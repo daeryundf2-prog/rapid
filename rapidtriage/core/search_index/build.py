@@ -52,10 +52,12 @@ from ..artifact_profiles import (
     resolve_records_path,
 )
 from ..json_stream import JsonStreamError, iter_array_items
+from ..search_hits import entry_locator, record_time
 from .schema import (
     BIGRAM_RULE,
     BUILDING_SUFFIX,
     FLATTEN_VERSION,
+    FOLD_RULE,
     INDEX_FILE_NAME,
     INDEX_VERSION,
     QUERY_BUDGET_SECONDS,
@@ -77,6 +79,7 @@ from .textutil import (
     parse_offset,
     parse_ts_ms,
     path_key,
+    stored_fold,
     target_path_key,
 )
 
@@ -86,6 +89,10 @@ SEARCH_INDEX_KIND = "search-index"
 CANCEL_EVERY_ROWS = 500
 BATCH_ROWS = 4000
 TEXT_MAX_CHARS = 64 * 1024
+# Document bodies (R7 S2 review #3): 512 K characters cover 99.6 % of the documents of a real
+# run (run-subset10: 1,998 bodies, p99.5 = 371 K); 64 K cut 3 % of them and their later text
+# was not searchable. Artifact rows keep ARTIFACT_TEXT_MAX_CHARS.
+DOC_TEXT_MAX_CHARS = 512 * 1024
 ARTIFACT_TEXT_MAX_CHARS = 8 * 1024
 EVENTLOG_TEXT_MAX_CHARS = 64 * 1024
 VALUE_MAX_CHARS = 1024
@@ -216,6 +223,8 @@ class Doc:
     # the path stays searchable with ``path:``/``under:`` but is not repeated in the text.
     text_path: bool = True
     path2: str = ""
+    # The record's own time as v1 hits show it (``search_hits.record_time``; ``search_doc.ts_text``).
+    ts_text: str = ""
     # "<reason>:<field>" -> count of cuts on this row (value/list/text caps).
     cuts: Counter[str] = field(default_factory=Counter)
 
@@ -520,6 +529,7 @@ def _base_doc(ctx: BuildContext, kind: str, record_index: int, row: Mapping[str,
     if not include_source and (kind in CONTAINER_KINDS or artifact_type in CONTAINER_TYPES):
         doc.text_path = False
     doc.times = list(ctx.timeline.get((f"artifacts_{kind}", record_index), ()))
+    doc.ts_text = record_time("artifacts", row) or ""
     return doc, details
 
 
@@ -644,14 +654,15 @@ def flatten_documents(ctx: BuildContext, kind: str, record_index: int, row: Mapp
     if isinstance(entries, list):
         if len(entries) > LIST_MAX_ITEMS:
             doc.cuts["list-truncated:sample_entries"] += 1
-        for entry in entries[:LIST_MAX_ITEMS]:
+        for position, entry in enumerate(entries[:LIST_MAX_ITEMS]):
             if not isinstance(entry, Mapping) or not entry.get("name"):
                 continue
             name = str(entry.get("name"))
             child = Doc(
                 collection="artifacts",
                 kind=kind,
-                locator=doc.locator,
+                # Its own row key (review #6): resolves to the archive record (``base_locator``).
+                locator=entry_locator(doc.locator, position),
                 domain=doc.domain,
                 artifact_type="archive-entry",
                 title=name,
@@ -659,9 +670,10 @@ def flatten_documents(ctx: BuildContext, kind: str, record_index: int, row: Mapp
                 size=_int_or_none(entry.get("uncompressed_size")),
                 in_archive=1,
                 body=[name],
+                ts_text=doc.ts_text,
             )
             child.search_fields.append(("archive_entry", fold(name), None))
-            child.fields = {"archive": doc.path, "name": name, "crc32": entry.get("crc32") or ""}
+            child.fields = {"archive": doc.path, "name": name, "entry_path": name, "crc32": entry.get("crc32") or ""}
             docs.append(child)
     return docs
 
@@ -747,6 +759,7 @@ def flatten_file(ctx: BuildContext, scope: str, index: int, row: Mapping[str, ob
     doc = Doc(collection="files", locator=f"/{scope}/{index}", domain="filesystem", artifact_type=f"file-{scope}", path=raw_path)
     doc.title = str(row.get("name") or Path(raw_path.replace("\\", "/")).name)
     doc.size = _int_or_none(row.get("size"))
+    doc.ts_text = record_time("files", row) or ""
     hashes = row.get("hashes") if isinstance(row.get("hashes"), Mapping) else {}
     _collect_hashes({"hashes": hashes}, doc, include_source=False)
     signature = row.get("file_signature") if isinstance(row.get("file_signature"), Mapping) else {}
@@ -778,12 +791,13 @@ def flatten_file(ctx: BuildContext, scope: str, index: int, row: Mapping[str, ob
 
 
 def flatten_doc(ctx: BuildContext, index: int, row: Mapping[str, object], body: str | None, *, body_cut: bool = False) -> Doc:
-    """Document candidate: title + body (<= 64 KB) + metadata (author, last saved by, template, company)."""
+    """Document candidate: title + body (<= ``DOC_TEXT_MAX_CHARS``) + metadata (author, last saved by, template, company)."""
     raw_path = str(row.get("path") or "")
     doc = Doc(collection="docs", locator=f"/candidates/{index}", domain="media", artifact_type=f"document-{row.get('kind') or 'file'}", path=raw_path)
     doc.title = Path(raw_path.replace("\\", "/")).name
     doc.size = _int_or_none(row.get("size"))
-    doc.text_cap = TEXT_MAX_CHARS
+    doc.ts_text = record_time("documents", row) or ""
+    doc.text_cap = DOC_TEXT_MAX_CHARS
     if body_cut:
         doc.cuts["text-truncated:body"] += 1
     meta = ctx.doc_meta.get(os.path.normcase(raw_path), {})
@@ -801,6 +815,7 @@ def flatten_indicator(ctx: BuildContext, index: int, row: Mapping[str, object]) 
     kind = str(row.get("type") or "indicator")
     value = str(row.get("value") or "")
     doc = Doc(collection="indicators", locator=f"/indicators/{index}", domain="incident", artifact_type=f"indicator-{kind}", title=f"{kind}: {value}"[:512])
+    doc.ts_text = record_time("indicators", row) or ""
     flags = row.get("risk_flags") if isinstance(row.get("risk_flags"), list) else []
     doc.body = [value, kind, str(row.get("classification") or ""), *(str(flag) for flag in flags[:20])]
     if kind in {"md5", "sha1", "sha256"}:
@@ -966,7 +981,7 @@ def load_document_bodies(case_db: Path | None) -> dict[str, tuple[str, bool]]:
         rows = connection.execute(
             "SELECT f.path, substr(d.body, 1, ?), length(d.body) > ? FROM indexed_document d JOIN file_record f ON f.id = d.file_record_id "
             "WHERE d.source_type = 'document'",
-            (TEXT_MAX_CHARS, TEXT_MAX_CHARS),
+            (DOC_TEXT_MAX_CHARS, DOC_TEXT_MAX_CHARS),
         )
         for path, body, cut in rows:
             if path and body:
@@ -987,7 +1002,7 @@ def extract_document_body(path: str, kind: str) -> tuple[str, bool] | None:
         from ..docs import extract_text
 
         text = extract_text(source, kind)
-        return text[:TEXT_MAX_CHARS], len(text) > TEXT_MAX_CHARS
+        return text[:DOC_TEXT_MAX_CHARS], len(text) > DOC_TEXT_MAX_CHARS
     except Exception:  # extraction failures never stop the build
         return None
 
@@ -998,7 +1013,7 @@ def extract_document_body(path: str, kind: str) -> tuple[str, bool] | None:
 
 DOC_COLUMNS = (
     "doc_id, group_id, collection, kind, locator, analysis_id, domain, artifact_type, title, path, path_fold, path2, path2_fold, "
-    "ext, size, ts, ts_kind, ts_family, ts_labels, actor, actor_sid, computer, md5, sha1, sha256, text, fields_json, deleted, "
+    "ext, size, ts, ts_kind, ts_text, ts_family, ts_labels, actor, actor_sid, computer, md5, sha1, sha256, text, text_fold, fields_json, deleted, "
     "sig_mismatch, in_archive, pii_count, truncated"
 )
 DOC_INSERT = f"INSERT INTO search_doc ({DOC_COLUMNS}) VALUES ({', '.join('?' for _ in DOC_COLUMNS.split(','))})"
@@ -1043,6 +1058,8 @@ class IndexWriter:
         name = fold_path.rsplit("/", 1)[-1]
         ext = name.rsplit(".", 1)[-1] if "." in name and not name.startswith("!") else ""
         hashes = {alg: value for alg, value in doc.hashes}
+        text_fold = stored_fold(text)
+        content = text_fold if text_fold is not None else text  # what search_text / search_bigram index
         times = sorted(set(doc.times), key=lambda item: (item[0], item[1])) or [(None, "", ())]
         primary = self.next_id
         fields_json = json.dumps(doc.fields, ensure_ascii=False, default=str)[:FIELDS_MAX_CHARS] if doc.fields else "{}"
@@ -1069,6 +1086,7 @@ class IndexWriter:
                     doc.size,
                     millis,
                     label,
+                    doc.ts_text[:64] if position == 0 else "",
                     ts_family(label) if label else "",
                     ",".join(extra),
                     nfc(doc.actor)[:256],
@@ -1078,6 +1096,7 @@ class IndexWriter:
                     hashes.get("sha1", ""),
                     hashes.get("sha256", ""),
                     text if position == 0 else None,
+                    text_fold if position == 0 else None,
                     fields_json if position == 0 else "{}",
                     doc.deleted,
                     doc.sig_mismatch,
@@ -1088,8 +1107,8 @@ class IndexWriter:
             )
             self.row_count += 1
         if self.fts_inline:
-            self.fts.append((primary, text))
-        pairs = bigram_tokens(text)
+            self.fts.append((primary, content))
+        pairs = bigram_tokens(content)
         if pairs:
             self.bigrams.append((primary, pairs))
         self.fields.extend((primary, name, value, value_int) for name, value, value_int in doc.search_fields)
@@ -1396,6 +1415,7 @@ def build_search_index(
             "skipped": dict(ctx.skipped),
             "skipped_fields": skipped_fields_payload(ctx.skipped_fields),
             "truncated_by_domain": truncated_by_domain(connection),
+            "truncated_by_collection": truncated_by_collection(connection),
             "tokenizer": tokenizer,
         }
         write_meta(
@@ -1413,6 +1433,7 @@ def build_search_index(
                 "tz_source": "registry" if ctx.tz_offset is not None else ("timeline" if tz is not None else ""),
                 "tokenizer": tokenizer,
                 "bigram": BIGRAM_RULE,
+                "fold": FOLD_RULE,
                 "analyses_indexed": indexed,
                 "summary": build_summary,
             },
@@ -1498,6 +1519,17 @@ def truncated_by_domain(connection: sqlite3.Connection) -> dict[str, int]:
     }
 
 
+def truncated_by_collection(connection: sqlite3.Connection) -> dict[str, int]:
+    """Primary rows cut at a cap, per collection (``docs``/``files``/``artifacts``/...): the query
+    warning names them per search source."""
+    return {
+        str(collection): int(count)
+        for collection, count in connection.execute(
+            "SELECT collection, COUNT(*) FROM search_doc WHERE truncated = 1 AND doc_id = group_id GROUP BY collection ORDER BY collection"
+        )
+    }
+
+
 def _build_incremental(
     output_dir: Path,
     summary: Mapping[str, object],
@@ -1527,7 +1559,7 @@ def _build_incremental(
         for analysis_id in wanted:
             hooks.check_cancel()
             removed = connection.execute(
-                "SELECT doc_id, text FROM search_doc WHERE analysis_id = ? AND text IS NOT NULL", (analysis_id,)
+                "SELECT doc_id, COALESCE(text_fold, text) FROM search_doc WHERE analysis_id = ? AND text IS NOT NULL", (analysis_id,)
             ).fetchall()
             connection.executemany(
                 "INSERT INTO search_text(search_text, rowid, text) VALUES ('delete', ?, ?)", [(item[0], item[1]) for item in removed]
@@ -1561,6 +1593,7 @@ def _build_incremental(
             "skipped": dict(skipped),
             "skipped_fields": merge_skipped_fields(previous.get("skipped_fields"), ctx.skipped_fields),
             "truncated_by_domain": truncated_by_domain(connection),
+            "truncated_by_collection": truncated_by_collection(connection),
             "tokenizer": meta.get("tokenizer") or "",
         }
         build_summary["row_count"] = int(connection.execute("SELECT COUNT(*) FROM search_doc").fetchone()[0])
@@ -1664,6 +1697,10 @@ def stale_reasons(meta: Mapping[str, object], summary: Mapping[str, object], out
     reasons: list[str] = []
     if meta.get("index_version") == "search-index-v2" and meta.get("flatten_version") == FLATTEN_VERSION:
         reasons.append("2자 한글 검색용 색인(bigram)이 없는 이전 형식입니다. 색인을 다시 만드세요")
+    elif meta.get("index_version") == "search-index-v3" and meta.get("flatten_version") == FLATTEN_VERSION:
+        reasons.append(
+            "이전 형식 색인입니다: 영문 외 대소문자(É·Ａ·Σ·ß 등)를 구분 없이 찾지 못하고 파일·문서 적중 시각이 비어 있습니다. 색인을 다시 만드세요"
+        )
     elif meta.get("index_version") != INDEX_VERSION or meta.get("flatten_version") != FLATTEN_VERSION:
         reasons.append("색인 형식이 바뀌었습니다. 다시 만드세요")
     if meta.get("source_summary_sha256") != summary_sha256(summary):

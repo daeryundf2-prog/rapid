@@ -60,7 +60,20 @@ _TIME_KEYS = (
     "date",
 )
 
-_ORDINAL_POINTER = re.compile(r"^/([a-z_]+)/(\d+)$")
+_ORDINAL_POINTER = re.compile(r"^/([a-z_]+)/(\d+)(?:#entry:(\d+))?$")
+# An archive-entry row of the search index: ``<parent locator>#entry:<n>`` (R7 S2 review #6).
+ENTRY_MARK = "#entry:"
+
+
+def entry_locator(parent: str, index: int) -> str:
+    """The unique locator of entry ``index`` of the archive row ``parent``."""
+    return f"{parent}{ENTRY_MARK}{index}"
+
+
+def base_locator(locator: str) -> str:
+    """The source record's locator (an archive entry's parent; any other locator unchanged)."""
+    head, mark, tail = locator.partition(ENTRY_MARK)
+    return head if mark and tail.isdigit() else locator
 _WHITESPACE = re.compile(r"\s+")
 
 
@@ -161,6 +174,37 @@ def _window(text: str, start: int, end: int, limit: int) -> str:
     return prefix + text[lo:hi] + suffix
 
 
+# Hit text is stricter than :func:`redact_secret_text` (R7 S2 review #16): any ``key=value`` whose
+# key ends in a credential word (``rpctoken=``, ``SharedAccessToken=``, ``PublicKeyToken=``,
+# ``db_password=``), whatever precedes it, has its value masked. The viewer still shows the record.
+_CREDENTIAL_PAIR_RE = re.compile(
+    r"(?P<key>[A-Za-z0-9_.\-]*(?:token|password|passwd|pwd|secret|api_?key))=(?P<value>\"[^\"]*\"|'[^']*'|[^&;#\s\"'),]+)",
+    re.IGNORECASE,
+)
+
+
+def redact_text(text: str) -> str:
+    """Credentials masked in hit text: :func:`redact_secret_text` (URL user info, query and bare
+    pairs) plus :data:`_CREDENTIAL_PAIR_RE`, also when a snippet window starts with ``…`` right
+    before the key (``…token=abc``: the ellipsis is not a pair lead)."""
+    if "=" not in text and "@" not in text:
+        return text
+    from ..artifacts.url_redaction import REDACTED_VALUE, redact_secret_text
+
+    if text.startswith("…"):
+        text = "…" + str(redact_secret_text(" " + text[1:]))[1:]
+    else:
+        text = str(redact_secret_text(text))
+
+    def mask(match: re.Match[str]) -> str:
+        value = match.group("value")
+        if value.strip("\"'").startswith(REDACTED_VALUE):
+            return match.group(0)
+        return f"{match.group('key')}={REDACTED_VALUE}"
+
+    return _CREDENTIAL_PAIR_RE.sub(mask, text) if "=" in text else text
+
+
 def search_snippet(source: object, keywords: Sequence[str], *, limit: int = SNIPPET_LIMIT) -> tuple[str, list[list[int]]]:
     """``(snippet, highlight spans)``: the first match in ``source`` (text or a record).
 
@@ -174,10 +218,12 @@ def search_snippet(source: object, keywords: Sequence[str], *, limit: int = SNIP
     # text (cleaning only collapses whitespace): leaves without any are skipped before the
     # whitespace clean-up and the offset mapping (R7: a record walks thousands of leaves).
     prefilter = bool(folded_keywords) and all(word and not any(ch.isspace() for ch in word) for word in folded_keywords)
+    # Credentials (``token=…``, ``password=…``, URL user info) are masked before the window is
+    # cut, so a value is never shown half-cut past the mask (R7 S2 review #16).
     if isinstance(source, str):
-        candidates = iter((_clean(source),))
+        candidates = iter((redact_text(_clean(source)),))
     else:
-        candidates = (f"{key}: {text}" if key else text for key, text in _iter_leaves(source))
+        candidates = (redact_text(f"{key}: {text}" if key else text) for key, text in _iter_leaves(source))
     first = ""
     for raw in candidates:
         if prefilter and not isinstance(source, str):
@@ -208,14 +254,45 @@ def _first_time(record: Mapping[str, object]) -> str | None:
     return None
 
 
+def _text_or_none(value: object) -> str | None:
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def file_modified_time(record: Mapping[str, object]) -> str | None:
+    """The 수정 time the files grid shows (``modifiedTimeOf``): ``fs_modified_at`` (the evidence
+    filesystem's own time); for an acquisition copy the NTFS join's ``$SI`` modified time when
+    joined; else ``modified_at``."""
+    found = _text_or_none(record.get("fs_modified_at"))
+    if found:
+        return found
+    if record.get("modified_at_origin") == "acquisition-copy":
+        ntfs = record.get("ntfs") if isinstance(record.get("ntfs"), Mapping) else {}
+        found = _text_or_none(ntfs.get("si_modified_at"))
+        if found:
+            return found
+    return _text_or_none(record.get("modified_at"))
+
+
+def record_time(source: str, record: Mapping[str, object]) -> str | None:
+    """The record's own time a hit shows, as the record spells it (v1 and the search index alike).
+
+    Files: :func:`file_modified_time`. Everything else: the first of :data:`_TIME_KEYS` in
+    ``details``, then in the record (event/file/visit time).
+    """
+    if source == "files":
+        return file_modified_time(record)
+    details = record.get("details") if isinstance(record.get("details"), Mapping) else {}
+    return _first_time(details) or _first_time(record)
+
+
 def hit_timestamp(match: Mapping[str, object]) -> str | None:
-    """The record's own time: details first, then the record (event/file time)."""
-    for value in (match.get("timestamp"),):
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+    """The hit's ``timestamp`` when set (index hits: the indexed :func:`record_time`), else
+    :func:`record_time` of its source record."""
+    found = _text_or_none(match.get("timestamp"))
+    if found:
+        return found
     metadata = match.get("metadata") if isinstance(match.get("metadata"), Mapping) else {}
-    details = metadata.get("details") if isinstance(metadata.get("details"), Mapping) else {}
-    return _first_time(details) or _first_time(metadata)
+    return record_time(str(match.get("source") or ""), metadata)
 
 
 def _artifact_title(record: Mapping[str, object]) -> str:
@@ -267,6 +344,13 @@ def hit_locator(match: Mapping[str, object]) -> dict[str, object] | None:
         return None
     member, ordinal = parsed.group(1), int(parsed.group(2))
     locator: dict[str, object] = {"pointer": pointer, "record_index": ordinal, "output_index": ordinal}
+    if parsed.group(3) is not None:
+        if member != "artifacts":
+            return None
+        # An archive entry: its own pointer (a unique row key) that resolves to the archive record.
+        locator["entry_index"] = int(parsed.group(3))
+        if match.get("entry_path"):
+            locator["entry_path"] = str(match.get("entry_path"))
     if member == "candidates" and source in {"files", "ocr"}:
         locator.update(collection="files", kind="", output_name="files")
     elif member == "results" and source == "documents":
@@ -320,7 +404,7 @@ def finalize_search_hit(
         title = str(item.get("title") or "")
         context = str(item.get("preview") or "")
     snippet, highlights = search_snippet(context if snippet_source is None else snippet_source, keywords)
-    item["title"] = _compact(title, TITLE_LIMIT) if title else PureWindowsPath(path).name
+    item["title"] = redact_text(_compact(title, TITLE_LIMIT) if title else PureWindowsPath(path).name)
     item["artifact_type"] = _artifact_type(item) if source in {"artifacts", "web"} else ""
     item["timestamp"] = hit_timestamp(item)
     item["display_path"] = display_path(path, root)

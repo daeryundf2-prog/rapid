@@ -38,6 +38,7 @@ from ...core.jobs import RunJobStore
 from ...core.search_index.build import read_index_meta, stale_reasons
 from ...core.search_index.engine import (
     DEFAULT_BUDGET_SECONDS,
+    MAX_POSITION,
     PAGE_MAX,
     Budget,
     QueryRequest,
@@ -116,7 +117,14 @@ class SearchOptionsBody(_Body):
 class PageBody(_Body):
     cursor: str | None = Field(default=None, max_length=4096)
     limit: int = Field(default=100, ge=1, le=PAGE_MAX)
-    offset: int = Field(default=0, ge=0, description="keywords 검색: 이 쪽 앞의 적중 수(search_result_id 번호만; 쪽은 cursor로 넘긴다)")
+    offset: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "keywords 검색: 이 쪽 앞의 적중 수. 번호(search_result_id)는 서버가 커서의 위치로 매기며, "
+            "위치가 없는 이전 커서에만 이 값을 쓴다(최대 1,000,000, 넘으면 422)"
+        ),
+    )
 
 
 class HistogramBody(_Body):
@@ -296,6 +304,8 @@ def build_search_index_router(store: RunJobStore, *, owner: object | None = None
         marks = ReviewMarks(job, run_id)
         keywords: list[str] | None = None
         q = body.q
+        if body.page.offset > MAX_POSITION:
+            raise HTTPException(status_code=422, detail=f"page.offset은 {MAX_POSITION:,} 이하여야 합니다")
         if body.keywords is not None:
             if body.q.strip():
                 raise HTTPException(status_code=400, detail="q와 keywords 중 하나만 주세요")
@@ -335,7 +345,12 @@ def build_search_index_router(store: RunJobStore, *, owner: object | None = None
             )
             marks.apply_truncation(result, uses_review=bool(result.pop("uses_review", False)))
             if keywords is not None:
-                attach_console_hits(result, keywords, summary=job.summary or {}, run_id=run_id, offset=body.page.offset)
+                # Server-side numbering (R7 S2 review #11): the page position the cursor carries;
+                # the client's offset only for a cursor of an older server.
+                page_info = result.get("page") if isinstance(result.get("page"), dict) else {}
+                position = page_info.get("position")
+                offset = int(position) if isinstance(position, int) else body.page.offset
+                attach_console_hits(result, keywords, summary=job.summary or {}, run_id=run_id, offset=offset)
             return result
 
         slot = QUERY_LIMITER.acquire(run_id)

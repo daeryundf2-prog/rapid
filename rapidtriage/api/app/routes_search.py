@@ -15,7 +15,7 @@ from ...core.keyword_packs import (
     keyword_pack_selection_profile,
     resolve_keyword_packs,
 )
-from ...core.search import SearchError, run_unified_search
+from ...core.search import SearchError, regex_guard_problem, run_unified_search
 from ...core.search_fts import regex_literal_prefix_problem
 from .analyses import AnalysisRowRef, analysis_row_ref
 from .helpers import (
@@ -185,14 +185,16 @@ def build_search_router(
         record fields the grid reads (``metadata=full``: the whole record).
         ``limit`` (default 250) and ``offset`` page the hits in a stable order;
         ``pagination`` reports ``has_more``/``next_offset``/``total``. A regex
-        keyword must start with a literal word (Korean 422 otherwise).
+        keyword must start with a literal word and pass the v2 regex guard (no nested
+        or overlapping unbounded quantifiers; Korean 422 otherwise).
         """
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         if search_mode == "regex":
             for pattern in keyword:
-                problem = regex_literal_prefix_problem(pattern)
+                # The v2 guard first (catastrophic backtracking), then the indexed-prefix rule.
+                problem = regex_guard_problem(pattern) or regex_literal_prefix_problem(pattern)
                 if problem:
                     raise HTTPException(status_code=422, detail=problem)
         try:

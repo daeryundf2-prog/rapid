@@ -53,6 +53,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..files import CATEGORY_RULES
+from ..search_hits import ENTRY_MARK
+from ..textnorm import locate_normalized
 from .query import (
     MAX_LIST_ITEMS,
     Group,
@@ -68,6 +70,7 @@ from .query import (
 from .regex_guard import GuardedRegex, RowTimeout
 from .schema import (
     BIGRAM_RULE,
+    FOLD_RULE,
     QUERY_BUDGET_SECONDS,
     QUERY_GRACE_SECONDS,
     READABLE_INDEX_VERSIONS,
@@ -75,6 +78,7 @@ from .schema import (
     open_read_only,
 )
 from .textutil import (
+    ascii_lower,
     fold,
     format_offset,
     is_bigram_term,
@@ -87,6 +91,8 @@ from .textutil import (
 
 # The aggregate pass materialises at most this many matching rows (memory guard).
 TOTAL_CAP = 1_000_000
+# Highest result position a page may start at (cursor ``pos``, the console's ``page.offset``).
+MAX_POSITION = TOTAL_CAP
 SORT_TS_CAP = 50_000
 DEFAULT_BUDGET_SECONDS = QUERY_BUDGET_SECONDS
 GRACE_SECONDS = QUERY_GRACE_SECONDS
@@ -295,10 +301,6 @@ def bigram_match(literal: str) -> str:
     return f'"{literal}"'
 
 
-def ascii_lower(text: str) -> str:
-    return "".join(char.lower() if char.isascii() else char for char in text)
-
-
 def contains_sql(column: str, literal: str) -> tuple[str, str]:
     """``instr`` test of ``column`` containing ``literal`` ignoring ASCII case: ``(sql, param)``.
 
@@ -463,6 +465,7 @@ class CompileContext:
     temp_tables: int = 0
     uses_review: bool = False
     bigram: bool = False  # the index has ``search_bigram`` (v3)
+    folded: bool = False  # the index has ``text_fold`` and folded full-text content (v4)
     _marks: list[Mapping[str, object]] | None = None
 
     def warn(self, message: str) -> None:
@@ -501,6 +504,15 @@ class Compiler:
             return f"EXISTS (SELECT 1 FROM {source} WHERE {column} = d.group_id AND ({where}))"
         return f"d.group_id IN (SELECT {column} FROM {source} WHERE {where})"
 
+    def match_literal(self, literal: str) -> str:
+        """The form a keyword is compared in: NFC + casefold on a v4 index (its full-text content
+        and bigram pairs are folded the same way), else as typed (SQLite folds ASCII only)."""
+        return fold(literal) if self.ctx.folded else literal
+
+    def fold_column(self, prefix: str = "") -> str:
+        """The folded row text (``text_fold`` where the row has one) -- raw ``text`` before v4."""
+        return f"COALESCE({prefix}text_fold, {prefix}text)" if self.ctx.folded else f"{prefix}text"
+
     def _fts_ok(self, literal: str) -> bool:
         return self.ctx.tokenizer == TOKENIZER_TRIGRAM and len(literal) >= 3 and "%" not in literal and "_" not in literal
 
@@ -514,36 +526,45 @@ class Compiler:
         return True
 
     def text_check(self, literal: str, extra: str = "", extra_params: Sequence[object] = ()) -> tuple[str, list[object]]:
-        """Rows whose primary text contains ``literal`` (+ ``extra`` on ``{text}``)."""
+        """Rows whose primary text contains ``literal`` (+ ``extra`` on ``{text}`` = the raw text,
+        ``{fold}`` = the folded text).
+
+        ``literal`` is compared in :meth:`match_literal` form; ``extra`` always reads
+        ``search_doc`` itself (the full-text content of a v4 index is the folded text).
+        """
+        literal = self.match_literal(literal)
         if self.mode == "row":
             if not extra and self._bigram_ok(literal):
                 # Exact without reading the text: the term's (small) row set, computed once.
                 return "d.group_id IN (SELECT rowid FROM search_bigram WHERE search_bigram MATCH ?)", [bigram_match(literal)]
-            test, param = contains_sql("p.text", literal)
+            test, param = contains_sql(self.fold_column("p."), literal)
             sql = f"p.text IS NOT NULL AND {test}"
             params: list[object] = [param]
             if extra:
-                sql += " AND " + extra.format(text="p.text")
+                sql += " AND " + extra.format(text="p.text", fold=self.fold_column("p."))
                 params.extend(extra_params)
             return f"EXISTS (SELECT 1 FROM search_doc p WHERE p.doc_id = d.group_id AND {sql})", params
         if self._fts_ok(literal):
             sql = "SELECT rowid FROM search_text WHERE text LIKE ?"
             params = [f"%{literal}%"]
+            if extra:
+                sql = f"SELECT doc_id FROM search_doc WHERE doc_id IN ({sql})"
         elif self._bigram_ok(literal):
             sql = "SELECT rowid FROM search_bigram WHERE search_bigram MATCH ?"
             params = [bigram_match(literal)]
             if extra:  # contentless: the extra checks read the row's text
                 sql = f"SELECT doc_id FROM search_doc WHERE doc_id IN ({sql})"
         else:
-            test, param = contains_sql("text", literal)
+            test, param = contains_sql(self.fold_column(), literal)
             sql = f"SELECT doc_id FROM search_doc WHERE text IS NOT NULL AND {test}"
             params = [param]
         if extra:
-            sql += " AND " + extra.format(text="text")
+            sql += " AND " + extra.format(text="text", fold=self.fold_column())
             params.extend(extra_params)
         return f"d.group_id IN ({sql})", params
 
     def add_driver(self, literal: str, negated: bool, top: bool) -> None:
+        literal = self.match_literal(literal)
         if self.mode == "set" and top and not negated:
             if self._fts_ok(literal):
                 self.ctx.drivers.append(Driver(literal))
@@ -595,9 +616,10 @@ class Compiler:
             self.add_driver(left, negated, top)
             extra = "sx_near({text}, ?, ?, ?)"
             params: list[object] = [left, right, distance]
-            if self.mode == "set" and self._fts_ok(right):
-                extra += " AND {text} LIKE ?"
-                params.append(f"%{right}%")
+            folded_right = self.match_literal(right)
+            if self.mode == "set" and self._fts_ok(folded_right):
+                extra += " AND {fold} LIKE ?"
+                params.append(f"%{folded_right}%")
             return self.text_check(left, extra, params)
         parts: list[str] = []
         params = []
@@ -1018,7 +1040,13 @@ class Compiler:
             f"INSERT OR IGNORE INTO temp.{name} VALUES (?, ?, ?)",
             [(str(mark.get("collection") or ""), str(mark.get("kind") or ""), str(mark.get("locator") or "")) for mark in self.marks() if predicate(mark)],
         )
-        return f"(d.collection, d.kind, d.locator) IN (SELECT collection, kind, locator FROM temp.{name})"
+        # An archive entry (``<locator>#entry:<n>``) carries the mark of its archive record.
+        return (
+            f"((d.collection, d.kind, d.locator) IN (SELECT collection, kind, locator FROM temp.{name}) OR "
+            f"(d.artifact_type = 'archive-entry' AND instr(d.locator, '{ENTRY_MARK}') > 0 AND "
+            f"(d.collection, d.kind, substr(d.locator, 1, instr(d.locator, '{ENTRY_MARK}') - 1)) IN "
+            f"(SELECT collection, kind, locator FROM temp.{name})))"
+        )
 
     def field_review(self, term: Term, value: Value, negated: bool) -> tuple[str, list[object]]:
         statuses = {fold(_scalar(item, "review")) for item in _items(value)}
@@ -1056,13 +1084,34 @@ def query_hash(q: str, options: SearchOptions, collapse: bool, build_id: str) ->
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
-def encode_cursor(qhash: str, sort: str, effective: str, key: object, row_id: int, direction: str) -> str:
-    payload = json.dumps(
-        {"v": CURSOR_VERSION, "qhash": qhash, "sort": sort, "es": effective, "last": [key, row_id], "dir": direction},
-        separators=(",", ":"),
-        ensure_ascii=False,
-    )
+def encode_cursor(qhash: str, sort: str, effective: str, key: object, row_id: int, direction: str, *, position: int | None = None) -> str:
+    """``position``: the 0-based result position of the first row of the page the cursor opens
+    (the server numbers console hits from it; R7 S2 review #11)."""
+    body: dict[str, object] = {"v": CURSOR_VERSION, "qhash": qhash, "sort": sort, "es": effective, "last": [key, row_id], "dir": direction}
+    if position is not None:
+        body["pos"] = max(0, int(position))
+    payload = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
     return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def cursor_position(cursor: str | None) -> int | None:
+    """The ``pos`` a (validated) cursor carries, or ``None`` (first page: 0; an older cursor: unknown).
+
+    A position past :data:`MAX_POSITION` is not a cursor this server made: 400.
+    """
+    if not cursor:
+        return None
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except (ValueError, UnicodeError):
+        return None
+    position = payload.get("pos") if isinstance(payload, dict) else None
+    if position is None:
+        return None
+    if not isinstance(position, int) or isinstance(position, bool) or not 0 <= position <= MAX_POSITION:
+        raise QueryError("커서가 이 질의에 맞지 않습니다")
+    return position
 
 
 def _sql_int(value: object) -> bool:
@@ -1197,6 +1246,7 @@ class SearchIndex:
             connection=self.connection,
             tokenizer=self.tokenizer,
             bigram=self.meta.get("bigram") == BIGRAM_RULE,
+            folded=self.meta.get("fold") == FOLD_RULE,
             tz=tz,
             ref_ms=self.reference_ms(options.reference_ts, tz),
             options=options,
@@ -1233,7 +1283,9 @@ class SearchIndex:
             spans = prepared.regex_spans.setdefault(job.table, {})
             if job.literal and self.tokenizer == TOKENIZER_TRIGRAM and "%" not in job.literal and "_" not in job.literal:
                 sql = "SELECT d.doc_id, d.text FROM search_doc d WHERE d.doc_id IN (SELECT rowid FROM search_text WHERE text LIKE ?) ORDER BY d.doc_id"
-                params: list[object] = [f"%{job.literal}%"]
+                # A v4 index's full-text content is folded: the (prefilter) literal is folded too.
+                literal = fold(job.literal) if prepared.ctx.folded else job.literal
+                params: list[object] = [f"%{literal}%"]
             elif job.literal:
                 sql = "SELECT doc_id, text FROM search_doc WHERE text IS NOT NULL AND instr(lower(text), ?) > 0 ORDER BY doc_id"
                 params = [ascii_lower(job.literal)]
@@ -1511,6 +1563,12 @@ def build_snippet(
         if found is not None:
             matched.append({"term": literal, "field": field_name})
             spans.append((found.start(), found.end()))
+        elif field_name != "word":
+            # Full case folding (``straße`` ~ ``STRASSE``) that ``re.IGNORECASE`` does not do.
+            located = locate_normalized(text, literal)
+            if located is not None and located[0] == text:
+                matched.append({"term": literal, "field": field_name})
+                spans.append((located[1], located[2]))
     for matcher, span in regexes:
         if span is not None and span[1] > span[0]:
             matched.append({"term": matcher.pattern, "field": "re"})
@@ -1527,11 +1585,16 @@ def build_snippet(
     if highlight:
         for field_name, literal in terms:
             pattern = _word_regex(literal) if field_name == "word" else _literal_regex(literal)
+            before = len(marks)
             for found in pattern.finditer(window):
                 if found.end() > found.start():
                     marks.append([found.start(), found.end()])
                 if len(marks) >= MAX_MARKS:
                     break
+            if len(marks) == before and field_name != "word":
+                located = locate_normalized(window, literal)
+                if located is not None and located[0] == window and located[2] > located[1]:
+                    marks.append([located[1], located[2]])
         for matcher, _span in regexes:
             if len(marks) >= MAX_MARKS:
                 break
@@ -1724,6 +1787,8 @@ def _row_payload(
         fields = {}
     fields = dict(list(fields.items())[:20]) if isinstance(fields, dict) else {}
     ts = row["ts"]
+    # v4: the record's own time ("" = the record has none); ``None`` before v4 (not indexed).
+    record_ts = str(row["pts_text"] or "") if "pts_text" in row.keys() else None
     return {
         "doc_id": int(row["doc_id"]),
         "group_id": int(row["group_id"]),
@@ -1740,6 +1805,8 @@ def _row_payload(
         "ts": ms_to_iso(ts, dt.timedelta(0)) if ts is not None else None,
         "ts_local": ms_to_iso(ts, tz) if ts is not None else None,
         "ts_kind": row["ts_kind"] or None,
+        # The record's own time as its source spells it (v4; what a v1 hit shows as ``timestamp``).
+        "record_ts": record_ts,
         "ts_kinds": ts_kinds if ts_kinds is not None else ([row["ts_kind"]] if row["ts_kind"] else []),
         "actor": row["actor"],
         "computer": row["computer"],
@@ -1755,12 +1822,18 @@ def _row_payload(
     }
 
 
+def _has_ts_text(connection: sqlite3.Connection) -> bool:
+    """Index v4 rows carry ``ts_text`` (v2/v3 indexes stay readable without it)."""
+    return any(row[1] == "ts_text" for row in connection.execute("PRAGMA table_info(search_doc)"))
+
+
 def fetch_rows(connection: sqlite3.Connection, doc_ids: list[int]) -> dict[int, sqlite3.Row]:
     if not doc_ids:
         return {}
     marks = ", ".join("?" for _ in doc_ids)
+    record_ts = ", p.ts_text AS pts_text" if _has_ts_text(connection) else ""
     rows = connection.execute(
-        "SELECT d.*, p.text AS ptext, p.fields_json AS pfields FROM search_doc d JOIN search_doc p ON p.doc_id = d.group_id "
+        f"SELECT d.*, p.text AS ptext, p.fields_json AS pfields{record_ts} FROM search_doc d JOIN search_doc p ON p.doc_id = d.group_id "
         f"WHERE d.doc_id IN ({marks})",
         doc_ids,
     ).fetchall()
@@ -1787,16 +1860,26 @@ def _sql_error(exc: Exception) -> QueryError:
     return QueryError(f"검색을 실행할 수 없습니다: {text}")
 
 
-def truncated_warning(meta: Mapping[str, object], domains: Iterable[str]) -> str | None:
-    """Matched domains (all domains when nothing matched) that hold rows cut at an index cap."""
+# Search sources a truncated-rows warning names (collection -> Korean label).
+SOURCE_LABELS = {"docs": "문서", "files": "파일", "artifacts": "아티팩트", "indicators": "지표", "analysis": "분석 결과"}
+
+
+def truncated_warning(meta: Mapping[str, object], collections: Iterable[str], domains: Iterable[str] = ()) -> str | None:
+    """The matched sources (all when nothing matched) that hold rows cut at an index cap, with the
+    number of cut rows per source (``문서 8건, 아티팩트 45건``); indexes before v4 name domains."""
     summary = meta.get("summary") if isinstance(meta.get("summary"), Mapping) else {}
-    by_domain = summary.get("truncated_by_domain") if isinstance(summary.get("truncated_by_domain"), Mapping) else {}
-    wanted = set(domains) or set(by_domain)
-    hits = {str(name): int(count) for name, count in by_domain.items() if name in wanted and isinstance(count, int) and count > 0}
+    by_collection = summary.get("truncated_by_collection")
+    if isinstance(by_collection, Mapping):
+        counts, wanted, labels = by_collection, set(collections), SOURCE_LABELS
+    else:
+        by_domain = summary.get("truncated_by_domain")
+        counts, wanted, labels = (by_domain if isinstance(by_domain, Mapping) else {}), set(domains), {}
+    wanted = wanted or {str(name) for name in counts}
+    hits = {str(name): int(count) for name, count in counts.items() if name in wanted and isinstance(count, int) and count > 0}
     if not hits:
         return None
-    detail = ", ".join(f"{name} {count:,}건" for name, count in sorted(hits.items(), key=lambda item: -item[1])[:6])
-    return f"색인 상한에서 본문 일부가 잘린 행이 있어 그 부분은 검색되지 않습니다({detail})"
+    detail = ", ".join(f"{labels.get(name, name)} {count:,}건" for name, count in sorted(hits.items(), key=lambda item: (-item[1], item[0]))[:6])
+    return f"색인 상한에서 본문 일부가 잘린 행이 있어 잘린 뒷부분은 검색되지 않습니다(본문이 잘린 행: {detail})"
 
 
 def run_query(
@@ -1845,9 +1928,13 @@ def _run_query(
     after: tuple[object, int] | None = None
     direction = "next"
     cursor_sort: str | None = None
+    # 0-based position of this page's first row: 0 on the first page, from the cursor after it
+    # (``None``: a cursor of an older server; the caller falls back to its own count).
+    position: int | None = 0
     if request.cursor:
         key, row_id, direction, cursor_sort = decode_cursor(request.cursor, qhash, sort)
         after = (key, row_id)
+        position = cursor_position(request.cursor)
     wants_full = request.aggregates or sort != "relevance" or (cursor_sort is not None and cursor_sort != "relevance")
     prepared = index.prepare(
         parsed, request.options, review_provider=review_provider, hashset_resolver=hashset_resolver, row_mode=not wants_full
@@ -1936,20 +2023,23 @@ def _run_query(
                 truncated_reason = truncated_reason or index.budget.reason
     rows_payload = _page_payload(index, prepared, request, page_rows, review_lookup, materialized=materialized)
     next_cursor = previous_cursor = None
+    next_position = position + len(page_rows) if position is not None else None
+    previous_position = max(0, position - limit) if position is not None else None
     if page_rows:
         first, last = page_rows[0], page_rows[-1]
         if direction == "next":
             if more:
-                next_cursor = encode_cursor(qhash, sort, effective, last[2], last[0], "next")
+                next_cursor = encode_cursor(qhash, sort, effective, last[2], last[0], "next", position=next_position)
             if after is not None:
-                previous_cursor = encode_cursor(qhash, sort, effective, first[2], first[0], "prev")
+                previous_cursor = encode_cursor(qhash, sort, effective, first[2], first[0], "prev", position=previous_position)
         else:
-            next_cursor = encode_cursor(qhash, sort, effective, last[2], last[0], "next")
+            next_cursor = encode_cursor(qhash, sort, effective, last[2], last[0], "next", position=next_position)
             if more:
-                previous_cursor = encode_cursor(qhash, sort, effective, first[2], first[0], "prev")
+                previous_cursor = encode_cursor(qhash, sort, effective, first[2], first[0], "prev", position=previous_position)
     facets: dict[str, object] | None = None
     histogram: dict[str, object] | None = None
     matched_domains: set[str] = {str(row.get("domain") or "") for row in rows_payload}
+    matched_collections: set[str] = {str(row.get("collection") or "") for row in rows_payload}
     if materialized and request.aggregates:
         try:
             facets, histogram = build_aggregates(
@@ -1965,6 +2055,7 @@ def _run_query(
             )
             if facets is not None:
                 matched_domains |= {str(item["key"]) for item in facets["domain"]}  # type: ignore[index, union-attr]
+                matched_collections |= {str(item["key"]) for item in facets["collection"]}  # type: ignore[index, union-attr]
         except sqlite3.OperationalError:
             if not index.budget.expired():
                 raise
@@ -1975,7 +2066,9 @@ def _run_query(
     if capped:
         warnings.append(f"결과가 {TOTAL_CAP:,}건을 넘어 건수·집계는 처음 {TOTAL_CAP:,}건 기준입니다")
     if ctx.text_terms or ctx.regex_jobs:
-        message = truncated_warning(meta, {domain for domain in matched_domains if domain})
+        message = truncated_warning(
+            meta, {name for name in matched_collections if name}, {domain for domain in matched_domains if domain}
+        )
         if message:
             warnings.append(message)
     return {
@@ -1983,6 +2076,8 @@ def _run_query(
         "rows": rows_payload,
         "page": {
             "cursor": request.cursor,
+            # 0-based result position of this page's first row (``None``: an older cursor).
+            "position": position,
             "next_cursor": next_cursor,
             "previous_cursor": previous_cursor,
             "returned": len(rows_payload),

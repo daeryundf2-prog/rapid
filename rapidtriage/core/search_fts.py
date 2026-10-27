@@ -44,6 +44,7 @@ from .search import (
     keyword_stems,
     match_keywords,
     normalize_document_extraction_error,
+    record_text,
 )
 from .search_budget import SearchBudget, SourceScan
 from .textnorm import normalize_nfc, normalize_search_text
@@ -495,12 +496,15 @@ def fts_unified_matches(
             "indicators": _indicators,
             "timeline": _timeline,
         }
-        total_sources = len(wanted) + (1 if want_ocr else 0)
-        for position, source in enumerate(wanted):
+        for source in wanted:
             if collector.full:
                 budget.skip_source(source, "limit")
                 continue
-            scan = budget.start_source(source, sources_left=total_sources - position)
+            if budget.truncated:
+                # A budget stop ends the result at that point of the source order (a prefix).
+                budget.skip_source(source, "after-budget")
+                continue
+            scan = budget.start_source(source)
             guard.deadline = scan.deadline
             before = len(collector.matches)
             try:
@@ -520,8 +524,10 @@ def fts_unified_matches(
     if want_ocr:
         if collector.full:
             budget.skip_source("ocr", "limit")
+        elif budget.truncated:
+            budget.skip_source("ocr", "after-budget")
         else:
-            scan = budget.start_source("ocr", sources_left=1)
+            scan = budget.start_source("ocr")
             remaining = (limit - collector.visible) if limit else 0
             ocr_matches, ocr_errors = ocr_search(remaining, scan)
             for match in ocr_matches:
@@ -676,7 +682,7 @@ def _files(connection: sqlite3.Connection, context: _SearchContext, scan: Source
         candidate = candidates.get(ordinal)
         if candidate is None:
             continue
-        haystack = json.dumps(candidate, ensure_ascii=False)
+        haystack = record_text(candidate)
         matched = context.matched(haystack)
         if not matched:
             continue
@@ -729,7 +735,7 @@ def _artifacts(connection: sqlite3.Connection, context: _SearchContext, scan: So
         path = str(stored.get("path", ""))
         if not collector.accepts_path(path):
             continue
-        haystack = json.dumps(stored, ensure_ascii=False)
+        haystack = record_text(stored)
         matched = context.matched(haystack)
         if not matched:
             continue
@@ -770,7 +776,7 @@ def _indicators(connection: sqlite3.Connection, context: _SearchContext, scan: S
         if not isinstance(details, Mapping) or not isinstance(details.get("raw"), Mapping):
             continue
         raw = dict(details["raw"])
-        haystack = json.dumps(raw, ensure_ascii=False)
+        haystack = record_text(raw)
         matched = context.matched(haystack)
         if not matched:
             continue
@@ -826,7 +832,7 @@ def _timeline(connection: sqlite3.Connection, context: _SearchContext, scan: Sou
             "path": path,
             "summary": row["description"],
         }
-        haystack = json.dumps(event, ensure_ascii=False)
+        haystack = record_text(event)
         matched = context.matched(haystack)
         if not matched:
             continue

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import contextvars
 import datetime as dt
 import hashlib
 import json
 import re
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -18,6 +20,12 @@ from .json_stream import JsonStreamError, iter_array_items
 from .search_backend import build_search_backend_contract
 from .search_budget import SearchBudget, SourceScan, resolve_scan_budget_seconds
 from .search_hits import finalize_search_hit, scan_root_of
+from .search_index.regex_guard import (
+    GuardedRegex,
+    RegexRejected,
+    RowTimeout,
+    analyze_regex,
+)
 from .textnorm import normalize_nfc, normalize_search_text
 
 IMAGE_EXTS = set(CATEGORY_RULES["images"]["extensions"])
@@ -101,6 +109,57 @@ class SearchError(ValueError):
     """Raised when unified search cannot load a completed run."""
 
 
+V1_REGEX_FLAGS = re.IGNORECASE | re.MULTILINE
+# Rows whose regex check ran past the guard's per-row time limit in this search (``regex`` mode).
+_REGEX_UNCHECKED: contextvars.ContextVar[list[int] | None] = contextvars.ContextVar("search_regex_unchecked", default=None)
+
+
+def record_text(record: object) -> str:
+    """The text a v1 keyword is matched against: the record's values, one per line (R7 S2 review #15).
+
+    The JSON serialization matched its own syntax -- ``"`` and ``_`` (key names) hit every row,
+    ``quote"inside`` / ``back\\slash`` / a tab never matched their escaped forms -- so the scan
+    reads the string and number values only (keys, ``null`` and booleans are not evidence text).
+    """
+    parts: list[str] = []
+    stack: list[object] = [record]
+    while stack:
+        value = stack.pop()
+        if isinstance(value, str):
+            if value:
+                parts.append(value)
+        elif isinstance(value, Mapping):
+            stack.extend(reversed(list(value.values())))
+        elif isinstance(value, (list, tuple)):
+            stack.extend(reversed(value))
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            parts.append(str(value))
+    return "\n".join(parts)
+
+
+def regex_guard_problem(pattern: str) -> str | None:
+    """Korean reason why ``pattern`` cannot run as a v1 regex keyword, or ``None`` (R7 S2 review #7).
+
+    The v2 regex guard's static check (``search_index.regex_guard``): nested or overlapping
+    unbounded quantifiers (``Live(a+)+$``), back references, lookarounds with quantifiers and
+    patterns over 512 characters backtrack catastrophically and are refused. A pattern that does
+    not compile is not refused here: it matches nothing and the query validation reports it.
+    """
+    try:
+        analyze_regex(normalize_nfc(pattern), ignorecase=True)
+    except RegexRejected as exc:
+        return f"정규식 '{_shown(pattern)}': {exc.reason}"
+    except re.error:
+        return None
+    except (RecursionError, OverflowError):
+        return f"정규식 '{_shown(pattern)}': 정규식이 너무 복잡합니다(구조가 너무 깊습니다)"
+    return None
+
+
+def _shown(pattern: str) -> str:
+    return pattern if len(pattern) <= 80 else pattern[:77] + "..."
+
+
 def stable_search_sha256(payload: object) -> str:
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
@@ -144,6 +203,7 @@ def run_unified_search(
     ``metadata="compact"`` keeps only :data:`COMPACT_METADATA_KEYS` of each
     hit's source record.
     """
+    request_started = time.monotonic()
     offset = max(0, int(offset or 0))
     page_limit = limit
     # One lookahead hit tells whether another page exists.
@@ -153,6 +213,14 @@ def run_unified_search(
     if not normalized:
         raise SearchError("at least one keyword is required")
     normalized_search_mode = normalize_search_mode(search_mode)
+    if normalized_search_mode == "regex":
+        for pattern in normalized:
+            problem = regex_guard_problem(pattern)
+            if problem:
+                raise SearchError(problem)
+    # Counts rows whose regex check ran past the per-row limit (this request's context only).
+    regex_unchecked: list[int] = [0]
+    _REGEX_UNCHECKED.set(regex_unchecked)
     normalized_fuzzy_distance = max(0, min(int(fuzzy_distance or 0), 2))
     normalized_proximity_window = max(0, min(int(proximity_window or 0), 100))
     normalized_sources = {item.strip().lower() for item in (sources or []) if item.strip()}
@@ -168,7 +236,7 @@ def run_unified_search(
         "fuzzy_distance": normalized_fuzzy_distance,
         "proximity_window": normalized_proximity_window,
     }
-    budget = SearchBudget(resolve_scan_budget_seconds(scan_budget_seconds))
+    budget = SearchBudget(resolve_scan_budget_seconds(scan_budget_seconds), started=request_started)
     backend = SEARCH_BACKEND_SCAN
     index_error = ""
     index_path = None
@@ -206,7 +274,8 @@ def run_unified_search(
             )
         except CaseIndexError as exc:
             index_error = str(exc)
-            budget = SearchBudget(budget.seconds)
+            # The scan fallback keeps the request's deadline (the budget covers the whole request).
+            budget = SearchBudget(budget.seconds, started=request_started)
     if fts_result is not None:
         backend = SEARCH_BACKEND_FTS
         matches, document_errors, ocr_errors = fts_result
@@ -233,7 +302,10 @@ def run_unified_search(
         hide_known_good=hide_known_good,
     )
 
-    has_more = bool(page_limit) and len(matches) > offset + page_limit
+    found = len(matches)
+    # A budget stop ends the result at a point of the source order: what was found is a prefix of
+    # the full result, and there is no next page to ask for (the next search would stop again).
+    has_more = bool(page_limit) and found > offset + page_limit and not budget.truncated
     matches = matches[offset : offset + page_limit] if page_limit else matches[offset:]
     limit = page_limit
     # Readable rows for the grid: title, root-stripped path, record time, snippet, review locator.
@@ -316,6 +388,7 @@ def run_unified_search(
     if analysis is not None:
         payload["analysis"] = analysis
     complete = not budget.truncated and not has_more
+    truncated_reason = budget_stop_reason(budget, found=found, offset=offset) if budget.truncated else None
     payload["pagination"] = {
         "collection": "search",
         "offset": offset,
@@ -325,16 +398,44 @@ def run_unified_search(
         "next_offset": offset + len(matches) if has_more else None,
         # Exact only when the search reached the end (no lookahead hit, no budget stop).
         "total": offset + len(matches) if complete else None,
+        **({"budget_stopped": True, "stopped_reason": truncated_reason} if truncated_reason else {}),
     }
     payload["has_more"] = has_more
     payload["backend"] = backend
     payload["truncated"] = budget.truncated
+    if truncated_reason:
+        payload["truncated_reason"] = truncated_reason
     payload["scanned"] = budget.scanned()
     payload["scan_budget_seconds"] = budget.seconds
     if index_error:
         payload["index_error"] = index_error
-    payload["elapsed_ms"] = budget.elapsed_ms()
+    if regex_unchecked[0]:
+        # Never silently a non-match: rows whose regex check ran past the per-row time limit.
+        payload["regex_unchecked_rows"] = regex_unchecked[0]
+        payload["warnings"] = [f"정규식 확인이 행당 시간 한도를 넘어 {regex_unchecked[0]:,}개 행은 확인하지 못했습니다"]
+    # The whole request (summary load, a failed index attempt, hit finalization), not only the scan.
+    payload["elapsed_ms"] = round((time.monotonic() - request_started) * 1000, 1)
     return payload
+
+
+SOURCE_LABELS_KO = {
+    "documents": "문서",
+    "files": "파일",
+    "artifacts": "아티팩트",
+    "indicators": "지표",
+    "timeline": "타임라인",
+    "ocr": "OCR",
+}
+
+
+def budget_stop_reason(budget: SearchBudget, *, found: int, offset: int) -> str:
+    """Korean reason of a budget-stopped search: where it stopped and why there is no next page."""
+    source = budget.stopped_source or ""
+    where = SOURCE_LABELS_KO.get(source, source)
+    head = f"시간 예산({budget.seconds:g}초)이 끝나 {where} 출처를 읽던 중 검색을 멈췄습니다"
+    if offset and found <= offset:
+        return f"{head}. 예산 안에 이 쪽({offset + 1:,}번째 결과)까지 찾지 못해 이 쪽은 비어 있습니다. 검색어를 좁히세요"
+    return f"{head}. 출처 순서상 앞부분 {found:,}건까지만 찾았고 그 뒤 쪽은 없습니다. 검색어를 좁히세요"
 
 
 def normalize_search_metadata_mode(value: str | None) -> str:
@@ -357,6 +458,17 @@ def compact_search_metadata(metadata: Mapping[str, object]) -> dict[str, object]
         elif isinstance(value, str) and len(value) > 512:
             continue
         compact[key] = value
+    # The grid's hash columns read flat ``md5``/``sha1``/``sha256`` (index hits are flat already;
+    # R7 S2 review #14): a file record's ``hashes`` (else ``source_hashes``) map fills them.
+    for algorithm in ("md5", "sha1", "sha256"):
+        if compact.get(algorithm):
+            continue
+        for container in ("hashes", "source_hashes"):
+            found = compact.get(container)
+            value = found.get(algorithm) if isinstance(found, Mapping) else None
+            if isinstance(value, str) and value.strip():
+                compact[algorithm] = value.strip().lower()
+                break
     return compact
 
 
@@ -459,7 +571,7 @@ def scan_unified_matches(
     budget: SearchBudget,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
     """Scan backend: requested sources only, in scan order, each stopping at
-    the limit still open and at its share of the wall-clock budget."""
+    the limit still open; a wall-clock budget stop ends the scan there."""
     planned = [
         source
         for source in SCAN_SOURCE_ORDER
@@ -470,12 +582,15 @@ def scan_unified_matches(
     document_errors: list[dict[str, object]] = []
     ocr_errors: list[dict[str, str]] = []
     visible = 0
-    for position, source in enumerate(planned):
+    for source in planned:
         remaining = max(0, limit - visible) if limit else 0
         if limit and remaining == 0:
             budget.skip_source(source, "limit")
             continue
-        scan = budget.start_source(source, sources_left=len(planned) - position)
+        if budget.truncated:
+            budget.skip_source(source, "after-budget")
+            continue
+        scan = budget.start_source(source)
         if source == "documents":
             found, document_errors = search_docs(
                 outputs, keywords, limit=remaining, search_options=search_options, scan=scan
@@ -1309,7 +1424,7 @@ def search_files(
             continue
         if scan is not None and not scan.tick():
             break
-        haystack = json.dumps(candidate, ensure_ascii=False)
+        haystack = record_text(candidate)
         matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
         if not matched:
             continue
@@ -1357,7 +1472,7 @@ def search_artifacts(
                 continue
             if scan is not None and not scan.tick():
                 return matches
-            haystack = json.dumps(artifact, ensure_ascii=False)
+            haystack = record_text(artifact)
             matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
             if not matched:
                 continue
@@ -1396,7 +1511,7 @@ def search_timeline(
             continue
         if scan is not None and not scan.tick():
             break
-        haystack = json.dumps(event, ensure_ascii=False)
+        haystack = record_text(event)
         matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
         if not matched:
             continue
@@ -1437,7 +1552,7 @@ def search_indicators(
             continue
         if scan is not None and not scan.tick():
             return matches
-        haystack = json.dumps(indicator, ensure_ascii=False)
+        haystack = record_text(indicator)
         matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
         if not matched:
             continue
@@ -1496,7 +1611,7 @@ def search_ioc_scanner_hits(
             continue
         if scan is not None and not scan.tick():
             break
-        haystack = json.dumps(hit, ensure_ascii=False)
+        haystack = record_text(hit)
         matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
         if not matched:
             continue
@@ -1697,10 +1812,14 @@ def build_keyword_match_plan(
             "lower": normalize_nfc(keyword) if mode == "regex" else normalize_search_text(keyword),
         }
         if mode == "regex":
-            try:
-                entry["regex"] = re.compile(normalize_nfc(keyword), flags=re.IGNORECASE | re.MULTILINE)
-            except re.error:
-                entry["regex"] = None
+            # The v2 guard (R7 S2 review #7): static check, then bounded slices with a per-row
+            # time limit -- ``re`` cannot be interrupted, so a catastrophic pattern never runs.
+            entry["regex"] = None
+            if regex_guard_problem(keyword) is None:
+                try:
+                    entry["regex"] = GuardedRegex(re.compile(normalize_nfc(keyword), flags=V1_REGEX_FLAGS))
+                except re.error:
+                    entry["regex"] = None
         elif mode == "fuzzy":
             entry["max_distance"] = max(0, min(int(options.get("fuzzy_distance") or 1), 2))
             entry["stems"] = keyword_stems(keyword) if is_simple_word(keyword) else None
@@ -1731,7 +1850,14 @@ def match_keywords(
                 continue
             if nfc_text is None:
                 nfc_text = normalize_nfc(text)
-            if pattern.search(nfc_text):
+            try:
+                found = pattern.search(nfc_text)  # type: ignore[union-attr]
+            except RowTimeout:
+                counter = _REGEX_UNCHECKED.get()
+                if counter is not None:
+                    counter[0] += 1
+                continue
+            if found is not None:
                 matched.append(keyword)
             continue
         if mode == "fuzzy":

@@ -139,6 +139,8 @@ class UnifiedSearchPagingTests(unittest.TestCase):
                 "size": 10,
                 "hashes": {"sha256": "a" * 64},
                 "source_hashes": {"sha256": "b" * 64},
+                # Flat like index hits (R7 S2 review #14): ``hashes`` before ``source_hashes``.
+                "sha256": "a" * 64,
             },
         )
 
