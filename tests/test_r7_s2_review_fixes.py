@@ -503,6 +503,34 @@ class ReviewApiTests(unittest.TestCase):
         self.assertEqual(ok.status_code, 200, ok.text)
         self.assertTrue(ok.json()["matches"])
 
+    def console(self, **page: object) -> dict:
+        response = self.client.post(self.url("/search/query"), json={"keywords": ["bsh"], "page": page, "aggregates": False, "facets": False})
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def test_hit_numbers_come_from_the_cursor_not_the_client(self) -> None:
+        self.build_index()
+        ids = lambda payload: [hit["search_result_id"] for hit in payload["matches"]]
+        first = self.console(limit=2)
+        self.assertEqual(ids(first), ["search-hit-000001", "search-hit-000002"])
+        self.assertEqual(first["page"]["position"], 0)
+        # The client lies about its offset: the server still numbers from the cursor.
+        second = self.console(limit=2, cursor=first["page"]["next_cursor"], offset=0)
+        self.assertEqual(ids(second), ["search-hit-000003", "search-hit-000004"])
+        lying = self.console(limit=2, cursor=first["page"]["next_cursor"], offset=777)
+        self.assertEqual(ids(lying), ids(second))
+        back = self.console(limit=2, cursor=second["page"]["previous_cursor"])
+        self.assertEqual(ids(back), ids(first))
+        # A first page is position 0 whatever offset the client sends.
+        self.assertEqual(ids(self.console(limit=2, offset=500)), ids(first))
+
+    def test_offset_beyond_the_bound_is_a_korean_422(self) -> None:
+        self.build_index()
+        response = self.client.post(self.url("/search/query"), json={"keywords": ["bsh"], "page": {"offset": 1_000_001}})
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertIn("page.offset은", response.json()["detail"])
+        self.assertEqual(self.client.post(self.url("/search/query"), json={"keywords": ["bsh"], "page": {"offset": 1_000_000}}).status_code, 200)
+
 
 if __name__ == "__main__":
     unittest.main()

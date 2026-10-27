@@ -91,6 +91,8 @@ from .textutil import (
 
 # The aggregate pass materialises at most this many matching rows (memory guard).
 TOTAL_CAP = 1_000_000
+# Highest result position a page may start at (cursor ``pos``, the console's ``page.offset``).
+MAX_POSITION = TOTAL_CAP
 SORT_TS_CAP = 50_000
 DEFAULT_BUDGET_SECONDS = QUERY_BUDGET_SECONDS
 GRACE_SECONDS = QUERY_GRACE_SECONDS
@@ -1082,13 +1084,34 @@ def query_hash(q: str, options: SearchOptions, collapse: bool, build_id: str) ->
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
-def encode_cursor(qhash: str, sort: str, effective: str, key: object, row_id: int, direction: str) -> str:
-    payload = json.dumps(
-        {"v": CURSOR_VERSION, "qhash": qhash, "sort": sort, "es": effective, "last": [key, row_id], "dir": direction},
-        separators=(",", ":"),
-        ensure_ascii=False,
-    )
+def encode_cursor(qhash: str, sort: str, effective: str, key: object, row_id: int, direction: str, *, position: int | None = None) -> str:
+    """``position``: the 0-based result position of the first row of the page the cursor opens
+    (the server numbers console hits from it; R7 S2 review #11)."""
+    body: dict[str, object] = {"v": CURSOR_VERSION, "qhash": qhash, "sort": sort, "es": effective, "last": [key, row_id], "dir": direction}
+    if position is not None:
+        body["pos"] = max(0, int(position))
+    payload = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
     return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def cursor_position(cursor: str | None) -> int | None:
+    """The ``pos`` a (validated) cursor carries, or ``None`` (first page: 0; an older cursor: unknown).
+
+    A position past :data:`MAX_POSITION` is not a cursor this server made: 400.
+    """
+    if not cursor:
+        return None
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except (ValueError, UnicodeError):
+        return None
+    position = payload.get("pos") if isinstance(payload, dict) else None
+    if position is None:
+        return None
+    if not isinstance(position, int) or isinstance(position, bool) or not 0 <= position <= MAX_POSITION:
+        raise QueryError("커서가 이 질의에 맞지 않습니다")
+    return position
 
 
 def _sql_int(value: object) -> bool:
@@ -1904,9 +1927,13 @@ def _run_query(
     after: tuple[object, int] | None = None
     direction = "next"
     cursor_sort: str | None = None
+    # 0-based position of this page's first row: 0 on the first page, from the cursor after it
+    # (``None``: a cursor of an older server; the caller falls back to its own count).
+    position: int | None = 0
     if request.cursor:
         key, row_id, direction, cursor_sort = decode_cursor(request.cursor, qhash, sort)
         after = (key, row_id)
+        position = cursor_position(request.cursor)
     wants_full = request.aggregates or sort != "relevance" or (cursor_sort is not None and cursor_sort != "relevance")
     prepared = index.prepare(
         parsed, request.options, review_provider=review_provider, hashset_resolver=hashset_resolver, row_mode=not wants_full
@@ -1995,17 +2022,19 @@ def _run_query(
                 truncated_reason = truncated_reason or index.budget.reason
     rows_payload = _page_payload(index, prepared, request, page_rows, review_lookup, materialized=materialized)
     next_cursor = previous_cursor = None
+    next_position = position + len(page_rows) if position is not None else None
+    previous_position = max(0, position - limit) if position is not None else None
     if page_rows:
         first, last = page_rows[0], page_rows[-1]
         if direction == "next":
             if more:
-                next_cursor = encode_cursor(qhash, sort, effective, last[2], last[0], "next")
+                next_cursor = encode_cursor(qhash, sort, effective, last[2], last[0], "next", position=next_position)
             if after is not None:
-                previous_cursor = encode_cursor(qhash, sort, effective, first[2], first[0], "prev")
+                previous_cursor = encode_cursor(qhash, sort, effective, first[2], first[0], "prev", position=previous_position)
         else:
-            next_cursor = encode_cursor(qhash, sort, effective, last[2], last[0], "next")
+            next_cursor = encode_cursor(qhash, sort, effective, last[2], last[0], "next", position=next_position)
             if more:
-                previous_cursor = encode_cursor(qhash, sort, effective, first[2], first[0], "prev")
+                previous_cursor = encode_cursor(qhash, sort, effective, first[2], first[0], "prev", position=previous_position)
     facets: dict[str, object] | None = None
     histogram: dict[str, object] | None = None
     matched_domains: set[str] = {str(row.get("domain") or "") for row in rows_payload}
@@ -2046,6 +2075,8 @@ def _run_query(
         "rows": rows_payload,
         "page": {
             "cursor": request.cursor,
+            # 0-based result position of this page's first row (``None``: an older cursor).
+            "position": position,
             "next_cursor": next_cursor,
             "previous_cursor": previous_cursor,
             "returned": len(rows_payload),
