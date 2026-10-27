@@ -53,7 +53,11 @@ from collections import OrderedDict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
+from ...core.dedup import DEDUP_MODES
+from ...core.families import parse_ref
+from ...core.irregular import CATEGORIES as IRREGULAR_CATEGORIES
 from .artifact_sort import TIME_KEYS
 
 COLLECTIONS = ("artifacts", "files", "timeline")
@@ -608,6 +612,82 @@ def in_hours(hour: int, window: tuple[int, int]) -> bool:
     return start <= hour < end if start < end else hour >= start or hour < end
 
 
+# --- row sets (R7 갈래 A) ---------------------------------------------------------------------
+
+DUP_LABELS = {"original": "원본", "duplicate": "중복", "any": "중복 있음"}
+
+
+@dataclass(frozen=True)
+class RowSetQuery:
+    """``family=`` / ``dup=`` (+ ``dup_mode=``) / ``irregular=`` of a listing (parsed, unresolved)."""
+
+    family: str | None = None
+    dup: str | None = None
+    dup_mode: str = "item"
+    irregular: frozenset[str] | None = None
+
+    @property
+    def active(self) -> bool:
+        return self.family is not None or self.dup is not None or self.irregular is not None
+
+    def cache_key(self) -> tuple[object, ...]:
+        return (self.family, self.dup, self.dup_mode, tuple(sorted(self.irregular)) if self.irregular is not None else None)
+
+    def describe(self) -> dict[str, object]:
+        out: dict[str, object] = {}
+        if self.family is not None:
+            out["family"] = self.family
+        if self.dup is not None:
+            out["dup"] = self.dup
+            out["dup_mode"] = self.dup_mode
+        if self.irregular is not None:
+            out["irregular"] = sorted(self.irregular)
+        return out
+
+
+def parse_row_sets(
+    *, family: str | None = None, dup: str | None = None, dup_mode: str | None = None, irregular: Sequence[str] = ()
+) -> RowSetQuery | None:
+    """Korean ``ValueError`` for a bad value; ``None`` when none is given."""
+    family_ref: str | None = None
+    if family is not None and family.strip():
+        text = family.strip()
+        if parse_ref(text) is None or text.startswith("source::"):
+            raise ValueError("family 값은 항목 참조여야 합니다(예: artifacts:email:/artifacts/3, files::/candidates/12)")
+        family_ref = text
+    dup_value: str | None = None
+    if dup is not None and dup.strip():
+        dup_value = dup.strip().lower()
+        if dup_value not in DUP_LABELS:
+            raise ValueError("dup 값은 original(원본)·duplicate(중복)·any(중복 있음) 중 하나여야 합니다")
+    mode = (dup_mode or "").strip().lower() or "item"
+    if mode not in DEDUP_MODES:
+        raise ValueError("dup_mode 값은 item(항목별)·family(계열별)·custodian(보관자 순위별) 중 하나여야 합니다")
+    if dup_mode and dup_mode.strip() and dup_value is None:
+        raise ValueError("dup_mode는 dup 조건과 함께 써야 합니다")
+    parts = [part.strip() for value in irregular for part in str(value).split(",") if part.strip()]
+    categories: frozenset[str] | None = None
+    if parts:
+        unknown = [part for part in parts if part not in IRREGULAR_CATEGORIES]
+        if unknown:
+            raise ValueError(f"irregular 값 '{unknown[0][:32]}'을(를) 알 수 없습니다 — {', '.join(IRREGULAR_CATEGORIES)} 중에서 고르세요")
+        categories = frozenset(parts)
+    query = RowSetQuery(family=family_ref, dup=dup_value, dup_mode=mode, irregular=categories)
+    return query if query.active else None
+
+
+class ResolvedRowSets(Protocol):
+    """Row sets of a :class:`RowSetQuery` resolved against a run (``families.RowSets``)."""
+
+    def artifacts(self, kind: str) -> frozenset[int]: ...
+
+    def files(self, lane: str) -> frozenset[int]: ...
+
+    def timeline_event(self, event: Mapping[str, object]) -> bool: ...
+
+    def cache_key(self) -> tuple[object, ...]: ...
+
+
 # --- conditions -------------------------------------------------------------------------------
 
 
@@ -625,6 +705,10 @@ class RowConditions:
     partial: bool = False
     content: frozenset[str] | None = None
     geo: tuple[float, float, float, float] | None = None
+    # R7 갈래 A: ``family=`` / ``dup=`` / ``irregular=`` (parsed) and their resolved row sets (the
+    # route resolves them against the run's derivation: ``families.resolve_row_sets``).
+    row_sets: RowSetQuery | None = None
+    resolved: ResolvedRowSets | None = None
 
     @property
     def clock(self) -> bool:
@@ -671,6 +755,10 @@ class RowConditions:
                 return False
             if not in_geo_box(point, self.geo):
                 return False
+        # Artifact and files rows are restricted at their source (record indices); a timeline
+        # event passes when its source row does.
+        if self.resolved is not None and collection == "timeline" and not self.resolved.timeline_event(row):
+            return False
         return True
 
     def predicate(self, collection: str, ntfs_time: NtfsTime | None = None) -> Callable[[Mapping[str, object]], bool]:
@@ -688,6 +776,8 @@ class RowConditions:
             self.partial,
             tuple(sorted(self.content)) if self.content is not None else None,
             self.geo,
+            self.row_sets.cache_key() if self.row_sets is not None else None,
+            self.resolved.cache_key() if self.resolved is not None else None,
         )
 
     def describe(self) -> dict[str, object]:
@@ -711,6 +801,8 @@ class RowConditions:
             out["content"] = sorted(self.content)
         if self.geo is not None:
             out["geo"] = list(self.geo)
+        if self.row_sets is not None:
+            out.update(self.row_sets.describe())
         return out
 
 
@@ -725,6 +817,10 @@ def parse_row_conditions(
     partial: bool = False,
     content: Sequence[str] = (),
     geo: str | None = None,
+    family: str | None = None,
+    dup: str | None = None,
+    dup_mode: str | None = None,
+    irregular: Sequence[str] = (),
 ) -> RowConditions | None:
     """Parse the query parameters (module doc); ``None`` when no condition is given."""
     zone, label = parse_tz(tz)
@@ -750,9 +846,14 @@ def parse_row_conditions(
         partial=bool(partial),
         content=parse_content(content),
         geo=parse_geo(geo),
+        row_sets=parse_row_sets(family=family, dup=dup, dup_mode=dup_mode, irregular=irregular),
     )
     active = (
-        conditions.uses_time or conditions.partial or conditions.content is not None or conditions.geo is not None
+        conditions.uses_time
+        or conditions.partial
+        or conditions.content is not None
+        or conditions.geo is not None
+        or conditions.row_sets is not None
     )
     return conditions if active else None
 

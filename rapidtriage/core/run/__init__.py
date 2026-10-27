@@ -147,6 +147,7 @@ from .persist import (
     DOCS_TEXT_SPOOL_NAME,
     DocumentTextSpool,
     build_run_case_db,
+    build_run_families,
     build_run_geo_index,
     skipped_case_db_record,
 )
@@ -1341,6 +1342,7 @@ def _run_triage_stages(
         )
     # 위치 행 색인 (r6 §3.3 갈래 C): the map view's located-row index, written with the run.
     geo_index_record = build_run_geo_index(output_dir, artifact_outputs, artifact_payloads)
+    families_record = build_run_families(output_dir, provisional_outputs)  # R7 갈래 A 계열·중복·예외
     finish_stage(
         "persist",
         {
@@ -1353,6 +1355,11 @@ def _run_triage_stages(
                 key: geo_index_record[key]
                 for key in ("status", "located", "truncated", "elapsed_seconds", "error", "reason")
                 if key in geo_index_record
+            },
+            "families": {
+                key: families_record[key]
+                for key in ("status", "edges", "dedup_items", "irregular", "elapsed_seconds", "error", "reason")
+                if key in families_record
             },
         },
     )
