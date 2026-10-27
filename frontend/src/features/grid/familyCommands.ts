@@ -14,7 +14,8 @@ import type { GridRow } from "../../contracts/collection";
 import { type Command, KEY_MAP } from "../../contracts/command";
 import { rowKeyOf } from "../../state/slices/selection";
 import { useAppStore } from "../../state/store";
-import { familyRoute } from "../viewer/familyNav";
+import { familyRoute, openFamilyRoute } from "../viewer/familyNav";
+import { useGridLocalStore } from "./adapter";
 import type { GridCommandHost } from "./gridCommands";
 import { reviewLocatorOf } from "./gridCommands";
 
@@ -80,7 +81,7 @@ export function buildFamilyCommands(hostRef: { current: GridCommandHost }): Comm
         const runId = host().runId;
         if (!item || !runId) return;
         const route = familyRoute(runId, item.ref, item.ref);
-        if (route) useAppStore.getState().navigate(route);
+        if (route) openFamilyRoute(route);
       },
     },
     {
@@ -114,7 +115,7 @@ export function buildFamilyCommands(hostRef: { current: GridCommandHost }): Comm
             return;
           }
           const route = familyRoute(runId, parent.ref, data.top.ref);
-          if (route) useAppStore.getState().navigate(route);
+          if (route) openFamilyRoute(route);
         } catch (error) {
           host().toast(
             `상위 항목을 찾지 못했습니다: ${error instanceof Error ? error.message : String(error)}`,
@@ -197,13 +198,33 @@ export function applyExpansion(
     }
     mine.push(rowKeyOf(row));
   }
+  // One kind's grid stays on its kind when the whole expansion is of that kind (same selection
+  // scope); otherwise the list goes across kinds and the selection waits for the new scope.
+  const kinds = new Set(mine.map((key) => key.split(":")[1] ?? ""));
+  const keepKind = collection === "artifacts" && route.kind && kinds.size === 1 && kinds.has(route.kind);
+  const grid = useGridLocalStore;
+  const scopeBefore = grid.getState().selectionScope;
+  const sameScope = keepKind || (collection === "files" && route.collection === "files");
   store.navigate({
     runId,
     collection,
+    ...(keepKind ? { kind: route.kind } : {}),
     ...(inventory ? { category: "inventory" } : {}),
     family: requested,
   });
-  useAppStore.getState().setSelectedRows(mine);
+  const select = () => grid.getState().select(mine);
+  if (sameScope && route.collection === collection) {
+    select();
+  } else {
+    let off: (() => void) | null = null;
+    const timer = setTimeout(() => off?.(), 5000);
+    off = grid.subscribe((state) => {
+      if (state.selectionScope === scopeBefore) return;
+      off?.();
+      clearTimeout(timer);
+      select();
+    });
+  }
   host.toast(
     `계열로 확장: 이 목록 ${mine.length.toLocaleString("ko-KR")}건 선택` +
       (others ? ` · 다른 목록 ${others.toLocaleString("ko-KR")}건(파일·아티팩트·분석 결과)` : "") +

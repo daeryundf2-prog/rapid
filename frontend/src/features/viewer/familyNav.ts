@@ -10,6 +10,8 @@
 import { parseItemRef, rowRefOfItem } from "../../api/families";
 import type { RowRef } from "../../contracts/rowRef";
 import type { Route } from "../../router";
+import { useAppStore } from "../../state/store";
+import { requestViewerMode } from "./session";
 
 /** The analysis node kind of a carve analysis id (`…-carve…` ids; carving is the only family source). */
 const CARVE_NODE = "carve";
@@ -46,4 +48,10 @@ export function familyRoute(
   };
   if (parsed.collection === "files" && row.locator.startsWith("/inventory/")) route.category = "inventory";
   return route;
+}
+
+/** Navigate to a family route; its row opens in the viewer's 계열 tab (not only on a page load). */
+export function openFamilyRoute(route: Route): void {
+  if (route.row && route.runId && route.mode) requestViewerMode(route.runId, route.row, route.mode);
+  useAppStore.getState().navigate(route);
 }

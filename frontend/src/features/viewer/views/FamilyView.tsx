@@ -8,11 +8,10 @@
 import type { ReactNode } from "react";
 import { type FamilyNode, type FamilyResponse, fetchFamily } from "../../../api/families";
 import type { ViewerTarget } from "../../../contracts/viewer";
-import { useAppStore } from "../../../state/store";
 import { artifactTypeLabel } from "../../filters/typeLabels";
 import { familyForType } from "../../flags/catalog";
 import { setViewerTarget } from "../adapter";
-import { familyRoute } from "../familyNav";
+import { familyRoute, openFamilyRoute } from "../familyNav";
 import { familyRefOf } from "../modes";
 import { useAsync } from "../useAsync";
 
@@ -185,7 +184,7 @@ function NodeButton({
 export function openNode(target: ViewerTarget, data: FamilyResponse, node: FamilyNode): void {
   if (node.navigable) {
     const route = familyRoute(target.runId, node.ref, data.top.ref);
-    if (route) useAppStore.getState().navigate(route);
+    if (route) openFamilyRoute(route);
     return;
   }
   if (node.source_path) {

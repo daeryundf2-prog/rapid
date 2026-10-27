@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GridRow } from "../../contracts/collection";
 import type { CommandContext } from "../../contracts/command";
 import { useAppStore } from "../../state/store";
+import { useGridLocalStore } from "./adapter";
 import { makeRef, makeRow } from "./columns/common";
 import {
   applyExpansion,
@@ -163,8 +164,13 @@ describe("선택을 상위+하위 항목으로 확장 (Q-A6)", () => {
       ],
     );
     const state = useAppStore.getState();
-    expect(state.route).toMatchObject({ collection: "artifacts", family: ["artifacts:email:/artifacts/2"] });
-    expect(state.selectedRowKeys).toEqual([
+    // The whole expansion of this list is one kind: the grid stays on it (same selection scope).
+    expect(state.route).toMatchObject({
+      collection: "artifacts",
+      kind: "email",
+      family: ["artifacts:email:/artifacts/2"],
+    });
+    expect([...useGridLocalStore.getState().selectedKeys]).toEqual([
       "artifacts:email:/artifacts/2",
       "artifacts:email:/artifacts/1",
       "artifacts:email:/artifacts/3",
