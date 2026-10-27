@@ -1,5 +1,15 @@
-import { type QueryClient, QueryClientContext } from "@tanstack/react-query";
-import { type FormEvent, type KeyboardEvent, useContext, useEffect, useId, useRef, useState } from "react";
+import { notifyManager, type QueryClient, QueryClientContext } from "@tanstack/react-query";
+import {
+  type FormEvent,
+  type KeyboardEvent,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { announce, useEscape, useFocusTrap } from "../a11y";
 import { COLLECTION_LABEL } from "../app/collections";
 import { focusGridWhenReady, GLOBAL_SEARCH_ID, NO_RUN_REASON } from "../commands/builtin";
@@ -27,16 +37,20 @@ export function searchQueryKey(runId: string | null) {
   return ["collection", runId, "search"] as const;
 }
 
-/** Any page of the run's search in flight (false without a QueryClient, e.g. a bare shell). */
+/** Any page of the run's search in flight (false without a QueryClient, e.g. a bare shell).
+ *
+ * `useIsFetching`'s store (R7 S2 confirmation): the cache also notifies while another component
+ * renders (a query created during render), so the change is scheduled with
+ * `notifyManager.batchCalls`, never a synchronous setState (React: "Cannot update a component
+ * while rendering a different component"). */
 function useSearchBusy(client: QueryClient | undefined, runId: string | null): boolean {
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (!client) return;
-    const check = () => setBusy(client.isFetching({ queryKey: searchQueryKey(runId) }) > 0);
-    check();
-    return client.getQueryCache().subscribe(check);
-  }, [client, runId]);
-  return busy;
+  const subscribe = useCallback(
+    (onStoreChange: () => void) =>
+      client ? client.getQueryCache().subscribe(notifyManager.batchCalls(onStoreChange)) : () => undefined,
+    [client],
+  );
+  const snapshot = () => (client ? client.isFetching({ queryKey: searchQueryKey(runId) }) > 0 : false);
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 function GlobalSearch() {
