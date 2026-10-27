@@ -186,7 +186,11 @@ class ConsoleSearchApiTests(unittest.TestCase):
         self.assertEqual(both.json()["detail"], "q와 keywords 중 하나만 주세요")
         empty = self.client.post(self.url("/search/query"), json={"keywords": ["  "]})
         self.assertEqual(empty.status_code, 400)
-        self.assertEqual(self.client.post(self.url("/search/query"), json={"keywords": ["x"] * 33}).status_code, 422)
+        too_many = self.client.post(self.url("/search/query"), json={"keywords": [f"x{index}" for index in range(33)]})
+        self.assertEqual(too_many.status_code, 422)
+        # R7 S3 confirmation: a Korean reason, not pydantic's English list message.
+        self.assertEqual(too_many.json()["detail"], "검색어는 32개까지 사용할 수 있습니다 (받은 수: 33)")
+        self.assertEqual(self.client.post(self.url("/search/query"), json={"keywords": [f"x{index}" for index in range(32)]}).status_code, 200)
 
     def test_console_hits_match_v1_shape_and_set(self) -> None:
         self.build_index()

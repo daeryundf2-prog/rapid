@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { searchSpec } from "../app/gridBridge";
@@ -92,6 +92,38 @@ describe("top bar search: spinner and cancel (R7 P2)", () => {
     fireEvent.submit(input);
     await waitFor(() => expect(previous.signal()?.aborted).toBe(true));
     expect(window.location.hash).toBe(`#/case/${RUN}/explore/search?q=LiveUpdate`);
+  });
+
+  it("a search query created while another component renders logs no React error (R7 S2 confirmation)", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    function Grid() {
+      // The query is built and its fetch started (the cache notified) during this render.
+      void client.prefetchQuery({
+        queryKey: [...searchQueryKey(RUN), "계약", "page", 1],
+        queryFn: () => new Promise(() => undefined),
+      });
+      useQuery({
+        queryKey: [...searchQueryKey(RUN), "계약", "page", 0],
+        queryFn: () => new Promise(() => undefined),
+      });
+      return null;
+    }
+    const tree = (grid: boolean) => (
+      <QueryClientProvider client={client}>
+        <TopBar />
+        {grid ? <Grid /> : null}
+      </QueryClientProvider>
+    );
+    try {
+      // The top bar is subscribed to the cache before the grid mounts (a search opened later).
+      const { rerender } = render(tree(false));
+      rerender(tree(true));
+      await waitFor(() => expect(document.querySelector(".global-search-spinner")).not.toBeNull());
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
+    }
   });
 });
 

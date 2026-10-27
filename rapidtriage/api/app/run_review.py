@@ -162,6 +162,7 @@ class RunLocatorIndex:
         self._docs_results: list[str] | None = None
         self._docs_candidates: list[str] | None = None
         self._file_candidate_count: int | None = None
+        self._last_artifact: tuple[int, ...] | None = None
 
     # -- helpers ------------------------------------------------------------
 
@@ -243,12 +244,15 @@ class RunLocatorIndex:
         """Bisect the contiguous per-kind artifact block; scan as a fallback."""
         target = (output_name, row_index)
         lo = self._first_id("artifact", " AND parser_name != ?", (INDICATOR_PARSER_NAME,))
-        last = self.connection.execute(
-            "SELECT id FROM artifact WHERE evidence_source_id = ? AND parser_name != ? ORDER BY id DESC LIMIT 1",
-            (self.evidence_source_id, INDICATOR_PARSER_NAME),
-        ).fetchone()
-        if lo is not None and last is not None:
-            hi = int(last[0])
+        if self._last_artifact is None:
+            last = self.connection.execute(
+                "SELECT id FROM artifact WHERE evidence_source_id = ? AND parser_name != ? ORDER BY id DESC LIMIT 1",
+                (self.evidence_source_id, INDICATOR_PARSER_NAME),
+            ).fetchone()
+            # Once per request (it walks back over the indicator rows): ``()`` when none.
+            self._last_artifact = (int(last[0]),) if last is not None else ()
+        if lo is not None and self._last_artifact:
+            hi = self._last_artifact[0]
             while lo <= hi:
                 mid = (lo + hi) // 2
                 key = self._artifact_key(mid)
@@ -360,6 +364,36 @@ class RunLocatorIndex:
             row_id = self._artifact_id(f"artifacts_{kind}", row_index)
             return ("artifact", str(row_id)) if row_id is not None else None
         return None
+
+    def artifact_summaries(self, keys: Iterable[tuple[str, str]]) -> dict[tuple[str, str], str]:
+        """``{(kind, locator): stored artifact summary}`` of ``/artifacts/<n>`` locators (one page
+        of search hits: R7 S2 confirmation #10). The import keeps each kind's rows contiguous, so
+        once a row of a kind is found the others are tried at the same id offset (verified)
+        before a bisect."""
+        found: dict[tuple[str, str], str] = {}
+        if self.evidence_source_id is None:
+            return found
+        offsets: dict[str, int] = {}
+        for kind, locator in keys:
+            row_index = _ordinal(base_locator(locator), "/artifacts/")
+            if row_index is None or not kind:
+                continue
+            output_name = f"artifacts_{kind}"
+            guess = offsets.get(output_name)
+            if guess is not None and self._artifact_key(guess + row_index) == (output_name, row_index):
+                row_id: int | None = guess + row_index
+            else:
+                row_id = self._artifact_id(output_name, row_index)
+                if row_id is not None:
+                    offsets[output_name] = row_id - row_index
+            if row_id is None:
+                continue
+            row = self.connection.execute(
+                "SELECT summary FROM artifact WHERE id = ? AND evidence_source_id = ?", (row_id, self.evidence_source_id)
+            ).fetchone()
+            if row is not None:
+                found[(kind, locator)] = str(row[0] or "")
+        return found
 
     def locate(self, target_type: str, target_id: str) -> dict[str, str] | None:
         """(target_type, target_id) -> {collection, kind, locator}, or None."""
