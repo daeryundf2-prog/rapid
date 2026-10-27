@@ -11,8 +11,12 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRovingTabindex } from "../../a11y";
+import { MiddlePath } from "../../components/MiddlePath";
 import type { GridRow } from "../../contracts/collection";
 import { encodeRowRef } from "../../contracts/rowRef";
+import { serializeRoute } from "../../router";
+import { fileTouchRoute, isAiSessionRow, requestedSession } from "../ai/aiChat";
+import { useFilterStore } from "../filters/filterStore";
 import { useViewerTarget } from "../grid/adapter";
 import { REVIEW_LABELS } from "../grid/columns/common";
 import { buildViewerTarget } from "../grid/gridCommands";
@@ -30,6 +34,14 @@ import {
 } from "./chat";
 import { useAutoLoad, useViewRows } from "./useViewRows";
 import { EmptyState, ErrorState, LoadingCard } from "./ViewState";
+
+/** Rows the view reads: bubbles, plus AI session rows that name their conversations. */
+function isChatSourceRow(row: GridRow): boolean {
+  return isMessageRow(row) || isAiSessionRow(row);
+}
+
+/** AI tool-call blocks opened in this session (row keys). */
+const OPEN_AI_CALLS = new Set<string>();
 
 /** Rows loaded automatically for the conversation list (then "더 불러오기"). */
 export const CHAT_AUTOLOAD_ROWS = 10_000;
@@ -53,6 +65,9 @@ function Highlighted({ text, terms }: { text: string; terms: readonly string[] }
 }
 
 function bubbleLabel(message: ChatMessage): string {
+  if (message.ai && message.ai.variant !== "message") {
+    return [message.ai.roleLabel, message.timestamp ?? "시각 없음", message.text].join(", ");
+  }
   const parts = [message.sender || "발신자 미상", message.timestamp ?? "시각 없음", message.text];
   if (message.attachments.length) parts.push(`첨부 ${message.attachments.length}개`);
   if (message.row.reviewStatus) parts.push(REVIEW_LABELS[message.row.reviewStatus]);
@@ -114,7 +129,10 @@ function ConversationList({
             }
           }}
         >
-          <span className="chat-list-title">{conversation.label}</span>
+          {/* Conversation names come from the evidence (chat titles, session ids): shown as written. */}
+          <span className="chat-list-title" data-raw-ok>
+            {conversation.label}
+          </span>
           <span className="chat-list-meta">
             {[conversation.service, `메시지 ${conversation.messages.length.toLocaleString("ko-KR")}개`]
               .filter(Boolean)
@@ -146,6 +164,14 @@ function MessageList({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const messages = conversation.messages;
   const [active, setActive] = useState(0);
+  // AI tool-call blocks the examiner opened: kept outside the component (a click on a bubble
+  // publishes its row, which may remount the view) — by row key.
+  const [, setOpenTick] = useState(0);
+  const toggleCall = (key: string) => {
+    if (OPEN_AI_CALLS.has(key)) OPEN_AI_CALLS.delete(key);
+    else OPEN_AI_CALLS.add(key);
+    setOpenTick((n) => n + 1);
+  };
   const activeIndex = Math.min(active, Math.max(messages.length - 1, 0));
   const pendingFocus = useRef<number | null>(null);
   const virtualizer = useVirtualizer({
@@ -232,7 +258,9 @@ function MessageList({
   return (
     <section className="chat-thread" aria-label={`${conversation.label} 대화`}>
       <header className="chat-thread-head">
-        <span className="chat-thread-title">{conversation.label}</span>
+        <span className="chat-thread-title" data-raw-ok>
+          {conversation.label}
+        </span>
         <span className="chat-list-meta">
           {[
             conversation.service,
@@ -301,10 +329,22 @@ function MessageList({
                     {isUnresolvedId(message.sender) ? ` ${UNRESOLVED_NAME_HINT}` : ""}
                   </span>
                 ) : null}
-                <div className="chat-bubble">
-                  <p className="chat-text">
-                    <Highlighted text={message.text} terms={terms} />
-                  </p>
+                <div className={`chat-bubble${message.ai ? ` is-ai-${message.ai.variant}` : ""}`}>
+                  {message.ai?.variant === "tool" ? (
+                    <AiToolBlock
+                      message={message}
+                      terms={terms}
+                      open={OPEN_AI_CALLS.has(message.row.rowKey)}
+                      onToggle={() => toggleCall(message.row.rowKey)}
+                    />
+                  ) : message.ai?.variant === "file" ? (
+                    <AiFileLink message={message} runId={runId} />
+                  ) : (
+                    // Message bodies are evidence text, shown as written.
+                    <p className="chat-text" data-raw-ok>
+                      <Highlighted text={message.text} terms={terms} />
+                    </p>
+                  )}
                   {message.attachments.length ? (
                     <ul className="chat-attachments" aria-label="첨부">
                       {message.attachments.map((name) => (
@@ -325,15 +365,106 @@ function MessageList({
   );
 }
 
+/** AI tool call (R7 AI 사용): a folded block — 호출 도구 · 종류, then the command and target. */
+function AiToolBlock({
+  message,
+  terms,
+  open,
+  onToggle,
+}: {
+  message: ChatMessage;
+  terms: readonly string[];
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const ai = message.ai;
+  if (!ai) return null;
+  const hasBody = Boolean(ai.command || ai.targetPath);
+  return (
+    <div className="chat-tool" data-testid="ai-tool-call" data-open={open || undefined}>
+      <button
+        type="button"
+        className="chat-tool-toggle"
+        aria-expanded={hasBody ? open : undefined}
+        disabled={!hasBody}
+        // The bubble publishes its row on focus / click, which re-lays the panes out: a press on
+        // the toggle keeps the focus where it is so the click lands on the same button.
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggle();
+        }}
+        onKeyDown={(event) => {
+          // Enter / Space fold the block instead of opening the row in the viewer.
+          if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+        }}
+      >
+        <span aria-hidden="true">{hasBody ? (open ? "▾ " : "▸ ") : ""}</span>
+        {/* The tool's own name (vendor id, e.g. read_file) as written; its kind in Korean. */}
+        <span data-raw-ok>
+          <Highlighted text={ai.toolName ?? message.text} terms={terms} />
+        </span>
+        {ai.toolKind ? ` · ${ai.toolKind}` : null}
+        {ai.destructive ? <span className="chat-tool-flag"> · 파괴적 작업</span> : null}
+        {ai.exitCode !== undefined ? (
+          <span className="chat-list-meta"> · 종료 코드 {ai.exitCode}</span>
+        ) : null}
+      </button>
+      {open && ai.command ? (
+        <pre className="chat-tool-command">
+          <Highlighted text={ai.command} terms={terms} />
+        </pre>
+      ) : null}
+      {open && ai.targetPath ? (
+        <p className="chat-tool-target">
+          대상 <MiddlePath path={ai.targetPath} />
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** AI file touch (R7 AI 사용): 작업 · path, linked to the file list (the evidence file when known). */
+function AiFileLink({ message, runId }: { message: ChatMessage; runId: string | null }) {
+  const ai = message.ai;
+  if (!ai) return null;
+  const route = fileTouchRoute(runId ?? "", ai);
+  return (
+    <p className="chat-text chat-file-touch" data-testid="ai-file-touch">
+      <span>{ai.op || "파일 접촉"}</span>{" "}
+      {route ? (
+        <a
+          href={serializeRoute(route)}
+          title={ai.locator ? `증거 파일: ${ai.locator}` : "파일 목록에서 이 이름을 찾습니다"}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <MiddlePath path={ai.path || ai.locator} />
+        </a>
+      ) : (
+        <MiddlePath path={ai.path} />
+      )}
+    </p>
+  );
+}
+
 export function ChatView() {
-  const { cq, rows, runId, q } = useViewRows({ predicate: isMessageRow, textFilter: false });
+  const { cq, rows, runId, q } = useViewRows({ predicate: isChatSourceRow, textFilter: false });
   const capped = useAutoLoad(cq, true, CHAT_AUTOLOAD_ROWS);
   const conversations = useMemo(() => groupConversations(rows), [rows]);
+  const messageCount = useMemo(
+    () => conversations.reduce((sum, conversation) => sum + conversation.messages.length, 0),
+    [conversations],
+  );
   const terms = useMemo(() => highlightTerms(q), [q]);
+  // AI 사용 › 세션 → 대화 보기 asks for one session (`cf=f:session_id:<id>`): open that one first.
+  const requested = useFilterStore((s) => requestedSession(s.filters.columns));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusRequest, setFocusRequest] = useState(0);
   const layoutRef = useRef<HTMLDivElement | null>(null);
-  const conversation = conversations.find((c) => c.id === selectedId) ?? conversations[0];
+  const conversation =
+    conversations.find((c) => c.id === selectedId) ??
+    (requested ? conversations.find((c) => c.id === requested) : undefined) ??
+    conversations[0];
 
   if (cq.error && cq.loadedCount === 0) {
     return <ErrorState message={`대화를 불러오지 못했습니다. ${errorText(cq.error)}`} onRetry={cq.refetch} />;
@@ -357,8 +488,8 @@ export function ChatView() {
     <div className="view-pane chat-view" ref={layoutRef}>
       <div className="view-toolbar">
         <span className="view-count">
-          대화 {conversations.length.toLocaleString("ko-KR")}개 · 메시지 {rows.length.toLocaleString("ko-KR")}
-          개{cq.isFetching ? " · 불러오는 중…" : ""}
+          대화 {conversations.length.toLocaleString("ko-KR")}개 · 메시지{" "}
+          {messageCount.toLocaleString("ko-KR")}개{cq.isFetching ? " · 불러오는 중…" : ""}
         </span>
         {capped ? (
           <button type="button" className="view-link" onClick={cq.loadMore}>

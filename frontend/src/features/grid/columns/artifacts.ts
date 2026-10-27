@@ -12,7 +12,8 @@ import { parseFlags } from "../../flags/flags";
 import { kindsForCategory } from "../../tree/categories";
 import { serverPathFilter } from "../gridUtils";
 import type { CollectionDef, ColumnSpec } from "../types";
-import { labelledCell } from "../valueLabels";
+import { labelledCell, valueListLabel } from "../valueLabels";
+import { AI_KIND_COLUMNS, AI_TYPE_FAMILY_COLUMNS } from "./ai";
 import { recordHighlight, registryCellKindLabel, summarizeArtifact } from "./artifactSummary";
 import {
   col,
@@ -36,6 +37,7 @@ import {
 } from "./families";
 import { familyDedupColumns, familyDedupFields } from "./familyDedup";
 import { mismatchDirectionLabel } from "./files";
+import { pathCell } from "./PathCell";
 import { typeChipCell } from "./StatusCells";
 
 /** Row time = first of these details keys. Same order as the server's `sort=timestamp` (plan §4.1). */
@@ -155,6 +157,8 @@ export interface KindColumnDef {
   number?: boolean;
   /** ISO timestamp: shown in the display timezone, filtered from/to. */
   time?: boolean;
+  /** A file / folder path: drawn tail first (MiddlePath), the full path stays the tooltip and value. */
+  path?: boolean;
   /** Presets the column is visible in (default analysis + axiom). */
   presets?: ColumnSpec["presets"];
 }
@@ -191,6 +195,15 @@ export function kindColumn(def: KindColumnDef): ColumnSpec {
         ? { filterKind: "number" as const }
         : {}),
     ...(def.number || def.bytes ? { align: "right" as const } : {}),
+    ...(def.path
+      ? {
+          minWidth: 200,
+          render: (row: { fields: Record<string, unknown> }) => {
+            const v = read(row);
+            return pathCell(typeof v === "string" ? v : null);
+          },
+        }
+      : {}),
     ...(sortable ? { sortKey: `details.${first}` } : {}),
     ...(named ? { sortHint: `${def.header} 정렬 (${first} 기준)` } : {}),
     ...(def.list ? { unsortableReason: SORT_LIST_REASON } : {}),
@@ -369,6 +382,8 @@ export const TYPE_FAMILY_COLUMNS: Record<string, { types: readonly string[]; col
       { header: "트리거", keys: ["trigger_types"], width: 160, list: true },
     ],
   },
+  // R7 AI 사용 (갈래 D): one column set per AI 사용 node.
+  ...AI_TYPE_FAMILY_COLUMNS,
 };
 
 /**
@@ -409,6 +424,8 @@ export const MESSENGER_DIRECTION_KO: Readonly<Record<string, string>> = {
 };
 
 export const KIND_COLUMNS: Record<string, KindColumnDef[]> = {
+  // R7 AI 사용 기록 전체 (every ai-agent type): 도구 · 계정 · 근거 수준.
+  "ai-agent": AI_KIND_COLUMNS,
   eventlog: [
     { header: "레벨", keys: ["level"], width: 80 },
     { header: "컴퓨터", keys: ["computer"], width: 160 },
@@ -579,7 +596,15 @@ export const KIND_COLUMNS: Record<string, KindColumnDef[]> = {
     { header: "암호화 항목", keys: ["encrypted_entry_count"], width: 100, number: true },
     { header: "크기", keys: ["source_size"], width: 100, bytes: true },
     { header: "수정", keys: ["modified_at"], width: 170 },
-    { header: "위험", keys: ["risk_flags"], width: 240, list: true },
+    {
+      header: "위험",
+      keys: ["risk_flags"],
+      width: 240,
+      list: true,
+      // Risk tags in Korean (desktop AI app / AI prompt history … — R7 AI 사용), raw ids in the tooltip.
+      display: (value) => valueListLabel("riskTag", value),
+      tooltip: (details) => flatValue(details.risk_flags),
+    },
   ],
 };
 
