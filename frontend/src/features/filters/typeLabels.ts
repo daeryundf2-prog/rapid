@@ -6,6 +6,7 @@
  */
 
 import { timestampKindLabel } from "../../utils/timeKinds";
+import { AI_TYPE_LABELS } from "../ai/aiLabels";
 import { DOMAINS, flattenDomainNodes } from "../tree/domains";
 
 /**
@@ -58,6 +59,9 @@ export const TYPE_LABEL_OVERRIDES: Readonly<Record<string, string>> = {
   "windows-execution-summary": "실행 흔적 요약",
   "windows-usb-device": "USB 장치",
   "windows-mounted-device": "마운트된 장치",
+  // R7 AI 사용 (갈래 D): the full type names (the tree's node names — 세션, 메시지 … — are too
+  // short for the timeline's 영역·유형 column and the 유형 chips).
+  ...AI_TYPE_LABELS,
 };
 
 let cache: Map<string, string> | null = null;

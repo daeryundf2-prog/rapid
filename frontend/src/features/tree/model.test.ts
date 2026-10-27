@@ -134,8 +134,8 @@ describe("tree model (탐색 domain tree, console-ia §4)", () => {
       ...DOMAINS.map((d) => d.label),
     ]);
     // 통합 보기 (axiom-adoption §3.2) leads the 15 forensic domains.
-    // + 처리 (R7 갈래 A 예외 항목) after the forensic domains.
-    expect(DOMAINS).toHaveLength(17);
+    // + 처리 (R7 갈래 A 예외 항목) after the forensic domains, + AI 사용 (R7 AI 갈래 D).
+    expect(DOMAINS).toHaveLength(18);
     expect(DOMAINS[DOMAINS.length - 1]?.label).toBe("처리");
     expect(DOMAINS[0]?.label).toBe("통합 보기");
     // Workflow places are rail stages, not tree nodes.
@@ -269,7 +269,7 @@ describe("tree model (탐색 domain tree, console-ia §4)", () => {
 
   it("flattens only expanded branches", () => {
     const model = buildTreeModel({ summary: summary(), tree, review });
-    expect(flattenVisible(model, new Set())).toHaveLength(20);
+    expect(flattenVisible(model, new Set())).toHaveLength(21);
     const open = flattenVisible(model, new Set(["domain:eventlog"]));
     expect(open.filter((f) => f.level === 2).map((f) => f.node.label)).toEqual([
       "전체 이벤트 로그(EVTX·ETL)",
