@@ -15,7 +15,7 @@ import { MiddlePath } from "../../components/MiddlePath";
 import type { GridRow } from "../../contracts/collection";
 import { encodeRowRef } from "../../contracts/rowRef";
 import { serializeRoute } from "../../router";
-import { fileTouchRoute, requestedSession } from "../ai/aiChat";
+import { fileTouchRoute, isAiSessionRow, requestedSession } from "../ai/aiChat";
 import { useFilterStore } from "../filters/filterStore";
 import { useViewerTarget } from "../grid/adapter";
 import { REVIEW_LABELS } from "../grid/columns/common";
@@ -34,6 +34,11 @@ import {
 } from "./chat";
 import { useAutoLoad, useViewRows } from "./useViewRows";
 import { EmptyState, ErrorState, LoadingCard } from "./ViewState";
+
+/** Rows the view reads: bubbles, plus AI session rows that name their conversations. */
+function isChatSourceRow(row: GridRow): boolean {
+  return isMessageRow(row) || isAiSessionRow(row);
+}
 
 /** AI tool-call blocks opened in this session (row keys). */
 const OPEN_AI_CALLS = new Set<string>();
@@ -433,9 +438,13 @@ function AiFileLink({ message, runId }: { message: ChatMessage; runId: string | 
 }
 
 export function ChatView() {
-  const { cq, rows, runId, q } = useViewRows({ predicate: isMessageRow, textFilter: false });
+  const { cq, rows, runId, q } = useViewRows({ predicate: isChatSourceRow, textFilter: false });
   const capped = useAutoLoad(cq, true, CHAT_AUTOLOAD_ROWS);
   const conversations = useMemo(() => groupConversations(rows), [rows]);
+  const messageCount = useMemo(
+    () => conversations.reduce((sum, conversation) => sum + conversation.messages.length, 0),
+    [conversations],
+  );
   const terms = useMemo(() => highlightTerms(q), [q]);
   // AI 사용 › 세션 → 대화 보기 asks for one session (`cf=f:session_id:<id>`): open that one first.
   const requested = useFilterStore((s) => requestedSession(s.filters.columns));
@@ -469,8 +478,8 @@ export function ChatView() {
     <div className="view-pane chat-view" ref={layoutRef}>
       <div className="view-toolbar">
         <span className="view-count">
-          대화 {conversations.length.toLocaleString("ko-KR")}개 · 메시지 {rows.length.toLocaleString("ko-KR")}
-          개{cq.isFetching ? " · 불러오는 중…" : ""}
+          대화 {conversations.length.toLocaleString("ko-KR")}개 · 메시지{" "}
+          {messageCount.toLocaleString("ko-KR")}개{cq.isFetching ? " · 불러오는 중…" : ""}
         </span>
         {capped ? (
           <button type="button" className="view-link" onClick={cq.loadMore}>

@@ -14,7 +14,7 @@ const COUNTS = {
   "ai-tool-presence": 83,
   "ai-agent-session": 28,
   "ai-agent-tool-call": 19,
-  "ai-credential-presence": 35,
+  "ai-credential-presence": 23,
   "ai-account": 7,
 };
 

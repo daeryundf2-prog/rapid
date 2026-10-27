@@ -15,17 +15,24 @@ type Details = Record<string, unknown>;
 
 const TIME_WIDTH = 190;
 
+/** Reading of one value or a list of values (merged rows: `credential_kinds[]`). */
+function labelOf(domain: AiValueDomain, value: unknown): string {
+  if (Array.isArray(value)) return value.map((item) => aiValueLabel(domain, item)).join(", ");
+  return aiValueLabel(domain, value);
+}
+
 /** A column whose raw value reads through an AI value domain (the raw value is the tooltip). */
 function labelled(header: string, keys: string[], domain: AiValueDomain, width = 140): KindColumnDef {
   return {
     header,
     keys,
     width,
-    display: (value) => aiValueLabel(domain, value),
+    display: (value) => labelOf(domain, value),
     tooltip: (details) => {
       const raw = keys.map((key) => details[key]).find((v) => v !== undefined && v !== null && v !== "");
-      const shown = aiValueLabel(domain, raw);
-      return raw !== undefined && String(raw) !== shown ? `${shown} (원래 값: ${String(raw)})` : shown;
+      const shown = labelOf(domain, raw);
+      const text = Array.isArray(raw) ? raw.join(", ") : String(raw);
+      return raw !== undefined && text !== shown ? `${shown} (원래 값: ${text})` : shown;
     },
   };
 }

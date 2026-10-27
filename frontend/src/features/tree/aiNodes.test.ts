@@ -32,7 +32,7 @@ const node = (id: string): DomainNodeDef => {
 const FIXTURE_COUNTS: Record<string, number> = {
   "ai-tool-presence": 83,
   "ai-agent-message": 45,
-  "ai-credential-presence": 35,
+  "ai-credential-presence": 23,
   "ai-agent-session": 28,
   "ai-agent-file-touch": 19,
   "ai-agent-tool-call": 19,
@@ -158,7 +158,7 @@ describe("AI 사용 domain", () => {
     expect(find(model, "domain:ai:ai-tools-install")?.count).toBe(1);
     expect(find(model, "domain:ai:ai-tools-path")?.count).toBe(14);
     expect(find(model, "domain:ai:ai-tools-execution")?.disabledReason).toBeTruthy();
-    expect(find(model, "domain:ai")?.count).toBe(278);
+    expect(find(model, "domain:ai")?.count).toBe(266);
   });
 
   it("shows '—' for a 도구·설치 view while the presence facets are unknown", () => {

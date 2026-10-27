@@ -98,7 +98,7 @@ test("Q-AI10 tree: the AI 사용 domain lists its nodes with the fixture's count
     ["파일 접촉", 19],
     ["MCP 서버", 17],
     ["지침·메모리 파일", 12],
-    ["자격 증명 존재(값 없음)", 35],
+    ["자격 증명 존재(값 없음)", 23],
     ["계정·전환", 9],
     ["AI 코드 기여", 4],
     ["사용량", 6],
