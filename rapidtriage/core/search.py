@@ -435,6 +435,17 @@ def compact_search_metadata(metadata: Mapping[str, object]) -> dict[str, object]
         elif isinstance(value, str) and len(value) > 512:
             continue
         compact[key] = value
+    # The grid's hash columns read flat ``md5``/``sha1``/``sha256`` (index hits are flat already;
+    # R7 S2 review #14): a file record's ``hashes`` (else ``source_hashes``) map fills them.
+    for algorithm in ("md5", "sha1", "sha256"):
+        if compact.get(algorithm):
+            continue
+        for container in ("hashes", "source_hashes"):
+            found = compact.get(container)
+            value = found.get(algorithm) if isinstance(found, Mapping) else None
+            if isinstance(value, str) and value.strip():
+                compact[algorithm] = value.strip().lower()
+                break
     return compact
 
 

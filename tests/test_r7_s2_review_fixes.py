@@ -436,6 +436,31 @@ class V1RegexGuardTest(IsolatedEnv):
         self.assertIn("행당 시간 한도", payload["warnings"][0])
 
 
+class CompactHashTest(IsolatedEnv):
+    """#14: v1 compact metadata has flat md5/sha1/sha256 like v2 hits (the grid's hash columns)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        hashes = {"md5": "a" * 32, "sha1": "b" * 40, "sha256": "C" * 64}
+        candidates = [
+            {"path": "E:\\root\\tool.exe", "name": "tool.exe", "size": 1, "categories": ["executables"], "hashes": hashes},
+            {"path": "E:\\root\\tool2.exe", "name": "tool2.exe", "size": 2, "categories": ["executables"], "source_hashes": {"sha256": "d" * 64}},
+        ]
+        cls.syn = SearchRun(cls.base, candidates)
+
+    def test_flat_hashes_equal_v2(self) -> None:
+        v1 = {hit["title"]: hit["metadata"] for hit in self.syn.v1_hits(["tool"])}
+        v2 = {hit["title"]: hit["metadata"] for hit in self.syn.v2_hits(["tool"])}
+        self.assertEqual(v1["tool.exe"]["sha256"], "c" * 64)
+        self.assertEqual(v1["tool.exe"]["md5"], "a" * 32)
+        self.assertEqual(v1["tool.exe"]["sha1"], "b" * 40)
+        self.assertEqual(v1["tool2.exe"]["sha256"], "d" * 64)
+        self.assertIn("hashes", v1["tool.exe"])  # the map stays for older readers
+        for algorithm in ("md5", "sha1", "sha256"):
+            self.assertEqual(v1["tool.exe"][algorithm], v2["tool.exe"][algorithm])
+
+
 class PathIndexBudgetTest(unittest.TestCase):
     """#12: the artifact path indexes share one byte budget (LRU across kinds)."""
 
