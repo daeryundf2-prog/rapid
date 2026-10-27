@@ -35,6 +35,9 @@ import {
 import { useAutoLoad, useViewRows } from "./useViewRows";
 import { EmptyState, ErrorState, LoadingCard } from "./ViewState";
 
+/** AI tool-call blocks opened in this session (row keys). */
+const OPEN_AI_CALLS = new Set<string>();
+
 /** Rows loaded automatically for the conversation list (then "더 불러오기"). */
 export const CHAT_AUTOLOAD_ROWS = 10_000;
 
@@ -153,6 +156,14 @@ function MessageList({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const messages = conversation.messages;
   const [active, setActive] = useState(0);
+  // AI tool-call blocks the examiner opened: kept outside the component (a click on a bubble
+  // publishes its row, which may remount the view) — by row key.
+  const [, setOpenTick] = useState(0);
+  const toggleCall = (key: string) => {
+    if (OPEN_AI_CALLS.has(key)) OPEN_AI_CALLS.delete(key);
+    else OPEN_AI_CALLS.add(key);
+    setOpenTick((n) => n + 1);
+  };
   const activeIndex = Math.min(active, Math.max(messages.length - 1, 0));
   const pendingFocus = useRef<number | null>(null);
   const virtualizer = useVirtualizer({
@@ -310,7 +321,12 @@ function MessageList({
                 ) : null}
                 <div className={`chat-bubble${message.ai ? ` is-ai-${message.ai.variant}` : ""}`}>
                   {message.ai?.variant === "tool" ? (
-                    <AiToolBlock message={message} terms={terms} />
+                    <AiToolBlock
+                      message={message}
+                      terms={terms}
+                      open={OPEN_AI_CALLS.has(message.row.rowKey)}
+                      onToggle={() => toggleCall(message.row.rowKey)}
+                    />
                   ) : message.ai?.variant === "file" ? (
                     <AiFileLink message={message} runId={runId} />
                   ) : (
@@ -339,29 +355,57 @@ function MessageList({
 }
 
 /** AI tool call (R7 AI 사용): a folded block — 호출 도구 · 종류, then the command and target. */
-function AiToolBlock({ message, terms }: { message: ChatMessage; terms: readonly string[] }) {
+function AiToolBlock({
+  message,
+  terms,
+  open,
+  onToggle,
+}: {
+  message: ChatMessage;
+  terms: readonly string[];
+  open: boolean;
+  onToggle: () => void;
+}) {
   const ai = message.ai;
   if (!ai) return null;
+  const hasBody = Boolean(ai.command || ai.targetPath);
   return (
-    <details className="chat-tool" data-testid="ai-tool-call">
-      <summary>
+    <div className="chat-tool" data-testid="ai-tool-call" data-open={open || undefined}>
+      <button
+        type="button"
+        className="chat-tool-toggle"
+        aria-expanded={hasBody ? open : undefined}
+        disabled={!hasBody}
+        // The bubble publishes its row on focus / click, which re-lays the panes out: a press on
+        // the toggle keeps the focus where it is so the click lands on the same button.
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggle();
+        }}
+        onKeyDown={(event) => {
+          // Enter / Space fold the block instead of opening the row in the viewer.
+          if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+        }}
+      >
+        <span aria-hidden="true">{hasBody ? (open ? "▾ " : "▸ ") : ""}</span>
         <Highlighted text={message.text} terms={terms} />
         {ai.destructive ? <span className="chat-tool-flag"> · 파괴적 작업</span> : null}
         {ai.exitCode !== undefined ? (
           <span className="chat-list-meta"> · 종료 코드 {ai.exitCode}</span>
         ) : null}
-      </summary>
-      {ai.command ? (
+      </button>
+      {open && ai.command ? (
         <pre className="chat-tool-command">
           <Highlighted text={ai.command} terms={terms} />
         </pre>
       ) : null}
-      {ai.targetPath ? (
+      {open && ai.targetPath ? (
         <p className="chat-tool-target">
           대상 <MiddlePath path={ai.targetPath} />
         </p>
       ) : null}
-    </details>
+    </div>
   );
 }
 

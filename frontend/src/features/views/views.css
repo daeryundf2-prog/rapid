@@ -573,8 +573,17 @@
   background: var(--surface-2, transparent);
   border-style: dashed;
 }
-.chat-tool > summary {
+.chat-tool-toggle {
+  all: unset;
   cursor: pointer;
+  display: block;
+  max-width: 100%;
+}
+.chat-tool-toggle:focus-visible {
+  outline: 2px solid var(--focus, currentColor);
+}
+.chat-tool-toggle:disabled {
+  cursor: default;
 }
 .chat-tool-flag {
   color: var(--danger, currentColor);

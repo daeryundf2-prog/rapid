@@ -322,6 +322,23 @@ function assertClean(from: number) {
   if (!REPORT_ONLY) expect(mine, mine.join(" || ")).toEqual([]);
 }
 
+/** AI 사용 nodes (R7 AI 갈래 D, frontend/src/features/tree/domains.ts AI_USAGE_DOMAIN). */
+const AI_NODES = [
+  "explore/artifacts/ai-agent",
+  "explore/artifacts/ai-agent?types=ai-tool-presence",
+  "explore/artifacts/ai-agent?types=ai-agent-session",
+  "explore/artifacts/ai-agent?types=ai-agent-message",
+  "explore/artifacts/ai-agent?types=ai-agent-tool-call",
+  "explore/artifacts/ai-agent?types=ai-agent-file-touch",
+  "explore/artifacts/ai-agent?types=ai-mcp-server",
+  "explore/artifacts/ai-agent?types=ai-instruction-file",
+  "explore/artifacts/ai-agent?types=ai-credential-presence",
+  "explore/artifacts/ai-agent?types=ai-account,ai-account-switch",
+  "explore/artifacts/ai-agent?types=ai-code-attribution",
+  "explore/artifacts/ai-agent?types=ai-usage-stat",
+  "explore/artifacts/ai-agent?types=ai-retention-cleanup",
+];
+
 /** Grid nodes per run (route below `#/case/{run}/`). */
 const GRID_NODES = [
   "explore/files",
@@ -346,6 +363,9 @@ const GRID_NODES = [
   "explore/artifacts/windows-shellbags",
   "explore/artifacts/windows-os-account",
   "explore/artifacts/synthetic-media",
+  // R7 AI 사용 (갈래 D): every AI 사용 node (empty on runs without AI rows) and a session's 대화 보기.
+  ...AI_NODES,
+  "explore/artifacts/ai-agent?types=ai-agent-session,ai-agent-message,ai-agent-tool-call,ai-agent-file-touch&view=chat",
 ];
 
 /** Nodes whose first row's viewer meta panel is scanned. */
@@ -360,6 +380,14 @@ const META_NODES = [
   "explore/files",
   "explore/timeline",
   "explore/artifacts/windows-registry",
+  // R7 AI 사용: session (links + 핵심), message, tool call, file touch, MCP, credential, account.
+  "explore/artifacts/ai-agent?types=ai-agent-session",
+  "explore/artifacts/ai-agent?types=ai-agent-message",
+  "explore/artifacts/ai-agent?types=ai-agent-tool-call",
+  "explore/artifacts/ai-agent?types=ai-agent-file-touch",
+  "explore/artifacts/ai-agent?types=ai-mcp-server",
+  "explore/artifacts/ai-agent?types=ai-credential-presence",
+  "explore/artifacts/ai-agent?types=ai-account,ai-account-switch",
 ];
 
 const GRID_SCOPE = "[data-testid='grid-region'], [data-testid='tree-region'], [data-testid='statusbar']";
