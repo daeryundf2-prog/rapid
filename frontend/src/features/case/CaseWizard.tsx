@@ -22,6 +22,7 @@ import {
 } from "../../api/cases";
 import { ApiError } from "../../api/client";
 import { navigate } from "../tree/adapter";
+import { AiRunOptionsField } from "./AiRunOptionsField";
 import { ErrorText } from "./ErrorText";
 import { EvidenceFields } from "./EvidenceFields";
 import { Modal } from "./Modal";
@@ -564,6 +565,14 @@ export function CaseWizard({
             <RunPlanGroupsField
               form={runForm}
               onChange={(skipGroups) => setRun("skipGroups", skipGroups)}
+              idPrefix={`${baseId}-run`}
+            />
+            <AiRunOptionsField
+              form={runForm}
+              onChange={(patch) => {
+                if (patch.aiBodies !== undefined) setRun("aiBodies", patch.aiBodies);
+                if (patch.aiHashDbs !== undefined) setRun("aiHashDbs", patch.aiHashDbs);
+              }}
               idPrefix={`${baseId}-run`}
             />
             {outputDirReason(runForm.outputDir, toRun.length) ? (
