@@ -94,6 +94,21 @@ KNOWN_DYNAMIC_ARTIFACT_TYPES = {
     "amcache-application-shortcut",
     "amcache-device-census",
     "amcache-inventory-row",
+    # R7 AI usage, lane B session adapters (artifacts/ai_agents/adapters: rows built through
+    # RowContext.row("<type>", ...), not ``artifact_type=`` literals).
+    "ai-agent-session",
+    "ai-agent-message",
+    "ai-agent-tool-call",
+    "ai-agent-file-touch",
+    "ai-mcp-server",
+    "ai-instruction-file",
+    "ai-credential-presence",
+    "ai-account",
+    "ai-account-switch",
+    "ai-retention-cleanup",
+    "ai-code-attribution",
+    "ai-usage-stat",
+    "ai-tool-presence",
 }
 
 
@@ -388,6 +403,31 @@ TAXONOMY_TARGETS: tuple[TaxonomyTarget, ...] = (
         expected_artifact_types=("macos-browser-ai-usage", "macos-browser-ai-conversation"),
         required_test_markers=("ai", "browser"),
         required_doc_markers=("AI", "ChatGPT"),
+    ),
+    # R7 AI usage (stage 3.5), lane B: local coding-agent / harness session stores.
+    TaxonomyTarget(
+        id="ai-agent-sessions",
+        category="ai-usage",
+        title="AI coding agent session stores",
+        required_collectors=("ai-agent",),
+        expectation=(
+            "Parse Claude Code, Codex, Cursor, Antigravity, Kiro, OmO, ZCode, Claude desktop, claude-swap and Gemini CLI "
+            "local stores into sessions (parent/child), messages, tool calls, file touches, MCP servers, accounts, AI code "
+            "attribution and usage, with credential files existence-only and every text masked."
+        ),
+        expected_artifact_types=(
+            "ai-agent-session",
+            "ai-agent-message",
+            "ai-agent-tool-call",
+            "ai-agent-file-touch",
+            "ai-mcp-server",
+            "ai-account",
+            "ai-code-attribution",
+            "ai-usage-stat",
+            "ai-credential-presence",
+        ),
+        required_test_markers=("ai-agent-session", "claude_code", "wal", "secret_values"),
+        required_doc_markers=("R7 AI", "Claude Code", "MCP"),
     ),
     TaxonomyTarget(
         id="email-pst-ost-mbox-msg",

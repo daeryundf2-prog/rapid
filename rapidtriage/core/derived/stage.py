@@ -28,6 +28,7 @@ from ..triage_rules.stage import (
     ROWS_FILE_NAME,
     STATE_FILE_NAME,
     _write_state,
+    new_run_stage_analysis_id,
 )
 from .engine import TABLES, run_derived
 
@@ -72,9 +73,9 @@ def run_derived_stage(
     files_path: Path | None = None,
     files_payload: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """Run the derived engine into a new ``analyses/run-derived-<time>/``; returns the run-summary step row."""
+    """Run the derived engine into a new ``analyses/run-derived-<time>-<hex>/``; returns the run-summary step row."""
     root = Path(output_dir) / ANALYSES_DIR_NAME
-    analysis_id = f"{RUN_STAGE_ANALYSIS_PREFIX}-{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%S%f')}"
+    analysis_id = new_run_stage_analysis_id(RUN_STAGE_ANALYSIS_PREFIX)
     directory = root / analysis_id
     started_at = _utc_now()
     started = time.monotonic()

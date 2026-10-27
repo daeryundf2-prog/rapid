@@ -1609,7 +1609,8 @@ class RapidTriageApiTests(unittest.TestCase):
             indicators_response = client.get(f"/api/runs/{run_id}/indicators", params={"offset": 0, "limit": 5})
             search_response = client.get(
                 f"/api/runs/{run_id}/search",
-                params={"keyword": "password", "ocr": "false", "keyword_pack": "credentials"},
+                # detail=1: the audit/source-viewer profiles asserted below are opt-in since R7.
+                params={"keyword": "password", "ocr": "false", "keyword_pack": "credentials", "detail": "1"},
             )
             docs_index_search_response = client.get(
                 f"/api/runs/{run_id}/docs-index-search",

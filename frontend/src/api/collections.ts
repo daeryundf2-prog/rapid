@@ -13,6 +13,14 @@ import {
 } from "../contracts/collection";
 import { ApiError, api } from "./client";
 import { type ArtifactsQuery, artifactsQueryString } from "./runs";
+import {
+  fetchIndexSearchPage,
+  forgetSearchIndex,
+  indexCoversSearch,
+  koreanSearchError,
+  type SearchIndexStatus,
+  searchIndexStatus,
+} from "./search";
 
 export type RawRow = Record<string, unknown>;
 
@@ -144,16 +152,42 @@ async function jsonPaged(
   const meta: Record<string, unknown> = {};
   // Files rows are joined with the newest NTFS-meta analysis; `null` = never ran (absent = old server).
   if ("ntfs_join" in payload) meta.ntfs_join = payload.ntfs_join;
+  // Timeline pages: the acquisition root the event paths start with (출처 행 column strips it).
+  if (endpoint === "timeline" && typeof payload.root === "string") meta.root = payload.root;
+  // A timeline written before the readability builder (no `jumplist_lnk_merges` counter in its
+  // summary) has no Jump List merge / readable summaries: the grid says so (UX-round review).
+  if (endpoint === "timeline") {
+    const summary = payload.summary;
+    if (
+      summary &&
+      typeof summary === "object" &&
+      !Array.isArray(summary) &&
+      !("jumplist_lnk_merges" in summary)
+    ) {
+      meta.timeline_legacy = true;
+    }
+  }
   // Files pages (parser-quality r2): candidates vs. every scanned file (`scope=inventory`).
   for (const key of ["scope", "inventory_count", "candidate_count"] as const) {
     if (key in payload) meta[key] = payload[key];
   }
+  // R-2: which times the files' time conditions / 수정 sort use ("ntfs" | "acquisition-copy" | "mixed").
+  if (endpoint === "files" && typeof payload.time_basis === "string") meta.time_basis = payload.time_basis;
+  // Files pages list their large non-row sections instead of carrying them (R6 S3 follow-up):
+  // `fetchFilesSection` loads one when its UI opens.
+  if (Array.isArray(payload.sections_available)) meta.sections_available = payload.sections_available;
+  // Files server sort (plan r7 §3.2 L2): the whole list was ordered from the column index.
+  const sortState =
+    endpoint === "files" && payload.sort && typeof payload.sort === "object" && !Array.isArray(payload.sort)
+      ? (payload.sort as ServerSortState)
+      : undefined;
   const base = {
     rows,
     offset,
     backend: "file",
     elapsedMs: Math.round(now() - started),
     ...(Object.keys(meta).length ? { meta } : {}),
+    ...(sortState ? { sort: sortState } : {}),
   };
   const pagination =
     payload.pagination && typeof payload.pagination === "object" && !Array.isArray(payload.pagination)
@@ -213,6 +247,28 @@ export function filesPathQueryString(filter: FilesPathFilter | undefined): strin
 }
 
 /** `GET /files` (optionally `category=<id>`: documents, images, archives, databases, emails, …). */
+/**
+ * Server sort and text filter of `GET /files` (plan r7 §3.2 L2): `sort=name|path|size|mtime|ctime`
+ * with `order=`, and `q=` (name/path terms) — both over the WHOLE list, from the column index.
+ */
+export interface FilesOrder {
+  sort?: ServerSort;
+  q?: string;
+}
+
+/** `&sort=…&order=…&q=…` ("" when neither is set). */
+export function filesOrderQueryString(order: FilesOrder | undefined): string {
+  const params = new URLSearchParams();
+  if (order?.sort) {
+    params.set("sort", order.sort.key);
+    params.set("order", order.sort.order);
+  }
+  const q = order?.q?.trim();
+  if (q) params.set("q", q);
+  const text = params.toString();
+  return text ? `&${text}` : "";
+}
+
 export const fetchFilesPage = (
   runId: string,
   offset: number,
@@ -221,9 +277,10 @@ export const fetchFilesPage = (
   category?: string,
   flags?: FlagFilter,
   path?: FilesPathFilter,
+  order?: FilesOrder,
 ) => {
   const route = parseFilesCategory(category);
-  const pathQuery = filesPathQueryString(path);
+  const pathQuery = filesPathQueryString(path) + filesOrderQueryString(order);
   return jsonPaged(
     runId,
     "files",
@@ -238,6 +295,45 @@ export const fetchFilesPage = (
     Boolean(pathQuery) || Boolean(flags?.ids?.length || flags?.grade) || hasConditions(flags),
   );
 };
+
+/** One entry of a files page's `sections_available` (a non-row section left out of the page). */
+export interface FilesSectionInfo {
+  name: string;
+  /** JSON size of the section in bytes. */
+  approx_bytes: number;
+  /** List length or object key count. */
+  item_count: number | null;
+}
+
+/** `GET /files/sections?name=`: one non-row section of the files output. */
+export interface FilesSection<T = unknown> {
+  run_id: string;
+  name: string;
+  kind: "list" | "object";
+  item_count: number | null;
+  approx_bytes: number | null;
+  /** The section, or the requested slice of a list section. */
+  value: T;
+  /** Present when a list section was paged (`limit > 0`). */
+  pagination?: { offset: number; limit: number; returned: number; total: number; has_more: boolean };
+}
+
+/**
+ * Paged `GET /files` responses leave out the large non-row sections (duplicate groups, duplicate /
+ * hash-cache manifests …, R6 S3 follow-up); this loads one of them on demand. `limit` pages a
+ * list section (0 = the whole section).
+ */
+export function fetchFilesSection<T = unknown>(
+  runId: string,
+  name: string,
+  page: { offset?: number; limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<FilesSection<T>> {
+  const params = new URLSearchParams({ name });
+  if (page.offset) params.set("offset", String(page.offset));
+  if (page.limit) params.set("limit", String(page.limit));
+  return api<FilesSection<T>>(`/api/runs/${enc(runId)}/files/sections?${params.toString()}`, { signal });
+}
 
 /**
  * Route `category=` value of the files inventory (parser-quality r2): `inventory` = every scanned
@@ -344,14 +440,22 @@ export async function fetchDocsPage(
     meta: { docs_rows: key },
   };
 }
+/**
+ * Timeline page. `search.q` is the server text search (`q=`: summary, target, path, event type,
+ * Korean event name — every event, not the loaded page); `search.group` asks for display groups
+ * (`group=1`: one row per target · second · kind family, with `source_count` / `sources`).
+ */
 export const fetchTimelinePage = (
   runId: string,
   offset: number,
   limit: number,
   signal?: AbortSignal,
   conditions?: Record<string, string | string[]>,
-) =>
-  jsonPaged(
+  search: { q?: string; group?: boolean } = {},
+) => {
+  const q = search.q?.trim() ?? "";
+  const extra = `${flagQueryString({ conditions })}${q ? `&q=${enc(q)}` : ""}${search.group ? "&group=1" : ""}`;
+  return jsonPaged(
     runId,
     "timeline",
     "events",
@@ -360,9 +464,32 @@ export const fetchTimelinePage = (
     signal,
     undefined,
     undefined,
-    flagQueryString({ conditions }),
-    Object.keys(conditions ?? {}).length > 0,
+    extra,
+    Object.keys(conditions ?? {}).length > 0 || q !== "" || search.group === true,
   );
+};
+/**
+ * Row position of timeline event `recordIndex` in the listing a query shows (`locate=`, with the
+ * same conditions / `q` / `group` as the grid): a deep link's page when positions are not record
+ * indexes (grouped or filtered). Null when the event is not listed.
+ */
+export async function locateTimelineRow(
+  runId: string,
+  recordIndex: number,
+  conditions: Record<string, string | string[]> | undefined,
+  search: { q?: string; group?: boolean },
+  signal?: AbortSignal,
+): Promise<number | null> {
+  const q = search.q?.trim() ?? "";
+  const extra = `${flagQueryString({ conditions })}${q ? `&q=${enc(q)}` : ""}${search.group ? "&group=1" : ""}`;
+  const payload = await api<{ pagination?: { locate?: { position?: unknown } } }>(
+    `/api/runs/${enc(runId)}/timeline?offset=0&limit=1&locate=${recordIndex}${extra}`,
+    { signal },
+  );
+  const position = payload.pagination?.locate?.position;
+  return typeof position === "number" && Number.isInteger(position) && position >= 0 ? position : null;
+}
+
 export const fetchIndicatorsPage = (runId: string, offset: number, limit: number, signal?: AbortSignal) =>
   jsonPaged(runId, "indicators", "indicators", offset, limit, signal);
 
@@ -911,33 +1038,83 @@ async function fetchArtifactKindsPage(
   };
 }
 
-/** Unified search (FTS when the run has a case DB, else a bounded scan). Not paged by the API. */
+/** Server page size of the unified search (the API default). */
+export const SEARCH_PAGE_SIZE = 250;
+
+/**
+ * Unified search (FTS when the run has a case DB, else a bounded scan), one page of hits.
+ * The API's defaults are the grid's: no `analysis`, no OCR (`ocr=1` only when the search
+ * options ask for it), compact hit metadata, no per-hit audit profiles (`detail`).
+ * `total` is known only once the server reached the end (`pagination.total`); until then
+ * `hasMore` tells the grid another page exists.
+ */
 export async function fetchSearchRows(
   runId: string,
-  query: Pick<CollectionQuery, "search" | "extension">,
+  query: Pick<CollectionQuery, "search" | "extension"> & Partial<Pick<CollectionQuery, "offset">>,
   limit: number,
   signal?: AbortSignal,
 ): Promise<RawPage> {
   const spec = query.search;
+  const offset = Math.max(0, query.offset ?? 0);
   if (!spec || spec.keywords.length === 0) {
-    return { rows: [], total: 0, offset: 0, backend: "none", truncated: false, elapsedMs: 0 };
+    return { rows: [], total: 0, offset, backend: "none", truncated: false, elapsedMs: 0 };
+  }
+  const pageLimit = Math.min(Math.max(1, limit || SEARCH_PAGE_SIZE), 1000);
+  // R7 P2: the run's v2 search index answers the default console search when it is ready.
+  let indexStatus: SearchIndexStatus | undefined;
+  if (indexCoversSearch(spec, query.extension)) {
+    indexStatus = await searchIndexStatus(runId);
+    if (indexStatus === "ready") {
+      try {
+        return await fetchIndexSearchPage(runId, spec.keywords, offset, pageLimit, signal);
+      } catch (error) {
+        // No index any more (404), an unreadable / older-format index (409) or a locked one (503):
+        // v1 answers instead (the index status is re-read). A request v2 rejects (400 / 422: too
+        // many keywords, a query over 4,000 characters — R7 S2 #4) also goes to v1, which has no
+        // such limits; the index itself is fine. Anything else (a cancelled request) is the
+        // search's error.
+        if (!(error instanceof ApiError && [400, 404, 409, 422, 503].includes(error.status))) throw error;
+        if (error.status === 400 || error.status === 422) {
+          indexStatus = undefined;
+        } else {
+          forgetSearchIndex(runId);
+          indexStatus = "unknown";
+        }
+      }
+    }
   }
   const params = new URLSearchParams();
   for (const keyword of spec.keywords) params.append("keyword", keyword);
-  params.set("limit", String(Math.min(limit, 1000)));
+  params.set("limit", String(pageLimit));
+  if (offset > 0) params.set("offset", String(offset));
   params.set("search_mode", spec.mode);
+  if (spec.ocr) params.set("ocr", "1");
   for (const source of spec.sources ?? []) params.append("source", source);
   for (const extension of query.extension ?? []) params.append("extension", extension);
   if (spec.hideKnownGood) params.set("hide_known_good", "true");
-  const payload = await api<Record<string, unknown>>(`/api/runs/${enc(runId)}/search?${params}`, { signal });
+  const payload = await api<Record<string, unknown>>(`/api/runs/${enc(runId)}/search?${params}`, {
+    signal,
+  }).catch((error: unknown) => {
+    throw koreanSearchError(error);
+  });
   const rows = asRows(payload.matches);
+  const pagination =
+    payload.pagination && typeof payload.pagination === "object"
+      ? (payload.pagination as Record<string, unknown>)
+      : null;
+  // Older servers answer one unpaged window: its rows are the whole result.
+  const hasMore = pagination ? pagination.has_more === true : false;
+  const total = pagination ? (asNumber(pagination.total) ?? null) : offset + rows.length;
   return {
     rows,
-    total: rows.length,
-    offset: 0,
+    total: hasMore ? null : (total ?? (payload.truncated === true ? null : offset + rows.length)),
+    offset,
     backend: typeof payload.backend === "string" ? payload.backend : "scan",
+    hasMore,
     truncated: payload.truncated === true,
     elapsedMs: asNumber(payload.elapsed_ms) ?? 0,
+    // The footer offers to build the index when v1 answered for want of one.
+    ...(indexStatus !== undefined ? { meta: { searchIndex: indexStatus } } : {}),
   };
 }
 

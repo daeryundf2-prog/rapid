@@ -6,15 +6,30 @@
  * The URL stays the source of truth (filterStore / filterModel are unchanged).
  */
 
-import { type ReactNode, type RefObject, useEffect, useId, useRef, useState } from "react";
+import { QueryClientContext, useQuery } from "@tanstack/react-query";
+import {
+  type ReactNode,
+  type RefObject,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type WheelEvent,
+} from "react";
 import { announce } from "../../a11y";
+import { runDetailQuery, runStartedAt } from "../../api/runs";
 import { Popover } from "../../components/Popover";
 import type { ReviewStatus } from "../../contracts/collection";
 import { Icon } from "../../icons";
+import { useTimezone } from "../../state/hooks";
+import { useAppStore } from "../../state/store";
+import { formatTimestamp } from "../../utils/time";
 import { type Grade, useCatalog } from "../flags/catalog";
 import { REVIEW_LABELS } from "../grid/columns/common";
+import { GRID_FILTER_DEBOUNCE_MS } from "../grid/gridUtils";
 import { DEFAULT_PRESET, DENSITY_LABELS, type Density, type GridPreset, PRESET_LABELS } from "../grid/types";
-import { ClockSection, IncidentRange, ResultSection } from "./ConditionSections";
+import { ClockSection, FamilySection, IncidentRange, ResultSection } from "./ConditionSections";
 import {
   recentRanges,
   rememberRange,
@@ -26,16 +41,16 @@ import {
 } from "./conditionMemory";
 import { useConditionPanel } from "./conditionPanel";
 import {
-  activeChips,
-  activePreset,
-  type FilterChip,
-  hasActiveFilters,
-  presetRange,
-  removeChip,
-  TIME_PRESET_LABELS,
-  type TimePreset,
-  toInputValue,
-} from "./filterModel";
+  activeRelativePreset,
+  type PresetAnchor,
+  presetAnchor,
+  RELATIVE_PRESETS,
+  relativePresetCaption,
+  relativePresetLabel,
+  relativePresetRange,
+  relativePresetShortLabel,
+} from "./conditionValues";
+import { activeChips, type FilterChip, hasActiveFilters, removeChip, toInputValue } from "./filterModel";
 import { type FilterReport, useFilterStore } from "./filterStore";
 import { orderedRange } from "./rowConditions";
 import "./filters.css";
@@ -43,7 +58,8 @@ import { typeOptionsFor } from "./typeLabels";
 
 const STATUS_ORDER: ReviewStatus[] = ["relevant", "needs-review", "excluded", "include-in-report"];
 const COMMIT_DEBOUNCE_MS = 250;
-const SEARCH_DEBOUNCE_MS = 200;
+// Toolbar text filter: the grid's server text search (timeline / files `q=`) — R7 P2.
+const SEARCH_DEBOUNCE_MS = GRID_FILTER_DEBOUNCE_MS;
 
 /** Toolbar of a stage (visual-polish S2): 탐색 = full filter popover, 검토 / 보고 = their own controls. */
 export type FilterBarVariant = "explore" | "review" | "report";
@@ -135,6 +151,89 @@ function toggle<T extends string>(list: T[], value: T): T[] {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 }
 
+/**
+ * The chip strip scrolls sideways (scroll review C6): a plain vertical wheel over it moves it
+ * left/right too, besides its thin scrollbar and Tab (focus scrolls a chip into view).
+ */
+export function chipStripWheel(event: WheelEvent<HTMLElement>): void {
+  const el = event.currentTarget;
+  if (el.scrollWidth <= el.clientWidth + 1) return;
+  if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+  el.scrollLeft += event.deltaY;
+}
+
+/**
+ * 시간 범위 presets (C-D5): counted back from the newest evidence time of the open run (run detail
+ * `timeline_max_ts`), else its start — "증거 기준 최근 7일" — so 2025 evidence opened in 2026 still
+ * finds rows. Without a run (or a query client) they count back from the clock ("최근 7일").
+ */
+function RelativePresets() {
+  const client = useContext(QueryClientContext);
+  const runId = useAppStore((s) => s.route.runId);
+  return client && runId ? (
+    <RunRelativePresets runId={runId} />
+  ) : (
+    <PresetButtons anchor={presetAnchor(null, null)} />
+  );
+}
+
+function RunRelativePresets({ runId }: { runId: string }) {
+  const run = useAppStore((s) => s.runs.find((item) => item.run_id === runId) ?? null);
+  const detail = useQuery({ ...runDetailQuery(runId), staleTime: 60_000, retry: false });
+  const anchor = presetAnchor(
+    detail.data?.timeline_max_ts,
+    detail.data ? runStartedAt(detail.data) : run ? runStartedAt(run) : null,
+  );
+  return <PresetButtons anchor={anchor} />;
+}
+
+export function PresetButtons({ anchor }: { anchor: PresetAnchor }) {
+  const filters = useFilterStore((s) => s.filters);
+  const patch = useFilterStore((s) => s.patchFilters);
+  const { timezone } = useTimezone();
+  const preset = activeRelativePreset(filters, anchor);
+  const basis =
+    anchor.source === "evidence"
+      ? `증거 최신 시각 ${formatTimestamp(anchor.ms / 1000, timezone, { precision: "minute" })}부터 거꾸로 셉니다`
+      : anchor.source === "run-start"
+        ? `증거 시각을 모르는 런: 런 시작 ${formatTimestamp(anchor.ms / 1000, timezone, { precision: "minute" })}부터 셉니다`
+        : undefined;
+  const caption = relativePresetCaption(anchor);
+  // R-6: "증거 기준" once above the segment, short labels on the buttons (the full label is the
+  // accessible name), so the three presets fit the popover instead of overflowing it.
+  return (
+    <div className="filter-preset-block">
+      {caption ? (
+        <span className="filter-preset-caption" data-testid="relative-presets-caption" title={basis}>
+          {caption}
+        </span>
+      ) : null}
+      <div
+        className="segmented filter-segment filter-preset-segment"
+        data-testid="relative-presets"
+        data-anchor={anchor.source}
+        title={basis}
+      >
+        {RELATIVE_PRESETS.map((id) => (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={preset === id}
+            aria-label={relativePresetLabel(id, anchor)}
+            onClick={() =>
+              preset === id
+                ? patch({ from: undefined, to: undefined })
+                : patch(relativePresetRange(id, anchor))
+            }
+          >
+            {relativePresetShortLabel(id, anchor)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** Popover body (탐색): time range, type, status, tag, extension, path. */
 function FilterPopoverBody({ tagListId }: { tagListId: string }) {
   const filters = useFilterStore((s) => s.filters);
@@ -143,27 +242,13 @@ function FilterPopoverBody({ tagListId }: { tagListId: string }) {
   const patch = useFilterStore((s) => s.patchFilters);
   const typeCounts = useFilterStore((s) => s.typeCounts);
   const [typeQuery, setTypeQuery] = useState("");
-  const preset = activePreset(filters);
   const types = [...new Set([...typeOptions, ...filters.types])].sort((a, b) => a.localeCompare(b, "ko"));
   const shownTypes = typeOptionsFor(types, typeCounts, typeQuery);
   return (
     <>
       <fieldset className="popover-section" aria-label="시간 범위">
         <legend className="popover-title">시간 범위</legend>
-        <div className="segmented filter-segment">
-          {(Object.keys(TIME_PRESET_LABELS) as TimePreset[]).map((id) => (
-            <button
-              key={id}
-              type="button"
-              aria-pressed={preset === id}
-              onClick={() =>
-                preset === id ? patch({ from: undefined, to: undefined }) : patch(presetRange(id))
-              }
-            >
-              {TIME_PRESET_LABELS[id]}
-            </button>
-          ))}
-        </div>
+        <RelativePresets />
         <IncidentRange />
         <RecentRanges onPick={(range) => patch({ from: range.from, to: range.to })} />
         {/* One column (review #10): a datetime field needs the popover's full width. */}
@@ -198,6 +283,7 @@ function FilterPopoverBody({ tagListId }: { tagListId: string }) {
 
       <ClockSection />
       <ResultSection />
+      <FamilySection />
 
       <fieldset className="popover-section" aria-label="아티팩트 유형">
         <legend className="popover-title">유형</legend>
@@ -696,7 +782,7 @@ export function FilterBar(props: FilterBarProps) {
                 <strong className="filter-trigger-applied">{appliedSummary}</strong>
               </>
             ) : (
-              <span>조건</span>
+              <span className="filter-btn-label">조건</span>
             )}
             {count ? (
               <>
@@ -713,8 +799,10 @@ export function FilterBar(props: FilterBarProps) {
             onClose={() => setPopoverOpen(false)}
             triggerRef={triggerRef}
             label="조건"
-            // Opens leftwards from the button: the grid pane clips anything past its right edge.
             align="start"
+            // In a portal above every pane (the viewer too), flipped into the viewport (C-D4):
+            // the grid pane no longer clips it beside the open viewer.
+            portal
             className="filter-popover"
             // Opening lands on the heading, not on "오늘" (review #10): one Tab reaches the presets.
             initialFocus=".filter-popover-title"
@@ -759,6 +847,10 @@ export function FilterBar(props: FilterBarProps) {
                       partial: undefined,
                       content: undefined,
                       geo: undefined,
+                      family: undefined,
+                      dup: undefined,
+                      dupMode: undefined,
+                      irregular: undefined,
                     })
                   }
                 >
@@ -781,7 +873,7 @@ export function FilterBar(props: FilterBarProps) {
         </span>
 
         {displayChips.length ? (
-          <ul className="filter-chips filter-display-chips" aria-label="표시 설정">
+          <ul className="filter-chips filter-display-chips" aria-label="표시 설정" onWheel={chipStripWheel}>
             {displayChips.map((chip) => (
               <li key={chip.id} className="filter-chip chip is-display">
                 <button
@@ -805,7 +897,7 @@ export function FilterBar(props: FilterBarProps) {
           </ul>
         ) : null}
         {chips.length ? (
-          <ul className="filter-chips" aria-label="적용된 조건">
+          <ul className="filter-chips" aria-label="적용된 조건" onWheel={chipStripWheel}>
             {chips.map((chip) => (
               <li key={chip.id} className="filter-chip chip">
                 <button type="button" className="chip-open" title="조건 패널 열기" onClick={openPanel}>
@@ -828,6 +920,7 @@ export function FilterBar(props: FilterBarProps) {
             type="button"
             className="grid-btn grid-btn-quiet"
             data-testid="filter-save"
+            aria-label="조건 저장"
             title="지금 조건을 저장해 조건 패널의 '저장한 조건'에서 다시 적용합니다"
             onClick={() => {
               const name = chips
@@ -839,13 +932,16 @@ export function FilterBar(props: FilterBarProps) {
               announce(`조건을 저장했습니다: ${name}`);
             }}
           >
-            조건 저장
+            <Icon name="bookmark" />
+            <span className="filter-btn-label">조건 저장</span>
           </button>
         ) : null}
         {anyActive ? (
           <button
             type="button"
             className="grid-btn grid-btn-quiet filter-reset"
+            aria-label="조건 지우기"
+            title="조건 지우기"
             onClick={() => {
               clear();
               setText("");
@@ -853,7 +949,8 @@ export function FilterBar(props: FilterBarProps) {
               onQuery("");
             }}
           >
-            조건 지우기
+            <Icon name="close" />
+            <span className="filter-btn-label">조건 지우기</span>
           </button>
         ) : null}
         <span className="filter-row-end">

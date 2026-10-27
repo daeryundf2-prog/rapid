@@ -17,7 +17,8 @@ export interface ViewerController {
   copyHash(): Promise<void>;
   copyPath(): Promise<void>;
   copyCitation(): Promise<void>;
-  mark(action: MarkAction): Promise<void>;
+  /** Resolves `true` when the server stored the mark, `false` when it failed (already announced). */
+  mark(action: MarkAction): Promise<boolean>;
   back(): void;
   forward(): void;
   canBack(): boolean;
@@ -111,10 +112,18 @@ export function buildViewerCommands(controller: ViewerController): Command[] {
 }
 
 /** Clipboard write with a textarea fallback (non-secure contexts). */
+/** Korean reason of a refused copy (r7 L4, C-W10): never the browser's English DOMException text. */
+export const CLIPBOARD_DENIED =
+  "클립보드에 복사하지 못했습니다 — 브라우저가 접근을 막았습니다(창이 포커스를 잃었거나 권한 없음). 창을 클릭한 뒤 다시 시도하세요.";
+
 export async function writeClipboard(text: string): Promise<void> {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Permission / focus refusal: try the legacy path below, then say why in Korean.
+    }
   }
   const area = document.createElement("textarea");
   area.value = text;
@@ -123,7 +132,12 @@ export async function writeClipboard(text: string): Promise<void> {
   area.style.opacity = "0";
   document.body.appendChild(area);
   area.select();
-  const ok = typeof document.execCommand === "function" && document.execCommand("copy");
+  let ok = false;
+  try {
+    ok = typeof document.execCommand === "function" && document.execCommand("copy");
+  } catch {
+    ok = false;
+  }
   area.remove();
-  if (!ok) throw new Error("클립보드에 접근할 수 없습니다.");
+  if (!ok) throw new Error(CLIPBOARD_DENIED);
 }

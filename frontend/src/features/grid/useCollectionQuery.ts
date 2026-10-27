@@ -11,6 +11,7 @@ import {
   type ServerSortState,
 } from "../../contracts/collection";
 import { useTimezone } from "../../state/hooks";
+import { searchCancelKey, useSearchState } from "../case/searchState";
 import { applyColumnFilters } from "../filters/columnFilters";
 import {
   applyClientFilters,
@@ -25,6 +26,7 @@ import { categoryInfo, isArtifactCategoryId } from "../tree/categories";
 import { useRoute } from "./adapter";
 import { collectionDef } from "./columns";
 import { promotedColumn } from "./columns/fieldColumns";
+import { filesServerSort } from "./columns/files";
 import { serverPathFilter } from "./gridUtils";
 import { overlayReview, useReviewMap } from "./reviewMap";
 import type { CollectionDef, ColumnSpec } from "./types";
@@ -73,9 +75,20 @@ export function artifactTypesOfTree(nodes: readonly TreeNode[] | undefined, kind
 
 export interface CollectionQueryResult {
   def: CollectionDef;
+  /** The query the pages are fetched with (filters folded in: conditions, server text …). */
+  query: CollectionQuery;
   pageSize: number;
   /** Total rows after server filters; null while unknown. */
   total: number | null;
+  /**
+   * Rows the server holds for this query (after server filters, before loaded-row filters); null
+   * while unknown. The toolbar badge "불러온 N / 전체 M" reads it (plan r7 §3.2, C-D1).
+   */
+  serverTotal: number | null;
+  /** Display index of a loaded row by key (-1 when no loaded page holds it). */
+  indexOfKey: (rowKey: string) => number;
+  /** Filter-bar conditions the server cannot apply run over the loaded rows only. */
+  clientFiltering: boolean;
   /** Number of server pages (1 for whole collections); null while total is unknown. */
   pageCount: number | null;
   /** Pages currently loaded. */
@@ -119,6 +132,8 @@ export interface CollectionQueryResult {
    * null while unknown (more pages / scan cap), undefined when the server did not filter.
    */
   serverMatched: number | null | undefined;
+  /** The search collection's request was cancelled with Esc (nothing is requested until resubmitted). */
+  searchCancelled: boolean;
 }
 
 /** Grid column by id for column filters: the collection's columns, else a promoted `f:<key>` column. */
@@ -136,9 +151,13 @@ export function columnResolver(
 /** Re-request interval while the server builds a sort index (plan artifact-columns §4.2). */
 export const SORT_POLL_MS = 1000;
 
-/** The sort the server applies: artifacts of exactly one kind, or one analysis job's rows. */
+/**
+ * The sort the server applies: artifacts of exactly one kind, one analysis job's rows, or the
+ * files list on its column-index keys (이름 · 경로 · 크기 · 수정 · NTFS 생성 · 특이사항).
+ */
 export function serverSortOf(query: CollectionQuery): CollectionQuery["sort"] {
   if (!query.sort) return undefined;
+  if (query.ref.id === "files") return filesServerSort(query);
   if (query.ref.id === "artifacts" && query.ref.kind) return query.sort;
   if (query.ref.id === "analysis" && query.ref.analysisId) return query.sort;
   return undefined;
@@ -177,8 +196,9 @@ export function collectionQueryKey(runId: string | null, query: CollectionQuery,
     (query.ref.id === "artifacts" && !query.ref.kind) || query.ref.id === "files" || query.ref.id === "docs"
       ? (query.ref.category ?? "")
       : "",
-    def.source === "whole" ? (query.search ?? null) : null,
-    def.source === "whole" ? (query.extension ?? null) : null,
+    // The search collection pages on the server: its spec is part of every page's key.
+    def.source === "whole" || query.ref.id === "search" ? (query.search ?? null) : null,
+    def.source === "whole" || query.ref.id === "search" ? (query.extension ?? null) : null,
     query.ref.id === "analysis" ? (query.ref.analysisId ?? "") : "",
     // 파일 시스템 탐색기 folder / special node (files only): another folder is another listing.
     query.ref.id === "files" && (query.ref.dir !== undefined || query.ref.special)
@@ -203,6 +223,12 @@ export function collectionQueryKey(runId: string | null, query: CollectionQuery,
     query.ref.id === "analysis" && query.detailFilters ? JSON.stringify(query.detailFilters) : "",
     // Row conditions (r4 §2.3: time, 요일·시간대, 부분 결과, 콘텐츠 유형, 위치), artifacts · files · timeline.
     query.rowConditions ? JSON.stringify(query.rowConditions) : "",
+    // Timeline server search (`q=`) and display grouping (`group=1`, on unless false).
+    query.ref.id === "timeline"
+      ? `${query.text?.trim() ?? ""}|${query.group === true ? "group" : "flat"}`
+      : "",
+    // Files server text filter (`q=` over name/path, plan r7 §3.2 L2).
+    query.ref.id === "files" ? (query.text?.trim() ?? "") : "",
   ] as const;
 }
 
@@ -257,6 +283,7 @@ export function useCollectionQuery(
       rawQuery.sort?.key,
       rawQuery.sort?.order,
       rawQuery.rowConditions,
+      rawQuery.group,
       filters,
       serverTypes,
       timezone,
@@ -287,6 +314,12 @@ export function useCollectionQuery(
   // While the server builds a sort index, page 0 is polled and no later page is requested.
   const gateTotal = page0?.sort?.status === "building" ? null : (page0?.total ?? null);
   const sortBuilding = page0?.sort?.status === "building";
+  // R7 P2: a search cancelled with Esc in the top bar is not requested again until resubmitted.
+  const cancelledSearch = useSearchState((s) => s.cancelled);
+  const searchCancelled =
+    query.ref.id === "search" &&
+    cancelledSearch !== null &&
+    cancelledSearch === searchCancelKey(runId, query.search?.keywords ?? []);
 
   const results = useQueries({
     queries: firstPass.map((p) => ({
@@ -295,6 +328,7 @@ export function useCollectionQuery(
         def.fetch(runId as string, { ...query, offset: p * pageSize, limit: pageSize }, signal),
       enabled:
         runId !== null &&
+        !searchCancelled &&
         (p === 0 ||
           (!sortBuilding &&
             (gateTotal !== null
@@ -412,6 +446,19 @@ export function useCollectionQuery(
     if (clientFiltering) requestPages(0, (FILTER_AUTOLOAD_PAGES - 1) * pageSize);
   }, [clientFiltering, requestPages, pageSize]);
 
+  const indexOfKey = useCallback(
+    (rowKey: string): number => {
+      if (def.source === "whole" || clientFiltering)
+        return loadedRows.findIndex((row) => row.rowKey === rowKey);
+      for (const [page, rows] of mappedByPage) {
+        const at = rows.findIndex((row) => row.rowKey === rowKey);
+        if (at >= 0) return page * pageSize + at;
+      }
+      return -1;
+    },
+    [def.source, clientFiltering, loadedRows, mappedByPage, pageSize],
+  );
+
   const lastData = pageData.filter((d): d is RawPage => !!d).at(-1);
   const canLoadMore =
     def.source === "paged" &&
@@ -520,8 +567,12 @@ export function useCollectionQuery(
 
   return {
     def,
+    query,
     pageSize,
     total,
+    serverTotal,
+    indexOfKey,
+    clientFiltering,
     pageCount,
     pagesLoaded: mappedByPage.size,
     loadedCount: unfilteredRows.length,
@@ -549,5 +600,6 @@ export function useCollectionQuery(
     clientColumnFilters: plan.clientColumns.length > 0,
     serverColumnFilters: plan.serverColumns.length > 0,
     serverMatched,
+    searchCancelled,
   };
 }

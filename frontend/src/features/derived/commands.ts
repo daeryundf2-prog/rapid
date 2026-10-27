@@ -11,6 +11,7 @@ import { NO_RUN_REASON } from "../../commands/reasons";
 import { registerCommands } from "../../commands/registry";
 import type { Command } from "../../contracts/command";
 import { useAppStore } from "../../state/store";
+import { confirmWrite, joinRunPath, runOutputDir } from "../case/WriteConfirm";
 import { writeClipboard } from "../viewer/commands";
 import { DERIVED_TABLE_IDS, derivedMetaKey, startDerivedAnalysis } from "./api";
 import { useDerivedStore } from "./store";
@@ -104,6 +105,20 @@ export function derivedCommands(queryClient: QueryClient): Command[] {
       run: async () => {
         const runId = app().route.runId;
         if (!runId) return;
+        // A write (C-X2): say what goes where first; nothing is sent before 다시 만들기 is confirmed.
+        const folder = await runOutputDir(runId);
+        const ok = await confirmWrite({
+          title: "통합 보기 다시 만들기",
+          writes: [
+            {
+              what: "통합 보기 분석 결과(새 분석 1개 — 표·원본 행 색인)",
+              where: joinRunPath(folder, "analyses"),
+            },
+          ],
+          note: "이전 결과는 지우지 않고 새 분석으로 추가합니다. 원본 증거는 바꾸지 않습니다.",
+          confirmLabel: "다시 만들기",
+        });
+        if (!ok) return;
         try {
           const created = await startDerivedAnalysis(runId);
           derived().setRebuilding(created.analysis_id);

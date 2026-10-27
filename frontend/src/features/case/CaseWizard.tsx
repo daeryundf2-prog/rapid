@@ -22,6 +22,7 @@ import {
 } from "../../api/cases";
 import { ApiError } from "../../api/client";
 import { navigate } from "../tree/adapter";
+import { AiRunOptionsField } from "./AiRunOptionsField";
 import { ErrorText } from "./ErrorText";
 import { EvidenceFields } from "./EvidenceFields";
 import { Modal } from "./Modal";
@@ -92,6 +93,10 @@ export function adoptableEvidence(rows: CaseEvidence[], draft: EvidenceDraft): C
   return rows.find((row) => samePathText(row.path, draft.path)) ?? null;
 }
 
+/** 사건 유형 choices (C-L2): the listed types, then 기타 with its own text field. */
+const CASE_TYPE_CHOICES = CASE_TYPE_SUGGESTIONS.filter((type) => type !== "기타");
+const CASE_TYPE_OTHER = "__other__";
+
 const INPUT_TYPES_WITHOUT_ENTER = new Set(["checkbox", "radio", "button", "submit", "reset", "file"]);
 
 interface Progress {
@@ -103,7 +108,6 @@ interface Progress {
 
 const CASE_FIELDS: Array<{ key: keyof CaseInfoForm; label: string; max: number; hint?: string }> = [
   { key: "name", label: "사건명", max: 200 },
-  { key: "caseType", label: "사건 유형", max: 100 },
   { key: "examiner", label: "검사관", max: 200, hint: "메모·태그의 기본 작성자" },
   { key: "requester", label: "의뢰처", max: 200 },
   { key: "organization", label: "소속", max: 200 },
@@ -131,6 +135,8 @@ export function CaseWizard({
   const [checking, setChecking] = useState(false);
   const [checks, setChecks] = useState<Record<string, DraftCheck>>({});
   const [error, setError] = useState("");
+  // 사건 유형 "기타": the free-text field is shown (also for a typed value that is not a listed type).
+  const [caseTypeOther, setCaseTypeOther] = useState(false);
   const [progress, setProgress] = useState<Progress>({
     caseId: null,
     caseNumber: "",
@@ -310,6 +316,7 @@ export function CaseWizard({
           <ReasonButton
             className="button primary"
             reason={nextReason}
+            quietReason
             onClick={next}
             data-testid="wizard-next"
           >
@@ -319,6 +326,7 @@ export function CaseWizard({
           <ReasonButton
             className="button primary"
             reason={submitReason}
+            quietReason
             onClick={() => void submit()}
             data-testid="wizard-submit"
           >
@@ -406,7 +414,6 @@ export function CaseWizard({
                   value={info[field.key]}
                   maxLength={field.max}
                   disabled={caseLocked}
-                  list={field.key === "caseType" ? `${baseId}-types` : undefined}
                   aria-describedby={field.hint ? `${baseId}-${field.key}-hint` : undefined}
                   onChange={(e) => setField(field.key, e.target.value)}
                 />
@@ -417,11 +424,43 @@ export function CaseWizard({
                 ) : null}
               </div>
             ))}
-            <datalist id={`${baseId}-types`}>
-              {CASE_TYPE_SUGGESTIONS.map((type) => (
-                <option key={type} value={type} />
-              ))}
-            </datalist>
+            <div className="case-field">
+              <label htmlFor={`${baseId}-caseType`}>사건 유형</label>
+              <select
+                id={`${baseId}-caseType`}
+                value={
+                  caseTypeOther || (info.caseType !== "" && !CASE_TYPE_CHOICES.includes(info.caseType))
+                    ? CASE_TYPE_OTHER
+                    : info.caseType
+                }
+                disabled={caseLocked}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setCaseTypeOther(value === CASE_TYPE_OTHER);
+                  setField("caseType", value === CASE_TYPE_OTHER ? "" : value);
+                }}
+              >
+                <option value="">선택 안 함</option>
+                {CASE_TYPE_CHOICES.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+                <option value={CASE_TYPE_OTHER}>기타 (직접 입력)</option>
+              </select>
+              {caseTypeOther || (info.caseType !== "" && !CASE_TYPE_CHOICES.includes(info.caseType)) ? (
+                <input
+                  id={`${baseId}-caseType-other`}
+                  type="text"
+                  aria-label="사건 유형 (기타, 직접 입력)"
+                  value={info.caseType}
+                  maxLength={100}
+                  disabled={caseLocked}
+                  placeholder="사건 유형을 입력하세요"
+                  onChange={(e) => setField("caseType", e.target.value)}
+                />
+              ) : null}
+            </div>
             <div className="case-field">
               <label htmlFor={`${baseId}-description`}>설명</label>
               <textarea
@@ -526,6 +565,14 @@ export function CaseWizard({
             <RunPlanGroupsField
               form={runForm}
               onChange={(skipGroups) => setRun("skipGroups", skipGroups)}
+              idPrefix={`${baseId}-run`}
+            />
+            <AiRunOptionsField
+              form={runForm}
+              onChange={(patch) => {
+                if (patch.aiBodies !== undefined) setRun("aiBodies", patch.aiBodies);
+                if (patch.aiHashDbs !== undefined) setRun("aiHashDbs", patch.aiHashDbs);
+              }}
               idPrefix={`${baseId}-run`}
             />
             {outputDirReason(runForm.outputDir, toRun.length) ? (

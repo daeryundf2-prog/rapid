@@ -1,3 +1,44 @@
+/* Scroll review C1: the evidence tree fills the panel below the stage heading; only the list
+   scrolls (its own scrollbar), the search field and the foot stay put. */
+.evidence-tree {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.evidence-tree > * {
+  flex: none;
+}
+
+.evidence-tree > ul[role="tree"] {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-block-end: var(--space-2);
+}
+
+/* Items sit flush with the scroller's edges: keep the focus ring inside so it is not clipped. */
+.evidence-tree .case-tree-item:focus-visible {
+  outline-offset: -2px;
+}
+
+.evidence-tree-foot {
+  border-top: 1px solid var(--line-subtle);
+  padding-block-end: var(--space-2);
+}
+
+/* No blocked reason: no empty line under the list. */
+.evidence-tree-foot > .case-tree-reason:empty {
+  display: none;
+}
+
+.evidence-tree-foot:not(:has(> :not(:empty))) {
+  border-top-color: transparent;
+}
+
 .case-tree ul {
   list-style: none;
   margin: 0;
@@ -73,6 +114,8 @@
 
 .case-tree-label {
   flex: 1;
+  /* Shrink (with an ellipsis) so the counts stay inside a narrow panel. */
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -1,33 +1,87 @@
 /**
  * Dashboard card shell (plan §9 X10): collapsible body, ⋯ menu (새로고침 /
  * 숨기기), loading card and explanatory empty state (X9/X18). Collapse and
- * hide state persist per browser (`rt.dashboard.layout.v1`).
+ * hide state persist per browser (`rt.dashboard.layout.v2`; the v1 layout of the
+ * 14-card dashboard is migrated once and removed — r7 examiner-first redesign).
  */
 
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 import { Icon, type IconName } from "../../icons";
-import { readStoredJson, writeStored } from "../../state/storage";
+import { readStored, readStoredJson, writeStored } from "../../state/storage";
 
-const LAYOUT_KEY = "rt.dashboard.layout.v1";
+export const LAYOUT_KEY = "rt.dashboard.layout.v2";
+export const LEGACY_LAYOUT_KEY = "rt.dashboard.layout.v1";
+export const LAYOUT_VERSION = 2;
 
 export interface CardLayout {
+  version: number;
   collapsed: string[];
   hidden: string[];
 }
 
+/**
+ * v1 card id → v2 card id. Merged cards (증거 목록 + 증거 소스, 처리 문제 + 공개 사항, 케이스 메모 +
+ * 요약 노트, 리뷰 + 내보내기) map several old ids to one; the removed 처리 설정 스냅샷 maps to none.
+ */
+export const LEGACY_CARD_MAP: Record<string, string | null> = {
+  "case-info": "case-info",
+  "case-evidence": "evidence",
+  evidence: "evidence",
+  snapshot: null,
+  problems: "warnings",
+  disclosures: "warnings",
+  "case-memo": "notes",
+  notes: "notes",
+  categories: "categories",
+  processing: "status",
+  review: "review",
+  exports: "review",
+  keywords: "keywords",
+  start: "start",
+};
+
+const isStringList = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((x) => typeof x === "string");
+
 function isLayout(value: unknown): value is CardLayout {
   const v = value as CardLayout | null;
-  return (
-    !!v &&
-    Array.isArray(v.collapsed) &&
-    Array.isArray(v.hidden) &&
-    v.collapsed.every((x) => typeof x === "string") &&
-    v.hidden.every((x) => typeof x === "string")
-  );
+  return !!v && v.version === LAYOUT_VERSION && isStringList(v.collapsed) && isStringList(v.hidden);
+}
+
+function isLegacyLayout(value: unknown): value is { collapsed: string[]; hidden: string[] } {
+  const v = value as { collapsed?: unknown; hidden?: unknown } | null;
+  return !!v && isStringList(v.collapsed) && isStringList(v.hidden);
+}
+
+/**
+ * A merged v2 card keeps a v1 state (collapsed / hidden) only when EVERY v1 card that maps to it
+ * had that state — hiding 내보내기 alone must not hide the whole 검토·보고서 card.
+ */
+export function migrateLegacyLayout(legacy: { collapsed: string[]; hidden: string[] }): CardLayout {
+  const carry = (list: string[]) => {
+    const targets = new Set(Object.values(LEGACY_CARD_MAP).filter((id): id is string => Boolean(id)));
+    return [...targets].filter((target) => {
+      const sources = Object.entries(LEGACY_CARD_MAP)
+        .filter(([, to]) => to === target)
+        .map(([from]) => from);
+      return sources.every((source) => list.includes(source));
+    });
+  };
+  return { version: LAYOUT_VERSION, collapsed: carry(legacy.collapsed), hidden: carry(legacy.hidden) };
 }
 
 export function readCardLayout(): CardLayout {
-  return readStoredJson(LAYOUT_KEY, isLayout) ?? { collapsed: [], hidden: [] };
+  const current = readStoredJson(LAYOUT_KEY, isLayout);
+  if (current) return current;
+  const legacy = readStoredJson(LEGACY_LAYOUT_KEY, isLegacyLayout);
+  const layout = legacy
+    ? migrateLegacyLayout(legacy)
+    : { version: LAYOUT_VERSION, collapsed: [], hidden: [] };
+  if (legacy || readStored(LEGACY_LAYOUT_KEY) !== null) {
+    writeStored(LAYOUT_KEY, JSON.stringify(layout));
+    writeStored(LEGACY_LAYOUT_KEY, null);
+  }
+  return layout;
 }
 
 /** Collapse / hide state for every card, persisted in localStorage (never throws). */
@@ -52,9 +106,13 @@ export function useCardLayout() {
   };
 }
 
+/** Column span of a card in the 12-column band layout (≥ 1100 px pane; one column below). */
+export type CardSpan = 4 | 6 | 8 | 12;
+
 export interface CardProps {
   id: string;
   title: string;
+  span: CardSpan;
   icon?: IconName;
   /** Short text after the title (e.g. a total). */
   meta?: ReactNode;
@@ -153,6 +211,7 @@ function CardMenu({
 export function Card({
   id,
   title,
+  span,
   icon,
   meta,
   collapsed,
@@ -169,6 +228,7 @@ export function Card({
       className={`dash-card${collapsed ? " collapsed" : ""}${className ? ` ${className}` : ""}`}
       aria-labelledby={headingId}
       data-card={id}
+      data-span={span}
     >
       {/* A div, not <header>: the shell top bar is the page's only banner landmark. */}
       <div className="dash-card-head">
@@ -205,7 +265,24 @@ export function CardLoading({ label = "불러오는 중…" }: { label?: string 
 }
 
 /** X9 empty state: what the card is for and how to fill it. */
-export function CardEmpty({ title, children }: { title: string; children?: ReactNode }) {
+export function CardEmpty({
+  title,
+  children,
+  compact = false,
+}: {
+  title: string;
+  children?: ReactNode;
+  /** One line ("제목 — 안내"), for a section inside a shared card. */
+  compact?: boolean;
+}) {
+  if (compact) {
+    return (
+      <p className="dash-empty dash-empty-compact">
+        <span className="dash-empty-title">{title}</span>
+        {children ? <span className="dash-empty-text"> — {children}</span> : null}
+      </p>
+    );
+  }
   return (
     <div className="dash-empty">
       <p className="dash-empty-title">{title}</p>

@@ -6,6 +6,7 @@ import { resetViewerAdapter, setViewerTarget } from "./adapter";
 import { clearCaseDbCache } from "./citation";
 import { installFetch, metadata, preview, target } from "./testSupport";
 import { Viewer } from "./Viewer";
+import { ViewerToolbar } from "./ViewerToolbar";
 
 beforeEach(() => {
   resetAnnouncer();
@@ -45,13 +46,14 @@ describe("viewer header (review #6)", () => {
     const triggers = within(header)
       .getAllByRole("button")
       .filter((b) => b.getAttribute("aria-haspopup") === "menu");
-    expect(triggers).toHaveLength(1);
+    // Two menus (r7 L4, C-W9): the one review-status chip ("미검토 ▾") and ⋯ 더보기.
+    expect(triggers.map((b) => b.getAttribute("aria-label"))).toEqual(["리뷰 상태: 미검토", "더보기"]);
     fireEvent.click(screen.getByRole("button", { name: "더보기" }));
     const menu = screen.getByRole("menu", { name: "더보기" });
     // 같은 해시 행에 전파 (AXIOM E3): its own section, always on the viewer row.
     expect([...menu.querySelectorAll(".menu-heading")].map((h) => h.textContent)).toEqual([
       "리뷰",
-      "같은 해시 행에 전파",
+      "태그 전파",
       "원본",
       "피벗",
     ]);
@@ -72,14 +74,74 @@ describe("viewer header (review #6)", () => {
       expect(item.querySelector(".menu-item-lead")).not.toBeNull();
   });
 
-  it("shows the review status as a chip with text and the parent folder as the path line", async () => {
+  it("shows the review status as a chip with text and the path tail first as the path line", async () => {
     await showText();
     const status = screen.getByTestId("viewer-review-status");
     expect(status.classList.contains("status-chip")).toBe(true);
     expect(status.textContent).toBe("미검토");
     const path = document.querySelector(".viewer-path .mid-path") as HTMLElement;
     expect(path.getAttribute("title")).toBe("C:\\evidence\\Users\\alice\\notes.txt");
-    expect(path.textContent).toBe("C:\\evidence\\Users\\alice");
-    expect(path.querySelector(".mid-path-tail")?.textContent).toBe("alice");
+    // Tail first (plan r7 §3.2 L2, C-W6): file name + two parent folders, the head ellipsizes.
+    expect(path.textContent).toBe("C:\\evidence\\Users\\alice\\notes.txt");
+    expect(path.querySelector(".mid-path-tail")?.textContent).toBe("notes.txt");
+    expect(path.querySelector(".mid-path-parents")?.textContent).toBe("Users\\alice\\");
+  });
+});
+
+describe("R-1: viewer status chip with a failing onRun", () => {
+  const ctx = {
+    runId: "run-1",
+    collection: "files",
+    selectedRowKeys: [],
+    focusedRowKey: null,
+    viewerHasTarget: true,
+    runIsActive: false,
+  };
+  const mark = (action: string) => ({
+    id: `viewer.mark.${action}`,
+    label: action === "relevant" ? "표시: 관련 있음" : `표시: ${action}`,
+    group: "viewer" as const,
+    run: () => {},
+  });
+
+  for (const [name, outcome] of [
+    ["rejects", () => Promise.reject(new Error("403"))],
+    ["resolves false", () => Promise.resolve(false)],
+  ] as const) {
+    it(`reverts the optimistic status when onRun ${name}`, async () => {
+      act(() => setViewerTarget(target({ sourcePath: "C:evidencea.txt" })));
+      const onRun = vi.fn(outcome);
+      render(
+        <ViewerToolbar
+          sourceCommands={[]}
+          markCommands={[mark("relevant")]}
+          ctx={ctx}
+          onRun={onRun}
+          rowsForSource={{ reason: "없음", run: () => {} }}
+        />,
+      );
+      const chip = () => screen.getByTestId("viewer-review-status");
+      expect(chip().textContent).toBe("미검토");
+      fireEvent.click(screen.getByTestId("viewer-review-status-menu"));
+      fireEvent.click(document.querySelector('[data-command="viewer.mark.relevant"]') as HTMLElement);
+      expect(onRun).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(chip().textContent).toBe("미검토"));
+    });
+  }
+
+  it("keeps the new status when onRun succeeds", async () => {
+    act(() => setViewerTarget(target({ sourcePath: "C:evidencea.txt" })));
+    render(
+      <ViewerToolbar
+        sourceCommands={[]}
+        markCommands={[mark("relevant")]}
+        ctx={ctx}
+        onRun={() => Promise.resolve()}
+        rowsForSource={{ reason: "없음", run: () => {} }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("viewer-review-status-menu"));
+    fireEvent.click(document.querySelector('[data-command="viewer.mark.relevant"]') as HTMLElement);
+    await waitFor(() => expect(screen.getByTestId("viewer-review-status").textContent).toBe("관련 있음"));
   });
 });

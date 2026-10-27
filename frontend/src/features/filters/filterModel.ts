@@ -13,7 +13,8 @@
  *  - search:    `extension` (repeated param; 확장자 column filter too)
  *  - artifacts/files/timeline (r4 §2.3 row conditions): time range (`from`/`to`), 요일·시간대·업무
  *               외 시간 (`weekday`/`hours`/`offhours` + `tz`), 부분 결과 (`partial`), 콘텐츠 유형
- *               (`content`); artifacts also the map cluster box (`geo`)
+ *               (`content`); artifacts also the map cluster box (`geo`); R7 갈래 A 계열 · 중복 ·
+ *               예외 항목 (`family` / `dup` + `dup_mode` / `irregular`)
  *  - docs/indicators/search/analysis: those row conditions run on the loaded rows
  * Everything else (review status, tags, other column filters) runs on the rows already
  * loaded; the filter status line says so.
@@ -38,6 +39,7 @@ import { parseInstant } from "../../utils/time";
 import { CARVE_KINDS } from "../analysis/analysisForm";
 import { type Grade, isGrade } from "../flags/catalog";
 import { rowMatchesFlagFilter, ruleLabel } from "../flags/flags";
+import { DUP_LABELS, DUP_MODE_LABELS, type DupMode, type DupStatus, irregularLabel } from "./conditionValues";
 import { contentTypeLabel } from "./contentTypes";
 import {
   clockLabel,
@@ -82,6 +84,14 @@ export interface FilterState {
   content?: string[];
   /** Map cluster box `lat0,lon0,lat1,lon1` (URL `geo=`). */
   geo?: string;
+  /** 계열 (R7 갈래 A): item refs whose families are listed (URL `family=`, repeated). */
+  family?: string[];
+  /** 중복 (URL `dup=`). */
+  dup?: DupStatus;
+  /** 중복 비교 방식 (URL `dup_mode=`; absent = 항목별). */
+  dupMode?: DupMode;
+  /** 예외 항목 categories (URL `irregular=`). */
+  irregular?: string[];
 }
 
 export const EMPTY_FILTERS: FilterState = Object.freeze({
@@ -92,6 +102,16 @@ export const EMPTY_FILTERS: FilterState = Object.freeze({
   path: "",
   columns: [],
 }) as FilterState;
+
+/**
+ * Korean artifact-type names for the 유형 chips (R7 L3). Registered by grid/valueLabels: the type
+ * table lives with the tree (tree/domains imports this module), so a direct import would cycle.
+ */
+let chipTypeLabel: (type: string) => string | null = () => null;
+
+export function setChipTypeLabel(resolve: (type: string) => string | null): void {
+  chipTypeLabel = resolve;
+}
 
 export function normalizeExt(value: string): string {
   return value.trim().replace(/^\.+/, "").toLowerCase();
@@ -117,6 +137,10 @@ export function filtersFromRoute(route: Route): FilterState {
     ...(route.partial ? { partial: true } : {}),
     ...(route.content?.length ? { content: route.content } : {}),
     ...(route.geo ? { geo: route.geo } : {}),
+    ...(route.family?.length ? { family: route.family } : {}),
+    ...(route.dup ? { dup: route.dup } : {}),
+    ...(route.dup && route.dupMode ? { dupMode: route.dupMode } : {}),
+    ...(route.irregular?.length ? { irregular: route.irregular } : {}),
   };
 }
 
@@ -141,6 +165,10 @@ export function filtersToRoutePatch(filters: FilterState): Partial<Route> {
     partial: filters.partial ? true : undefined,
     content: filters.content?.length ? filters.content : undefined,
     geo: filters.geo && parseGeo(filters.geo) ? filters.geo : undefined,
+    family: filters.family?.length ? filters.family : undefined,
+    dup: filters.dup || undefined,
+    dupMode: filters.dup && filters.dupMode && filters.dupMode !== "item" ? filters.dupMode : undefined,
+    irregular: filters.irregular?.length ? filters.irregular : undefined,
   };
 }
 
@@ -167,7 +195,11 @@ export function filtersEqual(a: FilterState, b: FilterState): boolean {
     Boolean(a.offhours) === Boolean(b.offhours) &&
     Boolean(a.partial) === Boolean(b.partial) &&
     (a.content ?? []).join() === (b.content ?? []).join() &&
-    (a.geo ?? "") === (b.geo ?? "")
+    (a.geo ?? "") === (b.geo ?? "") &&
+    (a.family ?? []).join() === (b.family ?? []).join() &&
+    (a.dup ?? "") === (b.dup ?? "") &&
+    (a.dup ? (a.dupMode ?? "item") : "") === (b.dup ? (b.dupMode ?? "item") : "") &&
+    (a.irregular ?? []).join() === (b.irregular ?? []).join()
   );
 }
 
@@ -314,6 +346,7 @@ export function partitionFilters(
   if (hasClock(filters)) conditionLabels.push(filters.offhours ? "업무 외 시간" : "요일·시간대");
   if (filters.partial) conditionLabels.push("부분 결과");
   if (filters.content?.length) conditionLabels.push("콘텐츠 유형");
+  conditionLabels.push(...rowSetLabels(filters));
   const geoOnServer = ref.id === "artifacts";
   if (CONDITION_SERVER_COLLECTIONS.has(ref.id)) {
     const params = serverConditionParams(filters, tz, { time: true, geo: geoOnServer });
@@ -445,6 +478,10 @@ export function clientOnlyFilters(filters: FilterState, plan: FilterPlan): Filte
           partial: undefined,
           content: undefined,
           geo: plan.server.conditions.geo ? undefined : filters.geo,
+          family: undefined,
+          dup: undefined,
+          dupMode: undefined,
+          irregular: undefined,
         }
       : {}),
   };
@@ -525,7 +562,43 @@ export function rowMatchesFilters(row: GridRow, filters: FilterState, tz = "utc"
   if (filters.path && !(row.sourcePath ?? "").toLowerCase().includes(filters.path.toLowerCase()))
     return false;
   if (!rowMatchesFlagFilter(row, filters.flags ?? [], filters.flagGrade)) return false;
+  if (!rowMatchesRowSets(row, filters)) return false;
   return rowMatchesConditions(row, filters, tz);
+}
+
+/** Labels of the 계열 · 중복 · 예외 conditions (R7 갈래 A) for the filter status line. */
+export function rowSetLabels(filters: Pick<FilterState, "family" | "dup" | "irregular">): string[] {
+  const out: string[] = [];
+  if (filters.family?.length) out.push("계열");
+  if (filters.dup) out.push("중복");
+  if (filters.irregular?.length) out.push("예외 항목");
+  return out;
+}
+
+/**
+ * Client check of the 계열 · 중복 · 예외 conditions on a listing the server does not filter (the
+ * server listings apply them): only rows that carry the server's `family` / `dedup` annotations can
+ * pass; 예외 항목 is known to the server only, so such rows never pass here.
+ */
+export function rowMatchesRowSets(
+  row: GridRow,
+  filters: Pick<FilterState, "family" | "dup" | "dupMode" | "irregular">,
+): boolean {
+  if (filters.irregular?.length) return false;
+  if (filters.family?.length) {
+    const family = row.fields.family as { top?: unknown } | undefined;
+    const top = typeof family?.top === "string" ? family.top : null;
+    if (!top || !filters.family.includes(top)) return false;
+  }
+  if (filters.dup) {
+    if (filters.dupMode && filters.dupMode !== "item") return false;
+    const dedup = row.fields.dedup as { status?: unknown; count?: unknown } | undefined;
+    const status = typeof dedup?.status === "string" ? dedup.status : null;
+    if (!status) return false;
+    if (filters.dup === "any") return typeof dedup?.count === "number" && dedup.count > 1;
+    if (status !== filters.dup) return false;
+  }
+  return true;
 }
 
 export function applyClientFilters(rows: GridRow[], filters: FilterState, tz = "utc"): GridRow[] {
@@ -549,7 +622,10 @@ export type FilterKey =
   | "clock"
   | "partial"
   | "content"
-  | "geo";
+  | "geo"
+  | "family"
+  | "dup"
+  | "irregular";
 
 export interface FilterChip {
   key: FilterKey;
@@ -668,7 +744,9 @@ export function activeChips(
     });
   }
   for (const s of filters.statuses) chips.push({ key: "status", value: s, label: `상태 ${statusLabel(s)}` });
-  for (const t of filters.types) chips.push({ key: "type", value: t, label: `유형 ${t}` });
+  // The type's Korean name (R7 L3, C-D9); the raw id stays the chip value.
+  for (const t of filters.types)
+    chips.push({ key: "type", value: t, label: `유형 ${chipTypeLabel(t) ?? t}` });
   for (const t of filters.tags) chips.push({ key: "tag", value: t, label: `태그 ${t}` });
   for (const e of filters.ext) chips.push({ key: "ext", value: e, label: `확장자 .${e}` });
   if (filters.path) chips.push({ key: "path", label: `경로 ${filters.path}` });
@@ -700,6 +778,19 @@ export function activeChips(
     const lon = ((box[1] + box[3]) / 2).toFixed(3);
     chips.push({ key: "geo", label: `위치 ${lat}, ${lon} 부근` });
   }
+  // 계열 · 중복 · 예외 (R7 갈래 A): Korean names only (never an item ref or a category id).
+  if (filters.family?.length)
+    chips.push({
+      key: "family",
+      label: filters.family.length === 1 ? "계열 1개 항목" : `계열 ${filters.family.length}개 항목`,
+    });
+  if (filters.dup) {
+    const mode =
+      filters.dupMode && filters.dupMode !== "item" ? ` (${DUP_MODE_LABELS[filters.dupMode]})` : "";
+    chips.push({ key: "dup", label: `중복 ${DUP_LABELS[filters.dup]}${mode}` });
+  }
+  for (const id of filters.irregular ?? [])
+    chips.push({ key: "irregular", value: id, label: `예외 ${irregularLabel(id)}` });
   return chips;
 }
 
@@ -747,5 +838,13 @@ export function removeChip(filters: FilterState, chip: FilterChip): FilterState 
     }
     case "geo":
       return { ...filters, geo: undefined };
+    case "family":
+      return { ...filters, family: undefined };
+    case "dup":
+      return { ...filters, dup: undefined, dupMode: undefined };
+    case "irregular": {
+      const rest = (filters.irregular ?? []).filter((id) => id !== chip.value);
+      return { ...filters, irregular: rest.length ? rest : undefined };
+    }
   }
 }

@@ -24,6 +24,7 @@ import logging
 import os
 import shutil
 import time
+import uuid
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -71,6 +72,18 @@ def _utc_now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
 
 
+def new_run_stage_analysis_id(prefix: str) -> str:
+    """``<prefix>-<UTC µs time>-<8 hex>``: unique even when two stage runs share a clock tick.
+
+    The Windows clock can return the same microsecond value for consecutive calls, so a
+    timestamp alone collided (``FileExistsError`` on the generation directory). The random
+    suffix keeps the id inside ``[A-Za-z0-9_-]{1,64}`` and the ``<prefix>-`` start that
+    generation cleanup and readers match on; nothing parses the time part.
+    """
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+    return f"{prefix}-{stamp}-{uuid.uuid4().hex[:8]}"
+
+
 def _write_state(path: Path, state: Mapping[str, object]) -> None:
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
@@ -100,9 +113,9 @@ def run_triage_stage(
     files_path: Path | None = None,
     files_payload: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """Run the engine over a run's outputs into a new ``analyses/run-triage-flags-<time>/``; returns the run-summary step row."""
+    """Run the engine over a run's outputs into a new ``analyses/run-triage-flags-<time>-<hex>/``; returns the run-summary step row."""
     root = Path(output_dir) / ANALYSES_DIR_NAME
-    analysis_id = f"{RUN_STAGE_ANALYSIS_PREFIX}-{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%S%f')}"
+    analysis_id = new_run_stage_analysis_id(RUN_STAGE_ANALYSIS_PREFIX)
     directory = root / analysis_id
     state_path = directory / STATE_FILE_NAME
     started_at = _utc_now()

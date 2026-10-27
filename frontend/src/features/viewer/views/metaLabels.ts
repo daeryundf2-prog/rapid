@@ -11,9 +11,12 @@
  * 검증 계획 해시").
  */
 
+import { AI_FIELD_LABELS } from "../../ai/aiFields";
 import { FIELD_LABELS } from "../../grid/columns/fieldColumns";
 
 export const META_LABELS: Record<string, string> = {
+  // R7 AI 사용 (갈래 D): the AI rows' keys; a label below for the same key wins.
+  ...AI_FIELD_LABELS,
   // 핵심
   timestamp: "시각",
   time: "시각",
@@ -311,6 +314,13 @@ export const META_LABELS: Record<string, string> = {
   evidence_refs: "근거 참조",
   primary_evidence: "주요 근거",
   source: "출처",
+  // R-10: browser / app profile provenance and the timeline's source-row pointer.
+  source_database: "원본 데이터베이스",
+  profile_dir: "프로필 폴더",
+  source_platform: "원본 플랫폼",
+  source_record: "원본 행",
+  output: "출력",
+  row_index: "행 번호",
   source_refs: "출처 참조",
   citation_refs: "인용 참조",
   parse_status: "파싱 상태",
@@ -365,6 +375,145 @@ export const META_LABELS: Record<string, string> = {
   detected_at: "탐지 시각",
   detected_at_raw: "원본 시각 값",
   action_label: "조치",
+  // R7 L3: keys seen unlabelled on the real runs (run-subset10 / qa-case1 viewer meta).
+  channel_family: "채널 계열",
+  evtx_integrity_status: "EVTX 무결성 상태",
+  evtx_decoder_version: "EVTX 디코더 버전",
+  decoder: "디코더",
+  provider_guid: "공급자 GUID",
+  event_time_encoding: "이벤트 시각 인코딩",
+  friendly_event_name: "이벤트 이름",
+  record_detail: "레코드 상세",
+  last_run_filetimes: "최근 실행 시각(FILETIME 원문)",
+  last_run_time_slots: "실행 시각 칸",
+  run_time_slots: "실행 시각 칸",
+  last_run_time_offset: "최근 실행 시각 오프셋",
+  last_run_time_offset_hex: "최근 실행 시각 오프셋(16진)",
+  run_count_offset: "실행 횟수 오프셋",
+  run_count_offset_hex: "실행 횟수 오프셋(16진)",
+  nonzero_run_time_count: "기록된 실행 시각 수",
+  prefetch_decompression: "Prefetch 압축 해제",
+  prefetch_decode_coverage: "Prefetch 해석 범위",
+  prefetch_version_metadata: "Prefetch 버전 정보",
+  run_count_cross_check: "실행 횟수 교차 확인",
+  binary_format_detected: "감지된 바이너리 형식",
+  file_metrics: "파일 지표",
+  file_metrics_array: "파일 지표 배열",
+  volume_information: "볼륨 정보",
+  compressed_size: "압축 크기",
+  declared_block_size: "선언된 블록 크기",
+  declared_uncompressed_size: "선언된 압축 해제 크기",
+  payload_size: "페이로드 크기",
+  section_field_offsets: "구역 필드 오프셋",
+  selected_offset_hex: "선택한 오프셋(16진)",
+  selected_value: "선택한 값",
+  alternate_offset_hex: "대체 오프셋(16진)",
+  alternate_value: "대체 값",
+  supported_common_layout: "지원되는 공통 구조",
+  native_binary_layout_decoding_available: "네이티브 바이너리 구조 해석 가능",
+  layout_name: "구조 이름",
+  format_id: "형식 ID",
+  extra_data_blocks: "추가 데이터 블록",
+  omitted_blocks: "생략한 블록",
+  property_store_blocks: "속성 저장소 블록",
+  property_store_data: "속성 저장소 데이터",
+  property_count: "속성 수",
+  property_id: "속성 ID",
+  properties: "속성",
+  shell_item_metadata: "셸 항목 메타데이터",
+  string_data_offset: "문자열 데이터 오프셋",
+  storage_count: "저장소 수",
+  environment_target: "환경 변수 대상",
+  file_information: "파일 정보",
+  media_trusted_diffs: "미디어 대조 차이",
+  image_end_offset: "이미지 끝 오프셋",
+  trailing_data_bytes: "끝에 붙은 데이터(바이트)",
+  decode_status: "해석 상태",
+  dimension_source: "크기 정보 출처",
+  parser_confidence_basis: "파서 신뢰도 근거",
+  container_structure_status: "컨테이너 구조 상태",
+  ocr_candidate: "OCR 후보",
+  content_format: "콘텐츠 형식",
+  document_metadata: "문서 메타데이터",
+  extension_format: "확장자 형식",
+  av_audio: "오디오",
+  kakaotalk_windows_analysis: "카카오톡(Windows) 분석",
+  registry_distinct_path_count: "레지스트리 고유 경로 수",
+  registry_trace_total: "레지스트리 흔적 수",
+  trace_chains: "흔적 연결",
+  string_candidates: "문자열 후보",
+  string_sample_count: "문자열 표본 수",
+  filename_strings: "파일 이름 문자열",
+  guid_candidates: "GUID 후보",
+  candidate_program_names: "후보 프로그램 이름",
+  candidate_path_count: "후보 경로 수",
+  candidate_sha1_count: "후보 SHA-1 수",
+  candidates_truncated: "후보 목록 잘림",
+  message_content_status: "메시지 본문 상태",
+  supports_pc_kakaotalk_triage: "PC 카카오톡 선별 지원",
+  scan_kind: "스캔 종류",
+  area: "영역",
+  field_path: "필드 경로",
+  cache_order: "캐시 순서",
+  control_set: "컨트롤 세트",
+  full_detail_option: "전체 상세 옵션",
+  targetFull: "대상(전체)",
+  key_cell_offset: "키 셀 오프셋",
+  key_depth: "키 깊이",
+  is_root_key: "루트 키 여부",
+  parent_cell_offset: "상위 키 셀 오프셋",
+  value_cell_offset: "값 셀 오프셋",
+  hive_mount: "하이브 마운트",
+  name_encoding: "이름 인코딩",
+  transaction_log_status: "트랜잭션 로그 상태",
+  transaction_log_disclosure: "트랜잭션 로그 안내",
+  key_path_confidence: "키 경로 신뢰도",
+  root_reachable: "루트에서 도달 가능",
+  last_written_filetime: "마지막 기록(FILETIME 원문)",
+  registry_value_type: "레지스트리 값 형식",
+  value_format: "값 형식",
+  relative_offset: "상대 오프셋",
+  ai_score: "AI 생성 점수",
+  score: "점수",
+  band: "점수 구간",
+  band_label: "점수 구간 이름",
+  verdict: "판정",
+  signals: "신호",
+  model_analysis: "모델 분석",
+  model_analysis_available: "모델 분석 가능",
+  pixel_analysis: "픽셀 분석",
+  source_guess: "출처 추정",
+  source_attribution_label: "출처 귀속 라벨",
+  per_file_context_row: "파일별 맥락 행",
+  post_bigbang_caveat: "주의 사항",
+  limitations: "한계",
+  next_checks: "다음 확인",
+  reasons: "사유",
+  method: "방법",
+  signature: "서명",
+  algorithm_id: "알고리즘 ID",
+  windows_family: "Windows 계열",
+  row_cluster_status: "행 묶음 상태",
+  row_cluster_window_bytes: "행 묶음 창(바이트)",
+  clustered_hash_count: "묶인 해시 수",
+  clustered_path_count: "묶인 경로 수",
+  clustered_timestamp_candidate_count: "묶인 시각 후보 수",
+  candidate_row_cluster_count: "후보 행 묶음 수",
+  amcache_candidate_cluster_count: "Amcache 후보 묶음 수",
+  amcache_hive_evidence: "Amcache 하이브 근거",
+  executable_hint_source: "실행 파일 힌트 출처",
+  schema_decode_status: "스키마 해석 상태",
+  schema_row_count: "스키마 행 수",
+  attempted: "시도함",
+  consistent: "일치",
+  items: "항목",
+  fields: "필드",
+  raw_result: "원시 결과",
+  loaded_module_count: "로드된 모듈 수",
+  shellbag_entry_count: "ShellBag 항목 수",
+  bags_exclusion_note: "Bags 제외 안내",
+  bags_view_settings_key_count_excluded: "제외한 Bags 보기 설정 키 수",
+  profile_template: "프로필 템플릿",
 };
 
 /**
@@ -469,6 +618,115 @@ export const META_VALUE_LABELS: Record<string, string> = {
  * extraction caps `size` / `count` …): `META_KEYED_VALUE_LABELS[key][value]`.
  */
 export const META_KEYED_VALUE_LABELS: Record<string, Record<string, string>> = {
+  // R-10: provenance enumerations of artifact records (`reportability`, `evidence_strength`), every
+  // value the collectors / case DB write (metaLabels.test lists them; grep the field names).
+  reportability: {
+    review: "검토 필요",
+    triage: "선별용",
+    "triage-pivot": "선별 단서(피벗)",
+    "review-pivot": "검토 단서(피벗)",
+    "review-only": "검토 전용",
+    "inventory-only": "목록 전용",
+    "inventory-triage": "목록 선별용",
+    "metadata-only": "메타데이터만",
+    reportable: "보고 가능",
+    "not-reportable": "보고 불가",
+    "reviewed-reportable": "검토 완료 — 보고 가능",
+    "reviewed-report-candidate": "검토 후 보고 후보",
+    "candidate-review-only": "후보 — 검토 전용",
+    "candidate-destlist-entry-citation": "DestList 항목 후보 인용",
+    "excluded-from-execution-evidence": "실행 증거에서 제외",
+    "excluded-from-recent-file-evidence": "최근 파일 증거에서 제외",
+    "native-pure-python-decompression": "내장 압축 해제 결과(검증 필요)",
+    "normal-scca-path": "일반 SCCA 해석",
+    "review-only-string-offset-candidate": "문자열 오프셋 후보 — 검토 전용",
+    "source-context-candidate": "출처 맥락 후보",
+    "triage-cache-entry-candidate": "선별용 캐시 항목 후보",
+    "triage-embedded-media-candidate": "선별용 내장 미디어 후보",
+    "triage-preview-candidate": "선별용 미리보기 후보",
+    "triage-timeline-candidate": "선별용 타임라인 후보",
+    "commercial-blocked": "검증 전 보고 보류",
+    "internally-covered": "내부 검증 완료",
+    "not-commercial-grade-until-real-case-diff-and-signoff": "실사건 비교·서명 전 보고 등급 아님",
+    "validation-diff-attachment-inventory": "검증 비교 첨부 목록",
+    "usn-state-replay-validation-gate": "USN 상태 재생 검증 관문",
+    "bounded-delete-lifecycle-candidate": "삭제 수명주기 후보(범위 제한)",
+    "bounded-mft-cache-usn-path-candidate": "MFT 캐시·USN 경로 후보(범위 제한)",
+    "bounded-mft-cache-usn-review-preview": "MFT 캐시·USN 검토 미리보기(범위 제한)",
+    "bounded-mft-path-cache-quality-profile": "MFT 경로 캐시 품질 요약(범위 제한)",
+    "bounded-parent-cache-usn-name-path-candidate": "상위 폴더 캐시·USN 이름 경로 후보(범위 제한)",
+    "bounded-rename-pair-candidate": "이름 변경 쌍 후보(범위 제한)",
+    "bounded-scan-path-candidate": "스캔 경로 후보(범위 제한)",
+    "bounded-usn-path-reliability-assessment": "USN 경로 신뢰도 평가(범위 제한)",
+    "bounded-usn-state-replay-preview": "USN 상태 재생 미리보기(범위 제한)",
+    "bounded-usn-state-replay-transition": "USN 상태 재생 전이(범위 제한)",
+    "bounded-usn-timeline-review-candidate": "USN 타임라인 검토 후보(범위 제한)",
+  },
+  evidence_strength: {
+    strong: "강함",
+    weak: "약함",
+    triage: "선별용",
+    context: "맥락 정보",
+    "account-lifecycle-registry-export": "계정 수명주기(레지스트리 내보내기)",
+    "amcache-native-string-pivot": "Amcache 문자열 단서",
+    "application-fault-report": "응용 프로그램 오류 보고",
+    "application-resource-usage-database-presence": "앱 리소스 사용(SRUM) DB 존재",
+    "application-resource-usage-indicator": "앱 리소스 사용 지표",
+    "application-resource-usage-string-pivot": "앱 리소스 사용 문자열 단서",
+    "evtx-chunk-header": "EVTX 청크 헤더",
+    "evtx-record-candidate": "EVTX 레코드 후보",
+    "evtx-slack-copy": "EVTX 슬랙 영역 사본",
+    "execution-indicator": "실행 정황",
+    "exported-group-membership-hint": "내보낸 그룹 구성원 단서",
+    "external-tool-index-row": "외부 도구 색인 행",
+    "indexed-document-match": "색인 문서 일치",
+    "indicator-pivot": "지표 단서",
+    "jumplist-destination-candidate": "점프 목록 대상 후보",
+    "kakaotalk-application-database-presence": "카카오톡 DB 존재",
+    "kakaotalk-cross-source-presence-candidate": "카카오톡 교차 출처 존재 후보",
+    "kakaotalk-deviceinfo-context-preserved": "카카오톡 기기 정보 맥락 보존",
+    "kakaotalk-macos-database-presence-and-openability": "카카오톡(macOS) DB 존재·열림 확인",
+    "kakaotalk-user-id-context-preserved": "카카오톡 사용자 ID 맥락 보존",
+    "local-rule-ioc-hit": "로컬 규칙 IOC 일치",
+    "mounted-device-registry-key": "마운트 장치 레지스트리 키",
+    "native-hive-deviceinfo-string-presence-candidate": "하이브 기기 정보 문자열 존재 후보",
+    "native-hive-deviceinfo-values-preserved": "하이브 기기 정보 값 보존",
+    "ntfs-mft-native-attribute-metadata": "NTFS MFT 속성 메타데이터",
+    "ntfs-usn-native-record": "NTFS USN 레코드",
+    "package-integrity-finding": "패키지 무결성 발견",
+    "partial-event-record": "일부만 읽은 이벤트 레코드",
+    "persistence-configuration": "지속성 설정",
+    "prefetch-file-reference": "Prefetch 파일 참조",
+    // The two values the family catalogue reads (value_labels) read the same here.
+    "program-presence-not-proof-of-execution": "존재 흔적(실행 증거 아님)",
+    "program-presence-or-execution": "프로그램 존재 또는 실행",
+    "program-presence-or-execution-candidate": "프로그램 존재 또는 실행 후보",
+    "recent-execution-indicator-candidate": "최근 실행 지표 후보",
+    "registry-deleted-cell-candidate": "삭제된 레지스트리 셀 후보",
+    "registry-deleted-key-candidate": "삭제된 레지스트리 키 후보",
+    "registry-deleted-value-candidate": "삭제된 레지스트리 값 후보",
+    "registry-export-key": "레지스트리 내보내기 키",
+    "registry-hive-header": "레지스트리 하이브 헤더",
+    "registry-hive-string-candidate": "레지스트리 하이브 문자열 후보",
+    "remote-access-destination": "원격 접속 대상",
+    "sam-hive-group-key-candidate": "SAM 하이브 그룹 키 후보",
+    "sam-hive-key-candidate": "SAM 하이브 키 후보",
+    "search-index-database-presence": "검색 색인 DB 존재",
+    "search-index-string-pivot": "검색 색인 문자열 단서",
+    "security-policy-sensitive-location": "보안 정책 민감 위치",
+    "security-privilege-assignment": "보안 권한 할당",
+    "snapshot-file-delta": "스냅숏 파일 차이",
+    "srum-native-row-string-candidate": "SRUM 행 문자열 후보",
+    "srum-row-indicator-candidate": "SRUM 행 지표 후보",
+    "srum-table-presence-candidate": "SRUM 표 존재 후보",
+    "system-service-configuration": "시스템 서비스 설정",
+    "user-execution-indicator": "사용자 실행 지표",
+    "user-execution-indicator-candidate": "사용자 실행 지표 후보",
+    "vsc-snapshot-file-copy": "VSC 스냅숏 파일 사본",
+    "windows-search-correlated-native-string-candidate": "Windows 검색 상관 문자열 후보",
+    "windows-search-page-local-string-correlation": "Windows 검색 페이지 내 문자열 상관",
+    "windows-search-table-presence-candidate": "Windows 검색 표 존재 후보",
+  },
   backup_domain: {
     _manifest: "백업 매니페스트",
     a: "APK",
@@ -519,7 +777,11 @@ export function isRawToken(value: string): boolean {
 export function metaValueLabel(value: unknown, key?: string): string | null {
   if (typeof value === "boolean") return value ? "예" : "아니요";
   if (typeof value !== "string") return null;
-  const keyed = key ? META_KEYED_VALUE_LABELS[key]?.[value] : undefined;
+  // A nested field ("provenance.reportability") reads like its last segment.
+  const leaf = key?.split(".").pop();
+  const keyed = key
+    ? (META_KEYED_VALUE_LABELS[key]?.[value] ?? (leaf ? META_KEYED_VALUE_LABELS[leaf]?.[value] : undefined))
+    : undefined;
   if (keyed) return keyed;
   const direct = META_VALUE_LABELS[value] ?? META_VALUE_LABELS[value.toLowerCase()];
   if (direct) return direct;
@@ -674,17 +936,50 @@ export function metaLabel(key: string): string | null {
 
 /**
  * Labels for the keys of ONE section (review B2-8): keys that share a label (timestamp / time →
- * 시각, user / user_name → 사용자 …) read "라벨 (raw_key)" so the visible text tells them apart
- * — a tooltip alone is not accessible. null = no label (the raw key is shown).
+ * 시각, user / user_name → 사용자 …) read "라벨", "라벨 (2)" … so the visible text tells them apart
+ * without a raw key (R7 L3; the raw key stays the tooltip). null = no label (the raw key is shown).
  */
 export function sectionLabels(keys: readonly string[]): Map<string, string | null> {
   const labels = new Map(keys.map((key) => [key, metaLabel(key)] as const));
   const uses = new Map<string, number>();
   for (const label of labels.values()) if (label) uses.set(label, (uses.get(label) ?? 0) + 1);
+  const seen = new Map<string, number>();
   return new Map(
-    [...labels].map(([key, label]) => [
-      key,
-      label && (uses.get(label) ?? 0) > 1 ? `${label} (${key})` : label,
-    ]),
+    [...labels].map(([key, label]) => {
+      if (!label || (uses.get(label) ?? 0) < 2) return [key, label];
+      const nth = (seen.get(label) ?? 0) + 1;
+      seen.set(label, nth);
+      return [key, nth > 1 ? `${label} (${nth})` : label];
+    }),
   );
+}
+
+/**
+ * Korean text of the source viewer's limitation notes (`viewer_limitations`, api/app/viewer_core.py
+ * source_viewer_limitations — English server sentences); an unknown note is shown as sent.
+ */
+const VIEWER_LIMITATIONS_KO: Readonly<Record<string, string>> = {
+  "Preview is read-only and may be capped to keep large cases responsive.":
+    "미리보기는 읽기 전용이며, 큰 케이스에서도 빠르게 열리도록 일부만 표시될 수 있습니다.",
+  "Use hashes and source download before relying on a preview in a final report.":
+    "최종 보고서에 쓰기 전에 해시와 원본 파일로 확인하세요(미리보기만으로 판단하지 않습니다).",
+  "Image text requires OCR or OCR sidecar review; the file viewer does not OCR images inline.":
+    "이미지 속 글자는 OCR 결과로 확인해야 합니다. 뷰어는 이미지를 바로 OCR하지 않습니다.",
+  "SQLite previews show bounded tables/rows; use file search or a dedicated database tool for full table review.":
+    "SQLite 미리보기는 표·행 일부만 보여 줍니다. 전체 표는 파일 검색이나 전용 DB 도구로 확인하세요.",
+  "Structured parsing is skipped for very large JSON/XML files; use current-file search or external tooling.":
+    "매우 큰 JSON/XML 파일은 구조 해석을 건너뜁니다. 현재 파일 검색이나 외부 도구를 쓰세요.",
+  "Document text extraction is bounded for preview; use source search resume or an external parser for full-document validation.":
+    "문서 본문 추출은 미리보기 범위로 제한됩니다. 문서 전체 확인은 원본 검색이나 외부 파서를 쓰세요.",
+  "Email preview is bounded; only the first parse window is shown until mailbox-specific pagination is implemented.":
+    "메일 미리보기는 처음 해석한 구간만 보여 줍니다.",
+};
+
+export function viewerLimitationKo(note: string): string {
+  const known = VIEWER_LIMITATIONS_KO[note];
+  if (known) return known;
+  const capped = /^Inline text snippets are capped near (\d+) characters\.$/.exec(note);
+  if (capped?.[1])
+    return `본문 미리보기는 약 ${Number(capped[1]).toLocaleString("ko-KR")}자까지만 표시합니다.`;
+  return note;
 }

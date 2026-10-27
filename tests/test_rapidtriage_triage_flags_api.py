@@ -306,8 +306,8 @@ class TriageFlagsApiTests(unittest.TestCase):
             response = self.client.get(f"/api/runs/{self.run_id}/artifacts", params=params)
             self.assertEqual(response.status_code, status, (params, response.text))
             self.assertRegex(json.dumps(response.json(), ensure_ascii=False), "[가-힣]|sort requires")
-        # /files keeps ignoring sorts it does not have (only sort=flags exists there).
-        response = self.client.get(f"/api/runs/{self.run_id}/files", params={"limit": 10, "sort": "name"})
+        # /files keeps ignoring sorts it does not have (flags + the column-index sorts of plan r7 §3.2).
+        response = self.client.get(f"/api/runs/{self.run_id}/files", params={"limit": 10, "sort": "bogus"})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual([row["record_index"] for row in response.json()["candidates"]], [0, 1, 2])
         for record_index in ("-5", "abc", "", "1.5"):
@@ -385,6 +385,16 @@ class TriageFlagsApiTests(unittest.TestCase):
         rule = next(item for item in payload["rules"] if item["id"] == CLEARED)
         self.assertEqual(rule["grade"], "A")
         self.assertTrue(all(url.startswith("https://") for url in rule["sources"]))
+        # R6 S4: the A-grade rules serve their validation metadata (real-data negative control filled 2026-10-21).
+        self.assertEqual(rule["validation"]["synthetic"], True)
+        self.assertEqual([(entry["source"], entry["hits"], entry["false_positives"]) for entry in rule["validation"]["real"]],
+                         [("run-subset10 이벤트 로그(음성)", 0, 0)])
+        self.assertEqual(rule["validation"]["public"], [])
+        self.assertRegex(rule["validation"]["notes_ko"], "음성 대조만")
+        a_rules = [item for item in payload["rules"] if item["grade"] == "A"]
+        self.assertEqual(len(a_rules), 7)
+        self.assertTrue(all(isinstance(item.get("validation"), dict) for item in a_rules))
+        self.assertNotIn("validation", next(item for item in payload["rules"] if item["id"] == SERVICE))
 
     def test_row_citations_and_no_path_escape(self) -> None:
         self.standard_flags()

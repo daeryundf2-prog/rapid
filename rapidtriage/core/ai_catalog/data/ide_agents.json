@@ -1,0 +1,1881 @@
+[
+  {
+    "name": "Cursor",
+    "vendor": "Anysphere",
+    "category": "vscode-fork-ide",
+    "paths": {
+      "windows": {
+        "value": [
+          "%APPDATA%\\Cursor\\User\\globalStorage\\state.vscdb",
+          "%APPDATA%\\Cursor\\User\\workspaceStorage\\<hash>\\state.vscdb",
+          "%USERPROFILE%\\.cursor\\projects\\<slug>\\agent-transcripts\\<id>\\<id>.jsonl",
+          "%USERPROFILE%\\.cursor\\ai-tracking\\ai-code-tracking.db"
+        ],
+        "confidence": "inferred (Windows base) + third-party (relative layout)",
+        "source": "https://docs.rs/toolpath-cursor"
+      },
+      "macos": {
+        "value": [
+          "~/Library/Application Support/Cursor/User/globalStorage/state.vscdb",
+          "~/Library/Application Support/Cursor/User/workspaceStorage/<id>/state.vscdb",
+          "~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl",
+          "~/.cursor/ai-tracking/ai-code-tracking.db",
+          "~/Library/Application Support/Cursor/User/globalStorage/anysphere.cursor-commits/",
+          "~/Library/Application Support/Cursor/logs/"
+        ],
+        "confidence": "third-party",
+        "source": "https://docs.rs/toolpath-cursor"
+      },
+      "linux": {
+        "value": [
+          "~/.config/Cursor/User/globalStorage/state.vscdb",
+          "~/.config/Cursor/User/workspaceStorage/<hash>/state.vscdb",
+          "~/.cursor/"
+        ],
+        "confidence": "inferred-from-vscode-layout",
+        "source": null
+      }
+    },
+    "storage_format": {
+      "value": "SQLite. Global state.vscdb: table cursorDiskKV has composerData:<id>, bubbleId:<composerId>:<bubbleId>, composer.content.<hash>; table ItemTable has composer.composerHeaders and cursorAuth/*. Workspace state.vscdb holds per-workspace composer metadata. agent-transcripts JSONL is a lossy copy.",
+      "confidence": "third-party",
+      "source": "https://docs.rs/toolpath-cursor"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "No auto purge; deleting chats in UI does not shrink DB; orphan bubbleId rows without composerData may remain; DB reported growing to tens of GB",
+      "confidence": "third-party",
+      "source": "https://forum.cursor.com/t/agent-chat-db-state-vscdb-grows-without-bound-50-bubble-rows-per-visible-message-96-gb-and-climbing/170508"
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "state.vscdb ItemTable keys cursorAuth/* hold live OAuth tokens",
+      "confidence": "third-party",
+      "source": "https://docs.rs/toolpath-cursor"
+    },
+    "schema_keys": {
+      "value": {
+        "composerData": [
+          "composerId",
+          "modelConfig.modelName",
+          "name",
+          "agentBackend"
+        ],
+        "composerHeader": [
+          "workspaceIdentifier.uri.fsPath"
+        ],
+        "bubble": [
+          "type (1=user,2=assistant)",
+          "allThinkingBlocks[].text",
+          "toolFormerData{tool,params,result}",
+          "tokenCount",
+          "modelInfo.modelName",
+          "checkpointId",
+          "requestId",
+          "capabilityType",
+          "richText"
+        ],
+        "toolFormerData.tool": {
+          "38": "edit_file_v2",
+          "15": "run_terminal_command_v2",
+          "40": "read_file_v2",
+          "42": "glob_file_search"
+        }
+      },
+      "confidence": "third-party",
+      "source": "https://docs.rs/toolpath-cursor"
+    },
+    "forks_renames": {
+      "value": "VS Code fork; CLI 'cursor-agent'",
+      "confidence": "third-party",
+      "source": "https://docs.rs/toolpath-cursor"
+    },
+    "gaps": [
+      "Process names and API domains not verified"
+    ],
+    "local_verification": {
+      "verified_on": "Windows 11, Cursor user data under %APPDATA%\\Cursor",
+      "confidence": "verified-on-test-pc",
+      "source": "schema probe on this PC, 2026-10-27 (structure only; message bodies not opened)",
+      "global_db": "%APPDATA%\\Cursor\\User\\globalStorage\\state.vscdb (399.1MB on this PC)",
+      "tables": {
+        "ItemTable": {
+          "cols": [
+            "key",
+            "value(BLOB)"
+          ],
+          "rows_seen": 285,
+          "key_families_seen": [
+            "secret:* (8; encrypted secrets - never decrypt or export)",
+            "aiCodeTracking.dailyStats.*",
+            "cursor/localLastActivityTimestampMs",
+            "cursor.plugins.installedIds.*",
+            "composer.composerHeaders.*",
+            "composer.planRegistry",
+            "aicontext.personalContext",
+            "browserAutomation.history",
+            "cloudAgentRepository.agents.*",
+            "cloudEnvironmentTemplate.githubRepos",
+            "adminSettings.cached*",
+            "chat.workspaceTransfer",
+            "conversationClassificationScoredConversations",
+            "branchMetadata.prUrl.v1"
+          ]
+        },
+        "composerHeaders": {
+          "cols": [
+            "composerId",
+            "workspaceId",
+            "createdAt",
+            "lastUpdatedAt",
+            "isArchived",
+            "isSubagent",
+            "recency",
+            "checkpointAt",
+            "value",
+            "subagentTypeName"
+          ],
+          "rows_seen": 44,
+          "note": "conversation index including subagent flag"
+        },
+        "cursorDiskKV": {
+          "cols": [
+            "key",
+            "value(BLOB)"
+          ],
+          "rows_seen": 38383,
+          "key_prefix_counts": {
+            "agentKv": 18165,
+            "bubbleId": 17255,
+            "checkpointId": 591,
+            "codeBlockPartialInlineDiffFates": 375,
+            "ofsContent": 340,
+            "codeBlockDiff": 277,
+            "composerData": 91,
+            "inlineDiff": 85,
+            "messageRequestContext": 68,
+            "composer.content.<id>": 29,
+            "inlineDiffs-*": 10
+          }
+        }
+      },
+      "workspace_dbs": "13 per-workspace state.vscdb files under workspaceStorage/*/ ; the newest has ItemTable only (30 keys incl. aiService.prompts, history.entries, aiCodeTracking.recentCommit); composerHeaders and cursorDiskKV are EMPTY there -> conversations are in the GLOBAL db, not per workspace",
+      "other_dirs": {
+        "~/.cursor/ai-tracking": "1 file, 7.1MB",
+        "~/.cursor/projects": "339 files",
+        "~/.cursor/agents, plans, plugins, browser-logs, skills-cursor": "names only"
+      },
+      "forensic_notes": [
+        "Key prefix bubbleId -> message bubbles; composerData -> conversation object (join with composerHeaders.composerId). Exact key layout beyond the prefix was not examined",
+        "agentKv (18k rows) is the largest family; purpose not examined",
+        "Cursor may hold the db open: copy together with -wal; open the copy read-only/immutable",
+        "A 399MB db is acquired and hashed once; parse from the verified copy"
+      ],
+      "ai_tracking_db": {
+        "path": "~/.cursor/ai-tracking/ai-code-tracking.db (7.1MB)",
+        "tables": {
+          "ai_code_hashes": {
+            "cols": [
+              "hash",
+              "source",
+              "fileExtension",
+              "fileName",
+              "requestId",
+              "conversationId",
+              "timestamp",
+              "model",
+              "createdAt"
+            ],
+            "rows_seen": 17479,
+            "meaning": "hash of AI-generated code lines linked to file name, conversation and model -> proves which files contained AI-generated code"
+          },
+          "scored_commits": {
+            "cols": [
+              "commitHash",
+              "branchName",
+              "scoredAt",
+              "linesAdded",
+              "linesDeleted",
+              "tabLinesAdded",
+              "composerLinesAdded",
+              "humanLinesAdded",
+              "commitMessage",
+              "commitDate",
+              "v1AiPercentage",
+              "v2AiPercentage"
+            ],
+            "rows_seen": 23,
+            "meaning": "per-commit share of AI vs human lines"
+          },
+          "ai_deleted_files / conversation_summaries / tracked_file_content / tracking_state": "present, empty or 1 row"
+        },
+        "note": "valuable for litigation: AI-authorship of committed code can be shown even when chat bodies are gone",
+        "confidence": "verified-on-test-pc"
+      }
+    }
+  },
+  {
+    "name": "Windsurf",
+    "vendor": "Codeium / Cognition",
+    "category": "vscode-fork-ide",
+    "paths": {
+      "windows": {
+        "value": [
+          "%APPDATA%\\Windsurf\\User\\workspaceStorage\\<hash>\\state.vscdb",
+          "%APPDATA%\\Windsurf\\User\\globalStorage\\state.vscdb"
+        ],
+        "confidence": "inferred-from-vscode-layout",
+        "source": null
+      },
+      "macos": {
+        "value": [
+          "~/Library/Application Support/Windsurf/User/workspaceStorage/<hash>/state.vscdb",
+          "~/Library/Application Support/Windsurf/User/globalStorage/state.vscdb"
+        ],
+        "confidence": "inferred-from-vscode-layout",
+        "source": null
+      },
+      "linux": {
+        "value": [
+          "~/.config/Windsurf/User/workspaceStorage/<hash>/state.vscdb",
+          "~/.config/Windsurf/User/globalStorage/state.vscdb"
+        ],
+        "confidence": "inferred-from-vscode-layout",
+        "source": null
+      }
+    },
+    "storage_format": {
+      "value": "Cascade workspace memories stored under ~/.codeium/windsurf/memories/ (workspace-specific). Full Cascade conversation store: unknown.",
+      "confidence": "third-party",
+      "source": "https://aimemory.pro/blog/windsurf-memory"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "forks_renames": {
+      "value": "VS Code fork by Codeium; agent is Cascade",
+      "confidence": "third-party",
+      "source": "https://docs.devin.ai/windsurf/plugins/cascade/cascade-overview"
+    },
+    "gaps": [
+      "Cascade conversation storage unknown; ~/.codeium/windsurf only memories confirmed (third-party)"
+    ],
+    "local_verification": {
+      "source": "schema/structure probe on this PC, 2026-10-27 (names, counts, column/key names only; content, emails, account ids and credentials not recorded)",
+      "~/.codeium/windsurf/": "installation_id, user_settings.pb, native_storage_migrations.lock, dirs: brain, cascade, codemaps, code_tracker, context_state, database, implicit(*.pb 427KB), memories(*.md)",
+      "state": "on this PC the cascade/brain/database folders are empty - Windsurf appears installed but barely used, or data lives elsewhere (not found)",
+      "also": "the Windsurf Pyright extension (codeium.windsurfpyright) appears in another IDE's extensions - a Windsurf-derived component can be present without Windsurf itself",
+      "confidence": "verified-on-test-pc"
+    }
+  },
+  {
+    "name": "GitHub Copilot Chat (VS Code)",
+    "vendor": "GitHub / Microsoft",
+    "category": "vscode-extension",
+    "forks_renames": {
+      "value": "Extensions github.copilot, github.copilot-chat; also runs in Cursor/VS Code Insiders/VSCodium",
+      "confidence": "third-party",
+      "source": "https://docs.rs/hindsight-copilot"
+    },
+    "paths": {
+      "windows": {
+        "value": [
+          "%APPDATA%\\Code\\User\\workspaceStorage\\<workspace-id>\\chatSessions\\",
+          "%APPDATA%\\Code\\User\\workspaceStorage\\<workspace-id>\\chatEditingSessions\\ (unverified)"
+        ],
+        "confidence": "third-party",
+        "source": "https://docs.rs/hindsight-copilot"
+      },
+      "macos": {
+        "value": [
+          "~/Library/Application Support/Code/User/workspaceStorage/<workspace-id>/chatSessions/"
+        ],
+        "confidence": "third-party",
+        "source": "https://docs.rs/hindsight-copilot"
+      },
+      "linux": {
+        "value": [
+          "~/.config/Code/User/workspaceStorage/<workspace-id>/chatSessions/"
+        ],
+        "confidence": "third-party",
+        "source": "https://docs.rs/hindsight-copilot"
+      }
+    },
+    "storage_format": {
+      "value": "Per-session JSON files (sources disagree .json vs .jsonl in newer builds); workspace.json maps hash to folder; orphaned hash dirs remain when workspace moved/renamed",
+      "confidence": "third-party",
+      "source": "https://github.com/microsoft/vscode/issues/305818"
+    },
+    "schema_keys": {
+      "value": "Community parser: requesterUsername, responderUsername, requests[] with message and response[]; version-dependent",
+      "confidence": "third-party",
+      "source": "https://glama.ai/mcp/servers/@vltansky/cursor-conversations-mcp/blob/e15492520e0e7518a8cac8a884453ce2528d9b4e/src/database/copilot-reader.ts"
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "Persist until cleared; files can reach hundreds of MB; Copilot logs in JSON Stream/LSP Trace format at Trace level",
+      "confidence": "third-party",
+      "source": "https://docs.rs/hindsight-copilot"
+    },
+    "gaps": [
+      "Domains, auth store, process names not verified"
+    ]
+  },
+  {
+    "name": "GitHub Copilot (JetBrains / Visual Studio)",
+    "vendor": "GitHub / Microsoft",
+    "category": "jetbrains-plugin",
+    "forks_renames": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "paths": {
+      "windows": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      }
+    },
+    "storage_format": {
+      "value": "Third-party scanner parses JSON from a per-product 'copilot' folder under JetBrains config path",
+      "confidence": "third-party",
+      "source": "https://glama.ai/mcp/servers/@Arkya-AI/ember-mcp/blob/61f1279df7cbe9b5c9e90c0852a1427a860b7b9a/ember/scanners/copilot.py"
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "gaps": [
+      "Paths unconfirmed; Visual Studio storage unknown"
+    ]
+  },
+  {
+    "name": "Cline",
+    "vendor": "Cline Bot Inc. (saoudrizwan.claude-dev)",
+    "category": "vscode-extension",
+    "forks_renames": {
+      "value": "Formerly Claude Dev; forked into Roo Code and Kilo Code; standalone/CLI uses ~/.cline",
+      "confidence": "third-party",
+      "source": "https://agent-safehouse.dev/docs/agent-investigations/cline"
+    },
+    "paths": {
+      "windows": {
+        "value": [
+          "%APPDATA%\\Code\\User\\globalStorage\\saoudrizwan.claude-dev\\tasks\\<taskId>\\",
+          "%USERPROFILE%\\.cline\\data\\",
+          "C:\\Users\\<user>\\AppData\\Local\\Temp\\cline\\"
+        ],
+        "confidence": "third-party (temp path stated; globalStorage Windows base inferred)",
+        "source": "https://agent-safehouse.dev/docs/agent-investigations/cline"
+      },
+      "macos": {
+        "value": [
+          "~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/",
+          "~/.cline/data/",
+          "~/Documents/Cline/{Rules,Workflows,MCP,Hooks}/"
+        ],
+        "confidence": "third-party",
+        "source": "https://agent-safehouse.dev/docs/agent-investigations/cline"
+      },
+      "linux": {
+        "value": [
+          "~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/",
+          "~/.cline/data/",
+          "/tmp/cline/"
+        ],
+        "confidence": "third-party/inferred",
+        "source": "https://agent-safehouse.dev/docs/agent-investigations/cline"
+      }
+    },
+    "storage_format": {
+      "value": "JSON per task: tasks/<taskId>/{api_conversation_history.json,ui_messages.json,task_metadata.json,context_history.json,settings.json}; state/taskHistory.json; settings/cline_mcp_settings.json; checkpoints/<cwdHash>/.git shadow repos; standalone ~/.cline/data/{globalState.json,secrets.json,workspaceState.json}; project .clinerules/.clineignore",
+      "confidence": "third-party",
+      "source": "https://agent-safehouse.dev/docs/agent-investigations/cline"
+    },
+    "schema_keys": {
+      "value": "ui_messages.json has api_req_started entries with usage; full schema unknown",
+      "confidence": "third-party",
+      "source": "https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/cline.md"
+    },
+    "api_domains": {
+      "value": [
+        "app.cline.bot",
+        "api.cline.bot",
+        "api.anthropic.com",
+        "api.openai.com",
+        "openrouter.ai",
+        "generativelanguage.googleapis.com",
+        "api.mistral.ai",
+        "api.deepseek.com",
+        "localhost:11434",
+        "localhost:1234",
+        "PostHog"
+      ],
+      "confidence": "third-party",
+      "source": "https://agent-safehouse.dev/docs/agent-investigations/cline"
+    },
+    "process_names": {
+      "value": [
+        "rg",
+        "git",
+        "claude",
+        "chrome (--remote-debugging-port=9222)",
+        "bash/zsh/powershell/cmd"
+      ],
+      "confidence": "third-party",
+      "source": "https://agent-safehouse.dev/docs/agent-investigations/cline"
+    },
+    "auth_storage": {
+      "value": "VS Code SecretStorage (Keychain on macOS); standalone ~/.cline/data/secrets.json plaintext; ~/.qwen/oauth_creds.json; vscode://saoudrizwan.claude-dev/ OAuth URI",
+      "confidence": "third-party",
+      "source": "https://agent-safehouse.dev/docs/agent-investigations/cline"
+    },
+    "retention": {
+      "value": "Persist until user deletes; Cline 4.x reported to migrate legacy globalStorage into ~/.cline/data",
+      "confidence": "third-party",
+      "source": "https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/cline.md"
+    },
+    "gaps": [
+      "Windows globalStorage path not documented explicitly"
+    ]
+  },
+  {
+    "name": "Roo Code",
+    "vendor": "Roo Code Inc. (rooveterinaryinc.roo-cline)",
+    "category": "vscode-extension",
+    "forks_renames": {
+      "value": "Fork of Cline (formerly Roo Cline)",
+      "confidence": "unverified",
+      "source": null
+    },
+    "paths": {
+      "windows": {
+        "value": [
+          "%APPDATA%\\Code\\User\\globalStorage\\rooveterinaryinc.roo-cline\\tasks\\"
+        ],
+        "confidence": "third-party single source + inferred base",
+        "source": "https://glama.ai/mcp/servers/@vltansky/cursor-conversations-mcp/blob/e15492520e0e7518a8cac8a884453ce2528d9b4e/src/database/cline-reader.ts"
+      },
+      "macos": {
+        "value": [
+          "~/Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks/"
+        ],
+        "confidence": "third-party",
+        "source": "https://glama.ai/mcp/servers/@vltansky/cursor-conversations-mcp/blob/e15492520e0e7518a8cac8a884453ce2528d9b4e/src/database/cline-reader.ts"
+      },
+      "linux": {
+        "value": [
+          "~/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks/"
+        ],
+        "confidence": "inferred-from-vscode-layout",
+        "source": null
+      }
+    },
+    "storage_format": {
+      "value": "Cline-style tasks/<id>/{ui_messages.json,api_conversation_history.json,task_metadata.json}",
+      "confidence": "third-party",
+      "source": "https://glama.ai/mcp/servers/@vltansky/cursor-conversations-mcp/blob/e15492520e0e7518a8cac8a884453ce2528d9b4e/src/database/cline-reader.ts"
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "gaps": [
+      "Single-source"
+    ]
+  },
+  {
+    "name": "Kilo Code",
+    "vendor": "Kilo Code",
+    "category": "vscode-extension",
+    "forks_renames": {
+      "value": "Fork of Roo Code/Cline",
+      "confidence": "unverified",
+      "source": null
+    },
+    "paths": {
+      "windows": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      }
+    },
+    "storage_format": {
+      "value": "A third-party tool has a Kilo provider sharing Cline globalStorage helper; extension folder unverified",
+      "confidence": "third-party",
+      "source": "https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/cline.md"
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "gaps": [
+      "Paths unknown; agent-safehouse lists a Kilo Code report (not fetched): https://agent-safehouse.dev/docs/agent-investigations/"
+    ]
+  },
+  {
+    "name": "Kiro",
+    "vendor": "Amazon (AWS)",
+    "category": "vscode-fork-ide",
+    "forks_renames": {
+      "value": "Code OSS based; Kiro CLI",
+      "confidence": "official-doc",
+      "source": "https://kiro.dev/docs/configuration/"
+    },
+    "paths": {
+      "windows": {
+        "value": [
+          "%APPDATA%\\Kiro\\User\\globalStorage\\kiro.kiroagent\\",
+          "%USERPROFILE%\\.kiro\\"
+        ],
+        "confidence": "third-party",
+        "source": "https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/kiro.md"
+      },
+      "macos": {
+        "value": [
+          "~/Library/Application Support/Kiro/User/globalStorage/kiro.kiroagent",
+          "~/.kiro/",
+          "~/.kiro/sessions/cli/"
+        ],
+        "confidence": "third-party; ~/.kiro and KIRO_HOME override are official-doc",
+        "source": "https://kiro.dev/docs/configuration/"
+      },
+      "linux": {
+        "value": [
+          "~/.config/Kiro/User/globalStorage/kiro.kiroagent",
+          "~/.kiro/",
+          "~/.kiro-server/data/User/globalStorage/kiro.kiroagent (remote)"
+        ],
+        "confidence": "third-party",
+        "source": "https://raw.githubusercontent.com/getagentseal/codeburn/main/docs/providers/kiro.md"
+      }
+    },
+    "storage_format": {
+      "value": "kiro.kiroagent: hash-named workspace dirs; legacy .chat files; newer extensionless execution files; workspace-sessions/<id>.json. CLI: local DB under ~/.kiro/ plus sessions/cli metadata .json. Artifacts per session in global app storage, not project .kiro.",
+      "confidence": "third-party; CLI and artifact statements official-doc",
+      "source": "https://kiro.dev/docs/cli/chat/session-management/"
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "gaps": [
+      "Execution file schema unknown"
+    ],
+    "local_verification": {
+      "verified_on": "Windows 11, Kiro IDE (VS Code fork) - this PC had only a short-lived install (2026-08-29), so sizes are tiny",
+      "confidence": "verified-on-test-pc",
+      "source": "schema/structure probe on this PC, 2026-10-27 (names, counts, column/key names only; message bodies, URLs, titles and credentials not read)",
+      "layout": {
+        "~/.kiro/sessions/<workspaceHash>/sess_<uuid>/session.json": "one JSON per session",
+        "~/.kiro/session-index/<workspaceHash>.jsonl": "keys: at(int), op(str), sessionPath(str) - append-only index of session create/update events",
+        "~/.kiro/logs/<timestamp>/{kiro.log,mcp.log,powers.log}": "per launch logs",
+        "~/.kiro/{extensions,powers,skills,steering}": "extensions.json, powers registries, skills, steering rules (empty here)",
+        "~/.kiro/.trust-migration.json, argv.json": "settings/migration markers",
+        "%APPDATA%\\Kiro\\User\\globalStorage\\kiro.kiroagent\\<hash>/<hash>/ and default/": "agent workspace stores (empty here)",
+        "%APPDATA%\\Kiro\\User\\globalStorage\\state.vscdb (+.backup)": "ItemTable 51 rows; AI-related keys: chat.ChatSessionStore.index, kiro.kiroAgent, kiroAgent.onboarding.*",
+        "%APPDATA%\\Kiro\\User\\workspaceStorage\\<id>\\{state.vscdb,workspace.json}": "per-workspace state",
+        "%APPDATA%\\Kiro\\User\\chatLanguageModels.json": "model config (2 bytes here)"
+      },
+      "session_json_keys": [
+        "id",
+        "title",
+        "createdAt",
+        "lastModifiedAt",
+        "modelId",
+        "agentMode",
+        "autopilot",
+        "rootPaths[]",
+        "workspacePaths[]",
+        "specWorkflow",
+        "specPlanEnabled",
+        "specSkipClarificationEnabled",
+        "workflowsEnabled",
+        "semanticReviewEnabled",
+        "ftaEnabled",
+        "disableAutoCompaction",
+        "dataModelVersion",
+        "schemaVersion",
+        "_meta.kiro.{policyPreset[],shellType}"
+      ],
+      "forensic_notes": [
+        "session.json holds session metadata (model, mode, workspace paths, timestamps); on this PC the sessions folder contained only session.json, so message bodies were not present - another storage location may hold them (not found)",
+        "kiro.log, mcp.log are per-launch and small; rotated into timestamped folders"
+      ]
+    }
+  },
+  {
+    "name": "Amazon Q Developer (IDE extensions)",
+    "vendor": "Amazon (AWS)",
+    "category": "ide-extension",
+    "forks_renames": {
+      "value": "Successor direction: Kiro / Kiro CLI",
+      "confidence": "unverified",
+      "source": null
+    },
+    "paths": {
+      "windows": {
+        "value": [
+          "%USERPROFILE%\\.aws\\amazonq\\history\\chat-history-<hash>.json",
+          "%TEMP%\\qlog\\ (CLI logs)"
+        ],
+        "confidence": "third-party (history); official-doc (qlog)",
+        "source": "https://dev.classmethod.jp/articles/q-dev-cv-history/"
+      },
+      "macos": {
+        "value": [
+          "~/.aws/amazonq/history/chat-history-<hash>.json",
+          "$TMPDIR/qlog/"
+        ],
+        "confidence": "third-party; official-doc",
+        "source": "https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/troubleshooting-q-logs.html"
+      },
+      "linux": {
+        "value": [
+          "~/.aws/amazonq/history/chat-history-<hash>.json",
+          "$XDG_RUNTIME_DIR/qlog/"
+        ],
+        "confidence": "third-party; official-doc",
+        "source": "https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/troubleshooting-q-logs.html"
+      }
+    },
+    "storage_format": {
+      "value": "Per-workspace local JSON in home dir; each chat tab a conversation; exportable to Markdown/HTML; CLI logs qchat.log, chat.log",
+      "confidence": "official-doc (local/per-workspace); filename pattern third-party",
+      "source": "https://docs.aws.eu/amazonq/latest/qdeveloper-ug/ide-chat-conversation.html"
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "Local until deleted via UI",
+      "confidence": "official-doc",
+      "source": "https://docs.aws.eu/amazonq/latest/qdeveloper-ug/ide-chat-conversation.html"
+    },
+    "gaps": [
+      "Schema, domains, token store unknown"
+    ]
+  },
+  {
+    "name": "Zed AI (Agent Panel)",
+    "vendor": "Zed Industries",
+    "category": "native-editor",
+    "forks_renames": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "paths": {
+      "windows": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "macos": {
+        "value": "threads/threads.db under Zed Application Support (snippet truncated)",
+        "confidence": "unverified",
+        "source": "https://github.com/zed-industries/zed/discussions/48083"
+      },
+      "linux": {
+        "value": [
+          "~/.local/share/zed/db (agent threads SQLite)",
+          "~/.local/share/zed/conversations (text threads JSON)"
+        ],
+        "confidence": "third-party (single issue)",
+        "source": "https://github.com/zed-industries/zed/issues/46874"
+      }
+    },
+    "storage_format": {
+      "value": "Agent threads SQLite; text threads JSON files",
+      "confidence": "third-party",
+      "source": "https://github.com/zed-industries/zed/issues/46874"
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "gaps": [
+      "Windows unknown; macOS unverified"
+    ]
+  },
+  {
+    "name": "Continue",
+    "vendor": "Continue Dev, Inc.",
+    "category": "vscode-jetbrains-extension",
+    "forks_renames": {
+      "value": "CLI 'cn'",
+      "confidence": "official-doc",
+      "source": "https://docs.continue.dev/cli/configuration"
+    },
+    "paths": {
+      "windows": {
+        "value": [
+          "%USERPROFILE%\\.continue\\config.yaml",
+          "%USERPROFILE%\\.continue\\dev_data\\"
+        ],
+        "confidence": "official-doc",
+        "source": "https://docs.continue.dev/customize/deep-dives/development-data"
+      },
+      "macos": {
+        "value": [
+          "~/.continue/config.yaml",
+          "~/.continue/dev_data/"
+        ],
+        "confidence": "official-doc",
+        "source": "https://docs.continue.dev/customize/deep-dives/development-data"
+      },
+      "linux": {
+        "value": [
+          "~/.continue/config.yaml",
+          "~/.continue/dev_data/"
+        ],
+        "confidence": "official-doc",
+        "source": "https://docs.continue.dev/customize/deep-dives/development-data"
+      }
+    },
+    "storage_format": {
+      "value": "config.yaml (legacy config.json); dev_data development data default location",
+      "confidence": "official-doc",
+      "source": "https://docs.continue.dev/customize/deep-dives/development-data"
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "gaps": [
+      "Sessions/index location unknown"
+    ]
+  },
+  {
+    "name": "Trae",
+    "vendor": "ByteDance",
+    "category": "vscode-fork-ide",
+    "paths": {
+      "windows": {
+        "value": [
+          "%APPDATA%\\Trae\\User\\workspaceStorage\\"
+        ],
+        "confidence": "third-party",
+        "source": "https://adg.csdn.net/6a3ce52a10ee7a33f2822cf3.html"
+      },
+      "macos": {
+        "value": [
+          "~/Library/Application Support/Trae/User/workspaceStorage/"
+        ],
+        "confidence": "third-party",
+        "source": "https://adg.csdn.net/6a3ce52a10ee7a33f2822cf3.html"
+      },
+      "linux": {
+        "value": [
+          "~/.config/Trae/User/workspaceStorage/"
+        ],
+        "confidence": "third-party",
+        "source": "https://adg.csdn.net/6a3ce52a10ee7a33f2822cf3.html"
+      }
+    },
+    "storage_format": {
+      "value": "SQLite state.vscdb; global (no-project) chat path unknown",
+      "confidence": "third-party",
+      "source": "https://adg.csdn.net/6a3ce52a10ee7a33f2822cf3.html"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "forks_renames": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "gaps": [
+      "Keys, domains, auth unknown; ~/.trae unconfirmed"
+    ]
+  },
+  {
+    "name": "Antigravity",
+    "vendor": "Google",
+    "category": "vscode-fork-ide",
+    "forks_renames": {
+      "value": "Agentic IDE, VS Code-style, Gemini models",
+      "confidence": "third-party",
+      "source": "https://hackernoon.com/google-unveils-antigravity-ide-an-ai-driven-coding-environment-powered-by-gemini-3"
+    },
+    "paths": {
+      "windows": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      }
+    },
+    "storage_format": {
+      "value": "A Google forum thread mentions conversation data in a 'brain' folder; path not confirmed; generates Markdown artifacts",
+      "confidence": "unverified",
+      "source": "https://discuss.ai.google.dev/t/conversation-history-not-showing-in-ui-despite-data-existing-in-brain-folder/170803"
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "gaps": [
+      "Paths unverified"
+    ],
+    "local_verification": {
+      "verified_on": "Windows 11, Antigravity IDE (VS Code fork) + agent data under ~/.gemini/antigravity",
+      "confidence": "verified-on-test-pc",
+      "source": "schema/structure probe on this PC, 2026-10-27 (names, counts, column/key names only; message bodies, URLs, titles and credentials not read)",
+      "agent_root": "~/.gemini/antigravity (NOT ~/.antigravity). ~/.gemini/GEMINI.md and ~/.gemini/antigravity-browser-profile also exist. A stray '~/..gemini/antigravity' (double dot) folder was seen as well",
+      "layout": {
+        "conversations/": "one SQLite file per conversation: <uuid>.db (+ -wal/-shm for active ones). 508 dbs, 2.9GB on this PC; size min 48KB / median 1.6MB / max 82MB",
+        "conversation_summaries.db": "34MB index of all conversations incl. FTS5 full-text index (title, user_body, agent_body) - may allow search of conversation text even when a per-conversation db is missing",
+        "brain/<uuid>/": "per-conversation workspace: .system_generated/{logs,messages,steps,subagents}, .user_uploaded/, scratch/, plus generated *.md artifacts each with a *.md.metadata.json; 507 conversation dirs + tempmediaStorage",
+        "scratch/": "agent working files (py/png/txt/csv/json/html/xlsx/md; 1,794 files, 692MB) - contains work products, treat as user data",
+        "mcp/<server>/": "cache of MCP tool schemas (<tool>.json) per configured MCP server -> inventory of MCP servers/tools the agent was given (includes older/renamed copies)",
+        "annotations/*.pbtxt": "262 small protobuf-text files named by conversation uuid",
+        "implicit/*.pb": "5 protobuf files",
+        "code_tracker/{active,history}": "snapshots of edited files (active/no_repo had 39 files)",
+        "cache/marketplaces/, builtin/skills/, bin/": "marketplace cache, built-in skills, helper binaries",
+        "antigravity_state.pbtxt, agyhub_summaries_proto.pb, user_settings.pb, installation_id": "state/settings/install id (contents not read)",
+        "crashes/*.log": "crash logs"
+      },
+      "conversation_db_schema": {
+        "steps": [
+          "idx",
+          "step_type",
+          "status",
+          "has_subtrajectory",
+          "metadata(BLOB)",
+          "error_details(BLOB)",
+          "permissions(BLOB)",
+          "task_details(BLOB)",
+          "render_info(BLOB)",
+          "step_payload(BLOB)",
+          "step_format"
+        ],
+        "gen_metadata": [
+          "idx",
+          "data(BLOB)",
+          "size"
+        ],
+        "executor_metadata": [
+          "idx",
+          "data(BLOB)"
+        ],
+        "trajectory_meta": [
+          "trajectory_id",
+          "cascade_id",
+          "trajectory_type",
+          "source"
+        ],
+        "trajectory_metadata_blob": [
+          "id",
+          "data(BLOB)"
+        ],
+        "parent_references / battle_mode_infos": [
+          "idx",
+          "data(BLOB)"
+        ],
+        "sample_counts": {
+          "steps": 260,
+          "gen_metadata": 86
+        },
+        "note": "payloads are BLOBs (probably protobuf); decoding was not attempted"
+      },
+      "summaries_db_schema": {
+        "conversation_summaries": [
+          "conversation_id",
+          "title",
+          "preview",
+          "step_count",
+          "last_modified_time",
+          "workspace_uris",
+          "status",
+          "source",
+          "project_id",
+          "agent_name",
+          "parent_conversation_id",
+          "nesting_depth",
+          "battle_id",
+          "winning_conversation_id",
+          "not_fully_idle",
+          "killed",
+          "last_user_input_time",
+          "last_user_input_step_index",
+          "app_data_dir",
+          "raw_summary(BLOB)",
+          "group_id"
+        ],
+        "rows_seen": 609,
+        "conversations_fts": [
+          "conversation_id",
+          "chunk_index",
+          "chunk_first_step",
+          "chunk_last_step",
+          "last_modified_time",
+          "step_count",
+          "last_step_created_at",
+          "archived",
+          "user_step_byte_offsets",
+          "agent_step_byte_offsets",
+          "title",
+          "workspace",
+          "project",
+          "user_body",
+          "agent_body"
+        ],
+        "fts_rows": 1126
+      },
+      "plain_text_transcripts": {
+        "brain/<uuid>/.system_generated/logs/transcript.jsonl and transcript_full.jsonl": "keys: content, created_at, source, status, step_index, type, tool_calls[].{name,args.*}, truncated_fields, token counters (input/output/cache_read)",
+        "brain/<uuid>/.system_generated/messages/<uuid>.json": "keys: id, sender, recipient, priority, content, timestamp, renderDetails.messageTitle, sourceMetadata.tool.{conversationId,stepIndex,toolCall.{id,name,argumentsJson}} (agent-to-agent messages)",
+        "brain/<uuid>/.system_generated/steps/<n>/": "per-step directories",
+        "chunks/": "log chunk directory (not examined)"
+      },
+      "ide_state": {
+        "%APPDATA%\\Antigravity\\User\\globalStorage\\state.vscdb": "0.4MB, ItemTable only (241 rows). AI-related key names: antigravity.notification.<uuid> (many), antigravity.profileUrl, antigravityAuthStatus (sensitive), antigravityAnalytics.* , antigravityChangelog/*, antigravity.agentViewContainerId.state.hidden. Conversations are NOT here"
+      },
+      "forensic_notes": [
+        "Highest-value sources: conversations/<uuid>.db (steps) and conversation_summaries.db (index + FTS text); brain/<uuid>/.system_generated/logs/transcript*.jsonl is plain text and much easier to parse",
+        "Evidence is spread over three roots: ~/.gemini/antigravity (agent), %APPDATA%\\Antigravity (IDE), ~/.antigravity(-ide) (extensions/argv)",
+        "~/.gemini also holds an OAuth token file and an auth status key: existence/mtime only, never values",
+        "Parent/child relations: conversation_summaries.parent_conversation_id and nesting_depth"
+      ]
+    },
+    "local_verification_extra": {
+      "source": "schema/structure probe on this PC, 2026-10-27 (names, counts, column/key names only; content, emails, account ids and credentials not recorded)",
+      "multiple_accounts_hint": "see claude-swap entry in harnesses.json: account-switching tools can hold several accounts on one PC"
+    }
+  },
+  {
+    "name": "JetBrains AI Assistant / Junie",
+    "vendor": "JetBrains",
+    "category": "jetbrains-plugin",
+    "forks_renames": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "paths": {
+      "windows": {
+        "value": "%APPDATA%\\JetBrains\\<Product><Ver>\\options\\ (inferred)",
+        "confidence": "inferred-from-vscode-layout",
+        "source": "https://intellij-support.jetbrains.com/hc/en-us/community/posts/18011283838482-AI-Losing-Chats"
+      },
+      "macos": {
+        "value": "~/Library/Application Support/JetBrains/<Product><Ver>/options/ (inferred)",
+        "confidence": "inferred-from-vscode-layout",
+        "source": "https://intellij-support.jetbrains.com/hc/en-us/community/posts/18011283838482-AI-Losing-Chats"
+      },
+      "linux": {
+        "value": "~/.config/JetBrains/<Product><Ver>/options/ (inferred)",
+        "confidence": "inferred-from-vscode-layout",
+        "source": "https://intellij-support.jetbrains.com/hc/en-us/community/posts/18011283838482-AI-Losing-Chats"
+      }
+    },
+    "storage_format": {
+      "value": "XML in IDE config dir, one file per project, component ChatSessionStateTemp (user report)",
+      "confidence": "unverified",
+      "source": "https://intellij-support.jetbrains.com/hc/en-us/community/posts/18011283838482-AI-Losing-Chats"
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "Server-side policy page only",
+      "confidence": "official-doc",
+      "source": "https://www.jetbrains.com/help/ai/data-retention.html"
+    },
+    "gaps": [
+      "Filename and Junie storage unknown"
+    ]
+  },
+  {
+    "name": "Claude Code (CLI + IDE extension)",
+    "vendor": "Anthropic",
+    "category": "agent-ide-extension",
+    "forks_renames": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "paths": {
+      "windows": {
+        "value": [
+          "%USERPROFILE%\\.claude\\projects\\<encoded-cwd>\\<uuid>.jsonl",
+          "%USERPROFILE%\\.claude.json"
+        ],
+        "confidence": "third-party",
+        "source": "https://pkg.go.dev/github.com/ahmojo/codex-claude-transfer"
+      },
+      "macos": {
+        "value": [
+          "~/.claude/projects/<encoded-cwd>/<uuid>.jsonl",
+          "~/.claude.json"
+        ],
+        "confidence": "third-party",
+        "source": "https://pkg.go.dev/github.com/ahmojo/codex-claude-transfer"
+      },
+      "linux": {
+        "value": [
+          "~/.claude/projects/<encoded-cwd>/<uuid>.jsonl",
+          "~/.claude.json"
+        ],
+        "confidence": "third-party",
+        "source": "https://pkg.go.dev/github.com/ahmojo/codex-claude-transfer"
+      }
+    },
+    "storage_format": {
+      "value": "JSONL transcripts; ~/.claude.json is config; ~/.claude/sessions/*.json read by a Raycast tool",
+      "confidence": "third-party",
+      "source": "https://www.raycast.com/leyang/vibelet-search"
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "gaps": [
+      "IDE lock files (~/.claude/ide) not verified"
+    ]
+  },
+  {
+    "name": "Codex (CLI + IDE extension)",
+    "vendor": "OpenAI",
+    "category": "agent-ide-extension",
+    "forks_renames": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "paths": {
+      "windows": {
+        "value": [
+          "%USERPROFILE%\\.codex\\sessions\\YYYY\\MM\\DD\\"
+        ],
+        "confidence": "third-party",
+        "source": "https://pkg.go.dev/github.com/ahmojo/codex-claude-transfer"
+      },
+      "macos": {
+        "value": [
+          "~/.codex/sessions/YYYY/MM/DD/"
+        ],
+        "confidence": "third-party",
+        "source": "https://pkg.go.dev/github.com/ahmojo/codex-claude-transfer"
+      },
+      "linux": {
+        "value": [
+          "~/.codex/sessions/YYYY/MM/DD/"
+        ],
+        "confidence": "third-party",
+        "source": "https://pkg.go.dev/github.com/ahmojo/codex-claude-transfer"
+      }
+    },
+    "storage_format": {
+      "value": "Rollout JSONL files; SQLite DB as rebuildable index",
+      "confidence": "third-party",
+      "source": "https://pkg.go.dev/github.com/ahmojo/codex-claude-transfer"
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "gaps": []
+  },
+  {
+    "name": "Tabnine",
+    "vendor": "Tabnine",
+    "category": "ide-extension",
+    "forks_renames": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "paths": {
+      "windows": {
+        "value": "~/.tabnine/ (CLI extensions under extensions/<name>/); rest unknown",
+        "confidence": "third-party",
+        "source": "https://docs.tabnine.com/main/getting-started/tabnine-cli/features/extensions"
+      },
+      "macos": {
+        "value": "~/.tabnine/ (CLI extensions under extensions/<name>/); rest unknown",
+        "confidence": "third-party",
+        "source": "https://docs.tabnine.com/main/getting-started/tabnine-cli/features/extensions"
+      },
+      "linux": {
+        "value": "~/.tabnine/ (CLI extensions under extensions/<name>/); rest unknown",
+        "confidence": "third-party",
+        "source": "https://docs.tabnine.com/main/getting-started/tabnine-cli/features/extensions"
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "gaps": [
+      "Mostly unknown"
+    ]
+  },
+  {
+    "name": "Augment Code",
+    "vendor": "Augment Computer",
+    "category": "ide-extension",
+    "forks_renames": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "paths": {
+      "windows": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "gaps": [
+      "Not verified in research; nothing recorded. Web tools keep state server-side (browser-side artifacts unverified)."
+    ]
+  },
+  {
+    "name": "Void",
+    "vendor": "Void Editor",
+    "category": "vscode-fork-ide",
+    "forks_renames": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "paths": {
+      "windows": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "gaps": [
+      "Not verified in research; nothing recorded. Web tools keep state server-side (browser-side artifacts unverified)."
+    ]
+  },
+  {
+    "name": "Codeium extension (legacy)",
+    "vendor": "Codeium",
+    "category": "ide-extension",
+    "forks_renames": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "paths": {
+      "windows": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "gaps": [
+      "Not verified in research; nothing recorded. Web tools keep state server-side (browser-side artifacts unverified)."
+    ]
+  },
+  {
+    "name": "Replit",
+    "vendor": "Replit",
+    "category": "web-ide",
+    "forks_renames": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "paths": {
+      "windows": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "gaps": [
+      "Not verified in research; nothing recorded. Web tools keep state server-side (browser-side artifacts unverified)."
+    ]
+  },
+  {
+    "name": "Bolt (bolt.new / bolt.diy)",
+    "vendor": "StackBlitz",
+    "category": "web-ide",
+    "forks_renames": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "paths": {
+      "windows": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "gaps": [
+      "Not verified in research; nothing recorded. Web tools keep state server-side (browser-side artifacts unverified)."
+    ]
+  },
+  {
+    "name": "Lovable",
+    "vendor": "Lovable",
+    "category": "web-ide",
+    "forks_renames": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "paths": {
+      "windows": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "gaps": [
+      "Not verified in research; nothing recorded. Web tools keep state server-side (browser-side artifacts unverified)."
+    ]
+  },
+  {
+    "name": "v0",
+    "vendor": "Vercel",
+    "category": "web-ide",
+    "forks_renames": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "paths": {
+      "windows": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "source": null
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "schema_keys": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "api_domains": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "auth_storage": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "retention": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "source": null
+    },
+    "gaps": [
+      "Not verified in research; nothing recorded. Web tools keep state server-side (browser-side artifacts unverified)."
+    ]
+  }
+]

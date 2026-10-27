@@ -211,7 +211,7 @@ describe("처리 stage (Q-IA-3)", () => {
       within(extra)
         .getAllByRole("link")
         .map((a) => a.textContent?.split("미실행")[0]),
-    ).toHaveLength(7);
+    ).toHaveLength(8);
 
     const card = await screen.findByTestId("analysis-card-carve");
     await waitFor(() => expect(card.className).toContain("is-selected"));
@@ -234,8 +234,8 @@ describe("처리 stage (Q-IA-3)", () => {
     );
     // Step ids read in Korean (files → 파일 목록).
     expect(screen.getByRole("table", { name: "처리 단계" }).textContent).toContain("파일 목록");
-    // Every analysis kind has its card.
-    expect(screen.getAllByTestId(/^analysis-card-/)).toHaveLength(7);
+    // Every analysis kind has its card (R7 P2: + 검색 색인(v2)).
+    expect(screen.getAllByTestId(/^analysis-card-/)).toHaveLength(8);
   });
 
   it("panel cards show state, last run and a run button; the plan table reads counts and notes (S8)", async () => {
@@ -398,5 +398,36 @@ describe("검토 / 보고 stages (Q-IA-5)", () => {
     expect(within(history).getAllByRole("row")).toHaveLength(2);
     expect(history.textContent).toContain("case-report.html");
     expect(screen.getByTestId("grid-stub")).toBeTruthy();
+  });
+});
+
+describe("R-11: 보고 page export buttons at the drawer width", () => {
+  const mediaMatches = (matches: boolean) =>
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: matches && query.includes("899.98"),
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      })),
+    );
+
+  it("below 900px (left panel = closed drawer) the page body carries the export buttons", () => {
+    mediaMatches(true);
+    setRoute(`#/case/${RUN}/report/outputs`);
+    renderWithClient(<ReportPage />);
+    const actions = screen.getByTestId("report-page-actions");
+    expect(within(actions).getByRole("button", { name: "보고서 내보내기…" })).toBeTruthy();
+    expect(within(actions).getByTestId("report-page-open-validation-package").textContent).toBe(
+      "검증 패키지 내보내기…",
+    );
+  });
+
+  it("at a wide layout the buttons stay in the left panel only (never twice)", () => {
+    mediaMatches(false);
+    setRoute(`#/case/${RUN}/report/outputs`);
+    renderWithClient(<ReportPage />);
+    expect(screen.queryByTestId("report-page-actions")).toBeNull();
   });
 });

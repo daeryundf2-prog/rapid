@@ -126,6 +126,7 @@ GROUP_CATALOG: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("eventlog", "이벤트 로그", ("eventlog",)),
     ("filesystem", "파일시스템·검색 색인", ("windows-filesystem", "windows-search-index")),
     ("web", "웹·브라우저", ("browser", "p2p")),
+    ("ai", "AI 사용 기록", ("ai-agent",)),
     (
         "messaging",
         "메신저·메일",
@@ -218,6 +219,7 @@ TASK_LABELS: dict[str, str] = {
     "windows-search-index": "Windows 검색 색인",
     "browser": "브라우저(캐시·WebCache 포함)",
     "p2p": "P2P·토렌트(eMule 포함)",
+    "ai-agent": "AI 사용 기록(도구·설치·자격 증명 존재·세션)",
     "email": "이메일(PST·ICS 포함)",
     "kakaotalk-windows": "카카오톡 (Windows)",
     "kakaotalk-macos": "카카오톡 (macOS)",

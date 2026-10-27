@@ -32,8 +32,11 @@ Query parameters (all optional, AND-ed with each other and with the listing's ot
 Row time (keep aligned with the console's row mapping): artifacts = the first *parseable* scalar
 of ``details`` among ``artifact_sort.TIME_KEYS`` (an unparseable value falls through to the next
 key); files = ``fs_modified_at``, else for an acquisition copy the NTFS ``$SI`` modified time of
-the joined row (none without the join; the ``/files`` route resolves it per row through
-``ntfs_time``), else ``modified_at``; timeline = ``timestamp``. A row without a parseable time
+the joined row (the ``/files`` route resolves it per row through ``ntfs_time``), else
+``modified_at`` -- also for an acquisition copy without an NTFS time (folder-input runs: the copy's
+own time, what the 수정 column and ``sort=mtime`` show); a files value that is missing,
+unparseable or a placeholder (1601-01-01 / 1970-01-01 / 1980-01-01 00:00 UTC) falls through to
+the next source; timeline = ``timestamp``. A row without a parseable time
 never passes a time condition, nor does a time the ``tz`` cannot represent (year 1 / 9999 edges).
 A row time without an offset (naive text) is read as UTC -- never in ``tz`` -- like the console's
 ``parseInstant``.
@@ -50,7 +53,11 @@ from collections import OrderedDict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
+from ...core.dedup import DEDUP_MODES
+from ...core.families import parse_ref
+from ...core.irregular import CATEGORIES as IRREGULAR_CATEGORIES
 from .artifact_sort import TIME_KEYS
 
 COLLECTIONS = ("artifacts", "files", "timeline")
@@ -266,13 +273,30 @@ def _scalar(value: object) -> bool:
 
 NtfsTime = Callable[[Mapping[str, object]], object]
 
+# Placeholder times that mean "no time" on a files row (R7 S1 re-review R-13): FILETIME 0
+# (1601-01-01), Unix epoch 0 and the DOS / ZIP epoch 1980-01-01T00:00:00 (UTC instants).
+PLACEHOLDER_MOMENTS: frozenset[dt.datetime] = frozenset(
+    dt.datetime(year, 1, 1, tzinfo=dt.timezone.utc) for year in (1601, 1970, 1980)
+)
+
+
+def files_moment(value: object) -> dt.datetime | None:
+    """A files-row time value -> aware datetime; None when missing, unparseable or a
+    :data:`PLACEHOLDER_MOMENTS` value (those count as no time for conditions and sorting)."""
+    if not _scalar(value):
+        return None
+    moment = parse_moment(value)
+    if moment is None or moment in PLACEHOLDER_MOMENTS:
+        return None
+    return moment
+
 
 def needs_ntfs_time(row: object) -> bool:
     """A files row whose time is the joined NTFS ``$SI`` modified time (acquisition copy, no join yet)."""
     return (
         isinstance(row, Mapping)
         and row.get("modified_at_origin") == "acquisition-copy"
-        and not _scalar(row.get("fs_modified_at"))
+        and files_moment(row.get("fs_modified_at")) is None
         and not isinstance(row.get("ntfs"), Mapping)
     )
 
@@ -290,18 +314,21 @@ def row_time(row: Mapping[str, object], collection: str, ntfs_time: NtfsTime | N
                     return moment
         return None
     if collection == "files":
-        fs_time = row.get("fs_modified_at")
-        if _scalar(fs_time):
-            return parse_moment(fs_time)
+        moment = files_moment(row.get("fs_modified_at"))
+        if moment is not None:
+            return moment
         if row.get("modified_at_origin") == "acquisition-copy":
             ntfs = row.get("ntfs")
             if isinstance(ntfs, Mapping):
                 value = ntfs.get("si_modified_at")
             else:
                 value = ntfs_time(row) if ntfs_time is not None else None
-            return parse_moment(value) if _scalar(value) else None
-        value = row.get("modified_at")
-        return parse_moment(value) if _scalar(value) else None
+            moment = files_moment(value)
+            if moment is not None:
+                return moment
+            # No NTFS $SI time (no join, or the entry has none): the copy's own time, as the
+            # 수정 cell and ``sort=mtime`` show it (R7 S1 re-review R-2).
+        return files_moment(row.get("modified_at"))
     value = row.get("timestamp")
     return parse_moment(value) if _scalar(value) else None
 
@@ -585,6 +612,85 @@ def in_hours(hour: int, window: tuple[int, int]) -> bool:
     return start <= hour < end if start < end else hour >= start or hour < end
 
 
+# --- row sets (R7 갈래 A) ---------------------------------------------------------------------
+
+DUP_LABELS = {"original": "원본", "duplicate": "중복", "any": "중복 있음"}
+# Items one ``family=`` listing may name (repeated parameter: the union of their families).
+MAX_FAMILY_REFS = 500
+
+
+@dataclass(frozen=True)
+class RowSetQuery:
+    """``family=`` / ``dup=`` (+ ``dup_mode=``) / ``irregular=`` of a listing (parsed, unresolved)."""
+
+    family: tuple[str, ...] | None = None
+    dup: str | None = None
+    dup_mode: str = "item"
+    irregular: frozenset[str] | None = None
+
+    @property
+    def active(self) -> bool:
+        return self.family is not None or self.dup is not None or self.irregular is not None
+
+    def cache_key(self) -> tuple[object, ...]:
+        return (self.family, self.dup, self.dup_mode, tuple(sorted(self.irregular)) if self.irregular is not None else None)
+
+    def describe(self) -> dict[str, object]:
+        out: dict[str, object] = {}
+        if self.family is not None:
+            out["family"] = list(self.family)
+        if self.dup is not None:
+            out["dup"] = self.dup
+            out["dup_mode"] = self.dup_mode
+        if self.irregular is not None:
+            out["irregular"] = sorted(self.irregular)
+        return out
+
+
+def parse_row_sets(
+    *, family: Sequence[str] = (), dup: str | None = None, dup_mode: str | None = None, irregular: Sequence[str] = ()
+) -> RowSetQuery | None:
+    """Korean ``ValueError`` for a bad value; ``None`` when none is given."""
+    refs = [text.strip() for text in family if isinstance(text, str) and text.strip()]
+    if len(refs) > MAX_FAMILY_REFS:
+        raise ValueError(f"family 값은 {MAX_FAMILY_REFS}개까지 쓸 수 있습니다")
+    for text in refs:
+        if parse_ref(text) is None or text.startswith("source::"):
+            raise ValueError("family 값은 항목 참조여야 합니다(예: artifacts:email:/artifacts/3, files::/candidates/12)")
+    family_ref = tuple(dict.fromkeys(refs)) or None
+    dup_value: str | None = None
+    if dup is not None and dup.strip():
+        dup_value = dup.strip().lower()
+        if dup_value not in DUP_LABELS:
+            raise ValueError("dup 값은 original(원본)·duplicate(중복)·any(중복 있음) 중 하나여야 합니다")
+    mode = (dup_mode or "").strip().lower() or "item"
+    if mode not in DEDUP_MODES:
+        raise ValueError("dup_mode 값은 item(항목별)·family(계열별)·custodian(보관자 순위별) 중 하나여야 합니다")
+    if dup_mode and dup_mode.strip() and dup_value is None:
+        raise ValueError("dup_mode는 dup 조건과 함께 써야 합니다")
+    parts = [part.strip() for value in irregular for part in str(value).split(",") if part.strip()]
+    categories: frozenset[str] | None = None
+    if parts:
+        unknown = [part for part in parts if part not in IRREGULAR_CATEGORIES]
+        if unknown:
+            raise ValueError(f"irregular 값 '{unknown[0][:32]}'을(를) 알 수 없습니다 — {', '.join(IRREGULAR_CATEGORIES)} 중에서 고르세요")
+        categories = frozenset(parts)
+    query = RowSetQuery(family=family_ref, dup=dup_value, dup_mode=mode, irregular=categories)
+    return query if query.active else None
+
+
+class ResolvedRowSets(Protocol):
+    """Row sets of a :class:`RowSetQuery` resolved against a run (``families.RowSets``)."""
+
+    def artifacts(self, kind: str) -> frozenset[int]: ...
+
+    def files(self, lane: str) -> frozenset[int]: ...
+
+    def timeline_event(self, event: Mapping[str, object]) -> bool: ...
+
+    def cache_key(self) -> tuple[object, ...]: ...
+
+
 # --- conditions -------------------------------------------------------------------------------
 
 
@@ -602,6 +708,10 @@ class RowConditions:
     partial: bool = False
     content: frozenset[str] | None = None
     geo: tuple[float, float, float, float] | None = None
+    # R7 갈래 A: ``family=`` / ``dup=`` / ``irregular=`` (parsed) and their resolved row sets (the
+    # route resolves them against the run's derivation: ``families.resolve_row_sets``).
+    row_sets: RowSetQuery | None = None
+    resolved: ResolvedRowSets | None = None
 
     @property
     def clock(self) -> bool:
@@ -648,6 +758,10 @@ class RowConditions:
                 return False
             if not in_geo_box(point, self.geo):
                 return False
+        # Artifact and files rows are restricted at their source (record indices); a timeline
+        # event passes when its source row does.
+        if self.resolved is not None and collection == "timeline" and not self.resolved.timeline_event(row):
+            return False
         return True
 
     def predicate(self, collection: str, ntfs_time: NtfsTime | None = None) -> Callable[[Mapping[str, object]], bool]:
@@ -665,6 +779,8 @@ class RowConditions:
             self.partial,
             tuple(sorted(self.content)) if self.content is not None else None,
             self.geo,
+            self.row_sets.cache_key() if self.row_sets is not None else None,
+            self.resolved.cache_key() if self.resolved is not None else None,
         )
 
     def describe(self) -> dict[str, object]:
@@ -688,6 +804,8 @@ class RowConditions:
             out["content"] = sorted(self.content)
         if self.geo is not None:
             out["geo"] = list(self.geo)
+        if self.row_sets is not None:
+            out.update(self.row_sets.describe())
         return out
 
 
@@ -702,6 +820,10 @@ def parse_row_conditions(
     partial: bool = False,
     content: Sequence[str] = (),
     geo: str | None = None,
+    family: Sequence[str] = (),
+    dup: str | None = None,
+    dup_mode: str | None = None,
+    irregular: Sequence[str] = (),
 ) -> RowConditions | None:
     """Parse the query parameters (module doc); ``None`` when no condition is given."""
     zone, label = parse_tz(tz)
@@ -727,9 +849,14 @@ def parse_row_conditions(
         partial=bool(partial),
         content=parse_content(content),
         geo=parse_geo(geo),
+        row_sets=parse_row_sets(family=family, dup=dup, dup_mode=dup_mode, irregular=irregular),
     )
     active = (
-        conditions.uses_time or conditions.partial or conditions.content is not None or conditions.geo is not None
+        conditions.uses_time
+        or conditions.partial
+        or conditions.content is not None
+        or conditions.geo is not None
+        or conditions.row_sets is not None
     )
     return conditions if active else None
 

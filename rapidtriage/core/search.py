@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import contextvars
 import datetime as dt
 import hashlib
 import json
 import re
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -17,6 +19,13 @@ from .image_io import imread_unicode_safe
 from .json_stream import JsonStreamError, iter_array_items
 from .search_backend import build_search_backend_contract
 from .search_budget import SearchBudget, SourceScan, resolve_scan_budget_seconds
+from .search_hits import finalize_search_hit, scan_root_of
+from .search_index.regex_guard import (
+    GuardedRegex,
+    RegexRejected,
+    RowTimeout,
+    analyze_regex,
+)
 from .textnorm import normalize_nfc, normalize_search_text
 
 IMAGE_EXTS = set(CATEGORY_RULES["images"]["extensions"])
@@ -55,8 +64,100 @@ ADVANCED_SEARCH_REPORT_GRADE_BLOCKERS = [
 ]
 
 
+SEARCH_METADATA_FULL = "full"
+SEARCH_METADATA_COMPACT = "compact"
+# Source-record fields a compact hit keeps (grid: time, type, hashes; viewer: path/size).
+COMPACT_METADATA_KEYS = (
+    "timestamp",
+    "timestamp_kind",
+    "event_type",
+    "artifact_type",
+    "provider",
+    "name",
+    "extension",
+    "size",
+    "modified_at",
+    "categories",
+    "is_deleted",
+    "known_good_status",
+    "sha256",
+    "sha1",
+    "md5",
+    "hashes",
+    "source_hashes",
+)
+# Response blocks only ``detail=True`` builds (audit/report-grade profiles, per-hit manifests).
+SEARCH_DETAIL_KEYS = (
+    "advanced_search_profile",
+    "advanced_search_query_hit_manifest",
+    "advanced_search_query_hit_manifest_hash",
+    "advanced_search_report_grade_validation_plan",
+    "advanced_search_report_grade_validation_plan_hash",
+    "search_backend_contract",
+    "search_backend_contract_hash",
+    "workbench_search_profile",
+    "search_report_grade_assessment",
+    "core_accuracy_gates",
+    "commercial_uplift_evidence",
+    "matches[].source_verification_profile",
+    "matches[].advanced_search_hit_manifest",
+    "matches[].source_viewer_action_profile",
+)
+
+
 class SearchError(ValueError):
     """Raised when unified search cannot load a completed run."""
+
+
+V1_REGEX_FLAGS = re.IGNORECASE | re.MULTILINE
+# Rows whose regex check ran past the guard's per-row time limit in this search (``regex`` mode).
+_REGEX_UNCHECKED: contextvars.ContextVar[list[int] | None] = contextvars.ContextVar("search_regex_unchecked", default=None)
+
+
+def record_text(record: object) -> str:
+    """The text a v1 keyword is matched against: the record's values, one per line (R7 S2 review #15).
+
+    The JSON serialization matched its own syntax -- ``"`` and ``_`` (key names) hit every row,
+    ``quote"inside`` / ``back\\slash`` / a tab never matched their escaped forms -- so the scan
+    reads the string and number values only (keys, ``null`` and booleans are not evidence text).
+    """
+    parts: list[str] = []
+    stack: list[object] = [record]
+    while stack:
+        value = stack.pop()
+        if isinstance(value, str):
+            if value:
+                parts.append(value)
+        elif isinstance(value, Mapping):
+            stack.extend(reversed(list(value.values())))
+        elif isinstance(value, (list, tuple)):
+            stack.extend(reversed(value))
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            parts.append(str(value))
+    return "\n".join(parts)
+
+
+def regex_guard_problem(pattern: str) -> str | None:
+    """Korean reason why ``pattern`` cannot run as a v1 regex keyword, or ``None`` (R7 S2 review #7).
+
+    The v2 regex guard's static check (``search_index.regex_guard``): nested or overlapping
+    unbounded quantifiers (``Live(a+)+$``), back references, lookarounds with quantifiers and
+    patterns over 512 characters backtrack catastrophically and are refused. A pattern that does
+    not compile is not refused here: it matches nothing and the query validation reports it.
+    """
+    try:
+        analyze_regex(normalize_nfc(pattern), ignorecase=True)
+    except RegexRejected as exc:
+        return f"정규식 '{_shown(pattern)}': {exc.reason}"
+    except re.error:
+        return None
+    except (RecursionError, OverflowError):
+        return f"정규식 '{_shown(pattern)}': 정규식이 너무 복잡합니다(구조가 너무 깊습니다)"
+    return None
+
+
+def _shown(pattern: str) -> str:
+    return pattern if len(pattern) <= 80 else pattern[:77] + "..."
 
 
 def stable_search_sha256(payload: object) -> str:
@@ -80,6 +181,9 @@ def run_unified_search(
     use_case_db: bool = True,
     case_db_path: Path | None = None,
     scan_budget_seconds: float | None = None,
+    offset: int = 0,
+    detail: bool = True,
+    metadata: str = SEARCH_METADATA_FULL,
 ) -> dict[str, object]:
     """Search a completed run's outputs.
 
@@ -89,12 +193,34 @@ def run_unified_search(
     wall-clock budget (``scan_budget_seconds``, default
     ``RAPIDTRIAGE_SEARCH_SCAN_BUDGET_SECONDS`` or 20 s); a budget stop
     returns the matches found so far with ``truncated: true``.
+
+    Paging: hits come in a stable order (source order, then output/rowid
+    order), so ``offset`` skips the first visible hits and ``pagination``
+    reports ``has_more`` (one lookahead hit) and ``total`` (known only when
+    the search ran to the end). ``detail=False`` leaves out the per-hit
+    verification/manifest profiles and the top-level ``advanced_*``,
+    accuracy-gate and contract blocks (``detail_omitted`` names them);
+    ``metadata="compact"`` keeps only :data:`COMPACT_METADATA_KEYS` of each
+    hit's source record.
     """
+    request_started = time.monotonic()
+    offset = max(0, int(offset or 0))
+    page_limit = limit
+    # One lookahead hit tells whether another page exists.
+    limit = (offset + page_limit + 1) if page_limit else 0
     summary = load_run_summary(run_summary)
     normalized = normalize_keywords(keywords, search_mode=search_mode)
     if not normalized:
         raise SearchError("at least one keyword is required")
     normalized_search_mode = normalize_search_mode(search_mode)
+    if normalized_search_mode == "regex":
+        for pattern in normalized:
+            problem = regex_guard_problem(pattern)
+            if problem:
+                raise SearchError(problem)
+    # Counts rows whose regex check ran past the per-row limit (this request's context only).
+    regex_unchecked: list[int] = [0]
+    _REGEX_UNCHECKED.set(regex_unchecked)
     normalized_fuzzy_distance = max(0, min(int(fuzzy_distance or 0), 2))
     normalized_proximity_window = max(0, min(int(proximity_window or 0), 100))
     normalized_sources = {item.strip().lower() for item in (sources or []) if item.strip()}
@@ -110,7 +236,7 @@ def run_unified_search(
         "fuzzy_distance": normalized_fuzzy_distance,
         "proximity_window": normalized_proximity_window,
     }
-    budget = SearchBudget(resolve_scan_budget_seconds(scan_budget_seconds))
+    budget = SearchBudget(resolve_scan_budget_seconds(scan_budget_seconds), started=request_started)
     backend = SEARCH_BACKEND_SCAN
     index_error = ""
     index_path = None
@@ -148,7 +274,8 @@ def run_unified_search(
             )
         except CaseIndexError as exc:
             index_error = str(exc)
-            budget = SearchBudget(budget.seconds)
+            # The scan fallback keeps the request's deadline (the budget covers the whole request).
+            budget = SearchBudget(budget.seconds, started=request_started)
     if fts_result is not None:
         backend = SEARCH_BACKEND_FTS
         matches, document_errors, ocr_errors = fts_result
@@ -175,15 +302,17 @@ def run_unified_search(
         hide_known_good=hide_known_good,
     )
 
-    if limit:
-        matches = matches[:limit]
-    matches = enrich_unified_search_matches(matches, search_options=search_options)
-    query_hit_manifest = build_advanced_search_query_hit_manifest(
-        matches=matches,
-        keywords=normalized,
-        options=search_options,
-        limit=limit,
-    )
+    found = len(matches)
+    # A budget stop ends the result at a point of the source order: what was found is a prefix of
+    # the full result, and there is no next page to ask for (the next search would stop again).
+    has_more = bool(page_limit) and found > offset + page_limit and not budget.truncated
+    matches = matches[offset : offset + page_limit] if page_limit else matches[offset:]
+    limit = page_limit
+    # Readable rows for the grid: title, root-stripped path, record time, snippet, review locator.
+    scan_root = scan_root_of(summary)
+    matches = [finalize_search_hit(match, root=scan_root) for match in matches]
+    for position, match in enumerate(matches):
+        match["search_result_id"] = f"search-hit-{offset + position + 1:06d}"
     source_counts: dict[str, int] = {}
     keyword_counts: dict[str, int] = {keyword: 0 for keyword in normalized}
     for match in matches:
@@ -191,10 +320,179 @@ def run_unified_search(
         source_counts[source] = source_counts.get(source, 0) + 1
         for keyword in match.get("matched_keywords", []):
             keyword_counts[str(keyword)] = keyword_counts.get(str(keyword), 0) + 1
+    # Analysis reads the whole source records: before any metadata trim.
+    analysis = build_search_analysis(matches, normalized) if include_analysis else None
+    if detail:
+        matches = enrich_unified_search_matches(matches, search_options=search_options, offset=offset)
+    detail_payload = (
+        build_search_detail_payload(
+            matches=matches,
+            keywords=normalized,
+            search_options=search_options,
+            source_counts=source_counts,
+            include_ocr=include_ocr,
+            include_analysis=include_analysis,
+            limit=limit,
+            known_good_search_profile=known_good_search_profile,
+        )
+        if detail
+        else {}
+    )
+    if normalize_search_metadata_mode(metadata) != SEARCH_METADATA_FULL:
+        for match in matches:
+            if isinstance(match.get("metadata"), Mapping):
+                match["metadata"] = compact_search_metadata(match["metadata"])
+    payload: dict[str, object] = {
+        "command": "search",
+        "generated_at": dt.datetime.now().isoformat(),
+        "run_summary": str(summary.get("outputs", {}).get("summary", "")),
+        "keywords": normalized,
+        "root": scan_root,
+        "options": {
+            "include_ocr": include_ocr,
+            "limit": limit,
+            "offset": offset,
+            "sources": sorted(normalized_sources),
+            "extensions": sorted(normalized_extensions),
+            "path_contains": normalized_path_fragment,
+            "hide_known_good": bool(hide_known_good),
+            "detail": bool(detail),
+            "metadata": normalize_search_metadata_mode(metadata),
+            **search_options,
+        },
+        "summary": {
+            "match_count": len(matches),
+            "source_counts": source_counts,
+            "keyword_counts": keyword_counts,
+            "known_good_match_count": known_good_search_profile["known_good_match_count"],
+            "known_good_suppressed_count": known_good_search_profile["suppressed_match_count"],
+            "document_error_count": len(document_errors),
+            "ocr_error_count": len(ocr_errors),
+            "commercial_gap_ids": [SEARCH_FEATURE_GAP_ID],
+            "commercial_grade_ready": False,
+        },
+        "matches": matches,
+        "documents": {
+            "errors": document_errors,
+        },
+        "ocr": {
+            "enabled": include_ocr,
+            "errors": ocr_errors,
+        },
+        "known_good_search_suppression_profile": known_good_search_profile,
+        "search_native_capabilities": dict(SEARCH_NATIVE_CAPABILITIES),
+        **detail_payload,
+    }
+    if not detail:
+        payload["detail_omitted"] = list(SEARCH_DETAIL_KEYS)
+    if analysis is not None:
+        payload["analysis"] = analysis
+    complete = not budget.truncated and not has_more
+    truncated_reason = budget_stop_reason(budget, found=found, offset=offset) if budget.truncated else None
+    payload["pagination"] = {
+        "collection": "search",
+        "offset": offset,
+        "limit": limit,
+        "returned": len(matches),
+        "has_more": has_more,
+        "next_offset": offset + len(matches) if has_more else None,
+        # Exact only when the search reached the end (no lookahead hit, no budget stop).
+        "total": offset + len(matches) if complete else None,
+        **({"budget_stopped": True, "stopped_reason": truncated_reason} if truncated_reason else {}),
+    }
+    payload["has_more"] = has_more
+    payload["backend"] = backend
+    payload["truncated"] = budget.truncated
+    if truncated_reason:
+        payload["truncated_reason"] = truncated_reason
+    payload["scanned"] = budget.scanned()
+    payload["scan_budget_seconds"] = budget.seconds
+    if index_error:
+        payload["index_error"] = index_error
+    if regex_unchecked[0]:
+        # Never silently a non-match: rows whose regex check ran past the per-row time limit.
+        payload["regex_unchecked_rows"] = regex_unchecked[0]
+        payload["warnings"] = [f"정규식 확인이 행당 시간 한도를 넘어 {regex_unchecked[0]:,}개 행은 확인하지 못했습니다"]
+    # The whole request (summary load, a failed index attempt, hit finalization), not only the scan.
+    payload["elapsed_ms"] = round((time.monotonic() - request_started) * 1000, 1)
+    return payload
 
+
+SOURCE_LABELS_KO = {
+    "documents": "문서",
+    "files": "파일",
+    "artifacts": "아티팩트",
+    "indicators": "지표",
+    "timeline": "타임라인",
+    "ocr": "OCR",
+}
+
+
+def budget_stop_reason(budget: SearchBudget, *, found: int, offset: int) -> str:
+    """Korean reason of a budget-stopped search: where it stopped and why there is no next page."""
+    source = budget.stopped_source or ""
+    where = SOURCE_LABELS_KO.get(source, source)
+    head = f"시간 예산({budget.seconds:g}초)이 끝나 {where} 출처를 읽던 중 검색을 멈췄습니다"
+    if offset and found <= offset:
+        return f"{head}. 예산 안에 이 쪽({offset + 1:,}번째 결과)까지 찾지 못해 이 쪽은 비어 있습니다. 검색어를 좁히세요"
+    return f"{head}. 출처 순서상 앞부분 {found:,}건까지만 찾았고 그 뒤 쪽은 없습니다. 검색어를 좁히세요"
+
+
+def normalize_search_metadata_mode(value: str | None) -> str:
+    """``full`` (the whole source record per hit) or ``compact`` (:data:`COMPACT_METADATA_KEYS`)."""
+    return SEARCH_METADATA_COMPACT if str(value or "").strip().lower() == SEARCH_METADATA_COMPACT else SEARCH_METADATA_FULL
+
+
+def compact_search_metadata(metadata: Mapping[str, object]) -> dict[str, object]:
+    """The record fields the console reads from a hit (time, type, size, hashes); no ``details``."""
+    compact: dict[str, object] = {}
+    for key in COMPACT_METADATA_KEYS:
+        value = metadata.get(key)
+        if value is None or value == "":
+            continue
+        if isinstance(value, Mapping):
+            # Hash maps only (``hashes`` / ``source_hashes``): short scalar values.
+            value = {str(k): v for k, v in value.items() if isinstance(v, (str, int, float, bool)) and len(str(v)) <= 256}
+        elif isinstance(value, list):
+            value = [item for item in value if isinstance(item, (str, int, float, bool))][:16]
+        elif isinstance(value, str) and len(value) > 512:
+            continue
+        compact[key] = value
+    # The grid's hash columns read flat ``md5``/``sha1``/``sha256`` (index hits are flat already;
+    # R7 S2 review #14): a file record's ``hashes`` (else ``source_hashes``) map fills them.
+    for algorithm in ("md5", "sha1", "sha256"):
+        if compact.get(algorithm):
+            continue
+        for container in ("hashes", "source_hashes"):
+            found = compact.get(container)
+            value = found.get(algorithm) if isinstance(found, Mapping) else None
+            if isinstance(value, str) and value.strip():
+                compact[algorithm] = value.strip().lower()
+                break
+    return compact
+
+
+def build_search_detail_payload(
+    *,
+    matches: Sequence[Mapping[str, object]],
+    keywords: Sequence[str],
+    search_options: Mapping[str, object],
+    source_counts: Mapping[str, int],
+    include_ocr: bool,
+    include_analysis: bool,
+    limit: int,
+    known_good_search_profile: Mapping[str, object],
+) -> dict[str, object]:
+    """The report-grade/audit blocks of a search response (``detail=1``; keys = :data:`SEARCH_DETAIL_KEYS`)."""
+    query_hit_manifest = build_advanced_search_query_hit_manifest(
+        matches=matches,
+        keywords=keywords,
+        options=search_options,
+        limit=limit,
+    )
     report_grade = search_report_grade_assessment()
     advanced_profile = advanced_search_profile(
-        keywords=normalized,
+        keywords=keywords,
         matches=matches,
         options=search_options,
         include_ocr=include_ocr,
@@ -203,7 +501,7 @@ def run_unified_search(
         query_hit_manifest=query_hit_manifest,
     )
     validation_plan = build_advanced_search_report_grade_validation_plan(
-        keywords=normalized,
+        keywords=keywords,
         matches=matches,
         options=search_options,
         limit=limit,
@@ -221,7 +519,7 @@ def run_unified_search(
         validation_plan=validation_plan,
     )
     search_backend_contract = build_search_backend_contract(
-        keywords=normalized,
+        keywords=keywords,
         limit=limit,
         corpus_estimate={
             "document_rows": len(source_counts),
@@ -229,40 +527,7 @@ def run_unified_search(
             "target_rows": 1_000_000,
         },
     )
-    payload: dict[str, object] = {
-        "command": "search",
-        "generated_at": dt.datetime.now().isoformat(),
-        "run_summary": str(summary.get("outputs", {}).get("summary", "")),
-        "keywords": normalized,
-        "options": {
-            "include_ocr": include_ocr,
-            "limit": limit,
-            "sources": sorted(normalized_sources),
-            "extensions": sorted(normalized_extensions),
-            "path_contains": normalized_path_fragment,
-            "hide_known_good": bool(hide_known_good),
-            **search_options,
-        },
-            "summary": {
-                "match_count": len(matches),
-                "source_counts": source_counts,
-                "keyword_counts": keyword_counts,
-                "known_good_match_count": known_good_search_profile["known_good_match_count"],
-                "known_good_suppressed_count": known_good_search_profile["suppressed_match_count"],
-                "document_error_count": len(document_errors),
-                "ocr_error_count": len(ocr_errors),
-                "commercial_gap_ids": [SEARCH_FEATURE_GAP_ID],
-                "commercial_grade_ready": False,
-            },
-            "matches": matches,
-            "documents": {
-                "errors": document_errors,
-            },
-            "ocr": {
-                "enabled": include_ocr,
-                "errors": ocr_errors,
-        },
-        "known_good_search_suppression_profile": known_good_search_profile,
+    return {
         "advanced_search_profile": advanced_profile,
         "advanced_search_query_hit_manifest": query_hit_manifest,
         "advanced_search_query_hit_manifest_hash": query_hit_manifest["manifest_hash"],
@@ -270,7 +535,6 @@ def run_unified_search(
         "advanced_search_report_grade_validation_plan_hash": validation_plan["validation_plan_sha256"],
         "search_backend_contract": search_backend_contract,
         "search_backend_contract_hash": search_backend_contract["contract_hash"],
-        "search_native_capabilities": dict(SEARCH_NATIVE_CAPABILITIES),
         "workbench_search_profile": workbench_search_profile(
             matches=matches,
             source_counts=source_counts,
@@ -292,16 +556,6 @@ def run_unified_search(
             validation_plan=validation_plan,
         ),
     }
-    if include_analysis:
-        payload["analysis"] = build_search_analysis(matches, normalized)
-    payload["backend"] = backend
-    payload["truncated"] = budget.truncated
-    payload["scanned"] = budget.scanned()
-    payload["scan_budget_seconds"] = budget.seconds
-    if index_error:
-        payload["index_error"] = index_error
-    payload["elapsed_ms"] = budget.elapsed_ms()
-    return payload
 
 
 def scan_unified_matches(
@@ -317,7 +571,7 @@ def scan_unified_matches(
     budget: SearchBudget,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
     """Scan backend: requested sources only, in scan order, each stopping at
-    the limit still open and at its share of the wall-clock budget."""
+    the limit still open; a wall-clock budget stop ends the scan there."""
     planned = [
         source
         for source in SCAN_SOURCE_ORDER
@@ -328,12 +582,15 @@ def scan_unified_matches(
     document_errors: list[dict[str, object]] = []
     ocr_errors: list[dict[str, str]] = []
     visible = 0
-    for position, source in enumerate(planned):
+    for source in planned:
         remaining = max(0, limit - visible) if limit else 0
         if limit and remaining == 0:
             budget.skip_source(source, "limit")
             continue
-        scan = budget.start_source(source, sources_left=len(planned) - position)
+        if budget.truncated:
+            budget.skip_source(source, "after-budget")
+            continue
+        scan = budget.start_source(source)
         if source == "documents":
             found, document_errors = search_docs(
                 outputs, keywords, limit=remaining, search_options=search_options, scan=scan
@@ -438,11 +695,12 @@ def enrich_unified_search_matches(
     matches: Sequence[Mapping[str, object]],
     *,
     search_options: Mapping[str, object],
+    offset: int = 0,
 ) -> list[dict[str, object]]:
     enriched: list[dict[str, object]] = []
     for index, match in enumerate(matches):
         item = dict(match)
-        item["search_result_id"] = f"search-hit-{index + 1:06d}"
+        item["search_result_id"] = f"search-hit-{offset + index + 1:06d}"
         item["source_verification_profile"] = search_match_source_verification_profile(item)
         hit_manifest = build_advanced_search_hit_manifest(item, search_options=search_options)
         item["advanced_search_hit_manifest"] = hit_manifest
@@ -1122,6 +1380,7 @@ def search_docs(
                 "preview": build_preview(text, matched[0]),
                 "search_match": build_search_match_metadata(text, keywords, search_options=search_options),
                 "pointer": f"/results/{result_index_by_path[str(path)]}" if str(path) in result_index_by_path else "",
+                "candidate_index": index,
                 "metadata": dict(candidate),
             }
         )
@@ -1165,7 +1424,7 @@ def search_files(
             continue
         if scan is not None and not scan.tick():
             break
-        haystack = json.dumps(candidate, ensure_ascii=False)
+        haystack = record_text(candidate)
         matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
         if not matched:
             continue
@@ -1213,7 +1472,7 @@ def search_artifacts(
                 continue
             if scan is not None and not scan.tick():
                 return matches
-            haystack = json.dumps(artifact, ensure_ascii=False)
+            haystack = record_text(artifact)
             matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
             if not matched:
                 continue
@@ -1252,7 +1511,7 @@ def search_timeline(
             continue
         if scan is not None and not scan.tick():
             break
-        haystack = json.dumps(event, ensure_ascii=False)
+        haystack = record_text(event)
         matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
         if not matched:
             continue
@@ -1293,7 +1552,7 @@ def search_indicators(
             continue
         if scan is not None and not scan.tick():
             return matches
-        haystack = json.dumps(indicator, ensure_ascii=False)
+        haystack = record_text(indicator)
         matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
         if not matched:
             continue
@@ -1352,7 +1611,7 @@ def search_ioc_scanner_hits(
             continue
         if scan is not None and not scan.tick():
             break
-        haystack = json.dumps(hit, ensure_ascii=False)
+        haystack = record_text(hit)
         matched = match_keywords(haystack, keywords, search_options=search_options, plan=plan)
         if not matched:
             continue
@@ -1553,10 +1812,14 @@ def build_keyword_match_plan(
             "lower": normalize_nfc(keyword) if mode == "regex" else normalize_search_text(keyword),
         }
         if mode == "regex":
-            try:
-                entry["regex"] = re.compile(normalize_nfc(keyword), flags=re.IGNORECASE | re.MULTILINE)
-            except re.error:
-                entry["regex"] = None
+            # The v2 guard (R7 S2 review #7): static check, then bounded slices with a per-row
+            # time limit -- ``re`` cannot be interrupted, so a catastrophic pattern never runs.
+            entry["regex"] = None
+            if regex_guard_problem(keyword) is None:
+                try:
+                    entry["regex"] = GuardedRegex(re.compile(normalize_nfc(keyword), flags=V1_REGEX_FLAGS))
+                except re.error:
+                    entry["regex"] = None
         elif mode == "fuzzy":
             entry["max_distance"] = max(0, min(int(options.get("fuzzy_distance") or 1), 2))
             entry["stems"] = keyword_stems(keyword) if is_simple_word(keyword) else None
@@ -1587,7 +1850,14 @@ def match_keywords(
                 continue
             if nfc_text is None:
                 nfc_text = normalize_nfc(text)
-            if pattern.search(nfc_text):
+            try:
+                found = pattern.search(nfc_text)  # type: ignore[union-attr]
+            except RowTimeout:
+                counter = _REGEX_UNCHECKED.get()
+                if counter is not None:
+                    counter[0] += 1
+                continue
+            if found is not None:
                 matched.append(keyword)
             continue
         if mode == "fuzzy":
@@ -1605,7 +1875,8 @@ def match_keywords(
             matched.append(keyword)
             continue
         stems = entry.get("stems")
-        if stems:
+        # A stem that is a whole token is also a substring: tokenize only when one occurs at all.
+        if stems and any(stem in lower for stem in stems):  # type: ignore[union-attr]
             if tokens is None:
                 tokens = set(tokenize_folded_words(lower))
             if stems & tokens:

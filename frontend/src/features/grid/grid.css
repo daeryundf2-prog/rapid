@@ -413,6 +413,16 @@
   position: relative;
 }
 
+/* A kept core column with no value on the loaded page (UX-round review): a quiet note, not a hint link. */
+.grid-hcell-novalue {
+  flex: none;
+  margin-inline-end: 4px;
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
 /* The accent bar must stay on top of the sticky select cell, which covers the row's own edge. */
 .grid-row.is-selected > .grid-cell-select {
   box-shadow: inset 2px 0 0 var(--accent);
@@ -644,6 +654,33 @@
 
 .grid-sort[aria-disabled="true"] {
   cursor: not-allowed;
+}
+
+/* Range honesty (plan r7 §3.2 L2, 구조 D2): "불러온 N / 전체 M" on the 조건 줄, always. */
+.grid-scope-badge {
+  flex: none;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line-subtle);
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+/* A sort / filter over the loaded rows only says so above the grid. */
+.grid-scope-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  border-left: 3px solid var(--warn);
+  background: var(--surface-1);
+  color: var(--text);
+  font-size: var(--fs-table-aux);
 }
 
 .grid-sortstatus {

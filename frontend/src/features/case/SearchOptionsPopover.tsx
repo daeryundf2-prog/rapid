@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type RefObject, useId, useRef, useState } from "react";
-import { ensureCaseDb, saveSearch } from "../../api/caseDb";
+import { saveSearch } from "../../api/caseDb";
 import { listKeywordPacks, SEARCH_SOURCES } from "../../api/keywordPacks";
 import { Popover } from "../../components/Popover";
 import { Icon } from "../../icons";
+import { ensureRunCaseDb } from "../grid/reviewActions";
 import { ErrorText } from "./ErrorText";
 import { ReasonButton } from "./ReasonButton";
+import { invalidateSavedSearches } from "./savedSearches";
 import { useSearchState } from "./searchState";
 import "./case.css";
 
@@ -58,6 +60,25 @@ export function SearchOptionsButton({ runId }: { runId: string | null }) {
  * Tab / Shift+Tab stay inside, Esc returns to the trigger, a press outside — including on
  * another popover's trigger — closes it.
  */
+/**
+ * Korean names of the built-in keyword packs (core keyword packs; C-G15). The pack id and its first
+ * keywords are the tooltip; a pack the console does not know keeps the server label, else its id.
+ */
+export const KEYWORD_PACK_LABELS: Readonly<Record<string, string>> = {
+  "browser-ai": "생성형 AI 서비스",
+  // R7 AI 사용 (갈래 A pack): product names, service domains, API key prefixes (never values).
+  "ai-tools": "AI 도구(제품·도메인·키 접두사)",
+  credentials: "자격 증명·비밀",
+  execution: "명령 실행 도구",
+  exfiltration: "외부 반출·클라우드 전송",
+  network: "네트워크·다운로드",
+  "windows-ir": "Windows 침해 대응 이벤트",
+};
+
+export function keywordPackLabel(name: string, label?: string | null): string {
+  return KEYWORD_PACK_LABELS[name] ?? (label || name);
+}
+
 export function SearchOptionsPopover({
   runId,
   onClose,
@@ -79,7 +100,10 @@ export function SearchOptionsPopover({
 
   const save = useMutation({
     mutationFn: async () => {
-      const db = await ensureCaseDb(runId);
+      // Same handle as the review marks (R7 S2 #13): a run that reports `case_db_ready` needs no
+      // `/case-db/ensure` POST; otherwise ensure once per run.
+      const db = await ensureRunCaseDb(runId);
+      if (!db) throw new Error("이 런은 케이스 DB를 만들 수 없어 검색을 저장할 수 없습니다.");
       return saveSearch({
         database: db.database,
         case_id: db.case_id,
@@ -92,7 +116,7 @@ export function SearchOptionsPopover({
     },
     onSuccess: () => {
       setSaveName("");
-      void queryClient.invalidateQueries({ queryKey: ["saved-searches", runId] });
+      void invalidateSavedSearches(queryClient, runId);
       void queryClient.invalidateQueries({ queryKey: ["review-counts", runId] });
     },
   });
@@ -199,7 +223,9 @@ export function SearchOptionsPopover({
           checked={options.hideKnownGood}
           onChange={(e) => patch({ hideKnownGood: e.target.checked })}
         />{" "}
-        known-good 숨기기
+        <span title="알려진 정상 파일(known-good 해시 목록에 있는 파일)을 결과에서 뺍니다">
+          알려진 정상 파일 숨기기
+        </span>
       </label>
       <fieldset className="case-field">
         <legend>키워드 팩</legend>
@@ -215,7 +241,11 @@ export function SearchOptionsPopover({
                 patch({ keywordPacks: toggle(options.keywordPacks, pack.name, e.target.checked) })
               }
             />{" "}
-            {pack.label || pack.name}
+            <span
+              title={`${pack.name}${Array.isArray(pack.keywords) ? `: ${pack.keywords.slice(0, 8).join(", ")}` : ""}`}
+            >
+              {keywordPackLabel(pack.name, pack.label)}
+            </span>
           </label>
         ))}
       </fieldset>

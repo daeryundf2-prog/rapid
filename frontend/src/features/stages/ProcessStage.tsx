@@ -9,10 +9,17 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { announce, DisabledReason } from "../../a11y";
 import { type AnalysisState, isAnalysisActive } from "../../api/analyses";
+import { getProcessingSnapshot } from "../../api/cases";
 import { ApiError } from "../../api/client";
 import { useRunPlan } from "../../api/runPlan";
-import { getRunSummary, normalizeRunStatus, RETRYABLE_RUN_STATUSES } from "../../api/runs";
-import { RUN_MODE_LABEL, runDisplayName } from "../../app/collections";
+import {
+  getRunSummary,
+  normalizeRunStatus,
+  RETRYABLE_RUN_STATUSES,
+  type RunTimeSource,
+  runCompletedAt,
+} from "../../api/runs";
+import { runDisplayName } from "../../app/collections";
 import { CommandButton } from "../../commands/CommandButton";
 import { useCommandState } from "../../commands/registry";
 import { StatusBadge, statusLabel } from "../../components/Badge";
@@ -23,7 +30,8 @@ import { formatElapsed, progressText as runProgressText, staleText } from "../..
 import { useRoute, useRuns, useTimezone } from "../../state/hooks";
 import { isRunActive } from "../../state/slices/runs";
 import { useAppStore } from "../../state/store";
-import { formatTimestamp } from "../../utils/time";
+import { formatRunTime, formatTimestamp } from "../../utils/time";
+import { AiProcessSection } from "../ai/AiProcessSection";
 import { History, lastStateText } from "../analysis/AnalysisPane";
 import { cancelAnalysisJob, runCommandId } from "../analysis/commands";
 import {
@@ -39,11 +47,14 @@ import {
   STATUS_LABEL,
 } from "../analysis/kinds";
 import { useAnalyses } from "../analysis/store";
+import { snapshotQueryKey } from "../case/caseLink";
+import { runDurationText, runModeText, runStartText, runTimeTooltip } from "../case/runTime";
 import { DisclosuresCard } from "../dashboard/cards";
-import { disclosureDigest, disclosureItems, runWarnings } from "../dashboard/disclosures";
+import { SnapshotCard } from "../dashboard/caseCards";
+import { disclosureDigest, disclosureItems, runWarnings, stepLabelKo } from "../dashboard/disclosures";
 import { formatCount } from "../grid/gridUtils";
-import { RunPlanTable } from "./RunPlanTable";
-import { stepNameLabel, stepStatusLabel, stepWarningLabel } from "./stepLabels";
+import { isLegacyPlan, planSummaryText, RunPlanTable } from "./RunPlanTable";
+import { stepStatusLabel, stepWarningLabel } from "./stepLabels";
 import { useNow } from "./useNow";
 import "../analysis/analysis.css";
 import "../dashboard/dashboard.css";
@@ -51,23 +62,64 @@ import "./stages.css";
 
 export { stepNameLabel, stepStatusLabel, stepWarningLabel } from "./stepLabels";
 
-function elapsedOf(
-  run: { created_at?: string; updated_at?: string; finished_at?: string | null; status?: unknown },
-  now: number,
-): string {
-  const start = run.created_at ? Date.parse(run.created_at) : Number.NaN;
-  if (!Number.isFinite(start)) return "—";
-  const finished = run.finished_at ?? run.updated_at;
-  const end = isRunActive(run) ? now : finished ? Date.parse(finished) : Number.NaN;
-  return Number.isFinite(end) ? formatElapsed(end - start) : "—";
-}
-
 export { useNow };
 
 /** Runs listed before "더 보기" in the 처리 panel (the routed run is always listed). */
 export const RECENT_RUN_COUNT = 5;
 
-type RunLike = { run_id: string; created_at?: string; request?: { root?: string; output_dir?: string } };
+type RunLike = RunTimeSource;
+
+/** Run states whose 처리 page leads with the results (C-G1 / 구조 D1). */
+export const FINISHED_RUN_STATUSES: ReadonlySet<string> = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+  "interrupted",
+]);
+
+/**
+ * The 처리 page layout: "live" (queued / running, or a plan the run process still writes) = plan
+ * table with skip / cancel; "results" (a finished run) = 단계표 → 공개 사항 → 처리 설정 스냅샷 →
+ * 추가 분석 추천, the plan only as a read-only record.
+ */
+export function processLayout(runStatus: string, planLive = false): "live" | "results" {
+  return FINISHED_RUN_STATUSES.has(runStatus) && !planLive ? "results" : "live";
+}
+
+/** "34:09" of a step's `elapsed_seconds` (or the older `elapsed_s` / `duration_s` / `elapsed`). */
+export function stepElapsedText(step: Record<string, unknown>): string {
+  for (const key of ["elapsed_seconds", "elapsed_s", "duration_s"]) {
+    const value = step[key];
+    const seconds =
+      typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+    if (Number.isFinite(seconds) && seconds >= 0) return formatElapsed(Math.round(seconds * 1000)) || "00:00";
+  }
+  return typeof step.elapsed === "string" ? step.elapsed : "";
+}
+
+/**
+ * Sum of the steps' elapsed seconds in ms — only when every step reports one (null otherwise):
+ * an older summary times two steps of 35, and their sum would read as a short run.
+ */
+export function stepsElapsedMs(steps: ReadonlyArray<Record<string, unknown>>): number | null {
+  if (steps.length === 0) return null;
+  let total = 0;
+  for (const step of steps) {
+    let found = false;
+    for (const key of ["elapsed_seconds", "elapsed_s", "duration_s"]) {
+      const value = step[key];
+      const seconds =
+        typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+      if (Number.isFinite(seconds) && seconds >= 0) {
+        total += seconds * 1000;
+        found = true;
+        break;
+      }
+    }
+    if (!found) return null;
+  }
+  return Math.round(total);
+}
 
 /** One run's list label: the shared name, and what tells it apart (start time · short id). */
 export interface RunNameParts {
@@ -87,7 +139,8 @@ export function runNameParts(runs: readonly RunLike[], timezone: string): Map<st
   const out = new Map<string, RunNameParts>();
   for (const run of runs) {
     const name = runDisplayName(run);
-    const when = run.created_at ? formatTimestamp(run.created_at, timezone, { precision: "minute" }) : "";
+    // The run's representative start (the time 랜딩 · 접수 · 선택기 print too, C-G3).
+    const when = runStartText(run, timezone);
     const detail =
       (counts.get(name) ?? 0) < 2 ? "" : [when, run.run_id.slice(0, 8)].filter(Boolean).join(" · ");
     const tooltip = [name, when, run.run_id].filter(Boolean).join(" · ");
@@ -206,7 +259,7 @@ export function ProcessPanel() {
             detail: "",
             tooltip: `${runDisplayName(run)} · ${run.run_id}`,
           };
-          const elapsed = elapsedOf(run, now);
+          const elapsed = runDurationText(run, now);
           const label = [
             parts.detail ? `${parts.name} · ${parts.detail}` : parts.name,
             statusLabel(String(run.status)),
@@ -312,7 +365,16 @@ export function stepNoteText(step: Record<string, unknown>): string {
  * 건수 · 비고 — with a status tally above it: the fallback of a run without a plan (written before
  * R4 V1). With a plan (`planned`) only the 공개 사항 digest is left here.
  */
-function StepList({ runId, planned = false }: { runId: string; planned?: boolean }) {
+function StepList({
+  runId,
+  planned = false,
+  results = false,
+}: {
+  runId: string;
+  planned?: boolean;
+  /** Results layout of a finished run: "처리 단계" with 소요, 공개 사항 in their own section. */
+  results?: boolean;
+}) {
   const summary = useQuery({
     queryKey: ["run-summary", runId],
     queryFn: () => getRunSummary(runId),
@@ -330,7 +392,8 @@ function StepList({ runId, planned = false }: { runId: string; planned?: boolean
     ) : null;
   }
   const text = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : "");
-  const timed = steps.some((step) => text(step.elapsed_s ?? step.duration_s ?? step.elapsed) !== "");
+  const timed = steps.some((step) => stepElapsedText(step) !== "");
+  const totalMs = stepsElapsedMs(steps);
   const tally = new Map<string, number>();
   for (const step of steps) {
     const label = text(step.status) ? stepStatusLabel(text(step.status)) : "상태 없음";
@@ -339,14 +402,18 @@ function StepList({ runId, planned = false }: { runId: string; planned?: boolean
   return (
     <section className="stage-section process-plan" aria-labelledby="process-plan-title">
       <div className="process-plan-head">
-        <h3 id="process-plan-title">처리 계획</h3>
+        <h3 id="process-plan-title">{results ? "처리 단계" : "처리 계획"}</h3>
         {steps.length ? (
-          <p className="process-plan-tally">
-            {[`${steps.length}단계`, ...[...tally].map(([label, n]) => `${label} ${n}`)].join(" · ")}
+          <p className="process-plan-tally" data-testid="process-step-tally">
+            {[
+              `${steps.length}단계`,
+              ...[...tally].map(([label, n]) => `${label} ${n}`),
+              ...(results && totalMs !== null ? [`단계 소요 합계 ${formatElapsed(totalMs) || "00:00"}`] : []),
+            ].join(" · ")}
           </p>
         ) : null}
       </div>
-      {disclosures.length || warnings.length ? (
+      {!results && (disclosures.length || warnings.length) ? (
         <details className="process-plan-disclosures" data-testid="process-disclosures">
           <summary>{disclosureDigest(summary.data)}</summary>
           <DisclosuresCard items={disclosures} warnings={warnings} />
@@ -367,7 +434,11 @@ function StepList({ runId, planned = false }: { runId: string; planned?: boolean
                   건수
                 </th>
                 <th scope="col">비고</th>
-                {timed ? <th scope="col">소요</th> : null}
+                {timed ? (
+                  <th scope="col" className="is-right">
+                    소요
+                  </th>
+                ) : null}
               </tr>
             </thead>
             <tbody>
@@ -381,7 +452,7 @@ function StepList({ runId, planned = false }: { runId: string; planned?: boolean
                 return (
                   // biome-ignore lint/suspicious/noArrayIndexKey: steps have no id; order is stable
                   <tr key={index} data-status={text(step.status) || undefined}>
-                    <td title={id || undefined}>{id ? stepNameLabel(id) : `단계 ${index + 1}`}</td>
+                    <td title={id || undefined}>{id ? stepLabelKo(id) : `단계 ${index + 1}`}</td>
                     <td>
                       {/* Step state as the shared dot + text chip (review #24). */}
                       {status ? (
@@ -398,13 +469,63 @@ function StepList({ runId, planned = false }: { runId: string; planned?: boolean
                     <td className="process-plan-note" title={messages.join("\n") || undefined}>
                       {stepNoteText(step) || "—"}
                     </td>
-                    {timed ? <td>{text(step.elapsed_s ?? step.duration_s ?? step.elapsed) || "—"}</td> : null}
+                    {timed ? <td className="is-right">{stepElapsedText(step) || "—"}</td> : null}
                   </tr>
                 );
               })}
             </tbody>
           </table>
         </div>
+      )}
+    </section>
+  );
+}
+
+/** 공개 사항 of a finished run (results layout): the digest line, the cards folded below it. */
+function DisclosuresSection({ runId }: { runId: string }) {
+  const summary = useQuery({
+    queryKey: ["run-summary", runId],
+    queryFn: () => getRunSummary(runId),
+    retry: false,
+  });
+  const disclosures = disclosureItems(summary.data);
+  const warnings = runWarnings(summary.data);
+  if (!disclosures.length && !warnings.length) return null;
+  return (
+    <section className="stage-section" aria-labelledby="process-disclosures-title">
+      <h3 id="process-disclosures-title">공개 사항</h3>
+      <details className="process-plan-disclosures" data-testid="process-disclosures">
+        <summary>{disclosureDigest(summary.data)}</summary>
+        <DisclosuresCard items={disclosures} warnings={warnings} />
+      </details>
+    </section>
+  );
+}
+
+/**
+ * 처리 설정 스냅샷 (접수 후속): the options fixed for this run — the card the 접수 strip's
+ * "처리 설정 보기" leads to. Read only (`GET /processing-snapshot`).
+ */
+function SnapshotSection({ runId }: { runId: string }) {
+  const snapshot = useQuery({
+    queryKey: snapshotQueryKey(runId),
+    queryFn: () => getProcessingSnapshot(runId),
+    retry: false,
+  });
+  return (
+    <section
+      id="process-settings"
+      className="stage-section process-snapshot"
+      aria-labelledby="process-snapshot-title"
+      data-testid="process-snapshot"
+    >
+      <h3 id="process-snapshot-title">처리 설정 스냅샷</h3>
+      {snapshot.data ? (
+        <SnapshotCard snapshot={snapshot.data} />
+      ) : (
+        <p className="analysis-desc">
+          {snapshot.isPending ? "처리 설정을 불러오는 중…" : "처리 설정 스냅샷을 불러오지 못했습니다."}
+        </p>
       )}
     </section>
   );
@@ -554,8 +675,19 @@ export function ProcessPage() {
   const runStatus = normalizeRunStatus(run?.status);
   const active = isRunActive(run);
   const retryable = RETRYABLE_RUN_STATUSES.has(runStatus);
+  const layout = processLayout(runStatus, plan.data?.live === true);
+  const planMissing = plan.error instanceof ApiError && plan.error.status === 404;
+  // A finished run whose plan record does not describe it (written before plans: every task
+  // still "대기") or that has none: say so instead of showing 23 waiting groups (C-G1).
+  const legacyPlan = layout === "results" && (Boolean(plan.data && isLegacyPlan(plan.data)) || planMissing);
+  const completedAt = run ? runCompletedAt(run) : null;
   return (
-    <section className="stage-page" aria-labelledby="process-title" data-testid="process-page">
+    <section
+      className="stage-page"
+      aria-labelledby="process-title"
+      data-testid="process-page"
+      data-layout={layout}
+    >
       <h2 id="process-title">처리</h2>
       <section className="stage-section" aria-labelledby="process-run-title">
         <h3 id="process-run-title">런 {run ? runDisplayName(run) : runId.slice(0, 8)}</h3>
@@ -570,15 +702,27 @@ export function ProcessPage() {
               ) : null}
             </dd>
             <dt>모드</dt>
-            <dd>{RUN_MODE_LABEL[String(run.request?.mode ?? "")] ?? run.request?.mode ?? "—"}</dd>
+            <dd>{runModeText(run) || "—"}</dd>
             <dt>증거 경로</dt>
             <dd className="mono">{run.request?.root ?? "—"}</dd>
             <dt>시작</dt>
-            <dd>{run.created_at ? formatTimestamp(run.created_at, timezone) : "—"}</dd>
+            <dd data-testid="process-run-start" title={runTimeTooltip(run, timezone)}>
+              {runStartText(run, timezone) || "—"}
+            </dd>
+            {completedAt ? (
+              <>
+                <dt>완료</dt>
+                <dd data-testid="process-run-end">{formatRunTime(completedAt, timezone)}</dd>
+              </>
+            ) : null}
             <dt>소요</dt>
-            <dd>{elapsedOf(run, now)}</dd>
-            <dt>진행</dt>
-            <dd>{runProgressText(run) || "—"}</dd>
+            <dd data-testid="process-run-elapsed">{runDurationText(run, now)}</dd>
+            {active ? (
+              <>
+                <dt>진행</dt>
+                <dd>{runProgressText(run) || "—"}</dd>
+              </>
+            ) : null}
             <dt>오류</dt>
             <dd>{run.progress?.error_count ?? 0}</dd>
           </dl>
@@ -608,16 +752,47 @@ export function ProcessPage() {
           </div>
         ) : null}
       </section>
-      {plan.data ? <RunPlanTable key={runId} runId={runId} plan={plan.data} controls={false} /> : null}
-      {!plan.data && plan.error && !(plan.error instanceof ApiError && plan.error.status === 404) ? (
-        // A run written before R4 has no plan (404 → the step list alone); any other failure is said.
+      {plan.error && !planMissing ? (
+        // Any failure other than "no plan" (404, an older run) is said.
         <p className="run-plan-stale" role="status" data-testid="run-plan-error">
           처리 계획을 불러오지 못했습니다: {plan.error.message}
         </p>
       ) : null}
-      <StepList runId={runId} planned={Boolean(plan.data)} />
+      {layout === "live" ? (
+        <>
+          {plan.data ? <RunPlanTable key={runId} runId={runId} plan={plan.data} controls={false} /> : null}
+          <StepList runId={runId} planned={Boolean(plan.data)} />
+        </>
+      ) : (
+        <>
+          {legacyPlan ? (
+            <p className="run-plan-legacy" role="note" data-testid="run-plan-legacy">
+              계획 기록 없음(이전 형식) — 이 런은 처리 계획표가 생기기 전 형식으로 기록되어 아래 단계표가 처리
+              결과입니다.
+            </p>
+          ) : null}
+          <StepList runId={runId} results />
+          <DisclosuresSection runId={runId} />
+          <SnapshotSection runId={runId} />
+          {/* R7 AI 사용 기록: the ai group's state, rows and collection scope. */}
+          <AiProcessSection
+            runId={runId}
+            plan={plan.data}
+            request={run?.request as Record<string, unknown> | undefined}
+          />
+          {plan.data && !legacyPlan ? (
+            <details className="process-plan-record" data-testid="process-plan-record">
+              <summary>처리 계획 기록 · {planSummaryText(plan.data)}</summary>
+              <RunPlanTable key={runId} runId={runId} plan={plan.data} controls={false} />
+            </details>
+          ) : null}
+        </>
+      )}
       <section aria-labelledby="process-analyses-heading">
-        <h3 id="process-analyses-heading">추가 분석</h3>
+        <h3 id="process-analyses-heading">{layout === "results" ? "추가 분석 추천" : "추가 분석"}</h3>
+        {layout === "results" ? (
+          <p className="analysis-desc">처리가 끝난 런에서 이어서 실행할 수 있는 분석입니다.</p>
+        ) : null}
         {unavailable ? <p className="analysis-desc">이 서버는 분석 작업을 지원하지 않습니다.</p> : null}
         <div className="analysis-cards">
           {ANALYSIS_NODES.map((node) => (

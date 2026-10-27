@@ -35,11 +35,31 @@ export function rowReviewKey(row: GridRow): string | null {
   return target ? reviewKey(target.collection, target.kind, target.locator) : null;
 }
 
+/**
+ * A grouped timeline row (`group=1`, fields.groupMembers = the members' record indexes) stands for
+ * its members: a mark stored on any member shows on the row, so it survives the leader changing
+ * with the filters (UX-round review). The row's own mark wins; else the first member mark that is
+ * not a cleared toggle, else the first one.
+ */
+function groupMemberMark(row: GridRow, map: ReviewMap): ReviewMapMark | undefined {
+  const members = row.fields.groupMembers;
+  if (row.ref.collection !== "timeline" || !Array.isArray(members)) return undefined;
+  let cleared: ReviewMapMark | undefined;
+  for (const member of members) {
+    if (typeof member !== "number") continue;
+    const mark = map.get(reviewKey("timeline", "", `/events/${member}`));
+    if (!mark) continue;
+    if (mark.status !== "unreviewed") return mark;
+    cleared ??= mark;
+  }
+  return cleared;
+}
+
 /** Row with the stored status/tags/note; rows without a mark are returned as-is. */
 export function overlayReview(row: GridRow, map: ReviewMap | undefined): GridRow {
   if (!map || map.size === 0) return row;
   const key = rowReviewKey(row);
-  const mark = key ? map.get(key) : undefined;
+  const mark = (key ? map.get(key) : undefined) ?? groupMemberMark(row, map);
   if (!mark) return row;
   return {
     ...row,

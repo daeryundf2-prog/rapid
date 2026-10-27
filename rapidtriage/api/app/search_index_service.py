@@ -21,7 +21,7 @@ import logging
 import os
 import sqlite3
 import threading
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
@@ -32,6 +32,7 @@ from fastapi import HTTPException
 from ...core.case_db.base import now_iso
 from ...core.case_db.database import CaseDatabase, next_citation_id_for_connection
 from ...core.jobs import RunJob, RunJobStore, run_output_dir
+from ...core.search_hits import base_locator
 from ...core.search_index.build import (
     SEARCH_INDEX_KIND,
     SWAP_FAILED_STATUS,
@@ -325,6 +326,29 @@ def _case_exists(database: Path, case_id: str) -> bool:
         connection.close()
 
 
+def artifact_summaries(job: RunJob, run_id: str, keys: Sequence[tuple[str, str]]) -> dict[tuple[str, str], str]:
+    """The case DB's stored ``artifact_summary`` of one page of console-search artifact rows
+    (``{(kind, locator): summary}``; empty without a case DB): v1's hit titles (R7 S2 confirmation #10)."""
+    from .run_review import RunLocatorIndex
+
+    if job.summary is None or not keys:
+        return {}
+    database, case_id = run_case(job, run_id)
+    if not database.is_file():
+        return {}
+    outputs = job.summary.get("outputs")
+    try:
+        connection = sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True)
+        try:
+            index = RunLocatorIndex(connection, case_id, outputs if isinstance(outputs, dict) else {}, output_dir=run_output_dir(job.summary))
+            return index.artifact_summaries(keys)
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        LOGGER.warning("artifact summaries unavailable for %s: %s", run_id, exc)
+        return {}
+
+
 class ReviewMarks:
     """Review marks of the run's case DB, loaded at most once per request (``truncated`` past the limit)."""
 
@@ -385,7 +409,9 @@ class ReviewMarks:
             return
         by_key = {(str(mark.get("collection") or ""), str(mark.get("kind") or ""), str(mark.get("locator") or "")): mark for mark in marks}
         for row in rows:
-            mark = by_key.get((str(row.get("collection") or ""), str(row.get("kind") or ""), str(row.get("locator") or "")))
+            collection, kind, locator = str(row.get("collection") or ""), str(row.get("kind") or ""), str(row.get("locator") or "")
+            # An archive entry row shows the mark of its archive record.
+            mark = by_key.get((collection, kind, locator)) or by_key.get((collection, kind, base_locator(locator)))
             if mark is not None:
                 row["review"] = {
                     "status": mark.get("status"),

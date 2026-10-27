@@ -305,13 +305,23 @@ rules:
   label_ko: 외부 IP RDP 연결(1149/131)
   rationale_ko: 'RemoteConnectionManager 1149 또는 RdpCoreTS 131의 클라이언트 주소가 공인 IP: 인터넷 노출 RDP.'
   false_positive_ko: VPN 게이트웨이 주소.
-  sources: &id001
+  sources:
   - https://frsecure.com/blog/rdp-connection-event-logs/
   - https://www.magnetforensics.com/blog/rdp-artifacts-in-incident-response/
-  - https://andreafortuna.org/2019/03/27/remote-desktop-connections-forensics/
-  - https://www.cybertriage.com/?p=26680
+  - https://attack.mitre.org/techniques/T1021/001/
   version: 1
   status: verified
+  validation:
+    synthetic: true
+    real:
+    - source: run-subset10 이벤트 로그(음성)
+      result: negative
+      hits: 0
+      false_positives: 0
+      checked_at: '2026-10-21'
+      note_ko: '입력 가능 이벤트 로그 292,370행에서 0적중(기대 최대 0, 통과). 1149·131 공인 IP 연결이 없어 양성은 확인하지 못함. r6-s1-run·qa-case1·r4-v1 런은 같은 증거를 다시 처리한 것이라 독립 근거가 아님.'
+    public: []
+    notes_ko: 실데이터는 음성 대조만(0적중·오탐 0). 양성 실데이터 없음 — 공개 데이터셋·VM 생성은 사용자 승인 대기.
   params: {}
 - id: rdp.pairing_mismatch
   family: eventlog-event
@@ -319,7 +329,9 @@ rules:
   label_ko: RDP 인증·세션 짝 불일치
   rationale_ko: '1149(네트워크 인증) 뒤 세션 로그온(21)이 없거나, 원격 21 앞에 1149가 없음: NLA 단계에서 멈춘 시도와 실제 세션 구분.'
   false_positive_ko: NLA 실패, 스캔, 로그 보존 기간 차이.
-  sources: *id001
+  sources:
+  - https://frsecure.com/blog/rdp-connection-event-logs/
+  - https://www.cybertriage.com/?p=26680
   version: 1
   status: verified
   params:
@@ -330,7 +342,9 @@ rules:
   label_ko: RDP 세션 재연결 주소 불일치
   rationale_ko: '4778/LSM 25 재연결 주소가 그 계정의 직전 RDP 로그온 주소와 다름: 세션 탈취 가능성.'
   false_positive_ko: 사용자가 다른 장소에서 재접속.
-  sources: *id001
+  sources:
+  - https://frsecure.com/blog/rdp-connection-event-logs/
+  - https://attack.mitre.org/techniques/T1563/002/
   version: 1
   status: provisional
   params: {}
@@ -340,7 +354,9 @@ rules:
   label_ko: 아웃바운드 RDP(1024 + 4648)
   rationale_ko: '원격 데스크톱 클라이언트 1024와 가까운 시각의 4648: 이 PC가 다른 호스트로 접속한 횡이동 출발지.'
   false_positive_ko: 관리자의 정상 원격 접속.
-  sources: *id001
+  sources:
+  - https://andreafortuna.org/2019/03/27/remote-desktop-connections-forensics/
+  - https://www.magnetforensics.com/blog/rdp-artifacts-in-incident-response/
   version: 1
   status: verified
   params:
@@ -351,7 +367,9 @@ rules:
   label_ko: RDP 활성화(fDenyTSConnections=0)
   rationale_ko: 'fDenyTSConnections 값을 0으로 설정(Sysmon 13 또는 레지스트리 값): 공격자의 RDP 활성화.'
   false_positive_ko: 정상 원격 지원 구성.
-  sources: *id001
+  sources:
+  - https://www.magnetforensics.com/blog/rdp-artifacts-in-incident-response/
+  - https://attack.mitre.org/techniques/T1021/001/
   version: 1
   status: provisional
   params: {}
@@ -361,7 +379,10 @@ rules:
   label_ko: 한 계정의 다수 호스트 RDP
   rationale_ko: '같은 계정이 짧은 시간 안에 여러 컴퓨터에 유형 10 로그온: 횡이동.'
   false_positive_ko: 점프 서버, 운영 관리자.
-  sources: *id001
+  sources:
+  - https://frsecure.com/blog/rdp-connection-event-logs/
+  - https://andreafortuna.org/2019/03/27/remote-desktop-connections-forensics/
+  - https://attack.mitre.org/techniques/T1021/001/
   version: 1
   status: verified
   params:

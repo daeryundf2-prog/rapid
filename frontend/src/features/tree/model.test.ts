@@ -134,16 +134,18 @@ describe("tree model (탐색 domain tree, console-ia §4)", () => {
       ...DOMAINS.map((d) => d.label),
     ]);
     // 통합 보기 (axiom-adoption §3.2) leads the 15 forensic domains.
-    expect(DOMAINS).toHaveLength(16);
+    // + 처리 (R7 갈래 A 예외 항목) after the forensic domains, + AI 사용 (R7 AI 갈래 D).
+    expect(DOMAINS).toHaveLength(18);
+    expect(DOMAINS[DOMAINS.length - 1]?.label).toBe("처리");
     expect(DOMAINS[0]?.label).toBe("통합 보기");
     // Workflow places are rail stages, not tree nodes.
     const ids = flattenVisible(model, new Set(model.map((n) => n.id))).map((f) => f.node.id);
     for (const gone of ["intake", "review", "outputs", "analyses"]) expect(ids).not.toContain(gone);
     const views = model.find((n) => n.id === "views");
     expect(views?.children?.map((c) => [c.label, c.count])).toEqual([
-      ["전체 파일", 30],
+      ["파일 목록", 30],
       // r4 §2.2 explorers: the file system view counts the files, the registry one its key-tree rows.
-      ["파일 시스템", 30],
+      ["폴더 탐색기", 30],
       ["레지스트리 탐색기", 0],
       ["전체 아티팩트", 120],
       ["전체 타임라인", 0],
@@ -267,7 +269,7 @@ describe("tree model (탐색 domain tree, console-ia §4)", () => {
 
   it("flattens only expanded branches", () => {
     const model = buildTreeModel({ summary: summary(), tree, review });
-    expect(flattenVisible(model, new Set())).toHaveLength(19);
+    expect(flattenVisible(model, new Set())).toHaveLength(21);
     const open = flattenVisible(model, new Set(["domain:eventlog"]));
     expect(open.filter((f) => f.level === 2).map((f) => f.node.label)).toEqual([
       "전체 이벤트 로그(EVTX·ETL)",

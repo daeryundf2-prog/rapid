@@ -27,6 +27,26 @@ function writeViewerPane(mode: ViewerPaneMode): void {
   }
 }
 
+/** Wide layouts: the left panel folded to its rail, kept for the session like the viewer's 뷰어 접기 (UX-round review). */
+export const TREE_COLLAPSED_KEY = "rapidtriage.v2.treeCollapsed";
+
+export function storedTreeCollapsed(): boolean {
+  try {
+    return window.sessionStorage.getItem(TREE_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeTreeCollapsed(collapsed: boolean): void {
+  try {
+    if (collapsed) window.sessionStorage.setItem(TREE_COLLAPSED_KEY, "1");
+    else window.sessionStorage.removeItem(TREE_COLLAPSED_KEY);
+  } catch {
+    // Session storage may be unavailable; the choice lasts until reload.
+  }
+}
+
 /** The wide viewer pane is shown as its rail (never in the drawer layout). */
 export function viewerPaneCollapsed(
   state: Pick<AppState, "viewerPane" | "viewerIsDrawer"> & { route: { row?: unknown } },
@@ -35,14 +55,33 @@ export function viewerPaneCollapsed(
   return state.viewerPane === "collapsed" || (state.viewerPane === "auto" && !state.route.row);
 }
 
-export type OverlayName = "palette" | "help" | "runDialog" | "viewerDrawer";
+export type OverlayName = "palette" | "help" | "runDialog" | "treeDrawer" | "viewerDrawer";
 
-type OverlayFlag = "paletteOpen" | "helpOpen" | "runDialogOpen" | "viewerDrawerOpen";
+type OverlayFlag = "paletteOpen" | "helpOpen" | "runDialogOpen" | "treeDrawerOpen" | "viewerDrawerOpen";
 
 export interface OverlaySlice {
   paletteOpen: boolean;
   helpOpen: boolean;
   runDialogOpen: boolean;
+  /** Below 900 px the left panel (tree) is an overlay drawer (scroll review C2); its open state. */
+  treeDrawerOpen: boolean;
+  /** True while the layout renders the left panel as a drawer (< 900 px). */
+  treeIsDrawer: boolean;
+  setTreeIsDrawer: (drawer: boolean) => void;
+  /** Wide layouts: the left panel is folded to its 36px rail (dragged shut or 탐색 패널 접기; kept for the session). */
+  treeCollapsed: boolean;
+  /** The analyst's fold / unfold (rail, command, drag): stored for the session; ends an auto-fold. */
+  setTreeCollapsed: (collapsed: boolean) => void;
+  /**
+   * The tree is folded only because the viewer opened on a narrow window (plan r7 §3.2 L2). Kept in
+   * the store, not in the pane component, so the fold is undone even when the pane unmounts (the
+   * landing, a two-column stage) — it is never the analyst's preference and never stored.
+   */
+  treeAutoFolded: boolean;
+  /** Fold the tree for the opened viewer (no-op when it is already folded). */
+  autoFoldTree: () => void;
+  /** Undo an automatic fold the analyst has not touched since (no-op otherwise). */
+  releaseTreeAutoFold: () => void;
   /** Below 1200 px the viewer is an overlay drawer; this is its open state. */
   viewerDrawerOpen: boolean;
   /** True while the layout renders the viewer as a drawer (< 1200 px). */
@@ -64,11 +103,12 @@ const FLAG: Record<OverlayName, OverlayFlag> = {
   palette: "paletteOpen",
   help: "helpOpen",
   runDialog: "runDialogOpen",
+  treeDrawer: "treeDrawerOpen",
   viewerDrawer: "viewerDrawerOpen",
 };
 
 /** Topmost first. */
-const STACK: readonly OverlayName[] = ["palette", "help", "runDialog", "viewerDrawer"];
+const STACK: readonly OverlayName[] = ["palette", "help", "runDialog", "treeDrawer", "viewerDrawer"];
 
 export function topOverlay(state: Pick<AppState, OverlayFlag>): OverlayName | null {
   return STACK.find((name) => state[FLAG[name]]) ?? null;
@@ -78,6 +118,24 @@ export const createOverlaySlice: StateCreator<AppState, [], [], OverlaySlice> = 
   paletteOpen: false,
   helpOpen: false,
   runDialogOpen: false,
+  treeDrawerOpen: false,
+  treeIsDrawer: false,
+  setTreeIsDrawer: (drawer) =>
+    set(drawer ? { treeIsDrawer: true } : { treeIsDrawer: false, treeDrawerOpen: false }),
+  treeCollapsed: storedTreeCollapsed(),
+  setTreeCollapsed: (collapsed) => {
+    writeTreeCollapsed(collapsed);
+    set({ treeCollapsed: collapsed, treeAutoFolded: false });
+  },
+  treeAutoFolded: false,
+  autoFoldTree: () => {
+    if (!get().treeCollapsed) set({ treeCollapsed: true, treeAutoFolded: true });
+  },
+  releaseTreeAutoFold: () => {
+    const s = get();
+    if (!s.treeAutoFolded) return;
+    set(s.treeCollapsed ? { treeCollapsed: false, treeAutoFolded: false } : { treeAutoFolded: false });
+  },
   viewerDrawerOpen: false,
   viewerIsDrawer: false,
   viewerPane: storedViewerPane(),
@@ -94,6 +152,9 @@ export const createOverlaySlice: StateCreator<AppState, [], [], OverlaySlice> = 
   setOverlay: (name, open) => {
     const flag = FLAG[name];
     const patch: Partial<Record<OverlayFlag, boolean>> = { [flag]: open };
+    // The two drawers share the narrow pane area: opening one closes the other.
+    if (open && name === "treeDrawer") patch.viewerDrawerOpen = false;
+    if (open && name === "viewerDrawer") patch.treeDrawerOpen = false;
     set(patch);
   },
   setViewerIsDrawer: (drawer) =>

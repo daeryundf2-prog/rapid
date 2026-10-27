@@ -32,6 +32,7 @@ from .routes_case_db import build_case_db_router
 from .routes_cases import CASE_FIELD_LABELS, build_cases_router
 from .routes_derived import build_derived_router
 from .routes_explorers import build_explorers_router
+from .routes_families import build_families_router
 from .routes_flags import build_flags_router
 from .routes_ioc import build_ioc_router
 from .routes_media import build_media_router
@@ -204,6 +205,7 @@ def create_app(
     api.include_router(build_cases_router(store, case_workspace))
     api.include_router(build_flags_router(store))
     api.include_router(build_derived_router(store))
+    api.include_router(build_families_router(store))  # R7 갈래 A 계열·중복·예외
     api.include_router(build_explorers_router(store))
     api.include_router(build_analyses_router(store, owner=analysis_owner))
     api.include_router(build_ioc_router(store))

@@ -2,11 +2,18 @@ import { fetchArtifactsPage, locateArtifactRow } from "../../../api/collections"
 import { clipValue, flatValue } from "../../../utils/flatValue";
 import { formatGridTime } from "../../../utils/time";
 import { artifactTypeLabel } from "../../filters/typeLabels";
-import { type CatalogFamily, familyForKind, familyForTypes } from "../../flags/catalog";
+import {
+  type CatalogFamily,
+  familyForKind,
+  familyForTypes,
+  majorityFamilyForTypes,
+} from "../../flags/catalog";
 import { parseFlags } from "../../flags/flags";
 import { kindsForCategory } from "../../tree/categories";
 import { serverPathFilter } from "../gridUtils";
 import type { CollectionDef, ColumnSpec } from "../types";
+import { labelledCell, valueListLabel } from "../valueLabels";
+import { AI_KIND_COLUMNS, AI_TYPE_FAMILY_COLUMNS } from "./ai";
 import { recordHighlight, registryCellKindLabel, summarizeArtifact } from "./artifactSummary";
 import {
   col,
@@ -21,8 +28,16 @@ import {
   str,
   strOrNull,
 } from "./common";
-import { familyLayout, familyWidthPriority, flagsColumn, mixedSummaryColumns } from "./families";
+import {
+  familyColumnId,
+  familyLayout,
+  familyWidthPriority,
+  flagsColumn,
+  mixedSummaryColumns,
+} from "./families";
+import { familyDedupColumns, familyDedupFields } from "./familyDedup";
 import { mismatchDirectionLabel } from "./files";
+import { pathCell } from "./PathCell";
 import { typeChipCell } from "./StatusCells";
 
 /** Row time = first of these details keys. Same order as the server's `sort=timestamp` (plan §4.1). */
@@ -96,14 +111,26 @@ const detailColumn = col.field("detail", "내용", 320, ["analysis"], (r) => fie
 /** Kind layouts keep the summary column, off by default (the kind columns carry the detail). */
 const quietDetailColumn: ColumnSpec = { ...detailColumn, presets: [] };
 /** Server-sorted on `timestamp` (first TIME_KEYS value, the same rule as the server). */
-const timeColumn: ColumnSpec = { ...col.timestamp(170), sortKey: "timestamp" };
+const timeColumn: ColumnSpec = { ...col.timestamp(), sortKey: "timestamp" };
 const tail = [
-  col.field("provider", "파서", 130, ["analysis", "source"], (r) => r.provider),
+  col.field(
+    "provider",
+    "파서",
+    130,
+    ["analysis", "source"],
+    (r) => r.provider,
+    labelledCell("provider", (r) => r.provider),
+  ),
   col.field("rules", "탐지 규칙", 160, ["source"], (r) => fieldStr(r, "matchedRules")),
   col.field("supported", "지원", 70, ["source"], (r) => (r.fields.supported === false ? "미지원" : "")),
   col.path(420, ["source"]),
   col.sha256(),
+  // 중복 · 계열 (R7 갈래 A): default, hidden while no loaded row has a value.
+  ...familyDedupColumns(),
 ];
+
+/** Tail columns that stay default in every layout (the others move to 출처 중심 / 열 선택). */
+const DEFAULT_TAIL_IDS: ReadonlySet<string> = new Set(["dedup", "family"]);
 
 // ---- kind columns (plan artifact-columns §4.3) ---------------------------------
 
@@ -130,6 +157,8 @@ export interface KindColumnDef {
   number?: boolean;
   /** ISO timestamp: shown in the display timezone, filtered from/to. */
   time?: boolean;
+  /** A file / folder path: drawn tail first (MiddlePath), the full path stays the tooltip and value. */
+  path?: boolean;
   /** Presets the column is visible in (default analysis + axiom). */
   presets?: ColumnSpec["presets"];
 }
@@ -166,6 +195,15 @@ export function kindColumn(def: KindColumnDef): ColumnSpec {
         ? { filterKind: "number" as const }
         : {}),
     ...(def.number || def.bytes ? { align: "right" as const } : {}),
+    ...(def.path
+      ? {
+          minWidth: 200,
+          render: (row: { fields: Record<string, unknown> }) => {
+            const v = read(row);
+            return pathCell(typeof v === "string" ? v : null);
+          },
+        }
+      : {}),
     ...(sortable ? { sortKey: `details.${first}` } : {}),
     ...(named ? { sortHint: `${def.header} 정렬 (${first} 기준)` } : {}),
     ...(def.list ? { unsortableReason: SORT_LIST_REASON } : {}),
@@ -344,6 +382,8 @@ export const TYPE_FAMILY_COLUMNS: Record<string, { types: readonly string[]; col
       { header: "트리거", keys: ["trigger_types"], width: 160, list: true },
     ],
   },
+  // R7 AI 사용 (갈래 D): one column set per AI 사용 node.
+  ...AI_TYPE_FAMILY_COLUMNS,
 };
 
 /**
@@ -354,7 +394,8 @@ export function resolveArtifactFamily(
   kind: string | undefined,
   types?: readonly string[],
 ): CatalogFamily | undefined {
-  return familyForTypes(types) ?? (types?.length ? undefined : familyForKind(kind));
+  // Several types of one kind: the family holding most of their rows (C6), else the mixed layout.
+  return familyForTypes(types) ?? (types?.length ? majorityFamilyForTypes(kind, types) : familyForKind(kind));
 }
 
 /** The type family every selected type belongs to (one family only), else undefined. */
@@ -383,6 +424,8 @@ export const MESSENGER_DIRECTION_KO: Readonly<Record<string, string>> = {
 };
 
 export const KIND_COLUMNS: Record<string, KindColumnDef[]> = {
+  // R7 AI 사용 기록 전체 (every ai-agent type): 도구 · 계정 · 근거 수준.
+  "ai-agent": AI_KIND_COLUMNS,
   eventlog: [
     { header: "레벨", keys: ["level"], width: 80 },
     { header: "컴퓨터", keys: ["computer"], width: 160 },
@@ -460,7 +503,7 @@ export const KIND_COLUMNS: Record<string, KindColumnDef[]> = {
     { header: "게시자", keys: ["publisher"], width: 160 },
     { header: "버전", keys: ["version"], width: 100 },
     { header: "SHA-1", keys: ["sha1"], width: 200, mono: true },
-    { header: "키 기록", keys: ["key_last_written_at"], width: 170 },
+    { header: "키 기록", keys: ["key_last_written_at"], width: 170, time: true },
   ],
   // 앱/앱 경로/오류 모듈/이벤트 시각 stay promotable but are not defaults until the WER parser
   // decodes UTF-16 .wer files (their keys are garbled today; QA run-subset7).
@@ -553,7 +596,15 @@ export const KIND_COLUMNS: Record<string, KindColumnDef[]> = {
     { header: "암호화 항목", keys: ["encrypted_entry_count"], width: 100, number: true },
     { header: "크기", keys: ["source_size"], width: 100, bytes: true },
     { header: "수정", keys: ["modified_at"], width: 170 },
-    { header: "위험", keys: ["risk_flags"], width: 240, list: true },
+    {
+      header: "위험",
+      keys: ["risk_flags"],
+      width: 240,
+      list: true,
+      // Risk tags in Korean (desktop AI app / AI prompt history … — R7 AI 사용), raw ids in the tooltip.
+      display: (value) => valueListLabel("riskTag", value),
+      tooltip: (details) => flatValue(details.risk_flags),
+    },
   ],
 };
 
@@ -565,7 +616,7 @@ const defaultColumns = (): ColumnSpec[] => [
   // Default width = minimum width: 항목 takes the slack (DataGrid fitColumnWidths); a narrow
   // grid hides 경로 → 선별 → 시각 → 유형 instead of truncating everything (ARTIFACT_PRIORITY).
   // 시각 is in 출처 중심 too: a source review still needs the time (review B2-6).
-  { ...timeColumn, width: 140, minWidth: 140, presets: ["analysis", "compact", "source"] },
+  { ...timeColumn, presets: ["analysis", "compact", "source"] },
   // 130px: the colour dot + ~14 characters ("cloud-messaging") without an ellipsis.
   { ...typeColumn, width: 130, minWidth: 130 },
   { ...col.title("항목", 220), minWidth: 220 },
@@ -615,10 +666,21 @@ export const MIXED_PRIORITY = [
   "sum:support",
   "sum:extra",
   "review",
+  "dedup",
+  "family",
 ] as const;
 
 /** Generic artifact layout, highest priority first: 항목 > 특이사항 > 유형 > 시각 > 선별 > 경로. */
-export const ARTIFACT_PRIORITY = ["title", "flags", "type", "timestamp", "review", "path"] as const;
+export const ARTIFACT_PRIORITY = [
+  "title",
+  "flags",
+  "type",
+  "timestamp",
+  "review",
+  "path",
+  "dedup",
+  "family",
+] as const;
 
 /**
  * Responsive layouts: the generic one and every catalogue family layout (empty core columns go
@@ -648,7 +710,12 @@ export function artifactColumnsForKind(kind: string | undefined, types?: readonl
         { ...timeColumn, presets: [] },
         catalogued.id === "eventlog" ? { ...messageColumn, presets: [] } : quietDetailColumn,
         // The catalogue sets the examiner's default columns: 파서 stays in 원본 preset / 열 선택.
-        ...tail.map((column) => ({ ...column, presets: column.presets.filter((p) => p !== "analysis") })),
+        ...tail.map((column) => ({
+          ...column,
+          presets: DEFAULT_TAIL_IDS.has(column.id)
+            ? column.presets
+            : column.presets.filter((p) => p !== "analysis"),
+        })),
       ],
     });
   }
@@ -733,6 +800,8 @@ export const artifactsCollection: CollectionDef = {
         matchedRules: Array.isArray(raw.matched_rules) ? raw.matched_rules.map(str).join(", ") : "",
         highlight: recordHighlight(details),
         ...recoveryFields(details.recovery),
+        // 계열 · 중복 (R7 갈래 A): the listing's annotations once the run's derivation exists.
+        ...familyDedupFields(raw),
         // 특이사항 (U-F4): raw API value + the parsed list the cells read.
         ...(Array.isArray(raw.flags) ? { flags: raw.flags, flagList: parseFlags(raw.flags) } : {}),
         details,
@@ -742,6 +811,14 @@ export const artifactsCollection: CollectionDef = {
   columns: defaultColumns(),
   columnsFor: (ref, types) => artifactColumnsForKind(ref.kind, types),
   widthPriority: (ref, types) => artifactWidthPriority(ref.kind, types),
+  // A family's core column with no value in any loaded row hides like any empty default column
+  // (C-D7/C-E4, plan r7 §3.2 L2): it comes back as soon as a loaded row has a value, and 열 선택
+  // lists it as "값이 없어 숨김". Only the leading time column stays (the row's place in time).
+  keepWhenEmpty: (ref, types) => {
+    const family = resolveArtifactFamily(ref.kind, types);
+    const lead = family?.core_columns[0];
+    return lead?.format === "time" ? [familyColumnId(lead.key)] : [];
+  },
   locate: (runId, ref, sort, recordIndex, signal) =>
     ref.kind
       ? locateArtifactRow(runId, ref.kind, sort, recordIndex, signal)

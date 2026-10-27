@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import tempfile
 import unittest
@@ -28,7 +29,11 @@ from rapidtriage.core.derived.normalize import (
     phone_e164,
     url_host,
 )
-from rapidtriage.core.derived.stage import DERIVED_ANALYSIS_KIND, run_derived_stage
+from rapidtriage.core.derived.stage import (
+    DERIVED_ANALYSIS_KIND,
+    RUN_STAGE_ANALYSIS_PREFIX,
+    run_derived_stage,
+)
 from rapidtriage.core.derived.url_classes import (
     UrlClassError,
     load_url_classes,
@@ -178,8 +183,9 @@ class CatalogSemanticTests(unittest.TestCase):
         # + r3 O1 (10) + r3 O3 (ntfs-timestamp-mismatch, ntfs-logfile-transaction, carved-file)
         # + R5 L3 (11: location-url-candidate, browser-analytics-cookie, carved-url-candidate, 6 p2p, 2 android-backup)
         # + R5 L2 (15: startup, banner, Office x2, SSH x5, VM, wallet, AV, wallpaper, credential stores, NTFS volume)
-        # + R6 S2 lane A (1: av-product-presence).
-        self.assertEqual(len(catalog.families), 120)
+        # + R6 S2 lane A (1: av-product-presence)
+        # + timeline/grid readability C8 (2: shimcache, amcache-file).
+        self.assertEqual(len(catalog.families), 122)
         for family in catalog.families:
             columns = [*family["core_columns"], *(family.get("aux_columns") or [])]
             tagged = [column for column in columns if column.get("semantic")]
@@ -552,6 +558,23 @@ class StageTests(unittest.TestCase):
             self.assertNotIn("SECRET", message)
             self.assertFalse((run_dir / "analyses" / str(failed["analysis_id"]) / "analysis.json").exists())
             self.assertTrue((run_dir / "analyses" / str(second["analysis_id"]) / "analysis.json").exists())
+
+    def test_back_to_back_stage_runs_get_distinct_ids(self) -> None:
+        # Same-tick runs used to share a µs-timestamp id -> FileExistsError [WinError 183].
+        frozen = dt.datetime(2026, 10, 27, 1, 2, 3, 456789, tzinfo=dt.timezone.utc)
+        with tempfile.TemporaryDirectory() as temp, patch("rapidtriage.core.triage_rules.stage.dt") as fake_dt:
+            fake_dt.datetime.now.return_value = frozen
+            fake_dt.timezone = dt.timezone
+            run_dir = Path(temp)
+            ids = []
+            for _ in range(5):
+                step = run_derived_stage(run_dir, artifact_outputs={})
+                self.assertEqual(step["status"], "completed", step)
+                ids.append(str(step["analysis_id"]))
+        self.assertEqual(len(set(ids)), 5)
+        for analysis_id in ids:
+            self.assertRegex(analysis_id, rf"^{RUN_STAGE_ANALYSIS_PREFIX}-20261027T010203456789-[0-9a-f]{{8}}$")
+            self.assertLessEqual(len(analysis_id), 64)
 
 
 if __name__ == "__main__":

@@ -100,7 +100,7 @@ describe("run option summary", () => {
     const sent = Object.keys(body).filter((key) => !["wait", "evidence_citation_id"].includes(key));
     expect(rows.map((row) => row.key).sort()).toEqual(sent.sort());
     const byKey = Object.fromEntries(rows.map((row) => [row.key, row.value]));
-    expect(byKey.mode).toBe("침해사고 (hacking)");
+    expect(byKey.mode).toBe("침해사고");
     expect(byKey.max_file_count).toBe("500개");
     expect(byKey.known_good_hash_feeds).toBe("D:/kg.txt");
     expect(byKey.read_only).toBe("예");
@@ -284,11 +284,15 @@ describe("case switcher (케이스 › 증거 › 런)", () => {
       .getAllByText(/^증거 E-/)
       .map((node) => node.textContent);
     expect(evidence).toEqual(["증거 E-2 · a", "증거 E-10 · z"]);
-    const current = screen.getByRole("button", { name: "가-1 › E-2 › a.E01 · 실행 중" });
+    expect(screen.getByRole("dialog", { name: "케이스 열기" })).toBeTruthy();
+    const current = screen.getByRole("button", { name: /^가-1 › E-2 › a\.E01 · 실행 중 · / });
     expect(current.getAttribute("aria-current")).toBe("true");
     const loose = screen.getByRole("list", { name: "케이스 없는 런 목록" });
-    expect(within(loose).getByRole("button", { name: "old · 완료" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "나-2 › E-01 › b.E01 · 완료" }));
+    expect(within(loose).getByRole("button", { name: /^old · 완료 · / })).toBeTruthy();
+    // Delete is in each row's ⋯ menu, not a button on every row (C-L1).
+    expect(screen.queryByRole("button", { name: /삭제$/ })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /런 메뉴$/ }).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: /^나-2 › E-01 › b\.E01 · 완료 · / }));
     expect(window.location.hash).toContain("run-b");
   });
 });
@@ -303,7 +307,7 @@ describe("case link: commands and citation prefix", () => {
     useCaseLinks.getState().setLink("r1", null);
     expect(find("case.edit")?.disabledReason?.(ctx)).toBe("케이스에 연결되지 않은 런입니다");
     expect(find("case.link")?.disabledReason?.(ctx)).toBeUndefined();
-    expect(find("case.link")?.disabledReason?.({ ...ctx, runId: null })).toBe("열린 케이스가 없습니다");
+    expect(find("case.link")?.disabledReason?.({ ...ctx, runId: null })).toBe("케이스를 먼저 선택하세요");
     useCaseLinks.getState().setLink("r1", {
       caseId: "c1",
       caseNumber: "2026-1",

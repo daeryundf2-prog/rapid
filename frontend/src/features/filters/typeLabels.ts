@@ -5,6 +5,8 @@
  * Korean names (`typeLabels`), which win over the shorter child labels ("메시지").
  */
 
+import { timestampKindLabel } from "../../utils/timeKinds";
+import { AI_TYPE_LABELS, OTHER_AI_TYPE_LABELS } from "../ai/aiLabels";
 import { DOMAINS, flattenDomainNodes } from "../tree/domains";
 
 /**
@@ -42,6 +44,25 @@ export const TYPE_LABEL_OVERRIDES: Readonly<Record<string, string>> = {
   "p2p-search-term": "P2P 검색어",
   "p2p-client-config": "P2P 클라이언트 설정",
   "p2p-parse-error": "P2P 읽기 오류",
+  // Types no single tree node names (timeline/grid readability C9): the timeline's 영역·유형
+  // column and the condition popover read these instead of the raw id.
+  "browser-storage-inventory": "브라우저 저장소 목록",
+  "jumplist-automatic": "점프 목록(자동, 파일 단위)",
+  "jumplist-custom": "점프 목록(사용자 지정)",
+  "jumplist-entry": "점프 목록 항목",
+  "recent-shortcut-invalid-content": "최근 항목 바로 가기(읽기 오류)",
+  "registry-deleted-cell-candidate": "레지스트리 삭제 셀 후보",
+  "registry-key-recovery-candidate": "레지스트리 복구 키 후보",
+  "registry-value-recovery-candidate": "레지스트리 복구 값 후보",
+  "synthetic-media-image": "합성 의심 이미지",
+  "synthetic-media-text": "합성 의심 텍스트",
+  "windows-execution-summary": "실행 흔적 요약",
+  "windows-usb-device": "USB 장치",
+  "windows-mounted-device": "마운트된 장치",
+  // R7 AI 사용 (갈래 D): the full type names (the tree's node names — 세션, 메시지 … — are too
+  // short for the timeline's 영역·유형 column and the 유형 chips).
+  ...AI_TYPE_LABELS,
+  ...OTHER_AI_TYPE_LABELS,
 };
 
 let cache: Map<string, string> | null = null;
@@ -65,7 +86,23 @@ function labels(): Map<string, string> {
 
 /** Korean label of an artifact type, or null when none is known. */
 export function artifactTypeLabel(type: string): string | null {
-  return labels().get(type) ?? null;
+  return labels().get(type) ?? timelineEventTypeLabel(type);
+}
+
+/**
+ * Timeline event types (`artifact-<artifact type>-<time kind>`, e.g.
+ * `artifact-jumplist-entry-target-created`) read as "<type name> · <time kind>" so the timeline's
+ * 유형 filter list is Korean too (C9); null when the embedded type is unknown.
+ */
+export function timelineEventTypeLabel(eventType: string): string | null {
+  if (!eventType.startsWith("artifact-")) return null;
+  const rest = eventType.slice("artifact-".length);
+  const known = labels();
+  for (let cut = rest.lastIndexOf("-"); cut > 0; cut = rest.lastIndexOf("-", cut - 1)) {
+    const name = known.get(rest.slice(0, cut));
+    if (name) return `${name} · ${timestampKindLabel(rest.slice(cut + 1))}`;
+  }
+  return null;
 }
 
 export interface TypeOption {

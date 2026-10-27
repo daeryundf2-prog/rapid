@@ -10,6 +10,8 @@ import {
   type ReviewMarkBody,
 } from "../../api/collections";
 import { extractRows, type RunExtractResult } from "../../api/extract";
+import { getRun } from "../../api/runs";
+import { useToastStore } from "../../components/toastStore";
 import type { GridRow, ReviewStatus } from "../../contracts/collection";
 import type { MarkAction } from "../../contracts/viewer";
 import { useAppStore } from "../../state/store";
@@ -46,8 +48,34 @@ export const MARK_LABELS: Record<BatchAction, string> = {
 /** Max rows per extract request (API limit). */
 export const EXTRACT_LIMIT = 500;
 
+/**
+ * Source-row locator a row carries explicitly (search hits: the API `locator`), as
+ * `fields.reviewCollection` / `reviewKind` / `reviewPointer`; null when the row has none.
+ */
+function carriedLocator(row: GridRow): { collection: string; kind: string; pointer: string } | null {
+  const collection = row.fields.reviewCollection;
+  const pointer = row.fields.reviewPointer;
+  if (
+    typeof collection !== "string" ||
+    !collection ||
+    typeof pointer !== "string" ||
+    !pointer.startsWith("/")
+  )
+    return null;
+  const kind = typeof row.fields.reviewKind === "string" ? row.fields.reviewKind : "";
+  if (collection === "artifacts" && !kind) return null;
+  return { collection, kind, pointer };
+}
+
 /** Bookmark API target (`source` alias + JSON pointer) for a grid row, or null when unknown. */
 export function bookmarkTarget(row: GridRow): { source: string; pointer: string } | null {
+  const carried = carriedLocator(row);
+  if (carried) {
+    return {
+      source: carried.collection === "artifacts" ? `artifacts:${carried.kind}` : carried.collection,
+      pointer: carried.pointer,
+    };
+  }
   const raw = row.fields.pointer ? str(row.fields.pointer) : row.ref.locator;
   // Search rows may carry "docs-index:/results/3"; the pointer is the part after the scheme.
   const pointer = raw.includes(":/") ? raw.slice(raw.indexOf(":/") + 1) : raw;
@@ -191,6 +219,8 @@ export interface ApplyResult {
   applied: number;
   extract?: RunExtractResult;
   store?: ReviewStore;
+  /** Rows the mark did not apply to (no source record), each with its reason. */
+  skipped?: SkippedRow[];
 }
 
 /** Toast suffix that tells the analyst a mark went to the case.json fallback, not the case DB. */
@@ -203,13 +233,13 @@ export function storeNotice(result: ApplyResult): string {
 // ---- case DB handle (ensure once per run) ----------------------------------
 
 const caseDbHandles = new Map<string, Promise<CaseDbHandle | null>>();
-/** Runs whose ensure call has settled (the handle is known; marks apply without waiting). */
-const settledRuns = new Set<string>();
+/** Runs whose `/case-db/ensure` is in flight (only these say "케이스 DB 준비 중…"). */
+const preparingRuns = new Set<string>();
 
 /** Forget cached handles (tests; a run re-import). */
 export function resetCaseDbHandles(): void {
   caseDbHandles.clear();
-  settledRuns.clear();
+  preparingRuns.clear();
 }
 
 /** Shown while POST /case-db/ensure is still running (first import can take minutes). */
@@ -219,6 +249,24 @@ export const CASE_DB_PREPARING_NOTICE = "케이스 DB 준비 중… 완료되면
 function notifyPreparing(): void {
   announce(CASE_DB_PREPARING_NOTICE);
   useAppStore.getState().showNotice(CASE_DB_PREPARING_NOTICE);
+}
+
+/** The preparing toast goes once the case DB answered: one toast per mark, not two (review P2). */
+function clearPreparing(): void {
+  const toasts = useToastStore.getState();
+  for (const toast of toasts.toasts) if (toast.text === CASE_DB_PREPARING_NOTICE) toasts.dismiss(toast.id);
+}
+
+/**
+ * The handle the run itself reports (`GET /api/runs/{id}` `case_db_ready`, r7 L4 C-G13): an
+ * already-imported case DB needs no `/case-db/ensure` round trip and no "준비 중" toast. Any error
+ * (older server, network) falls back to ensure.
+ */
+function readyHandle(runId: string): Promise<CaseDbHandle | null> {
+  return getRun(runId).then(
+    (run) => (run.case_db_ready && run.case_db?.database && run.case_db.case_id ? run.case_db : null),
+    () => null,
+  );
 }
 
 function apiReason(error: ApiError): string {
@@ -233,21 +281,31 @@ function apiReason(error: ApiError): string {
 function caseDbHandle(runId: string): Promise<CaseDbHandle | null> {
   const cached = caseDbHandles.get(runId);
   if (cached) return cached;
-  const pending = ensureCaseDb(runId).then(
-    (handle) => {
-      settledRuns.add(runId);
-      return handle;
-    },
-    (error: unknown) => {
-      caseDbHandles.delete(runId);
-      if (error instanceof ApiError && error.status < 500 && error.status !== 401) {
-        // Same fallback as before (case.json bookmarks), but say why.
-        announce(`케이스 DB를 만들 수 없습니다(${apiReason(error)}). ${BOOKMARK_FALLBACK_NOTICE}`);
-        return null;
-      }
-      throw error;
-    },
-  );
+  const pending = readyHandle(runId)
+    .then((ready) => {
+      if (ready) return ready;
+      preparingRuns.add(runId);
+      notifyPreparing();
+      return ensureCaseDb(runId);
+    })
+    .then(
+      (handle) => {
+        preparingRuns.delete(runId);
+        clearPreparing();
+        return handle;
+      },
+      (error: unknown) => {
+        caseDbHandles.delete(runId);
+        preparingRuns.delete(runId);
+        clearPreparing();
+        if (error instanceof ApiError && error.status < 500 && error.status !== 401) {
+          // Same fallback as before (case.json bookmarks), but say why.
+          announce(`케이스 DB를 만들 수 없습니다(${apiReason(error)}). ${BOOKMARK_FALLBACK_NOTICE}`);
+          return null;
+        }
+        throw error;
+      },
+    );
   caseDbHandles.set(runId, pending);
   return pending;
 }
@@ -318,19 +376,57 @@ function caseDbMark(action: BatchAction, tag?: string): ReviewMarkBody {
   }
 }
 
+/** A row a mark could not apply to, with the Korean reason shown to the analyst. */
+export interface SkippedRow {
+  row: GridRow;
+  reason: string;
+}
+
+/** Why a row has no review target (shown per row when a batch skips it). */
+export const NO_SOURCE_ROW_REASON = "출처 위치(원본 레코드)를 알 수 없는 행입니다";
+
+/** Rows a review mark can target (case-db id or run-output locator), and the rest with a reason. */
+export function partitionReviewRows(rows: GridRow[]): { targetable: GridRow[]; skipped: SkippedRow[] } {
+  const targetable: GridRow[] = [];
+  const skipped: SkippedRow[] = [];
+  for (const row of rows) {
+    if (reviewTargetOf(row)) targetable.push(row);
+    else skipped.push({ row, reason: NO_SOURCE_ROW_REASON });
+  }
+  return { targetable, skipped };
+}
+
+/** Toast suffix naming the skipped rows ("… 2건은 건너뜀: 제목1, 제목2"). */
+export function skippedNotice(skipped: readonly SkippedRow[]): string {
+  if (skipped.length === 0) return "";
+  const names = skipped
+    .slice(0, 3)
+    .map((item) => item.row.title || item.row.rowKey)
+    .join(", ");
+  const more = skipped.length > 3 ? ` 외 ${skipped.length - 3}건` : "";
+  return ` 출처 위치(원본 레코드)를 알 수 없는 ${skipped.length}건은 건너뛰었습니다: ${names}${more}.`;
+}
+
 async function applyBody(
   runId: string,
-  rows: GridRow[],
+  allRows: GridRow[],
   body: MarkPayload,
   mark: ReviewMarkBody,
 ): Promise<ApplyResult> {
+  // Rows without a source record (aggregates, derived rows) are skipped with a note; the
+  // mark still applies to every row that has one.
+  const { targetable: rows, skipped } = partitionReviewRows(allRows);
+  if (rows.length === 0) {
+    throw new Error(
+      `출처 위치를 알 수 없는 행이 ${allRows.length}건 있습니다(원본 레코드 없음, 집계·파생 행).`,
+    );
+  }
   const targets = rows.map(reviewTargetOf);
-  const unresolved = targets.filter((t) => t === null).length;
-  if (unresolved > 0) throw new Error(`출처 위치를 알 수 없는 행이 ${unresolved}건 있습니다.`);
   // Queue on the (shared, cached) ensure promise: a mark made while the case DB is still being
   // prepared is applied when it resolves, never dropped; the analyst hears that right away.
   const pending = caseDbHandle(runId);
-  if (!settledRuns.has(runId)) notifyPreparing();
+  // A mark queued behind an ensure still in flight hears the notice too.
+  if (preparingRuns.has(runId)) notifyPreparing();
   const handle = await pending;
   let store: ReviewStore;
   if (handle) {
@@ -355,7 +451,7 @@ async function applyBody(
     store = "bookmarks";
   }
   for (const listener of listeners) listener(runId, store);
-  return { applied: rows.length, store };
+  return skipped.length ? { applied: rows.length, store, skipped } : { applied: rows.length, store };
 }
 
 // ---- review tools (AXIOM E3) ---------------------------------------------
@@ -366,7 +462,7 @@ async function applyBody(
  */
 export function ensureRunCaseDb(runId: string): Promise<CaseDbHandle | null> {
   const pending = caseDbHandle(runId);
-  if (!settledRuns.has(runId)) notifyPreparing();
+  if (preparingRuns.has(runId)) notifyPreparing();
   return pending;
 }
 

@@ -6,20 +6,24 @@ import {
   type PanelImperativeHandle,
   Separator,
 } from "react-resizable-panels";
-import { SkipLink, useEscape } from "../a11y";
+import { SkipLink, useEscape, useFocusTrap } from "../a11y";
 import {
   expandViewerPane,
   focusMain,
   focusViewer,
   MAIN_ID,
+  TREE_EXPAND_ID,
+  toggleTreePane,
   VIEWER_EXPAND_ID,
   VIEWER_ID,
 } from "../commands/builtin";
 import { CommandButton } from "../commands/CommandButton";
 import { ToastRegion } from "../components/ToastRegion";
 import { Landing } from "../features/case/Landing";
+import { WriteConfirmHost } from "../features/case/WriteConfirm";
 import { ReviewToolsHost } from "../features/review/ReviewToolsHost";
 import { readClassicLayout, useViewPrefs, writeClassicLayout } from "../features/review/viewPrefs";
+import { IntakePanel } from "../features/stages/IntakePanel";
 import { StageRail } from "../features/stages/StageRail";
 import { STAGE_DEFS, STAGE_HEADING_ID } from "../features/stages/stages";
 import { focusPopout, returnViewerFromPopout, usePopoutHost } from "../features/viewer/popout/host";
@@ -36,6 +40,12 @@ import { TopBar } from "./TopBar";
 
 /** Below this width the viewer becomes an overlay drawer (plan §4.1). */
 export const DRAWER_QUERY = "(max-width: 1199.98px)";
+/**
+ * Below this width the left panel (tree) becomes an overlay drawer too (scroll review C2): the
+ * stage rail, a 180px tree and a 320px grid no longer fit beside each other without widening the
+ * page (body overflow is hidden, so the overflow was simply cut off).
+ */
+export const TREE_DRAWER_QUERY = "(max-width: 899.98px)";
 /** Panel ids are DOM ids too: keep them distinct from the landmark ids (#main, #viewer). */
 const PANEL = { tree: "pane-tree", grid: "pane-grid", viewer: "pane-viewer" } as const;
 /**
@@ -46,7 +56,17 @@ const PANEL = { tree: "pane-tree", grid: "pane-grid", viewer: "pane-viewer" } as
  * (percentages) and restored when the viewer expands.
  */
 export const TREE_DEFAULT = "260px";
+/** The tree can be dragged from 180px to half the row, or past 180px shut to its rail (C2/C3). */
+export const TREE_MIN = "180px";
+export const TREE_MAX = "50%";
+export const TREE_RAIL = "36px";
+/** The grid keeps at least this much beside the tree (and the viewer). */
+export const GRID_MIN = "320px";
 export const VIEWER_DEFAULT = "440px";
+/** Accessible names of the resize separators (UX-round review: every <Separator> has one). */
+export const TREE_SEPARATOR_LABEL = "탐색 패널 너비 조절";
+export const VIEWER_SEPARATOR_LABEL = "뷰어 너비 조절";
+export const ROWS_SEPARATOR_LABEL = "목록·뷰어 높이 조절";
 /** Width of the collapsed viewer rail (no row selected, or 뷰어 접기). */
 export const VIEWER_RAIL = "36px";
 
@@ -65,18 +85,185 @@ export function useMediaQuery(query: string): boolean {
   return matches;
 }
 
-function TreePane() {
+function TreePane({ hidden = false }: { hidden?: boolean }) {
   // The left panel follows the stage (console-ia §3): domain tree, runs, review lists, exports.
   const label = useAppStore((s) => STAGE_DEFS[stageOf(s.route)].panelLabel);
   const stage = useAppStore((s) => (s.route.runId ? STAGE_DEFS[stageOf(s.route)].label : ""));
+  const intake = useAppStore((s) => Boolean(s.route.runId) && stageOf(s.route) === "intake");
   return (
-    <nav className="pane-frame" aria-label={label} data-testid="tree-region">
+    <nav className="pane-frame" aria-label={label} data-testid="tree-region" hidden={hidden}>
       {/* Stage switches (rail / Alt+1..5) land focus here (console-ia §3, Q-IA-1). */}
       <h1 id={STAGE_HEADING_ID} tabIndex={-1} className="stage-heading">
         {stage || "케이스"}
       </h1>
-      <Slot name="tree" fallback={<p className="pane-empty">탐색 트리를 불러오는 중…</p>} />
+      {/* 접수 has its own left panel (r7 L4, C-I3); every other stage the stage's tree slot. */}
+      {intake ? (
+        <IntakePanel />
+      ) : (
+        <Slot name="tree" fallback={<p className="pane-empty">탐색 트리를 불러오는 중…</p>} />
+      )}
     </nav>
+  );
+}
+
+/** The folded left panel (C2): a 36px rail whose button unfolds it, like the viewer's rail. */
+function TreeRail() {
+  return (
+    <div className="viewer-rail tree-rail" data-testid="tree-rail">
+      <button
+        type="button"
+        id={TREE_EXPAND_ID}
+        className="viewer-rail-button"
+        aria-label="왼쪽 패널 펼치기"
+        aria-expanded={false}
+        title="왼쪽 패널 펼치기"
+        onClick={() => toggleTreePane()}
+      >
+        <span className="viewer-rail-icon">
+          <Icon name="panel-left-open" />
+        </span>
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The left panel as a resizable Panel (≥ 900px): 180px … 50%, double-click on the handle resets
+ * it to 260px, and dragging it past 180px folds it to the 36px rail (탐색 패널 접기 does the same).
+ */
+function TreePanel({ defaultSize = TREE_DEFAULT }: { defaultSize?: string }) {
+  const panelRef = useRef<PanelImperativeHandle>(null);
+  const collapsed = useAppStore((s) => s.treeCollapsed);
+  const setCollapsed = useAppStore((s) => s.setTreeCollapsed);
+  const [initiallyCollapsed] = useState(collapsed);
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    if (collapsed && !panel.isCollapsed()) panel.collapse();
+    if (!collapsed && panel.isCollapsed()) {
+      panel.expand();
+      // A drag shut passes through the 180px minimum, which expand() would restore: reopen at
+      // the default width instead.
+      if (panel.isCollapsed() || panel.getSize().inPixels < 200) panel.resize(TREE_DEFAULT);
+    }
+  }, [collapsed]);
+  return (
+    <Panel
+      id={PANEL.tree}
+      panelRef={panelRef}
+      defaultSize={initiallyCollapsed ? TREE_RAIL : defaultSize}
+      minSize={TREE_MIN}
+      maxSize={TREE_MAX}
+      collapsible
+      collapsedSize={TREE_RAIL}
+      onResize={() => {
+        // A drag across the fold threshold is the same choice as the rail / command.
+        const shut = panelRef.current?.isCollapsed() ?? false;
+        if (shut !== useAppStore.getState().treeCollapsed) setCollapsed(shut);
+      }}
+    >
+      {collapsed ? <TreeRail /> : null}
+      <TreePane hidden={collapsed} />
+    </Panel>
+  );
+}
+
+/** The stage rail's 탐색 button: where focus returns when the tree drawer closes. */
+const TREE_TOGGLE_SELECTOR = '[data-testid="tree-toggle"]';
+/** The narrow layout's 뷰어 열기 handle: where focus returns when the viewer drawer closes. */
+const VIEWER_OPEN_SELECTOR = '[data-testid="viewer-drawer-open"]';
+
+/**
+ * After a drawer closes (UX-round review): once its focus trap has let go, move focus to `target()`
+ * (else the list) when focus was left inside the now-hidden drawer or on <body>. Effects run after
+ * the trap's cleanup in the same commit, so the trap cannot pull focus back.
+ */
+function useDrawerReturnFocus(
+  open: boolean,
+  ref: { current: HTMLElement | null },
+  target: () => HTMLElement | null,
+): void {
+  const wasOpen = useRef(open);
+  const targetRef = useRef(target);
+  targetRef.current = target;
+  useEffect(() => {
+    const closing = wasOpen.current && !open;
+    wasOpen.current = open;
+    if (!closing) return;
+    const active = document.activeElement;
+    const stranded = !active || active === document.body || (ref.current?.contains(active) ?? false);
+    if (!stranded) return;
+    targetRef.current()?.focus();
+    // No target, or one that cannot take focus (a disabled handle): the list.
+    if (document.activeElement === active || document.activeElement === document.body) focusMain();
+  }, [open, ref]);
+}
+
+/**
+ * Below 900px the left panel is an overlay drawer from the left edge (C2), opened from the stage
+ * rail's 탐색 패널 button (or the command); Esc, the scrim or picking a node closes it. While open
+ * it traps focus (initial focus on the stage heading, UX-round review); closing returns focus to
+ * the 탐색 button, or to the list when a picked node closed it.
+ */
+function TreeDrawer() {
+  const open = useAppStore((s) => s.treeDrawerOpen);
+  const setOverlay = useAppStore((s) => s.setOverlay);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const pickedNode = useRef(false);
+  const close = () => setOverlay("treeDrawer", false);
+  useEscape(close, open);
+  useFocusTrap(drawerRef, { active: open, initialFocus: `#${STAGE_HEADING_ID}`, returnFocus: false });
+  useDrawerReturnFocus(open, drawerRef, () => {
+    const picked = pickedNode.current;
+    pickedNode.current = false;
+    return picked ? null : document.querySelector<HTMLElement>(TREE_TOGGLE_SELECTOR);
+  });
+  // Picking a node (another collection / kind / stage) closes the drawer: the list is the goal.
+  const place = useAppStore(
+    (s) => `${s.route.runId}|${s.route.collection}|${s.route.kind ?? ""}|${s.route.status ?? ""}`,
+  );
+  const lastPlace = useRef(place);
+  useEffect(() => {
+    if (place === lastPlace.current) return;
+    lastPlace.current = place;
+    if (useAppStore.getState().treeDrawerOpen) {
+      pickedNode.current = true;
+      setOverlay("treeDrawer", false);
+    }
+  }, [place, setOverlay]);
+  return (
+    <>
+      {open ? (
+        <button
+          type="button"
+          className="drawer-scrim"
+          aria-label="왼쪽 패널 닫기"
+          tabIndex={-1}
+          onClick={close}
+        />
+      ) : null}
+      <div
+        ref={drawerRef}
+        className={`tree-drawer${open ? " open" : ""}`}
+        data-testid="tree-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="탐색 패널"
+        hidden={!open}
+      >
+        <div className="drawer-head">
+          <button
+            type="button"
+            className="button ghost icon-only"
+            aria-label="왼쪽 패널 닫기 (Esc)"
+            onClick={close}
+          >
+            <Icon name="close" />
+          </button>
+        </div>
+        <TreePane />
+      </div>
+    </>
   );
 }
 
@@ -95,14 +282,14 @@ function ViewerSlot({ drawer }: { drawer: boolean }) {
 export { stageHasViewer, VIEWER_STAGES } from "../router";
 
 /** 접수·처리·보고: left panel + page, no viewer column. */
-function TwoPanes({ narrow }: { narrow: boolean }) {
+function TwoPanes({ narrow, treeDrawer }: { narrow: boolean; treeDrawer: boolean }) {
+  // The tree drawer itself is the Layout's (it outlives the 2 ↔ 3 column switch).
+  if (treeDrawer) return <GridPane />;
   return (
     <Group id="rapidtriage-console-2col" orientation="horizontal" style={{ height: "100%" }}>
-      <Panel id={PANEL.tree} defaultSize={narrow ? "28%" : TREE_DEFAULT} minSize="240px" maxSize="320px">
-        <TreePane />
-      </Panel>
-      <Separator className="resize-handle" />
-      <Panel id={PANEL.grid} minSize="320px">
+      <TreePanel defaultSize={narrow ? "28%" : TREE_DEFAULT} />
+      <Separator className="resize-handle" aria-label={TREE_SEPARATOR_LABEL} />
+      <Panel id={PANEL.grid} minSize={GRID_MIN}>
         <GridPane />
       </Panel>
     </Group>
@@ -189,6 +376,16 @@ function PopoutRail() {
   );
 }
 
+/**
+ * Below this window width an opened viewer folds the tree (plan r7 §3.2 L2): at 1440px the grid
+ * keeps ≈ 908px instead of ≈ 672px beside a 440px viewer and a 180px tree.
+ */
+export const TREE_AUTOFOLD_BELOW = 1600;
+
+export function shouldAutoFoldTree(windowWidth: number): boolean {
+  return windowWidth > 0 && windowWidth < TREE_AUTOFOLD_BELOW;
+}
+
 function validLayout(layout: Record<string, number> | null): layout is Record<string, number> {
   return Boolean(layout?.[PANEL.tree] && layout[PANEL.grid] && layout[PANEL.viewer]);
 }
@@ -219,6 +416,24 @@ function WidePanes() {
   useEffect(() => {
     if (validLayout(saved) && !initiallyCollapsed) groupRef.current?.setLayout(saved);
   }, []);
+  // Tree auto-fold (plan r7 §3.2 L2, 구조 D3): opening the viewer on a window narrower than
+  // TREE_AUTOFOLD_BELOW folds the tree to its rail so the grid keeps its analysis columns; closing
+  // the viewer, leaving the pane (landing, a two-column stage), another run or another stage
+  // unfolds it again — unless the analyst moved the tree themselves in between (setTreeCollapsed
+  // ends the auto-fold). The flag lives in the store: an unmount must not lose it (r7 S2 review).
+  useEffect(() => {
+    const s = useAppStore.getState();
+    if (!collapsed && shouldAutoFoldTree(window.innerWidth)) s.autoFoldTree();
+    else if (collapsed) s.releaseTreeAutoFold();
+  }, [collapsed]);
+  const place = useAppStore((s) => `${s.route.runId ?? ""}|${stageOf(s.route)}`);
+  const lastPlace = useRef(place);
+  useEffect(() => {
+    if (place === lastPlace.current) return;
+    lastPlace.current = place;
+    useAppStore.getState().releaseTreeAutoFold();
+  }, [place]);
+  useEffect(() => () => useAppStore.getState().releaseTreeAutoFold(), []);
   // Collapse to the rail / expand back to the saved (dragged) width, else the 440px default.
   useEffect(() => {
     const panel = viewerRef.current;
@@ -247,14 +462,12 @@ function WidePanes() {
       }}
       style={{ height: "100%" }}
     >
-      <Panel id={PANEL.tree} defaultSize={TREE_DEFAULT} minSize="240px" maxSize="320px">
-        <TreePane />
-      </Panel>
-      <Separator className="resize-handle" />
-      <Panel id={PANEL.grid} minSize="320px">
+      <TreePanel />
+      <Separator className="resize-handle" aria-label={TREE_SEPARATOR_LABEL} />
+      <Panel id={PANEL.grid} minSize={GRID_MIN}>
         <GridPane />
       </Panel>
-      <Separator className="resize-handle" />
+      <Separator className="resize-handle" aria-label={VIEWER_SEPARATOR_LABEL} />
       <Panel
         id={PANEL.viewer}
         panelRef={viewerRef}
@@ -286,25 +499,30 @@ function WidePanes() {
   );
 }
 
-function NarrowPanes() {
+function NarrowPanes({ treeDrawer }: { treeDrawer: boolean }) {
   const open = useAppStore((s) => s.viewerDrawerOpen);
   const setOverlay = useAppStore((s) => s.setOverlay);
-  const close = () => {
-    setOverlay("viewerDrawer", false);
-    focusMain();
-  };
+  const drawerRef = useRef<HTMLElement>(null);
+  const close = () => setOverlay("viewerDrawer", false);
   useEscape(close, open);
+  // Like the tree drawer (UX-round review): trapped while open; closing returns focus to where it
+  // was before (e.g. the row), else to the 뷰어 열기 handle, else to the list.
+  // Opening lands on the drawer's 닫기 button (review P8: it used to land on the metadata block).
+  useFocusTrap(drawerRef, { active: open, initialFocus: "[data-viewer-drawer-close]" });
+  useDrawerReturnFocus(open, drawerRef, () => document.querySelector<HTMLElement>(VIEWER_OPEN_SELECTOR));
   return (
     <>
-      <Group id="rapidtriage-console-narrow" orientation="horizontal" style={{ height: "100%" }}>
-        <Panel id={PANEL.tree} defaultSize="28%" minSize="240px" maxSize="320px">
-          <TreePane />
-        </Panel>
-        <Separator className="resize-handle" />
-        <Panel id={PANEL.grid} minSize="320px">
-          <GridPane />
-        </Panel>
-      </Group>
+      {treeDrawer ? (
+        <GridPane />
+      ) : (
+        <Group id="rapidtriage-console-narrow" orientation="horizontal" style={{ height: "100%" }}>
+          <TreePanel defaultSize="28%" />
+          <Separator className="resize-handle" aria-label={TREE_SEPARATOR_LABEL} />
+          <Panel id={PANEL.grid} minSize={GRID_MIN}>
+            <GridPane />
+          </Panel>
+        </Group>
+      )}
       {open ? (
         <button type="button" className="drawer-scrim" aria-label="뷰어 닫기" tabIndex={-1} onClick={close} />
       ) : (
@@ -313,6 +531,7 @@ function NarrowPanes() {
         </div>
       )}
       <aside
+        ref={drawerRef}
         id={VIEWER_ID}
         tabIndex={-1}
         className={`viewer-drawer${open ? " open" : ""}`}
@@ -325,6 +544,7 @@ function NarrowPanes() {
             type="button"
             className="button ghost icon-only"
             aria-label="뷰어 닫기 (Esc)"
+            data-viewer-drawer-close=""
             onClick={close}
           >
             <Icon name="close" />
@@ -351,10 +571,8 @@ function ClassicPanes() {
   }, []);
   return (
     <Group id="rapidtriage-console-classic" orientation="horizontal" style={{ height: "100%" }}>
-      <Panel id={PANEL.tree} defaultSize={TREE_DEFAULT} minSize="240px" maxSize="320px">
-        <TreePane />
-      </Panel>
-      <Separator className="resize-handle" />
+      <TreePanel />
+      <Separator className="resize-handle" aria-label={TREE_SEPARATOR_LABEL} />
       <Panel id="pane-classic" minSize="420px">
         <Group
           id="rapidtriage-console-classic-rows"
@@ -368,7 +586,7 @@ function ClassicPanes() {
           <Panel id={PANEL.grid} defaultSize="55%" minSize="160px">
             <GridPane />
           </Panel>
-          <Separator className="resize-handle resize-handle-rows" />
+          <Separator className="resize-handle resize-handle-rows" aria-label={ROWS_SEPARATOR_LABEL} />
           <Panel id={PANEL.viewer} defaultSize="45%" minSize="160px">
             <aside
               id={VIEWER_ID}
@@ -404,6 +622,9 @@ export function Layout() {
   const drawer = useMediaQuery(DRAWER_QUERY);
   const setViewerIsDrawer = useAppStore((s) => s.setViewerIsDrawer);
   useEffect(() => setViewerIsDrawer(drawer), [drawer, setViewerIsDrawer]);
+  const treeDrawer = useMediaQuery(TREE_DRAWER_QUERY);
+  const setTreeIsDrawer = useAppStore((s) => s.setTreeIsDrawer);
+  useEffect(() => setTreeIsDrawer(treeDrawer), [treeDrawer, setTreeIsDrawer]);
   const hasCase = useAppStore((s) => Boolean(s.route.runId));
   const withViewer = useAppStore((s) => stageHasViewer(stageOf(s.route)));
   const columns = !hasCase ? "landing" : withViewer ? "three" : "two";
@@ -415,6 +636,7 @@ export function Layout() {
       className="shell"
       data-testid="workbench-shell"
       data-layout={drawer ? "drawer" : "wide"}
+      data-tree={treeDrawer ? "drawer" : undefined}
       data-columns={columns}
       data-split={classic && columns === "three" && !drawer ? "classic" : undefined}
     >
@@ -426,18 +648,20 @@ export function Layout() {
           {columns === "landing" ? (
             <LandingPane />
           ) : columns === "two" ? (
-            <TwoPanes narrow={drawer} />
+            <TwoPanes narrow={drawer} treeDrawer={treeDrawer} />
           ) : drawer ? (
-            <NarrowPanes />
+            <NarrowPanes treeDrawer={treeDrawer} />
           ) : classic ? (
             <ClassicPanes />
           ) : (
             <WidePanes />
           )}
+          {treeDrawer && columns !== "landing" ? <TreeDrawer /> : null}
         </div>
       </div>
       <StatusBar />
       <ToastRegion />
+      <WriteConfirmHost />
       <CommandPalette />
       <HelpOverlay />
       <ReviewToolsHost />

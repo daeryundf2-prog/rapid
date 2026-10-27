@@ -24,7 +24,7 @@ import {
 } from "./catalog";
 import { FlagBanner, FlagCell } from "./FlagCell";
 import fallbackJson from "./families.fallback.json";
-import { flagCitation, flagsAccessibleName, parseFlags, rowMatchesFlagFilter } from "./flags";
+import { flagCitation, flagsAccessibleName, parseFlags, rowMatchesFlagFilter, validationLine } from "./flags";
 
 afterEach(() => {
   cleanup();
@@ -185,7 +185,7 @@ describe("catalogue columns (U-F3)", () => {
     expect(logon.format?.(r)).toMatch(/원격/);
   });
 
-  it("time columns show their ts_kind chip with a Korean name", () => {
+  it("time columns: the column's own ts_kind is its header (no chip); another kind keeps a chip (C-D6)", () => {
     const time = catalogColumn({
       key: "time_created",
       label: "시각",
@@ -193,11 +193,20 @@ describe("catalogue columns (U-F3)", () => {
       ts_kind: "logged",
       aliases: ["event_created_at"],
     });
-    render(<div>{time.render?.(row({ details }))}</div>);
-    const chip = screen.getByTitle("기록 시각 (logged)");
-    expect(chip.textContent).toBe("기록 시각");
+    const { container } = render(<div>{time.render?.(row({ details }))}</div>);
+    expect(container.querySelector(".ts-kind-chip")).toBeNull();
+    expect(container.textContent).not.toContain("기록 시각");
     expect(time.tooltip?.(row({ details }))).toContain("기록 시각(logged)");
     expect(time.sortKey).toBe("details.time_created");
+    expect(time.minWidth).toBeGreaterThanOrEqual(180);
+    // A `timestamp` column whose row says its time is another kind keeps the chip.
+    const generic = catalogColumn({ key: "timestamp", label: "시각", format: "time", ts_kind: "logged" });
+    render(
+      <div>
+        {generic.render?.(row({ details: { timestamp: "2026-03-01T12:00:00Z", timestamp_kind: "created" } }))}
+      </div>,
+    );
+    expect(screen.getByTitle("생성 (created)").textContent).toBe("생성");
   });
 
   it("family layout: time · 항목 · 특이사항 · core in catalogue order · 선별 · 유형, aux hidden", () => {
@@ -314,6 +323,92 @@ describe("특이사항 (U-F4)", () => {
     expect(after.flagGrade).toBe("B");
     expect(rowMatchesFlagFilter(row({ flags: RAW_FLAGS }), [], "A")).toBe(true);
     expect(rowMatchesFlagFilter(row({ flags: [RAW_FLAGS[0]] }), [], "A")).toBe(false);
+  });
+});
+
+describe("rule validation line (R6 S4, Q-S4-6)", () => {
+  function catalogWith(validation: unknown): FamilyCatalog {
+    const base = getCatalog();
+    const raw = {
+      version: "t",
+      families: base.families,
+      rules: base.rules.map((rule) =>
+        rule.id === "eventlog.log_cleared" ? { ...rule, validation } : { ...rule },
+      ),
+    };
+    return normalizeCatalog(raw) as FamilyCatalog;
+  }
+
+  function popoverLine(): HTMLElement | null {
+    render(<FlagCell row={row({ flags: RAW_FLAGS })} />);
+    fireEvent.click(screen.getByRole("button"));
+    const dialog = screen.getByRole("dialog", { name: "특이사항 근거" });
+    return within(dialog).queryByTestId("flag-validation");
+  }
+
+  it("synthetic-only rules say so in the popover; the note is the tooltip", () => {
+    setCatalog(catalogWith({ synthetic: true, real: [], public: [], notes_ko: "합성 근거만" }));
+    const line = popoverLine();
+    expect(line?.textContent).toBe("검증: 합성 픽스처만");
+    expect(line?.getAttribute("title")).toBe("합성 근거만");
+  });
+
+  it("only positive/negative real-data and public-dataset checks are counted", () => {
+    setCatalog(
+      catalogWith({
+        synthetic: true,
+        real: [
+          { source: "bsh-mft", result: "negative", hits: 3, false_positives: 3, sample_size: 3 },
+          { source: "bsh-subset", result: "negative", hits: 0 },
+          { source: "vm-1102", result: "positive", hits: 1 },
+          { source: "subset-na", result: "not_applicable", hits: 0 },
+        ],
+        public: [{ source: "cfreds-hacking-case", result: "positive", hits: 1 }],
+        notes_ko: "실데이터 확인",
+      }),
+    );
+    expect(popoverLine()?.textContent).toBe(
+      "검증: 실데이터 음성 2건 · 양성 1건 · 공개 데이터셋 음성 0건 · 양성 1건 · 합성 픽스처",
+    );
+  });
+
+  it("not-applicable / unevaluated entries are not validation (UX-round review)", () => {
+    setCatalog(
+      catalogWith({
+        synthetic: true,
+        real: [{ source: "run-subset10(입력 없음)", result: "not_applicable", hits: 0 }],
+        public: [],
+        notes_ko: "해당 없음",
+      }),
+    );
+    expect(popoverLine()?.textContent).toBe("검증: 실데이터 해당 없음 · 합성 픽스처");
+    cleanup();
+    // An older payload without `result` reads as unevaluated, never as a counted check.
+    setCatalog(
+      catalogWith({ synthetic: true, real: [{ source: "old", hits: 0 }], public: [], notes_ko: "x" }),
+    );
+    expect(popoverLine()?.textContent).toBe("검증: 실데이터 미평가 · 합성 픽스처");
+  });
+
+  it("rules without a validation block (or a malformed one) show no line", () => {
+    setCatalog(catalogWith(undefined));
+    expect(popoverLine()).toBeNull();
+    cleanup();
+    setCatalog(catalogWith({ synthetic: "yes", notes_ko: "x" }));
+    expect(popoverLine()).toBeNull();
+  });
+
+  it("the bundled catalogue carries the block on all seven A-grade rules", () => {
+    const catalog = normalizeCatalog(fallbackJson) as FamilyCatalog;
+    const aGrade = catalog.rules.filter((rule) => rule.grade === "A");
+    expect(aGrade).toHaveLength(7);
+    for (const rule of aGrade) expect(rule.validation?.synthetic, rule.id).toBe(true);
+    const lines = Object.fromEntries(aGrade.map((rule) => [rule.id, validationLine(rule)]));
+    expect(lines["eventlog.log_cleared"]).toBe("검증: 실데이터 음성 1건 · 양성 0건 · 합성 픽스처");
+    expect(lines["ntfs.ads_executable"]).toBe("검증: 실데이터 해당 없음 · 합성 픽스처");
+    expect(lines["cloud.bulk_upload"]).toBe("검증: 실데이터 해당 없음 · 합성 픽스처");
+    expect(lines["antiforensics.wiper_run_after_incident"]).toBe("검증: 실데이터 미평가 · 합성 픽스처");
+    expect(lines["ntfs.si_before_fn"]).toBe("검증: 실데이터 음성 3건 · 양성 0건 · 합성 픽스처");
   });
 });
 

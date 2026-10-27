@@ -1,82 +1,138 @@
 /**
- * 접수 dashboard (plan §9 X1/X9/X10/X18, AXIOM 케이스 대시보드 §2a): a card grid
- * — 3 columns from 1200 px, 1 column below — replacing the single-column
- * intake summary. Mounted in the grid slot when the route's collection is
- * "intake" (app/IntakePane.tsx).
+ * 접수 dashboard (plan §9 X1/X9/X10/X18, AXIOM 케이스 대시보드 §2a; r7 examiner-first redesign).
+ * A sticky status strip (런 이름 · 상태 · 모드 · 시작→완료 · 총 소요 · 단계 진행 · 처리 요약 보기) over
+ * a 12-column band grid of 9 cards in examiner order — 처리 상태 · 증거 / 아티팩트 범주 · 처리
+ * 경고·제한 사항 / 사건 정보 · 키워드 일치 · 시작할 곳 / 노트·메모 · 검토·보고서 — with equal-height
+ * cards per band. A container query (≥ 1100 px pane) switches the band grid on; a narrower pane
+ * gets one column. Mounted in the grid slot when the route's collection is "intake"
+ * (app/IntakePane.tsx).
  */
 
-import { useMemo } from "react";
-import { runDisplayName } from "../../app/collections";
-import { StatusBadge } from "../../components/Badge";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import type { CollectionId, ReviewStatus } from "../../contracts/collection";
 import type { IconName } from "../../icons";
 import { useRoute } from "../../state/hooks";
 import { isRunActive } from "../../state/slices/runs";
 import { useRunCaseLink } from "../case/caseLink";
 import { useSearchState } from "../case/searchState";
-import { Card, CardEmpty, CardError, CardLoading, useCardLayout } from "./Card";
+import { Card, CardEmpty, CardError, type CardSpan, useCardLayout } from "./Card";
 import {
-  CaseNotesCard,
   CategoryCard,
-  DisclosuresCard,
-  EvidenceCard,
   ExportsCard,
   KeywordCard,
-  ProcessingCard,
   ReviewCard,
   StartCard,
+  StatusCard,
+  StatusStrip,
 } from "./cards";
 import {
-  CaseEvidenceCard,
   CaseInfoCard,
-  CaseMemoCard,
+  EvidenceCard,
   NoCaseLink,
-  ProblemsCard,
-  SnapshotCard,
+  NotesCard,
   useCaseIntakeData,
+  WarningsCard,
+  warningCounts,
+  warningCountsText,
 } from "./caseCards";
 import { disclosureItems, runWarnings } from "./disclosures";
 import { categoryBars, keywordRows, reviewSummary, stageRows } from "./model";
 import { useDashboardData } from "./useDashboardData";
 import "./dashboard.css";
 
+/** Examiner order (r7): status first, then what came in, what went wrong, the case, the notes. */
 export const CARD_IDS = [
-  // Case intake (AXIOM adoption E1).
-  "case-info",
-  "case-evidence",
-  "snapshot",
-  "problems",
-  "case-memo",
-  "notes",
+  "status",
   "evidence",
   "categories",
-  "processing",
-  "disclosures",
-  "review",
+  "warnings",
+  "case-info",
   "keywords",
-  "exports",
   "start",
+  "notes",
+  "review",
 ] as const;
 export type CardId = (typeof CARD_IDS)[number];
 
+/** Column span per card in the 12-column band grid (rows: 8+4 · 6+6 · 4+4+4 · 8+4). */
+export const CARD_SPANS: Record<CardId, CardSpan> = {
+  status: 8,
+  evidence: 4,
+  categories: 6,
+  warnings: 6,
+  "case-info": 4,
+  keywords: 4,
+  start: 4,
+  notes: 8,
+  review: 4,
+};
+
 const CARD_META: Record<CardId, { title: string; icon: IconName }> = {
-  "case-info": { title: "사건 정보", icon: "inbox" },
-  "case-evidence": { title: "증거 목록", icon: "hard-drive" },
-  snapshot: { title: "처리 설정 스냅샷", icon: "settings" },
-  problems: { title: "처리 문제", icon: "alert" },
-  "case-memo": { title: "케이스 메모", icon: "message" },
-  notes: { title: "케이스 요약 노트", icon: "file-text" },
-  evidence: { title: "증거 소스", icon: "hard-drive" },
+  status: { title: "처리 상태", icon: "clock" },
+  evidence: { title: "증거", icon: "hard-drive" },
   categories: { title: "아티팩트 범주", icon: "layers" },
-  processing: { title: "케이스 처리 세부", icon: "clock" },
-  disclosures: { title: "공개 사항", icon: "alert" },
-  review: { title: "태그 및 리뷰 상태", icon: "tag" },
+  warnings: { title: "처리 경고·제한 사항", icon: "alert" },
+  "case-info": { title: "사건 정보", icon: "inbox" },
   keywords: { title: "키워드 일치", icon: "search" },
-  exports: { title: "내보내기/보고서 이력", icon: "download" },
   start: { title: "시작할 곳", icon: "arrow-right" },
+  notes: { title: "노트·메모", icon: "message" },
+  review: { title: "검토·보고서", icon: "tag" },
 };
 
 const WAIT_FOR_RUN = "런이 완료되면 표시됩니다.";
+
+/** After 처리 설정 보기: scroll to and focus the 처리 page's settings section once it renders. */
+function focusProcessSettings(tries = 40): void {
+  const target = document.getElementById("process-settings");
+  if (target) {
+    target.scrollIntoView?.({ block: "start" });
+    if (!target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+    target.focus({ preventScroll: true });
+    return;
+  }
+  if (tries > 0) window.setTimeout(() => focusProcessSettings(tries - 1), 100);
+}
+
+/** One card's own skeleton while its data loads (C-I1): the card is there, its body fills in. */
+function CardSkeleton() {
+  return (
+    <div className="dash-skeleton" aria-hidden="true" data-testid="card-skeleton">
+      <span className="skeleton" style={{ width: "60%" }} />
+      <span className="skeleton" style={{ width: "30%" }} />
+      <span className="skeleton" style={{ width: "45%" }} />
+    </div>
+  );
+}
+
+/** "카드 N/M" while the intake cards load (C-I1: a 12 s first load was skeletons only, no progress). */
+function CardProgress({ ready, total }: { ready: number; total: number }) {
+  if (total === 0 || ready >= total) return null;
+  return (
+    <p className="dash-card-progress" data-testid="dash-card-progress">
+      <progress max={total} value={ready} aria-label="접수 카드 불러오기" /> 카드 {ready}/{total} 준비됨
+    </p>
+  );
+}
+
+/** Keeps `--dash-head-h` on the scroller equal to the sticky head's height (card heads stick below it). */
+function useStickyHeadHeight(ready: boolean) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const head = useRef<HTMLDivElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run once the loaded head mounts (the skeleton render has no head)
+  useLayoutEffect(() => {
+    const root = scroller.current;
+    const el = head.current;
+    if (!root || !el) return;
+    const sync = () =>
+      root.style.setProperty("--dash-head-h", `${Math.ceil(el.getBoundingClientRect().height)}px`);
+    sync();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(sync);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ready]);
+  return { scroller, head };
+}
 
 export function CaseDashboard({ runId }: { runId: string }) {
   const { openCollection } = useRoute();
@@ -88,6 +144,7 @@ export function CaseDashboard({ runId }: { runId: string }) {
   const runFinished = Boolean(detail.data) && !isRunActive(detail.data);
   const intake = useCaseIntakeData(runId, snapshot.data, runFinished);
   const caseDetail = intake.detail.data;
+  const { scroller, head } = useStickyHeadHeight(Boolean(detail.data));
 
   const counts = summary.data?.summary?.counts;
   const categories = useMemo(() => categoryBars(tree.data), [tree.data]);
@@ -98,14 +155,20 @@ export function CaseDashboard({ runId }: { runId: string }) {
   );
 
   if (detail.isPending) {
-    // The final card shells in their final order, skeleton lines inside (review #11): nothing
-    // jumps when the data arrives.
+    // The final card shells in their final order and spans, skeleton lines inside (review #11):
+    // nothing jumps when the data arrives.
     const shells = CARD_IDS.filter((id) => !layout.hidden.includes(id));
     return (
       <div className="dash" data-testid="intake-pane" aria-busy="true">
+        <CardProgress ready={0} total={shells.length} />
         <div className="dash-grid">
           {shells.map((id, index) => (
-            <section key={id} className="dash-card" aria-label={CARD_META[id].title}>
+            <section
+              key={id}
+              className="dash-card"
+              aria-label={CARD_META[id].title}
+              data-span={CARD_SPANS[id]}
+            >
               <div className="dash-card-head">
                 {/* Not a heading yet: the loaded card's own h2 replaces it (one outline). */}
                 <span className="dash-card-title-static">{CARD_META[id].title}</span>
@@ -133,6 +196,7 @@ export function CaseDashboard({ runId }: { runId: string }) {
   }
 
   const run = { ...detail.data, run_id: detail.data.run_id ?? runId };
+  const stages = stageRows(run.progress);
   const go = (
     collection: CollectionId,
     options: { kind?: string; status?: ReviewStatus; category?: string; q?: string } = {},
@@ -142,6 +206,7 @@ export function CaseDashboard({ runId }: { runId: string }) {
     id,
     title: CARD_META[id].title,
     icon: CARD_META[id].icon,
+    span: CARD_SPANS[id],
     collapsed: layout.collapsed.includes(id),
     onCollapsedChange: (value: boolean) => setCollapsed(id, value),
     onHide: () => setHidden(id, true),
@@ -150,142 +215,88 @@ export function CaseDashboard({ runId }: { runId: string }) {
   const visible = (id: CardId) => !layout.hidden.includes(id);
   const hiddenCount = CARD_IDS.filter((id) => layout.hidden.includes(id)).length;
 
+  const disclosures = completed && summary.data ? disclosureItems(summary.data) : [];
+  const warnings = completed && summary.data ? runWarnings(summary.data) : [];
+  const warnCounts =
+    runFinished && (intake.problems.data || summary.data)
+      ? warningCounts(intake.problems.data, disclosures, warnings)
+      : null;
+  const crumb = caseDetail ? `${caseDetail.case_number} › ${intake.evidenceNumber || "—"}` : null;
+  const outputDir = String(run.request?.output_dir ?? snapshot.data?.snapshot.request?.output_dir ?? "");
+  const caseLoading = snapshot.isPending || Boolean(intake.caseId && intake.detail.isPending);
+  // Which cards have their data (or know they wait for the run): the "카드 N/M" line.
+  const cardReady: Record<CardId, boolean> = {
+    status: true,
+    evidence: !(caseLoading || (dashboard.isPending && !caseDetail)),
+    categories: !completed || !tree.isPending,
+    warnings: !runFinished || !(intake.problems.isPending || (completed && summary.isPending)),
+    "case-info": !caseLoading,
+    keywords: !completed || !dashboard.isPending,
+    start: true,
+    notes: !(notes.isPending || snapshot.isPending),
+    review: !completed || !(review.isPending || dashboard.isPending),
+  };
+  const shownCards = CARD_IDS.filter((id) => !layout.hidden.includes(id));
+  const readyCards = shownCards.filter((id) => cardReady[id]).length;
+
   return (
-    <div className="dash" data-testid="intake-pane">
-      <div className="dash-head">
-        <h1>{runDisplayName(run)}</h1>
-        <StatusBadge status={String(run.status)} />
-        {caseDetail ? (
-          <p className="dash-crumb" data-testid="case-crumb">
-            <span className="visually-hidden">케이스 › 증거 › 런: </span>
-            {caseDetail.case_number} › {intake.evidenceNumber || "—"} › {runId.slice(0, 8)}
-          </p>
-        ) : null}
-        {hiddenCount ? (
-          <button type="button" className="button ghost dash-head-action" onClick={showAll}>
-            숨긴 카드 {hiddenCount}개 다시 표시
-          </button>
-        ) : null}
+    <div className="dash" data-testid="intake-pane" ref={scroller}>
+      <div className="dash-head" ref={head}>
+        <StatusStrip
+          run={run}
+          stages={stages}
+          crumb={crumb}
+          onOpenSummary={() => {
+            if (completed) go("outputs");
+          }}
+          onOpenSettings={() => {
+            // L1's anchor on the 처리 page: land on the run's settings, not the top of the page.
+            go("process");
+            focusProcessSettings();
+          }}
+        >
+          {hiddenCount ? (
+            <button type="button" className="button ghost" onClick={showAll}>
+              숨긴 카드 {hiddenCount}개 다시 표시
+            </button>
+          ) : null}
+        </StatusStrip>
+        <CardProgress ready={readyCards} total={shownCards.length} />
       </div>
 
       <div className="dash-grid">
-        {visible("case-info") ? (
-          <Card
-            {...cardProps("case-info", () => {
-              void snapshot.refetch();
-              void intake.detail.refetch();
-            })}
-            meta={caseDetail ? caseDetail.case_number : snapshot.data ? "케이스 없음" : undefined}
-          >
-            {snapshot.isPending || (intake.caseId && intake.detail.isPending) ? (
-              <CardLoading />
-            ) : snapshot.isError ? (
-              <CardError error={snapshot.error} />
-            ) : !intake.caseId ? (
-              <NoCaseLink />
-            ) : intake.detail.isError || !caseDetail ? (
-              <CardError error={intake.detail.error} />
-            ) : (
-              <CaseInfoCard detail={caseDetail} />
-            )}
-          </Card>
-        ) : null}
-
-        {visible("case-evidence") ? (
-          <Card
-            {...cardProps("case-evidence", () => void intake.detail.refetch())}
-            meta={caseDetail ? `증거 ${caseDetail.evidence_count} · 런 ${caseDetail.run_count}` : undefined}
-          >
-            {snapshot.isPending || (intake.caseId && intake.detail.isPending) ? (
-              <CardLoading />
-            ) : !intake.caseId ? (
-              <CardEmpty title="증거 목록">
-                케이스에 연결하면 케이스의 증거와 증거별 런이 표시됩니다.
-              </CardEmpty>
-            ) : intake.detail.isError || !caseDetail ? (
-              <CardError error={intake.detail.error} />
-            ) : (
-              <CaseEvidenceCard detail={caseDetail} currentRunId={runId} />
-            )}
-          </Card>
-        ) : null}
-
-        {visible("snapshot") ? (
-          <Card {...cardProps("snapshot", () => void snapshot.refetch())}>
-            {snapshot.isPending ? (
-              <CardLoading />
-            ) : snapshot.isError || !snapshot.data ? (
-              <CardError error={snapshot.error} />
-            ) : (
-              <SnapshotCard snapshot={snapshot.data} />
-            )}
-          </Card>
-        ) : null}
-
-        {visible("problems") ? (
-          <Card
-            {...cardProps("problems", () => void intake.problems.refetch())}
-            meta={
-              intake.problems.data ? `${intake.problems.data.total.toLocaleString("ko-KR")}건` : undefined
-            }
-          >
-            {!runFinished ? (
-              <CardEmpty title="처리 문제">{WAIT_FOR_RUN}</CardEmpty>
-            ) : intake.problems.isPending ? (
-              <CardLoading />
-            ) : intake.problems.isError || !intake.problems.data ? (
-              <CardError error={intake.problems.error} />
-            ) : (
-              <ProblemsCard runId={runId} problems={intake.problems.data} />
-            )}
-          </Card>
-        ) : null}
-
-        {visible("case-memo") ? (
-          <Card
-            {...cardProps("case-memo", () => void intake.notes.refetch())}
-            meta={intake.notes.data ? `${intake.notes.data.count}건` : undefined}
-          >
-            {snapshot.isPending || (intake.caseId && intake.notes.isPending) ? (
-              <CardLoading />
-            ) : !intake.caseId ? (
-              <CardEmpty title="케이스 메모">
-                케이스에 연결하면 작성자·시각이 남는 케이스 메모를 쓸 수 있습니다.
-              </CardEmpty>
-            ) : intake.notes.isError || !intake.notes.data ? (
-              <CardError error={intake.notes.error} />
-            ) : (
-              <CaseMemoCard
-                caseId={intake.caseId}
-                examiner={caseDetail?.examiner ?? ""}
-                notes={intake.notes.data}
-              />
-            )}
-          </Card>
-        ) : null}
-
-        {visible("notes") ? (
-          <Card {...cardProps("notes", () => void notes.refetch())}>
-            {notes.isPending ? (
-              <CardLoading />
-            ) : notes.isError ? (
-              <CardError error={notes.error} />
-            ) : (
-              <CaseNotesCard runId={runId} notes={notes.data} />
-            )}
+        {visible("status") ? (
+          <Card {...cardProps("status", () => void detail.refetch())}>
+            <StatusCard
+              run={run}
+              stages={stages}
+              counts={counts}
+              outputDir={outputDir}
+              issues={issues.data?.rows}
+            />
           </Card>
         ) : null}
 
         {visible("evidence") ? (
-          <Card {...cardProps("evidence", () => void dashboard.refetch())}>
-            {dashboard.isPending ? (
-              <CardLoading />
-            ) : dashboard.isError || !dashboard.data ? (
+          <Card
+            {...cardProps("evidence", () => {
+              void dashboard.refetch();
+              void intake.detail.refetch();
+            })}
+            meta={caseDetail ? `증거 ${caseDetail.evidence_count} · 런 ${caseDetail.run_count}` : undefined}
+          >
+            {caseLoading || (dashboard.isPending && !caseDetail) ? (
+              <CardSkeleton />
+            ) : intake.caseId && (intake.detail.isError || !caseDetail) ? (
+              <CardError error={intake.detail.error} />
+            ) : !caseDetail && (dashboard.isError || !dashboard.data) ? (
               <CardError error={dashboard.error} />
             ) : (
               <EvidenceCard
-                source={dashboard.data.evidence_source}
+                detail={caseDetail ?? null}
+                source={dashboard.data?.evidence_source}
                 counts={counts}
+                currentRunId={runId}
                 onOpenFiles={() => go("files")}
               />
             )}
@@ -300,70 +311,62 @@ export function CaseDashboard({ runId }: { runId: string }) {
             {!completed ? (
               <CardEmpty title="아티팩트 범주">{WAIT_FOR_RUN}</CardEmpty>
             ) : tree.isPending ? (
-              <CardLoading />
+              <CardSkeleton />
             ) : tree.isError ? (
               <CardError error={tree.error} />
             ) : (
               <CategoryCard
                 bars={categories.bars}
                 total={categories.total}
-                sourceName={dashboard.data?.evidence_source.name}
                 onOpenCategory={(category) => go("artifacts", { category })}
               />
             )}
           </Card>
         ) : null}
 
-        {visible("processing") ? (
-          <Card {...cardProps("processing", () => void detail.refetch())}>
-            <ProcessingCard
-              run={run}
-              stages={stageRows(run.progress)}
-              issues={issues.data?.rows}
-              onOpenOutputs={() => {
-                if (completed) go("outputs");
-              }}
-            />
-          </Card>
-        ) : null}
-
-        {visible("disclosures") ? (
+        {visible("warnings") ? (
           <Card
-            {...cardProps("disclosures", () => void summary.refetch())}
-            meta={
-              completed && summary.data
-                ? (() => {
-                    const warn = disclosureItems(summary.data).filter((item) => item.tone === "warn").length;
-                    return warn ? `확인 필요 ${warn}` : undefined;
-                  })()
-                : undefined
-            }
+            {...cardProps("warnings", () => {
+              void intake.problems.refetch();
+              void summary.refetch();
+            })}
+            meta={warnCounts ? warningCountsText(warnCounts) : undefined}
           >
-            {!completed ? (
-              <CardEmpty title="공개 사항">{WAIT_FOR_RUN}</CardEmpty>
-            ) : summary.isPending ? (
-              <CardLoading />
-            ) : summary.isError ? (
-              <CardError error={summary.error} />
+            {!runFinished ? (
+              <CardEmpty title="처리 경고·제한 사항">{WAIT_FOR_RUN}</CardEmpty>
+            ) : intake.problems.isPending || (completed && summary.isPending) ? (
+              <CardSkeleton />
+            ) : intake.problems.isError && !summary.data ? (
+              <CardError error={intake.problems.error} />
             ) : (
-              <DisclosuresCard items={disclosureItems(summary.data)} warnings={runWarnings(summary.data)} />
+              <WarningsCard
+                runId={runId}
+                problems={intake.problems.data}
+                items={disclosures}
+                warnings={warnings}
+              />
             )}
           </Card>
         ) : null}
 
-        {visible("review") ? (
+        {visible("case-info") ? (
           <Card
-            {...cardProps("review", () => void review.refetch())}
-            meta={review.data ? `표시 ${reviewRows.total.toLocaleString("ko-KR")}건` : undefined}
+            {...cardProps("case-info", () => {
+              void snapshot.refetch();
+              void intake.detail.refetch();
+            })}
+            meta={caseDetail ? caseDetail.case_number : snapshot.data ? "케이스 없음" : undefined}
           >
-            {!completed ? (
-              <CardEmpty title="리뷰 상태">{WAIT_FOR_RUN}</CardEmpty>
-            ) : review.isPending ? (
-              <CardLoading />
-            ) : review.isError ? (
-              <CardError error={review.error} />
+            {caseLoading ? (
+              <CardSkeleton />
+            ) : snapshot.isError ? (
+              <CardError error={snapshot.error} />
+            ) : !intake.caseId ? (
+              <NoCaseLink />
+            ) : intake.detail.isError || !caseDetail ? (
+              <CardError error={intake.detail.error} />
             ) : (
-              <ReviewCard rows={reviewRows.rows} onOpenStatus={(status) => go("review", { status })} />
+              <CaseInfoCard detail={caseDetail} />
             )}
           </Card>
         ) : null}
@@ -373,7 +376,7 @@ export function CaseDashboard({ runId }: { runId: string }) {
             {!completed ? (
               <CardEmpty title="키워드 일치">{WAIT_FOR_RUN}</CardEmpty>
             ) : dashboard.isPending ? (
-              <CardLoading />
+              <CardSkeleton />
             ) : (
               <KeywordCard
                 runId={runId}
@@ -388,23 +391,69 @@ export function CaseDashboard({ runId }: { runId: string }) {
           </Card>
         ) : null}
 
-        {visible("exports") ? (
-          <Card {...cardProps("exports", () => void dashboard.refetch())}>
-            {!completed ? (
-              <CardEmpty title="내보내기 이력">{WAIT_FOR_RUN}</CardEmpty>
-            ) : dashboard.isPending ? (
-              <CardLoading />
-            ) : dashboard.isError || !dashboard.data ? (
-              <CardError error={dashboard.error} />
+        {visible("start") ? (
+          <Card {...cardProps("start")}>
+            <StartCard onGo={(target) => go(target)} />
+          </Card>
+        ) : null}
+
+        {visible("notes") ? (
+          <Card
+            {...cardProps("notes", () => {
+              void notes.refetch();
+              void intake.notes.refetch();
+            })}
+            meta={intake.notes.data ? `메모 ${intake.notes.data.count}건` : undefined}
+          >
+            {notes.isPending || snapshot.isPending ? (
+              <CardSkeleton />
             ) : (
-              <ExportsCard entries={dashboard.data.exports} />
+              <NotesCard
+                runId={runId}
+                caseId={intake.caseId}
+                caseExaminer={caseDetail?.examiner ?? ""}
+                caseNotes={intake.notes.data}
+                caseNotesState={
+                  !intake.caseId
+                    ? "none"
+                    : intake.notes.isPending
+                      ? "loading"
+                      : intake.notes.isError
+                        ? "error"
+                        : "ready"
+                }
+                runNotes={notes.data}
+              />
             )}
           </Card>
         ) : null}
 
-        {visible("start") ? (
-          <Card {...cardProps("start")}>
-            <StartCard onGo={(target) => go(target)} />
+        {visible("review") ? (
+          <Card
+            {...cardProps("review", () => {
+              void review.refetch();
+              void dashboard.refetch();
+            })}
+            meta={review.data ? `표시 ${reviewRows.total.toLocaleString("ko-KR")}건` : undefined}
+          >
+            {!completed ? (
+              <CardEmpty title="검토·보고서">{WAIT_FOR_RUN}</CardEmpty>
+            ) : review.isPending || dashboard.isPending ? (
+              <CardSkeleton />
+            ) : (
+              <div className="dash-review">
+                {review.isError ? (
+                  <CardError error={review.error} />
+                ) : (
+                  <ReviewCard rows={reviewRows.rows} onOpenStatus={(status) => go("review", { status })} />
+                )}
+                {dashboard.isError || !dashboard.data ? (
+                  <CardError error={dashboard.error} />
+                ) : (
+                  <ExportsCard entries={dashboard.data.exports} />
+                )}
+              </div>
+            )}
           </Card>
         ) : null}
       </div>

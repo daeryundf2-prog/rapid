@@ -115,6 +115,11 @@
   --status-report: #a98ff2;
   --status-report-on: #0b1117;
 
+  /* Scrollbars (scroll review C4): thumb ≥ 3:1 on every surface (4.47:1 on surface-0). */
+  --sb-thumb: #6e7d8f;
+  --sb-thumb-hover: #9aa6b3;
+  --sb-track: transparent;
+
   --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(0 0 0 / 0.2);
 }
 
@@ -167,6 +172,11 @@
   --status-report: #6c4bbf;
   --status-report-on: #ffffff;
 
+  /* Scrollbars (C4): thumb ≥ 3:1 on every surface (3.65:1 on white). */
+  --sb-thumb: #7c8794;
+  --sb-thumb-hover: #5c6774;
+  --sb-track: transparent;
+
   --shadow-pop: 0 8px 24px rgb(16 24 32 / 0.14), 0 0 0 1px rgb(16 24 32 / 0.06);
 }
 
@@ -215,6 +225,9 @@
     --status-needs-review-on: #ffffff;
     --status-report: #6c4bbf;
     --status-report-on: #ffffff;
+    --sb-thumb: #7c8794;
+    --sb-thumb-hover: #5c6774;
+    --sb-track: transparent;
     --shadow-pop: none;
   }
 }
@@ -233,6 +246,8 @@
   --bg-popover: var(--surface-3);
   --focus: var(--accent);
   --deleted: var(--danger);
+  /* Pane resize grip (scroll review C3): the scrollbar thumb colour, ≥ 3:1 on the panes. */
+  --resize-grip: var(--sb-thumb);
 }
 
 /* Global focus ring (U-V8): 2px accent, offset 1px, keyboard users only. */

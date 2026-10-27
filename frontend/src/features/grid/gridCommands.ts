@@ -14,6 +14,7 @@ import { recordCitationParts } from "../viewer/citation";
 import { PIVOT_LABELS, PIVOT_ORDER, type PivotId, recordPivots } from "../viewer/pivots";
 import { registerCommand, registerLocalCommand } from "./adapter";
 import { baseName, currentTimezone, isRecord } from "./columns/common";
+import { buildFamilyCommands } from "./familyCommands";
 import {
   applyNote,
   applyReviewAction,
@@ -21,7 +22,9 @@ import {
   EXTRACT_LIMIT,
   MARK_LABELS,
   optimisticPatch,
+  partitionReviewRows,
   reviewTargetOf,
+  skippedNotice,
   storeNotice,
 } from "./reviewActions";
 import type { ColumnSpec } from "./types";
@@ -57,6 +60,7 @@ export function buildViewerTarget(runId: string, row: GridRow, mode?: ViewerMode
   const rowMode =
     typeof row.fields.viewerMode === "string" ? (row.fields.viewerMode as ViewerMode) : undefined;
   const preferred = mode ?? rowMode ?? (isArtifact ? "meta" : undefined);
+  const review = reviewLocatorOf(row);
   return {
     ref: row.ref,
     runId,
@@ -64,7 +68,28 @@ export function buildViewerTarget(runId: string, row: GridRow, mode?: ViewerMode
     ...(row.fields.isDirectory === true ? { isDirectory: true, preferredMode: "meta" as const } : {}),
     ...(preferred && row.fields.isDirectory !== true ? { preferredMode: preferred } : {}),
     ...(highlight ? { highlight } : {}),
+    ...(review ? { review } : {}),
   };
+}
+
+/**
+ * The run-output row a search hit carries (`fields.reviewCollection` / `reviewKind` /
+ * `reviewPointer`, from the API `locator`; R7 S2 #8); undefined for every other row.
+ */
+export function reviewLocatorOf(row: GridRow): ViewerTarget["review"] {
+  const { reviewCollection, reviewKind, reviewPointer } = row.fields;
+  if (typeof reviewCollection !== "string" || !reviewCollection) return undefined;
+  if (typeof reviewPointer !== "string" || !reviewPointer.startsWith("/")) return undefined;
+  return typeof reviewKind === "string" && reviewKind
+    ? { collection: reviewCollection, kind: reviewKind, pointer: reviewPointer }
+    : { collection: reviewCollection, pointer: reviewPointer };
+}
+
+/** `collection[:kind]:locator` a citation names: a search hit's source row, else the row's own ref. */
+export function citationLocator(row: GridRow): string {
+  const review = reviewLocatorOf(row);
+  if (review) return [review.collection, review.kind, review.pointer].filter(Boolean).join(":");
+  return `${row.ref.collection}:${row.ref.locator}`;
 }
 
 /**
@@ -72,13 +97,9 @@ export function buildViewerTarget(runId: string, row: GridRow, mode?: ViewerMode
  * sha256, then the record id and record time.
  */
 export function citationText(row: GridRow, runId?: string | null): string {
-  const parts = [
-    ...caseCitationParts(runId),
-    row.sourcePath ?? row.title,
-    `[${row.ref.collection}:${row.ref.locator}]`,
-  ];
-  if (row.sha256)
-    parts.push(`${row.ref.collection === "artifacts" ? "컨테이너 sha256" : "sha256"}=${row.sha256}`);
+  const parts = [...caseCitationParts(runId), row.sourcePath ?? row.title, `[${citationLocator(row)}]`];
+  const artifactRow = row.ref.collection === "artifacts" || reviewLocatorOf(row)?.collection === "artifacts";
+  if (row.sha256) parts.push(`${artifactRow ? "컨테이너 sha256" : "sha256"}=${row.sha256}`);
   const record = recordCitationParts(row, currentTimezone());
   if (record.length) parts.push(...record);
   else if (row.timestamp) parts.push(row.timestamp);
@@ -406,7 +427,8 @@ export function buildRowMarkCommands(hostRef: { current: GridCommandHost }): Com
         if (!h.runId) return "열린 케이스가 없습니다.";
         const rows = menuRows(h);
         if (rows.length === 0) return NO_ROW;
-        if (rows.some((r) => reviewTargetOf(r) === null))
+        // Rows without a source record are skipped (with a note); only all-unknown disables.
+        if (rows.every((r) => reviewTargetOf(r) === null))
           return "출처 위치를 알 수 없는 행은 표시할 수 없습니다.";
         return undefined;
       },
@@ -430,18 +452,23 @@ async function runMark(
   tag?: string,
 ): Promise<boolean> {
   if (rows.length === 0 || !host.runId) return false;
+  // Only rows with a source record change optimistically; the others are skipped (and named).
+  const patched = action === "extract" ? [] : partitionReviewRows(rows).targetable;
   const rollback =
     action === "extract"
       ? () => {}
       : host.patchRows(
-          rows.map((r) => r.rowKey),
+          patched.map((r) => r.rowKey),
           optimisticPatch(action, tag),
         );
   try {
     const result = await applyReviewAction(host.runId, rows, action, { tag });
     if (result.extract) host.showExtract(result.extract);
     else
-      host.toast(`${MARK_LABELS[action]}: ${result.applied}건 처리했습니다.${storeNotice(result)}`, "info");
+      host.toast(
+        `${MARK_LABELS[action]}: ${result.applied}건 처리했습니다.${storeNotice(result)}${skippedNotice(result.skipped ?? [])}`,
+        "info",
+      );
     return true;
   } catch (error) {
     rollback();
@@ -479,6 +506,8 @@ export function useGridCommands(host: GridCommandHost): void {
   useEffect(() => {
     const unregister = [
       ...buildGridCommands(hostRef).map(registerCommand),
+      // 계열 보기 · 상위 항목으로 · 선택 확장 (R7 갈래 A).
+      ...buildFamilyCommands(hostRef).map(registerCommand),
       ...buildRowMarkCommands(hostRef).map(registerLocalCommand),
       ...buildReviewToolGridCommands(hostRef).map(registerCommand),
       // Shell review tools (tag propagation, digit keys) read the selection through this.

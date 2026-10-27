@@ -20,6 +20,7 @@ import {
   patchCase,
 } from "../../api/cases";
 import { ApiError } from "../../api/client";
+import { problemMessageKo, stepLabelKo } from "../dashboard/disclosures";
 import { navigate } from "../tree/adapter";
 import { caseRunBody, caseRunFormReason } from "./CaseWizard";
 import { snapshotQueryKey } from "./caseLink";
@@ -141,7 +142,7 @@ export function LinkCaseDialog({
         </div>
       }
     >
-      <p className="case-reason">이 런의 처리 옵션을 케이스에 스냅숏으로 남기고 증거 번호를 붙입니다.</p>
+      <p className="case-reason">이 런의 처리 옵션을 케이스에 스냅샷으로 남기고 증거 번호를 붙입니다.</p>
       {cases.isPending ? <p aria-busy="true">케이스 목록을 불러오는 중…</p> : null}
       {cases.isError ? <ErrorText>케이스 목록을 불러오지 못했습니다.</ErrorText> : null}
       {cases.data && sorted.length === 0 ? (
@@ -603,9 +604,12 @@ export function ProblemsDialog({
               {group.items.map((item, index) => (
                 // biome-ignore lint/suspicious/noArrayIndexKey: problem items have no id; order is stable
                 <tr key={index}>
-                  <td className="mono">{item.step || "—"}</td>
+                  {/* R-7: Korean step name and reasons (key→reason table); raw text stays the tooltip. */}
+                  <td title={item.step || undefined}>{item.step ? stepLabelKo(item.step) : "—"}</td>
                   <td>{LEVEL_LABEL[item.level] ?? item.level}</td>
-                  <td className="break-all">{item.message}</td>
+                  <td className="break-all" title={item.message}>
+                    {problemMessageKo(item.message)}
+                  </td>
                 </tr>
               ))}
             </tbody>

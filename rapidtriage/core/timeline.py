@@ -34,6 +34,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple
 
+from ..artifacts.url_redaction import redact_secret_text
 from .artifact_profiles import iter_payload_records
 from .artifacts import SUPPORTED_ARTIFACT_KINDS, run_artifact_collection
 from .docs import scan_document_candidates
@@ -344,6 +345,27 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
         F("campaign_set_at", "ga-campaign-set"),
     ),
     "phone-link-photo": (F("taken_at", "photo-taken"), F("updated_at", "photo-synced")),
+    # --- R7 AI usage (stage 3.5, lane B session adapters) ------------------------------------
+    # Every ai-* row states its own evidence time through the row-level contract
+    # (``timestamp`` + ``timestamp_kind``: session started, message, tool call ``run``, file touch
+    # accessed/modified/deleted/created, MCP ``observed``, account ``added``, account switch
+    # ``switched``, cleanup marker ``cleanup``, AI-attributed commit ``committed``). The fields
+    # below are the extra times of the same row. Wall-clock log times without a zone are kept in
+    # ``timestamp_local`` and never become UTC events. Presence / credential / instruction /
+    # usage rows carry stat times as row fields only.
+    "ai-agent-session": (F("started_at", "started"), F("ended_at", "ended")),
+    "ai-agent-message": (),
+    "ai-agent-tool-call": (F("completed_at", "completed"),),
+    "ai-agent-file-touch": (),
+    "ai-mcp-server": (),
+    "ai-account": (F("first_seen", "added"), F("last_seen", "last-used")),
+    "ai-account-switch": (),
+    "ai-retention-cleanup": (),
+    "ai-code-attribution": (F("first_ts", "created"),),
+    "ai-usage-stat": (),
+    "ai-tool-presence": (),
+    "ai-credential-presence": (),
+    "ai-instruction-file": (),
 }
 # Rows that only aggregate other rows (their times duplicate the source rows)
 # and per-reference rows of a parent artifact never emit events.
@@ -404,6 +426,47 @@ RECORD_IDENTITY_FIELDS: tuple[str, ...] = (
     "rowid",
     "entry_name",
 )
+# Jump List identity (timeline/grid readability C1): a ``.automaticDestinations-ms`` /
+# ``.customDestinations-ms`` file yields one ``jumplist-automatic`` / ``jumplist-custom`` row (its
+# LNK streams in ``destinations[]``) *and* one ``jumplist-entry`` row per DestList entry joined to
+# the same LNK stream (``recent_files.jumplist_entry_payloads``). Both describe one embedded LNK, so
+# their events share the identity of that LNK inside the file: the OLE stream name (automatic: the
+# hex DestList entry number) or, in a custom file (one ``container-scan`` stream), the LNK offset.
+# The ``jumplist-entry`` event is kept (it carries the DestList metadata); the container's event
+# joins it (labels, ``also_in``).
+JUMPLIST_TYPES = frozenset({"jumplist-automatic", "jumplist-custom", "jumplist-entry"})
+JUMPLIST_PREFERRED_TYPE = "jumplist-entry"
+_JUMPLIST_SHARED_STREAMS = frozenset({"", "container-scan"})
+
+
+def jumplist_lnk_identity(artifact_type: str, context: Mapping[str, object]) -> str:
+    """Identity of the embedded LNK an event of a Jump List row (or ``destinations[]`` element)
+    describes: ``lnk-stream=<name>``, ``lnk-offset=<n>`` (custom file), ``destlist-offset=<n>``
+    (DestList entry without an LNK), else ``""`` (the generic record identity applies)."""
+    if artifact_type not in JUMPLIST_TYPES:
+        return ""
+    if artifact_type == JUMPLIST_PREFERRED_TYPE:
+        stream = context.get("lnk_stream_name")
+    else:
+        stream = context.get("stream_name") or context.get("lnk_stream_name")
+    stream_text = str(stream).strip() if isinstance(stream, (str, int)) and not isinstance(stream, bool) else ""
+    if stream_text and stream_text not in _JUMPLIST_SHARED_STREAMS:
+        return f"lnk-stream={stream_text}"
+    offset = context.get("lnk_offset")
+    custom = artifact_type == "jumplist-custom" or context.get("jumplist_kind") == "custom" or stream_text == "container-scan"
+    if custom and isinstance(offset, int) and not isinstance(offset, bool):
+        return f"lnk-offset={offset}"
+    destlist = context.get("destlist_entry_offset" if artifact_type == JUMPLIST_PREFERRED_TYPE else "entry_offset")
+    if isinstance(destlist, int) and not isinstance(destlist, bool):
+        return f"destlist-offset={destlist}"
+    return ""
+
+
+def _artifact_type_of(event: Mapping[str, object]) -> str:
+    details = event.get("details")
+    return str(details.get("artifact_type") or "") if isinstance(details, Mapping) else ""
+
+
 TIMESTAMP_LIKE_KEY_RE = re.compile(r"(_at|_time|^timestamp|_timestamp|_date)$")
 CONTEXT_EXCLUDED_KEY_RE = re.compile(r"(_hash|_sha256|_hashes|_fingerprint)$")
 MAX_CONTEXT_VALUE_LENGTH = 256
@@ -452,6 +515,10 @@ class TimelineStats:
         self.aggregate_types_skipped: Counter[str] = Counter()
         self.build_stamp_fields: Counter[str] = Counter()
         self.cross_record_merges = 0
+        # Jump List container events joined to their DestList entry event (same embedded LNK).
+        self.jumplist_lnk_merges = 0
+        # Events whose summary / target fields had a credential-like value hidden (UX-round review).
+        self.secret_redactions = 0
         self.timezone_relabelled = 0
         # Row-level truncation seen while streaming every artifact row (the
         # run steps promote it to step warnings): kind -> Counter.
@@ -494,6 +561,8 @@ class TimelineStats:
             "label_variants_merged": sum(self.label_merges.values()),
             "label_variants_merged_by_type": dict(self.label_merges.most_common(50)),
             "cross_record_merges": self.cross_record_merges,
+            "jumplist_lnk_merges": self.jumplist_lnk_merges,
+            "secret_redacted_events": self.secret_redactions,
             "key_level_events_collapsed": sum(self.key_level_collapsed.values()),
             "key_level_events_collapsed_by_type": dict(self.key_level_collapsed.most_common(20)),
             "aggregate_rows_not_emitted": dict(self.aggregate_types_skipped),
@@ -692,6 +761,49 @@ def _summary(payload: Mapping[str, object]) -> Mapping[str, object]:
     return summary if isinstance(summary, Mapping) else {}
 
 
+# What ``q=`` searches and the console shows of an event besides its summary (the search target
+# keys of api.app.timeline_index plus command lines): redacted before the event is stored.
+SECRET_TEXT_DETAIL_KEYS: tuple[str, ...] = (
+    "target_path",
+    "media_path",
+    "local_path",
+    "target_file",
+    "file_path",
+    "executable_path",
+    "referenced_path",
+    "file_name",
+    "filename",
+    "attachment_name",
+    "url",
+    "key_path",
+    "command_line",
+    "arguments",
+)
+
+
+def redact_event_secrets(event: dict[str, object]) -> bool:
+    """Hide credential-like values (``password=`` / ``token=`` / ``sharedAccessToken=`` / OAuth
+    ``state=`` ... , URL userinfo) in an event's summary and target fields (UX-round review: the
+    timeline stores them and ``q=`` would surface them). ``True`` when anything changed."""
+    changed = False
+    summary = event.get("summary")
+    if isinstance(summary, str) and ("=" in summary or "@" in summary):
+        redacted = redact_secret_text(summary)
+        if redacted != summary:
+            event["summary"] = redacted
+            changed = True
+    details = event.get("details")
+    if isinstance(details, dict):
+        for key in SECRET_TEXT_DETAIL_KEYS:
+            value = details.get(key)
+            if isinstance(value, str) and ("=" in value or "@" in value):
+                redacted = redact_secret_text(value)
+                if redacted != value:
+                    details[key] = redacted
+                    changed = True
+    return changed
+
+
 class TimelineBuilder:
     """Collects events: one event per ``(source record, timestamp)``.
 
@@ -716,6 +828,8 @@ class TimelineBuilder:
             self.add(event)
 
     def add(self, event: dict[str, object]) -> None:
+        if redact_event_secrets(event):
+            self.stats.secret_redactions += 1
         record_key = event.pop("record_key", None)
         scope = event.pop("_scope", "row")
         if not record_key:
@@ -731,6 +845,17 @@ class TimelineBuilder:
         if _merge_eventlog_detection(existing, event):
             self.stats.merged_detections += 1
             return
+        incoming_type = _artifact_type_of(event)
+        existing_type = _artifact_type_of(existing)
+        if incoming_type in JUMPLIST_TYPES and existing_type in JUMPLIST_TYPES and incoming_type != existing_type:
+            self.stats.jumplist_lnk_merges += 1
+            if incoming_type == JUMPLIST_PREFERRED_TYPE:
+                # The DestList entry event replaces the container's (same list position); the
+                # container's event then merges into it like any other duplicate.
+                container = dict(existing)
+                existing.clear()
+                existing.update(event)
+                event = container
         event_type = str(event.get("event_type"))
         if scope == "key":
             self.stats.key_level_collapsed[event_type] += 1
@@ -1183,6 +1308,10 @@ def extract_artifact_events(
             context = compact_event_context(detail_event["context"], event_path=artifact_path)
             identity = detail_event.get("identity") or _record_identity(details) or f"row={row_index}"
             element_identity = str(detail_event.get("element_identity") or "")
+            lnk_identity = jumplist_lnk_identity(artifact_type, detail_event["context"])
+            record_key = (
+                f"{artifact_path}|{lnk_identity}|" if lnk_identity else f"{artifact_path}|{identity}|{element_identity}"
+            )
             event_details: dict[str, object] = {
                 "kind": kind,
                 "provider": provider,
@@ -1202,9 +1331,14 @@ def extract_artifact_events(
                 "source": "artifacts",
                 "event_type": event_type,
                 "path": artifact_path,
-                "summary": _short(build_artifact_summary(artifact_type, artifact_path, context), MAX_SUMMARY_LENGTH),
+                "summary": _short(
+                    build_artifact_summary(
+                        artifact_type, artifact_path, {**context, **(detail_event.get("summary_context") or {})}
+                    ),
+                    MAX_SUMMARY_LENGTH,
+                ),
                 "details": event_details,
-                "record_key": f"{artifact_path}|{identity}|{element_identity}",
+                "record_key": record_key,
                 "_scope": detail_event.get("scope") or "row",
             }
             extra_labels = [label for label in detail_event.get("extra_labels") or () if label != event["timestamp_kind"]]
@@ -1590,7 +1724,14 @@ EVENTLOG_CONTEXT_KEYS: tuple[str, ...] = (
     "risk_score",
     "risk_flags",
     "rule",
+    # Readable summary inputs (timeline/grid readability C2): level and the Korean event name.
+    "level",
+    "event_label_ko",
 )
+# The parser's catch-all event name ("일반 이벤트") says nothing: the summary uses the message then.
+GENERIC_EVENT_LABELS_KO = frozenset({"일반 이벤트", "이벤트"})
+EVENTLOG_SUMMARY_MESSAGE_LENGTH = 120
+_SPACES_RE = re.compile(r"\s+")
 
 
 def eventlog_detail_event(artifact_type: str, details: Mapping[str, object]) -> dict[str, object] | None:
@@ -1602,7 +1743,12 @@ def eventlog_detail_event(artifact_type: str, details: Mapping[str, object]) -> 
     context = collect_selected_context(details, EVENTLOG_CONTEXT_KEYS)
     if not context.get("risk_score"):
         context.pop("risk_score", None)
+    # The rendered message feeds the summary only (first 120 characters): the event keeps its
+    # pointer to the row (``source_record``) instead of a second copy of the message.
+    message = _SPACES_RE.sub(" ", str(details.get("event_message") or "")).strip()
+    summary_context = {"event_message": _short(message, EVENTLOG_SUMMARY_MESSAGE_LENGTH)} if message else {}
     return {
+        "summary_context": summary_context,
         "timestamp": timestamp,
         "timestamp_kind": "event",
         "timezone": "UTC",
@@ -1760,42 +1906,87 @@ def field_label(name: str, value: object) -> str:
     return f"{name}={value}" if value not in (None, "") else ""
 
 
+def _text(value: object) -> str:
+    return _SPACES_RE.sub(" ", str(value)).strip() if value not in (None, "", [], {}) else ""
+
+
+def build_eventlog_summary(artifact_type: str, context: Mapping[str, object]) -> str:
+    """One readable line of an event-log event (timeline/grid readability C2): the Korean event name
+    (not the catch-all "일반 이벤트"), else the first 120 characters of the rendered message, else
+    the provider and event ID -- then the account (subject → target), computer, remote address and
+    command line. The channel / ID / level stay in ``details`` (their own columns)."""
+    label = _text(context.get("event_label_ko"))
+    message = _text(context.get("event_message"))[:EVENTLOG_SUMMARY_MESSAGE_LENGTH]
+    if label in GENERIC_EVENT_LABELS_KO:
+        label = ""
+    if label:
+        head = label
+    elif message:
+        head = message
+    else:
+        source = _text(context.get("provider_name")) or _text(context.get("channel")) or "이벤트 로그"
+        event_id = _text(context.get("event_id"))
+        head = f"{source} 이벤트 {event_id}".strip() if event_id else source
+    bits = [head]
+    subject = _text(context.get("subject_user_name"))
+    target = _text(context.get("target_user_name"))
+    if subject and target and subject.casefold() != target.casefold():
+        bits.append(f"계정 {subject} → {target}")
+    else:
+        account = target or subject or _text(context.get("user_name"))
+        if account:
+            bits.append(f"계정 {account}")
+    computer = _text(context.get("computer"))
+    if computer:
+        bits.append(f"컴퓨터 {computer}")
+    source_ip = _text(context.get("source_ip"))
+    if source_ip:
+        bits.append(f"원격 {source_ip}")
+    command = _text(context.get("command_line") or context.get("script_block_text"))
+    if command:
+        bits.append(f"명령 {command[:EVENTLOG_SUMMARY_MESSAGE_LENGTH]}")
+    text = " · ".join(bits)
+    return f"[탐지] {text}" if artifact_type == "eventlog-detection" else text
+
+
 def build_artifact_summary(artifact_type: str, artifact_path: str, context: Mapping[str, object]) -> str:
+    """The event's one-line summary: what it is about (URL, target, executable, key, entry), with no
+    "Artifact event: <type>" prefix (the type has its own column, timeline/grid readability C5)."""
     if artifact_type in EVENTLOG_TYPES:
-        label = "EventLog detection" if artifact_type == "eventlog-detection" else "EventLog event"
-        bits = [
-            field_label("id", context.get("event_id")),
-            str(context.get("event_category") or ""),
-            field_label("channel", context.get("channel")),
-            field_label("user", context.get("user_name") or context.get("target_user_name") or context.get("subject_user_name")),
-            field_label("src", context.get("source_ip")),
-            field_label("cmd", context.get("command_line") or context.get("script_block_text")),
-        ]
-        return f"{label}: {' '.join(bit for bit in bits if bit)}".strip()
+        return build_eventlog_summary(artifact_type, context)
     if "ai_service" in context:
         bits = [
             str(context.get("ai_service") or "AI service"),
             str(context.get("query_hint") or context.get("prompt_hint") or context.get("title") or context.get("url") or ""),
         ]
         return f"AI usage: {' '.join(bit for bit in bits if bit)}".strip()
-    if "url" in context:
-        return f"Artifact event: {artifact_type} {context['url']}"
-    if "source_url" in context:
-        return f"Artifact event: {artifact_type} {context['source_url']}"
+    if context.get("url"):
+        title = _text(context.get("title"))
+        return f"{title} — {context['url']}" if title else str(context["url"])
+    if context.get("source_url"):
+        return str(context["source_url"])
     if context.get("target_path"):
-        return f"Artifact event: {artifact_type} {context['target_path']}"
+        return str(context["target_path"])
     if context.get("executable_path"):
-        return f"Artifact event: {artifact_type} {context['executable_path']}"
+        return str(context["executable_path"])
     if context.get("key_path"):
-        return f"Artifact event: {artifact_type} {context['key_path']}"
+        return str(context["key_path"])
+    # Rows of a profile database (cookies, autofill, programs) name their thing, not the database
+    # file (P5/P6): host + cookie name, the form field, the program.
+    if context.get("host") and context.get("name"):
+        return f"{context['host']} · {context['name']}"
+    if context.get("field_name"):
+        return f"입력 필드 {context['field_name']}"
+    if context.get("program_name"):
+        return str(context["program_name"])
     if "timeline_type" in context and str(context.get("timeline_type") or "").startswith("usn-"):
         label = str(context.get("event_label") or context.get("timeline_type") or "USN timeline candidate")
         path = str(context.get("path_candidate") or context.get("file_name") or "")
         return f"{label} {path}".strip()
-    if "entry_name" in context:
-        return f"Artifact event: {artifact_type} {context['entry_name']}"
+    if context.get("entry_name"):
+        return str(context["entry_name"])
     label = Path(artifact_path).name or artifact_path or artifact_type
-    return f"Artifact event: {artifact_type} {label}"
+    return f"{artifact_type} {label}"
 
 
 def event_sort_key(event: Mapping[str, object]) -> tuple[float, str, str, str]:

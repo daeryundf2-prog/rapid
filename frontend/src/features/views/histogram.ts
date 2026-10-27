@@ -6,6 +6,8 @@
 
 import type { RunTree, TreeNode } from "../../api/runs";
 import type { CollectionId, GridRow } from "../../contracts/collection";
+import { uniqueLabels } from "../grid/columns/families";
+import { typeDisplayLabel } from "../grid/valueLabels";
 
 /** `GET /api/runs/{id}/timeline-histogram` (api/app/timeline_hist.py). */
 export interface TimelineHistogramPayload {
@@ -17,6 +19,10 @@ export interface TimelineHistogramPayload {
   bucket_count: number;
   range_start: string | null;
   range_end: string | null;
+  /** Events outside the requested `from`/`to` (server-side range, R7 S1 re-review). */
+  range_excluded_events?: number;
+  /** The range the server applied (echo of the conditions). */
+  range_filter?: unknown;
   max_bucket_count?: number;
   sources: Array<{ name: string; count: number }>;
   buckets: Array<{
@@ -157,6 +163,143 @@ export function bucketAriaLabel(bucket: TimeBucket, granularity: Granularity): s
   return `${from} ~ ${to} (UTC): ${bucket.count.toLocaleString("ko-KR")}건`;
 }
 
+// --- width-fitted, zone-aware bars (R7 L1, C-V2) -------------------------------------------------
+
+/** One bar per this many pixels of the bar area (482 bars in 460 px was unreadable). */
+export const BAR_PX = 4;
+/** Bars when the width is unknown (not laid out yet, tests). */
+export const DEFAULT_MAX_BARS = 240;
+
+/** Bar widths tried from the finest, for "자동" (each at least the server bucket). */
+const FIT_SIZES_MS = [
+  HOUR,
+  3 * HOUR,
+  6 * HOUR,
+  12 * HOUR,
+  DAY,
+  2 * DAY,
+  7 * DAY,
+  14 * DAY,
+  30 * DAY,
+  91 * DAY,
+  365 * DAY,
+];
+
+/** How many bars fit `widthPx` (one per BAR_PX), DEFAULT_MAX_BARS when unknown. */
+export function maxBarsFor(widthPx: number | null | undefined): number {
+  if (!widthPx || !Number.isFinite(widthPx) || widthPx <= 0) return DEFAULT_MAX_BARS;
+  return Math.max(1, Math.floor(widthPx / BAR_PX));
+}
+
+export interface FittedBars {
+  granularity: Granularity;
+  /** Bar width in ms. */
+  sizeMs: number;
+  buckets: TimeBucket[];
+  /** Server buckets left out by the range (outside it). */
+  clipped: boolean;
+}
+
+/**
+ * Bars of the timeline histogram fitted to the width (C-V2): the server buckets inside the time
+ * range condition (`[fromMs, untilMs)`; a bucket that straddles a bound is kept whole), merged
+ * into the finest bar width that keeps the count ≤ `maxBars`, with bar edges on the display
+ * zone's hours / days (`offsetMinutes`, minutes east of UTC at the first bar).
+ */
+export function fitBuckets(
+  payload: TimelineHistogramPayload,
+  options: {
+    maxBars: number;
+    offsetMinutes?: number;
+    fromMs?: number | null;
+    untilMs?: number | null;
+    /** A chosen bar width (시간 / 일 / 원본 버킷) instead of the fitted one; never below the server bucket. */
+    sizeMs?: number;
+  },
+): FittedBars {
+  const offset = (options.offsetMinutes ?? 0) * 60_000;
+  const from = options.fromMs ?? null;
+  const until = options.untilMs ?? null;
+  const serverMs = Math.max(1, (payload.bucket_seconds ?? 0) * 1000);
+  const kept: TimeBucket[] = [];
+  let clipped = false;
+  for (const bucket of payload.buckets) {
+    const s = parseMs(bucket.start);
+    const e = parseMs(bucket.end);
+    if (s === null || e === null) continue;
+    if ((until !== null && s >= until) || (from !== null && e <= from)) {
+      if (bucket.count) clipped = true;
+      continue;
+    }
+    if (bucket.count) kept.push({ startMs: s, endMs: e, count: bucket.count });
+  }
+  if (kept.length === 0) return { granularity: "native", sizeMs: serverMs, buckets: [], clipped };
+  const first = Math.min(...kept.map((b) => b.startMs));
+  const last = Math.max(...kept.map((b) => b.endMs));
+  const maxBars = Math.max(1, options.maxBars);
+  const fits = (size: number) => {
+    const origin = Math.floor((first + offset) / size) * size - offset;
+    return Math.ceil((last - origin) / size) <= maxBars;
+  };
+  let size =
+    options.sizeMs !== undefined
+      ? Math.max(options.sizeMs, serverMs)
+      : FIT_SIZES_MS.find((candidate) => candidate >= serverMs && fits(candidate));
+  if (size === undefined) {
+    // Wider than a year per bar, or a coarse server bucket: whole server buckets per bar.
+    const per = Math.max(1, Math.ceil((last - first) / maxBars / serverMs));
+    size = per * serverMs;
+    while (!fits(size)) size += serverMs;
+  }
+  const origin = Math.floor((first + offset) / size) * size - offset;
+  const count = Math.max(1, Math.ceil((last - origin) / size));
+  const buckets: TimeBucket[] = Array.from({ length: count }, (_, index) => ({
+    startMs: origin + index * size,
+    endMs: origin + (index + 1) * size,
+    count: 0,
+  }));
+  for (const bucket of kept) {
+    const index = Math.min(count - 1, Math.max(0, Math.floor((bucket.startMs - origin) / size)));
+    const target = buckets[index];
+    if (target) target.count += bucket.count;
+  }
+  const granularity: Granularity = size === HOUR ? "hour" : size === DAY ? "day" : "native";
+  return { granularity, sizeMs: size, buckets, clipped };
+}
+
+/** "막대 1시간" · "막대 6시간" · "막대 1일" · "막대 7일" · "막대 42분" — the width of one bar. */
+export function barSizeLabel(sizeMs: number): string {
+  if (sizeMs >= DAY && sizeMs % DAY === 0) return `막대 ${sizeMs / DAY}일`;
+  if (sizeMs >= HOUR && sizeMs % HOUR === 0) return `막대 ${sizeMs / HOUR}시간`;
+  return `막대 ${Math.max(1, Math.round(sizeMs / 60_000))}분`;
+}
+
+/** Wall-clock parts of `ms` at a fixed offset (minutes east of UTC). */
+function wall(ms: number, offsetMinutes: number) {
+  const d = new Date(ms + offsetMinutes * 60_000);
+  return {
+    date: `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`,
+    md: `${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`,
+    hour: pad(d.getUTCHours()),
+    minute: pad(d.getUTCMinutes()),
+  };
+}
+
+/** Bar label in the display zone: a day-or-wider bar "2026-10-11", an hour bar "10-11 14시", else "2026-10-11 14:00". */
+export function zonedBucketLabel(ms: number, sizeMs: number, offsetMinutes: number): string {
+  const w = wall(ms, offsetMinutes);
+  if (sizeMs >= DAY) return w.date;
+  if (sizeMs === HOUR) return `${w.md} ${w.hour}시`;
+  return `${w.date} ${w.hour}:${w.minute}`;
+}
+
+/** "2026-10-11 14:00 ~ 2026-10-11 15:00 (KST+09:00): 6건". */
+export function zonedBucketAriaLabel(bucket: TimeBucket, offsetMinutes: number, zone: string): string {
+  const a = wall(bucket.startMs, offsetMinutes);
+  const b = wall(bucket.endMs, offsetMinutes);
+  return `${a.date} ${a.hour}:${a.minute} ~ ${b.date} ${b.hour}:${b.minute} (${zone}): ${bucket.count.toLocaleString("ko-KR")}건`;
+}
+
 export const GRANULARITY_LABELS: Record<GranularityChoice, string> = {
   auto: "자동",
   hour: "시간 단위",
@@ -187,14 +330,19 @@ function findNode(nodes: readonly TreeNode[], match: (node: TreeNode) => boolean
   return null;
 }
 
-/** Kind nodes below the artifacts root (group nodes are flattened). */
-function kindNodes(nodes: readonly TreeNode[]): TreeNode[] {
-  const out: TreeNode[] = [];
+/** Kind nodes below the artifacts root (group nodes are flattened), with their group's label. */
+function kindNodes(nodes: readonly TreeNode[], group = ""): Array<{ node: TreeNode; group: string }> {
+  const out: Array<{ node: TreeNode; group: string }> = [];
   for (const node of nodes) {
-    if (node.kind && !node.artifact_type) out.push(node);
-    else if (node.children) out.push(...kindNodes(node.children));
+    if (node.kind && !node.artifact_type) out.push({ node, group });
+    else if (node.children) out.push(...kindNodes(node.children, node.label));
   }
   return out;
+}
+
+/** Bars with unique labels (R7 L3, C-V1): a kind split over groups names its group. */
+function distinct(bars: Array<CategoryBar & { context?: string }>): CategoryBar[] {
+  return uniqueLabels(bars).map(({ context: _context, ...bar }) => bar);
 }
 
 const byCount = (a: CategoryBar, b: CategoryBar) => b.count - a.count || a.label.localeCompare(b.label);
@@ -207,20 +355,30 @@ export function barsFromTree(tree: RunTree | undefined, kind: string | undefined
   if (!tree) return [];
   if (kind) {
     const node = findNode(tree.nodes, (n) => n.kind === kind && !n.artifact_type);
-    return (node?.children ?? [])
+    const bars = (node?.children ?? [])
       .filter((c) => c.artifact_type)
       .map((c) => ({
         id: c.id,
-        label: c.artifact_type ?? c.label,
+        // The type's Korean name (never the raw id, C-D9); the node label when the type has none.
+        label: c.artifact_type ? typeDisplayLabel(c.artifact_type) : c.label,
         count: c.count,
         artifactType: c.artifact_type,
       }))
       .sort(byCount);
+    return distinct(bars);
   }
   const root = tree.nodes.find((n) => n.id === "artifacts" || (n.collection === "artifacts" && !n.kind));
-  return kindNodes(root?.children ?? [])
-    .map((n) => ({ id: n.id, label: n.label, count: n.count, kind: n.kind }))
-    .sort(byCount);
+  return distinct(
+    kindNodes(root?.children ?? [])
+      .map(({ node, group }) => ({
+        id: node.id,
+        label: node.label,
+        count: node.count,
+        kind: node.kind,
+        context: group,
+      }))
+      .sort(byCount),
+  );
 }
 
 function rowExt(row: GridRow): string {
@@ -238,13 +396,15 @@ export function barsFromRows(rows: readonly GridRow[], collection: CollectionId 
     const key = byExtension ? rowExt(row) : (row.artifactType ?? "");
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
-  return [...counts.entries()]
-    .map(([key, count]): CategoryBar => {
-      const label = key || (byExtension ? "(확장자 없음)" : "(유형 없음)");
-      if (!key) return { id: `none`, label, count };
-      return byExtension
-        ? { id: `ext:${key}`, label: `.${key}`, count, extension: key }
-        : { id: `type:${key}`, label, count, artifactType: key };
-    })
-    .sort(byCount);
+  return distinct(
+    [...counts.entries()]
+      .map(([key, count]): CategoryBar => {
+        const label = key ? typeDisplayLabel(key) : byExtension ? "(확장자 없음)" : "(유형 없음)";
+        if (!key) return { id: `none`, label, count };
+        return byExtension
+          ? { id: `ext:${key}`, label: `.${key}`, count, extension: key }
+          : { id: `type:${key}`, label, count, artifactType: key };
+      })
+      .sort(byCount),
+  );
 }

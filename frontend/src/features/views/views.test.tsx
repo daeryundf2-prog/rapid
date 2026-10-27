@@ -846,11 +846,32 @@ describe("HistogramView (timeline)", () => {
 
   it("emits rapidtriage:filter for a dragged range and for keyboard selection", async () => {
     useGridLocalStore.setState((s) => ({ route: { ...s.route, collection: { id: "timeline" } } }));
-    installFetch({ "/timeline-histogram": () => jsonResponse(timeline) });
+    // The server ranges the buckets (`from` / `to`, R7 S1 re-review): the mock keeps the buckets
+    // inside the requested range and counts the rest as `range_excluded_events`.
+    const requested: Array<{ from: string | null; to: string | null }> = [];
+    installFetch({
+      "/timeline-histogram": (url) => {
+        const from = url.searchParams.get("from");
+        const to = url.searchParams.get("to");
+        requested.push({ from, to });
+        if (!from && !to) return jsonResponse(timeline);
+        const lo = from ? Date.parse(from) : -Infinity;
+        const hi = to ? Date.parse(to) : Infinity;
+        const inside = timeline.buckets.filter((b) => Date.parse(b.start) >= lo && Date.parse(b.start) <= hi);
+        const excluded =
+          timeline.buckets.reduce((n, b) => n + b.count, 0) - inside.reduce((n, b) => n + b.count, 0);
+        return jsonResponse({
+          ...timeline,
+          buckets: inside.map((b, index) => ({ ...b, index })),
+          bucket_count: inside.length,
+          range_excluded_events: excluded,
+        });
+      },
+    });
     const events = captureFilterEvents();
     renderQ(<HistogramView />);
     const group = await screen.findByRole("group", { name: /타임라인 히스토그램, 막대 3개/ });
-    const bars = Array.from(group.querySelectorAll<HTMLButtonElement>("button.hist-bar"));
+    let bars = Array.from(group.querySelectorAll<HTMLButtonElement>("button.hist-bar"));
     expect(bars).toHaveLength(3);
     expect(bars[1]?.getAttribute("aria-label")).toMatch(/6건$/);
     expect(bars.filter((b) => b.tabIndex === 0)).toHaveLength(1);
@@ -862,6 +883,18 @@ describe("HistogramView (timeline)", () => {
       from: "2026-10-01T10:00:00.000Z",
       to: "2026-10-01T11:59:59.999Z",
     });
+
+    // The range condition now shapes the bars too (C-V2): only the two hours inside it remain.
+    await screen.findByRole("group", { name: /타임라인 히스토그램, 막대 2개/ });
+    expect(screen.getByText(/시간 범위 안만/)).toBeTruthy();
+    // Ranged on the server, never clipped in the browser.
+    expect(requested.at(-1)?.from).toBe("2026-10-01T10:00:00.000Z");
+    expect(requested.at(-1)?.to).toBeTruthy();
+    act(() => {
+      window.dispatchEvent(new CustomEvent("rapidtriage:filter", { detail: { from: null, to: null } }));
+    });
+    await screen.findByRole("group", { name: /타임라인 히스토그램, 막대 3개/ });
+    bars = Array.from(document.querySelectorAll<HTMLButtonElement>("button.hist-bar"));
 
     act(() => bars[1]?.focus());
     fireEvent.keyDown(bars[1] as HTMLElement, { key: "Escape" }); // clears the dragged range

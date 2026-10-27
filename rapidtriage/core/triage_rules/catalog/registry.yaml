@@ -15,30 +15,35 @@ families:
     - timestamp
     format: time
     ts_kind: last-written
+  # Value-centric default (timeline/grid readability P4): key LastWrite · key (last three parts,
+  # full path on hover) · value name · value data · hive.
   - key: key
     label: 키 경로
     aliases:
     - key_path
     - source_key_path
-    format: path
+    format: key_tail
+    width: 260
+  - key: name
+    label: 값 이름
+    aliases:
+    - value_name
+    - key_name
+  - key: activity_value
+    label: 값 데이터
+    aliases:
+    - value_data
+    - data
+    format: mono
+    width: 260
   - key: hive_hint
     label: 하이브
     aliases:
     - hive_name
     - hive
-  - key: name
-    label: 이름
-    aliases:
-    - value_name
-    - key_name
+  aux_columns:
   - key: value_type
     label: 값 종류
-  - key: activity_value
-    label: 데이터
-    aliases:
-    - value_data
-    - data
-    format: mono
   - key: label
     label: 활동
     aliases:
@@ -52,7 +57,6 @@ families:
     semantic: account
     label: 사용자 SID
     format: sid
-  aux_columns:
   - key: user_hive_scope
     label: 사용자 하이브
   - key: value_names
@@ -969,11 +973,9 @@ rules:
   label_ko: 자동 실행이 사용자 경로·LOLBin
   rationale_ko: 'Run/RunOnce 등 자동 실행 값이 Temp/AppData/Public/Downloads, 인코딩 PowerShell 또는 LOLBin: 지속성.'
   false_positive_ko: 사용자 AppData에 설치되는 자동 업데이트(제외 목록 참고). Squirrel 방식 앱(값 이름 com.squirrel.* → AppData\Local\<앱>\<앱>.exe)은 제외.
-  sources: &id001
+  sources:
   - https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/
-  - https://www.sans.org/blog/digital-forensics-application-execution/
-  - https://forensics.wiki/usb_history_viewing/
-  - https://andreafortuna.org/2019/05/15/windows-forensics-program-execution-artifacts/
+  - https://attack.mitre.org/techniques/T1547/001/
   version: 2
   status: verified
   params:
@@ -990,7 +992,9 @@ rules:
   label_ko: 서비스 실행 경로 이상
   rationale_ko: 서비스 ImagePath가 사용자 쓰기 경로·cmd /c·PowerShell·LOLBin(시작 유형 함께 표시).
   false_positive_ko: 서드파티 서비스.
-  sources: *id001
+  sources:
+  - https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/
+  - https://attack.mitre.org/techniques/T1543/003/
   version: 1
   status: verified
   params: {}
@@ -1000,7 +1004,9 @@ rules:
   label_ko: 사건 시간대에 바뀐 자동 실행 키
   rationale_ko: '자동 실행·서비스 키의 LastWrite가 지정한 사건 시간대 안: 변경 시점 단서(사건 시간대를 지정해야 동작).'
   false_positive_ko: 설치·패치로 인한 정상 변경.
-  sources: *id001
+  sources:
+  - https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/
+  - https://attack.mitre.org/techniques/T1547/001/
   version: 1
   status: verified
   params: {}
@@ -1010,7 +1016,9 @@ rules:
   label_ko: USB 시리얼 ↔ MountedDevices 연결
   rationale_ko: 'USBSTOR 장치 시리얼(또는 볼륨 GUID)이 MountedDevices에도 있음: 장치와 드라이브 문자 연결.'
   false_positive_ko: 시리얼 없는 장치(UASP는 Enum\SCSI).
-  sources: *id001
+  sources:
+  - https://forensics.wiki/usb_history_viewing/
+  - https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/
   version: 1
   status: verified
   params: {}
@@ -1020,7 +1028,9 @@ rules:
   label_ko: UserAssist 실행 경로 의심
   rationale_ko: UserAssist 실행 경로가 Temp/사용자 쓰기 경로·UNC·이동식 드라이브.
   false_positive_ko: 포터블 앱. 바탕 화면·공용 폴더 표시와 바로 가기(.lnk) 실행은 제외.
-  sources: *id001
+  sources:
+  - https://www.sans.org/blog/digital-forensics-application-execution/
+  - https://andreafortuna.org/2019/05/15/windows-forensics-program-execution-artifacts/
   version: 2
   status: verified
   params:
@@ -1035,7 +1045,8 @@ rules:
   label_ko: ShellBag 이동식·네트워크 폴더
   rationale_ko: '탐색한 폴더가 이동식 드라이브 또는 UNC/네트워크 위치: 반출·접근 정황.'
   false_positive_ko: 정상 공유 폴더 사용.
-  sources: *id001
+  sources:
+  - https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/
   version: 1
   status: verified
   params: {}
@@ -1045,7 +1056,9 @@ rules:
   label_ko: 직접 입력한 UNC·관리 공유
   rationale_ko: 'TypedPaths/RunMRU에 UNC 또는 C$/ADMIN$ 입력: 횡이동 정황.'
   false_positive_ko: 관리자 업무.
-  sources: *id001
+  sources:
+  - https://www.cybertriage.com/blog/windows-registry-forensics-cheat-sheet-2026/
+  - https://attack.mitre.org/techniques/T1021/002/
   version: 1
   status: provisional
   params: {}

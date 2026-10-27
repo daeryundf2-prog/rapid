@@ -79,6 +79,10 @@ export interface ServerSortState extends ServerSort {
   /** 0..1 while building. */
   progress: number;
   reason?: string;
+  /** Files sort (R-9): every row lacks the column's value — the sort changes nothing. */
+  empty?: boolean;
+  /** Files sort (R-9): false = the server did not sort (unknown key …); `reason` says why. */
+  applied?: boolean;
 }
 
 export type ReviewStatus = "relevant" | "needs-review" | "excluded" | "include-in-report";
@@ -145,6 +149,12 @@ export interface CollectionQuery {
    * `from`, `to`, `weekday`, `hours`, `offhours`, `tz`, `partial`, `content`, `geo` (lists repeat).
    */
   rowConditions?: Record<string, string | string[]>;
+  /**
+   * Timeline display grouping (`group=1`): events about the same target at the same second with
+   * the same kind of time are one row with its sources. Only when `true` (the console timeline grid
+   * sets it, on by default); other readers of the timeline get every event.
+   */
+  group?: boolean;
   /** Navigation category (tree) filter; interpreted by the collection. */
   category?: string;
   /**
@@ -158,6 +168,10 @@ export interface CollectionQuery {
     mode: "exact" | "fuzzy" | "regex";
     sources?: string[];
     hideKnownGood?: boolean;
+    /** Include OCR sidecar text (`ocr=1`; off by default: it reads every image's sidecar). */
+    ocr?: boolean;
+    /** Korean note when the typed keywords were trimmed to the search limits (R7 S2 #4). */
+    keywordNote?: string;
   };
 }
 

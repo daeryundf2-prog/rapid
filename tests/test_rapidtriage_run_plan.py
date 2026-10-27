@@ -687,7 +687,7 @@ class RunPlanCliTests(unittest.TestCase):
         plan = json.loads(out)
         self.assertEqual(find_task(plan, "email")["status"], "skipped")
         code, out = self.run_cli("run", ".", "--mode", "hacking", "--print-plan")
-        self.assertIn("그룹 25 / 태스크", out)
+        self.assertIn("그룹 26 / 태스크", out)
         self.assertEqual(self.run_cli("run", ".", "--mode", "hacking", "--print-plan", "--skip-group", "report")[0], 2)
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp)

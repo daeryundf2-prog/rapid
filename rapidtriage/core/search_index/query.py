@@ -32,7 +32,12 @@ from .regex_guard import (
     analyze_regex,
     required_literal,
 )
-from .textutil import nfc
+from .textutil import is_bigram_term, nfc
+
+# Short keywords the indexes cannot serve (R7 S2): 3+ characters use the trigram index,
+# 2 non-ASCII characters the bigram table (index v3); the rest scan every row's text.
+SHORT_ONE_WARNING = "1자 검색어는 색인을 쓰지 못해 전체 본문을 훑습니다(느릴 수 있음)"
+SHORT_TWO_WARNING = "영문·숫자·기호가 든 2자 검색어는 색인을 쓰지 못해 전체 본문을 훑습니다(느릴 수 있음)"
 
 MAX_QUERY_CHARS = 4000
 MAX_CLAUSES = 64
@@ -545,10 +550,13 @@ def _validate_terms(terms: list[tuple[Term, bool]], warnings: list[str]) -> None
                 warnings.append(message)
         if name in TEXT_FIELDS and name != "re" and value.kind in {"token", "phrase"}:
             text = nfc(value.text).strip()
-            if 0 < len(text) < 3:
-                message = "2자 이하 검색어는 느립니다"
-                if message not in warnings:
-                    warnings.append(message)
+            message = ""
+            if len(text) == 1:
+                message = SHORT_ONE_WARNING
+            elif len(text) == 2 and not is_bigram_term(text):
+                message = SHORT_TWO_WARNING
+            if message and message not in warnings:
+                warnings.append(message)
         if name in BOOL_FIELDS and value.kind == "token" and value.text.lower() not in {"true", "false", "yes", "no", "1", "0"}:
             raise QueryError(f"{name}: 값은 true 또는 false여야 합니다", value.pos or term.pos)
 

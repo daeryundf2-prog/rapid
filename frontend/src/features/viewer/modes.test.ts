@@ -18,7 +18,7 @@ describe("resolveModes — one case per preview_type", () => {
       preview: preview({ preview_type: "text", extension: ".log" }),
     });
     expect(result.best).toBe("source");
-    expect(available(result)).toEqual(["source", "hex", "meta"]);
+    expect(available(result)).toEqual(["source", "hex", "meta", "family"]);
     expect(reason(result, "document")).toBe(REASONS.notDocument);
   });
 
@@ -28,7 +28,7 @@ describe("resolveModes — one case per preview_type", () => {
       preview: preview({ preview_type: "text", extension: ".pdf" }),
     });
     expect(result.best).toBe("document");
-    expect(available(result)).toEqual(["hex", "document", "meta"]);
+    expect(available(result)).toEqual(["hex", "document", "meta", "family"]);
     expect(reason(result, "source")).toBe(REASONS.documentHere);
   });
 
@@ -62,7 +62,7 @@ describe("resolveModes — one case per preview_type", () => {
       preview: preview({ preview_type: "image", extension: ".png" }),
     });
     expect(result.best).toBe("image");
-    expect(available(result)).toEqual(["hex", "image", "meta"]);
+    expect(available(result)).toEqual(["hex", "image", "meta", "family"]);
     expect(reason(result, "sqlite")).toBe(REASONS.notSqlite);
     expect(reason(result, "source")).toBe(REASONS.notText);
   });
@@ -73,7 +73,7 @@ describe("resolveModes — one case per preview_type", () => {
       preview: preview({ preview_type: "sqlite", extension: ".db" }),
     });
     expect(result.best).toBe("sqlite");
-    expect(available(result)).toEqual(["hex", "sqlite", "meta"]);
+    expect(available(result)).toEqual(["hex", "sqlite", "meta", "family"]);
     expect(reason(result, "image")).toBe(REASONS.notImage);
   });
 
@@ -101,7 +101,7 @@ describe("resolveModes — one case per preview_type", () => {
       preview: preview({ preview_type: "hex", extension: ".evtx" }),
     });
     expect(result.best).toBe("hex");
-    expect(available(result)).toEqual(["hex", "meta"]);
+    expect(available(result)).toEqual(["hex", "meta", "family"]);
     expect(reason(result, "media")).toBe(REASONS.notMedia);
   });
 
@@ -134,10 +134,10 @@ describe("resolveModes — edge cases", () => {
     expect(available(result)).toEqual([]);
   });
 
-  it("row without a source file → meta only", () => {
+  it("row without a source file → meta only (+ 계열 of a files row)", () => {
     const result = resolveModes({ target: target({ sourcePath: null }), preview: null });
     expect(result.best).toBe("meta");
-    expect(available(result)).toEqual(["meta"]);
+    expect(available(result)).toEqual(["meta", "family"]);
     expect(reason(result, "hex")).toBe(REASONS.noPath);
   });
 
@@ -173,5 +173,50 @@ describe("resolveModes — edge cases", () => {
       preview: preview({ preview_type: "json", container_path: "C:/a.zip" }),
     });
     expect(reason(result, "hex")).toBe(REASONS.archiveHex);
+  });
+});
+
+describe("계열 tab (R7 갈래 A)", () => {
+  it("is available for item rows and never chosen automatically", () => {
+    const files = resolveModes({
+      target: target(),
+      preview: preview({ preview_type: "text", extension: ".log" }),
+    });
+    expect(files.modes.find((m) => m.mode === "family")?.available).toBe(true);
+    expect(files.best).toBe("source");
+    const artifact = resolveModes({
+      target: target({
+        ref: { collection: "artifacts", kind: "email", locator: "/artifacts/3" },
+        sourcePath: null,
+      }),
+      preview: null,
+    });
+    expect(available(artifact)).toEqual(["meta", "family"]);
+    const entry = resolveModes({
+      target: target({
+        ref: { collection: "artifacts", kind: "generic-documents", locator: "/artifacts/0#entry:2" },
+      }),
+      preview: null,
+    });
+    expect(entry.modes.find((m) => m.mode === "family")?.available).toBe(true);
+  });
+
+  it("is disabled with a Korean reason for other rows; a requested 계열 wins when available", () => {
+    const timeline = resolveModes({
+      target: target({ ref: { collection: "timeline", locator: "/events/3" }, sourcePath: null }),
+      preview: null,
+    });
+    expect(reason(timeline, "family")).toBe(REASONS.notFamily);
+    const hit = resolveModes({
+      target: target({
+        ref: { collection: "search", locator: "search:artifacts:email:/artifacts/1" },
+        review: { collection: "artifacts", kind: "email", pointer: "/artifacts/1" },
+        sourcePath: null,
+      }),
+      preview: null,
+    });
+    expect(hit.modes.find((m) => m.mode === "family")?.available).toBe(true);
+    const asked = resolveModes({ target: target({ preferredMode: "family" }), preview: null });
+    expect(asked.best).toBe("family");
   });
 });

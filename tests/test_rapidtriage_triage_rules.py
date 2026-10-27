@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import json
+import random
 import re
 import tempfile
+import tracemalloc
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from rapidtriage.core.triage_rules import RULE_CLASSES, CatalogError, load_catalog
 from rapidtriage.core.triage_rules import engine as triage_engine
+from rapidtriage.core.triage_rules.base import FlagContext, RowView
 from rapidtriage.core.triage_rules.catalog import (
     CATALOG_DIR,
     RULE_ID_PATTERN,
@@ -28,7 +32,9 @@ from rapidtriage.core.triage_rules.stage import (
     RUN_STAGE_ANALYSIS_PREFIX,
     run_triage_stage,
 )
-from tests.triage_cases import all_cases, run_case
+from tests.triage_cases import all_cases, case_flags, run_case
+from tests.triage_cases.ntfs import CASES as NTFS_CASES
+from tests.triage_cases.ntfs import FN_TIME, SI_BEFORE_FN_GRADES, copied, mft
 
 GOOD_RULE = """
 families:
@@ -114,6 +120,82 @@ class CatalogTests(unittest.TestCase):
         with self.assertRaises(CatalogError):
             parse_catalog([("a.yaml", GOOD_RULE.encode()), ("b.yaml", GOOD_RULE.replace("- id: fam\n", "- id: fam2\n").encode())])
 
+    def test_a_grade_rules_carry_validation_metadata(self) -> None:
+        """R6 S4 (Q-S4-6): the seven A-grade rules have a ``validation`` block; it is metadata only."""
+        catalog = load_catalog()
+        a_grade = {spec.id for spec in catalog.specs.values() if spec.grade == "A"}
+        # Rule versions (the R6 S4 metadata alone never bumps them; ntfs.si_before_fn 2 = R6 S4 redesign, 3 = sliding bulk window).
+        versions = {
+            "antiforensics.wiper_run_after_incident": 1,
+            "cloud.bulk_upload": 2,
+            "eventlog.rdp_external_ip": 1,
+            "eventlog.log_cleared": 1,
+            "ntfs.si_before_fn": 3,
+            "ntfs.ads_executable": 1,
+            "rdp.external_ip": 1,
+        }
+        self.assertEqual(a_grade, set(versions))
+        # UX-round review: each real-data entry says what it proves (N/A / unevaluated are not validation).
+        real_results = {
+            "antiforensics.wiper_run_after_incident": ["unevaluated"],
+            "cloud.bulk_upload": ["not_applicable"],
+            "eventlog.rdp_external_ip": ["negative"],
+            "eventlog.log_cleared": ["negative"],
+            "ntfs.si_before_fn": ["negative", "negative", "negative"],
+            "ntfs.ads_executable": ["not_applicable"],
+            "rdp.external_ip": ["negative"],
+        }
+        served ={rule["id"]: rule for rule in catalog.payload()["rules"]}
+        for rule_id in sorted(a_grade):
+            with self.subTest(rule_id):
+                validation = catalog.specs[rule_id].validation
+                self.assertIsNotNone(validation)
+                self.assertIs(validation["synthetic"], True)
+                self.assertIsInstance(validation["real"], list)
+                self.assertIsInstance(validation["public"], list)
+                self.assertRegex(validation["notes_ko"], "[가-힣]")
+                self.assertEqual([entry["result"] for entry in validation["real"]], real_results[rule_id])
+                self.assertEqual(served[rule_id]["validation"], dict(validation))
+                self.assertEqual(catalog.specs[rule_id].version, versions[rule_id])
+        # Rules without the block load as before (``validation`` stays optional).
+        self.assertTrue(any(spec.validation is None for spec in catalog.specs.values()))
+
+    def test_validation_block_schema(self) -> None:
+        def with_validation(block: str) -> bytes:
+            return GOOD_RULE.replace("  status: verified\n", "  status: verified\n" + block).encode()
+
+        good = with_validation(
+            "  validation:\n    synthetic: true\n    real:\n    - source: bsh-mft\n      result: negative\n      hits: 2\n"
+            "      false_positives: 2\n      sample_size: 2\n      checked_at: '2026-10-20'\n      note_ko: 수동 확인 3건\n"
+            "    - source: subset\n      result: not_applicable\n    notes_ko: 실데이터 2건\n"
+        )
+        spec = parse_catalog([("a.yaml", good)]).specs["fam.one"]
+        self.assertEqual(spec.validation["real"][0]["source"], "bsh-mft")
+        self.assertEqual([entry["result"] for entry in spec.validation["real"]], ["negative", "not_applicable"])
+        self.assertEqual(spec.validation["real"][0]["sample_size"], 2)
+        self.assertEqual(spec.validation["public"], [])  # omitted list normalised to []
+        minimal = parse_catalog([("a.yaml", with_validation("  validation: {synthetic: false, notes_ko: 미검증}\n"))])
+        self.assertEqual(minimal.payload()["rules"][0]["validation"], {"synthetic": False, "real": [], "public": [], "notes_ko": "미검증"})
+        broken = {
+            "not-object": "  validation: yes\n",
+            "unknown-key": "  validation: {synthetic: true, notes_ko: 가, extra: 1}\n",
+            "synthetic-type": "  validation: {synthetic: 'yes', notes_ko: 가}\n",
+            "notes-missing": "  validation: {synthetic: true}\n",
+            "real-not-list": "  validation: {synthetic: true, notes_ko: 가, real: bsh}\n",
+            "entry-no-source": "  validation: {synthetic: true, notes_ko: 가, real: [{hits: 1, result: negative}]}\n",
+            "entry-unknown": "  validation: {synthetic: true, notes_ko: 가, public: [{source: x, result: negative, url: y}]}\n",
+            "hits-negative": "  validation: {synthetic: true, notes_ko: 가, real: [{source: x, result: negative, hits: -1}]}\n",
+            "date-unquoted": "  validation: {synthetic: true, notes_ko: 가, real: [{source: x, result: negative, checked_at: 2026-10-20}]}\n",
+            "result-missing": "  validation: {synthetic: true, notes_ko: 가, real: [{source: x, hits: 0}]}\n",
+            "result-unknown": "  validation: {synthetic: true, notes_ko: 가, real: [{source: x, result: pass}]}\n",
+            "sample-negative": "  validation: {synthetic: true, notes_ko: 가, real: [{source: x, result: negative, sample_size: -1}]}\n",
+            "fp-over-sample": "  validation: {synthetic: true, notes_ko: 가, real: [{source: x, result: negative, false_positives: 3, sample_size: 2}]}\n",
+        }
+        for name, block in broken.items():
+            with self.subTest(name), self.assertRaises(CatalogError) as caught:
+                parse_catalog([("a.yaml", with_validation(block))])
+            self.assertRegex(str(caught.exception), "[가-힣]")
+
 
 class RuleFixtureTests(unittest.TestCase):
     """Every rule: one positive and one false-positive look-alike fixture (``tests/triage_cases``)."""
@@ -134,6 +216,130 @@ class RuleFixtureTests(unittest.TestCase):
                     flagged, expected, summary = run_case(case, rule_id)
                     self.assertNotIn(rule_id, summary["rule_errors"])
                     self.assertEqual(flagged, expected)
+
+
+class SiBeforeFnGradeTests(unittest.TestCase):
+    """R6 S4 redesign of ``ntfs.si_before_fn``: A only with a timestomp-like corroborator, bulk/servicing dropped."""
+
+    RULE = "ntfs.si_before_fn"
+
+    def grades(self, case) -> dict[int, dict]:
+        flags, _expected, summary = case_flags(case, self.RULE)
+        self.assertNotIn(self.RULE, summary["rule_errors"])
+        return {index: flag for (_kind, index), flag in flags.items()}
+
+    def test_positive_rows_are_graded_by_corroborator(self) -> None:
+        flags = self.grades(NTFS_CASES[self.RULE]["positive"])
+        self.assertEqual([flags[index]["grade"] for index in sorted(flags)], SI_BEFORE_FN_GRADES)
+        self.assertEqual(flags[0]["evidence"]["corroborators"], ["zero_subsecond_si"])
+        self.assertEqual(flags[1]["evidence"]["corroborators"], ["si_changed_before_fn"])
+        self.assertNotIn("corroborators", flags[2]["evidence"])  # plain copy: C, no corroborator
+        self.assertIn("downloads", flags[3]["note"])
+        self.assertEqual(flags[2]["evidence"]["bucket_hits"], 4)  # the four positive rows share the $FN hour
+
+    def test_corroborated_hits_survive_bulk_and_servicing(self) -> None:
+        stomped = mft(
+            1300,
+            r"\Windows\WinSxS\x86_evil\payload.dll",
+            si_created_at="2019-03-01T09:00:00.0000000Z",
+            si_modified_at="2019-03-01T09:00:00.0000000Z",
+            si_mft_modified_at="2019-03-01T09:00:00.0000000Z",
+            fn_created_at=FN_TIME,
+        )
+        rows = [copied(1301 + index, rf"\Users\a\Documents\c{index}.docx") for index in range(3)] + [stomped]
+        flags = self.grades({"rows": rows, "params": {"bulk_min_records": 3}})
+        self.assertEqual(sorted(flags), [3])  # the bulk copies are dropped, the timestomped file is not
+        self.assertEqual(flags[3]["grade"], "A")
+        self.assertEqual(flags[3]["evidence"]["corroborators"], ["zero_subsecond_si", "si_changed_before_fn"])
+        self.assertEqual(flags[3]["evidence"]["bucket_hits"], 4)
+
+    def test_zero_subsecond_extraction_is_not_a(self) -> None:
+        """A ZIP extraction keeps 2-second $SI created/modified, but NTFS writes $SI MFT-modified itself."""
+        extracted = mft(
+            1310,
+            r"\Users\a\Documents\report.hwp",
+            si_created_at="2020-02-02T02:02:02.0000000Z",
+            si_modified_at="2020-02-02T02:02:02.0000000Z",
+            si_mft_modified_at="2024-05-01T10:15:30.2000000Z",
+            fn_created_at=FN_TIME,
+        )
+        self.assertEqual(self.grades({"rows": [extracted]})[0]["grade"], "C")
+
+    def test_bulk_window_slides_across_the_clock_hour(self) -> None:
+        """Two hits 2 s apart around 11:00 are one wave (fixed hourly buckets split them 1 + 1)."""
+        rows = [copied(1320, r"\Users\a\x.docx", "2024-05-01T10:59:59.1000000Z"), copied(1321, r"\Users\a\y.docx", "2024-05-01T11:00:01.1000000Z")]
+        self.assertEqual(self.grades({"rows": rows, "params": {"bulk_min_records": 2}}), {})
+        apart = [copied(1322, r"\Users\a\x.docx", "2024-05-01T10:00:00.1000000Z"), copied(1323, r"\Users\a\y.docx", "2024-05-01T10:30:00.1000000Z")]
+        flags = self.grades({"rows": apart, "params": {"bulk_min_records": 2, "bulk_bucket_seconds": 1800}})
+        self.assertEqual(sorted(flags), [0, 1])  # 30 min apart, window +/-15 min
+        self.assertEqual(flags[0]["evidence"]["bucket_hits"], 1)
+        self.assertEqual(self.grades({"rows": apart, "params": {"bulk_min_records": 2, "bulk_bucket_seconds": 3600}}), {})  # +/-30 min: inclusive
+
+    def test_straddling_wave_of_600_is_suppressed(self) -> None:
+        """Reviewer case: 600 copies with $FN created 10:55-11:04 (300 per clock hour) -> no flag at bulk_min 500."""
+        start = dt.datetime(2024, 5, 1, 10, 55, tzinfo=dt.timezone.utc)
+        rows = [
+            copied(2000 + index, rf"\Users\a\Documents\wave\f{index}.docx", (start + dt.timedelta(seconds=index)).isoformat().replace("+00:00", ".1000000Z"))
+            for index in range(600)
+        ]
+        self.assertEqual(self.grades({"rows": rows}), {})
+        lone = copied(2600, r"\Users\a\Documents\late.docx", "2024-05-01T12:00:00.1000000Z")  # 56 min after the wave's end
+        flags = self.grades({"rows": [*rows, lone]})
+        self.assertEqual(sorted(flags), [600])
+        self.assertEqual(flags[600]["grade"], "C")
+
+    def test_window_counts_match_brute_force(self) -> None:
+        rule = RULE_CLASSES[self.RULE]({"bulk_bucket_seconds": 600})
+        rng = random.Random(7)
+        expected_input = []
+        for index in range(400):
+            kind = rule._code(f"analysis:k{rng.randrange(2)}")
+            moment = rng.randrange(0, 4 * 3600) * 1_000_000
+            rule._kind.append(kind)
+            rule._fn.append(moment)
+            expected_input.append((kind, moment))
+        half = 300 * 1_000_000
+        brute = [sum(1 for other_kind, other in expected_input if other_kind == kind and abs(other - moment) <= half) for kind, moment in expected_input]
+        self.assertEqual(rule.window_counts(), brute)
+
+    def test_hit_state_is_compact(self) -> None:
+        """Hits are stored column-wise (epoch ints + one path string), not as datetime/row tuples."""
+        rule = RULE_CLASSES[self.RULE]()
+        rows = [copied(3000 + index, rf"\Users\a\Documents\c{index:05d}.docx") for index in range(5000)]
+        views = [RowView(kind="analysis:a", collection="analysis", source_kind="ntfs-meta", index=index, row=row["row"]) for index, row in enumerate(rows)]
+        ctx = FlagContext()
+        tracemalloc.start()
+        try:
+            before = tracemalloc.get_traced_memory()[0]
+            for view in views:
+                rule.apply(view, ctx)
+            retained = tracemalloc.get_traced_memory()[0] - before
+        finally:
+            tracemalloc.stop()
+        self.assertEqual(rule.candidate_count, 5000)
+        self.assertLess(retained / 5000, 200)  # was ~646 B per candidate (UX-round review)
+
+    def test_evidence_times_round_trip(self) -> None:
+        flags = self.grades(NTFS_CASES[self.RULE]["positive"])
+        self.assertEqual(flags[1]["evidence"]["si_created_at"], "2019-03-01T09:00:00.123456+00:00")
+        self.assertEqual(flags[1]["evidence"]["si_mft_modified_at"], "2019-03-02T11:20:00.765432+00:00")
+        self.assertEqual(flags[0]["evidence"]["si_created_at"], "2019-03-01T09:00:00+00:00")
+        self.assertGreater(flags[0]["evidence"]["delta_seconds"], 0)
+
+    def test_1970_si_counts_like_the_analysis(self) -> None:
+        """$SI 1970-01-02 (BSH IME files) is a real time; only FILETIME 0 (1601) means "no time"."""
+        ime = mft(
+            1330,
+            r"\Users\a\AppData\Roaming\Microsoft\InputMethod\Chs\ChsPinyinUDL_RoamUp.dat",
+            si_created_at="1970-01-02T00:00:00+00:00",
+            si_modified_at="1970-01-02T00:00:00+00:00",
+            si_mft_modified_at="2021-12-05T06:28:48.465053+00:00",
+            fn_created_at="2021-12-05T06:28:48.465053+00:00",
+        )
+        unset = mft(1331, r"\Users\a\b.txt", si_created_at="1601-01-01T00:00:00+00:00", fn_created_at=FN_TIME)
+        flags = self.grades({"rows": [ime, unset]})
+        self.assertEqual(sorted(flags), [0])
+        self.assertEqual(flags[0]["grade"], "C")  # zero sub-second created/modified, but $SI MFT-modified is not
 
 
 class EngineTests(unittest.TestCase):
@@ -238,6 +444,29 @@ class EngineTests(unittest.TestCase):
         self.assertIn("특이사항 단계 실패", step["warning_messages"][0])
         self.assertFalse((self.root / "analyses" / str(step["analysis_id"]) / "analysis.json").exists())
         # The previous generation stays joinable.
+        self.assertTrue((self.root / "analyses" / str(first["analysis_id"]) / "analysis.json").is_file())
+
+    def test_run_stage_failure_in_the_same_clock_tick_keeps_the_previous_generation(self) -> None:
+        # The flaky cause of test_run_stage_failure_is_isolated: with a µs-timestamp id a second
+        # run in the same Windows clock tick reused the first id, the mkdir failure was isolated
+        # and the "failed" step pointed at the first (completed) generation.
+        import datetime as dt
+
+        inputs = tiny_run(self.root)
+        frozen = dt.datetime(2026, 10, 27, 1, 2, 3, 456789, tzinfo=dt.timezone.utc)
+        with patch("rapidtriage.core.triage_rules.stage.dt") as fake_dt:
+            fake_dt.datetime.now.return_value = frozen
+            fake_dt.timezone = dt.timezone
+            first = run_triage_stage(self.root, artifact_outputs=inputs.artifact_payloads)
+            with (
+                patch("rapidtriage.core.triage_rules.stage.run_triage_flags", side_effect=RuntimeError("boom")),
+                self.assertLogs("rapidtriage.core.triage_rules.stage", "ERROR"),
+            ):
+                step = run_triage_stage(self.root, artifact_outputs=inputs.artifact_payloads)
+        self.assertEqual(first["status"], "completed", first)
+        self.assertNotEqual(step["analysis_id"], first["analysis_id"])
+        self.assertIn("RuntimeError: boom", step["warning_messages"][0])
+        self.assertFalse((self.root / "analyses" / str(step["analysis_id"]) / "analysis.json").exists())
         self.assertTrue((self.root / "analyses" / str(first["analysis_id"]) / "analysis.json").is_file())
 
     def test_run_stage_without_pyyaml_is_isolated_and_cli_imports_stay_clean(self) -> None:

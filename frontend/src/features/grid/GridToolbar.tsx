@@ -336,6 +336,8 @@ export interface GridFooterProps {
   filtering: boolean;
   /** Path text sent to the server (artifacts `path_contains`); other columns still filter the loaded rows. */
   serverPathFilter?: string;
+  /** The text is searched on the server over every row (timeline `q=`), not the loaded rows. */
+  serverSearch?: boolean;
   scanned?: number;
   sorting: boolean;
   loadedCount: number;
@@ -346,10 +348,60 @@ export interface GridFooterProps {
   loadingText?: string;
   /** Scope line for category nodes ("범주: 운영 체제 (5 유형)"). */
   scope?: string;
+  /** Checked rows (kept across pages, scrolling and refetches); "선택 N건" when any. */
+  selectedCount?: number;
+  /** Collection-specific wording of the truncation note (unified search). */
+  truncatedText?: string;
+  /** Loaded vs total line of a server-paged result (unified search: "불러온 250건 / 전체 441건"). */
+  loadedSummary?: string;
+  /** Unified search answered by v1 for want of a v2 search index: one line + a link to build it. */
+  indexHint?: { text: string; href: string; linkText: string };
+  /** v2 search notes (R7 S2 #3: truncated rows, short keywords; #4: keywords cut): one line + tooltip. */
+  searchNote?: { text: string; title: string };
 }
 
 export const TRUNCATED_NOTICE =
   "결과가 상한 또는 시간 제한으로 일부만 표시되었습니다. 키워드나 범위를 좁혀 다시 검색하세요.";
+
+/** The top bar's Esc cancelled the search in flight (R7 P2). */
+export const SEARCH_CANCELLED_TEXT = "검색을 취소했습니다 — 상단 검색창에서 Enter로 다시 검색";
+
+/** Unified search stopped at its wall-clock budget: the hits found so far, in their stable order. */
+export const SEARCH_TRUNCATED_NOTICE =
+  "검색이 시간 제한에 도달해 찾은 결과의 앞부분만 표시합니다. 키워드를 더 구체적으로 쓰거나 출처·확장자를 좁혀 다시 검색하세요.";
+
+/**
+ * Footer hint of a console search that v1 answered because the run's v2 search index is not
+ * usable (R7 P2): the index is never built automatically, the link opens its 처리 card.
+ */
+export function searchIndexHint(status: unknown): { text: string; linkText: string } | undefined {
+  switch (status) {
+    case "none":
+      return { text: "v2 색인 없음", linkText: "처리 단계에서 만들기" };
+    case "stale":
+      // Older run outputs or an older index format (R7 S2: a v2-format index has no bigram table).
+      return {
+        text: "v2 색인 재생성 필요(런 출력보다 오래됐거나 이전 형식)",
+        linkText: "처리 단계에서 다시 만들기",
+      };
+    case "building":
+      return { text: "v2 색인을 만드는 중(끝나면 색인으로 검색)", linkText: "처리 단계에서 보기" };
+    default:
+      return undefined;
+  }
+}
+
+/** Footer line of a server-paged search: rows loaded so far against the total (or "더 있음"). */
+export function searchLoadedText(loaded: number, total: number | null, hasMore: boolean): string {
+  if (total !== null) {
+    return loaded < total
+      ? `불러온 ${formatCount(loaded)}건 / 전체 ${formatCount(total)}건`
+      : `전체 ${formatCount(total)}건 모두 불러옴`;
+  }
+  return hasMore
+    ? `불러온 ${formatCount(loaded)}건 · 더 있음 (아래로 스크롤하면 이어서 불러옵니다)`
+    : `불러온 ${formatCount(loaded)}건`;
+}
 
 export function GridFooter(props: GridFooterProps) {
   const seconds =
@@ -360,26 +412,49 @@ export function GridFooter(props: GridFooterProps) {
       <span>
         {props.pageCount !== null ? `페이지 ${props.page}/${formatCount(props.pageCount)}` : "페이지 -"}
       </span>
-      <span data-testid="grid-footer-total">
-        총{" "}
-        {props.total !== null ? `${formatCount(props.total)}건` : props.loading ? "세는 중…" : "알 수 없음"}
+      <span
+        data-testid="grid-footer-total"
+        // The search engine and its time are diagnostics, not a finding: tooltip only (R7 L3, C-D16).
+        title={props.backend ? `${backendLabel(props.backend) || "조회"} · ${seconds}` : undefined}
+      >
+        {/* R-10: an uncounted total reads "전체 건수 미확정", never "총 알 수 없음". */}
+        {props.total !== null
+          ? `총 ${formatCount(props.total)}건`
+          : props.loading
+            ? "총 세는 중…"
+            : "전체 건수 미확정"}
       </span>
+      {props.loadedSummary ? <span data-testid="grid-footer-loaded">{props.loadedSummary}</span> : null}
+      {props.indexHint ? (
+        <span className="grid-note" data-testid="grid-footer-index-hint">
+          {props.indexHint.text} — <a href={props.indexHint.href}>{props.indexHint.linkText}</a>
+        </span>
+      ) : null}
+      {props.searchNote ? (
+        <span
+          className="grid-note"
+          data-testid="grid-footer-search-note"
+          title={props.searchNote.title || undefined}
+        >
+          {props.searchNote.text}
+        </span>
+      ) : null}
+      {props.selectedCount ? (
+        <span data-testid="grid-footer-selected">선택 {formatCount(props.selectedCount)}건</span>
+      ) : null}
       {props.loading ? (
         <span className="grid-note" data-testid="grid-footer-loading">
           {props.loadingText ?? "불러오는 중…"}
         </span>
       ) : null}
-      {props.backend ? (
-        <span>
-          {backendLabel(props.backend)} {seconds}
-        </span>
-      ) : null}
       {props.filtering ? (
         <span className="grid-note">
           필터 결과 {formatCount(props.shown)}건 ·{" "}
-          {props.serverPathFilter
-            ? `경로는 서버에서 검색${props.scanned ? `(${formatCount(props.scanned)}행 스캔)` : ""}하고, 다른 열은 불러온 ${formatCount(props.loadedCount)}행에서만 찾습니다.`
-            : `서버 필터 미지원: 불러온 ${formatCount(props.loadedCount)}행에서만 찾습니다.`}
+          {props.serverSearch
+            ? "서버 검색: 전체 이벤트에서 요약·대상·경로·이벤트 이름을 찾습니다."
+            : props.serverPathFilter
+              ? `경로는 서버에서 검색${props.scanned ? `(${formatCount(props.scanned)}행 스캔)` : ""}하고, 다른 열은 불러온 ${formatCount(props.loadedCount)}행에서만 찾습니다.`
+              : `서버 필터 미지원: 불러온 ${formatCount(props.loadedCount)}행에서만 찾습니다.`}
         </span>
       ) : null}
       {props.sorting ? (
@@ -387,7 +462,7 @@ export function GridFooter(props: GridFooterProps) {
       ) : null}
       {props.truncated ? (
         <span className="grid-note grid-warn" role="note">
-          {TRUNCATED_NOTICE}
+          {props.truncatedText ?? TRUNCATED_NOTICE}
         </span>
       ) : null}
       {props.canLoadMore ? (

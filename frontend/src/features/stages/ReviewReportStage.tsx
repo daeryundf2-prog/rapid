@@ -9,9 +9,11 @@ import { useMemo } from "react";
 import { getReviewCounts } from "../../api/caseDb";
 import { getRunTree } from "../../api/runs";
 import { CommandButton } from "../../commands/CommandButton";
+import { KEY_MAP } from "../../contracts/command";
 import { serializeRoute } from "../../router";
 import { useRoute, useTimezone } from "../../state/hooks";
 import { formatTimestamp } from "../../utils/time";
+import { useCaseDialogs } from "../case/dialogs";
 import { EXPORT_ACTIONS, useExportHistory } from "../case/exports";
 import { DataGrid } from "../grid/DataGrid";
 import { useReviewMap } from "../grid/reviewMap";
@@ -27,8 +29,33 @@ import {
   treeFlagsSection,
 } from "../tree/model";
 import "./stages.css";
+import { TREE_DRAWER_QUERY, useMediaQuery } from "../../shell/Layout";
 
 const BOOKMARK_TAG = "북마크";
+
+/** The review keys the empty 검토 stage points to (C-R3): key, what it marks. */
+export const REVIEW_KEYS: ReadonlyArray<{ key: string; label: string }> = [
+  { key: KEY_MAP.markRelevant, label: "관련" },
+  { key: "I", label: "재검토" },
+  { key: KEY_MAP.markExcluded, label: "제외" },
+  { key: KEY_MAP.bookmark, label: "북마크" },
+];
+
+/** 검토 has nothing yet: what to do next, with the keys (C-R3). */
+export function ReviewEmptyGuide() {
+  return (
+    <div className="stage-note review-empty-guide" data-testid="review-empty-guide">
+      <p>아직 검토 표시가 없습니다. 탐색에서 행을 고른 뒤 R·I·X·B로 표시하세요.</p>
+      <ul className="review-keys">
+        {REVIEW_KEYS.map((item) => (
+          <li key={item.key}>
+            <kbd>{item.key}</kbd> {item.label}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 /** Left panel of the 검토 stage. */
 export function ReviewPanel() {
@@ -70,6 +97,9 @@ export function ReviewPanel() {
     ? Object.values(counts.data.by_status ?? {}).reduce((sum, n) => sum + n, 0)
     : undefined;
   const onBoard = route.collection === "review";
+  // 특이사항 nodes of 검토 itself (C-R2): flagged rows listed without leaving the stage.
+  const onFlags = Boolean(route.inReview) && route.collection === "artifacts";
+  const nothingMarked = total === 0 && bookmarks === 0 && notes === 0;
   const link = (label: string, href: string, current: boolean, count?: number) => (
     <a className="stage-link" href={href} aria-current={current ? "page" : undefined}>
       <span>{label}</span>
@@ -78,6 +108,7 @@ export function ReviewPanel() {
   );
   return (
     <div className="stage-panel" data-testid="review-panel">
+      {counts.data && nothingMarked ? <ReviewEmptyGuide /> : null}
       <h2 id="review-status-title">리뷰 상태</h2>
       <ul aria-labelledby="review-status-title">
         <li>
@@ -110,17 +141,17 @@ export function ReviewPanel() {
           <ul aria-labelledby="review-flags-title" data-testid="review-flag-links">
             <li>
               {link(
-                "특이사항 A 전체 보기",
-                serializeRoute({ runId, collection: "artifacts", flagGrade: "A" }),
-                false,
+                "특이사항 A",
+                serializeRoute({ runId, collection: "artifacts", flagGrade: "A", inReview: true }),
+                onFlags && route.flagGrade === "A",
                 flags.byGrade.A,
               )}
             </li>
             <li>
               {link(
-                "특이사항 B 이상 보기",
-                serializeRoute({ runId, collection: "artifacts", flagGrade: "B" }),
-                false,
+                "특이사항 B 이상",
+                serializeRoute({ runId, collection: "artifacts", flagGrade: "B", inReview: true }),
+                onFlags && route.flagGrade === "B",
                 flags.byGrade.A + flags.byGrade.B,
               )}
             </li>
@@ -187,6 +218,38 @@ export function showCaseTagNodes(state: Pick<CaseTagState, "exists" | "status" |
   return state.exists && (state.status === "ready" || state.tags.length > 0);
 }
 
+/**
+ * The export buttons (C-G8): one 보고서 내보내기… (the dialog chooses the kind and says what is
+ * written where before anything is sent); the other kinds open the same dialog pre-chosen.
+ */
+function ExportButtons({
+  labelledBy,
+  testPrefix = "report-open",
+}: {
+  labelledBy: string;
+  testPrefix?: string;
+}) {
+  return (
+    <ul aria-labelledby={labelledBy}>
+      <li>
+        <CommandButton command="export.open" label="보고서 내보내기…" />
+      </li>
+      {EXPORT_ACTIONS.filter((action) => action.kind !== "case-report").map((action) => (
+        <li key={action.commandId}>
+          <button
+            type="button"
+            className="stage-link"
+            data-testid={`${testPrefix}-${action.kind}`}
+            onClick={() => useCaseDialogs.getState().openDialog("report", { exportKind: action.kind })}
+          >
+            {action.label} 내보내기…
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** Left panel of the 보고 stage. */
 export function ReportPanel() {
   const { route } = useRoute();
@@ -194,16 +257,7 @@ export function ReportPanel() {
   return (
     <div className="stage-panel" data-testid="report-panel">
       <h2 id="report-actions-title">내보내기</h2>
-      <ul aria-labelledby="report-actions-title">
-        <li>
-          <CommandButton command="export.open" label="보고서 내보내기…" />
-        </li>
-        {EXPORT_ACTIONS.map((action) => (
-          <li key={action.commandId}>
-            <CommandButton command={action.commandId} />
-          </li>
-        ))}
-      </ul>
+      <ExportButtons labelledBy="report-actions-title" />
     </div>
   );
 }
@@ -215,10 +269,23 @@ export function ReportPage() {
   const records = useExportHistory((s) => s.records);
   const runId = route.runId;
   const mine = records.filter((record) => record.runId === runId);
+  // R-11: below 900px the left panel is a closed drawer — the export buttons go in the page body
+  // too (only then, so a wide layout never shows them twice).
+  const panelIsDrawer = useMediaQuery(TREE_DRAWER_QUERY);
   if (!runId) return <p className="pane-empty">케이스를 먼저 선택하세요.</p>;
   return (
     <section className="stage-page is-report" aria-labelledby="report-title" data-testid="report-page">
       <h2 id="report-title">보고</h2>
+      {panelIsDrawer ? (
+        <section
+          className="stage-section report-page-actions"
+          aria-labelledby="report-page-actions-title"
+          data-testid="report-page-actions"
+        >
+          <h3 id="report-page-actions-title">내보내기</h3>
+          <ExportButtons labelledBy="report-page-actions-title" testPrefix="report-page-open" />
+        </section>
+      ) : null}
       <section className="stage-section" aria-labelledby="report-history-title">
         <h3 id="report-history-title">내보내기 이력</h3>
         {mine.length === 0 ? (

@@ -19,7 +19,9 @@ import {
   recordFieldsKey,
 } from "../../contracts/collection";
 import type { IconName } from "../../icons";
+import { AI_TYPE_LABELS } from "../ai/aiLabels";
 import type { AnalysisNodeId } from "../analysis/kinds";
+import { IRREGULAR_IDS, IRREGULAR_LABELS } from "../filters/conditionValues";
 import { CHANNEL_FILTER_COLUMN, CHANNEL_GROUP_FILTER_COLUMN } from "../filters/filterModel";
 
 export interface DomainTarget {
@@ -69,6 +71,17 @@ export interface DomainTarget {
   neverRanReason?: string;
   /** 파일 시스템 탐색기 (r4 §2.2): open the files listing with the folder tree at this folder (`""` = root). */
   dir?: string;
+  /**
+   * 예외 항목 category (R7 갈래 A, route `irregular=`): the listing's rows of that category; the
+   * count is the category's rows of that list (`GET /irregular/summary`).
+   */
+  irregular?: string;
+  /**
+   * Count from a console-side facet of the kind's rows (`TreeModelInput.rowFacets[kind][key]`,
+   * AI 사용 › 도구·설치 views: `/tree` has no per-value counts of `ai-tool-presence.source`).
+   * "—" while the facet is unknown; the node opens the kind with its `cf` on the loaded rows.
+   */
+  rowFacet?: string;
 }
 
 export interface DomainNodeDef {
@@ -424,6 +437,140 @@ function pickLabels(labels: Readonly<Record<string, string>>, types: string[]): 
   return Object.fromEntries(types.map((type) => [type, labels[type] ?? type]));
 }
 
+// --- AI 사용 (R7 단계 3.5 갈래 D, plan r7-ai-usage §3.5) -----------------------------------------
+
+/** Collector kind of the AI usage rows (core/run/constants.py). */
+export const AI_KIND = "ai-agent";
+const aiTypes = (...types: string[]) => a(AI_KIND, types);
+
+/**
+ * 도구·설치 views over `ai-tool-presence.source` (lane A: `install:<kind>` / `execution:<family>` /
+ * `catalog-path`; the session adapters' presence rows carry no source). The cf runs on the loaded
+ * rows (contains); the count is the console's facet of the presence rows (`rowFacet`).
+ */
+export const AI_PRESENCE_SOURCE_VIEWS: ReadonlyArray<{ id: string; label: string; source: string }> = [
+  { id: "ai-tools-install", label: "설치 흔적(npm·pip·winget·MSIX·확장)", source: "install:" },
+  { id: "ai-tools-execution", label: "실행 흔적(Prefetch·Amcache 등)", source: "execution:" },
+  { id: "ai-tools-path", label: "경로 흔적(카탈로그 경로)", source: "catalog-path" },
+];
+
+/** Facet key of a presence source view (`rowFacets["ai-agent"]`). */
+export const aiSourceFacet = (source: string) => `source:${source}`;
+
+/** Tooltip of AI 사용 › 자격 증명 존재: what the rows are, and what they never hold. */
+export const AI_CREDENTIAL_NOTE =
+  "AI 도구의 토큰·OAuth·쿠키·키 파일이 있었다는 기록입니다 — 경로·크기·수정 시각만 있고 값과 해시는 수집하지 않습니다";
+
+/**
+ * AI 사용: every row of the `ai-agent` kind by what it answers (도구·설치 · 세션 · 메시지 · 도구 호출 ·
+ * 파일 접촉 · MCP · 지침 · 자격 증명 · 계정 · 코드 기여 · 사용량 · 보존 정리 · 미분류 후보), plus the
+ * browser's AI service visits (moved here from 웹·브라우저, still cross-listed there) and the local
+ * LLM inventory of the document scan. A run without AI rows shows every node 0 (hidden by default).
+ */
+export const AI_USAGE_DOMAIN: DomainDef = {
+  id: "ai",
+  label: "AI 사용",
+  icon: "command",
+  nodes: [
+    {
+      id: "ai-tools",
+      label: "도구·설치",
+      target: aiTypes("ai-tool-presence"),
+      lead: true,
+      note: "AI 도구가 이 증거에 있었다는 흔적(카탈로그 경로·설치 패키지·실행 흔적·세션 저장소 위치)입니다 — 흔적이 없다고 사용하지 않았다는 뜻은 아닙니다",
+      children: [
+        {
+          id: "ai-tools-all",
+          label: "도구 흔적 전체",
+          target: aiTypes("ai-tool-presence"),
+          lead: true,
+          typeLabels: { "ai-tool-presence": AI_TYPE_LABELS["ai-tool-presence"] as string },
+        },
+        ...AI_PRESENCE_SOURCE_VIEWS.map(
+          (view): DomainNodeDef => ({
+            id: view.id,
+            label: view.label,
+            target: {
+              ...aiTypes("ai-tool-presence"),
+              cf: [{ col: "f:source", op: ":", value: view.source }],
+              rowFacet: aiSourceFacet(view.source),
+            },
+            note: `${view.label.replace(/\(.*\)$/, "")} 행만 봅니다 — 불러온 행에 출처 열 필터를 적용합니다`,
+          }),
+        ),
+      ],
+    },
+    { id: "ai-sessions", label: "세션", target: aiTypes("ai-agent-session"), lead: true },
+    { id: "ai-messages", label: "메시지", target: aiTypes("ai-agent-message"), lead: true },
+    { id: "ai-tool-calls", label: "도구 호출", target: aiTypes("ai-agent-tool-call"), lead: true },
+    { id: "ai-file-touches", label: "파일 접촉", target: aiTypes("ai-agent-file-touch"), lead: true },
+    { id: "ai-mcp", label: "MCP 서버", target: aiTypes("ai-mcp-server") },
+    { id: "ai-instructions", label: "지침·메모리 파일", target: aiTypes("ai-instruction-file") },
+    {
+      id: "ai-credentials",
+      label: "자격 증명 존재(값 없음)",
+      target: aiTypes("ai-credential-presence"),
+      note: AI_CREDENTIAL_NOTE,
+    },
+    {
+      id: "ai-accounts",
+      label: "계정·전환",
+      target: aiTypes("ai-account", "ai-account-switch"),
+      typeLabels: pickLabels(AI_TYPE_LABELS, ["ai-account", "ai-account-switch"]),
+    },
+    { id: "ai-code", label: "AI 코드 기여", target: aiTypes("ai-code-attribution") },
+    { id: "ai-usage-stats", label: "사용량", target: aiTypes("ai-usage-stat") },
+    {
+      id: "ai-retention",
+      label: "보존 정리",
+      target: aiTypes("ai-retention-cleanup"),
+      note: "도구가 오래된 기록을 지운 표식(예: Claude Code .last-cleanup)과 보존 일수입니다 — 그 이전 기록은 이 PC에 없을 수 있습니다",
+    },
+    {
+      id: "ai-web",
+      label: "웹 AI 방문",
+      target: a("browser", ["browser-ai-usage", "browser-ai-conversation"]),
+      typeLabels: { "browser-ai-usage": "AI 서비스 방문", "browser-ai-conversation": "AI 대화 후보" },
+    },
+    {
+      // AI service exports (ChatGPT / Claude … JSON / JSONL) read by the browser collector.
+      id: "ai-service-exports",
+      label: "AI 서비스 내보내기 대화",
+      target: a("browser", ["ai-service-export-conversation"]),
+    },
+    {
+      // Desktop AI app stores (SQLite / LevelDB candidates) of the document scan.
+      id: "ai-desktop-apps",
+      label: "데스크톱 AI 앱 파일",
+      target: a("generic-documents", ["desktop-ai-app-artifact"]),
+    },
+    { id: "ai-model-files", label: "로컬 LLM·모델 파일", target: aiTypes("ai-model-file") },
+    {
+      id: "ai-local-llm",
+      label: "로컬 LLM 앱 파일·프롬프트 후보",
+      target: a("generic-documents", ["local-llm-artifact", "local-llm-prompt-candidate"]),
+      typeLabels: {
+        "local-llm-artifact": "로컬 LLM 앱 파일",
+        "local-llm-prompt-candidate": "로컬 LLM 프롬프트 후보",
+      },
+    },
+    {
+      id: "ai-unknown",
+      label: "미분류 후보",
+      target: aiTypes("unknown-ai-tool-candidate"),
+      note: "카탈로그에 없는 홈 폴더 중 세션·대화 기록처럼 보이는 구조를 가진 폴더입니다(파일 이름은 적지 않음)",
+    },
+    {
+      id: "ai-errors",
+      label: "AI 기록 읽기 오류",
+      target: aiTypes("ai-agent-parse-error"),
+      detail: true,
+      typeLabels: { "ai-agent-parse-error": AI_TYPE_LABELS["ai-agent-parse-error"] as string },
+    },
+    { id: "ai-all", label: "AI 사용 기록 전체", target: a(AI_KIND), catchAll: true },
+  ],
+};
+
 /**
  * The 15 forensic domains of console-ia §4 (증거 소스 is the evidence node built from the
  * dashboard). Domain ids match the server tree groups (`artifacts-group:<domain>`, api/app/tree.py
@@ -743,20 +890,16 @@ export const DOMAINS: readonly DomainDef[] = [
       },
     ],
   },
+  // R7 L3 (C-T1/T2, glossary 파일 목록·폴더 탐색기·NTFS·파일시스템 아티팩트): "파일 목록" and
+  // "폴더 탐색기" live once, under 전체 보기 (tree/model.ts); this domain keeps the file categories,
+  // the inventory and the NTFS / file-system artifacts. The registry explorer is likewise only under
+  // 전체 보기.
   {
     id: "filesystem",
-    label: "파일시스템",
+    label: "NTFS·파일시스템 아티팩트",
     icon: "hard-drive",
     nodes: [
-      {
-        id: "fs-explorer",
-        label: "폴더 탐색기",
-        target: { collection: "files", dir: "" },
-        lead: true,
-        note: "볼륨 → 폴더 계층으로 내려가며 폴더의 파일을 목록에 표시합니다(←/→ 펼침, Enter 열기)",
-      },
-      { id: "fs-all", label: "전체 파일", target: { collection: "files" } },
-      { id: "fs-inventory", label: "전체 파일(인벤토리)", target: inventory() },
+      { id: "fs-inventory", label: "인벤토리(스캔한 모든 파일)", target: inventory() },
       { id: "fs-documents", label: "문서", target: files("documents") },
       { id: "fs-images", label: "이미지", target: files("images") },
       { id: "fs-archives", label: "압축", target: files("archives") },
@@ -836,7 +979,7 @@ export const DOMAINS: readonly DomainDef[] = [
       },
       {
         id: "fs-artifacts-all",
-        label: "파일시스템 아티팩트 전체",
+        label: "NTFS·파일시스템 아티팩트 전체",
         target: a("windows-filesystem"),
         catchAll: true,
       },
@@ -847,13 +990,6 @@ export const DOMAINS: readonly DomainDef[] = [
     label: "레지스트리",
     icon: "database",
     nodes: [
-      {
-        id: "reg-explorer",
-        label: "레지스트리 탐색기(키·값)",
-        target: { collection: "registry" },
-        lead: true,
-        note: "하이브 → 키 트리, 값 표(형식·데이터·디코딩), 키에서 나온 아티팩트 행으로 이동",
-      },
       {
         id: "reg-persistence",
         label: "자동 실행/지속성",
@@ -1091,10 +1227,12 @@ export const DOMAINS: readonly DomainDef[] = [
         target: a("browser", ["web-upload-candidate"]),
       },
       {
+        // R7 AI 사용 (갈래 D): the primary node moved to AI 사용 › 웹 AI 방문; listed here too.
         id: "web-ai",
         label: "AI 서비스 사용",
         target: a("browser", ["browser-ai-usage", "browser-ai-conversation"]),
-        typeLabels: { "browser-ai-usage": "AI 서비스 방문", "browser-ai-conversation": "AI 대화 후보" },
+        crossRef: true,
+        note: "AI 사용 › 웹 AI 방문과 같은 행입니다(AI 도구 세션·설치 흔적과 함께 보려면 AI 사용 계열을 여세요)",
       },
       {
         id: "web-storage",
@@ -1157,6 +1295,7 @@ export const DOMAINS: readonly DomainDef[] = [
       { id: "web-carved-urls", label: "URL 카빙 후보(페이지 파일·미할당)", target: run("url-carve") },
     ],
   },
+  AI_USAGE_DOMAIN,
   {
     id: "messaging",
     label: "메신저·메일",
@@ -1569,16 +1708,30 @@ export const DOMAINS: readonly DomainDef[] = [
         label: "USB 설치 기록",
         target: a("windows-system", ["usb-setupapi-device-install-candidate"]),
       },
+      // One artifact type per node (timeline/grid readability C6): the USB node gets the USB
+      // family layout (최초 설치 · 장치 이름 · 시리얼 · 마지막 연결/분리 · VID/PID); mounted
+      // devices (MountedDevices) are their own node with their own layout.
       {
         id: "dev-usb-registry",
-        label: "USB·마운트 장치(레지스트리)",
-        target: a("windows-registry", ["windows-usb-device", "windows-mounted-device"]),
-        typeLabels: { "windows-usb-device": "USB 장치", "windows-mounted-device": "마운트된 장치" },
+        label: "USB 장치(레지스트리)",
+        target: a("windows-registry", ["windows-usb-device"]),
+        typeLabels: { "windows-usb-device": "USB 장치" },
+      },
+      {
+        id: "dev-mounted-registry",
+        label: "마운트된 장치(레지스트리)",
+        target: a("windows-registry", ["windows-mounted-device"]),
+        typeLabels: { "windows-mounted-device": "마운트된 장치" },
       },
       {
         id: "dev-usb-mounted",
-        label: "USB·마운트 장치(reg 내보내기)",
-        target: a("windows-os-account", ["windows-mounted-device", "windows-usb-device"]),
+        label: "USB 장치(reg 내보내기)",
+        target: a("windows-os-account", ["windows-usb-device"]),
+      },
+      {
+        id: "dev-mounted-export",
+        label: "마운트된 장치(reg 내보내기)",
+        target: a("windows-os-account", ["windows-mounted-device"]),
       },
       { id: "dev-rdp", label: "RDP", target: a("windows-remote-access") },
       {
@@ -1755,6 +1908,45 @@ export const DOMAINS: readonly DomainDef[] = [
       { id: "loc-mobile", label: "모바일 위치", target: a("mobile-export", ["mobile-location"]) },
     ],
   },
+  // --- R7 갈래 A: 처리 › 예외 항목 (Nuix irregular items) ---------------------------------------
+  {
+    id: "processing",
+    label: "처리",
+    icon: "alert",
+    nodes: [
+      {
+        id: "proc-irregular",
+        label: "예외 항목",
+        target: { collection: "artifacts", irregular: IRREGULAR_IDS.join(",") },
+        note: "처리에서 예외로 남은 항목(확장자 불일치·손상·삭제·빈 파일·암호화·검색 불가 PDF·본문 제외·형식 미상·미지원) — 이 노드는 어느 범주든 해당하는 아티팩트, 범주마다 파일·전체 파일·아티팩트 목록으로 엽니다",
+        children: IRREGULAR_IDS.map(
+          (id): DomainNodeDef => ({
+            id: `proc-irregular-${id}`,
+            label: IRREGULAR_LABELS[id],
+            lead: true,
+            target: { collection: "artifacts", irregular: id },
+            children: [
+              {
+                id: `proc-irregular-${id}-files`,
+                label: "파일",
+                target: { collection: "files", irregular: id },
+              },
+              {
+                id: `proc-irregular-${id}-inventory`,
+                label: "전체 파일 목록",
+                target: { collection: "files", fileScope: "inventory", irregular: id },
+              },
+              {
+                id: `proc-irregular-${id}-artifacts`,
+                label: "아티팩트",
+                target: { collection: "artifacts", irregular: id },
+              },
+            ],
+          }),
+        ),
+      },
+    ],
+  },
 ];
 
 /** Every node of the table, sub-nodes included (pre-order: a group before its children). */
@@ -1782,6 +1974,8 @@ export function targetKey(
     /** 파일 시스템 탐색기 folder / special node: the explorer view of files is its own node. */
     dir?: string;
     special?: string;
+    /** 예외 항목 (R7 갈래 A): one category's rows are their own selection. */
+    irregular?: string | readonly string[];
     /**
      * Column filters: part of the key only on event-log channel views (`evt_channel(_group)`) and
      * for the analysis `details` server filters (`f:source` / `f:signature_kind` / `f:recovery_method` / `f:in_use`).
@@ -1806,13 +2000,24 @@ export function targetKey(
           .map((filter) => `|${filter.col}=${filter.value}`)
           .sort()
           .join("")
-      : "";
+      : target.collection === "artifacts" && target.kind === AI_KIND
+        ? // AI 사용 › 도구·설치 views (`f:source`) are their own selections.
+          (target.cf ?? [])
+            .filter((filter) => filter.col === "f:source")
+            .map((filter) => `|${filter.col}=${filter.value}`)
+            .sort()
+            .join("")
+        : "";
   const fsExplorer = target.collection === "files" && (target.dir !== undefined || Boolean(target.special));
   const filesCategory = fsExplorer
     ? "|fs"
     : target.fileScope
       ? filesInventoryCategory(target.fileCategory)
       : (target.fileCategory ?? target.category ?? "");
+  const irregular = typeof target.irregular === "string" ? [target.irregular] : [...(target.irregular ?? [])];
+  const irregularPart = irregular.filter(Boolean).length
+    ? `|irr=${irregular.filter(Boolean).sort().join(",")}`
+    : "";
   return (
     [
       target.collection,
@@ -1822,6 +2027,7 @@ export function targetKey(
       [...(target.ext ?? [])].sort().join(","),
     ].join("|") +
     flagPart +
-    detailPart
+    detailPart +
+    irregularPart
   );
 }

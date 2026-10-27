@@ -33,6 +33,7 @@ import { formatElapsed } from "../../shell/StatusBar";
 import { useTimezone } from "../../state/hooks";
 import { useAppStore } from "../../state/store";
 import { formatTimestamp } from "../../utils/time";
+import { confirmWrite, joinRunPath, runOutputDir } from "../case/WriteConfirm";
 import { formatCount } from "../grid/gridUtils";
 import { useNow } from "./useNow";
 
@@ -57,6 +58,25 @@ export function planSummaryText(plan: RunPlan, opts: { started?: string; elapsed
     `취소 ${formatCount(tasks.cancelled)}`,
     `실패 ${formatCount(tasks.failed)}`,
   ].join(" · ");
+}
+
+/** Run states with nothing left to run (the plan of such a run is a record, not a control). */
+const FINISHED_RUN_STATES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled", "interrupted"]);
+
+/**
+ * The plan does not describe the finished run (C-G1): it still lists queued / running tasks
+ * although the run ended and no process writes it — a run written before plans existed gets a
+ * plan rebuilt from the preview (all "대기"). The 처리 page shows "계획 기록 없음(이전 형식)".
+ */
+export function isLegacyPlan(plan: RunPlan): boolean {
+  if (plan.live) return false;
+  const status = normalizeRunStatus(plan.run_status);
+  if (!FINISHED_RUN_STATES.has(status)) return false;
+  const tasks = plan.counts.tasks;
+  // A completed run cannot still have work queued; a failed / cancelled / interrupted one may
+  // (resume runs it) — unless the plan never started and nothing in it ever ran.
+  if (status === "completed") return tasks.queued + tasks.running > 0;
+  return !plan.started_at && tasks.completed + tasks.partial + tasks.failed === 0 && tasks.queued > 0;
 }
 
 /** "이벤트 로그, 실행 중, 3/5 태스크" — a group row's accessible name. */
@@ -179,6 +199,13 @@ export function RunPlanTable({
     }
     return out;
   }, [plan.groups, expanded]);
+  // R-5: a plan without any recorded duration (imported / older run) hides the all-"—" 소요 column.
+  const timed =
+    runActive ||
+    plan.groups.some(
+      (group) =>
+        durationText(group.duration_ms) !== "" || group.tasks.some((t) => durationText(t.duration_ms) !== ""),
+    );
   const tabStop = rows.some((row) => rowKey(row) === focusedKey)
     ? focusedKey
     : rows[0]
@@ -193,6 +220,22 @@ export function RunPlanTable({
 
   const send = async (action: PlanControlAction, targets: PlanTarget[] | undefined, what: string) => {
     if (action === "cancel_all" && !confirmAction(CANCEL_ALL_CONFIRM)) return;
+    // 그룹/태스크 건너뛰기·취소 changes the run (r7 L4, D8): confirm what is recorded where first.
+    if (action === "skip" || action === "cancel") {
+      const folder = await runOutputDir(runId);
+      const ok = await confirmWrite({
+        title: `${what}`,
+        writes: [
+          {
+            what: `처리 계획에 ${action === "skip" ? "건너뜀" : "취소"} 기록 — 이 처리는 실행되지 않습니다`,
+            where: joinRunPath(folder, "rapidtriage-run-plan.json"),
+          },
+        ],
+        note: "건너뛴 처리는 이 런에서 되돌릴 수 없습니다(다시 실행 = 새 런).",
+        confirmLabel: action === "skip" ? "건너뛰기" : "취소 요청",
+      });
+      if (!ok) return;
+    }
     setBusy(true);
     try {
       // An in-flight plan poll that resolves after the reply would put the old plan back.
@@ -319,7 +362,7 @@ export function RunPlanTable({
           응답 없음 · 런 프로세스의 신호가 90초 넘게 없습니다
         </p>
       ) : null}
-      {controls ? (
+      {controls && runActive ? (
         <div className="analysis-actions run-plan-controls">
           <DisabledReason reason={busy ? "요청을 보내는 중입니다" : cancelAllReason}>
             <button
@@ -361,13 +404,18 @@ export function RunPlanTable({
               <th scope="col" className="is-right">
                 건수
               </th>
-              <th scope="col" className="is-right">
-                소요
-              </th>
+              {timed ? (
+                <th scope="col" className="is-right">
+                  소요
+                </th>
+              ) : null}
               <th scope="col">비고</th>
-              <th scope="col">
-                <span className="visually-hidden">동작</span>
-              </th>
+              {/* Skip / cancel only while the run runs (C-G1): a finished plan is a record. */}
+              {runActive ? (
+                <th scope="col">
+                  <span className="visually-hidden">동작</span>
+                </th>
+              ) : null}
             </tr>
           </thead>
           <tbody>
@@ -431,31 +479,33 @@ export function RunPlanTable({
                         ? `${formatCount(group.artifact_count)}건`
                         : "—"}
                     </td>
-                    <td className="is-right">{durationText(group.duration_ms) || "—"}</td>
+                    {timed ? <td className="is-right">{durationText(group.duration_ms) || "—"}</td> : null}
                     <td className="process-plan-note">
                       {group.counts.skipped ? `건너뜀 ${group.counts.skipped}` : ""}
                       {group.counts.cancelled
                         ? `${group.counts.skipped ? " · " : ""}취소 ${group.counts.cancelled}`
                         : ""}
                     </td>
-                    <td>
-                      <DisabledReason reason={reason}>
-                        <button
-                          type="button"
-                          className="icon-btn run-plan-x"
-                          aria-label={`${group.label} 그룹 ${verb}`}
-                          tabIndex={-1}
-                          data-action-for={key}
-                          data-action={action ?? "none"}
-                          onClick={() => {
-                            if (!action) return;
-                            void send(action, [{ group: group.id }], `${group.label} 그룹 ${verb}`);
-                          }}
-                        >
-                          <Icon name="close" />
-                        </button>
-                      </DisabledReason>
-                    </td>
+                    {runActive ? (
+                      <td>
+                        <DisabledReason reason={reason}>
+                          <button
+                            type="button"
+                            className="icon-btn run-plan-x"
+                            aria-label={`${group.label} 그룹 ${verb}`}
+                            tabIndex={-1}
+                            data-action-for={key}
+                            data-action={action ?? "none"}
+                            onClick={() => {
+                              if (!action) return;
+                              void send(action, [{ group: group.id }], `${group.label} 그룹 ${verb}`);
+                            }}
+                          >
+                            <Icon name="close" />
+                          </button>
+                        </DisabledReason>
+                      </td>
+                    ) : null}
                   </tr>
                 );
               }
@@ -504,28 +554,30 @@ export function RunPlanTable({
                   </td>
                   <td />
                   <td className="is-right">{count}</td>
-                  <td className="is-right">{duration}</td>
+                  {timed ? <td className="is-right">{duration}</td> : null}
                   <td className="process-plan-note" title={tooltip}>
                     {note || "—"}
                   </td>
-                  <td>
-                    <DisabledReason reason={reason}>
-                      <button
-                        type="button"
-                        className="icon-btn run-plan-x"
-                        aria-label={`${task.label} ${verb}`}
-                        tabIndex={-1}
-                        data-action-for={key}
-                        data-action={action ?? "none"}
-                        onClick={() => {
-                          if (!action) return;
-                          void send(action, [{ task: task.id }], `${task.label} ${verb}`);
-                        }}
-                      >
-                        <Icon name="close" />
-                      </button>
-                    </DisabledReason>
-                  </td>
+                  {runActive ? (
+                    <td>
+                      <DisabledReason reason={reason}>
+                        <button
+                          type="button"
+                          className="icon-btn run-plan-x"
+                          aria-label={`${task.label} ${verb}`}
+                          tabIndex={-1}
+                          data-action-for={key}
+                          data-action={action ?? "none"}
+                          onClick={() => {
+                            if (!action) return;
+                            void send(action, [{ task: task.id }], `${task.label} ${verb}`);
+                          }}
+                        >
+                          <Icon name="close" />
+                        </button>
+                      </DisabledReason>
+                    </td>
+                  ) : null}
                 </tr>
               );
             })}

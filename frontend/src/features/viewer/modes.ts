@@ -4,7 +4,10 @@
  * Pure functions so the matrix is unit-testable without rendering.
  */
 
+import { itemRef } from "../../api/families";
 import type { SourcePreview } from "../../api/viewer";
+import type { GridRow } from "../../contracts/collection";
+import type { RowRef } from "../../contracts/rowRef";
 import type { ViewerMode, ViewerModeState, ViewerTarget } from "../../contracts/viewer";
 
 export const MODE_ORDER: ViewerMode[] = [
@@ -16,6 +19,7 @@ export const MODE_ORDER: ViewerMode[] = [
   "email",
   "media",
   "meta",
+  "family",
 ];
 
 export const MODE_LABELS: Record<ViewerMode, string> = {
@@ -27,6 +31,7 @@ export const MODE_LABELS: Record<ViewerMode, string> = {
   email: "이메일",
   media: "미디어",
   meta: "메타",
+  family: "계열",
 };
 
 /**
@@ -66,7 +71,36 @@ export const REASONS = {
   notMedia: "오디오·비디오 파일이 아닙니다.",
   archiveHex: "ZIP 내부 항목은 헥스 미리보기를 제공하지 않습니다.",
   directory: "디렉터리는 미리보기가 없습니다. 디렉터리 안의 파일을 선택하세요.",
+  notFamily: "계열은 파일·아티팩트·분석 결과 행에서 볼 수 있습니다.",
 } as const;
+
+/**
+ * 계열 tab (R7 갈래 A): rows with an item ref (files, artifacts — archive entries too — and analysis
+ * rows; a search hit through the run-output row it names).
+ */
+export function familyState(target: ViewerTarget): ViewerModeState {
+  const review = target.review;
+  const ref = review
+    ? itemRef({
+        collection: review.collection as RowRef["collection"],
+        kind: review.kind,
+        locator: review.pointer,
+      })
+    : itemRef(target.ref);
+  return ref ? state("family") : state("family", REASONS.notFamily);
+}
+
+/** The item ref the 계열 tab shows for a target (a search hit: its run-output row). */
+export function familyRefOf(target: ViewerTarget): string | null {
+  const review = target.review;
+  return review
+    ? itemRef({
+        collection: review.collection as RowRef["collection"],
+        kind: review.kind,
+        locator: review.pointer,
+      })
+    : itemRef(target.ref);
+}
 
 /** A directory target: flagged by its row, or answered as one by the preview API. */
 export function isDirectoryTarget(target: ViewerTarget | null, preview: SourcePreview | null): boolean {
@@ -92,12 +126,51 @@ function state(mode: ViewerMode, reason?: string): ViewerModeState {
   return reason ? { mode, available: false, reason } : { mode, available: true };
 }
 
+/**
+ * SQLite by the server's detection (r7 L4, C-W1): `preview_type: "sqlite"` or a `viewer_hint` of
+ * mode sqlite — never the MIME type (Chromium `History` has no extension: application/octet-stream).
+ */
+export function isSqlitePreview(preview: SourcePreview): boolean {
+  return preview.preview_type === "sqlite" || preview.viewer_hint?.mode === "sqlite";
+}
+
+const DIGITS = /^\d+$/;
+
+/**
+ * The SQLite table + rowid a parsed row came from (browser history → `urls` at `source_row_id`): the
+ * row's own `source_table` when the file has that table, else the hint's table for its artifact
+ * type. null when the file is not SQLite or the row carries no row id.
+ */
+export function sqliteRowTarget(
+  preview: SourcePreview | null,
+  row: Pick<GridRow, "artifactType" | "fields"> | null,
+): { table: string; rowid: number } | null {
+  if (!preview || !row || !isSqlitePreview(preview)) return null;
+  const details = row.fields.details;
+  if (!details || typeof details !== "object") return null;
+  const record = details as Record<string, unknown>;
+  const raw = record.source_row_id;
+  const rowid =
+    typeof raw === "number" ? raw : typeof raw === "string" && DIGITS.test(raw) ? Number(raw) : null;
+  if (rowid === null || !Number.isSafeInteger(rowid)) return null;
+  const hint = preview.viewer_hint;
+  const known = new Set([
+    ...(hint?.sqlite_tables ?? []),
+    ...(preview.sqlite?.tables ?? []).map((t) => t.name),
+  ]);
+  const own = typeof record.source_table === "string" ? record.source_table : "";
+  const type = row.artifactType ?? (typeof record.artifact_type === "string" ? record.artifact_type : "");
+  const table = own && known.has(own) ? own : type ? hint?.row_tables?.[type] : undefined;
+  return table ? { table, rowid } : null;
+}
+
 export function isDocumentPreview(preview: SourcePreview): boolean {
   return DOCUMENT_EXTENSIONS.has((preview.extension || "").toLowerCase());
 }
 
 /** Mode the payload naturally belongs to (before availability checks). */
 export function naturalMode(preview: SourcePreview): ViewerMode {
+  if (isSqlitePreview(preview)) return "sqlite";
   switch (preview.preview_type) {
     case "image":
       return "image";
@@ -126,12 +199,26 @@ function hexState(preview: SourcePreview | null, target: ViewerTarget): ViewerMo
 }
 
 export function resolveModes(input: ResolveInput): ResolvedModes {
+  const resolved = resolveContentModes(input);
+  const target = input.target;
+  if (!target) return resolved;
+  // 계열 never depends on the preview: it is about the row's relations.
+  const modes = resolved.modes.map((m) => (m.mode === "family" ? familyState(target) : m));
+  const best =
+    target.preferredMode === "family" && modes.find((m) => m.mode === "family")?.available
+      ? "family"
+      : resolved.best;
+  return { modes, best };
+}
+
+function resolveContentModes(input: ResolveInput): ResolvedModes {
   const { target, preview, previewError, loading } = input;
   if (!target) {
     return { modes: MODE_ORDER.map((mode) => state(mode, "선택된 행이 없습니다.")), best: null };
   }
   // Decoded artifact rows (F2): the record itself (메타 → 레코드) is what the analyst wants first.
-  const recordFirst = target.ref.collection === "artifacts";
+  // Timeline events too (C10): their row is a decoded record; the hex of a 25 MB hive is not.
+  const recordFirst = target.ref.collection === "artifacts" || target.ref.collection === "timeline";
   if (!target.sourcePath) {
     return {
       modes: MODE_ORDER.map((mode) => (mode === "meta" ? state("meta") : state(mode, REASONS.noPath))),
@@ -174,7 +261,7 @@ export function resolveModes(input: ResolveInput): ResolvedModes {
       case "hex":
         return hexState(preview, target);
       case "sqlite":
-        return type === "sqlite" ? state("sqlite") : state("sqlite", REASONS.notSqlite);
+        return isSqlitePreview(preview) ? state("sqlite") : state("sqlite", REASONS.notSqlite);
       case "image":
         return type === "image" ? state("image") : state("image", REASONS.notImage);
       case "document":
@@ -188,6 +275,8 @@ export function resolveModes(input: ResolveInput): ResolvedModes {
         return type === "email" ? state("email") : state("email", REASONS.notEmail);
       case "media":
         return type === "media" ? state("media") : state("media", REASONS.notMedia);
+      case "family":
+        return state("family"); // replaced by familyState (resolveModes)
       default:
         return state("meta");
     }

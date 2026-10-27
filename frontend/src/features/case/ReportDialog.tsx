@@ -1,17 +1,23 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { getReviewCounts } from "../../api/caseDb";
+import { getRunTree } from "../../api/runs";
+import { aiRowCount } from "../ai/useAiUsage";
 import { caseLinkOf } from "./caseLink";
 import { ErrorText } from "./ErrorText";
 import {
+  AI_REPORT_SECTION,
   EXPORT_ACTIONS,
   type ExportKind,
   exportDisabledReason,
+  exportWrites,
   performExport,
   type ReportFormat,
+  writtenDetail,
 } from "./exports";
 import { Modal } from "./Modal";
 import { ReasonButton } from "./ReasonButton";
+import { notifyWritten, runOutputDir } from "./WriteConfirm";
 
 const FORMATS: Array<{ id: ReportFormat; label: string }> = [
   { id: "html", label: "HTML" },
@@ -29,19 +35,41 @@ export function ReportDialog({
   runId,
   runIsActive,
   onClose,
-  onNotice,
+  initialKind = "case-report",
 }: {
   runId: string | null;
   runIsActive: boolean;
   onClose: () => void;
-  onNotice?: (message: string) => void;
+  /** The kind chosen when the dialog opens (보고 panel / palette `export.*`). */
+  initialKind?: ExportKind;
 }) {
-  const [kind, setKind] = useState<ExportKind>("case-report");
+  const [kind, setKind] = useState<ExportKind>(initialKind);
+  // Where the files go (r7 L4): the run folder, known before anything is written.
+  const [folder, setFolder] = useState<string | null>(null);
+  useEffect(() => {
+    if (!runId) return;
+    let alive = true;
+    void runOutputDir(runId).then((dir) => {
+      if (alive) setFolder(dir);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [runId]);
   const [format, setFormat] = useState<ReportFormat>("html");
   const [title, setTitle] = useState("");
   // A case run pre-fills 사건 번호 and 분석자 from its case (AXIOM adoption E1).
   const [caseNumber, setCaseNumber] = useState(() => caseLinkOf(runId)?.caseNumber ?? "");
   const [investigator, setInvestigator] = useState(() => caseLinkOf(runId)?.examiner ?? "");
+  // AI 사용 절 (R7 AI 갈래 D): offered for a run with AI usage rows, on by default.
+  const [aiSection, setAiSection] = useState(true);
+  const tree = useQuery({
+    queryKey: ["run-tree", runId],
+    queryFn: () => getRunTree(runId as string),
+    enabled: Boolean(runId),
+    retry: false,
+  });
+  const hasAi = (aiRowCount(tree.data) ?? 0) > 0;
   const groupId = useId();
   const counts = useQuery({
     queryKey: ["review-counts", runId],
@@ -51,8 +79,27 @@ export function ReportDialog({
   });
   const exportMutation = useMutation({
     mutationFn: (chosen: ExportKind) =>
-      performExport(chosen, runId as string, { format, meta: { title, caseNumber, investigator } }),
-    onSuccess: (name) => onNotice?.(`${name} 파일을 저장했습니다.`),
+      performExport(chosen, runId as string, {
+        format,
+        meta: {
+          title,
+          caseNumber,
+          investigator,
+          ...(hasAi ? { sections: aiSection ? [AI_REPORT_SECTION] : [] } : {}),
+        },
+      }),
+    onSuccess: (result, chosen) => {
+      const label = EXPORT_ACTIONS.find((action) => action.kind === chosen)?.label ?? "내보내기";
+      const written = result.written ?? [];
+      notifyWritten(
+        written.length > 1
+          ? `${label}: ${written.length}개 파일을 썼습니다 (${result.fileName}은(는) 다운로드 폴더에도 저장).`
+          : `${label}: ${result.fileName}을(를) 저장했습니다.`,
+        written.length > 1 ? writtenDetail(written) : result.path,
+        result.open ? { label: "열기", run: () => void result.open?.() } : undefined,
+      );
+      onClose();
+    },
   });
   const reasonOf = (action: (typeof EXPORT_ACTIONS)[number]) =>
     exportDisabledReason(action, {
@@ -146,6 +193,23 @@ export function ReportDialog({
               onChange={(e) => setCaseNumber(e.target.value)}
             />
           </div>
+          {hasAi ? (
+            <div className="case-field" data-testid="report-ai-section">
+              <label htmlFor="report-ai-section">
+                <input
+                  id="report-ai-section"
+                  type="checkbox"
+                  checked={aiSection}
+                  onChange={(e) => setAiSection(e.target.checked)}
+                />{" "}
+                AI 사용 절 포함
+              </label>
+              <p className="case-reason">
+                도구·계정·기간·세션·도구 호출 상위·AI 생성 코드 비율과 서버 측 증거가 필요한 도구(갭 표)를
+                보고서에 넣습니다. 이 절을 지원하지 않는 서버는 기본 구성으로 씁니다.
+              </p>
+            </div>
+          ) : null}
           <div className="case-field">
             <label className="case-label" htmlFor="report-investigator">
               분석관 (선택)
@@ -159,6 +223,22 @@ export function ReportDialog({
           </div>
         </>
       ) : null}
+      <section className="case-field" aria-labelledby={`${groupId}-where`} data-testid="export-writes">
+        <h3 id={`${groupId}-where`} className="case-label">
+          쓰는 위치
+        </h3>
+        <ul className="write-confirm-list">
+          {exportWrites(kind, folder, format).map((item) => (
+            <li key={item.where}>
+              {item.what}
+              <div className="write-confirm-where">{item.where}</div>
+            </li>
+          ))}
+        </ul>
+        <p className="case-reason">
+          내보내기를 누르기 전에는 아무것도 쓰지 않습니다. 원본 증거는 바꾸지 않습니다.
+        </p>
+      </section>
       {exportMutation.error && (
         <ErrorText>
           {exportMutation.error instanceof Error ? exportMutation.error.message : "내보내지 못했습니다."}

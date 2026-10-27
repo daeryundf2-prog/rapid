@@ -1,11 +1,24 @@
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { notifyManager, type QueryClient, QueryClientContext } from "@tanstack/react-query";
+import {
+  type FormEvent,
+  type KeyboardEvent,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { announce, useEscape, useFocusTrap } from "../a11y";
 import { COLLECTION_LABEL } from "../app/collections";
 import { focusGridWhenReady, GLOBAL_SEARCH_ID, NO_RUN_REASON } from "../commands/builtin";
 import { CommandButton } from "../commands/CommandButton";
 import { useCommandState } from "../commands/registry";
+import { RUN_ADD_LABEL } from "../features/case/commands";
 import { SearchOptionsButton } from "../features/case/SearchOptionsPopover";
-import { useSearchState } from "../features/case/searchState";
+import { parseSearchKeywords } from "../features/case/searchKeywords";
+import { searchCancelKey, useSearchState } from "../features/case/searchState";
 import { Icon } from "../icons";
 import { keyLabel } from "../shortcuts";
 import { useRoute } from "../state/hooks";
@@ -19,12 +32,36 @@ export function CasePickerFallback() {
   return <CasePickerCombobox />;
 }
 
+/** React Query key prefix of every page of the run's unified-search grid (useCollectionQuery). */
+export function searchQueryKey(runId: string | null) {
+  return ["collection", runId, "search"] as const;
+}
+
+/** Any page of the run's search in flight (false without a QueryClient, e.g. a bare shell).
+ *
+ * `useIsFetching`'s store (R7 S2 confirmation): the cache also notifies while another component
+ * renders (a query created during render), so the change is scheduled with
+ * `notifyManager.batchCalls`, never a synchronous setState (React: "Cannot update a component
+ * while rendering a different component"). */
+function useSearchBusy(client: QueryClient | undefined, runId: string | null): boolean {
+  const subscribe = useCallback(
+    (onStoreChange: () => void) =>
+      client ? client.getQueryCache().subscribe(notifyManager.batchCalls(onStoreChange)) : () => undefined,
+    [client],
+  );
+  const snapshot = () => (client ? client.isFetching({ queryKey: searchQueryKey(runId) }) > 0 : false);
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
+}
+
 function GlobalSearch() {
   const { route, openCollection } = useRoute();
   const showNotice = useAppStore((s) => s.showNotice);
   const routedQuery = route.collection === "search" ? (route.q ?? "") : "";
   const [value, setValue] = useState(routedQuery);
   const hintId = useId();
+  const queryClient = useContext(QueryClientContext);
+  // R7 P2: a spinner while the search's pages are in flight; Esc or a new search cancels them.
+  const busy = useSearchBusy(queryClient, route.runId);
 
   useEffect(() => setValue(routedQuery), [routedQuery]);
 
@@ -40,17 +77,47 @@ function GlobalSearch() {
       announce("검색어를 입력하세요");
       return;
     }
+    // Submitting (again) lifts an Esc cancel of this search.
+    useSearchState.getState().setCancelled(null);
+    if (!(route.collection === "search" && q === routedQuery)) {
+      // A new search: abort the previous one's requests (their AbortSignal) before switching.
+      // (The same search again keeps its pages, in flight or cached, as before.)
+      void queryClient?.cancelQueries({ queryKey: searchQueryKey(route.runId) });
+    }
     // S4's search options read the keywords; the grid builds the FTS request (searchPath()).
-    useSearchState.getState().setKeywords(q.split(/[\s,]+/).filter(Boolean));
+    // R7 S2 #4: 32 keywords / 4,000 characters at most — trimmed here with a Korean note, never a
+    // server validation error.
+    const parsed = parseSearchKeywords(q);
+    useSearchState.getState().setKeywords(parsed.keywords);
+    if (parsed.note) {
+      showNotice(`전체 검색: ${parsed.note}`);
+      announce(`전체 검색: ${parsed.note}`);
+    }
     openCollection("search", { q });
     // The analyst's next key is J: hand focus to the results grid once it renders.
     focusGridWhenReady();
   };
 
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Escape" || !busy) return;
+    // Esc while searching cancels the search and keeps the typed text (the next Esc clears it).
+    event.preventDefault();
+    event.stopPropagation();
+    // Marked first so the grid does not request the pages again (focus / re-render refetch).
+    const { keywords } = parseSearchKeywords(routedQuery);
+    useSearchState.getState().setCancelled(searchCancelKey(route.runId, keywords));
+    void queryClient?.cancelQueries({ queryKey: searchQueryKey(route.runId) });
+    announce("검색을 취소했습니다. 다시 검색하려면 Enter를 누르세요");
+  };
+
   return (
-    <search className="global-search" aria-label="전체 검색">
+    <search className="global-search" aria-label="전체 검색" aria-busy={busy || undefined}>
       <form onSubmit={onSubmit}>
-        <Icon name="search" className="global-search-icon" />
+        {busy ? (
+          <Icon name="spinner" className="global-search-icon global-search-spinner" />
+        ) : (
+          <Icon name="search" className="global-search-icon" />
+        )}
         <input
           id={GLOBAL_SEARCH_ID}
           type="search"
@@ -60,9 +127,12 @@ function GlobalSearch() {
           aria-disabled={route.runId ? undefined : true}
           placeholder={route.runId ? "전체 검색 (Enter)" : NO_RUN_REASON}
           onChange={(event) => setValue(event.target.value)}
+          onKeyDown={onKeyDown}
         />
         <span id={hintId} className="visually-hidden">
-          {route.runId ? `${COLLECTION_LABEL.search}로 이동합니다` : NO_RUN_REASON}
+          {route.runId
+            ? `${COLLECTION_LABEL.search}로 이동합니다${busy ? " · 검색 중, Esc로 취소" : ""}`
+            : NO_RUN_REASON}
         </span>
       </form>
       {/* Search options live inside the search field (visual-polish S7). */}
@@ -140,7 +210,17 @@ export function TopBar() {
       <Brand />
       <div className="topbar-case">
         <Slot name="case-picker" fallback={<CasePickerFallback />} />
-        <CommandButton command="case.run-dialog" variant="ghost" label="실행" testId="run-dialog-button" />
+        {/* With a case open "실행" was the case-less quick run (C-G9): now a run of THIS case. */}
+        {hasCase ? (
+          <CommandButton
+            command="case.run.new"
+            variant="ghost"
+            label={RUN_ADD_LABEL}
+            testId="run-dialog-button"
+          />
+        ) : (
+          <CommandButton command="case.run-dialog" variant="ghost" label="실행" testId="run-dialog-button" />
+        )}
       </div>
       <div className="topbar-search">
         {hasCase ? <GlobalSearch /> : null}

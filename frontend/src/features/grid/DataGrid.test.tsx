@@ -87,24 +87,82 @@ describe("DataGrid ARIA", () => {
     expect(container.querySelector("[role=status]:not([aria-label])")).toBeNull();
   });
 
-  it("header buttons set aria-sort and the footer says sorting uses the loaded rows", async () => {
-    await renderFiles(600);
-    const header = screen
-      .getAllByRole("columnheader")
-      .find((h) => h.textContent?.includes("크기")) as HTMLElement;
-    expect(header.getAttribute("aria-sort")).toBe("none");
-    fireEvent.click(within(header).getByRole("button"));
-    expect(header.getAttribute("aria-sort")).toBe("ascending");
-    expect(screen.getByText(/정렬은 불러온 [0-9]+행 기준/)).toBeTruthy();
-    fireEvent.click(within(header).getByRole("button"));
-    expect(header.getAttribute("aria-sort")).toBe("descending");
-    // Descending size: file sizes grow with the index, so row titles count down.
+  it("header buttons set aria-sort; 크기 sorts the WHOLE files list on the server (C-D1)", {
+    timeout: 20_000,
+  }, async () => {
+    const { calls } = await renderFiles(600);
+    const header = () =>
+      screen.getAllByRole("columnheader").find((h) => h.textContent?.includes("크기")) as HTMLElement;
+    expect(header().getAttribute("aria-sort")).toBe("none");
+    fireEvent.click(within(header()).getByRole("button"));
+    expect(header().getAttribute("aria-sort")).toBe("ascending");
+    await waitFor(() => expect(calls.some((c) => /sort=size&order=asc/.test(c.url))).toBe(true));
+    fireEvent.click(within(header()).getByRole("button"));
+    expect(header().getAttribute("aria-sort")).toBe("descending");
+    await waitFor(() => expect(calls.some((c) => /sort=size&order=desc/.test(c.url))).toBe(true));
+    // Descending size over all 600 rows: the first row is the global maximum (file-599).
     const n = (i: number) =>
       Number(/file-(\d+)/.exec(within(rowAt(i)).getAllByRole("gridcell")[1]?.textContent ?? "")?.[1]);
-    expect(n(0)).toBeGreaterThan(n(1));
-    expect(n(1)).toBeGreaterThan(n(2));
-    fireEvent.click(within(header).getByRole("button"));
-    expect(header.getAttribute("aria-sort")).toBe("none");
+    await waitFor(() => expect(n(0)).toBe(599));
+    expect(n(1)).toBe(598);
+    expect(screen.getByTestId("grid-sort-status").textContent).toMatch(/크기 내림차순 \(전체 600건\)/);
+    // A server sort covers every row: no "loaded rows only" banner.
+    expect(screen.queryByTestId("grid-scope-banner")).toBeNull();
+    fireEvent.click(within(header()).getByRole("button"));
+    expect(header().getAttribute("aria-sort")).toBe("none");
+  });
+
+  it("a header click sorts only: focused row, selection and viewer target stay (C-D2)", {
+    timeout: 20_000,
+  }, async () => {
+    await renderFiles(600);
+    // Focus row 3 and tick rows 1 and 2.
+    fireEvent.mouseDown(rowAt(3), { button: 0 });
+    fireEvent.click(within(rowAt(1)).getByRole("checkbox"));
+    fireEvent.click(within(rowAt(2)).getByRole("checkbox"));
+    const before = useGridLocalStore.getState();
+    const focusedKey = before.focusedRowKey;
+    const target = before.target;
+    const selected = [...before.selectedKeys].sort();
+    expect(focusedKey).toBe("files:/candidates/3");
+    expect(selected).toHaveLength(2);
+    const header = () =>
+      screen.getAllByRole("columnheader").find((h) => h.textContent?.includes("이름")) as HTMLElement;
+    fireEvent.click(within(header()).getByRole("button"));
+    fireEvent.click(within(header()).getByRole("button")); // descending: row 3 leaves the first page
+    await waitFor(() => expect(header().getAttribute("aria-sort")).toBe("descending"));
+    await waitFor(() => expect(rows().length).toBeGreaterThan(0));
+    const after = useGridLocalStore.getState();
+    expect(after.focusedRowKey).toBe(focusedKey);
+    expect(after.target).toBe(target);
+    expect([...after.selectedKeys].sort()).toEqual(selected);
+    expect(after.route.rowRef?.locator).toBe("/candidates/3");
+    // Ascending again: the held row is loaded at a new place and is the focused row there.
+    fireEvent.click(within(header()).getByRole("button")); // none
+    await waitFor(() => expect(header().getAttribute("aria-sort")).toBe("none"));
+    await waitFor(() =>
+      expect(focusedRows().map((r) => r.getAttribute("data-row-key"))).toEqual([focusedKey]),
+    );
+    expect(useGridLocalStore.getState().target).toBe(target);
+  });
+
+  it("a column the server cannot sort sorts the loaded rows under a permanent banner and badge", async () => {
+    const view = installFetch({ "/files": filesHandler(600) });
+    renderWithClient(<DataGrid initialPreset="compact" />);
+    await waitFor(() => expect(rows().length).toBeGreaterThan(0));
+    // The badge is always there on a paged grid.
+    await waitFor(() =>
+      expect(screen.getByTestId("grid-scope-badge").textContent).toMatch(/불러온 [0-9,]+ \/ 전체 600/),
+    );
+    const header = () =>
+      screen.getAllByRole("columnheader").find((h) => h.textContent?.includes("확장자")) as HTMLElement;
+    expect(within(header()).getByRole("button").getAttribute("title")).toMatch(/불러온 행만 정렬/);
+    fireEvent.click(within(header()).getByRole("button"));
+    expect(header().getAttribute("aria-sort")).toBe("ascending");
+    expect(view.some((c) => /sort=/.test(c.url))).toBe(false);
+    await waitFor(() =>
+      expect(screen.getByTestId("grid-scope-banner").textContent).toMatch(/정렬·필터는 불러온 행 기준/),
+    );
   });
 });
 
@@ -170,22 +228,62 @@ describe("DataGrid keyboard", () => {
     expect(useGridLocalStore.getState().selectedKeys.size).toBe(3);
   });
 
-  it("click, Ctrl-click and Shift-click select single / toggle / range", async () => {
+  it("click focuses only; Ctrl-click toggles; Shift-click adds the range (R7)", async () => {
     await renderFiles();
     fireEvent.mouseDown(rowAt(2));
-    expect(useGridLocalStore.getState().selectedKeys.size).toBe(1);
+    // A plain click moves the focused row; it never checks or clears rows.
+    expect(useGridLocalStore.getState().selectedKeys.size).toBe(0);
+    expect(rowAt(2).classList.contains("is-focused")).toBe(true);
+    fireEvent.mouseDown(rowAt(2), { ctrlKey: true });
     fireEvent.mouseDown(rowAt(4), { ctrlKey: true });
     expect([...useGridLocalStore.getState().selectedKeys]).toEqual([
       "files:/candidates/2",
       "files:/candidates/4",
     ]);
     fireEvent.mouseDown(rowAt(6), { shiftKey: true });
-    // Range from anchor (row 4) to row 6 replaces the selection.
+    // Range from the anchor (row 4) to row 6 is added; row 2 stays checked.
     expect([...useGridLocalStore.getState().selectedKeys].sort()).toEqual([
+      "files:/candidates/2",
       "files:/candidates/4",
       "files:/candidates/5",
       "files:/candidates/6",
     ]);
+    fireEvent.mouseDown(rowAt(1));
+    expect(useGridLocalStore.getState().selectedKeys.size).toBe(4);
+    rowAt(1).focus();
+    fireEvent.keyDown(rowAt(1), { key: "Escape" });
+    expect(useGridLocalStore.getState().selectedKeys.size).toBe(0);
+  });
+
+  it("a ticked checkbox survives clicking another row and ticking another box (R7)", async () => {
+    await renderFiles();
+    const box = (i: number) =>
+      rowAt(i).querySelector<HTMLInputElement>('input[type="checkbox"]') as HTMLInputElement;
+    fireEvent.click(box(0));
+    fireEvent.mouseDown(rowAt(2));
+    fireEvent.click(rowAt(2));
+    expect(box(0).checked).toBe(true);
+    expect(rowAt(2).classList.contains("is-focused")).toBe(true);
+    expect(box(2).checked).toBe(false);
+    fireEvent.click(box(3));
+    expect([...useGridLocalStore.getState().selectedKeys].sort()).toEqual([
+      "files:/candidates/0",
+      "files:/candidates/3",
+    ]);
+    expect(screen.getByTestId("grid-footer-selected").textContent).toBe("선택 2건");
+    // Shift-click on a box extends from the last toggled box.
+    fireEvent.click(box(5), { shiftKey: true });
+    expect([...useGridLocalStore.getState().selectedKeys].sort()).toEqual([
+      "files:/candidates/0",
+      "files:/candidates/3",
+      "files:/candidates/4",
+      "files:/candidates/5",
+    ]);
+    // Esc from the focused checkbox clears the selection explicitly.
+    box(5).focus();
+    fireEvent.keyDown(box(5), { key: "Escape" });
+    expect(useGridLocalStore.getState().selectedKeys.size).toBe(0);
+    expect(screen.queryByTestId("grid-footer-selected")).toBeNull();
   });
 
   it("Enter publishes the ViewerTarget and requests viewer focus", async () => {
@@ -266,6 +364,10 @@ describe("DataGrid keyboard", () => {
       "인용 복사",
       "타임라인에서 보기",
       "같은 출처 행",
+      // 계열 (R7 갈래 A).
+      "계열 보기",
+      "상위 항목으로",
+      "선택을 상위+하위 항목으로 확장",
       "선택 행 OCR 실행",
       // Record pivots (viewer redesign §5), each disabled with a reason when the row lacks the field.
       "같은 사용자/SID",
@@ -331,8 +433,8 @@ describe("DataGrid keyboard", () => {
     expect(button.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(button);
     const menu = await screen.findByRole("menu", { name: "행 메뉴" });
-    // 7 row actions + 9 pivots + 5 review marks (+ contextual entries that apply).
-    expect(within(menu).getAllByRole("menuitem")).toHaveLength(21);
+    // 7 row actions + 3 계열 (R7 갈래 A) + 9 pivots + 5 review marks (+ contextual entries that apply).
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(24);
     const trigger = screen.getAllByRole("button", { name: "행 메뉴" })[1] as HTMLButtonElement;
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(trigger.getAttribute("aria-controls")).toBe(menu.id);
@@ -355,22 +457,24 @@ describe("DataGrid keyboard", () => {
 });
 
 describe("DataGrid filter", () => {
-  it("filters the loaded rows client-side and says so in the footer", async () => {
-    await renderFiles(600);
+  it("files: the text filter runs on the server over every file's name and path (q=)", async () => {
+    const { calls } = await renderFiles(600);
     const input = screen.getByPlaceholderText(/필터/);
     fireEvent.change(input, { target: { value: "file-12" } });
-    await waitFor(() => expect(screen.getByText(/서버 필터 미지원/)).toBeTruthy());
-    // file-12, file-120..129 (all in the first page of 250) = 11 rows.
+    await waitFor(() => expect(calls.some((c) => /[?&]q=file-12/.test(c.url))).toBe(true));
+    // file-12, file-120..129 = 11 rows of the whole list.
     await waitFor(() => expect(rows().length).toBe(11));
-    expect(screen.getByText(/불러온 [0-9]+행에서만/)).toBeTruthy();
+    expect(screen.queryByText(/서버 필터 미지원/)).toBeNull();
+    expect(screen.queryByTestId("grid-scope-banner")).toBeNull();
     fireEvent.change(input, { target: { value: "" } });
-    await waitFor(() => expect(screen.queryByText(/서버 필터 미지원/)).toBeNull());
+    await waitFor(() => expect(rows().length).toBeGreaterThan(11));
   });
 
   it("shows an empty message when nothing matches", async () => {
     await renderFiles(50);
     fireEvent.change(screen.getByPlaceholderText(/필터/), { target: { value: "zzzz-no-match" } });
-    await waitFor(() => expect(screen.getByText(/조건에 맞는 행이 없습니다/)).toBeTruthy());
+    // The empty state names the filter text (R7 L3, C-D16); files search name/path on the server (L2).
+    await waitFor(() => expect(screen.getByText(/'zzzz-no-match'에 맞는 파일이 없습니다/)).toBeTruthy());
   });
 });
 

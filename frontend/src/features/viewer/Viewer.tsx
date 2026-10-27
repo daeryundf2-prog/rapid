@@ -10,6 +10,7 @@ import {
 import { CLASSIC_COLLAPSE_REASON, collapseViewerPane } from "../../commands/builtin";
 import { runCommand as runShellCommand } from "../../commands/registry";
 import { MiddlePath } from "../../components/MiddlePath";
+import { pushToast } from "../../components/toastStore";
 import type { Command } from "../../contracts/command";
 import type { MarkAction, ViewerMode, ViewerTarget } from "../../contracts/viewer";
 import { Icon } from "../../icons";
@@ -43,14 +44,15 @@ import {
 } from "./commands";
 import { targetKey } from "./history";
 import { ModeTabs, panelId, tabId, VIEWER_PANEL_ID } from "./ModeTabs";
-import { resolveModes } from "./modes";
+import { resolveModes, sqliteRowTarget } from "./modes";
 import { POPOUT_COMMAND_ID } from "./popout/host";
 import { recordByteRange } from "./record";
-import { viewerSession } from "./session";
+import { pendingRowKey, viewerSession } from "./session";
 import { type AsyncState, errorText, useAsync } from "./useAsync";
 import { ViewerToolbar } from "./ViewerToolbar";
 import { DocumentView } from "./views/DocumentView";
 import { EmailView } from "./views/EmailView";
+import { FamilyView } from "./views/FamilyView";
 import { HexView } from "./views/HexView";
 import { ImageView } from "./views/ImageView";
 import { MediaView } from "./views/MediaView";
@@ -61,6 +63,13 @@ import "./viewer.css";
 
 /** Files up to this size get their SHA-256 computed automatically after load. */
 export const AUTO_HASH_MAX_BYTES = 32 * 1024 * 1024;
+
+/** A refused copy (C-W10): one Korean sentence, spoken and shown as an error toast. */
+function copyFailed(what: string, error: unknown): void {
+  const text = `${what}: ${errorText(error)}`;
+  announce(text, { politeness: "assertive" });
+  pushToast(text, "error");
+}
 
 function baseName(path: string): string {
   const parts = path.split(/[\\/]|::/);
@@ -190,7 +199,19 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
   // URL `mode=` restores the tab for the first target; later rows auto-select again.
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per target key
   useEffect(() => {
-    if (!key) return;
+    if (!key || !target) return;
+    // A tab requested for this row (계열 navigation): it wins over the URL rule below.
+    // Kept while that row shows: the URL-restored target and the grid's resolved one (with its
+    // source path) are two keys of the same row; another row clears it.
+    const pending = viewerSession().pendingMode;
+    if (pending) {
+      if (pending.row === pendingRowKey(target.runId, target.ref)) {
+        viewerSession().restoredMode = true;
+        setUserMode({ key, mode: pending.mode });
+        return;
+      }
+      viewerSession().pendingMode = null;
+    }
     if (!viewerSession().restoredMode) {
       viewerSession().restoredMode = true;
       if (routeMode) setUserMode({ key, mode: routeMode });
@@ -262,7 +283,7 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
         await writeClipboard(sha);
         announce(`SHA-256을 복사했습니다: ${sha.slice(0, 12)}…`);
       } catch (error) {
-        announce(`해시 복사 실패: ${errorText(error)}`);
+        copyFailed("해시 복사 실패", error);
       }
     },
     copyPath: async () => {
@@ -271,7 +292,7 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
         await writeClipboard(target.sourcePath);
         announce("경로를 복사했습니다.");
       } catch (error) {
-        announce(`경로 복사 실패: ${errorText(error)}`);
+        copyFailed("경로 복사 실패", error);
       }
     },
     copyCitation: async () => {
@@ -283,11 +304,11 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
         await writeClipboard(buildCitation({ ...target, highlight }, sha, row, currentTimezone()));
         announce("인용을 복사했습니다.");
       } catch (error) {
-        announce(`인용 복사 실패: ${errorText(error)}`);
+        copyFailed("인용 복사 실패", error);
       }
     },
     mark: async (action: MarkAction) => {
-      if (!target) return;
+      if (!target) return false;
       try {
         const result = await applyMark(target, action);
         const markKey = targetKey(target);
@@ -303,8 +324,10 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
         window.dispatchEvent(
           new CustomEvent("rapidtriage:viewer-marked", { detail: { runId: target.runId } }),
         );
+        return true;
       } catch (error) {
         announce(`표시 실패: ${errorText(error)}`);
+        return false;
       }
     },
     back: () => goHistory("back"),
@@ -321,7 +344,7 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
         copyHash: () => controller.current?.copyHash() ?? Promise.resolve(),
         copyPath: () => controller.current?.copyPath() ?? Promise.resolve(),
         copyCitation: () => controller.current?.copyCitation() ?? Promise.resolve(),
-        mark: (action) => controller.current?.mark(action) ?? Promise.resolve(),
+        mark: (action) => controller.current?.mark(action) ?? Promise.resolve(false),
         back: () => controller.current?.back(),
         forward: () => controller.current?.forward(),
         canBack: () => controller.current?.canBack() ?? false,
@@ -349,9 +372,9 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
       const reason = command.disabledReason?.(ctx);
       if (reason) {
         announce(reason);
-        return;
+        return false;
       }
-      void command.run(ctx);
+      return command.run(ctx);
     },
     [ctx],
   );
@@ -580,6 +603,8 @@ function ViewerBody(props: ViewerBodyProps) {
   const { target, mode, previewState, metadata, highlight } = props;
   const hexKey = `${target.sourcePath}|${highlight?.offset ?? ""}`;
   const preview = previewState.status === "ok" ? previewState.data : null;
+  // 계열 (R7 갈래 A) is about the row's relations: it never waits for the preview.
+  if (mode === "family") return <FamilyView target={target} />;
   if (
     props.resolving ||
     (mode !== "meta" &&
@@ -644,8 +669,21 @@ function ViewerBody(props: ViewerBodyProps) {
           staticRows={preview.container_path ? preview.hex?.rows : undefined}
         />
       );
-    case "sqlite":
-      return <SqliteView key={preview.path} runId={target.runId} preview={preview} highlight={highlight} />;
+    case "sqlite": {
+      // A parsed browser row opens its source table at its rowid (C-W1).
+      const rowTarget = sqliteRowTarget(preview, props.row);
+      const sqliteHighlight = rowTarget
+        ? { ...highlight, table: rowTarget.table, rowid: rowTarget.rowid }
+        : highlight;
+      return (
+        <SqliteView
+          key={`${preview.path}|${sqliteHighlight?.table ?? ""}|${sqliteHighlight?.rowid ?? ""}`}
+          runId={target.runId}
+          preview={preview}
+          highlight={sqliteHighlight}
+        />
+      );
+    }
     case "image":
       return (
         <ImageView key={preview.path} runId={target.runId} preview={preview} onOpenPath={props.onOpenPath} />

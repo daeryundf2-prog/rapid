@@ -55,7 +55,9 @@ describe("CommandPalette", () => {
     expect(document.activeElement).toBe(input());
     const listbox = screen.getByRole("listbox");
     expect(input().getAttribute("aria-controls")).toBe(listbox.id);
-    expect(screen.getAllByRole("group").length).toBe(3);
+    // No case open: the 이동 group is hidden (r7 L4, C-G11) and commands that cannot run stay
+    // out of the plain list (C-G11 remainder) — only the group with a runnable command is left.
+    expect(screen.getAllByRole("group").length).toBe(1);
     expect(activeOption()?.getAttribute("aria-selected")).toBe("true");
   });
 
@@ -66,7 +68,6 @@ describe("CommandPalette", () => {
       "테마 전환",
       "‘테마’ 전체 검색케이스를 먼저 선택하세요",
     ]);
-    fireEvent.change(input(), { target: { value: "" } });
     const first = activeOption()?.textContent;
     fireEvent.keyDown(input(), { key: "ArrowDown" });
     expect(activeOption()?.textContent).not.toBe(first);

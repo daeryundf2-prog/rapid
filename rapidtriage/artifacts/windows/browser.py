@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote_plus, urlparse
 
+from ...core.ai_catalog import domains as ai_catalog_domains
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .._walk import iter_evidence_paths
@@ -169,29 +170,12 @@ CLOUD_SYNC_PATH_TERMS = ("onedrive", "drivefs", "google drive", "googledrive")
 DESKTOP_CLOUD_SYNC_ROW_LIMIT = 200
 DESKTOP_CLOUD_SYNC_TABLE_LIMIT = 8
 
-AI_SERVICE_DOMAINS: tuple[tuple[str, str], ...] = (
-    ("chatgpt.com", "ChatGPT"),
-    ("chat.openai.com", "ChatGPT"),
-    ("openai.com", "OpenAI"),
-    ("claude.ai", "Claude"),
-    ("gemini.google.com", "Gemini"),
-    ("bard.google.com", "Gemini"),
-    ("aistudio.google.com", "Google AI Studio"),
-    ("perplexity.ai", "Perplexity"),
-    ("copilot.microsoft.com", "Microsoft Copilot"),
-    ("bing.com", "Microsoft Copilot/Bing Chat"),
-    ("poe.com", "Poe"),
-    ("huggingface.co", "Hugging Face"),
-    ("grok.com", "Grok"),
-    ("x.ai", "Grok"),
-    ("you.com", "You.com"),
-    ("phind.com", "Phind"),
-    ("chat.mistral.ai", "Mistral Le Chat"),
-    ("deepseek.com", "DeepSeek"),
-    ("meta.ai", "Meta AI"),
-    ("character.ai", "Character.AI"),
-    ("notion.so", "Notion AI"),
-)
+# R7 stage 3.5: generated from the AI tool catalog (rapidtriage/core/ai_catalog). The 21 legacy
+# domains come first in their old order and labels (first match wins, so those hosts are detected
+# exactly as before), then the catalog's chatbot, gateway and agent hosts (Kimi, Qwen, Doubao,
+# Z.ai, Manus, Genspark, Felo, NotebookLM, Duck.ai, OpenRouter, API hosts, Cursor, Devin, Jules,
+# Lovable, Bolt, v0, Replit, CLOVA X, Wrtn, Kanana, Zeta, Liner …).
+AI_SERVICE_DOMAINS: tuple[tuple[str, str], ...] = ai_catalog_domains(legacy="browser")
 QUERY_HINT_KEYS = ("q", "query", "prompt", "text", "message", "ask", "p")
 SEARCH_HOST_HINTS = ("google.", "bing.com", "duckduckgo.com", "naver.com", "daum.net", "yahoo.")
 EMAIL_HOST_HINTS = ("mail.google.com", "outlook.live.com", "outlook.office.com", "mail.naver.com", "mail.daum.net")

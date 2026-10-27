@@ -2,7 +2,8 @@
 
 * ``GET  /api/runs/{run}/search/index``         -- status ``none|building|ready|stale``
 * ``POST /api/runs/{run}/search/index/build``   -- 202 AnalysisState (kind ``search-index``)
-* ``POST /api/runs/{run}/search/query``         -- one result page (§3.2 response shape)
+* ``POST /api/runs/{run}/search/query``         -- one result page (§3.2 response shape); with
+  ``keywords`` instead of ``q`` the console's global search: v1 ``GET /search`` hits (R7 P2)
 * ``POST /api/runs/{run}/search/count``         -- per-term totals (budgeted, resumable by ``offset``)
 * ``POST /api/runs/{run}/search/hashes``        -- hash list / hash set lookup
 * ``GET|POST|PUT|DELETE /api/runs/{run}/search/saved[/{id}]`` -- saved searches (case DB)
@@ -37,6 +38,7 @@ from ...core.jobs import RunJobStore
 from ...core.search_index.build import read_index_meta, stale_reasons
 from ...core.search_index.engine import (
     DEFAULT_BUDGET_SECONDS,
+    MAX_POSITION,
     PAGE_MAX,
     Budget,
     QueryRequest,
@@ -56,6 +58,12 @@ from ...core.search_index.hashsets import (
     read_hash_set,
     read_hash_values,
 )
+from ...core.search_index.hits import (
+    MAX_CONSOLE_KEYWORDS,
+    attach_console_hits,
+    console_keywords,
+    console_query,
+)
 from ...core.search_index.query import QueryError
 from ...core.search_index.schema import INDEX_FILE_NAME
 from ...core.search_index.textutil import normalize_hash
@@ -67,6 +75,7 @@ from .search_index_service import (
     SEARCH_HISTORY,
     QuerySlot,
     ReviewMarks,
+    artifact_summaries,
     completed_run,
     create_saved,
     delete_saved,
@@ -109,6 +118,14 @@ class SearchOptionsBody(_Body):
 class PageBody(_Body):
     cursor: str | None = Field(default=None, max_length=4096)
     limit: int = Field(default=100, ge=1, le=PAGE_MAX)
+    offset: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "keywords 검색: 이 쪽 앞의 적중 수. 번호(search_result_id)는 서버가 커서의 위치로 매기며, "
+            "위치가 없는 이전 커서에만 이 값을 쓴다(최대 1,000,000, 넘으면 422)"
+        ),
+    )
 
 
 class HistogramBody(_Body):
@@ -122,7 +139,15 @@ class IndexBuildBody(_Body):
 
 class SearchQueryBody(_Body):
     # The parser enforces the 4,000-character limit with a Korean 400.
-    q: str = Field(..., max_length=100_000)
+    q: str = Field(default="", max_length=100_000)
+    # The 32-keyword cap is checked in the route (a Korean 422, R7 S3 confirmation), not by pydantic.
+    keywords: list[str] | None = Field(
+        default=None,
+        description=(
+            f"콘솔 전체 검색(q 대신, 최대 {MAX_CONSOLE_KEYWORDS}개 -- 넘으면 422): 키워드 중 하나라도 들어 있는 행(v1 exact와 같은 정규화). "
+            "응답은 rows 대신 matches(v1 GET /search 적중 모양)이고 검색 기록에 남지 않는다"
+        ),
+    )
     options: SearchOptionsBody = Field(default_factory=SearchOptionsBody)
     page: PageBody = Field(default_factory=PageBody)
     sort: Literal["relevance", "ts", "-ts", "path"] = "relevance"
@@ -278,8 +303,24 @@ def build_search_index_router(store: RunJobStore, *, owner: object | None = None
         job, output_dir = completed_run(store, run_id)
         index_path = output_dir / INDEX_FILE_NAME
         marks = ReviewMarks(job, run_id)
+        keywords: list[str] | None = None
+        q = body.q
+        if body.page.offset > MAX_POSITION:
+            raise HTTPException(status_code=422, detail=f"page.offset은 {MAX_POSITION:,} 이하여야 합니다")
+        if body.keywords is not None:
+            if len(body.keywords) > MAX_CONSOLE_KEYWORDS:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"검색어는 {MAX_CONSOLE_KEYWORDS}개까지 사용할 수 있습니다 (받은 수: {len(body.keywords)})",
+                )
+            if body.q.strip():
+                raise HTTPException(status_code=400, detail="q와 keywords 중 하나만 주세요")
+            keywords = console_keywords(body.keywords)
+            if not keywords:
+                raise HTTPException(status_code=400, detail="검색어를 입력하세요")
+            q = console_query(keywords)
         query_request = QueryRequest(
-            q=body.q,
+            q=q,
             options=body.options.to_options(),
             cursor=body.page.cursor,
             limit=body.page.limit,
@@ -303,11 +344,27 @@ def build_search_index_router(store: RunJobStore, *, owner: object | None = None
                 query_request,
                 budget=Budget(DEFAULT_BUDGET_SECONDS, cancel),
                 review_provider=marks.load,
-                review_lookup=marks.overlay,
+                # Console hits: the grid overlays review marks from the review map itself.
+                review_lookup=marks.overlay if keywords is None else None,
                 hashset_resolver=hash_set_path,
                 stale=stale,
             )
             marks.apply_truncation(result, uses_review=bool(result.pop("uses_review", False)))
+            if keywords is not None:
+                # Server-side numbering (R7 S2 review #11): the page position the cursor carries;
+                # the client's offset only for a cursor of an older server.
+                page_info = result.get("page") if isinstance(result.get("page"), dict) else {}
+                position = page_info.get("position")
+                offset = int(position) if isinstance(position, int) else body.page.offset
+                attach_console_hits(
+                    result,
+                    keywords,
+                    summary=job.summary or {},
+                    run_id=run_id,
+                    offset=offset,
+                    # v1's artifact titles (R7 S2 confirmation #10): this page's records only.
+                    artifact_summaries=lambda keys: artifact_summaries(job, run_id, keys),
+                )
             return result
 
         slot = QUERY_LIMITER.acquire(run_id)
@@ -316,6 +373,10 @@ def build_search_index_router(store: RunJobStore, *, owner: object | None = None
         except QueryError as exc:
             return query_error(exc)
         page = result["page"] if isinstance(result.get("page"), dict) else {}
+        if keywords is not None:
+            # The console's global search is not an analyst query: like v1, no history entry
+            # (nothing is written into the run folder).
+            return {"run_id": run_id, "keywords": keywords, "backend": "index", **result}
         if not body.page.cursor:
             # One history entry per search (not per page), written off the event loop.
             SEARCH_HISTORY.record(

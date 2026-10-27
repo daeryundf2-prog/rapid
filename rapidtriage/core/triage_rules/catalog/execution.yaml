@@ -144,6 +144,202 @@ families:
   - execution.multi_source
   - antiforensics.tool_present
   - antiforensics.wiper_run_after_incident
+# Timeline/grid readability (C8): ShimCache and Amcache file rows get their own examiner layout;
+# the semantic columns of `execution` are repeated (aux) so the derived tables read them as before.
+- id: shimcache
+  label: 앱 호환성 캐시(ShimCache)
+  types:
+  - shimcache-schema-entry
+  core_columns:
+  - key: timestamp
+    label: 파일 수정 시각(실행 아님)
+    format: time
+    ts_kind: file-last-modified
+    width: 200
+  - key: executable_path
+    semantic: path
+    label: 실행 파일 경로
+    aliases:
+    - decoded_name
+    - display_path
+    - path
+    format: path
+    width: 360
+  - key: cache_order
+    label: 캐시 순서
+    format: number
+    width: 90
+  - key: evidence_strength
+    label: 근거 강도
+    width: 200
+    value_labels:
+      program-presence-not-proof-of-execution: 존재 흔적(실행 증거 아님)
+      execution-indicator: 실행 정황
+  aux_columns:
+  - key: exec_flag
+    label: 실행 플래그
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - last_written_at
+    format: time
+    ts_kind: last-written
+  - key: control_set
+    label: 컨트롤 세트 (ControlSet)
+  - key: value_format
+    label: 값 형식
+  - key: entry_offset
+    label: 항목 오프셋
+    format: hex
+  - key: source_key
+    label: 키 경로
+    aliases:
+    - key_path
+    - source_key_path
+    format: path
+  - key: sha1
+    semantic: hash
+    label: SHA-1(파일)
+    aliases:
+    - file_id
+    format: mono
+  - key: user_sid
+    semantic: account
+    label: 사용자 SID
+    aliases:
+    - sid
+    format: sid
+  - key: user_name
+    semantic: account
+    label: 사용자
+    aliases:
+    - user
+  - key: shortcut_target_path
+    semantic: path
+    label: 바로 가기 대상
+    format: path
+  - key: device_instance_id
+    semantic: device
+    label: 장치 ID
+    aliases:
+    - container_id
+    format: mono
+  rules:
+  - execution.suspicious_path
+  - execution.name_mismatch
+  - execution.deleted_executable
+  - execution.cross_mismatch
+  - execution.multi_source
+  - antiforensics.tool_present
+- id: amcache-file
+  label: Amcache 파일·프로그램 항목
+  types:
+  - amcache-schema-row
+  - amcache-entry
+  core_columns:
+  - key: key_last_written_at
+    label: 키 마지막 기록
+    aliases:
+    - last_written_at
+    - timestamp
+    format: time
+    ts_kind: last-written
+  - key: executable_path
+    semantic: path
+    label: 실행 파일 경로
+    aliases:
+    - decoded_name
+    - display_path
+    - driver_path
+    - shortcut_path
+    - path
+    format: path
+    width: 340
+  - key: program_name
+    label: 프로그램
+    aliases:
+    - original_file_name
+    - name
+  - key: publisher
+    label: 게시자
+    aliases:
+    - manufacturer
+  - key: version
+    label: 버전
+    aliases:
+    - product_version
+  - key: size_bytes
+    label: 크기
+    aliases:
+    - size
+    format: bytes
+    width: 100
+  aux_columns:
+  - key: sha1
+    semantic: hash
+    label: SHA-1(파일)
+    aliases:
+    - file_id
+    format: mono
+  - key: product_name
+    label: 제품
+  - key: binary_type
+    label: 바이너리 유형
+    value_labels:
+      pe32_i386: 32비트 PE(x86)
+      pe64_amd64: 64비트 PE(x64)
+      pe64_arm64: 64비트 PE(ARM64)
+      pe32_arm: 32비트 PE(ARM)
+      pe32_clr_32: 32비트 .NET
+      pe32_clr_64: 64비트 .NET
+      pe32_unknown: 32비트 PE(아키텍처 불명)
+  - key: section
+    label: 섹션
+    aliases:
+    - label
+  - key: key_name
+    label: 키 이름
+    aliases:
+    - guid
+    format: mono
+  - key: link_date
+    label: 링크 시각
+    format: time
+    ts_kind: created
+  - key: install_date
+    label: 설치
+    aliases:
+    - first_install_date
+    format: time
+    ts_kind: installed
+  - key: user_sid
+    semantic: account
+    label: 사용자 SID
+    aliases:
+    - sid
+    format: sid
+  - key: user_name
+    semantic: account
+    label: 사용자
+    aliases:
+    - user
+  - key: shortcut_target_path
+    semantic: path
+    label: 바로 가기 대상
+    format: path
+  - key: device_instance_id
+    semantic: device
+    label: 장치 ID
+    aliases:
+    - container_id
+    format: mono
+  rules:
+  - execution.suspicious_path
+  - execution.name_mismatch
+  - execution.deleted_executable
+  - execution.cross_mismatch
+  - execution.multi_source
+  - antiforensics.tool_present
 - id: prefetch-file
   label: 프리페치
   types:
@@ -152,24 +348,34 @@ families:
   kinds:
   - windows-prefetch
   core_columns:
+  - key: executable_hint
+    label: 실행 파일
+    aliases:
+    - header_executable_name
+    - filename_executable_hint
+    width: 220
+  - key: run_count
+    label: 실행 횟수
+    format: number
+    width: 90
   - key: last_run_at
     label: 최근 실행
     aliases:
     - timestamp
     format: time
     ts_kind: run
-  - key: executable_hint
-    label: 실행 파일
-    aliases:
-    - header_executable_name
-    - filename_executable_hint
-  - key: run_count
-    label: 실행 횟수
-    format: number
   - key: last_run_times
-    label: 실행 시각 목록(최대 8)
+    label: 이전 실행(최대 8)
     format: time
     ts_kind: run
+    width: 180
+  - key: volumes
+    label: 볼륨(장치 · 일련번호 · 생성 시각)
+    aliases:
+    - volume_candidates
+    format: prefetch_volumes
+    width: 260
+  aux_columns:
   - key: prefetch_hash
     semantic: hash
     label: 프리페치 해시
@@ -178,11 +384,6 @@ families:
     format: mono
   - key: prefetch_version
     label: 버전
-  - key: volumes
-    label: 볼륨(장치 · 일련번호 · 생성 시각)
-    aliases:
-    - volume_candidates
-    format: prefetch_volumes
   - key: volume_count
     label: 볼륨 수
     format: number
@@ -191,7 +392,6 @@ families:
   - key: referenced_path_count
     label: 참조 파일 수
     format: number
-  aux_columns:
   - key: run_time_1
     label: 실행 1회차
     aliases:
@@ -527,10 +727,8 @@ rules:
   label_ko: 의심 경로에서 실행
   rationale_ko: '실행 흔적의 전체 경로가 Temp/Downloads/AppData(Roaming)/Public/휴지통/이동식 드라이브: 드롭·포터블 악성 도구(AppData Local의 사용자별 설치 앱은 제외).'
   false_positive_ko: 설치 프로그램, 사용자별 설치 앱(제외 목록 참고).
-  sources: &id001
+  sources:
   - https://www.sans.org/blog/digital-forensics-application-execution/
-  - https://belkasoft.com/windows-prefetch-forensics
-  - https://www.magnetforensics.com/blog/srum-forensic-analysis-of-windows-system-resource-utilization-monitor/
   - https://docs.velociraptor.app/exchange/artifacts/pages/evidenceofexecution/
   version: 1
   status: verified
@@ -546,7 +744,9 @@ rules:
   label_ko: 짧은 시간 반복 실행
   rationale_ko: 'Prefetch 최근 실행 시각 8개가 한 시간 안에 몰림: 단발성 도구의 반복 실행(Windows 구성 요소 제외).'
   false_positive_ko: 스케줄 작업, 자동 재시작.
-  sources: *id001
+  sources:
+  - https://belkasoft.com/windows-prefetch-forensics
+  - https://www.sans.org/blog/digital-forensics-application-execution/
   version: 1
   status: provisional
   params:
@@ -558,7 +758,9 @@ rules:
   label_ko: 시스템 바이너리 이름 위장
   rationale_ko: 'svchost.exe·lsass.exe 같은 시스템 파일 이름이 System32/SysWOW64 밖에서 실행: 마스커레이딩.'
   false_positive_ko: 동명 정상 복사본(백업·설치 매체).
-  sources: *id001
+  sources:
+  - https://attack.mitre.org/techniques/T1036/005/
+  - https://www.sans.org/blog/digital-forensics-application-execution/
   version: 1
   status: verified
   params: {}
@@ -568,7 +770,10 @@ rules:
   label_ko: 삭제된 실행 파일의 실행 흔적
   rationale_ko: 'Prefetch/Amcache/BAM에 남은 실행 파일이 같은 폴더의 다른 파일은 있는데 파일 목록에 없음: 실행 후 삭제(증거 인멸).'
   false_positive_ko: 삭제된 설치기, 수집 범위 밖.
-  sources: *id001
+  sources:
+  - https://www.sans.org/blog/digital-forensics-application-execution/
+  - https://belkasoft.com/windows-prefetch-forensics
+  - https://attack.mitre.org/techniques/T1070/004/
   version: 1
   status: verified
   params: {}
@@ -578,7 +783,9 @@ rules:
   label_ko: ShimCache에만 있는 실행 파일
   rationale_ko: 'ShimCache에는 있으나 Prefetch/Amcache에 같은 이름이 없음: 프리페치 비활성·삭제 정황.'
   false_positive_ko: Server는 Prefetch 기본 비활성, ShimCache는 실행이 아닌 존재 증거.
-  sources: *id001
+  sources:
+  - https://www.sans.org/blog/digital-forensics-application-execution/
+  - https://docs.velociraptor.app/exchange/artifacts/pages/evidenceofexecution/
   version: 1
   status: provisional
   params: {}
@@ -588,7 +795,9 @@ rules:
   label_ko: SRUM 대량 송신
   rationale_ko: 'SRUM 네트워크 사용량에서 한 앱의 BytesSent가 임계값 이상: 유출 가능성.'
   false_positive_ko: 백업·동기화 앱.
-  sources: *id001
+  sources:
+  - https://www.magnetforensics.com/blog/srum-forensic-analysis-of-windows-system-resource-utilization-monitor/
+  - https://attack.mitre.org/techniques/T1048/
   version: 1
   status: verified
   params:
@@ -606,7 +815,9 @@ rules:
   label_ko: 실행 다중 출처 확인
   rationale_ko: '같은 실행 파일(Windows/Program Files 밖)이 Prefetch·Amcache·BAM 모두에 있음: 실행 신뢰도 상승(의심 지표 아님).'
   false_positive_ko: 해당 없음(보강 지표).
-  sources: *id001
+  sources:
+  - https://www.sans.org/blog/digital-forensics-application-execution/
+  - https://docs.velociraptor.app/exchange/artifacts/pages/evidenceofexecution/
   version: 1
   status: verified
   params:

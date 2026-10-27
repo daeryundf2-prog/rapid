@@ -61,17 +61,13 @@ function routes(previewBody: unknown, extra: Record<string, Handler> = {}) {
 const region = () => screen.getByRole("region", { name: "원본 뷰어" });
 const tab = (name: string) => screen.getByRole("tab", { name });
 const live = () => (screen.getByTestId("live-polite").textContent ?? "").trim();
-/** Menu holding each viewer command (review #6): one "⋯" 더보기 menu with 리뷰 / 원본 sections. */
+/** Menu holding each viewer command (review #6): the ⋯ 더보기 menu (marks: the status chip menu). */
 const MENU_OF: Record<string, string> = {
   "viewer.open-original": "더보기",
   "viewer.hash": "더보기",
   "viewer.copy-path": "더보기",
   "viewer.cite": "더보기",
   "navigate.rows-for-source": "더보기",
-  "viewer.mark.needs-review": "더보기",
-  "viewer.mark.excluded": "더보기",
-  "viewer.mark.include-in-report": "더보기",
-  "viewer.mark.bookmark": "더보기",
   "viewer.note": "더보기",
 };
 /** The control of a viewer command, opening the menu that holds it first. */
@@ -79,6 +75,8 @@ const tool = (id: string) => {
   const selector = `[data-command="${id}"]`;
   const shown = document.querySelector(selector);
   if (shown) return shown as HTMLButtonElement;
+  // Every mark lives in the one review-status chip menu (r7 L4, C-W9).
+  if (id.startsWith("viewer.mark.")) fireEvent.click(screen.getByTestId("viewer-review-status-menu"));
   const menu = MENU_OF[id];
   if (menu) fireEvent.click(screen.getByRole("button", { name: menu }));
   return document.querySelector(selector) as HTMLButtonElement;
@@ -283,8 +281,9 @@ describe("Viewer — loading, modes, focus", () => {
     expect(document.activeElement).toBe(tab("SQLite"));
     expect(tab("헥스").getAttribute("aria-selected")).toBe("true");
     fireEvent.keyDown(tab("SQLite"), { key: "End" });
-    expect(document.activeElement).toBe(tab("메타"));
-    expect(tab("메타").getAttribute("aria-selected")).toBe("true");
+    // The last tab is 계열 (R7 갈래 A), available on a files row.
+    expect(document.activeElement).toBe(tab("계열"));
+    expect(tab("계열").getAttribute("aria-selected")).toBe("true");
   });
 
   it("moves focus to the selected mode tab when opened with Enter (requestViewerFocus)", async () => {
@@ -466,6 +465,33 @@ describe("Viewer — toolbar actions", () => {
     fireEvent.click(tool("viewer.mark.bookmark"));
     await waitFor(() => expect(live()).toBe("표시 실패: case DB has no row for run locator(s)"));
   });
+
+  it("R-1: a failed mark (403) rolls the status chip back to the previous status", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await show(
+      { preview_type: "text", extension: ".txt", text: "hi" },
+      {},
+      {
+        ensure: () => ({ database: "D:/case.db", case_id: "run-run-1" }),
+        "review-batch": async () => {
+          await gate;
+          return jsonResponse({ detail: "쓰기 차단" }, 403);
+        },
+      },
+    );
+    const chip = () => screen.getByTestId("viewer-review-status");
+    expect(chip().textContent).toBe("미검토");
+    fireEvent.click(tool("viewer.mark.relevant"));
+    // Optimistic while the request is in flight …
+    await waitFor(() => expect(chip().textContent).toBe("관련 있음"));
+    release();
+    // … and back to 미검토 once the server refuses it, with the failure toast.
+    await waitFor(() => expect(live()).toBe("표시 실패: 쓰기 차단"));
+    await waitFor(() => expect(chip().textContent).toBe("미검토"));
+  });
 });
 
 describe("Viewer — history and navigation", () => {
@@ -594,9 +620,9 @@ describe("Viewer — decoded artifact rows (F2)", () => {
     const source = screen.getByRole("region", { name: "레코드 출처" });
     expect(source.textContent).toContain("EVTX 레코드 오프셋4608");
     expect(source.textContent).toContain("EVTX 레코드 SHA-256");
-    // No "검증" group above the evidence any more; unknown keys are visible, not folded.
+    // No "검증" group above the evidence any more; labelled extra keys are visible (추가 필드).
     expect(screen.queryByRole("region", { name: "레코드 검증" })).toBeNull();
-    const other = screen.getByRole("region", { name: "레코드 기타 필드" });
+    const other = screen.getByRole("region", { name: "레코드 추가 필드" });
     expect(other.textContent).toContain("이벤트 데이터");
   });
 

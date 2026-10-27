@@ -90,6 +90,8 @@ export const OCR_LANGUAGES: Choice[] = [
 ];
 
 export const ANALYSIS_FIELDS: Record<AnalysisKind, FieldSpec[]> = {
+  // Full build only (incremental updates run by themselves after each analysis).
+  "search-index": [],
   carve: [
     {
       key: "ext",
@@ -421,6 +423,8 @@ export function defaultForm(
       return { volatility_output_dir: "" };
     case "cross-case":
       return { case_ids: [], max_shared: "500" };
+    case "search-index":
+      return {};
     case "url-carve":
       return {
         sources: ["pagefile", "unallocated"],

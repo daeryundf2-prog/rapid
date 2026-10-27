@@ -1,9 +1,10 @@
-import { middlePathParts, pathCellParts } from "../utils/pathDisplay";
+import { pathCellParts } from "../utils/pathDisplay";
 
 /**
- * One path renderer for the grid 경로 column, the viewer header and the 보고 table (review #9):
- * the parent folder, mono, the head ellipsized in the middle and the last folder kept whole.
- * The full path is the tooltip (and stays the cell's copy / filter value).
+ * One path renderer for the grid 경로 column, the viewer header, the 보고 table and the landing
+ * (review #9, plan r7 §3.2 L2 C-D8 / C-W6 / C-L3): the whole path, mono, TAIL FIRST — the file
+ * name never shrinks, its two parent folders shrink next, the head ellipsizes first. The full
+ * path is the tooltip (and stays the cell's copy / filter value); the text always holds the name.
  */
 export function MiddlePath({
   path,
@@ -12,15 +13,19 @@ export function MiddlePath({
 }: {
   path: string | null | undefined;
   className?: string;
-  /** Show the whole path (an evidence root), not its parent folder. */
+  /** An evidence root (a folder, not a file): same tail-first layout, marked for its styles. */
   whole?: boolean;
 }) {
-  const parts = whole ? (path ? middlePathParts(path) : null) : pathCellParts(path);
+  const parts = pathCellParts(path);
   if (!parts || !path) return null;
   return (
-    <span className={`mid-path${className ? ` ${className}` : ""}`} title={path}>
+    <span
+      className={`mid-path${whole ? " mid-path-whole" : ""}${className ? ` ${className}` : ""}`}
+      title={path}
+    >
       {parts.head ? <span className="mid-path-head">{parts.head}</span> : null}
-      <span className="mid-path-tail">{parts.tail}</span>
+      {parts.parents ? <span className="mid-path-parents">{parts.parents}</span> : null}
+      <span className="mid-path-tail">{parts.name}</span>
     </span>
   );
 }

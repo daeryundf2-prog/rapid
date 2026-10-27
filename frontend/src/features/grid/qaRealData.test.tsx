@@ -173,10 +173,13 @@ describe("files default preset (17)", () => {
       "timestamp",
       "ntfsCreated",
       "review",
+      // R7 갈래 A: 중복 · 계열 (hidden while no loaded row has a value).
+      "dedup",
+      "family",
     ]);
-    // No loaded row is reviewed or flagged yet: 선별 / 특이사항 wait in the 열 menu ("값이 없어 숨김", review #9);
-    // NTFS 생성 stays (its header links to the analysis that fills it).
-    expect(cols).toEqual(["title", "path", "size", "timestamp", "ntfsCreated"]);
+    // No loaded row is reviewed or flagged yet: 검토 / 특이사항 wait in the 열 menu ("값이 없어 숨김", review #9);
+    // NTFS 생성 is empty and this is no image input (nothing to run, C-D12): it waits there too.
+    expect(cols).toEqual(["title", "path", "size", "timestamp"]);
     expect(filesCollection.columns.find((c) => c.id === "ntfsCreated")?.presets).toEqual([
       "analysis",
       "source",
@@ -288,23 +291,30 @@ describe("pressed review toggles clear the mark (4)", () => {
       </>,
     );
     act(() => setViewerTarget(target({ sourcePath: row.sourcePath, ref: row.ref }), row));
-    // 재검토 lives in the viewer's review 더보기 menu (visual-polish S6) as a checked item.
+    // 재검토 lives in the one review-status chip menu (r7 L4, C-W9) as a checked item. Open the
+    // menu only when it is closed: clicking a toggle on every waitFor poll re-fires waitFor's
+    // MutationObserver on each open/close, a microtask loop that starves its timeout (the hang).
+    const statusMenu = () => screen.getByTestId("viewer-review-status-menu");
     const item = () => {
-      if (!document.querySelector('[data-command="viewer.mark.needs-review"]'))
-        fireEvent.click(screen.getByRole("button", { name: "더보기" }));
-      const el = document.querySelector<HTMLElement>('[data-command="viewer.mark.needs-review"]');
+      const selector = '[data-command="viewer.mark.needs-review"]';
+      if (!document.querySelector(selector) && statusMenu().getAttribute("aria-expanded") !== "true")
+        fireEvent.click(statusMenu());
+      const el = document.querySelector<HTMLElement>(selector);
       if (!el) throw new Error("no menu item");
       return el;
     };
     const button = await waitFor(item);
     expect(button.getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByTestId("viewer-review-status").getAttribute("aria-label")).toBe("리뷰 상태: 재검토");
+    expect(statusMenu().getAttribute("aria-label")).toBe("리뷰 상태: 재검토");
     fireEvent.click(button);
     await waitFor(() => expect(calls.some((c) => c.url.pathname.endsWith("review-batch"))).toBe(true));
     const post = calls.find((c) => c.url.pathname.endsWith("review-batch"));
     expect(JSON.parse(String(post?.init?.body))).toMatchObject({ status: "unreviewed" });
     await waitFor(() => expect(item().getAttribute("aria-checked")).toBe("false"));
-    expect(screen.getByTestId("viewer-review-status").getAttribute("aria-label")).toBe("리뷰 상태: 미검토");
+    expect(statusMenu().getAttribute("aria-label")).toBe("리뷰 상태: 미검토");
+    // One un-press = one POST (no toggle re-post loop in the viewer).
+    expect(calls.filter((c) => c.url.pathname.endsWith("review-batch"))).toHaveLength(1);
+    expect(screen.getByTestId("viewer-review-status").textContent).toBe("미검토");
   });
 
   it("the grid overlay and optimistic patch clear the status", () => {
@@ -351,7 +361,8 @@ describe("directory rows (15)", () => {
       preview: preview({ preview_type: "directory", is_directory: true, size: 0 }),
     });
     expect(resolved.best).toBe("meta");
-    expect(resolved.modes.filter((m) => m.available).map((m) => m.mode)).toEqual(["meta"]);
+    // 계열 (R7 갈래 A) is about the row's relations, not its content: still available.
+    expect(resolved.modes.filter((m) => m.available).map((m) => m.mode)).toEqual(["meta", "family"]);
     expect(resolved.modes.find((m) => m.mode === "hex")?.reason).toContain("디렉터리");
   });
 });

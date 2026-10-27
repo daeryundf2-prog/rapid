@@ -33,7 +33,7 @@ export interface FetchCall {
   body: unknown;
 }
 
-type Handler = (url: URL, init: RequestInit | undefined) => Response | Promise<Response>;
+export type Handler = (url: URL, init: RequestInit | undefined) => Response | Promise<Response>;
 
 /** Replace global fetch with a router keyed by a path substring; records every call. */
 export function installFetch(routes: Record<string, Handler>): FetchCall[] {
@@ -49,6 +49,14 @@ export function installFetch(routes: Record<string, Handler>): FetchCall[] {
         !Object.keys(routes).some((k) => k.includes("review-map"))
       ) {
         return jsonResponse({ marks: [], exists: false, truncated: false });
+      }
+      // The run record (GET /api/runs/{id}: `case_db_ready`, r7 L4) is read before a first mark;
+      // unless a test routes it, it answers 404 (= ensure as before) and stays out of the calls.
+      if (
+        /^\/api\/runs\/[^/]+$/.test(url.pathname) &&
+        !Object.keys(routes).some((k) => url.pathname.includes(k))
+      ) {
+        return jsonResponse({ detail: "run record not mocked" }, 404);
       }
       calls.push({
         url: `${url.pathname}${url.search}`,
@@ -120,16 +128,62 @@ export function fileCandidates(from: number, to: number) {
   }));
 }
 
-/** Files endpoint serving `total` rows with offset/limit paging. */
+/**
+ * Files endpoint serving `total` rows with offset/limit paging; `sort=name|path|size|mtime` +
+ * `order=` and `q=` (name/path terms) over the whole list like the server's column index (plan
+ * r7 §3.2 L2): such pages carry `record_index`, `matched` and a ready `sort` descriptor.
+ */
 export function filesHandler(total: number): Handler {
   return (url) => {
     const offset = Number(url.searchParams.get("offset") ?? 0);
     const limit = Number(url.searchParams.get("limit") ?? 0);
+    const sortKey = url.searchParams.get("sort");
+    const order = url.searchParams.get("order") === "desc" ? "desc" : "asc";
+    const q = url.searchParams.get("q")?.trim().toLowerCase() ?? "";
+    if (!sortKey && !q) {
+      return jsonResponse({
+        candidates: fileCandidates(offset, Math.min(offset + limit, total)),
+        total,
+        offset,
+        limit,
+      });
+    }
+    let all = fileCandidates(0, total).map((row, index) => ({ ...row, record_index: index }));
+    if (q) {
+      const terms = q.split(/\s+/);
+      all = all.filter((row) => terms.every((t) => `${row.name}\n${row.path}`.toLowerCase().includes(t)));
+    }
+    if (sortKey) {
+      const value = (row: (typeof all)[number]): string | number =>
+        sortKey === "size"
+          ? row.size
+          : sortKey === "mtime"
+            ? row.modified_at
+            : sortKey === "path"
+              ? row.path.toLowerCase()
+              : row.name.toLowerCase();
+      all = [...all].sort((a, b) => {
+        const av = value(a);
+        const bv = value(b);
+        const cmp = av < bv ? -1 : av > bv ? 1 : a.record_index - b.record_index;
+        return order === "desc" && av !== bv ? -cmp : cmp;
+      });
+    }
+    const page = all.slice(offset, offset + limit);
     return jsonResponse({
-      candidates: fileCandidates(offset, Math.min(offset + limit, total)),
-      total,
-      offset,
-      limit,
+      candidates: page,
+      matched: all.length,
+      pagination: {
+        offset,
+        limit,
+        returned: page.length,
+        total: all.length,
+        matched: all.length,
+        has_more: offset + page.length < all.length,
+        truncated: false,
+      },
+      ...(sortKey ? { sort: { key: sortKey, order, status: "ready", progress: 1 } } : {}),
+      ...(q ? { text_filter: { q, fields: ["name", "path"] } } : {}),
     });
   };
 }

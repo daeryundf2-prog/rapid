@@ -244,7 +244,7 @@ export function EvidenceTree({ runId }: { runId: string }) {
   }, [model, selectedId]);
 
   return (
-    <div className="case-tree" data-testid="evidence-tree">
+    <div className="case-tree evidence-tree" data-testid="evidence-tree">
       <LiveRunBanner live={liveTree} />
       <input
         type="search"
@@ -365,44 +365,47 @@ export function EvidenceTree({ runId }: { runId: string }) {
           );
         })}
       </ul>
-      {loading ? (
-        // Not a live region: the shell's single polite region (announce()) carries status text,
-        // and a second polite region while the tree loads broke the one-region rule.
-        <p className="case-tree-loading">
-          <Icon name="spinner" className="spin" />
-          건수와 아티팩트 목록을 불러오는 중…
-        </p>
-      ) : null}
-      <p className="case-tree-reason">{blockedReason}</p>
-      {/* The count is final once `/tree` answered (before that, kinds look unknown, not empty). */}
-      {treeSettled && emptyView.hiddenCount > 0 ? (
-        <button
-          type="button"
-          className="case-tree-empty-toggle"
-          aria-pressed={showEmpty}
-          aria-keyshortcuts="T"
-          data-testid="tree-empty-toggle"
-          title={
-            showEmpty
-              ? "결과가 없거나 분석되지 않은 계열을 다시 숨깁니다 (T)"
-              : "결과가 없거나 분석되지 않은 계열을 흐리게 사유와 함께 표시합니다 (T)"
-          }
-          onClick={() => {
-            const next = !showEmpty;
-            setShowEmpty(next);
-            announce(
-              next
-                ? `결과 없는 계열 ${emptyView.hiddenCount}개를 표시합니다.`
-                : `결과 없는 계열 ${emptyView.hiddenCount}개를 숨겼습니다.`,
-            );
-          }}
-        >
-          <Icon name={showEmpty ? "eye" : "list"} />
-          <span>
-            결과 없는 계열 {emptyView.hiddenCount.toLocaleString("ko-KR")}개 {showEmpty ? "숨김" : "표시"}
-          </span>
-        </button>
-      ) : null}
+      {/* The foot stays pinned below the scrolling tree list (scroll review C1). */}
+      <div className="evidence-tree-foot">
+        {loading ? (
+          // Not a live region: the shell's single polite region (announce()) carries status text,
+          // and a second polite region while the tree loads broke the one-region rule.
+          <p className="case-tree-loading">
+            <Icon name="spinner" className="spin" />
+            건수와 아티팩트 목록을 불러오는 중…
+          </p>
+        ) : null}
+        <p className="case-tree-reason">{blockedReason}</p>
+        {/* The count is final once `/tree` answered (before that, kinds look unknown, not empty). */}
+        {treeSettled && emptyView.hiddenCount > 0 ? (
+          <button
+            type="button"
+            className="case-tree-empty-toggle"
+            aria-pressed={showEmpty}
+            aria-keyshortcuts="T"
+            data-testid="tree-empty-toggle"
+            title={
+              showEmpty
+                ? "결과가 없거나 분석되지 않은 계열을 다시 숨깁니다 (T)"
+                : "결과가 없거나 분석되지 않은 계열을 흐리게 사유와 함께 표시합니다 (T)"
+            }
+            onClick={() => {
+              const next = !showEmpty;
+              setShowEmpty(next);
+              announce(
+                next
+                  ? `결과 없는 계열 ${emptyView.hiddenCount}개를 표시합니다.`
+                  : `결과 없는 계열 ${emptyView.hiddenCount}개를 숨겼습니다.`,
+              );
+            }}
+          >
+            <Icon name={showEmpty ? "eye" : "list"} />
+            <span>
+              결과 없는 계열 {emptyView.hiddenCount.toLocaleString("ko-KR")}개 {showEmpty ? "숨김" : "표시"}
+            </span>
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

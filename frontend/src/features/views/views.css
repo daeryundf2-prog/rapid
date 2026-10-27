@@ -439,6 +439,17 @@
 
 /* Histogram (X15) --------------------------------------------------------- */
 
+/* Short panes (scroll review): the time histogram's fixed-height chart, axis and status line
+   scroll in the view instead of being cut off; the category list keeps its own scroller. */
+.view-pane.hist-view {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.hist-view > :not(.hist-cats) {
+  flex: none;
+}
+
 .hist-bars {
   display: flex;
   align-items: flex-end;
@@ -554,4 +565,41 @@
   text-align: right;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
+}
+
+/* R7 AI 사용: tool calls fold under their summary; file touches link to the file list. */
+.chat-bubble.is-ai-tool,
+.chat-bubble.is-ai-file {
+  background: var(--surface-2, transparent);
+  border-style: dashed;
+}
+.chat-tool-toggle {
+  all: unset;
+  cursor: pointer;
+  display: block;
+  max-width: 100%;
+}
+.chat-tool-toggle:focus-visible {
+  outline: 2px solid var(--focus, currentColor);
+}
+.chat-tool-toggle:disabled {
+  cursor: default;
+}
+.chat-tool-flag {
+  color: var(--danger, currentColor);
+  font-weight: 600;
+}
+.chat-tool-command {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+.chat-tool-target,
+.chat-file-touch {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
 }

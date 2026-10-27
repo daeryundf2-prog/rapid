@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
+from array import array
 from collections import defaultdict
 from collections.abc import Iterator, Mapping
 
@@ -19,6 +21,8 @@ from .base import (
     parse_time,
     register,
     select,
+    split_windows_path,
+    user_writable_marker,
     window_groups,
 )
 
@@ -65,23 +69,220 @@ def mft_path(row: RowView) -> str:
     return row.text("path", "file_path", "name", "file_name")
 
 
+SI_BEFORE_FN_SUPPRESS_PATHS = ("\\windows\\winsxs\\", "\\windows\\servicing\\", "\\windows\\softwaredistribution\\")
+SI_BEFORE_FN_EXECUTABLES = ("exe", "dll", "sys", "scr", "com", "pif", "cpl", "msi", "bat", "cmd", "ps1", "psm1", "vbs", "vbe", "js", "jse", "wsf", "hta", "jar", "lnk")
+_EPOCH_UTC = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
+_EXTRA_DIGITS = re.compile(r"(\.\d{6})\d+")
+FILETIME_FLOOR_YEAR = 1601  # FILETIME 0 (1601-01-01) = "no time"; 1970 is a real (if odd) $SI value
+
+
+def ntfs_time(value: object) -> dt.datetime | None:
+    """:func:`parse_time` without its 1971 floor: only FILETIME 0 (year 1601) is "no time" for $SI/$FN
+    (two BSH IME files carry $SI 1970-01-02, which the analysis' own $SI/$FN check counts)."""
+    moment = parse_time(value)
+    if moment is not None or not isinstance(value, str):
+        return moment
+    try:
+        moment = dt.datetime.fromisoformat(_EXTRA_DIGITS.sub(r"\1", value.strip().replace("Z", "+00:00")))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=dt.timezone.utc)
+    return moment.astimezone(dt.timezone.utc) if moment.year > FILETIME_FLOOR_YEAR else None
+
+
+def _si_fn_times(row: RowView) -> dict[str, dt.datetime | None]:
+    si = row.get("standard_information")
+    fn_entries = as_list(row.get("file_name_entries"))
+    fn = fn_entries[0] if fn_entries and isinstance(fn_entries[0], Mapping) else {}
+    times: dict[str, dt.datetime | None] = {}
+    for name in ("created_at", "modified_at", "mft_modified_at"):
+        times[f"si_{name}"] = ntfs_time(row.get(f"si_{name}")) or (ntfs_time(si.get(name)) if isinstance(si, Mapping) else None)
+    times["fn_created_at"] = ntfs_time(row.get("fn_created_at")) or ntfs_time(fn.get("created_at"))
+    return times
+
+
 @register("ntfs.si_before_fn")
 class SiBeforeFn(Rule):
-    """$STANDARD_INFORMATION Created earlier than $FILE_NAME Created by more than ``min_delta_seconds`` (timestomping)."""
+    """$SI Created earlier than $FN Created by more than ``min_delta_seconds``, graded by corroborators.
+
+    A plain $SI < $FN is what every timestamp-preserving copy, archive extraction and Windows servicing
+    leaves (174,854 of 1,421,896 records of the BSH $MFT, R6 S4), so the catalogue grade (A) needs a
+    timestomp-like corroborator:
+
+    * ``zero_subsecond_si`` -- $SI created, modified *and* MFT-modified all have zero sub-seconds while
+      $FN created has them (second-precision SetFileTime/timestomp tools; an extraction keeps the
+      archive's 2-second times in created/modified, but NTFS writes MFT-modified itself);
+    * ``si_changed_before_fn`` -- $SI modified *and* MFT-modified are also earlier than $FN created by
+      more than the threshold (creating the name updates $SI MFT-modified; only a tool that rewrites
+      all $SI times leaves it behind).
+
+    An executable/script under a user-writable folder without those is capped at B; everything else at
+    C. A hit with no corroborator is dropped (no flag) when its path is under a servicing folder
+    (``suppress_path_markers``) or when it belongs to a bulk pattern: at least ``bulk_min_records``
+    hits of the same source whose $FN created lies within +/-``bulk_bucket_seconds``/2 of its own (a
+    sliding window, so a feature update or tree copy straddling a clock hour is still one wave; the
+    count is the evidence ``bucket_hits``). Corroborated hits are never dropped (mass timestomping
+    stays visible).
+
+    Memory: the ~175k hits of a 1.4M-record $MFT are kept column-wise (epoch-microsecond
+    ``array('q')`` columns, interned kind/type/marker codes, one path string each) instead of
+    datetime tuples.
+    """
 
     selector = MFT_ROWS
+
+    def __init__(self, params=None) -> None:
+        super().__init__(params)
+        self.executables = frozenset(str(item).lower().lstrip(".") for item in self.param("executable_extensions", SI_BEFORE_FN_EXECUTABLES))
+        self.threshold = float(self.param("min_delta_seconds", SI_BEFORE_FN_MIN_DELTA_SECONDS))
+        self.bucket_seconds = max(1, int(float(self.param("bulk_bucket_seconds", 3600))))
+        # Interned strings (row kind, row type, user-writable marker) -> small codes.
+        self._names: list[str] = []
+        self._codes: dict[str, int] = {}
+        # Hit columns, one entry per candidate row.
+        self._kind = array("H")
+        self._type = array("H")
+        self._index = array("q")
+        self._si = array("q")
+        self._fn = array("q")
+        self._si_modified = array("q")
+        self._si_changed = array("q")
+        self._corroborators = array("B")  # bit 0 zero_subsecond_si, bit 1 si_changed_before_fn
+        self._marker = array("H")  # code of the user-writable marker of an executable ("" = none)
+        self._paths: list[str] = []
+
+    def _code(self, text: str) -> int:
+        code = self._codes.get(text)
+        if code is None:
+            code = self._codes[text] = len(self._names)
+            self._names.append(text)
+        return code
 
     def apply(self, row: RowView, ctx: FlagContext) -> RuleResult | None:
         if row_source(row) != "mft":
             return None
-        times = mft_times(row)
+        times = _si_fn_times(row)
         si, fn = times["si_created_at"], times["fn_created_at"]
         if si is None or fn is None:
             return None
+        threshold = self.threshold
         delta = (fn - si).total_seconds()
-        if delta <= float(self.param("min_delta_seconds", SI_BEFORE_FN_MIN_DELTA_SECONDS)):
+        if delta <= threshold:
             return None
-        return RuleResult(evidence(path=mft_path(row), si_created_at=si, fn_created_at=fn, delta_seconds=int(delta)))
+        si_modified, si_changed = times["si_modified_at"], times["si_mft_modified_at"]
+        corroborators = 0
+        if (
+            si_modified is not None
+            and si_changed is not None
+            and not (si.microsecond or si_modified.microsecond or si_changed.microsecond)
+            and fn.microsecond
+        ):
+            corroborators |= 1
+        if (
+            si_modified is not None
+            and si_changed is not None
+            and (fn - si_modified).total_seconds() > threshold
+            and (fn - si_changed).total_seconds() > threshold
+        ):
+            corroborators |= 2
+        path = mft_path(row)
+        executable = ""
+        if row.flag("directory") is not True and extension(path) in self.executables:
+            executable = user_writable_marker(path)
+        self._kind.append(self._code(row.kind))
+        self._type.append(self._code(row.type))
+        self._index.append(row.index)
+        self._si.append(_epoch_us(si))
+        self._fn.append(_epoch_us(fn))
+        self._si_modified.append(_epoch_us(si_modified))
+        self._si_changed.append(_epoch_us(si_changed))
+        self._corroborators.append(corroborators)
+        self._marker.append(self._code(executable))
+        self._paths.append(path)
+        return None
+
+    @property
+    def candidate_count(self) -> int:
+        """Rows read so far with $SI created < $FN created by more than the threshold (before grading/suppression);
+        ``scripts/rule-validation.py`` compares it with the analysis' own ``si_created_before_fn`` count."""
+        return len(self._paths)
+
+    def window_counts(self) -> list[int]:
+        """Per hit: hits of the same row kind whose $FN created lies within +/-``bulk_bucket_seconds``/2
+        of its own, itself included (sort by (kind, $FN created), then a two-pointer sweep: O(n log n))."""
+        half = self.bucket_seconds * 1_000_000 // 2
+        kinds, fns = self._kind, self._fn
+        order = sorted(range(len(fns)), key=lambda position: (kinds[position], fns[position]))
+        counts = [0] * len(order)
+        low = high = 0
+        for current, position in enumerate(order):
+            kind, moment = kinds[position], fns[position]
+            if kinds[order[low]] != kind:  # first hit of the next kind
+                low = current
+            while fns[order[low]] < moment - half:
+                low += 1
+            high = max(high, current)
+            while high + 1 < len(order) and kinds[order[high + 1]] == kind and fns[order[high + 1]] <= moment + half:
+                high += 1
+            counts[position] = high - low + 1
+        return counts
+
+    def finalize(self, ctx: FlagContext) -> Iterator[tuple[RowRef, RuleResult, str]]:
+        bulk_min = int(self.param("bulk_min_records", 500))
+        markers = tuple(str(item).lower() for item in self.param("suppress_path_markers", SI_BEFORE_FN_SUPPRESS_PATHS))
+        counts = self.window_counts()
+        names = self._names
+        for position, path in enumerate(self._paths):
+            window_hits = counts[position]
+            corroborator_bits = self._corroborators[position]
+            if not corroborator_bits:
+                probe = "\\" + split_windows_path(path)[1]
+                if window_hits >= bulk_min or any(marker in probe for marker in markers):
+                    continue  # servicing / bulk copy pattern: informational only, no flag
+            ref = (names[self._kind[position]], self._index[position])
+            row_type = names[self._type[position]]
+            si, fn = self._si[position], self._fn[position]
+            fields = {
+                "path": path,
+                "si_created_at": _from_epoch_us(si),
+                "fn_created_at": _from_epoch_us(fn),
+                "delta_seconds": (fn - si) // 1_000_000,
+                "si_modified_at": _from_epoch_us(self._si_modified[position]),
+                "si_mft_modified_at": _from_epoch_us(self._si_changed[position]),
+            }
+            if corroborator_bits:
+                corroborators = [name for bit, name in CORROBORATOR_BITS if corroborator_bits & bit]
+                note = "타임스톰핑 정황: " + ", ".join(CORROBORATOR_LABELS[name] for name in corroborators)
+                yield ref, RuleResult(evidence(**fields, corroborators=corroborators, bucket_hits=window_hits), note=note), row_type
+                continue
+            executable = names[self._marker[position]]
+            if executable:
+                note = f"보강 근거 없음: 사용자 쓰기 가능 경로({executable})의 실행·스크립트 파일"
+                yield ref, RuleResult(evidence(**fields, bucket_hits=window_hits), note=note, grade="B"), row_type
+            else:
+                note = "보강 근거 없음: 시각 보존 복사·압축 해제에서도 흔한 모양"
+                yield ref, RuleResult(evidence(**fields, bucket_hits=window_hits), note=note, grade="C"), row_type
+
+
+NO_TIME_US = -(2**63)  # array('q') sentinel: missing $SI modified / MFT-modified
+_US = dt.timedelta(microseconds=1)
+CORROBORATOR_BITS = ((1, "zero_subsecond_si"), (2, "si_changed_before_fn"))
+
+
+def _epoch_us(moment: dt.datetime | None) -> int:
+    """Aware UTC datetime -> integer microseconds since 1970 (``NO_TIME_US`` for ``None``)."""
+    return NO_TIME_US if moment is None else (moment - _EPOCH_UTC) // _US
+
+
+def _from_epoch_us(value: int) -> dt.datetime | None:
+    return None if value == NO_TIME_US else _EPOCH_UTC + dt.timedelta(microseconds=value)
+
+
+CORROBORATOR_LABELS = {
+    "zero_subsecond_si": "$SI 생성·수정·MFT 수정 초 미만 0($FN은 아님)",
+    "si_changed_before_fn": "$SI 수정·MFT 수정도 $FN 생성보다 앞섬",
+}
 
 
 @register("ntfs.zero_subsecond")

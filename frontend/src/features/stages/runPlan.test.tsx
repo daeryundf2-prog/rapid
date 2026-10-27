@@ -13,6 +13,7 @@ import { caseCommands } from "../../commands/builtin";
 import { registerCommands, resetCommandRegistry } from "../../commands/registry";
 import { EMPTY_ROUTE, parseHash } from "../../router";
 import { useAppStore } from "../../state/store";
+import { useWriteConfirm } from "../case/WriteConfirm";
 import { installFetch, jsonResponse } from "../grid/testSupport";
 import { ProcessPage } from "./ProcessStage";
 import { groupAriaLabel, planSummaryText, RunPlanTable } from "./RunPlanTable";
@@ -242,6 +243,9 @@ describe("처리 계획표 (RunPlanTable)", () => {
   });
 
   it("stops in-flight plan polls before the POST and before writing the reply", async () => {
+    const stopConfirm = useWriteConfirm.subscribe((state) => {
+      if (state.pending) queueMicrotask(() => useWriteConfirm.getState().settle(true));
+    });
     const order: string[] = [];
     installFetch({
       "/plan/control": () => {
@@ -259,9 +263,17 @@ describe("처리 계획표 (RunPlanTable)", () => {
     await waitFor(() => expect(write).toHaveBeenCalled());
     expect(order).toEqual(["cancel", "post", "cancel"]);
     expect(cancel).toHaveBeenCalledWith({ queryKey: ["run-plan", RUN] });
+    stopConfirm();
   });
 
   it("row × buttons cancel a running group, skip a queued one and explain the rest", async () => {
+    // Each skip / cancel is confirmed first (r7 L4): record the dialogs and accept them.
+    const asked: string[] = [];
+    const stop = useWriteConfirm.subscribe((state) => {
+      if (!state.pending) return;
+      asked.push(state.pending.confirmLabel);
+      queueMicrotask(() => useWriteConfirm.getState().settle(true));
+    });
     const calls = installFetch({
       "/plan/control": () =>
         jsonResponse({ accepted: [{ group: "eventlog" }], rejected: [], plan: fixture() }, 202),
@@ -308,9 +320,14 @@ describe("처리 계획표 (RunPlanTable)", () => {
     fireEvent.click(finished);
     fireEvent.click(required);
     expect(calls).toHaveLength(3);
+    expect(asked).toEqual(["취소 요청", "건너뛰기", "건너뛰기"]);
+    stop();
   });
 
   it("a rejected target is shown and announced assertively", async () => {
+    const stopConfirm = useWriteConfirm.subscribe((state) => {
+      if (state.pending) queueMicrotask(() => useWriteConfirm.getState().settle(true));
+    });
     installFetch({
       "/plan/control": () =>
         jsonResponse(
@@ -337,6 +354,7 @@ describe("처리 계획표 (RunPlanTable)", () => {
     );
     expect(useAppStore.getState().notice).toMatchObject({ tone: "error" });
     expect(useAppStore.getState().notice?.text).toContain("거부");
+    stopConfirm();
   });
 
   it("모두 취소 / 지금까지로 마치기 post cancel_all / finish and explain when they cannot", async () => {
@@ -371,7 +389,7 @@ describe("처리 계획표 (RunPlanTable)", () => {
     ).toBe("대기 중인 태스크가 없습니다");
     view.unmount();
 
-    // A finished run: every control says the run is not running.
+    // A finished run (R7 C-G1): the plan is a record — no 모두 취소 / 마치기, no × column.
     renderWithClient(<RunPlanTable runId={RUN} plan={fixture({ run_status: "completed" })} />);
     for (const name of [
       "모두 취소",
@@ -379,10 +397,10 @@ describe("처리 계획표 (RunPlanTable)", () => {
       "이벤트 로그 그룹 취소",
       "웹 브라우저 그룹 건너뛰기",
     ]) {
-      expect(screen.getByRole("button", { name }).getAttribute("data-disabled-reason")).toBe(
-        "실행 중인 런이 아닙니다",
-      );
+      expect(screen.queryByRole("button", { name })).toBeNull();
     }
+    expect(document.querySelectorAll("button.run-plan-x")).toHaveLength(0);
+    expect(screen.queryByRole("columnheader", { name: "동작" })).toBeNull();
     expect(calls).toHaveLength(2);
   });
 
@@ -506,5 +524,28 @@ describe("처리 page with a plan", () => {
     expect(screen.queryByTestId("process-run-actions")).toBeNull();
     // A 404 is "no plan" (older run): no error note.
     expect(screen.queryByTestId("run-plan-error")).toBeNull();
+  });
+});
+
+describe("R-5: plan table 소요 column", () => {
+  const headers = () => [...screen.getByRole("treegrid").querySelectorAll("th")].map((th) => th.textContent);
+  it("is hidden on a finished plan where no group or task recorded a duration", () => {
+    const plan = fixture({ run_status: "completed", live: false });
+    for (const g of plan.groups) {
+      g.duration_ms = null;
+      for (const t of g.tasks) {
+        t.duration_ms = null;
+        if (t.status === "running" || t.status === "queued") t.status = "completed";
+      }
+    }
+    renderWithClient(<RunPlanTable runId={RUN} plan={plan} />);
+    expect(headers()).not.toContain("소요");
+    const first = screen.getByTestId("run-plan-group-prepare");
+    expect(first.querySelectorAll("td")).toHaveLength(headers().length);
+  });
+
+  it("stays when any duration exists", () => {
+    renderWithClient(<RunPlanTable runId={RUN} plan={fixture()} />);
+    expect(headers()).toContain("소요");
   });
 });

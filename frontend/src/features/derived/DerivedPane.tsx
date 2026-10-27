@@ -27,6 +27,7 @@ import { CommandButton } from "../../commands/CommandButton";
 import type { Route } from "../../router";
 import { useRoute, useTimezone } from "../../state/hooks";
 import { formatGridTime } from "../../utils/time";
+import { isSid, wellKnownSid } from "../viewer/sidNames";
 import {
   DERIVED_TABLE_IDS,
   type DerivedRow,
@@ -55,7 +56,32 @@ import "./derived.css";
 
 const SEARCH_DEBOUNCE_MS = 250;
 const PAGE_JUMP = 10;
+/** Rows the value table renders per step ("더 보기", plan r7 §3.2 L2 C-X1). */
+export const DERIVED_ROW_STEP = 200;
 const collator = new Intl.Collator("ko");
+
+/** DOS date-time 0 (1980-01-01 00:00:00): "no date recorded", not a real first/last sighting. */
+const DOS_EPOCH = /^1980-01-01[T ]00:00:00(\.0+)?(Z|[+-]00:?00)?$/;
+
+/**
+ * One derived cell as shown (r7 L4, C-X3): the DOS-epoch sentinel reads "—" (the raw value stays
+ * in the tooltip), and a well-known SID value gets its account name ("S-1-5-18 (SYSTEM …)").
+ */
+export function derivedCellDisplay(
+  columnId: string,
+  row: Pick<DerivedRow, "first_seen" | "last_seen" | "value">,
+  text: string,
+): { text: string; title: string } {
+  const raw = columnId === "first" ? row.first_seen : columnId === "last" ? row.last_seen : null;
+  if (raw && DOS_EPOCH.test(raw.trim())) {
+    return { text: "", title: `기록 없음 — DOS 시각 0(${raw})은 실제 시각이 아닙니다` };
+  }
+  if (columnId === "value" && isSid(text)) {
+    const known = wellKnownSid(text);
+    if (known) return { text: `${text} (${known.name})`, title: `${text} — 잘 알려진 SID: ${known.name}` };
+  }
+  return { text, title: text };
+}
 
 function useDebounced(value: string, delay: number): string {
   const [debounced, setDebounced] = useState(value);
@@ -145,6 +171,14 @@ function DerivedTablePane() {
   const matched = first?.matched ?? null;
   const total = first?.total ?? summary?.rows ?? null;
   const clampedFocus = rows.length ? Math.min(focusIdx, rows.length - 1) : -1;
+  // The table renders DERIVED_ROW_STEP rows at a time (C-X1): "더 보기" (or moving focus past
+  // the last shown row) reveals the next step of the loaded values.
+  const [shownRows, setShownRows] = useState(DERIVED_ROW_STEP);
+  useEffect(() => {
+    if (clampedFocus >= shownRows)
+      setShownRows(Math.ceil((clampedFocus + 1) / DERIVED_ROW_STEP) * DERIVED_ROW_STEP);
+  }, [clampedFocus, shownRows]);
+  const visibleRows = rows.length > shownRows ? rows.slice(0, shownRows) : rows;
 
   // Results are announced once per finished query (not per page).
   const announced = useRef<string>("");
@@ -207,7 +241,12 @@ function DerivedTablePane() {
   const focusRow = (index: number) => {
     const next = Math.max(0, Math.min(index, rows.length - 1));
     setFocusIdx(next);
-    gridRef.current?.querySelector<HTMLElement>(`[data-row-index="${next}"]`)?.focus();
+    const focusNow = () => gridRef.current?.querySelector<HTMLElement>(`[data-row-index="${next}"]`)?.focus();
+    if (next >= shownRows) {
+      // Past the shown rows: reveal the next step first, then focus once it rendered.
+      setShownRows(Math.ceil((next + 1) / DERIVED_ROW_STEP) * DERIVED_ROW_STEP);
+      requestAnimationFrame(focusNow);
+    } else focusNow();
     if (next >= rows.length - 5) loadMore();
   };
 
@@ -396,7 +435,7 @@ function DerivedTablePane() {
                 </div>
               ))}
             </div>
-            {rows.map((row, index) => (
+            {visibleRows.map((row, index) => (
               <div
                 key={row.normalized}
                 role="row"
@@ -411,21 +450,37 @@ function DerivedTablePane() {
                 onKeyDown={(event) => onRowKey(event, index)}
               >
                 {columns.map((column) => {
-                  const text = column.text(row, timezone);
+                  const cell = derivedCellDisplay(column.id, row, column.text(row, timezone));
                   return (
                     <div
                       key={column.id}
                       role="gridcell"
                       className={`derived-cell${column.mono ? " derived-mono" : ""}${column.numeric ? " derived-num" : ""}`}
-                      title={text}
+                      title={cell.title}
                     >
-                      {text || <span className="grid-cell-empty">—</span>}
+                      {cell.text || <span className="grid-cell-empty">—</span>}
                     </div>
                   );
                 })}
               </div>
             ))}
           </div>
+          {rows.length > visibleRows.length ? (
+            <p className="derived-more" data-testid="derived-more">
+              <span>
+                {visibleRows.length.toLocaleString("ko-KR")} / 불러온 {rows.length.toLocaleString("ko-KR")}개
+                표시
+              </span>
+              <button
+                type="button"
+                className="button ghost"
+                onClick={() => setShownRows((n) => n + DERIVED_ROW_STEP)}
+              >
+                더 보기 (
+                {Math.min(DERIVED_ROW_STEP, rows.length - visibleRows.length).toLocaleString("ko-KR")}개)
+              </button>
+            </p>
+          ) : null}
           {pages.isPending ? <p className="derived-hint">값을 불러오는 중…</p> : null}
           {pages.isError ? (
             <p className="derived-notice" role="alert">

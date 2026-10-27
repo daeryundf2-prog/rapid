@@ -34,7 +34,47 @@ body {
 
 :root {
   --field-edge: color-mix(in srgb, var(--line) 50%, transparent);
-  scrollbar-color: color-mix(in srgb, var(--text-subtle) 45%, transparent) transparent;
+}
+
+/* --- scrollbars (scroll review C4) ------------------------------------------
+   Visible thumbs on every scroller: --sb-thumb is ≥ 3:1 on every surface (check:contrast).
+   Standard properties first; the ::-webkit-scrollbar rules give Chromium a 12px bar with a
+   rounded thumb and a hover state (Chromium ignores them once scrollbar-color is set on the
+   same element, so they apply only where the standard pair is unsupported). */
+* {
+  scrollbar-color: var(--sb-thumb) var(--sb-track);
+  scrollbar-width: auto;
+}
+
+@supports not (scrollbar-color: auto) {
+  ::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: var(--sb-track);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 6px;
+    background: var(--sb-thumb) padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--sb-thumb-hover) padding-box;
+  }
+}
+
+/* The main scrollers keep their width when the bar appears and do not chain to the page. */
+.grid-scroll,
+.thumb-scroll,
+.card-scroll,
+.viewer-panel {
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
 }
 
 /* --- text inputs, textarea, select ---------------------------------------- */
@@ -674,9 +714,11 @@ button.chip:hover {
 
 /* --- path (review #9): parent folder, middle ellipsis, mono --------------------- */
 
+/* Tail first (plan r7 §3.2 L2, C-D8 / C-L3): the head gives way first (flex-shrink 1000), the two
+   parent folders next, the file name last. The parts carry their own separators: no gap. */
 .mid-path {
   display: inline-flex;
-  gap: var(--space-1);
+  gap: 0;
   min-width: 0;
   max-width: 100%;
   font-family: var(--font-mono);
@@ -685,11 +727,19 @@ button.chip:hover {
 }
 
 .mid-path-head {
-  flex: 0 1 auto;
+  flex: 0 1000 auto;
   min-width: 1.5em; /* room for the "…" itself */
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--text-subtle);
+}
+
+.mid-path-parents {
+  flex: 0 1 auto;
+  min-width: 1.5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
 }
 
 .mid-path-tail {
@@ -697,7 +747,7 @@ button.chip:hover {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--text-muted);
+  color: var(--text);
 }
 
 /* --- toast (U-V7: one kind, bottom-right) ------------------------------------- */

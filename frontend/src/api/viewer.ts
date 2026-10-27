@@ -66,6 +66,17 @@ export interface SqliteSidecarStateProfile {
   sidecars?: { wal?: SqliteSidecarInfo; shm?: SqliteSidecarInfo; rollback_journal?: SqliteSidecarInfo };
 }
 
+/** `viewer_hint` of the source preview (api/app/viewer_hint.py). */
+export interface ViewerHint {
+  mode: "sqlite" | string;
+  /** "magic-bytes" (header only, e.g. Chromium History) | "extension". */
+  detected_by?: string;
+  /** Every table name (the preview itself lists at most 8). */
+  sqlite_tables?: string[];
+  /** Parsed artifact type → the table its rows come from (browser-history → urls). */
+  row_tables?: Record<string, string>;
+}
+
 export interface SqlitePreviewPayload {
   table_count?: number;
   tables?: SqlitePreviewTable[];
@@ -200,6 +211,8 @@ export interface SourcePreview {
   image_url?: string;
   image?: ImagePreviewPayload;
   sqlite?: SqlitePreviewPayload;
+  /** How the viewer tab was detected (r7 L4): SQLite by its header, browser-row tables. */
+  viewer_hint?: ViewerHint;
   email?: EmailPreviewPayload;
   media?: MediaPreviewPayload;
   json?: JsonPreviewPayload;
@@ -248,6 +261,8 @@ export interface SqliteTablePage {
     has_next: boolean;
     next_offset: number | null;
     max_page_rows: number;
+    /** `locate_rowid` answer: the page above holds this rowid (found) at row_number. */
+    located?: { rowid: number; found: boolean; row_number: number } | null;
   };
 }
 
@@ -400,9 +415,10 @@ export function fetchSqliteTable(
   offset: number,
   limit: number,
   signal?: AbortSignal,
+  locateRowid?: number,
 ): Promise<SqliteTablePage> {
   return api<SqliteTablePage>(
-    `${runBase(runId)}/source-sqlite-table?${query({ path, table, offset, limit })}`,
+    `${runBase(runId)}/source-sqlite-table?${query({ path, table, offset, limit, locate_rowid: locateRowid })}`,
     {
       signal,
     },

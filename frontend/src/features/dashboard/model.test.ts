@@ -24,8 +24,13 @@ describe("stageRows", () => {
       ["inventory", "done", 3000],
       ["artifacts", "running", 60000],
     ]);
-    expect(formatDuration(2000)).toBe("2.0초");
-    expect(formatDuration(65000)).toBe("1분 5초");
+    // C-G4: one format and one rounding with the run chips (formatElapsed, floored seconds).
+    expect(formatDuration(2000)).toBe("00:02");
+    expect(formatDuration(65000)).toBe("01:05");
+    expect(formatDuration(2_048_900)).toBe("34:08");
+    expect(formatDuration(3_725_000)).toBe("1:02:05");
+    expect(formatDuration(400)).toBe("1초 미만");
+    expect(formatDuration(null)).toBe("—");
   });
 
   it("returns nothing without progress and omits the running row for finished runs", () => {

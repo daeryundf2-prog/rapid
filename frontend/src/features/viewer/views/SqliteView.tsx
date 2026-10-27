@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   fetchSqliteTable,
   fetchSqliteWalPreview,
@@ -7,6 +7,33 @@ import {
   type SqliteWalPreview,
 } from "../../../api/viewer";
 import { errorText, useAsync } from "../useAsync";
+
+/** R-10: Korean names of the sidecar ids the server lists in `detected_sidecars`. */
+const SIDECAR_LABELS: Record<string, string> = {
+  wal: "WAL",
+  shm: "SHM",
+  rollback_journal: "롤백 저널",
+  "rollback-journal": "롤백 저널",
+  journal: "롤백 저널",
+};
+
+export function sidecarLabel(id: string): string {
+  return SIDECAR_LABELS[id] ?? id;
+}
+
+/** R-10: Korean WAL header / preview states (api/app/sqlite.py, core/sqlite_wal.py). */
+const WAL_STATUS_LABELS: Record<string, string> = {
+  parsed: "해석됨",
+  "unknown-magic": "알 수 없는 형식(매직 불일치)",
+  "invalid-short-header": "헤더가 짧아 해석 불가",
+  "not-read": "읽지 않음",
+  missing: "없음",
+};
+
+export function walHeaderStatusLabel(status: string | undefined | null): string {
+  if (!status) return "미해석";
+  return WAL_STATUS_LABELS[status] ?? `미분류 상태(${status})`;
+}
 
 export const SQLITE_PAGE_SIZE = 200;
 
@@ -56,9 +83,9 @@ function WalBanner({
       <p className="viewer-note">
         WAL {sidecars.wal?.exists ? "있음" : "없음"} · SHM {sidecars.shm?.exists ? "있음" : "없음"} · 롤백
         저널 {sidecars.rollback_journal?.exists ? "있음" : "없음"}
-        {detected.length ? ` · 발견: ${detected.join(", ")}` : ""}
+        {detected.length ? ` · 발견: ${detected.map(sidecarLabel).join(", ")}` : ""}
         {sidecars.wal?.exists && header
-          ? ` · WAL 헤더 ${header.status || "미해석"}, 페이지 ${header.page_size ?? "?"}, 추정 프레임 ${header.estimated_frame_count ?? "?"}`
+          ? ` · WAL 헤더 ${walHeaderStatusLabel(header.status)}, 페이지 크기 ${header.page_size ?? "?"}바이트, 추정 프레임 ${header.estimated_frame_count ?? "?"}개`
           : ""}
       </p>
       {sidecars.wal?.exists ? (
@@ -70,8 +97,9 @@ function WalBanner({
       {wal.data ? (
         <div className="sqlite-wal-frames">
           <p className="viewer-note">
-            상태 {wal.data.wal.status || "알 수 없음"} · 추정 프레임 {wal.data.wal.estimated_frame_count ?? 0}{" "}
-            · 미리보기 {wal.data.wal.preview_frame_count ?? wal.data.wal.frames?.length ?? 0} · 삭제 후보{" "}
+            상태 {walHeaderStatusLabel(wal.data.wal.status)} · 추정 프레임{" "}
+            {wal.data.wal.estimated_frame_count ?? 0} · 미리보기{" "}
+            {wal.data.wal.preview_frame_count ?? wal.data.wal.frames?.length ?? 0} · 삭제 후보{" "}
             {wal.data.recovery_scope?.deleted_record_candidate_count ?? 0}건 (신뢰 도구 검증 전에는 단서로만
             사용)
           </p>
@@ -109,18 +137,42 @@ interface SqliteViewProps {
 
 export function SqliteView({ runId, preview, highlight }: SqliteViewProps) {
   const sqlite = preview.sqlite || {};
-  const tables = sqlite.tables || [];
+  const previewed = sqlite.tables || [];
+  // Every table the server named (viewer_hint, r7 L4): the preview itself stops at 8, and the
+  // browser `urls` table sorts past that — still listed (row count unknown until opened).
+  const tables: Array<{ name: string; row_count?: number | null }> = [
+    ...previewed,
+    ...(preview.viewer_hint?.sqlite_tables ?? [])
+      .filter((name) => !previewed.some((item) => item.name === name))
+      .map((name) => ({ name, row_count: null })),
+  ];
   const initialTable =
     highlight?.table && tables.some((t) => t.name === highlight.table)
       ? highlight.table
       : (tables[0]?.name ?? null);
   const [table, setTable] = useState<string | null>(initialTable);
   const [offset, setOffset] = useState(0);
+  // First page of the row's table: the page holding its rowid (locate_rowid), then plain paging.
+  const [locate, setLocate] = useState<number | undefined>(
+    highlight?.table && highlight.table === initialTable ? highlight.rowid : undefined,
+  );
   const sidecar = sqlite.sidecar_state_profile || sqlite.database_metadata?.sidecar_state_profile;
-  const page = useAsync(table ? `${preview.path}|${table}|${offset}` : null, (signal) =>
-    fetchSqliteTable(runId, preview.path, table as string, offset, SQLITE_PAGE_SIZE, signal),
+  const page = useAsync(table ? `${preview.path}|${table}|${offset}|${locate ?? ""}` : null, (signal) =>
+    fetchSqliteTable(runId, preview.path, table as string, offset, SQLITE_PAGE_SIZE, signal, locate),
   );
   const hiddenTables = Math.max(0, (sqlite.table_count ?? tables.length) - tables.length);
+  // The offset the server actually answered (a located page starts where the rowid is).
+  const base = page.status === "ok" ? page.data.pagination.offset : offset;
+  const located = page.status === "ok" ? page.data.pagination.located : null;
+  const rowsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (page.status !== "ok" || !located?.found) return;
+    rowsRef.current?.querySelector<HTMLElement>(".is-hl-row")?.scrollIntoView?.({ block: "center" });
+  }, [page.status, located]);
+  const goTo = (next: number) => {
+    setLocate(undefined);
+    setOffset(Math.max(0, next));
+  };
 
   return (
     <div className="sqlite-view">
@@ -141,11 +193,13 @@ export function SqliteView({ runId, preview, highlight }: SqliteViewProps) {
                     aria-current={item.name === table ? "true" : undefined}
                     onClick={() => {
                       setTable(item.name);
-                      setOffset(0);
+                      goTo(0);
                     }}
                   >
                     <span>{item.name}</span>
-                    <small>{item.row_count ?? "?"}행</small>
+                    <small>
+                      {item.row_count === null || item.row_count === undefined ? "" : `${item.row_count}행`}
+                    </small>
                   </button>
                 </li>
               ))}
@@ -170,7 +224,7 @@ export function SqliteView({ runId, preview, highlight }: SqliteViewProps) {
                 <div className="sqlite-pager">
                   <span>
                     {page.data.pagination.returned
-                      ? `${(offset + 1).toLocaleString("ko-KR")}–${(offset + page.data.pagination.returned).toLocaleString("ko-KR")}`
+                      ? `${(base + 1).toLocaleString("ko-KR")}–${(base + page.data.pagination.returned).toLocaleString("ko-KR")}`
                       : "0"}{" "}
                     /{" "}
                     {page.data.pagination.total === null
@@ -181,8 +235,8 @@ export function SqliteView({ runId, preview, highlight }: SqliteViewProps) {
                   <button
                     type="button"
                     className="viewer-button"
-                    disabled={offset === 0}
-                    onClick={() => setOffset(Math.max(0, offset - SQLITE_PAGE_SIZE))}
+                    disabled={base === 0}
+                    onClick={() => goTo(base - SQLITE_PAGE_SIZE)}
                   >
                     이전 {SQLITE_PAGE_SIZE}행
                   </button>
@@ -190,12 +244,19 @@ export function SqliteView({ runId, preview, highlight }: SqliteViewProps) {
                     type="button"
                     className="viewer-button"
                     disabled={!page.data.pagination.has_next}
-                    onClick={() => setOffset(page.data.pagination.next_offset ?? offset + SQLITE_PAGE_SIZE)}
+                    onClick={() => goTo(page.data.pagination.next_offset ?? base + SQLITE_PAGE_SIZE)}
                   >
                     다음 {SQLITE_PAGE_SIZE}행
                   </button>
                 </div>
-                <div className="viewer-table-wrap">
+                {located ? (
+                  <p className="viewer-note" data-testid="sqlite-located">
+                    {located.found
+                      ? `원본 행: ${table} rowid ${located.rowid} (${located.row_number.toLocaleString("ko-KR")}번째 행) — 강조 표시`
+                      : `원본 행 rowid ${located.rowid}이(가) 이 테이블에 없습니다(삭제되었거나 다른 스냅숏).`}
+                  </p>
+                ) : null}
+                <div className="viewer-table-wrap" ref={rowsRef}>
                   <table className="viewer-table">
                     <thead>
                       <tr>
