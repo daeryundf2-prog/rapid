@@ -56,6 +56,8 @@ GENERAL_FORENSIC_ARTIFACT_KINDS = (
     "browser",
     # R5 L3: BitTorrent clients / .torrent / eMule (artifacts/p2p.py).
     "p2p",
+    # R7 stage 3.5: AI usage records (artifacts/ai_agents).
+    "ai-agent",
     "recent-files",
     "email",
     "cloud-export",

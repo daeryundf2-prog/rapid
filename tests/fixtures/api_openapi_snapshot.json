@@ -192,6 +192,9 @@
     "/api/runs/{run_id}/dashboard": {
       "get": "get_run_dashboard_api_runs__run_id__dashboard_get"
     },
+    "/api/runs/{run_id}/dedup/summary": {
+      "get": "get_dedup_summary_api_runs__run_id__dedup_summary_get"
+    },
     "/api/runs/{run_id}/derived": {
       "get": "get_derived_api_runs__run_id__derived_get"
     },
@@ -219,6 +222,12 @@
     "/api/runs/{run_id}/extract/{name}/file": {
       "get": "download_run_extract_api_runs__run_id__extract__name__file_get"
     },
+    "/api/runs/{run_id}/families/{ref}": {
+      "get": "get_run_family_api_runs__run_id__families__ref__get"
+    },
+    "/api/runs/{run_id}/family-expansion": {
+      "get": "get_family_expansion_api_runs__run_id__family_expansion_get"
+    },
     "/api/runs/{run_id}/files": {
       "get": "get_run_files_api_runs__run_id__files_get"
     },
@@ -245,6 +254,9 @@
     },
     "/api/runs/{run_id}/indicators/ti-enrichment": {
       "get": "get_run_indicator_ti_enrichment_api_runs__run_id__indicators_ti_enrichment_get"
+    },
+    "/api/runs/{run_id}/irregular/summary": {
+      "get": "get_irregular_summary_api_runs__run_id__irregular_summary_get"
     },
     "/api/runs/{run_id}/issues": {
       "get": "get_run_issues_api_runs__run_id__issues_get"

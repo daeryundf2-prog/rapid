@@ -25,6 +25,7 @@ import {
   rehashEvidence,
 } from "../../api/cases";
 import { type EvidenceSource, type CaseNotes as RunNotes, saveCaseNotes } from "../../api/dashboard";
+import { fetchIrregularSummary, type IrregularSummary } from "../../api/families";
 import type { CanonicalCounts, RunWarning } from "../../api/runs";
 import { CommandButton } from "../../commands/CommandButton";
 import { StatusBadge } from "../../components/Badge";
@@ -35,6 +36,7 @@ import { useCaseDialogs } from "../case/dialogs";
 import { ReasonButton } from "../case/ReasonButton";
 import { summarizeRunRequest } from "../case/runSummary";
 import { EVIDENCE_TYPE_LABEL } from "../case/wizardModel";
+import { irregularLabel } from "../filters/conditionValues";
 import { formatBytes, partitionLabel } from "../tree/model";
 import { CardEmpty } from "./Card";
 import { DisclosureList, WarningList, warningsSummary } from "./cards";
@@ -398,7 +400,109 @@ export function EvidenceCard({
           <CommandButton command="case.evidence.add" label="증거 추가" variant="ghost" showReason />
         </div>
       ) : null}
+      {/* 예외 항목 (R7 갈래 A): the nine Nuix irregular categories of this run, below 증거. */}
+      <IrregularBlock runId={currentRunId} />
     </div>
+  );
+}
+
+// --- 예외 항목 (R7 갈래 A, Nuix irregular items) -----------------------------------------------
+
+export const irregularQueryKey = (runId: string) => ["irregular-summary", runId] as const;
+
+/** One listing link of a category: its rows on the files / inventory / artifacts list. */
+function irregularRoute(runId: string, id: string, list: "candidates" | "inventory" | "artifacts") {
+  if (list === "artifacts") return serializeRoute({ runId, collection: "artifacts", irregular: [id] });
+  return serializeRoute({
+    runId,
+    collection: "files",
+    ...(list === "inventory" ? { category: "inventory" } : {}),
+    irregular: [id],
+  });
+}
+
+/**
+ * 예외 항목: per category (확장자 불일치 · 손상 · 삭제 · 빈 파일 · 암호화 · 검색 불가 PDF · 본문 제외 ·
+ * 형식 미상 · 미지원) its row count, split into links to the files / 전체 파일 / artifacts lists
+ * filtered by `irregular=<id>` — each link lists exactly that many rows. The total is the sum of the
+ * categories (a row in two categories counts twice; "항목" is the distinct rows).
+ */
+export function IrregularBlock({ runId }: { runId: string }) {
+  const query = useQuery({
+    queryKey: irregularQueryKey(runId),
+    queryFn: ({ signal }) => fetchIrregularSummary(runId, signal),
+    enabled: Boolean(runId),
+    retry: false,
+    staleTime: 60_000,
+  });
+  return (
+    <section className="dash-irregular" aria-label="예외 항목" data-testid="case-irregular">
+      <h3 className="dash-subtitle">예외 항목</h3>
+      {query.isPending ? (
+        <p className="dash-note">예외 항목을 세는 중… (처음에는 런 출력을 한 번 훑습니다)</p>
+      ) : query.isError ? (
+        <p className="dash-note">{`예외 항목을 볼 수 없습니다: ${query.error instanceof Error ? query.error.message : String(query.error)}`}</p>
+      ) : (
+        <IrregularTable runId={runId} summary={query.data} />
+      )}
+    </section>
+  );
+}
+
+function IrregularTable({ runId, summary }: { runId: string; summary: IrregularSummary }) {
+  const lists = [
+    { key: "candidates", label: "파일" },
+    { key: "inventory", label: "전체 파일" },
+    { key: "artifacts", label: "아티팩트" },
+  ] as const;
+  // An older / partial payload never breaks the 증거 card.
+  if (!Array.isArray(summary?.categories))
+    return <p className="dash-note">예외 항목 요약을 읽을 수 없습니다.</p>;
+  return (
+    <>
+      <p className="dash-note" data-testid="irregular-total">
+        {`합계 ${n(summary.total)}건 · 항목 ${n(summary.unique_items)}개`}
+      </p>
+      <table className="dash-table dash-irregular-table">
+        <caption className="sr-only">예외 항목 범주별 건수</caption>
+        <thead>
+          <tr>
+            <th scope="col">범주</th>
+            <th scope="col">건수</th>
+            <th scope="col">목록</th>
+          </tr>
+        </thead>
+        <tbody>
+          {summary.categories.map((category) => (
+            <tr key={category.id} data-irregular={category.id}>
+              <th scope="row" title={category.help}>
+                {irregularLabel(category.id)}
+              </th>
+              <td className="num">{n(category.count)}</td>
+              <td>
+                {category.count === 0 ? (
+                  <span className="dash-muted">—</span>
+                ) : (
+                  lists
+                    .filter((list) => category[list.key] > 0)
+                    .map((list, index) => (
+                      <Fragment key={list.key}>
+                        {index > 0 ? " · " : null}
+                        <a
+                          href={irregularRoute(runId, category.id, list.key)}
+                          aria-label={`${irregularLabel(category.id)} ${list.label} ${n(category[list.key])}건 보기`}
+                        >
+                          {`${list.label} ${n(category[list.key])}`}
+                        </a>
+                      </Fragment>
+                    ))
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
   );
 }
 

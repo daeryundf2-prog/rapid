@@ -345,6 +345,27 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
         F("campaign_set_at", "ga-campaign-set"),
     ),
     "phone-link-photo": (F("taken_at", "photo-taken"), F("updated_at", "photo-synced")),
+    # --- R7 AI usage (stage 3.5, lane B session adapters) ------------------------------------
+    # Every ai-* row states its own evidence time through the row-level contract
+    # (``timestamp`` + ``timestamp_kind``: session started, message, tool call ``run``, file touch
+    # accessed/modified/deleted/created, MCP ``observed``, account ``added``, account switch
+    # ``switched``, cleanup marker ``cleanup``, AI-attributed commit ``committed``). The fields
+    # below are the extra times of the same row. Wall-clock log times without a zone are kept in
+    # ``timestamp_local`` and never become UTC events. Presence / credential / instruction /
+    # usage rows carry stat times as row fields only.
+    "ai-agent-session": (F("started_at", "started"), F("ended_at", "ended")),
+    "ai-agent-message": (),
+    "ai-agent-tool-call": (F("completed_at", "completed"),),
+    "ai-agent-file-touch": (),
+    "ai-mcp-server": (),
+    "ai-account": (F("first_seen", "added"), F("last_seen", "last-used")),
+    "ai-account-switch": (),
+    "ai-retention-cleanup": (),
+    "ai-code-attribution": (F("first_ts", "created"),),
+    "ai-usage-stat": (),
+    "ai-tool-presence": (),
+    "ai-credential-presence": (),
+    "ai-instruction-file": (),
 }
 # Rows that only aggregate other rows (their times duplicate the source rows)
 # and per-reference rows of a parent artifact never emit events.

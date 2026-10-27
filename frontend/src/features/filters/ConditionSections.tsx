@@ -11,7 +11,16 @@ import { useTimezone } from "../../state/hooks";
 import { useAppStore } from "../../state/store";
 import { zoneLabel } from "../../utils/time";
 import { useAnalysisStore } from "../analysis/store";
-import { WEEKDAY_IDS } from "./conditionValues";
+import {
+  DUP_LABELS,
+  DUP_MODE_LABELS,
+  DUP_MODES,
+  DUP_STATUSES,
+  type DupMode,
+  IRREGULAR_IDS,
+  IRREGULAR_LABELS,
+  WEEKDAY_IDS,
+} from "./conditionValues";
 import { CONTENT_TYPE_IDS, CONTENT_TYPES } from "./contentTypes";
 import { toLocalInput } from "./filterModel";
 import { useFilterStore } from "./filterStore";
@@ -180,6 +189,91 @@ export function ClockSection() {
         </select>
       </div>
       <p className="filter-empty">{`표시 시간대(${zoneLabel(timezone)}) 기준 · 끝 시각 전까지 · 자정을 넘을 수 있음(예: 18–09시)`}</p>
+    </fieldset>
+  );
+}
+
+/**
+ * 계열 · 중복 · 예외 항목 (R7 갈래 A): the server's row sets of the run's derivation. 중복 picks
+ * 원본만 / 중복만 / 중복 있는 항목 and the comparison (항목별 · 계열별 · 보관자 순위별); 예외 항목
+ * any of the nine categories; an active 계열 condition (set by 계열 보기 / 선택 확장) can be cleared.
+ */
+export function FamilySection() {
+  const filters = useFilterStore((s) => s.filters);
+  const patch = useFilterStore((s) => s.patchFilters);
+  const irregular = filters.irregular ?? [];
+  const modeId = useId();
+  return (
+    <fieldset className="popover-section" aria-label="계열·중복·예외 항목">
+      <legend className="popover-title">중복·예외 항목</legend>
+      <div className="filter-content-chips" role="group" aria-label="중복">
+        <button
+          type="button"
+          className="filter-content-chip"
+          aria-pressed={!filters.dup}
+          onClick={() => patch({ dup: undefined, dupMode: undefined })}
+        >
+          전체
+        </button>
+        {DUP_STATUSES.map((id) => (
+          <button
+            key={id}
+            type="button"
+            className="filter-content-chip"
+            aria-pressed={filters.dup === id}
+            onClick={() => patch({ dup: filters.dup === id ? undefined : id })}
+          >
+            {DUP_LABELS[id]}
+          </button>
+        ))}
+      </div>
+      {filters.dup ? (
+        <label className="filter-field" htmlFor={modeId}>
+          <span className="filter-range-label">비교 방식</span>
+          <select
+            id={modeId}
+            value={filters.dupMode ?? "item"}
+            onChange={(event) =>
+              patch({ dupMode: event.target.value === "item" ? undefined : (event.target.value as DupMode) })
+            }
+          >
+            {DUP_MODES.map((id) => (
+              <option key={id} value={id}>
+                {DUP_MODE_LABELS[id]}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      <div className="filter-content-chips" role="group" aria-label="예외 항목">
+        {IRREGULAR_IDS.map((id) => (
+          <button
+            key={id}
+            type="button"
+            className="filter-content-chip"
+            aria-pressed={irregular.includes(id)}
+            onClick={() => {
+              const next = toggle(irregular, id);
+              patch({
+                irregular: next.length ? IRREGULAR_IDS.filter((item) => next.includes(item)) : undefined,
+              });
+            }}
+          >
+            {IRREGULAR_LABELS[id]}
+          </button>
+        ))}
+      </div>
+      {filters.family?.length ? (
+        <p className="filter-empty">
+          {`계열 ${filters.family.length}개 항목의 상위·하위 항목만 표시 중 `}
+          <button type="button" className="button ghost" onClick={() => patch({ family: undefined })}>
+            계열 조건 해제
+          </button>
+        </p>
+      ) : null}
+      <p className="filter-empty">
+        파일·아티팩트·타임라인 목록에서 서버가 적용합니다(타임라인은 원본 행 기준).
+      </p>
     </fieldset>
   );
 }

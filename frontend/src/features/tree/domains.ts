@@ -20,6 +20,7 @@ import {
 } from "../../contracts/collection";
 import type { IconName } from "../../icons";
 import type { AnalysisNodeId } from "../analysis/kinds";
+import { IRREGULAR_IDS, IRREGULAR_LABELS } from "../filters/conditionValues";
 import { CHANNEL_FILTER_COLUMN, CHANNEL_GROUP_FILTER_COLUMN } from "../filters/filterModel";
 
 export interface DomainTarget {
@@ -74,6 +75,10 @@ export interface DomainTarget {
    * such as `hashset:known-bad` filter the run's search index (route `q=`).
    */
   q?: string;
+   * 예외 항목 category (R7 갈래 A, route `irregular=`): the listing's rows of that category; the
+   * count is the category's rows of that list (`GET /irregular/summary`).
+   */
+  irregular?: string;
 }
 
 export interface DomainNodeDef {
@@ -1805,6 +1810,45 @@ export const DOMAINS: readonly DomainDef[] = [
       { id: "loc-mobile", label: "모바일 위치", target: a("mobile-export", ["mobile-location"]) },
     ],
   },
+  // --- R7 갈래 A: 처리 › 예외 항목 (Nuix irregular items) ---------------------------------------
+  {
+    id: "processing",
+    label: "처리",
+    icon: "alert",
+    nodes: [
+      {
+        id: "proc-irregular",
+        label: "예외 항목",
+        target: { collection: "artifacts", irregular: IRREGULAR_IDS.join(",") },
+        note: "처리에서 예외로 남은 항목(확장자 불일치·손상·삭제·빈 파일·암호화·검색 불가 PDF·본문 제외·형식 미상·미지원) — 이 노드는 어느 범주든 해당하는 아티팩트, 범주마다 파일·전체 파일·아티팩트 목록으로 엽니다",
+        children: IRREGULAR_IDS.map(
+          (id): DomainNodeDef => ({
+            id: `proc-irregular-${id}`,
+            label: IRREGULAR_LABELS[id],
+            lead: true,
+            target: { collection: "artifacts", irregular: id },
+            children: [
+              {
+                id: `proc-irregular-${id}-files`,
+                label: "파일",
+                target: { collection: "files", irregular: id },
+              },
+              {
+                id: `proc-irregular-${id}-inventory`,
+                label: "전체 파일 목록",
+                target: { collection: "files", fileScope: "inventory", irregular: id },
+              },
+              {
+                id: `proc-irregular-${id}-artifacts`,
+                label: "아티팩트",
+                target: { collection: "artifacts", irregular: id },
+              },
+            ],
+          }),
+        ),
+      },
+    ],
+  },
 ];
 
 /** Every node of the table, sub-nodes included (pre-order: a group before its children). */
@@ -1834,6 +1878,8 @@ export function targetKey(
     special?: string;
     /** Search view query of a search node (R7 lane B): each query is its own node. */
     q?: string;
+    /** 예외 항목 (R7 갈래 A): one category's rows are their own selection. */
+    irregular?: string | readonly string[];
     /**
      * Column filters: part of the key only on event-log channel views (`evt_channel(_group)`) and
      * for the analysis `details` server filters (`f:source` / `f:signature_kind` / `f:recovery_method` / `f:in_use`).
@@ -1865,6 +1911,10 @@ export function targetKey(
     : target.fileScope
       ? filesInventoryCategory(target.fileCategory)
       : (target.fileCategory ?? target.category ?? "");
+  const irregular = typeof target.irregular === "string" ? [target.irregular] : [...(target.irregular ?? [])];
+  const irregularPart = irregular.filter(Boolean).length
+    ? `|irr=${irregular.filter(Boolean).sort().join(",")}`
+    : "";
   return (
     [
       target.collection,
@@ -1875,6 +1925,7 @@ export function targetKey(
     ].join("|") +
     flagPart +
     detailPart +
+    irregularPart +
     (target.collection === "search" && target.q ? `|q=${target.q}` : "")
   );
 }

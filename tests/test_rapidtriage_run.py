@@ -220,7 +220,7 @@ class RapidTriageRunTests(unittest.TestCase):
 
         self.assertEqual(
             supported - set(RUN_PROFILES["recovery"].artifacts_kinds),
-            {"browser", "p2p", "windows-execution", "windows-system"},
+            {"browser", "p2p", "windows-execution", "windows-system", "ai-agent"},
         )
 
     def test_investigative_modes_run_p2p_but_recovery_does_not(self) -> None:

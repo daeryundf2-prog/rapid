@@ -364,6 +364,10 @@ describe("DataGrid keyboard", () => {
       "인용 복사",
       "타임라인에서 보기",
       "같은 출처 행",
+      // 계열 (R7 갈래 A).
+      "계열 보기",
+      "상위 항목으로",
+      "선택을 상위+하위 항목으로 확장",
       "선택 행 OCR 실행",
       // Record pivots (viewer redesign §5), each disabled with a reason when the row lacks the field.
       "같은 사용자/SID",
@@ -429,8 +433,8 @@ describe("DataGrid keyboard", () => {
     expect(button.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(button);
     const menu = await screen.findByRole("menu", { name: "행 메뉴" });
-    // 7 row actions + 9 pivots + 5 review marks (+ contextual entries that apply).
-    expect(within(menu).getAllByRole("menuitem")).toHaveLength(21);
+    // 7 row actions + 3 계열 (R7 갈래 A) + 9 pivots + 5 review marks (+ contextual entries that apply).
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(24);
     const trigger = screen.getAllByRole("button", { name: "행 메뉴" })[1] as HTMLButtonElement;
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(trigger.getAttribute("aria-controls")).toBe(menu.id);
