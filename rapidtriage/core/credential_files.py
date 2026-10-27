@@ -8,8 +8,9 @@ is kept on the row):
   ``~/.codex/mcp-oauth-locks`` …), matched as a path suffix or as a parent folder;
 * ``credential-folder`` — any file below ``.sandbox-secrets`` or ``mcp-oauth-locks``;
 * ``credential-name`` — a general credential file name: ``.credentials.json``, ``auth.json``,
-  ``credentials``(``.json``), ``.netrc``, ``.pypirc``, ``.git-credentials``, ``buddy-tokens.json``,
-  ``jetski-standalone-oauth-token``, ``secret:*``, ``.docker/config.json``, ``.azure/*token*``;
+  ``credentials``(``.json``), ``.netrc``, ``.pypirc``, ``.git-credentials``, ``buddy-tokens.json``, ``ssh-remote-server-state.json``,
+  ``jetski-standalone-oauth-token``, ``secret:*``, ``.docker/config.json``, ``.azure/*token*``,
+  ``github-copilot/hosts.json``/``apps.json``;
 * ``browser-credential-store`` — Chromium ``Login Data`` / ``Cookies`` / ``Web Data`` (+ journals);
 * ``private-key`` — ``*.pem``, ``*.key`` (not a Keynote ZIP) and ``id_rsa*`` / ``id_ed25519*`` …;
 * ``ai-tool-credential-name`` — :func:`~rapidtriage.core.ai_catalog.is_credential_name`
@@ -69,6 +70,7 @@ _CREDENTIAL_NAMES = frozenset(
         ".pypirc",
         ".git-credentials",
         "buddy-tokens.json",
+        "ssh-remote-server-state.json",
         "jetski-standalone-oauth-token",
     }
 )
@@ -195,7 +197,11 @@ def credential_file_reason(
         return folder_reason
     if lowered in _CREDENTIAL_NAMES or lowered.startswith("secret:"):
         return "credential-name"
-    if (parent == ".docker" and lowered == "config.json") or (parent == ".azure" and "token" in lowered):
+    if (
+        (parent == ".docker" and lowered == "config.json")
+        or (parent == ".azure" and "token" in lowered)
+        or (parent == "github-copilot" and lowered in {"hosts.json", "apps.json"})
+    ):
         return "credential-name"
     if lowered in _BROWSER_STORE_NAMES:
         return "browser-credential-store"

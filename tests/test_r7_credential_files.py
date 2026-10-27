@@ -103,6 +103,9 @@ class CredentialFileClassificationTest(unittest.TestCase):
             "C:/Users/a/.azure/accessTokens.json": "credential-name",
             "C:/Users/a/.docker/config.json": "credential-name",
             "C:/Users/a/.claude/buddy-tokens.json": "credential-name",
+            "C:/Users/a/AppData/Roaming/Claude/ssh-remote-server-state.json": "credential-name",
+            "C:/Users/a/AppData/Local/github-copilot/hosts.json": "credential-name",
+            "C:/Users/a/.config/github-copilot/apps.json": "credential-name",
             "C:/Users/a/.gemini/jetski-standalone-oauth-token": "credential-name",
             "secret:github": "credential-name",
             "C:/U/a/AppData/Local/Google/Chrome/User Data/Default/Login Data": "browser-credential-store",
@@ -121,6 +124,7 @@ class CredentialFileClassificationTest(unittest.TestCase):
             "C:/Users/a/.claude/tokenizer.json",
             "C:/Users/a/.npmrc",  # kept, values masked
             "C:/Users/a/.docker/daemon.json",
+            "C:/Users/a/projects/site/hosts.json",
         ):
             self.assertEqual(credential_file_reason(path, sniff=False), "", path)
 
