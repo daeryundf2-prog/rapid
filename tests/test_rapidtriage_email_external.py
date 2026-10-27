@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -202,6 +203,7 @@ class RapidTriageEmailExternalParserTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn(payload["status"], {"blocked", "failed", "complete"})
 
+    @unittest.skipIf(shutil.which("false") is None, "needs a POSIX `false` on PATH (absent from a plain Windows PowerShell PATH)")
     def test_email_external_cli_returns_nonzero_when_selected_tool_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
