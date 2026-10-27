@@ -53,6 +53,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..files import CATEGORY_RULES
+from ..search_hits import ENTRY_MARK
 from ..textnorm import locate_normalized
 from .query import (
     MAX_LIST_ITEMS,
@@ -1037,7 +1038,13 @@ class Compiler:
             f"INSERT OR IGNORE INTO temp.{name} VALUES (?, ?, ?)",
             [(str(mark.get("collection") or ""), str(mark.get("kind") or ""), str(mark.get("locator") or "")) for mark in self.marks() if predicate(mark)],
         )
-        return f"(d.collection, d.kind, d.locator) IN (SELECT collection, kind, locator FROM temp.{name})"
+        # An archive entry (``<locator>#entry:<n>``) carries the mark of its archive record.
+        return (
+            f"((d.collection, d.kind, d.locator) IN (SELECT collection, kind, locator FROM temp.{name}) OR "
+            f"(d.artifact_type = 'archive-entry' AND instr(d.locator, '{ENTRY_MARK}') > 0 AND "
+            f"(d.collection, d.kind, substr(d.locator, 1, instr(d.locator, '{ENTRY_MARK}') - 1)) IN "
+            f"(SELECT collection, kind, locator FROM temp.{name})))"
+        )
 
     def field_review(self, term: Term, value: Value, negated: bool) -> tuple[str, list[object]]:
         statuses = {fold(_scalar(item, "review")) for item in _items(value)}

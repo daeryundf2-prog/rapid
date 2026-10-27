@@ -32,6 +32,7 @@ from fastapi import HTTPException
 from ...core.case_db.base import now_iso
 from ...core.case_db.database import CaseDatabase, next_citation_id_for_connection
 from ...core.jobs import RunJob, RunJobStore, run_output_dir
+from ...core.search_hits import base_locator
 from ...core.search_index.build import (
     SEARCH_INDEX_KIND,
     SWAP_FAILED_STATUS,
@@ -385,7 +386,9 @@ class ReviewMarks:
             return
         by_key = {(str(mark.get("collection") or ""), str(mark.get("kind") or ""), str(mark.get("locator") or "")): mark for mark in marks}
         for row in rows:
-            mark = by_key.get((str(row.get("collection") or ""), str(row.get("kind") or ""), str(row.get("locator") or "")))
+            collection, kind, locator = str(row.get("collection") or ""), str(row.get("kind") or ""), str(row.get("locator") or "")
+            # An archive entry row shows the mark of its archive record.
+            mark = by_key.get((collection, kind, locator)) or by_key.get((collection, kind, base_locator(locator)))
             if mark is not None:
                 row["review"] = {
                     "status": mark.get("status"),

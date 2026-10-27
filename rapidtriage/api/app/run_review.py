@@ -36,6 +36,7 @@ from ...core.case_db.helpers import normalize_path_for_db
 from ...core.case_db.review import load_review_target_match
 from ...core.json_stream import JsonStreamError, iter_array_items
 from ...core.run.persist import CASE_DB_FILE_NAME, legacy_run_case_ids, run_case_id
+from ...core.search_hits import base_locator
 
 ARTIFACT_LOCATOR_KEY = "source_locator"
 # Analysis-workbench result rows (plan P1 §3.3) are not imported into the case
@@ -352,7 +353,8 @@ class RunLocatorIndex:
                     return ("artifact", str(row_id)) if row_id is not None else None
             return None
         if collection == "artifacts":
-            row_index = _ordinal(locator, "/artifacts/")
+            # ``/artifacts/<n>#entry:<m>`` (a search-index archive entry): the archive record.
+            row_index = _ordinal(base_locator(locator), "/artifacts/")
             if row_index is None or not kind:
                 return None
             row_id = self._artifact_id(f"artifacts_{kind}", row_index)

@@ -280,5 +280,69 @@ class LongDocumentTest(IsolatedEnv):
         self.assertIn("색인 상한에서 본문 일부가 잘린 행이 있어 잘린 뒷부분은 검색되지 않습니다(본문이 잘린 행: 문서 1건)", warnings)
 
 
+class ArchiveEntryLocatorTest(IsolatedEnv):
+    """#6: archive-entry rows get their own locator (unique row key) that resolves to the archive record."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        root = "E:\\root"
+        entries = [{"name": f"계약서_{index:02d}.hwp", "uncompressed_size": 100 + index, "crc32": f"{index:08x}"} for index in range(14)]
+        kinds = {
+            "generic-documents": [
+                {"provider": "generic-documents", "artifact_type": "document-archive-inventory", "path": f"{root}\\Users\\u\\계약자료.zip",
+                 "details": {"source_path": f"{root}\\Users\\u\\계약자료.zip", "archive_inventory_profile": {"sample_entries": entries}}},
+            ],
+        }
+        cls.syn = SearchRun(cls.base, [], kinds=kinds, root=root)
+
+    def test_fifteen_rows_have_unique_locators(self) -> None:
+        hits = self.syn.v2_hits(["계약"])
+        self.assertEqual(len(hits), 15)
+        pointers = [hit["locator"]["pointer"] for hit in hits]
+        self.assertEqual(len(set(pointers)), 15, pointers)
+        self.assertEqual(len({hit["search_result_id"] for hit in hits}), 15)
+        entries = [hit for hit in hits if hit["artifact_type"] == "archive-entry"]
+        self.assertEqual(len(entries), 14)
+        for hit in entries:
+            locator = hit["locator"]
+            self.assertRegex(locator["pointer"], r"^/artifacts/0#entry:\d+$")
+            self.assertEqual(locator["record_index"], 0)
+            self.assertEqual(hit["entry_path"], locator["entry_path"])
+            self.assertEqual(hit["path"], f"E:\\root\\Users\\u\\계약자료.zip!{hit['entry_path']}")
+        self.assertEqual(sorted(hit["entry_path"] for hit in entries), [entry["name"] for entry in self._entries()])
+
+    def test_review_filter_sees_the_archive_mark(self) -> None:
+        marks = [{"collection": "artifacts", "kind": "generic-documents", "locator": "/artifacts/0", "status": "reviewed"}]
+        result = run_query(
+            self.syn.index, self.syn.meta, QueryRequest(q="계약 review:reviewed", limit=100, aggregates=False, facets=False),
+            budget=Budget(30), review_provider=lambda: marks,
+        )
+        self.assertEqual(len(result["rows"]), 15)
+
+    def _entries(self) -> list[dict[str, object]]:
+        return [{"name": f"계약서_{index:02d}.hwp"} for index in range(14)]
+
+    def test_entry_locator_resolves_to_the_archive_record(self) -> None:
+        import sqlite3
+
+        from rapidtriage.api.app.run_review import RunLocatorIndex
+
+        connection = sqlite3.connect(":memory:")
+        connection.executescript(
+            "CREATE TABLE evidence_source (id INTEGER PRIMARY KEY, case_id TEXT);"
+            "CREATE TABLE artifact (id INTEGER PRIMARY KEY, evidence_source_id INTEGER, parser_name TEXT, data_json TEXT);"
+        )
+        connection.execute("INSERT INTO evidence_source VALUES (1, 'case-1')")
+        locator = json.dumps({"source_locator": {"output_name": "artifacts_generic-documents", "row_index": 0}})
+        connection.execute("INSERT INTO artifact VALUES (7, 1, 'generic-documents', ?)", (locator,))
+        index = RunLocatorIndex(connection, "case-1", {})
+        for hit in self.syn.v2_hits(["계약"]):
+            with self.subTest(pointer=hit["locator"]["pointer"]):
+                self.assertEqual(index.resolve("artifacts", hit["locator"]["pointer"], "generic-documents"), ("artifact", "7"))
+        self.assertIsNone(index.resolve("artifacts", "/artifacts/0#entry:x", "generic-documents"))
+        connection.close()
+
+
 if __name__ == "__main__":
     unittest.main()

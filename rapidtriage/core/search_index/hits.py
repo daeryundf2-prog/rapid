@@ -156,6 +156,9 @@ def index_hit(
         match.update(source="indicators", kind=artifact_type.removeprefix("indicator-") or "indicator", pointer=locator)
     else:
         match.update(source="web" if kind == BROWSER_KIND else "artifacts", kind=kind, pointer=locator)
+        if row.get("artifact_type") == "archive-entry" and fields.get("entry_path"):
+            # The entry inside the archive (its locator is ``<archive locator>#entry:<n>``).
+            match["entry_path"] = str(fields.get("entry_path"))
     return finalize_search_hit(match, root=root, snippet_source=snippet_source, record_title=False)
 
 

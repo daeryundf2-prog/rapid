@@ -60,7 +60,20 @@ _TIME_KEYS = (
     "date",
 )
 
-_ORDINAL_POINTER = re.compile(r"^/([a-z_]+)/(\d+)$")
+_ORDINAL_POINTER = re.compile(r"^/([a-z_]+)/(\d+)(?:#entry:(\d+))?$")
+# An archive-entry row of the search index: ``<parent locator>#entry:<n>`` (R7 S2 review #6).
+ENTRY_MARK = "#entry:"
+
+
+def entry_locator(parent: str, index: int) -> str:
+    """The unique locator of entry ``index`` of the archive row ``parent``."""
+    return f"{parent}{ENTRY_MARK}{index}"
+
+
+def base_locator(locator: str) -> str:
+    """The source record's locator (an archive entry's parent; any other locator unchanged)."""
+    head, mark, tail = locator.partition(ENTRY_MARK)
+    return head if mark and tail.isdigit() else locator
 _WHITESPACE = re.compile(r"\s+")
 
 
@@ -298,6 +311,13 @@ def hit_locator(match: Mapping[str, object]) -> dict[str, object] | None:
         return None
     member, ordinal = parsed.group(1), int(parsed.group(2))
     locator: dict[str, object] = {"pointer": pointer, "record_index": ordinal, "output_index": ordinal}
+    if parsed.group(3) is not None:
+        if member != "artifacts":
+            return None
+        # An archive entry: its own pointer (a unique row key) that resolves to the archive record.
+        locator["entry_index"] = int(parsed.group(3))
+        if match.get("entry_path"):
+            locator["entry_path"] = str(match.get("entry_path"))
     if member == "candidates" and source in {"files", "ocr"}:
         locator.update(collection="files", kind="", output_name="files")
     elif member == "results" and source == "documents":

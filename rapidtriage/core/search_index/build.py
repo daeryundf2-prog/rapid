@@ -52,7 +52,7 @@ from ..artifact_profiles import (
     resolve_records_path,
 )
 from ..json_stream import JsonStreamError, iter_array_items
-from ..search_hits import record_time
+from ..search_hits import entry_locator, record_time
 from .schema import (
     BIGRAM_RULE,
     BUILDING_SUFFIX,
@@ -654,14 +654,15 @@ def flatten_documents(ctx: BuildContext, kind: str, record_index: int, row: Mapp
     if isinstance(entries, list):
         if len(entries) > LIST_MAX_ITEMS:
             doc.cuts["list-truncated:sample_entries"] += 1
-        for entry in entries[:LIST_MAX_ITEMS]:
+        for position, entry in enumerate(entries[:LIST_MAX_ITEMS]):
             if not isinstance(entry, Mapping) or not entry.get("name"):
                 continue
             name = str(entry.get("name"))
             child = Doc(
                 collection="artifacts",
                 kind=kind,
-                locator=doc.locator,
+                # Its own row key (review #6): resolves to the archive record (``base_locator``).
+                locator=entry_locator(doc.locator, position),
                 domain=doc.domain,
                 artifact_type="archive-entry",
                 title=name,
@@ -672,7 +673,7 @@ def flatten_documents(ctx: BuildContext, kind: str, record_index: int, row: Mapp
                 ts_text=doc.ts_text,
             )
             child.search_fields.append(("archive_entry", fold(name), None))
-            child.fields = {"archive": doc.path, "name": name, "crc32": entry.get("crc32") or ""}
+            child.fields = {"archive": doc.path, "name": name, "entry_path": name, "crc32": entry.get("crc32") or ""}
             docs.append(child)
     return docs
 
