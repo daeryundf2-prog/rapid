@@ -459,13 +459,25 @@ def iter_profiles(roots: Sequence[object], os_hint: str = "") -> list[EvidencePr
     """Lane A passes :class:`EvidenceProfile` roots; a plain path (tests, ad-hoc runs) is expanded
     with :func:`profile_homes` into one profile per user home."""
     out: list[EvidenceProfile] = []
+    seen: set[str] = set()
     hint = (os_hint or "").lower()
+
+    def add(profile: EvidenceProfile) -> None:
+        # one Found per home and adapter even when overlapping roots name the same folder twice
+        try:
+            key = os.path.normcase(str(profile.home.resolve()))
+        except OSError:
+            key = os.path.normcase(str(profile.home))
+        if key not in seen:
+            seen.add(key)
+            out.append(profile)
+
     for root in roots:
         if isinstance(root, EvidenceProfile):
-            out.append(root)
+            add(root)
         elif isinstance(root, (str, os.PathLike)):
             for home, user in profile_homes([Path(root)]):
-                out.append(EvidenceProfile(home=home, user=user, os=hint if hint in _OS_NAMES else "unknown"))
+                add(EvidenceProfile(home=home, user=user, os=hint if hint in _OS_NAMES else "unknown"))
     return out
 
 
@@ -565,6 +577,7 @@ def credential_row(ctx: RowContext, path: Path, kind: str, *, key_name: str = ""
         file_mtime=mtime,
         key_name=key_name,
         value_collected=False,
+        hash_collected=False,
     )
 
 
