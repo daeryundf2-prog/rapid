@@ -455,6 +455,9 @@ function IrregularTable({ runId, summary }: { runId: string; summary: IrregularS
     { key: "inventory", label: "전체 파일" },
     { key: "artifacts", label: "아티팩트" },
   ] as const;
+  // An older / partial payload never breaks the 증거 card.
+  if (!Array.isArray(summary?.categories))
+    return <p className="dash-note">예외 항목 요약을 읽을 수 없습니다.</p>;
   return (
     <>
       <p className="dash-note" data-testid="irregular-total">

@@ -262,7 +262,8 @@ export function PopoutApp() {
           id: `popout.mode.${mode}`,
           label: `뷰어 모드: ${MODE_LABELS[mode]}`,
           group: "viewer",
-          shortcut: String(index + 1),
+          // 1–8 (KEY_MAP.viewerModes); the 9th tab (계열) has no digit: 9 stays a tag key.
+          ...(index < 8 ? { shortcut: String(index + 1) } : {}),
           icon: "eye",
           disabledReason: () => (getViewerTarget() ? undefined : "뷰어에 표시된 행이 없습니다"),
           run: () => selectModeTab(mode),

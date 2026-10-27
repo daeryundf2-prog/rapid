@@ -550,7 +550,8 @@ export const NO_IRREGULAR_REASON = "이 목록에는 이 범주의 예외 항목
  * the list's rows in any of them (`unique_by_list`).
  */
 export function irregularNodeCount(target: DomainTarget, summary: IrregularSummary | undefined): DomainCount {
-  if (!summary) return { count: undefined };
+  // An older / partial payload (no category list) never breaks the tree: the count is unknown.
+  if (!summary || !Array.isArray(summary.categories)) return { count: undefined };
   const list = target.collection === "files" ? (target.fileScope ? "inventory" : "candidates") : "artifacts";
   const ids = (target.irregular ?? "").split(",").filter(Boolean);
   const count =

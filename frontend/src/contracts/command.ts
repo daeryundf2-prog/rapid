@@ -70,8 +70,8 @@ export const KEY_MAP = {
   treeEmpty: "T",
   /** Viewer in its own window (U-F2). */
   viewerPopout: "Ctrl+Shift+V",
-  /** Viewer window only: mode tabs 1–9 (원본 · 헥스 · SQLite · 이미지 · 문서 · 메일 · 미디어 · 메타 · 계열). */
-  viewerModes: "1-9",
+  /** Viewer window only: mode tabs 1–8 (원본 · 헥스 · SQLite · 이미지 · 문서 · 메일 · 미디어 · 메타; 계열 has no digit). */
+  viewerModes: "1-8",
   /** Review tags (AXIOM E3): 1–9 apply the case tag bound to the digit in 태그 관리 (1–5 default: 우선순위 n). */
   tagShortcuts: "1-9",
   /** Classic split (AXIOM E3): grid above, details below. */
