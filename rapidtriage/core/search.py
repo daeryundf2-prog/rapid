@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextvars
 import datetime as dt
 import hashlib
 import json
@@ -19,6 +20,12 @@ from .json_stream import JsonStreamError, iter_array_items
 from .search_backend import build_search_backend_contract
 from .search_budget import SearchBudget, SourceScan, resolve_scan_budget_seconds
 from .search_hits import finalize_search_hit, scan_root_of
+from .search_index.regex_guard import (
+    GuardedRegex,
+    RegexRejected,
+    RowTimeout,
+    analyze_regex,
+)
 from .textnorm import normalize_nfc, normalize_search_text
 
 IMAGE_EXTS = set(CATEGORY_RULES["images"]["extensions"])
@@ -102,6 +109,34 @@ class SearchError(ValueError):
     """Raised when unified search cannot load a completed run."""
 
 
+V1_REGEX_FLAGS = re.IGNORECASE | re.MULTILINE
+# Rows whose regex check ran past the guard's per-row time limit in this search (``regex`` mode).
+_REGEX_UNCHECKED: contextvars.ContextVar[list[int] | None] = contextvars.ContextVar("search_regex_unchecked", default=None)
+
+
+def regex_guard_problem(pattern: str) -> str | None:
+    """Korean reason why ``pattern`` cannot run as a v1 regex keyword, or ``None`` (R7 S2 review #7).
+
+    The v2 regex guard's static check (``search_index.regex_guard``): nested or overlapping
+    unbounded quantifiers (``Live(a+)+$``), back references, lookarounds with quantifiers and
+    patterns over 512 characters backtrack catastrophically and are refused. A pattern that does
+    not compile is not refused here: it matches nothing and the query validation reports it.
+    """
+    try:
+        analyze_regex(normalize_nfc(pattern), ignorecase=True)
+    except RegexRejected as exc:
+        return f"정규식 '{_shown(pattern)}': {exc.reason}"
+    except re.error:
+        return None
+    except (RecursionError, OverflowError):
+        return f"정규식 '{_shown(pattern)}': 정규식이 너무 복잡합니다(구조가 너무 깊습니다)"
+    return None
+
+
+def _shown(pattern: str) -> str:
+    return pattern if len(pattern) <= 80 else pattern[:77] + "..."
+
+
 def stable_search_sha256(payload: object) -> str:
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
@@ -155,6 +190,14 @@ def run_unified_search(
     if not normalized:
         raise SearchError("at least one keyword is required")
     normalized_search_mode = normalize_search_mode(search_mode)
+    if normalized_search_mode == "regex":
+        for pattern in normalized:
+            problem = regex_guard_problem(pattern)
+            if problem:
+                raise SearchError(problem)
+    # Counts rows whose regex check ran past the per-row limit (this request's context only).
+    regex_unchecked: list[int] = [0]
+    _REGEX_UNCHECKED.set(regex_unchecked)
     normalized_fuzzy_distance = max(0, min(int(fuzzy_distance or 0), 2))
     normalized_proximity_window = max(0, min(int(proximity_window or 0), 100))
     normalized_sources = {item.strip().lower() for item in (sources or []) if item.strip()}
@@ -343,6 +386,10 @@ def run_unified_search(
     payload["scan_budget_seconds"] = budget.seconds
     if index_error:
         payload["index_error"] = index_error
+    if regex_unchecked[0]:
+        # Never silently a non-match: rows whose regex check ran past the per-row time limit.
+        payload["regex_unchecked_rows"] = regex_unchecked[0]
+        payload["warnings"] = [f"정규식 확인이 행당 시간 한도를 넘어 {regex_unchecked[0]:,}개 행은 확인하지 못했습니다"]
     # The whole request (summary load, a failed index attempt, hit finalization), not only the scan.
     payload["elapsed_ms"] = round((time.monotonic() - request_started) * 1000, 1)
     return payload
@@ -1731,10 +1778,14 @@ def build_keyword_match_plan(
             "lower": normalize_nfc(keyword) if mode == "regex" else normalize_search_text(keyword),
         }
         if mode == "regex":
-            try:
-                entry["regex"] = re.compile(normalize_nfc(keyword), flags=re.IGNORECASE | re.MULTILINE)
-            except re.error:
-                entry["regex"] = None
+            # The v2 guard (R7 S2 review #7): static check, then bounded slices with a per-row
+            # time limit -- ``re`` cannot be interrupted, so a catastrophic pattern never runs.
+            entry["regex"] = None
+            if regex_guard_problem(keyword) is None:
+                try:
+                    entry["regex"] = GuardedRegex(re.compile(normalize_nfc(keyword), flags=V1_REGEX_FLAGS))
+                except re.error:
+                    entry["regex"] = None
         elif mode == "fuzzy":
             entry["max_distance"] = max(0, min(int(options.get("fuzzy_distance") or 1), 2))
             entry["stems"] = keyword_stems(keyword) if is_simple_word(keyword) else None
@@ -1765,7 +1816,14 @@ def match_keywords(
                 continue
             if nfc_text is None:
                 nfc_text = normalize_nfc(text)
-            if pattern.search(nfc_text):
+            try:
+                found = pattern.search(nfc_text)  # type: ignore[union-attr]
+            except RowTimeout:
+                counter = _REGEX_UNCHECKED.get()
+                if counter is not None:
+                    counter[0] += 1
+                continue
+            if found is not None:
                 matched.append(keyword)
             continue
         if mode == "fuzzy":

@@ -391,5 +391,118 @@ class BudgetPrefixTest(IsolatedEnv):
         self.assertIn("이 쪽은 비어 있습니다", page["pagination"]["stopped_reason"])  # type: ignore[index]
 
 
+class V1RegexGuardTest(IsolatedEnv):
+    """#7: v1 regex mode runs behind the v2 regex guard (static rejection + bounded per-row matching)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        candidates = [
+            {"path": f"E:\\root\\Users\\u\\Live{'a' * 30}b.txt", "name": f"Live{'a' * 30}b.txt", "extension": ".txt", "size": 1, "categories": ["documents"]},
+            {"path": "E:\\root\\Users\\u\\LiveUpdate.exe", "name": "LiveUpdate.exe", "extension": ".exe", "size": 2, "categories": ["executables"]},
+        ]
+        cls.syn = SearchRun(cls.base, candidates)
+
+    def test_catastrophic_pattern_is_refused_in_korean(self) -> None:
+        import time
+
+        from rapidtriage.core.search import SearchError, regex_guard_problem
+
+        started = time.monotonic()
+        with self.assertRaises(SearchError) as caught:
+            self.syn.v1_payload(["Live(a+)+$"], search_mode="regex", scan_budget_seconds=1.0)
+        self.assertLess(time.monotonic() - started, 1.0)
+        self.assertIn("정규식이 너무 복잡합니다", str(caught.exception))
+        self.assertIsNotNone(regex_guard_problem("(\\w+)*x"))
+        self.assertIsNone(regex_guard_problem("Live.*Update"))
+
+    def test_guarded_patterns_still_match(self) -> None:
+        payload = self.syn.v1_payload(["Live(a|b)+\\.txt"], search_mode="regex")
+        self.assertEqual([hit["title"] for hit in payload["matches"]], [f"Live{'a' * 30}b.txt"])
+        self.assertEqual(len(self.syn.v1_hits(["liveupdate\\.exe"], search_mode="regex")), 1)  # case-insensitive like before
+
+    def test_row_over_the_time_limit_is_reported_not_dropped(self) -> None:
+        from unittest import mock
+
+        from rapidtriage.core.search_index.regex_guard import GuardedRegex, RowTimeout
+
+        def slow(_self: object, _text: str) -> None:
+            raise RowTimeout()
+
+        with mock.patch.object(GuardedRegex, "search", slow):
+            payload = self.syn.v1_payload(["Live.*Update"], search_mode="regex")
+        self.assertEqual(payload["matches"], [])
+        self.assertEqual(payload["regex_unchecked_rows"], 2)
+        self.assertIn("행당 시간 한도", payload["warnings"][0])
+
+
+try:
+    from fastapi.testclient import TestClient
+
+    from rapidtriage.api.app import create_app
+    from rapidtriage.api.app.analyses import ANALYSIS_RUNNER, TERMINAL_STATUSES
+    from rapidtriage.api.app.search_index_service import AUTO_INDEX_ENV, SEARCH_HISTORY
+
+    HAS_FASTAPI = True
+except ImportError:  # pragma: no cover
+    HAS_FASTAPI = False
+
+TOKEN = "r7-s2-review-token"
+
+
+@unittest.skipUnless(HAS_FASTAPI, "fastapi is required for API tests")
+class ReviewApiTests(unittest.TestCase):
+    """The HTTP side of #7 (v1 regex 422) and #11 (server-side numbering, offset bound)."""
+
+    def setUp(self) -> None:
+        from unittest import mock
+
+        from rapidtriage.core.jobs import RunJobStore
+        from rapidtriage.core.search_index.hashsets import DATA_DIR_ENV
+        from tests.search_index_fixture import build_fixture_run
+
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(SEARCH_HISTORY.flush)
+        base = Path(self.temp.name)
+        env = mock.patch.dict(os.environ, {DATA_DIR_ENV: str(base / "data"), AUTO_INDEX_ENV: "0"})
+        env.start()
+        self.addCleanup(env.stop)
+        fixture = build_fixture_run(base)
+        self.store = RunJobStore()
+        self.run_id = self.store.import_completed_run(Path(fixture["run_dir"])).run_id
+        self.app = create_app(self.store, auth_token=TOKEN)
+        self.client = TestClient(self.app, headers={"X-RapidTriage-Token": TOKEN})
+        self.addCleanup(lambda: ANALYSIS_RUNNER.shutdown(owner=self.app.state.analysis_owner))
+
+    def url(self, suffix: str) -> str:
+        return f"/api/runs/{self.run_id}{suffix}"
+
+    def build_index(self) -> None:
+        import time
+
+        response = self.client.post(self.url("/search/index/build"), json={"mode": "full"})
+        self.assertEqual(response.status_code, 202, response.text)
+        analysis_id = response.json()["analysis_id"]
+        deadline = time.monotonic() + 300
+        while time.monotonic() < deadline:
+            state = self.client.get(self.url(f"/analyses/{analysis_id}")).json()
+            if state["status"] in TERMINAL_STATUSES:
+                self.assertEqual(state["status"], "completed", state)
+                return
+            time.sleep(0.1)
+        self.fail("index build did not finish")
+
+    def test_v1_regex_guard_is_a_korean_422(self) -> None:
+        for pattern in ("Live(a+)+$", "Any(\\w+)*Desk", "Any(.*)(.*)(.*)=Desk"):
+            with self.subTest(pattern=pattern):
+                response = self.client.get(self.url("/search"), params={"keyword": pattern, "search_mode": "regex"})
+                self.assertEqual(response.status_code, 422, response.text)
+                self.assertIn("정규식", response.json()["detail"])
+        ok = self.client.get(self.url("/search"), params={"keyword": "Any.*Desk", "search_mode": "regex"})
+        self.assertEqual(ok.status_code, 200, ok.text)
+        self.assertTrue(ok.json()["matches"])
+
+
 if __name__ == "__main__":
     unittest.main()
