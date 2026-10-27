@@ -3,8 +3,8 @@ registry (``ai_agents/base.py`` :func:`register_adapter`)."""
 
 from __future__ import annotations
 
-from . import claude_code
+from . import claude_code, codex
 
-ADAPTER_MODULES = (claude_code,)
+ADAPTER_MODULES = (claude_code, codex)
 
 __all__ = ["ADAPTER_MODULES"]
