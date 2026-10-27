@@ -5,6 +5,7 @@ import json
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
+from .ai_catalog.catalog import keyword_terms as ai_catalog_keyword_terms
 from .forensic_accuracy import build_accuracy_gate
 
 BUILTIN_KEYWORD_PACKS: dict[str, list[str]] = {
@@ -55,6 +56,9 @@ BUILTIN_KEYWORD_PACKS: dict[str, list[str]] = {
         "assistant",
         "conversation",
     ],
+    # R7 stage 3.5: generated from the AI tool catalog — product names, one main domain per
+    # product, gateway hosts and API key *prefixes* (prefix strings only, never key values).
+    "ai-tools": list(ai_catalog_keyword_terms()),
     "windows-ir": [
         "4624",
         "4625",

@@ -1,0 +1,1224 @@
+[
+  {
+    "id": "omo",
+    "name": "OmO (oh-my-opencode / oh-my-openagent)",
+    "category": "harness",
+    "wraps": "OpenCode (legacy plugin); current OmO README says it runs on 'senpi', a fork of pi (badlogic/pi-mono), native binary 'omo' / npm 'omo-ai'",
+    "aliases": [
+      "oh-my-opencode",
+      "oh-my-openagent",
+      "omo-ai"
+    ],
+    "paths": {
+      "windows": [
+        "%APPDATA%\\opencode\\oh-my-opencode.jsonc (legacy OpenCode-plugin user config, third-party mirror docs)",
+        "~/.omo/omo.jsonc (current OmO user config; OS-specific resolution not stated)",
+        "~/.local/bin/omo (binary; PowerShell installer said to do the same)"
+      ],
+      "macos": [
+        "~/.config/opencode/oh-my-opencode.json[c] (legacy)",
+        "~/.omo/omo.jsonc",
+        "~/.local/bin/omo"
+      ],
+      "linux": [
+        "~/.config/opencode/oh-my-opencode.json[c] (legacy)",
+        "~/.omo/omo.jsonc",
+        "~/.local/bin/omo"
+      ],
+      "project": [
+        ".omo/omo.jsonc (closest file wins)",
+        ".opencode/oh-my-opencode.json (legacy project config)"
+      ]
+    },
+    "formats": [
+      "JSONC config",
+      "memory = markdown files in a git repository (location not stated)"
+    ],
+    "retention": "unknown",
+    "env_vars": "none documented on README",
+    "install_artifacts": [
+      "omo binary in ~/.local/bin",
+      "global npm/bun package omo-ai",
+      "OpenCode plugin entry in opencode.json (legacy; unverified)"
+    ],
+    "gaps": "Log, session, transcript, and memory-repo paths not documented in README; /bug report bundles engine log + transcript but local location unknown.",
+    "claims": [
+      {
+        "claim": "~/.omo/omo.jsonc user config, .omo/omo.jsonc project config, binary in ~/.local/bin",
+        "confidence": "official-doc",
+        "source": "https://raw.githubusercontent.com/code-yeongyu/oh-my-opencode/dev/README.md"
+      },
+      {
+        "claim": "Legacy config ~/.config/opencode/oh-my-opencode.json(c), Windows %APPDATA%\\opencode\\oh-my-opencode.jsonc, project .opencode/oh-my-opencode.json",
+        "confidence": "third-party",
+        "source": "https://gitea.gravitywell.xyz/sapient/oh-my-openagent/src/tag/v3.8.4/docs/reference/configuration.md (via search summary; mirror)"
+      }
+    ],
+    "local_verification": {
+      "source": "schema/structure probe on this PC, 2026-10-27 (names, counts, column/key names only; content, emails, account ids and credentials not recorded)",
+      "confidence": "verified-on-test-pc",
+      "root": "~/.omo (NOT the OS temp folder on this version); %LOCALAPPDATA%\\oh-my-opencode\\bin is empty",
+      "layout": {
+        "~/.omo/omo.jsonc (+ timestamped .bak files)": "config with backups; ~/.omo/install.json",
+        "~/.omo/migration-backup-<timestamp>-opencode-config/": "backup of the earlier OpenCode-based config made during migration (shows tool lineage)",
+        "~/.omo/agent/": "agent home: sessions/<cwd-slug>/<timestamp>_<uuid>.jsonl, projects/<slug>/, logs/{session.log,config-reload.log,compaction.log,mcp/}, cache/{mcp-cache.json,help-flags.json,...}, bin/{fd.exe,rg.exe}, extensions/, omo-senpi/{omo-native,posthog}, process-crashes/, settings.json, models-store.json, auth.json(sensitive), migrations-state.json",
+        "~/.omo/binary-runtime/<version>/": "bundled runtime (omo.exe, claude-code-pin.json) - version 5.1.28 seen",
+        "~/.omo/memory/agents/<id>/ and transient-runs/": "agent memory folders",
+        "~/.omo/ulw-loop/<run>/{brief.md,goals.json,ledger.jsonl}": "long-running 'ulw' loop runs: goals.json keys (activeGoalId, codexGoalMode, codexObjective, goals[].{id,objective,status,successCriteria,startedAt}), ledger.jsonl keys (at, goalId, kind, message, status); evidence/ subfolder holds outputs",
+        "~/.omo/codegraph/session-start.jsonl": "keys: action, exitCode, projectRoot, source, timedOut, timestamp",
+        "~/.omo/lsp-daemon/": "sweep stamps, daemon.auth(sensitive), daemon.log"
+      },
+      "session_jsonl_keys": "agent/sessions/**/<timestamp>_<uuid>.jsonl (4 files on this PC): customType, cwd, display, id, content, details.{currentDate,cwd}, data.{sessionId,boundAt,repoPathHash,turnKey,...}, message.{api,content[]...} - a Pi-style session log with typed entries",
+      "forensic_notes": [
+        "Session folder names are slugs of the working directory path -> reveals which project folders were worked on without opening content",
+        "ulw-loop ledger.jsonl gives a timestamped narrative of autonomous work (goal start/finish)",
+        "Do not assume the temp-folder log from older docs: collect ~/.omo and the temp path both"
+      ]
+    }
+  },
+  {
+    "id": "ecc",
+    "name": "Everything Claude Code (ECC)",
+    "category": "harness",
+    "wraps": "Claude Code (also Cursor, Codex, OpenCode, Copilot, Kimi, Zed, Gemini, Qoder install targets)",
+    "aliases": [
+      "everything-claude-code",
+      "affaan-m/everything-claude-code"
+    ],
+    "paths": {
+      "windows": [
+        "%USERPROFILE%\\.claude\\{rules\\ecc,skills,agents,commands,settings.json,package-manager.json}",
+        "%USERPROFILE%\\.ecc\\memory\\",
+        "%USERPROFILE%\\.claude\\session-data\\ (default ECC_AGENT_DATA_HOME=~/.claude; Windows resolution assumed)"
+      ],
+      "macos": [
+        "~/.claude/rules/ecc/",
+        "~/.claude/session-data/",
+        "~/.claude/skills/learned/",
+        "~/.claude/session-aliases.json",
+        "~/.claude/metrics/",
+        "~/.local/share/ecc-homunculus (instincts)",
+        "~/.ecc/memory/"
+      ],
+      "linux": [
+        "same as macOS"
+      ],
+      "project": [
+        ".claude/rules/ecc/",
+        ".claude/package-manager.json",
+        ".ecc/memory/ (project/team memory; fail-closed .gitignore)",
+        ".cursor/agents/ecc-*.md, .cursor/hooks.json, .cursor/rules/ecc-agent-data-home.mdc, .cursor/ecc-agent-data.json",
+        ".github/ecc-install-state.json",
+        ".codex/config.toml, .codex/agents/, .agents/skills/",
+        ".opencode/opencode.json",
+        ".kimi-code/, .zed/, .qoder-plugin/"
+      ],
+      "other": [
+        "~/.claude/bin/codeagent-wrapper and ~/.claude/.ccg/prompts/* (ccg-workflow runtime for multi-* commands)"
+      ]
+    },
+    "formats": [
+      "SKILL.md with YAML frontmatter",
+      "agent md with frontmatter",
+      "ecc.memory.v1 markdown documents",
+      "Cursor .mdc rules",
+      "JSON: settings.json, hooks.json, session-aliases.json, ecc-install-state.json",
+      "TOML for Codex config"
+    ],
+    "retention": "session-tmp 30 days default (ECC_SESSION_RETENTION_DAYS; 0/off/never disables); expired pending instincts pruned by /prune (period unstated); memory retention unstated",
+    "env_vars": "ECC_AGENT_DATA_HOME (default ~/.claude), CLV2_HOMUNCULUS_DIR (default ~/.local/share/ecc-homunculus), ECC_SESSION_RETENTION_DAYS, ECC_HOOK_PROFILE, ECC_DISABLED_HOOKS, ECC_SESSION_START_MAX_CHARS, ECC_SESSION_START_CONTEXT, ECC_MAX_INJECTED_INSTINCTS, ECC_INSTINCT_CONFIDENCE_THRESHOLD, ECC_DISABLED_MCPS, ECC_MEMORY_HARNESS, ECC_MEMORY_ALLOW_USER_SCOPE, CLAUDE_PACKAGE_MANAGER",
+    "install_artifacts": [
+      "hook entries registered in ~/.claude/settings.json",
+      "rules/ecc/ dir",
+      "ecc-install-state.json"
+    ],
+    "gaps": "README truncated after 100k chars; exact session-data file naming and instinct file format not read.",
+    "claims": [
+      {
+        "claim": "All paths, env vars, 30-day retention listed above",
+        "confidence": "third-party (project's own README)",
+        "source": "https://raw.githubusercontent.com/affaan-m/everything-claude-code/main/README.md"
+      }
+    ]
+  },
+  {
+    "id": "hermes-agent",
+    "name": "Hermes Agent (Nous Research)",
+    "category": "standalone-agent-harness",
+    "wraps": "LLM providers (Nous Portal, OpenRouter, etc.); self-improving agent with gateway, skills, memory",
+    "aliases": [
+      "hermes"
+    ],
+    "paths": {
+      "windows": [
+        "%LOCALAPPDATA%\\hermes\\ (data dir, Windows source install)",
+        "%LOCALAPPDATA%\\hermes\\bin\\ (launcher)",
+        "%LOCALAPPDATA%\\hermes\\hermes-agent\\ (code)"
+      ],
+      "macos": [
+        "~/.hermes/",
+        "~/.local/bin/hermes",
+        "~/.hermes/hermes-agent/"
+      ],
+      "linux": [
+        "~/.hermes/",
+        "~/.local/bin/hermes",
+        "~/.hermes/hermes-agent/",
+        "Docker: /opt/data/ mounted volume"
+      ],
+      "layout_under_HERMES_HOME": [
+        "config.yaml",
+        ".env (secrets)",
+        "auth.json (OAuth creds)",
+        "SOUL.md",
+        "memories/MEMORY.md, memories/USER.md",
+        "skills/",
+        "cron/",
+        "sessions/",
+        "logs/errors.log, logs/gateway.log (secrets redacted)",
+        "state.db (SQLite: sessions, messages, gateway routing)"
+      ]
+    },
+    "formats": [
+      "YAML config",
+      "dotenv",
+      "JSON auth",
+      "Markdown memory/skills",
+      "SQLite state.db"
+    ],
+    "retention": "unknown",
+    "env_vars": "HERMES_HOME (relocates user data; symlinked HERMES_HOME and subdirs hooks, skills, sessions, logs supported); Windows installer params -HermesHome, -InstallDir",
+    "install_artifacts": [
+      "PowerShell installer iex (irm .../install.ps1)",
+      "launcher bin dir",
+      "hermes-agent source checkout"
+    ],
+    "gaps": "Config page was 279k chars; only first 100k read. hooks dir mentioned in install doc but layout unconfirmed. Desktop bundle path is 'platform default' only.",
+    "claims": [
+      {
+        "claim": "Install layout table: data dirs per install method, HERMES_HOME",
+        "confidence": "official-doc",
+        "source": "https://hermes-agent.nousresearch.com/docs/getting-started/installation"
+      },
+      {
+        "claim": "~/.hermes directory tree and state.db",
+        "confidence": "official-doc",
+        "source": "https://hermes-agent.nousresearch.com/docs/user-guide/configuration"
+      }
+    ]
+  },
+  {
+    "id": "openclaw",
+    "name": "OpenClaw (formerly Clawdbot / Moltbot)",
+    "category": "standalone-agent-gateway",
+    "wraps": "Messaging-channel personal agent gateway over LLM providers",
+    "aliases": [
+      "clawdbot",
+      "moltbot"
+    ],
+    "paths": {
+      "windows": [
+        "%USERPROFILE%\\.openclaw\\ (default state dir; OPENCLAW_HOME > HOME > USERPROFILE)"
+      ],
+      "macos": [
+        "~/.openclaw/"
+      ],
+      "linux": [
+        "~/.openclaw/"
+      ],
+      "layout": [
+        "~/.openclaw/openclaw.json (JSON5 config; .bak ring and <path>.rejected.<timestamp> on bad writes)",
+        "~/.openclaw/.env (global env; $OPENCLAW_STATE_DIR/.env)",
+        "~/.openclaw/workspace/ (AGENTS.md, SOUL.md, USER.md, IDENTITY.md, MEMORY.md, memory/YYYY-MM-DD.md, BOOT.md, BOOTSTRAP.md, skills/)",
+        "~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite (current session rows/transcripts and per-agent auth profiles)",
+        "~/.openclaw/agents/<agentId>/sessions/ (legacy migration sources, archives)",
+        "~/.openclaw/credentials/ (channel/provider state, legacy OAuth import)",
+        "~/.openclaw/skills/ (managed skills)",
+        "~/.openclaw-<profile>/ when OPENCLAW_PROFILE set"
+      ]
+    },
+    "formats": [
+      "JSON5 config",
+      "Markdown workspace/memory files",
+      "SQLite agent db (current)",
+      "JSONL sessions in older layout (unverified)"
+    ],
+    "retention": "unknown; daily memory notes accumulate per day",
+    "env_vars": "OPENCLAW_HOME, OPENCLAW_STATE_DIR, OPENCLAW_CONFIG_PATH, OPENCLAW_PROFILE, OPENCLAW_WORKSPACE_DIR, OPENCLAW_LOG_LEVEL; legacy CLAWDBOT_*/MOLTBOT_* prefixes are ignored",
+    "install_artifacts": [
+      "openclaw CLI",
+      "native Gateway OS service"
+    ],
+    "gaps": "Log file location not documented in fetched pages (/tmp/openclaw unverified). Legacy ~/.clawdbot and ~/.moltbot directories not documented.",
+    "claims": [
+      {
+        "claim": "workspace files, sessions sqlite, credentials, skills paths",
+        "confidence": "official-doc",
+        "source": "https://docs.openclaw.ai/concepts/agent-workspace"
+      },
+      {
+        "claim": "env var semantics and defaults",
+        "confidence": "official-doc",
+        "source": "https://docs.openclaw.ai/help/environment"
+      },
+      {
+        "claim": "config path and rejected/.bak files",
+        "confidence": "official-doc",
+        "source": "https://docs.openclaw.ai/gateway/configuration"
+      }
+    ]
+  },
+  {
+    "id": "gstack",
+    "name": "gstack (Garry Tan)",
+    "category": "harness",
+    "wraps": "Claude Code skills pack; also Codex, OpenCode, Cursor, Factory Droid, Kiro, Copilot CLI, Antigravity",
+    "aliases": [],
+    "paths": {
+      "windows": [
+        "unknown (Windows form of ~/.claude/skills/gstack not stated)"
+      ],
+      "macos": [
+        "~/.claude/skills/gstack (git clone)",
+        "~/.claude/skills/gstack/bin/gstack-team-init, gstack-doctor",
+        "~/.codex/skills/gstack-*/ (${CODEX_HOME:-~/.codex})",
+        "~/.config/opencode/skills/gstack-*/",
+        "~/.cursor/skills/gstack-*/",
+        "~/.factory/skills/gstack-*/",
+        "~/.kiro/skills/gstack-*/",
+        "~/.copilot/skills/gstack-*/",
+        "~/.gemini/antigravity-cli/skills/gstack-*/",
+        "~/gstack (alternate clone for other hosts)"
+      ],
+      "linux": [
+        "same as macOS"
+      ],
+      "project": [
+        ".claude/ and CLAUDE.md section committed in team mode"
+      ],
+      "state": [
+        "$GSTACK_STATE_ROOT/projects/$SLUG/specs/ (/spec archives); default of GSTACK_STATE_ROOT not stated"
+      ]
+    },
+    "formats": [
+      "Markdown skills",
+      "gstack-config keys (update_channel, update_check, codex_reviews)",
+      "Mermaid/excalidraw/SVG/PDF outputs"
+    ],
+    "retention": "unknown",
+    "env_vars": "GSTACK_STATE_ROOT, CODEX_HOME, GSTACK_CHROMIUM_NO_SANDBOX, GSTACK_STRICT_BUILD",
+    "install_artifacts": [
+      "./setup script",
+      "gstack-* skill folders per host",
+      "CLAUDE.md gstack section"
+    ],
+    "gaps": "~/.gstack state dir, browse daemon files, logs not confirmed (BROWSER.md/ARCHITECTURE.md not read).",
+    "claims": [
+      {
+        "claim": "install and host skill dirs, env vars",
+        "confidence": "third-party (project README)",
+        "source": "https://raw.githubusercontent.com/garrytan/gstack/main/README.md"
+      }
+    ]
+  },
+  {
+    "id": "superpowers",
+    "name": "Superpowers (obra)",
+    "category": "harness",
+    "wraps": "Claude Code plugin (also OpenCode, Kimi Code, Pi, Muse)",
+    "aliases": [],
+    "paths": {
+      "windows": [
+        "unknown"
+      ],
+      "macos": [
+        "unknown (plugin lives under ~/.claude/plugins/ per Claude Code generic mechanism)"
+      ],
+      "linux": [
+        "unknown"
+      ],
+      "project": [
+        "unverified recollection: docs/superpowers/specs and plans, .worktrees/ for git worktree isolation"
+      ]
+    },
+    "formats": [
+      "SKILL.md skills",
+      "markdown specs/plans"
+    ],
+    "retention": "unknown",
+    "env_vars": "SUPERPOWERS_DISABLE_TELEMETRY, DISABLE_TELEMETRY, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+    "install_artifacts": [
+      "Claude Code plugin cache in ~/.claude/plugins/ (generic mechanism)"
+    ],
+    "gaps": "README gives no install paths or spec/plan dirs.",
+    "claims": [
+      {
+        "claim": "telemetry env vars only",
+        "confidence": "third-party (project README)",
+        "source": "https://raw.githubusercontent.com/obra/superpowers/main/README.md"
+      },
+      {
+        "claim": "plugins stored under ~/.claude/plugins with installed_plugins.json",
+        "confidence": "official-doc",
+        "source": "https://code.claude.com/docs/en/claude-directory"
+      }
+    ]
+  },
+  {
+    "id": "claude-mem",
+    "name": "claude-mem (thedotmack)",
+    "category": "memory-plugin",
+    "wraps": "Claude Code plugin (hooks + worker + MCP); also other harnesses",
+    "aliases": [],
+    "paths": {
+      "windows": [
+        "%USERPROFILE%\\.claude-mem\\ (data dir; ~ resolution assumed)",
+        "%LOCALAPPDATA%\\claude-mem\\bin\\claude-mem.exe (launcher)"
+      ],
+      "macos": [
+        "~/.claude-mem/",
+        "~/.claude-mem/settings.json",
+        "~/.claude-mem/claude-mem.db",
+        "~/.claude-mem/logs/worker-out.log, worker-error.log",
+        "~/.claude-mem/worker.pid",
+        "~/.claude/plugins/marketplaces/thedotmack/plugin/modes/"
+      ],
+      "linux": [
+        "same as macOS"
+      ],
+      "other": [
+        "Chroma vector store dir derived from data root (name not stated)"
+      ]
+    },
+    "formats": [
+      "SQLite claude-mem.db (tool_uses, observations)",
+      "JSON settings",
+      "Chroma vector store",
+      "text logs"
+    ],
+    "retention": "CLAUDE_MEM_TOOL_USES_RETENTION_DAYS default 0 = keep forever; positive value prunes tool_uses linked to observations at worker start",
+    "env_vars": "CLAUDE_MEM_DATA_DIR, CLAUDE_MEM_WORKER_PORT (default 37700 + uid%100), CLAUDE_MEM_WORKER_HOST (127.0.0.1), CLAUDE_MEM_LOG_LEVEL, CLAUDE_MEM_PROVIDER, CLAUDE_MEM_MODE, CLAUDE_MEM_IDLE_EXIT_SEC, CLAUDE_MEM_CHROMA_UVX_PATH, CLAUDE_MEM_SESSION_START_INCLUDE_ALL_SOURCES, CLAUDE_MEM_ONLINE_OPTIN",
+    "install_artifacts": [
+      "plugin under ~/.claude/plugins/marketplaces/thedotmack/",
+      "local worker process on loopback port",
+      "chroma-mcp via uvx"
+    ],
+    "gaps": "Chroma dir name unknown. Content inside <private> tags is excluded from storage.",
+    "claims": [
+      {
+        "claim": "data dir, db name, logs, retention, port",
+        "confidence": "third-party (project docs)",
+        "source": "https://raw.githubusercontent.com/thedotmack/claude-mem/main/docs/public/configuration.mdx"
+      },
+      {
+        "claim": "settings.json, modes dir, Windows launcher",
+        "confidence": "third-party (project README)",
+        "source": "https://raw.githubusercontent.com/thedotmack/claude-mem/main/README.md"
+      }
+    ]
+  },
+  {
+    "id": "superclaude",
+    "name": "SuperClaude Framework",
+    "category": "harness",
+    "wraps": "Claude Code (slash commands /sc:*, MCP installer)",
+    "aliases": [
+      "SuperClaude_Framework"
+    ],
+    "paths": {
+      "windows": [
+        "unknown"
+      ],
+      "macos": [
+        "unknown"
+      ],
+      "linux": [
+        "unknown"
+      ],
+      "project": [
+        "PLANNING.md, TASK.md, KNOWLEDGE.md (repo-root docs referenced)"
+      ]
+    },
+    "formats": [
+      "markdown commands"
+    ],
+    "retention": "unknown",
+    "env_vars": "none documented",
+    "install_artifacts": [
+      "install.sh / 'superclaude mcp' CLI",
+      "slash commands /sc:*",
+      "unverified recollection: ~/.claude/commands/sc/, ~/.claude/superclaude/"
+    ],
+    "gaps": "README v4.3.0 names no install dirs; Serena memory path unspecified.",
+    "claims": [
+      {
+        "claim": "no paths in README; superclaude mcp CLI",
+        "confidence": "third-party (project README)",
+        "source": "https://raw.githubusercontent.com/SuperClaude-Org/SuperClaude_Framework/master/README.md"
+      }
+    ]
+  },
+  {
+    "id": "claude-flow-ruflo",
+    "name": "claude-flow / ruflo (ruvnet)",
+    "category": "orchestration",
+    "wraps": "Claude Code (also Grok Build); swarm/hooks/AgentDB memory",
+    "aliases": [
+      "claude-flow",
+      "ruflo"
+    ],
+    "paths": {
+      "windows": [
+        "unknown"
+      ],
+      "macos": [
+        "unknown"
+      ],
+      "linux": [
+        "unknown"
+      ],
+      "project": [
+        ".claude-flow/ (CLI install)",
+        ".claude/ and CLAUDE.md (CLI install)",
+        ".mcp.json (shipped by ruflo-core plugin)",
+        ".grok/ (npx ruflo init --grok)",
+        "unverified recollection: .swarm/memory.db, .hive-mind/, claude-flow.config.json"
+      ]
+    },
+    "formats": [
+      "HNSW-indexed AgentDB (storage format not named; SQLite unverified)",
+      "JSON"
+    ],
+    "retention": "unknown",
+    "env_vars": "unknown",
+    "install_artifacts": [
+      "npx ruflo init creates .claude-flow/, .claude/, CLAUDE.md, helpers, hooks (CLI path); plugin path creates none"
+    ],
+    "gaps": "Memory DB path/format unconfirmed.",
+    "claims": [
+      {
+        "claim": "project dirs created by CLI install",
+        "confidence": "third-party (project README)",
+        "source": "https://raw.githubusercontent.com/ruvnet/claude-flow/main/README.md"
+      }
+    ]
+  },
+  {
+    "id": "bmad-method",
+    "name": "BMAD-METHOD",
+    "category": "methodology-framework",
+    "wraps": "Any IDE agent (Claude Code, Cursor, Copilot, etc.) via installed agent/command files",
+    "aliases": [
+      "BMAD",
+      "bmad-code-org"
+    ],
+    "paths": {
+      "windows": [
+        "unknown"
+      ],
+      "macos": [
+        "unknown"
+      ],
+      "linux": [
+        "unknown"
+      ],
+      "project": [
+        "unverified recollection: _bmad/ (v6) or .bmad-core/ (v4), docs/stories, IDE command dirs"
+      ]
+    },
+    "formats": [
+      "markdown/YAML agents and workflows"
+    ],
+    "retention": "unknown",
+    "env_vars": "unknown",
+    "install_artifacts": [
+      "installer via npx and plugin marketplace command per README (details unverified)"
+    ],
+    "gaps": "README contains no directory layout; all paths unverified.",
+    "claims": [
+      {
+        "claim": "README has no install layout",
+        "confidence": "third-party (project README)",
+        "source": "https://raw.githubusercontent.com/bmad-code-org/BMAD-METHOD/main/README.md"
+      }
+    ]
+  },
+  {
+    "id": "spec-kit",
+    "name": "GitHub Spec Kit",
+    "category": "methodology-framework",
+    "wraps": "Many agents (Claude Code, Copilot, Cursor, Gemini, Codex...) via specify CLI",
+    "aliases": [
+      "specify-cli"
+    ],
+    "paths": {
+      "windows": [
+        "unknown"
+      ],
+      "macos": [
+        "unknown"
+      ],
+      "linux": [
+        "unknown"
+      ],
+      "project": [
+        ".specify/bugs/<slug>/",
+        ".specify/assessments/<slug>/decision.md",
+        "unverified recollection: .specify/, specs/NNN-feature/, memory/constitution.md, agent command dirs (.claude/commands, .github/prompts)"
+      ]
+    },
+    "formats": [
+      "markdown",
+      "slash skills /speckit-*"
+    ],
+    "retention": "unknown",
+    "env_vars": "none in README (SPECIFY_FEATURE unverified)",
+    "install_artifacts": [
+      "uv tool install specify-cli",
+      "specify init <name> --integration <key>"
+    ],
+    "gaps": "Core specs/constitution layout not in current README.",
+    "claims": [
+      {
+        "claim": ".specify/bugs and assessments dirs",
+        "confidence": "official-doc",
+        "source": "https://raw.githubusercontent.com/github/spec-kit/main/README.md"
+      }
+    ]
+  },
+  {
+    "id": "taskmaster",
+    "name": "Taskmaster AI (claude-task-master)",
+    "category": "task-management-mcp",
+    "wraps": "Cursor/Windsurf/VS Code/Claude Code via MCP server",
+    "aliases": [
+      "task-master-ai"
+    ],
+    "paths": {
+      "windows": [
+        "%USERPROFILE%\\.cursor\\mcp.json",
+        "%USERPROFILE%\\.codeium\\windsurf\\mcp_config.json"
+      ],
+      "macos": [
+        "~/.cursor/mcp.json",
+        "~/.codeium/windsurf/mcp_config.json",
+        "~/.aws/amazonq/mcp.json"
+      ],
+      "linux": [
+        "same as macOS"
+      ],
+      "project": [
+        ".taskmaster/docs/prd.txt",
+        "scripts/prd.txt (existing projects)",
+        ".taskmaster/templates/example_prd.txt",
+        ".cursor/mcp.json",
+        ".vscode/mcp.json",
+        ".env (API keys)",
+        "unverified recollection: .taskmaster/tasks/tasks.json, .taskmaster/config.json, .taskmaster/state.json"
+      ]
+    },
+    "formats": [
+      "JSON tasks",
+      "txt PRD"
+    ],
+    "retention": "unknown",
+    "env_vars": "TASK_MASTER_TOOLS, ANTHROPIC_API_KEY, PERPLEXITY_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY, MISTRAL_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY, XAI_API_KEY, AZURE_OPENAI_API_KEY, OLLAMA_API_KEY",
+    "install_artifacts": [
+      "npm package task-master-ai",
+      "MCP entry in editor config"
+    ],
+    "gaps": "tasks.json/config.json not in README.",
+    "claims": [
+      {
+        "claim": "MCP config locations table, prd paths, env vars",
+        "confidence": "third-party (project README)",
+        "source": "https://raw.githubusercontent.com/eyaltoledano/claude-task-master/main/README.md"
+      }
+    ]
+  },
+  {
+    "id": "ccpm",
+    "name": "CCPM (Claude Code PM, automazeio)",
+    "category": "project-management-harness",
+    "wraps": "Claude Code (also Factory Droid); GitHub Issues sync; parallel worktrees",
+    "aliases": [
+      "ccpm"
+    ],
+    "paths": {
+      "windows": [
+        "unknown"
+      ],
+      "macos": [
+        "~/.factory/skills/ccpm (Factory symlink)"
+      ],
+      "linux": [
+        "~/.factory/skills/ccpm"
+      ],
+      "project": [
+        ".claude/prds/<name>.md",
+        ".claude/epics/<feature>/epic.md",
+        ".claude/epics/<feature>/<N>.md",
+        ".claude/epics/<feature>/<N>-analysis.md",
+        ".claude/epics/<feature>/updates/",
+        ".claude/skills/ccpm (symlink)",
+        "../epic-<name>/ (git worktree)",
+        "legacy v1 branch: .claude/commands/pm (path unverified)"
+      ]
+    },
+    "formats": [
+      "markdown with frontmatter (depends_on, parallel, conflicts_with)",
+      "bash scripts",
+      "commit msgs 'Issue #N: ...'"
+    ],
+    "retention": "unknown",
+    "env_vars": "none documented",
+    "install_artifacts": [
+      "skill/ccpm SKILL.md"
+    ],
+    "gaps": "sync mapping file path unknown.",
+    "claims": [
+      {
+        "claim": "epic/prd path layout",
+        "confidence": "third-party (project README)",
+        "source": "https://raw.githubusercontent.com/automazeio/ccpm/main/README.md"
+      }
+    ]
+  },
+  {
+    "id": "claude-squad",
+    "name": "Claude Squad",
+    "category": "worktree-parallel-runner",
+    "wraps": "Claude Code, Codex, Gemini, Aider etc. in tmux sessions with git worktrees",
+    "aliases": [
+      "cs"
+    ],
+    "paths": {
+      "windows": [
+        "unknown (tmux-based; likely WSL)"
+      ],
+      "macos": [
+        "~/.claude-squad/config.json (run 'cs debug' for exact path)",
+        "~/.local/bin/cs"
+      ],
+      "linux": [
+        "~/.claude-squad/config.json",
+        "~/.local/bin/cs"
+      ],
+      "project": [
+        "unverified recollection: worktrees under ~/.claude-squad/worktrees, state.json"
+      ]
+    },
+    "formats": [
+      "JSON config: default_program, profiles[{name,program}]"
+    ],
+    "retention": "unknown; 'cs reset' clears state",
+    "env_vars": "OPENAI_API_KEY (Codex) only",
+    "install_artifacts": [
+      "cs binary",
+      "tmux sessions",
+      "git worktrees/branches"
+    ],
+    "gaps": "worktree, state, log locations not specified in README.",
+    "claims": [
+      {
+        "claim": "config.json path and schema",
+        "confidence": "third-party (project README)",
+        "source": "https://raw.githubusercontent.com/smtg-ai/claude-squad/main/README.md"
+      }
+    ]
+  },
+  {
+    "id": "conductor",
+    "name": "Conductor (conductor.build)",
+    "category": "worktree-parallel-runner",
+    "wraps": "Claude Code and Codex in isolated git worktrees (macOS app)",
+    "aliases": [],
+    "paths": {
+      "windows": [
+        "unknown"
+      ],
+      "macos": [
+        "unverified recollection: ~/Library/Application Support/com.conductor.app/, ~/conductor/workspaces/<repo>/<name>"
+      ],
+      "linux": [
+        "unknown"
+      ]
+    },
+    "formats": [
+      "unknown"
+    ],
+    "retention": "unknown",
+    "env_vars": "unknown",
+    "install_artifacts": [
+      "conductor.json in repo (unverified)"
+    ],
+    "gaps": "Not researched; all unverified.",
+    "claims": [
+      {
+        "claim": "not fetched",
+        "confidence": "unverified",
+        "source": "none"
+      }
+    ]
+  },
+  {
+    "id": "vibe-kanban",
+    "name": "Vibe Kanban (BloopAI)",
+    "category": "worktree-parallel-runner",
+    "wraps": "Claude Code, Codex, Gemini CLI, Amp etc. via kanban UI + git worktrees",
+    "aliases": [],
+    "paths": {
+      "windows": [
+        "unknown"
+      ],
+      "macos": [
+        "unknown"
+      ],
+      "linux": [
+        "unknown"
+      ]
+    },
+    "formats": [
+      "SQLite (dev_assets_seed copies a blank DB)"
+    ],
+    "retention": "unknown",
+    "env_vars": "PORT, HOST (127.0.0.1), BACKEND_PORT, FRONTEND_PORT, MCP_HOST, MCP_PORT, VK_ALLOWED_ORIGINS, VK_SHARED_API_BASE, VK_SHARED_RELAY_API_BASE, VK_TUNNEL, DISABLE_WORKTREE_CLEANUP",
+    "install_artifacts": [
+      "npx vibe-kanban (npx-cli)",
+      "local web server",
+      "git worktrees"
+    ],
+    "gaps": "Data dir, DB path, worktree dir not in README.",
+    "claims": [
+      {
+        "claim": "env vars and dev seed",
+        "confidence": "third-party (project README)",
+        "source": "https://raw.githubusercontent.com/BloopAI/vibe-kanban/main/README.md"
+      }
+    ]
+  },
+  {
+    "id": "crystal",
+    "name": "Crystal / Nimbalyst (stravu)",
+    "category": "worktree-parallel-runner",
+    "wraps": "Claude Code, Codex in git worktrees (Electron app)",
+    "aliases": [
+      "Nimbalyst"
+    ],
+    "paths": {
+      "windows": [
+        "unknown"
+      ],
+      "macos": [
+        "unverified recollection: ~/.crystal/ (sqlite DB, worktrees)"
+      ],
+      "linux": [
+        "unknown"
+      ]
+    },
+    "formats": [
+      "unknown; README mentions Markdown/JSON/CSV local-first files"
+    ],
+    "retention": "unknown",
+    "env_vars": "unknown (CRYSTAL_DIR not in README)",
+    "install_artifacts": [
+      "Electron app"
+    ],
+    "gaps": "README describes Nimbalyst-style product and has no paths.",
+    "claims": [
+      {
+        "claim": "README lacks paths",
+        "confidence": "third-party (project README)",
+        "source": "https://raw.githubusercontent.com/stravu/crystal/main/README.md"
+      }
+    ]
+  },
+  {
+    "id": "happy-coder",
+    "name": "Happy Coder",
+    "category": "remote-wrapper",
+    "wraps": "Claude Code and Codex CLI (happy claude / happy codex) with E2E-encrypted relay to mobile",
+    "aliases": [
+      "happy",
+      "slopus/happy"
+    ],
+    "paths": {
+      "windows": [
+        "unknown"
+      ],
+      "macos": [
+        "unverified recollection: ~/.happy/ (settings, daemon state, logs)"
+      ],
+      "linux": [
+        "unknown"
+      ]
+    },
+    "formats": [
+      "unknown"
+    ],
+    "retention": "unknown",
+    "env_vars": "unverified recollection: HAPPY_HOME_DIR, HAPPY_SERVER_URL",
+    "install_artifacts": [
+      "npm package happy / happy-cli",
+      "happy-server relay"
+    ],
+    "gaps": "README has no paths.",
+    "claims": [
+      {
+        "claim": "wraps claude/codex; packages happy-app/cli/agent/server",
+        "confidence": "third-party (project README)",
+        "source": "https://raw.githubusercontent.com/slopus/happy/main/README.md"
+      }
+    ]
+  },
+  {
+    "id": "claude-code-router",
+    "name": "claude-code-router (musistudio)",
+    "category": "proxy",
+    "wraps": "Claude Code via local gateway rerouting to other model providers",
+    "aliases": [
+      "ccr"
+    ],
+    "paths": {
+      "windows": [
+        "unverified recollection: %USERPROFILE%\\.claude-code-router\\config.json"
+      ],
+      "macos": [
+        "unverified recollection: ~/.claude-code-router/config.json, logs/"
+      ],
+      "linux": [
+        "same (unverified)"
+      ]
+    },
+    "formats": [
+      "JSON config (unverified)",
+      "local gateway http://127.0.0.1:3456; management UI 127.0.0.1:3458 (README)"
+    ],
+    "retention": "unknown",
+    "env_vars": "unknown (Claude Code pointed at loopback via ANTHROPIC_BASE_URL; unverified)",
+    "install_artifacts": [
+      "npm global package",
+      "loopback listener on 3456"
+    ],
+    "gaps": "README lists no files; it has a request/response Logs view.",
+    "claims": [
+      {
+        "claim": "loopback ports 3456/3458",
+        "confidence": "third-party (project README)",
+        "source": "https://raw.githubusercontent.com/musistudio/claude-code-router/main/README.md"
+      }
+    ]
+  },
+  {
+    "id": "ccusage",
+    "name": "ccusage (ryoppippi)",
+    "category": "analytics-reader",
+    "wraps": "Reads Claude Code (and Codex/OpenCode) local JSONL transcripts; writes no memory",
+    "aliases": [],
+    "paths": {
+      "windows": [
+        "reads %USERPROFILE%\\.claude\\projects\\**\\*.jsonl (unverified)"
+      ],
+      "macos": [
+        "reads ~/.claude/projects and ~/.config/claude/projects; CLAUDE_CONFIG_DIR (unverified recollection)"
+      ],
+      "linux": [
+        "same (unverified)"
+      ]
+    },
+    "formats": [
+      "reads JSONL"
+    ],
+    "retention": "n/a",
+    "env_vars": "CLAUDE_CONFIG_DIR (unverified recollection)",
+    "install_artifacts": [
+      "npx/bunx cache entries for 'ccusage' are an execution trace"
+    ],
+    "gaps": "Fetched README was a stub; tool-specific claims unverified.",
+    "claims": [
+      {
+        "claim": "Claude transcript location it reads",
+        "confidence": "official-doc (Claude side only)",
+        "source": "https://code.claude.com/docs/en/claude-directory"
+      }
+    ]
+  },
+  {
+    "id": "cline-memory-bank",
+    "name": "Cline Memory Bank / .clinerules",
+    "category": "instruction-memory-convention",
+    "wraps": "Cline (VS Code extension)",
+    "aliases": [],
+    "paths": {
+      "windows": [
+        "unknown"
+      ],
+      "macos": [
+        "unknown"
+      ],
+      "linux": [
+        "unknown"
+      ],
+      "project": [
+        "memory-bank/projectbrief.md",
+        "memory-bank/productContext.md",
+        "memory-bank/activeContext.md",
+        "memory-bank/systemPatterns.md",
+        "memory-bank/techContext.md",
+        "memory-bank/progress.md",
+        ".clinerules/memory-bank.md"
+      ]
+    },
+    "formats": [
+      "markdown"
+    ],
+    "retention": "indefinite in repo",
+    "env_vars": "none",
+    "install_artifacts": [
+      "rules file with memory-bank instructions"
+    ],
+    "gaps": "Cline task history/globalStorage paths not verified.",
+    "claims": [
+      {
+        "claim": "memory-bank file set and .clinerules path",
+        "confidence": "official-doc",
+        "source": "https://docs.cline.bot/features/memory-bank"
+      }
+    ]
+  },
+  {
+    "id": "roo-modes",
+    "name": "Roo Code custom modes / rules",
+    "category": "instruction-convention",
+    "wraps": "Roo Code (VS Code extension)",
+    "aliases": [],
+    "paths": {
+      "windows": [
+        "unknown"
+      ],
+      "macos": [
+        "unknown"
+      ],
+      "linux": [
+        "unknown"
+      ],
+      "project": [
+        "unverified recollection: .roomodes, .roo/rules/, .roo/rules-<slug>/, .roo/mcp.json; global custom_modes.yaml and mcp_settings.json under VS Code globalStorage rooveterinaryinc.roo-cline/settings/"
+      ]
+    },
+    "formats": [
+      "YAML/JSON modes",
+      "markdown rules"
+    ],
+    "retention": "unknown",
+    "env_vars": "none",
+    "install_artifacts": [
+      "VS Code extension (id unverified)"
+    ],
+    "gaps": "Docs fetch redirected and was not followed; all unverified.",
+    "claims": [
+      {
+        "claim": "not fetched",
+        "confidence": "unverified",
+        "source": "https://roocodeinc.github.io/Roo-Code/features/custom-modes"
+      }
+    ]
+  },
+  {
+    "id": "mcp-client-configs",
+    "name": "MCP server config files per client",
+    "category": "config",
+    "wraps": "Any MCP-capable client; entries launch arbitrary commands (npx/uvx) and hold env secrets",
+    "aliases": [
+      "mcpServers"
+    ],
+    "paths": {
+      "windows": [
+        "%APPDATA%\\Claude\\claude_desktop_config.json (Claude Desktop)",
+        "%APPDATA%\\Claude\\logs\\mcp.log and mcp-server-<NAME>.log",
+        "%USERPROFILE%\\.claude.json (Claude Code user/local MCP)",
+        "%USERPROFILE%\\.cursor\\mcp.json",
+        "%USERPROFILE%\\.codeium\\windsurf\\mcp_config.json"
+      ],
+      "macos": [
+        "~/Library/Application Support/Claude/claude_desktop_config.json",
+        "~/Library/Logs/Claude/mcp*.log",
+        "~/.claude.json",
+        "~/.cursor/mcp.json",
+        "~/.codeium/windsurf/mcp_config.json",
+        "~/.aws/amazonq/mcp.json"
+      ],
+      "linux": [
+        "~/.claude.json",
+        "~/.cursor/mcp.json (Claude Desktop Linux path not in docs)"
+      ],
+      "project": [
+        ".mcp.json (Claude Code project scope, team-shared)",
+        ".cursor/mcp.json",
+        ".vscode/mcp.json",
+        ".kimi-code/mcp.json (per ECC)",
+        ".roo/mcp.json (unverified)"
+      ]
+    },
+    "formats": [
+      "JSON with mcpServers{command,args,env}"
+    ],
+    "retention": "unknown",
+    "env_vars": "CLAUDE_CONFIG_DIR relocates ~/.claude paths",
+    "install_artifacts": [
+      "npx cache for server packages (%APPDATA%\\npm, _npx cache)"
+    ],
+    "gaps": "Codex ~/.codex/config.toml [mcp_servers], Gemini settings.json mcpServers, Continue, Zed not verified.",
+    "claims": [
+      {
+        "claim": "claude_desktop_config.json and MCP log dirs",
+        "confidence": "official-doc",
+        "source": "https://modelcontextprotocol.io/quickstart/user"
+      },
+      {
+        "claim": ".mcp.json project scope and ~/.claude.json personal MCP servers",
+        "confidence": "official-doc",
+        "source": "https://code.claude.com/docs/en/claude-directory"
+      },
+      {
+        "claim": "Cursor/Windsurf/VS Code/Q CLI mcp paths",
+        "confidence": "third-party",
+        "source": "https://raw.githubusercontent.com/eyaltoledano/claude-task-master/main/README.md"
+      }
+    ]
+  },
+  {
+    "id": "claude-code-extension-surfaces",
+    "name": "Claude Code instruction/skills/hooks/subagent/worktree artifacts",
+    "category": "base-agent-extension-surface",
+    "wraps": "Claude Code itself; where the harnesses above drop files",
+    "aliases": [],
+    "paths": {
+      "windows": [
+        "%USERPROFILE%\\.claude\\ (CLAUDE_CONFIG_DIR overrides)",
+        "%TEMP%\\claude\\<project>\\<session-id>\\scratchpad\\"
+      ],
+      "macos": [
+        "~/.claude/",
+        "/private/tmp/claude-<uid>/<project>/<session-id>/scratchpad/"
+      ],
+      "linux": [
+        "~/.claude/",
+        "/tmp/claude-<uid>/<project>/<session-id>/scratchpad/"
+      ],
+      "project": [
+        "CLAUDE.md, CLAUDE.local.md, AGENTS.md, .mcp.json, .worktreeinclude",
+        ".claude/{rules,skills,commands,agents,workflows,output-styles,agent-memory}/",
+        ".claude/settings.json, settings.local.json (hooks live in settings)"
+      ],
+      "data_under_claude_dir": [
+        "projects/<project>/<session>.jsonl (+ subagents/, tool-results/, mcp-tasks/)",
+        "projects/<project>/memory/ (auto memory)",
+        "history.jsonl",
+        "file-history/<session>/",
+        "plans/",
+        "debug/",
+        "paste-cache/",
+        "tasks/",
+        "shell-snapshots/",
+        "stats-cache.json",
+        "backups/ (.claude.json copies)",
+        "plugins/ (installed_plugins.json, marketplaces, synced/)",
+        "agent-memory/",
+        "jobs/, daemon/",
+        "sessions/",
+        "~/.claude.json"
+      ]
+    },
+    "formats": [
+      "JSONL transcripts (plaintext)",
+      "markdown + YAML frontmatter",
+      "JSON settings"
+    ],
+    "retention": "cleanupPeriodDays default 30 (min 1) for transcripts, file-history, plans, debug etc.; history.jsonl, stats-cache.json, auto memory kept until deleted; scratchpad removed with transcript or OS temp clear; legacy todos/ statsig/ logs/ swept",
+    "env_vars": "CLAUDE_CONFIG_DIR, CLAUDE_CODE_TMPDIR, CLAUDE_CODE_SKIP_PROMPT_HISTORY; settings cleanupPeriodDays, desktopSessionCleanupPeriodDays",
+    "install_artifacts": [
+      "claude purge command deletes per-project state"
+    ],
+    "gaps": "Exact subagent worktree dir not read (worktrees.md).",
+    "claims": [
+      {
+        "claim": "full ~/.claude data map and retention",
+        "confidence": "official-doc",
+        "source": "https://code.claude.com/docs/en/claude-directory"
+      }
+    ]
+  },
+  {
+    "id": "instruction-files-other-agents",
+    "name": "AGENTS.md / GEMINI.md / .cursorrules / .cursor/rules / Codex config",
+    "category": "instruction-files",
+    "wraps": "Codex, Gemini CLI, Cursor, Copilot, Claude Code (reads AGENTS.md in place of CLAUDE.md)",
+    "aliases": [],
+    "paths": {
+      "windows": [
+        "%USERPROFILE%\\.gemini\\GEMINI.md (assumed)",
+        "%USERPROFILE%\\.codex\\config.toml, agents (per ECC)"
+      ],
+      "macos": [
+        "~/.gemini/GEMINI.md (global)",
+        "~/.codex/config.toml, ~/.codex/agents"
+      ],
+      "linux": [
+        "same"
+      ],
+      "project": [
+        "AGENTS.md (root, .claude/, or any dir; Claude Code can load it)",
+        "GEMINI.md in workspace dirs and ancestors, and just-in-time on tool file access",
+        ".cursor/rules/*.mdc (description/globs/alwaysApply frontmatter; per ECC)",
+        ".cursorrules (legacy; unverified)",
+        ".github/copilot-instructions.md",
+        ".codex/config.toml, .agents/skills/"
+      ]
+    },
+    "formats": [
+      "markdown",
+      "mdc with frontmatter",
+      "TOML"
+    ],
+    "retention": "unknown",
+    "env_vars": "CODEX_HOME (default ~/.codex, per gstack README)",
+    "install_artifacts": [],
+    "gaps": "Cursor docs redirected; .cursorrules legacy and Cursor user-rule storage unverified; ~/.gemini/tmp and Gemini settings.json path not confirmed.",
+    "claims": [
+      {
+        "claim": "GEMINI.md load locations",
+        "confidence": "official-doc",
+        "source": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/gemini-md.md"
+      },
+      {
+        "claim": "AGENTS.md readable by Claude Code",
+        "confidence": "official-doc",
+        "source": "https://code.claude.com/docs/en/claude-directory"
+      },
+      {
+        "claim": "Cursor/Codex/Copilot install targets",
+        "confidence": "third-party",
+        "source": "https://raw.githubusercontent.com/affaan-m/everything-claude-code/main/README.md"
+      }
+    ]
+  },
+  {
+    "name": "claude-swap (Claude account switcher; ~/.claude-swap-backup)",
+    "category": "account-switching utility for Claude Code",
+    "confidence": "verified-on-test-pc (structure only); tool identity from folder name only",
+    "source": "schema/structure probe on this PC, 2026-10-27 (names, counts, column/key names only; content, emails, account ids and credentials not recorded)",
+    "found_because": "discovered by generic scan of home dot-folders - not in researched catalog",
+    "paths": {
+      "~/.claude-swap-backup/sequence.json": "keys: accounts.<n>.{added,email,organizationName,organizationUuid,uuid}, activeAccountNumber, lastUpdated, sequence[] -> list of accounts registered on this PC and which was active",
+      "~/.claude-swap-backup/configs/.claude-config-<n>-<email>.json": "per-account copies of ~/.claude.json (file NAMES contain the account email)",
+      "~/.claude-swap-backup/credentials/.creds-<n>-<email>.enc(+.prev)": "encrypted credential backups (never export)",
+      "~/.claude-swap-backup/cache/{usage.json,update_check.json}, claude-swap.log": "usage cache and tool log (switch events)"
+    },
+    "forensic_notes": [
+      "Shows that MORE THAN ONE Claude account (e.g. corporate vs personal) was used on the same PC - key for leak investigations where personal-account use bypasses corporate logging",
+      "claude-swap.log timestamps show when accounts were switched",
+      "Record account count, organization names and active account; do not copy emails/uuids into reports without need"
+    ]
+  }
+]
