@@ -566,3 +566,31 @@
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
+
+/* R7 AI 사용: tool calls fold under their summary; file touches link to the file list. */
+.chat-bubble.is-ai-tool,
+.chat-bubble.is-ai-file {
+  background: var(--surface-2, transparent);
+  border-style: dashed;
+}
+.chat-tool > summary {
+  cursor: pointer;
+}
+.chat-tool-flag {
+  color: var(--danger, currentColor);
+  font-weight: 600;
+}
+.chat-tool-command {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+.chat-tool-target,
+.chat-file-touch {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+}

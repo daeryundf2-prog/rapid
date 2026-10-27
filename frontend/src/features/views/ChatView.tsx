@@ -11,8 +11,12 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRovingTabindex } from "../../a11y";
+import { MiddlePath } from "../../components/MiddlePath";
 import type { GridRow } from "../../contracts/collection";
 import { encodeRowRef } from "../../contracts/rowRef";
+import { serializeRoute } from "../../router";
+import { fileTouchRoute, requestedSession } from "../ai/aiChat";
+import { useFilterStore } from "../filters/filterStore";
 import { useViewerTarget } from "../grid/adapter";
 import { REVIEW_LABELS } from "../grid/columns/common";
 import { buildViewerTarget } from "../grid/gridCommands";
@@ -53,6 +57,9 @@ function Highlighted({ text, terms }: { text: string; terms: readonly string[] }
 }
 
 function bubbleLabel(message: ChatMessage): string {
+  if (message.ai && message.ai.variant !== "message") {
+    return [message.ai.roleLabel, message.timestamp ?? "시각 없음", message.text].join(", ");
+  }
   const parts = [message.sender || "발신자 미상", message.timestamp ?? "시각 없음", message.text];
   if (message.attachments.length) parts.push(`첨부 ${message.attachments.length}개`);
   if (message.row.reviewStatus) parts.push(REVIEW_LABELS[message.row.reviewStatus]);
@@ -301,10 +308,16 @@ function MessageList({
                     {isUnresolvedId(message.sender) ? ` ${UNRESOLVED_NAME_HINT}` : ""}
                   </span>
                 ) : null}
-                <div className="chat-bubble">
-                  <p className="chat-text">
-                    <Highlighted text={message.text} terms={terms} />
-                  </p>
+                <div className={`chat-bubble${message.ai ? ` is-ai-${message.ai.variant}` : ""}`}>
+                  {message.ai?.variant === "tool" ? (
+                    <AiToolBlock message={message} terms={terms} />
+                  ) : message.ai?.variant === "file" ? (
+                    <AiFileLink message={message} runId={runId} />
+                  ) : (
+                    <p className="chat-text">
+                      <Highlighted text={message.text} terms={terms} />
+                    </p>
+                  )}
                   {message.attachments.length ? (
                     <ul className="chat-attachments" aria-label="첨부">
                       {message.attachments.map((name) => (
@@ -325,15 +338,70 @@ function MessageList({
   );
 }
 
+/** AI tool call (R7 AI 사용): a folded block — 호출 도구 · 종류, then the command and target. */
+function AiToolBlock({ message, terms }: { message: ChatMessage; terms: readonly string[] }) {
+  const ai = message.ai;
+  if (!ai) return null;
+  return (
+    <details className="chat-tool" data-testid="ai-tool-call">
+      <summary>
+        <Highlighted text={message.text} terms={terms} />
+        {ai.destructive ? <span className="chat-tool-flag"> · 파괴적 작업</span> : null}
+        {ai.exitCode !== undefined ? (
+          <span className="chat-list-meta"> · 종료 코드 {ai.exitCode}</span>
+        ) : null}
+      </summary>
+      {ai.command ? (
+        <pre className="chat-tool-command">
+          <Highlighted text={ai.command} terms={terms} />
+        </pre>
+      ) : null}
+      {ai.targetPath ? (
+        <p className="chat-tool-target">
+          대상 <MiddlePath path={ai.targetPath} />
+        </p>
+      ) : null}
+    </details>
+  );
+}
+
+/** AI file touch (R7 AI 사용): 작업 · path, linked to the file list (the evidence file when known). */
+function AiFileLink({ message, runId }: { message: ChatMessage; runId: string | null }) {
+  const ai = message.ai;
+  if (!ai) return null;
+  const route = fileTouchRoute(runId ?? "", ai);
+  return (
+    <p className="chat-text chat-file-touch" data-testid="ai-file-touch">
+      <span>{ai.op || "파일 접촉"}</span>{" "}
+      {route ? (
+        <a
+          href={serializeRoute(route)}
+          title={ai.locator ? `증거 파일: ${ai.locator}` : "파일 목록에서 이 이름을 찾습니다"}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <MiddlePath path={ai.path || ai.locator} />
+        </a>
+      ) : (
+        <MiddlePath path={ai.path} />
+      )}
+    </p>
+  );
+}
+
 export function ChatView() {
   const { cq, rows, runId, q } = useViewRows({ predicate: isMessageRow, textFilter: false });
   const capped = useAutoLoad(cq, true, CHAT_AUTOLOAD_ROWS);
   const conversations = useMemo(() => groupConversations(rows), [rows]);
   const terms = useMemo(() => highlightTerms(q), [q]);
+  // AI 사용 › 세션 → 대화 보기 asks for one session (`cf=f:session_id:<id>`): open that one first.
+  const requested = useFilterStore((s) => requestedSession(s.filters.columns));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusRequest, setFocusRequest] = useState(0);
   const layoutRef = useRef<HTMLDivElement | null>(null);
-  const conversation = conversations.find((c) => c.id === selectedId) ?? conversations[0];
+  const conversation =
+    conversations.find((c) => c.id === selectedId) ??
+    (requested ? conversations.find((c) => c.id === requested) : undefined) ??
+    conversations[0];
 
   if (cq.error && cq.loadedCount === 0) {
     return <ErrorState message={`대화를 불러오지 못했습니다. ${errorText(cq.error)}`} onRetry={cq.refetch} />;

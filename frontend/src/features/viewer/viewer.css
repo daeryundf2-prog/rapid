@@ -1248,3 +1248,11 @@ dd:focus-within .meta-colbtn,
   border: 1px solid var(--line);
   border-radius: var(--radius);
 }
+
+/* R7 AI 사용: session links above the record (대화 보기 · 도구 호출 · 파일 접촉 · 상위/하위 세션). */
+.meta-ai-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 8px;
+}
