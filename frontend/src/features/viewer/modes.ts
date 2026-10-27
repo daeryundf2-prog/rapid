@@ -4,8 +4,10 @@
  * Pure functions so the matrix is unit-testable without rendering.
  */
 
+import { itemRef } from "../../api/families";
 import type { SourcePreview } from "../../api/viewer";
 import type { GridRow } from "../../contracts/collection";
+import type { RowRef } from "../../contracts/rowRef";
 import type { ViewerMode, ViewerModeState, ViewerTarget } from "../../contracts/viewer";
 
 export const MODE_ORDER: ViewerMode[] = [
@@ -17,6 +19,7 @@ export const MODE_ORDER: ViewerMode[] = [
   "email",
   "media",
   "meta",
+  "family",
 ];
 
 export const MODE_LABELS: Record<ViewerMode, string> = {
@@ -28,6 +31,7 @@ export const MODE_LABELS: Record<ViewerMode, string> = {
   email: "이메일",
   media: "미디어",
   meta: "메타",
+  family: "계열",
 };
 
 /**
@@ -67,7 +71,36 @@ export const REASONS = {
   notMedia: "오디오·비디오 파일이 아닙니다.",
   archiveHex: "ZIP 내부 항목은 헥스 미리보기를 제공하지 않습니다.",
   directory: "디렉터리는 미리보기가 없습니다. 디렉터리 안의 파일을 선택하세요.",
+  notFamily: "계열은 파일·아티팩트·분석 결과 행에서 볼 수 있습니다.",
 } as const;
+
+/**
+ * 계열 tab (R7 갈래 A): rows with an item ref (files, artifacts — archive entries too — and analysis
+ * rows; a search hit through the run-output row it names).
+ */
+export function familyState(target: ViewerTarget): ViewerModeState {
+  const review = target.review;
+  const ref = review
+    ? itemRef({
+        collection: review.collection as RowRef["collection"],
+        kind: review.kind,
+        locator: review.pointer,
+      })
+    : itemRef(target.ref);
+  return ref ? state("family") : state("family", REASONS.notFamily);
+}
+
+/** The item ref the 계열 tab shows for a target (a search hit: its run-output row). */
+export function familyRefOf(target: ViewerTarget): string | null {
+  const review = target.review;
+  return review
+    ? itemRef({
+        collection: review.collection as RowRef["collection"],
+        kind: review.kind,
+        locator: review.pointer,
+      })
+    : itemRef(target.ref);
+}
 
 /** A directory target: flagged by its row, or answered as one by the preview API. */
 export function isDirectoryTarget(target: ViewerTarget | null, preview: SourcePreview | null): boolean {
@@ -166,6 +199,19 @@ function hexState(preview: SourcePreview | null, target: ViewerTarget): ViewerMo
 }
 
 export function resolveModes(input: ResolveInput): ResolvedModes {
+  const resolved = resolveContentModes(input);
+  const target = input.target;
+  if (!target) return resolved;
+  // 계열 never depends on the preview: it is about the row's relations.
+  const modes = resolved.modes.map((m) => (m.mode === "family" ? familyState(target) : m));
+  const best =
+    target.preferredMode === "family" && modes.find((m) => m.mode === "family")?.available
+      ? "family"
+      : resolved.best;
+  return { modes, best };
+}
+
+function resolveContentModes(input: ResolveInput): ResolvedModes {
   const { target, preview, previewError, loading } = input;
   if (!target) {
     return { modes: MODE_ORDER.map((mode) => state(mode, "선택된 행이 없습니다.")), best: null };
@@ -229,6 +275,8 @@ export function resolveModes(input: ResolveInput): ResolvedModes {
         return type === "email" ? state("email") : state("email", REASONS.notEmail);
       case "media":
         return type === "media" ? state("media") : state("media", REASONS.notMedia);
+      case "family":
+        return state("family"); // replaced by familyState (resolveModes)
       default:
         return state("meta");
     }

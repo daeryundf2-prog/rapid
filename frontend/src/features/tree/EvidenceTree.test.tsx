@@ -191,7 +191,8 @@ describe("EvidenceTree (탐색 domain tree)", () => {
     fireEvent.keyDown(document.activeElement as Element, { key: "ArrowDown" });
     expect(document.activeElement).toBe(item("파일 목록"));
     fireEvent.keyDown(document.activeElement as Element, { key: "End" });
-    expect(document.activeElement).toBe(item("위치·여행"));
+    // 처리 (R7 갈래 A 예외 항목) is the last domain.
+    expect(document.activeElement).toBe(item("처리"));
     fireEvent.keyDown(document.activeElement as Element, { key: "Home" });
     expect(document.activeElement).toBe(item("증거 소스"));
     fireEvent.keyDown(document.activeElement as Element, { key: "ArrowUp" });

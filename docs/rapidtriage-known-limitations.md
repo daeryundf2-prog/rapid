@@ -632,3 +632,16 @@ RapidTriage는 아래 기능을 프로젝트 정책으로 구현하지 않는다
 - **시각**: 행 시각은 UTC만 `timestamp`로 쓴다. 시간대가 없는 로그 줄 시각(Kiro `mcp.log` 등)은 `timestamp_local`에만 두고 타임라인 이벤트로 만들지 않는다. 파일 접촉 행의 시각은 도구 호출 시각이며 실제 파일 시스템 변경 시각이 아니다. Bash/PowerShell 명령의 경로·작업(`op`)은 명령 문자열에서 뽑은 추정(`op_source=command-heuristic`)이고, `destructive`도 ZCode `tool_usage` 외에는 명령 패턴 추정(`destructive_source=command-pattern`)이다.
 - **새 시각 종류**: `switched`(계정 전환), `cleanup`(보존 정리 표식), `committed`(AI 기여 커밋)은 콘솔 한글 라벨(`timeKinds.ts`, 갈래 D)이 아직 없다.
 - **갈래 A 인터페이스 밖 행 유형**: `ai-account-switch`, `ai-retention-cleanup`은 `base.AI_ARTIFACT_TYPES`에 없다(갈래 A에 추가 요청). 어댑터 실행 요약은 `ai-tool-presence`(`presence_kind=adapter-summary`)로 낸다.
+
+## R7 A — 계열·중복·예외 항목 (Nuix 갈래 A)
+
+파생은 런 출력만 읽는다(파서 변경 없음). 런 완료 `persist` 단계가 `rapidtriage-families.jsonl`·`rapidtriage-dedup.json`·`rapidtriage-irregular.json`을 쓰고, 없거나 오래된 런은 계열·중복·예외 API(또는 `family=`·`dup=`·`irregular=` 조건)의 첫 요청에서 만든다. `RAPIDTRIAGE_INDEX_PERSIST=0`이나 쓰기 금지 폴더는 메모리에만 둔다. 목록의 `family`·`dedup` 행 필드는 이미 있는 파생(캐시 또는 저장 파일)에서만 붙이고 목록 요청이 파생을 시작하지는 않는다.
+
+- **계열 규칙**: PST 정규화 메일 → `email-attachment` 행(같은 메일함 경로·`message_id`·`export_item`·`folder`); EML/MBOX 메일의 `details.attachments`는 가상 하위 항목 `#attachment:<i>`; 메일함·PST 컨테이너 → 메시지는 *컨테이너 관계*라 메시지가 최상위 항목으로 남는다; 압축 인벤토리 → `sample_entries`의 항목(`#entry:<i>`, 최대 80개 — 그 밖의 항목은 계열에 없음); adb 백업 → 멤버 → 추출 앱 행; 대화 메시지 → 같은 원본 행의 `chat-attachment`; 카빙 분석 행·카빙 파일 후보 → 원본 파일 행(행이 없으면 가상 `source::<경로>`). 런 단계 카빙 출력(`carving/rapidtriage-carve.json`)은 콘솔 행이 아니라 계열에 없다. 같은 자식은 첫 부모만 가진다.
+- **중복 키**: 파일 `hashes.sha256`(해시가 계산된 후보만 — run-subset10에서 1,981/4,935), 메일 첨부·백업 멤버·카빙 행의 `sha256`, 메일 키 `sha256(정규화 제목 | UTC 분 | 발신 주소 | 정렬된 수신+참조 주소 | 본문 해시 또는 Message-ID)`. 압축 항목은 CRC-32뿐이라 단독 중복 제거를 하지 않는다. 같은 바이트는 출처가 달라도 한 그룹이다(디스크 파일과 같은 첨부). 원본은 항목 순서(파일 → 아티팩트 종류순 → 분석 결과)의 첫 항목이다.
+- **계열별**: 최상위 항목만 비교하고 하위 항목은 최상위 항목의 상태를 따른다. 키가 없는 최상위 항목(원본 해시 없는 카빙 원본 등)은 중복이 아니다. 압축·백업 행은 계열별에서만 원본 SHA-256으로 비교한다.
+- **보관자 순위별**: 보관자 배정(갈래 D) 전에는 런 하나 = 증거 하나라 결과가 항목별과 같다(`custodians_assigned: false`).
+- **예외 항목 매핑의 한계**: `text-stripped`는 `binary-rejected`(본문을 바이너리로 판정해 색인 제외) 문서만 센다 — 비인쇄 문자를 걸러 나머지를 색인한 문서(`salvage_text`)는 런 출력에 흔적이 없다. `deleted`는 행 필드만 보며 NTFS 조인(요청 시 계산)의 삭제 상태는 반영하지 않는다. `empty`는 0바이트 파일·메일 첨부·백업 멤버 파일만. 한 행이 여러 범주에 들 수 있어 카드 합계는 범주 합(중복 포함)이고 "항목"은 서로 다른 행 수다.
+- **조건**: `/artifacts`·`/files`·`/timeline`에서 서버가 적용한다(타임라인 행은 `details.source_record`의 원본 아티팩트 행 기준 — 파일·문서 이벤트는 통과하지 않음). 다른 목록(문서·지표·검색)은 행 필드로만 거르며 예외 항목은 항상 0행이다. 진행 중 런은 409. 여러 종류에 걸친 목록의 `matched`는 다른 필터처럼 마지막 쪽까지 읽어야 정확하다.
+- **선택 확장**: 지금 목록(파일 또는 아티팩트)에 속한 계열 행만 선택한다. 다른 목록의 계열 행(카빙 원본 파일 등)은 알림에 건수로만 나온다.
+- **실데이터(run-subset10, 읽기 전용, `RAPIDTRIAGE_INDEX_PERSIST=0`)**: 파생 13–18 s, 최대 작업 집합 257 MB(가져오기 기준 155 MB), 65.9만 행 훑고 4.2만 행만 해석, 관계 399개(모두 압축 항목), 중복 항목별 1,981/그룹 1,272/중복 709(파일 출력의 `duplicate_content_groups` 604그룹·709건과 같음), 예외 합 793(항목 762) — 9범주 모두 카드 수 = 조건 목록 행 수. 런 폴더 새 파일 0(케이스 DB `-shm`/`-wal` 시각 변경은 기존 예외), artifact_type 행 수 변화 0.

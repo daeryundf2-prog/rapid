@@ -281,8 +281,9 @@ describe("Viewer — loading, modes, focus", () => {
     expect(document.activeElement).toBe(tab("SQLite"));
     expect(tab("헥스").getAttribute("aria-selected")).toBe("true");
     fireEvent.keyDown(tab("SQLite"), { key: "End" });
-    expect(document.activeElement).toBe(tab("메타"));
-    expect(tab("메타").getAttribute("aria-selected")).toBe("true");
+    // The last tab is 계열 (R7 갈래 A), available on a files row.
+    expect(document.activeElement).toBe(tab("계열"));
+    expect(tab("계열").getAttribute("aria-selected")).toBe("true");
   });
 
   it("moves focus to the selected mode tab when opened with Enter (requestViewerFocus)", async () => {

@@ -1161,3 +1161,90 @@ dd:focus-within .meta-colbtn,
   color: var(--text-muted);
   font-style: italic;
 }
+
+/* 계열 tab (R7 갈래 A): parent chain + family tree. */
+.family-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+
+.family-summary,
+.family-label {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+}
+
+.family-ancestors ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.family-tree ul {
+  margin: 0;
+  padding-left: var(--space-3);
+  list-style: none;
+}
+
+.family-tree > ul {
+  padding-left: 0;
+}
+
+.family-node {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1);
+  max-width: 100%;
+  margin: 1px 0;
+  padding: 2px var(--space-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.family-node:hover:not([aria-disabled="true"]) {
+  background: var(--bg-hover);
+}
+
+.family-node[aria-disabled="true"] {
+  cursor: default;
+}
+
+.family-node.is-current {
+  border-color: var(--accent);
+  background: var(--bg-selected);
+  font-weight: 600;
+}
+
+.family-node-title {
+  overflow-wrap: anywhere;
+}
+
+.family-node.is-immaterial .family-node-title {
+  color: var(--text-muted);
+}
+
+.family-node-type,
+.family-node-relation,
+.family-node-count,
+.family-node-badge {
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+}
+
+.family-node-badge {
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}

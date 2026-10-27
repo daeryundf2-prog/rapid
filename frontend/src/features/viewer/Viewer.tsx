@@ -47,11 +47,12 @@ import { ModeTabs, panelId, tabId, VIEWER_PANEL_ID } from "./ModeTabs";
 import { resolveModes, sqliteRowTarget } from "./modes";
 import { POPOUT_COMMAND_ID } from "./popout/host";
 import { recordByteRange } from "./record";
-import { viewerSession } from "./session";
+import { pendingRowKey, viewerSession } from "./session";
 import { type AsyncState, errorText, useAsync } from "./useAsync";
 import { ViewerToolbar } from "./ViewerToolbar";
 import { DocumentView } from "./views/DocumentView";
 import { EmailView } from "./views/EmailView";
+import { FamilyView } from "./views/FamilyView";
 import { HexView } from "./views/HexView";
 import { ImageView } from "./views/ImageView";
 import { MediaView } from "./views/MediaView";
@@ -198,7 +199,19 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
   // URL `mode=` restores the tab for the first target; later rows auto-select again.
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per target key
   useEffect(() => {
-    if (!key) return;
+    if (!key || !target) return;
+    // A tab requested for this row (계열 navigation): it wins over the URL rule below.
+    // Kept while that row shows: the URL-restored target and the grid's resolved one (with its
+    // source path) are two keys of the same row; another row clears it.
+    const pending = viewerSession().pendingMode;
+    if (pending) {
+      if (pending.row === pendingRowKey(target.runId, target.ref)) {
+        viewerSession().restoredMode = true;
+        setUserMode({ key, mode: pending.mode });
+        return;
+      }
+      viewerSession().pendingMode = null;
+    }
     if (!viewerSession().restoredMode) {
       viewerSession().restoredMode = true;
       if (routeMode) setUserMode({ key, mode: routeMode });
@@ -590,6 +603,8 @@ function ViewerBody(props: ViewerBodyProps) {
   const { target, mode, previewState, metadata, highlight } = props;
   const hexKey = `${target.sourcePath}|${highlight?.offset ?? ""}`;
   const preview = previewState.status === "ok" ? previewState.data : null;
+  // 계열 (R7 갈래 A) is about the row's relations: it never waits for the preview.
+  if (mode === "family") return <FamilyView target={target} />;
   if (
     props.resolving ||
     (mode !== "meta" &&

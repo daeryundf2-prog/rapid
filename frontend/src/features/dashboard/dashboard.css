@@ -773,3 +773,23 @@ textarea.dash-input {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
 }
+
+/* 예외 항목 block of the 증거 card (R7 갈래 A). */
+.dash-irregular > * + * {
+  margin-top: var(--space-1);
+}
+
+.dash-irregular .dash-subtitle {
+  margin: var(--space-2) 0 0;
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.dash-irregular-table th[scope="row"] {
+  font-weight: 400;
+  text-align: start;
+}
+
+.dash-muted {
+  color: var(--text-muted);
+}

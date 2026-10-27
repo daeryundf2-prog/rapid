@@ -201,6 +201,17 @@ def build_run_geo_index(
     return write_run_geo_index(output_dir, sources)
 
 
+def build_run_families(output_dir: Path, outputs: Mapping[str, object]) -> dict[str, object]:
+    """계열·중복·예외 항목 (R7 갈래 A): ``rapidtriage-families.jsonl``, ``rapidtriage-dedup.json`` and
+    ``rapidtriage-irregular.json`` next to the outputs, derived from them in one pass. Never raises:
+    a failed derivation leaves the run usable (the API derives on the first request)."""
+    try:
+        from ...api.app.families import write_run_families
+    except Exception as exc:  # pragma: no cover - the API package is part of the install
+        return {"status": "skipped", "reason": f"{type(exc).__name__}: {exc}"}
+    return write_run_families(output_dir, outputs)
+
+
 def skipped_case_db_record(reason: str) -> dict[str, object]:
     return {"status": "skipped", "search_backend": SEARCH_BACKEND_SCAN, "reason": reason}
 

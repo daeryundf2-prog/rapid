@@ -167,3 +167,84 @@ export function activeRelativePreset(
   }
   return null;
 }
+
+// --- 계열 · 중복 · 예외 항목 (R7 갈래 A) ----------------------------------------------------------
+// Keep aligned with `rapidtriage/api/app/row_conditions.py` (parse_row_sets) and
+// `rapidtriage/core/irregular.py` (CATEGORIES, CATEGORY_LABELS).
+
+/** `dup=`: 원본만 · 중복만 · 중복 있는 항목 (the original or a duplicate of a group with duplicates). */
+export const DUP_STATUSES = ["original", "duplicate", "any"] as const;
+export type DupStatus = (typeof DUP_STATUSES)[number];
+
+export const DUP_LABELS: Readonly<Record<DupStatus, string>> = {
+  original: "원본만",
+  duplicate: "중복만",
+  any: "중복 있는 항목",
+};
+
+/** `dup_mode=`: how items are compared (absent = 항목별). */
+export const DUP_MODES = ["item", "family", "custodian"] as const;
+export type DupMode = (typeof DUP_MODES)[number];
+
+export const DUP_MODE_LABELS: Readonly<Record<DupMode, string>> = {
+  item: "항목별",
+  family: "계열별",
+  custodian: "보관자 순위별",
+};
+
+/** `irregular=` category ids, in the server's order. */
+export const IRREGULAR_IDS = [
+  "bad-extension",
+  "corrupted",
+  "deleted",
+  "empty",
+  "encrypted",
+  "non-searchable-pdf",
+  "text-stripped",
+  "unrecognized",
+  "unsupported",
+] as const;
+export type IrregularId = (typeof IRREGULAR_IDS)[number];
+
+export const IRREGULAR_LABELS: Readonly<Record<IrregularId, string>> = {
+  "bad-extension": "확장자 불일치",
+  corrupted: "손상·부분 읽기",
+  deleted: "삭제됨",
+  empty: "빈 파일",
+  encrypted: "암호화",
+  "non-searchable-pdf": "검색 불가 PDF",
+  "text-stripped": "본문 제외(바이너리)",
+  unrecognized: "형식 미상",
+  unsupported: "미지원 형식",
+};
+
+export function isDupStatus(value: unknown): value is DupStatus {
+  return typeof value === "string" && (DUP_STATUSES as readonly string[]).includes(value);
+}
+
+export function isDupMode(value: unknown): value is DupMode {
+  return typeof value === "string" && (DUP_MODES as readonly string[]).includes(value);
+}
+
+/** Known category ids of a list, in server order (unknown ids dropped). */
+export function normalizeIrregular(values: readonly unknown[]): IrregularId[] {
+  return IRREGULAR_IDS.filter((id) => values.includes(id));
+}
+
+/** Korean name of a category id (the id itself never reaches the screen: unknown → "기타 예외"). */
+export function irregularLabel(id: string): string {
+  return (IRREGULAR_LABELS as Record<string, string>)[id] ?? "기타 예외";
+}
+
+const ITEM_REF =
+  /^(artifacts:[A-Za-z0-9._-]{1,128}:\/artifacts\/\d+(#(entry|attachment):\d+)?|files::\/(candidates|inventory)\/\d+|analysis:[A-Za-z0-9._-]{1,128}:\/rows\/\d+)$/;
+
+/** A `family=` item ref the server accepts (`artifacts:<kind>:/artifacts/<n>`, `files::/candidates/<n>`, …). */
+export function isFamilyRef(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 2048 && ITEM_REF.test(value);
+}
+
+/** Valid, de-duplicated `family=` refs of a list (at most 500, like the server). */
+export function normalizeFamilyRefs(values: readonly unknown[]): string[] {
+  return [...new Set(values.filter(isFamilyRef))].slice(0, 500);
+}

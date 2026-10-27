@@ -34,6 +34,7 @@ import {
   flagsColumn,
   mixedSummaryColumns,
 } from "./families";
+import { familyDedupColumns, familyDedupFields } from "./familyDedup";
 import { mismatchDirectionLabel } from "./files";
 import { typeChipCell } from "./StatusCells";
 
@@ -122,7 +123,12 @@ const tail = [
   col.field("supported", "지원", 70, ["source"], (r) => (r.fields.supported === false ? "미지원" : "")),
   col.path(420, ["source"]),
   col.sha256(),
+  // 중복 · 계열 (R7 갈래 A): default, hidden while no loaded row has a value.
+  ...familyDedupColumns(),
 ];
+
+/** Tail columns that stay default in every layout (the others move to 출처 중심 / 열 선택). */
+const DEFAULT_TAIL_IDS: ReadonlySet<string> = new Set(["dedup", "family"]);
 
 // ---- kind columns (plan artifact-columns §4.3) ---------------------------------
 
@@ -635,10 +641,21 @@ export const MIXED_PRIORITY = [
   "sum:support",
   "sum:extra",
   "review",
+  "dedup",
+  "family",
 ] as const;
 
 /** Generic artifact layout, highest priority first: 항목 > 특이사항 > 유형 > 시각 > 선별 > 경로. */
-export const ARTIFACT_PRIORITY = ["title", "flags", "type", "timestamp", "review", "path"] as const;
+export const ARTIFACT_PRIORITY = [
+  "title",
+  "flags",
+  "type",
+  "timestamp",
+  "review",
+  "path",
+  "dedup",
+  "family",
+] as const;
 
 /**
  * Responsive layouts: the generic one and every catalogue family layout (empty core columns go
@@ -668,7 +685,12 @@ export function artifactColumnsForKind(kind: string | undefined, types?: readonl
         { ...timeColumn, presets: [] },
         catalogued.id === "eventlog" ? { ...messageColumn, presets: [] } : quietDetailColumn,
         // The catalogue sets the examiner's default columns: 파서 stays in 원본 preset / 열 선택.
-        ...tail.map((column) => ({ ...column, presets: column.presets.filter((p) => p !== "analysis") })),
+        ...tail.map((column) => ({
+          ...column,
+          presets: DEFAULT_TAIL_IDS.has(column.id)
+            ? column.presets
+            : column.presets.filter((p) => p !== "analysis"),
+        })),
       ],
     });
   }
@@ -753,6 +775,8 @@ export const artifactsCollection: CollectionDef = {
         matchedRules: Array.isArray(raw.matched_rules) ? raw.matched_rules.map(str).join(", ") : "",
         highlight: recordHighlight(details),
         ...recoveryFields(details.recovery),
+        // 계열 · 중복 (R7 갈래 A): the listing's annotations once the run's derivation exists.
+        ...familyDedupFields(raw),
         // 특이사항 (U-F4): raw API value + the parsed list the cells read.
         ...(Array.isArray(raw.flags) ? { flags: raw.flags, flagList: parseFlags(raw.flags) } : {}),
         details,

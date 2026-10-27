@@ -536,7 +536,16 @@ export function familyLayout(family: CatalogFamily, parts: FamilyLayoutParts): C
 
 /** Priority of a family layout (responsive hiding, empty columns go first): 항목 > 특이사항 > core. */
 export function familyWidthPriority(family: CatalogFamily): string[] {
-  return ["title", "flags", ...family.core_columns.map((def) => familyColumnId(def.key)), "review", "type"];
+  // R7 갈래 A: 중복 · 계열 last (hidden first; hidden while no loaded row has a value).
+  return [
+    "title",
+    "flags",
+    ...family.core_columns.map((def) => familyColumnId(def.key)),
+    "review",
+    "type",
+    "dedup",
+    "family",
+  ];
 }
 
 /** Column ids of a family's auxiliary columns (열 선택 › 카탈로그 보조 열 모두 추가/제거). */

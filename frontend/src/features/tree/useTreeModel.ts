@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef } from "react";
 import { getReviewCounts } from "../../api/caseDb";
 import { getRunDashboard } from "../../api/dashboard";
+import { fetchIrregularSummary } from "../../api/families";
 import { getRunSummary, getRunTree, type RunTreeLive } from "../../api/runs";
 import { useAnalyses } from "../analysis/store";
 import { useSavedSearches } from "../case/savedSearches";
@@ -19,6 +20,8 @@ export const RUN_FINISH_QUERY_KEYS = [
   "run-dashboard",
   "review-counts",
   "geo-clusters",
+  // R7 갈래 A: 예외 항목 (409 until the run has finished).
+  "irregular-summary",
 ] as const;
 
 /**
@@ -59,6 +62,14 @@ export function useTreeData(runId: string | null) {
     retry: false,
     refetchInterval,
   });
+  // 처리 › 예외 항목 counts (R7 갈래 A): only for a finished run (the derivation reads its outputs).
+  const irregular = useQuery({
+    queryKey: ["irregular-summary", runId],
+    queryFn: ({ signal }) => fetchIrregularSummary(runId as string, signal),
+    enabled: enabled && !live.active && Boolean(summary.data),
+    retry: false,
+    staleTime: 60_000,
+  });
   const database = review.data?.exists ? review.data.database : null;
   const caseId = review.data?.case_id ?? null;
   const saved = useSavedSearches(runId, database, caseId);
@@ -92,6 +103,7 @@ export function useTreeData(runId: string | null) {
     review: review.data,
     saved: saved.data,
     evidence: dashboard.data?.evidence_source,
+    irregular: irregular.data,
     /** First load of the counts/tree (X18 loading card); false once either settles. */
     loading: enabled && summary.isPending && tree.isPending,
     /**
@@ -126,6 +138,7 @@ export function useTreeState(runId: string | null): {
         live: data.live,
         evidence: data.evidence,
         analyses: data.analyses,
+        irregular: data.irregular,
         onOpenSavedSearch: (search) => {
           applySavedSearch(search);
           if (runId) navigate({ runId, collection: "search" });
@@ -139,6 +152,7 @@ export function useTreeState(runId: string | null): {
       data.live,
       data.evidence,
       data.analyses,
+      data.irregular,
       applySavedSearch,
       runId,
     ],

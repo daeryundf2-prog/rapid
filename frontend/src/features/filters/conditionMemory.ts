@@ -4,7 +4,16 @@
  * wrapped and the UI simply shows nothing to recall.
  */
 
-import { normalizeContent, normalizeHours, normalizeWeekdays, parseGeo } from "./conditionValues";
+import {
+  isDupMode,
+  isDupStatus,
+  normalizeContent,
+  normalizeFamilyRefs,
+  normalizeHours,
+  normalizeIrregular,
+  normalizeWeekdays,
+  parseGeo,
+} from "./conditionValues";
 import { EMPTY_FILTERS, type FilterState, filtersEqual } from "./filterModel";
 
 export const RECENT_RANGES_KEY = "rapidtriage.v2.conditions.recentRanges";
@@ -86,6 +95,8 @@ export function normalizeFilters(raw: unknown): FilterState {
   const hours = normalizeHours(src.hours);
   const content = normalizeContent(stringList(src.content));
   const geo = text(src.geo);
+  const family = normalizeFamilyRefs(stringList(src.family));
+  const irregular = normalizeIrregular(stringList(src.irregular));
   return {
     ...EMPTY_FILTERS,
     ...(text(src.from) ? { from: text(src.from) } : {}),
@@ -107,6 +118,13 @@ export function normalizeFilters(raw: unknown): FilterState {
     ...(src.partial === true ? { partial: true } : {}),
     ...(content.length ? { content } : {}),
     ...(geo && parseGeo(geo) ? { geo } : {}),
+    // R7 갈래 A: 계열 refs, 중복 and 예외 categories (invalid values dropped).
+    ...(family.length ? { family } : {}),
+    ...(isDupStatus(src.dup) ? { dup: src.dup } : {}),
+    ...(isDupStatus(src.dup) && isDupMode(src.dupMode) && src.dupMode !== "item"
+      ? { dupMode: src.dupMode }
+      : {}),
+    ...(irregular.length ? { irregular } : {}),
   };
 }
 
