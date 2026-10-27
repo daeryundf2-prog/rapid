@@ -437,6 +437,18 @@ def decode_json_value(value: object) -> object:
         return None
 
 
+def content_text(content: object) -> str:
+    """Text of a message ``content`` value: a string, a list of ``{text}`` blocks or one block."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, Mapping):
+        text = content.get("text")
+        return text if isinstance(text, str) else ""
+    if isinstance(content, list):
+        return "\n".join(str(item["text"]) for item in content if isinstance(item, Mapping) and isinstance(item.get("text"), str))
+    return ""
+
+
 # --- rows ------------------------------------------------------------------------------------
 
 
