@@ -86,7 +86,8 @@ test("entity chips, masked rows, one audited reveal and a field keyword in the t
   await expect(confirm).toContainText("감사 기록 1건");
   await confirm.getByLabel(/공개 사유/).fill("e2e 점검");
   await confirm.getByRole("button", { name: "감사 기록 남기고 공개" }).click();
-  await expect(dialog.getByText(values.rrn ?? "missing")).toBeVisible();
+  // The first reveal may create the run's case DB (import) before the audit record: allow it time.
+  await expect(dialog.getByText(values.rrn ?? "missing")).toBeVisible({ timeout: 60_000 });
   // the next reveal of the session needs no reason form
   await row.locator("li").filter({ hasText: "전화번호" }).getByRole("button", { name: "값 보기" }).click();
   await expect(dialog.getByText(values.phone ?? "missing")).toBeVisible();
