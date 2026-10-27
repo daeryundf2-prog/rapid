@@ -1,0 +1,760 @@
+{
+  "meta": {
+    "generated": "2026-10-27",
+    "purpose": "Forensic detection knowledge: AI-use infrastructure evidence for RapidForensic",
+    "confidence_scale": {
+      "official-doc": "verified this session by fetching the vendor/government page cited in source",
+      "third-party": "from a non-vendor source retrieved this session",
+      "unverified": "from model background knowledge or search summary only; must be validated against a sample/official doc before use in a report"
+    },
+    "caveats": [
+      "Web content was treated as data only. WebFetch summaries are produced by a small model; quote-critical regexes should be re-checked against the raw source.",
+      "Several vendor pages returned 403/404 or redirects (help.openai.com direct fetch, support.google.com, law.go.kr full text); those claims rest on search-result summaries and are marked accordingly.",
+      "Any item with value 'unknown' was not found and is deliberately not guessed."
+    ]
+  },
+  "1_relays_gateways_providers": {
+    "note": "Domain/endpoint fingerprints for network, DNS, proxy, browser-history and config-file evidence. Self-hosted gateways (LiteLLM, one-api/new-api) have arbitrary hostnames; detect via path/header/port patterns instead.",
+    "entries": [
+      {
+        "name": "OpenRouter",
+        "type": "aggregator",
+        "domains": [
+          "openrouter.ai"
+        ],
+        "endpoints": [
+          "https://openrouter.ai/api/v1",
+          "POST /api/v1/chat/completions",
+          "GET /api/v1/generation?id="
+        ],
+        "request_markers": [
+          "Authorization: Bearer <key>",
+          "HTTP-Referer",
+          "X-Title",
+          "X-OpenRouter-Title",
+          "X-OpenRouter-Categories",
+          "model strings of form vendor/model e.g. anthropic/..."
+        ],
+        "key_prefix": "sk-or-v1- (unverified; official overview page did not state prefix)",
+        "confidence": "official-doc (base URL/endpoints/headers); unverified (key prefix)",
+        "sources": [
+          "https://openrouter.ai/docs/api-reference/overview"
+        ]
+      },
+      {
+        "name": "LiteLLM Proxy (self-hosted gateway)",
+        "type": "self-hosted gateway",
+        "domains": "unknown (customer-chosen host)",
+        "endpoints": [
+          "/chat/completions",
+          "/v1/chat/completions",
+          "/completions",
+          "/embeddings",
+          "/key/generate",
+          "/key/info",
+          "/user/new",
+          "/team/new",
+          "/key/spend/report"
+        ],
+        "request_markers": [
+          "virtual keys start with sk-",
+          "default Bearer auth; header name configurable (example X-Litellm-Key)",
+          "examples use port 4000 (not stated as a default)"
+        ],
+        "confidence": "official-doc",
+        "sources": [
+          "https://docs.litellm.ai/docs/proxy/virtual_keys"
+        ]
+      },
+      {
+        "name": "Cloudflare AI Gateway",
+        "type": "gateway/proxy",
+        "domains": [
+          "gateway.ai.cloudflare.com",
+          "api.cloudflare.com (alt REST: /client/v4/accounts/{ACCOUNT_ID}/ai/v1/chat/completions)"
+        ],
+        "endpoints": [
+          "https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/compat/chat/completions"
+        ],
+        "request_markers": [
+          "cf-aig-authorization: Bearer <token>",
+          "model field '{provider}/{model}' e.g. openai/..., 'dynamic/{route}', 'workers-ai/@cf/...'",
+          "account_id + gateway_id in URL path identify the tenant's gateway"
+        ],
+        "forensic_value": "URL path discloses Cloudflare account id and gateway id; gateway-side logs (in the customer's Cloudflare account) hold prompts if logging enabled (logging setting: unknown).",
+        "confidence": "official-doc",
+        "sources": [
+          "https://developers.cloudflare.com/ai-gateway/usage/chat-completion/"
+        ]
+      },
+      {
+        "name": "Portkey",
+        "domains": [
+          "api.portkey.ai"
+        ],
+        "request_markers": [
+          "x-portkey-api-key",
+          "x-portkey-virtual-key",
+          "x-portkey-provider",
+          "x-portkey-config"
+        ],
+        "confidence": "unverified (not fetched this session)",
+        "sources": []
+      },
+      {
+        "name": "Helicone",
+        "domains": [
+          "oai.helicone.ai",
+          "anthropic.helicone.ai",
+          "gateway.helicone.ai",
+          "api.helicone.ai"
+        ],
+        "request_markers": [
+          "Helicone-Auth: Bearer sk-helicone-...",
+          "Helicone-Property-*",
+          "Helicone-User-Id"
+        ],
+        "confidence": "unverified (not fetched this session)",
+        "sources": []
+      },
+      {
+        "name": "Requesty",
+        "domains": [
+          "router.requesty.ai"
+        ],
+        "confidence": "unverified (not fetched this session)",
+        "sources": []
+      },
+      {
+        "name": "one-api / new-api (self-hosted OpenAI-key relay panels, widely used by Chinese resellers)",
+        "type": "self-hosted relay",
+        "domains": "unknown (arbitrary reseller domains)",
+        "endpoints": [
+          "/v1/chat/completions",
+          "/v1/models",
+          "/v1/messages (new-api Claude format)",
+          "admin panel at / with /api/status",
+          "default port 3000"
+        ],
+        "request_markers": [
+          "keys 'sk-' + 48 alnum chars (one-api token format)",
+          "OpenAI-style Bearer auth against non-OpenAI host",
+          "base URL configured as OPENAI_BASE_URL / ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN env"
+        ],
+        "detection_tip": "Search configs/shell history/.env for BASE_URL overrides pointing at non-vendor hosts; any host answering GET /api/status or /v1/models with a non-vendor model list is a relay candidate.",
+        "confidence": "unverified (model knowledge; no official doc fetched)",
+        "sources": []
+      },
+      {
+        "name": "Generic Chinese relay / reseller services (e.g. api2d, ohmygpt, closeai-style 中转站)",
+        "domains": "unknown - the reseller landscape churns; maintain list from case evidence rather than a static catalog",
+        "confidence": "unknown",
+        "sources": []
+      },
+      {
+        "name": "Azure OpenAI / Microsoft Foundry",
+        "domains": [
+          "*.openai.azure.com",
+          "(also *.cognitiveservices.azure.com, *.services.ai.azure.com - unverified)"
+        ],
+        "endpoints": [
+          "POST https://{resource}.openai.azure.com/openai/deployments/{deployment}/chat/completions?api-version=YYYY-MM-DD",
+          "/openai/deployments/{id}/audio/transcriptions",
+          "/openai/deployments/{id}/images/generations"
+        ],
+        "request_markers": [
+          "header 'api-key: <key>' (not Authorization) OR Entra Bearer token",
+          "api-version query parameter",
+          "deployment name replaces model in path; resource name in hostname identifies tenant"
+        ],
+        "confidence": "official-doc (openai.azure.com pattern, api-key header, api-version); unverified (other hostnames)",
+        "sources": [
+          "https://learn.microsoft.com/en-us/azure/ai-services/openai/reference"
+        ]
+      },
+      {
+        "name": "AWS Bedrock",
+        "domains": [
+          "bedrock-runtime.{region}.amazonaws.com",
+          "bedrock.{region}.amazonaws.com",
+          "bedrock-agent.{region}.amazonaws.com",
+          "bedrock-agent-runtime.{region}.amazonaws.com"
+        ],
+        "endpoints": [
+          "POST /model/{modelId}/converse",
+          "/model/{modelId}/invoke",
+          "/model/{modelId}/converse-stream",
+          "/model/{modelId}/invoke-with-response-stream"
+        ],
+        "request_markers": [
+          "SigV4 Authorization header (AWS4-HMAC-SHA256 ... service=bedrock)",
+          "env AWS_BEARER_TOKEN_BEDROCK for Bedrock API keys (short-term up to 12h, long-term via IAM service-specific credential)",
+          "modelId like anthropic.claude-..."
+        ],
+        "forensic_value": "CloudTrail records management events; model invocation logging (prompts/responses) exists only if the customer enabled it (not verified this session).",
+        "confidence": "unverified (the fetched AWS page returned no body; summary came from model knowledge)",
+        "sources": [
+          "https://docs.aws.amazon.com/bedrock/latest/userguide/endpointsTable.html"
+        ]
+      },
+      {
+        "name": "Google Vertex AI",
+        "domains": [
+          "aiplatform.googleapis.com",
+          "{region}-aiplatform.googleapis.com"
+        ],
+        "endpoints": [
+          "/v1/projects/{p}/locations/{l}/publishers/google/models/{m}:generateContent",
+          "/publishers/anthropic/models/{m}:rawPredict (Claude on Vertex)"
+        ],
+        "request_markers": [
+          "OAuth2 Bearer token from gcloud/ADC (not an API key)",
+          "project id and location in path"
+        ],
+        "confidence": "unverified (redirected, not fetched)",
+        "sources": [
+          "https://docs.cloud.google.com/vertex-ai/docs/reference/rest"
+        ]
+      },
+      {
+        "name": "Google Gemini API (AI Studio)",
+        "domains": [
+          "generativelanguage.googleapis.com"
+        ],
+        "request_markers": [
+          "x-goog-api-key header or ?key=AIza... query",
+          "path /v1beta/models/{m}:generateContent"
+        ],
+        "confidence": "unverified (model knowledge); key prefix AIza confirmed via gitleaks (see section 2)",
+        "sources": []
+      },
+      {
+        "name": "Together AI",
+        "domains": [
+          "api.together.xyz",
+          "api.together.ai"
+        ],
+        "confidence": "unverified",
+        "sources": []
+      },
+      {
+        "name": "Groq",
+        "domains": [
+          "api.groq.com (path /openai/v1/chat/completions - unverified)"
+        ],
+        "request_markers": [
+          "env GROQ_API_KEY (official-doc)",
+          "key prefix gsk_ (third-party, see section 2)"
+        ],
+        "confidence": "official-doc (env var only); base URL unverified",
+        "sources": [
+          "https://console.groq.com/docs/quickstart"
+        ]
+      },
+      {
+        "name": "Fireworks AI",
+        "domains": [
+          "api.fireworks.ai (path /inference/v1/... - unverified)"
+        ],
+        "request_markers": [
+          "key prefix fw_ (unverified)"
+        ],
+        "confidence": "unverified",
+        "sources": []
+      },
+      {
+        "name": "DeepSeek API",
+        "domains": [
+          "api.deepseek.com",
+          "platform.deepseek.com (key console)"
+        ],
+        "endpoints": [
+          "POST https://api.deepseek.com/chat/completions",
+          "https://api.deepseek.com/anthropic (Anthropic-compatible)"
+        ],
+        "request_markers": [
+          "Bearer auth",
+          "env DEEPSEEK_API_KEY",
+          "key format not specified in docs"
+        ],
+        "confidence": "official-doc",
+        "sources": [
+          "https://api-docs.deepseek.com/"
+        ]
+      },
+      {
+        "name": "Moonshot / Kimi",
+        "domains": [
+          "api.moonshot.ai",
+          "api.moonshot.cn",
+          "platform.kimi.ai (docs moved here)"
+        ],
+        "confidence": "unverified (docs URL redirected, not fetched; hostnames from model knowledge). Docs redirect platform.moonshot.ai -> platform.kimi.ai observed (official).",
+        "sources": [
+          "https://platform.kimi.ai/docs/api/chat"
+        ]
+      },
+      {
+        "name": "Zhipu / Z.ai (GLM)",
+        "domains": [
+          "api.z.ai",
+          "open.bigmodel.cn (unverified; not on fetched page)"
+        ],
+        "endpoints": [
+          "POST https://api.z.ai/api/paas/v4/chat/completions"
+        ],
+        "request_markers": [
+          "Bearer auth",
+          "GLM Coding Plan uses a separate dedicated endpoint: unknown"
+        ],
+        "confidence": "official-doc (api.z.ai); unverified (open.bigmodel.cn)",
+        "sources": [
+          "https://docs.z.ai/guides/overview/quick-start"
+        ]
+      },
+      {
+        "name": "MiniMax",
+        "domains": [
+          "api.minimax.io",
+          "api.minimaxi.com"
+        ],
+        "confidence": "unverified (not fetched)",
+        "sources": []
+      },
+      {
+        "name": "First-party reference endpoints (for contrast/DNS lists)",
+        "domains": [
+          "api.openai.com",
+          "api.anthropic.com",
+          "generativelanguage.googleapis.com",
+          "api.x.ai",
+          "api.mistral.ai",
+          "api.cohere.com",
+          "api.perplexity.ai",
+          "api-inference.huggingface.co / router.huggingface.co"
+        ],
+        "confidence": "api.anthropic.com official-doc (compliance docs); remainder unverified",
+        "sources": [
+          "https://platform.claude.com/docs/en/manage-claude/compliance-api"
+        ]
+      }
+    ],
+    "cross_cutting_indicators": [
+      {
+        "indicator": "Base-URL override env vars (OPENAI_BASE_URL, OPENAI_API_BASE, ANTHROPIC_BASE_URL, GOOGLE_GEMINI_BASE_URL, AZURE_OPENAI_ENDPOINT)",
+        "meaning": "traffic redirected to a gateway/relay; compare host against first-party list",
+        "confidence": "unverified (env var names from model knowledge; only AZURE-style endpoint and GROQ_API_KEY/DEEPSEEK_API_KEY/AWS_BEARER_TOKEN_BEDROCK seen in docs)"
+      },
+      {
+        "indicator": "OpenAI-compatible path /v1/chat/completions on a non-OpenAI host",
+        "meaning": "relay or self-hosted OpenAI-compatible server (LiteLLM, vLLM, Ollama, one-api)",
+        "confidence": "official-doc for LiteLLM paths; remainder unverified"
+      }
+    ]
+  },
+  "2_api_keys_and_credential_storage": {
+    "key_formats": [
+      {
+        "provider": "Anthropic API",
+        "pattern": "\\b(sk-ant-api03-[a-zA-Z0-9_\\-]{93}AA)(?:[`'\"\\s;]|\\\\[nr]|$)",
+        "note": "gitleaks rule anthropic-api-key",
+        "confidence": "third-party (gitleaks default config, retrieved this session)",
+        "source": "https://raw.githubusercontent.com/gitleaks/gitleaks/master/config/gitleaks.toml"
+      },
+      {
+        "provider": "Anthropic Admin API",
+        "pattern": "\\b(sk-ant-admin01-[a-zA-Z0-9_\\-]{93}AA)(?:[`'\"\\s;]|\\\\[nr]|$)",
+        "confidence": "third-party (gitleaks)",
+        "source": "https://raw.githubusercontent.com/gitleaks/gitleaks/master/config/gitleaks.toml"
+      },
+      {
+        "provider": "OpenAI (project/service-account/admin)",
+        "pattern": "sk-(?:proj|svcacct|admin)-(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58})T3BlbkFJ(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58})",
+        "note": "legacy form sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20}; 'T3BlbkFJ' is base64 of 'OpenAI' and is a strong marker (newer keys may lack it - unverified)",
+        "confidence": "third-party (gitleaks)",
+        "source": "https://raw.githubusercontent.com/gitleaks/gitleaks/master/config/gitleaks.toml"
+      },
+      {
+        "provider": "Google API key (Gemini/Maps/etc, not Gemini-specific)",
+        "pattern": "\\bAIza[\\w-]{35}\\b",
+        "note": "prefix matches ANY Google Cloud API key; confirm Gemini by Generative Language API use/host",
+        "confidence": "third-party (gitleaks)",
+        "source": "https://raw.githubusercontent.com/gitleaks/gitleaks/master/config/gitleaks.toml"
+      },
+      {
+        "provider": "Hugging Face",
+        "pattern": "\\bhf_(?i:[a-z]{34})\\b",
+        "confidence": "third-party (gitleaks)",
+        "source": "https://raw.githubusercontent.com/gitleaks/gitleaks/master/config/gitleaks.toml"
+      },
+      {
+        "provider": "Perplexity",
+        "pattern": "\\bpplx-[a-zA-Z0-9]{48}\\b",
+        "confidence": "third-party (gitleaks)",
+        "source": "https://raw.githubusercontent.com/gitleaks/gitleaks/master/config/gitleaks.toml"
+      },
+      {
+        "provider": "Cohere",
+        "pattern": "context rule: name contains cohere|CO_API_KEY then [a-zA-Z0-9]{40}",
+        "confidence": "third-party (gitleaks); no fixed prefix",
+        "source": "https://raw.githubusercontent.com/gitleaks/gitleaks/master/config/gitleaks.toml"
+      },
+      {
+        "provider": "OpenRouter",
+        "pattern": "sk-or-v1-[0-9a-f]{64} (shape unverified)",
+        "confidence": "unverified; gitleaks default config has no rule for it",
+        "source": ""
+      },
+      {
+        "provider": "Groq",
+        "pattern": "gsk_[A-Za-z0-9]{~52} (length unverified)",
+        "confidence": "third-party (search summary: prefix gsk_); no gitleaks rule",
+        "source": "https://unified.to/blog/how_to_get_a_grok_xai_and_groq_api_key_and_connect_it_to_your_product"
+      },
+      {
+        "provider": "xAI (Grok)",
+        "pattern": "xai-[A-Za-z0-9]{~80} (length unverified)",
+        "confidence": "third-party (search summary: prefix xai-); no gitleaks rule",
+        "source": "https://unified.to/blog/how_to_get_a_grok_xai_and_groq_api_key_and_connect_it_to_your_product"
+      },
+      {
+        "provider": "LiteLLM virtual/master key",
+        "pattern": "sk-... (master key MUST start with sk-)",
+        "confidence": "official-doc",
+        "source": "https://docs.litellm.ai/docs/proxy/virtual_keys"
+      },
+      {
+        "provider": "Helicone",
+        "pattern": "sk-helicone-...",
+        "confidence": "unverified",
+        "source": ""
+      },
+      {
+        "provider": "Replicate",
+        "pattern": "r8_...",
+        "confidence": "unverified (no gitleaks rule)",
+        "source": ""
+      },
+      {
+        "provider": "DeepSeek, Moonshot, Zhipu, MiniMax, Fireworks (fw_), Together",
+        "pattern": "DeepSeek docs state no key format; others unknown/unverified",
+        "confidence": "unknown",
+        "source": "https://api-docs.deepseek.com/"
+      },
+      {
+        "provider": "AWS Bedrock API key",
+        "pattern": "no documented prefix found; carried in env AWS_BEARER_TOKEN_BEDROCK",
+        "confidence": "unverified",
+        "source": ""
+      },
+      {
+        "provider": "Azure OpenAI",
+        "pattern": "32-char hex key sent in 'api-key' header (shape unverified)",
+        "confidence": "unverified (header name official-doc)",
+        "source": "https://learn.microsoft.com/en-us/azure/ai-services/openai/reference"
+      }
+    ],
+    "scanning_caveats": [
+      "A generic sk-[a-zA-Z0-9]{16,32} pattern (third-party scanner) misses modern hyphenated Anthropic/OpenAI keys; use the specific patterns above.",
+      "A HuggingFace Space doc claimed an xAI key starts with gsk_; that conflicts with other sources (gsk_ = Groq) and is treated as unreliable.",
+      "Regexes were returned by a summarizer; verify against raw gitleaks.toml before shipping."
+    ],
+    "storage_locations": [
+      {
+        "where": "Environment variables / shell profiles / .env files",
+        "examples": [
+          "GROQ_API_KEY",
+          "DEEPSEEK_API_KEY",
+          "AWS_BEARER_TOKEN_BEDROCK",
+          "ANTHROPIC_COMPLIANCE_ACCESS_KEY (docs example)",
+          "OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY (conventional; unverified here)"
+        ],
+        "confidence": "official-doc for the first four; unverified for others",
+        "sources": [
+          "https://console.groq.com/docs/quickstart",
+          "https://api-docs.deepseek.com/",
+          "https://platform.claude.com/docs/en/manage-claude/compliance-api"
+        ]
+      },
+      {
+        "where": "Per-tool config files (e.g. ~/.claude/, ~/.codex/auth.json, ~/.config/<tool>/, VS Code settings.json, Cursor/Continue config)",
+        "confidence": "unverified - exact paths/filenames not verified this session; confirm per tool before listing"
+      },
+      {
+        "where": "OS credential stores (Windows Credential Manager / DPAPI, macOS Keychain, libsecret)",
+        "confidence": "unverified for individual tools; generic mechanism only"
+      },
+      {
+        "where": "Shell history, CI secrets, git history, Docker/compose files, Jupyter notebooks",
+        "confidence": "unverified (general DFIR practice)"
+      }
+    ]
+  },
+  "3_browser_extensions_and_os_assistants": {
+    "entries": [
+      {
+        "name": "Windows Recall (Copilot+ PC)",
+        "artifacts": [
+          "C:\\Users\\<u>\\AppData\\Local\\CoreAIPlatform.00\\UKP{DA73A0DB-DDF4-4A81-9506-CCB5DE8B0F14}\\ukg.db (SQLite: WindowCapture, App, AppDwellTime; OCR text and URLs)",
+          "ImageStore folder with JPEG snapshots, filename = snapshot id",
+          "SemanticTextStore.sidb, SemanticImageStore.sidb (DiskANN graphs)"
+        ],
+        "notes": [
+          "Opt-in on Copilot+ PCs (Qualcomm, Intel, AMD); GA April 25, 2025 (official-doc).",
+          "Apps can exclude content via SetWindowDisplayAffinity; browsers in InPrivate mode limited (official-doc / third-party).",
+          "IT policy DisableAIDataAnalysis controls snapshots (official-doc).",
+          "Protected by Windows Hello ESS / VBS enclave; offline acquisition may require user auth (claim from Microsoft summary page: 'secured-core PC, Pluton, ESS' - official-doc; exact decryption workflow: unknown).",
+          "ukg.db-wal sidecar expected as SQLite WAL but not confirmed: unverified.",
+          "Tooling: Velociraptor artifacts (Windows.System.Recall.*) and KAPE target by CyberCX (third-party)."
+        ],
+        "confidence": "official-doc (feature/policy); third-party (paths/tables)",
+        "sources": [
+          "https://learn.microsoft.com/en-us/windows/apps/develop/windows-integration/recall/",
+          "https://cybercx.com.au/blog/forensic-applications-of-microsoft-recall",
+          "https://docs.velociraptor.app/exchange/artifacts/pages/windows.system.recall.allwindowevents"
+        ]
+      },
+      {
+        "name": "Windows Copilot / Microsoft 365 Copilot in Edge / Bing host",
+        "artifacts": "Tenant-side: Purview audit AppHost values Bing, Edge, Office, M365App, BizChat (official-doc). Endpoint-side local artifacts: unknown/unverified.",
+        "confidence": "official-doc",
+        "sources": [
+          "https://learn.microsoft.com/en-us/purview/audit-copilot"
+        ]
+      },
+      {
+        "name": "Apple Intelligence / Siri ChatGPT extension / Writing Tools",
+        "notes": [
+          "Apple sends the user-selected request, attachments and limited context (time zone, country, device type, language, feature used) to OpenAI; IP obscured; confirmation prompt shown unless disabled.",
+          "Signed-in ChatGPT account => OpenAI may log request/attachments/history; without account Apple states OpenAI must not store or train on it.",
+          "Apple keeps only limited metadata (request counts, approximate sizes); audio/transcripts only if user opted in to Improve Siri and Dictation.",
+          "Device-side forensic artifacts: unknown."
+        ],
+        "confidence": "official-doc (Apple privacy page via search summary; page not fully fetched)",
+        "sources": [
+          "https://www.apple.com/legal/privacy/data/en/third-party-ai/",
+          "https://support.apple.com/guide/mac-help/mchlfc5cf131/mac"
+        ]
+      },
+      {
+        "name": "Gemini in Chrome / Gemini on Android",
+        "artifacts": "Workspace-side audit: see section 4. Local artifacts: unknown.",
+        "confidence": "unknown (local)",
+        "sources": []
+      },
+      {
+        "name": "Raycast AI",
+        "artifacts": "unknown",
+        "confidence": "unknown",
+        "sources": []
+      },
+      {
+        "name": "Grammarly / DeepL Write",
+        "artifacts": "extension IDs, local storage and network domains (grammarly.com, deepl.com) - not verified",
+        "confidence": "unverified",
+        "sources": []
+      },
+      {
+        "name": "Meeting recorders: Otter, Fireflies, Granola",
+        "artifacts": "calendar invite attendees (bot joins as participant, e.g. 'Otter.ai', 'Fireflies.ai Notetaker'), domains otter.ai / fireflies.ai / granola.ai, OAuth grants in IdP/Workspace/M365 consent logs",
+        "confidence": "unverified (model knowledge)",
+        "sources": []
+      },
+      {
+        "name": "Whisper tools (local, e.g. whisper.cpp, faster-whisper, MacWhisper, Buzz)",
+        "artifacts": "model files ggml-*.bin / *.safetensors in user dirs, large audio->txt/srt/vtt outputs; Azure OpenAI audio/transcriptions endpoint is the hosted variant (official-doc, see section 1)",
+        "confidence": "unverified for local files; official-doc for Azure endpoint",
+        "sources": [
+          "https://learn.microsoft.com/en-us/azure/ai-services/openai/reference"
+        ]
+      },
+      {
+        "name": "Browser extensions generally",
+        "method": "Enumerate Chrome/Edge 'Extensions' directory IDs and Preferences, match against Web Store IDs; list not built this session",
+        "confidence": "unknown (specific IDs not verified)",
+        "sources": []
+      }
+    ]
+  },
+  "4_enterprise_evidence_sources": {
+    "microsoft_purview_copilot": {
+      "summary": "Copilot and AI app interactions are logged automatically in Audit (Standard) if auditing is enabled. Fields: Operation=CopilotInteraction (admin ops e.g. UpdateTenantSettings, CreatePlugin), RecordType (CopilotInteraction, ConnectedAIAppInteraction, AIAppInteraction, TeamCopilotInteraction), Workload (Copilot, ConnectedAIApp, AIApp), AppIdentity (e.g. Copilot.MicrosoftCopilot.BizChat, Copilot.Studio.<guid>, ConnectedAIApp.Entra.AppId, AIApp.SaaS.AppName), AppHost, AccessedResources (id, SiteUrl, SensitivityLabelId, action), Messages (message ids, isPrompt, JailbreakDetected), AISystemPlugin (BingWebSearch = web grounding), AgentId/Name/Version, ModelTransparencyDetails (provider/name; model name not available for M365 Copilot), ClientRegion, DLP deferral bitmask. Third-party AI app records (AIAppInteraction, some ConnectedAIAppInteraction) are pay-as-you-go with 180-day retention and need enabling; AIApp records come from network/browser DLP. Search via Purview portal > Audit by operation/recordType/workload; AppIdentity filtering must be done offline after export. Records reference prompt/response by message id; the doc does not say the prompt text is in the audit record itself (content via other Purview features: unverified).",
+      "confidence": "official-doc",
+      "sources": [
+        "https://learn.microsoft.com/en-us/purview/audit-copilot"
+      ]
+    },
+    "google_workspace_gemini": {
+      "summary": "Admin console > Reporting > Audit and investigation > 'Gemini for Workspace log events' (needs Audit & Investigation privilege). Events: Feature Utilization; attributes Action (e.g. GENERATE_IMAGES, GENERATE_SLIDES, SUMMARIZE_THREAD), Actor email, Application name, Event Category (active_conversations, active_generate, active_summarize, active_unspecified, inactive, unknown), Agent info and By-an-agent flag, Feature Source, IP ASN, User device ID. Default view last 7 days; retention period not stated on that page (see separate 'data retention and lag times' page: unknown). Page does not say prompts/responses are logged. Separate audit logs for Gemini Notebook (announced Sept 3, 2026) viewable in security investigation tool and exportable to BigQuery (export off until enabled).",
+      "confidence": "official-doc",
+      "sources": [
+        "https://knowledge.workspace.google.com/admin/reports/gemini-for-workspace-log-events",
+        "https://workspaceupdates.googleblog.com/2026/08/introducing-comprehensive-audit-logs-for-Gemini-Notebook-in-the-Workspace-Admin-console.html"
+      ]
+    },
+    "chatgpt_enterprise_compliance_api": {
+      "summary": "OpenAI Compliance Platform/API for Enterprise and Edu: logs and metadata of ChatGPT workspace usable for eDiscovery/DLP/SIEM; two patterns (immutable append-only audit log stream; stateful API). Logs Platform retention only 30 days, so customers must pull and archive continuously. Deleted data not recoverable. Exact data types (conversation content, files, GPTs) and API paths: unknown (help page returned 403; claims come from search-result summary).",
+      "confidence": "unverified (search summary of official help article)",
+      "sources": [
+        "https://help.openai.com/en/articles/9261474-compliance-api-for-chatgpt-enterprise-edu-and-chatgpt-for-teachers"
+      ]
+    },
+    "claude_enterprise_compliance_api": {
+      "summary": "Base https://api.anthropic.com/v1/compliance/*, header x-api-key plus anthropic-version. GET /v1/compliance/activities (Activity Feed: id, created_at, actor{email,user_id,ip_address,user_agent}, type e.g. claude_chat_created). Key types: Compliance Access Key (claude.ai; all endpoints) and Admin API key (Console; Activity Feed only, scope read:compliance_activities). Enterprise-only endpoints retrieve/delete chats, files, projects and retrieve session transcripts for Cowork, Claude Code, Claude Science, Claude for Microsoft 365, Docs/Sheets/Slides add-ins and Claude in Chrome (local sessions captured only while signed in with the Enterprise account). Rate limit 600 req/min per parent org. Separate: audit log CSV export in claude.ai admin settings (narrow, capped lookback), Analytics APIs (aggregates), OpenTelemetry logging (can capture prompts), inference hooks (inline deny). Standalone Console orgs: activity feed only; one third-party article states the feed does not log inference content (third-party, treat cautiously). Retention of transcripts: unknown.",
+      "confidence": "official-doc (API, scope, coverage); third-party (inference-not-logged claim)",
+      "sources": [
+        "https://platform.claude.com/docs/en/manage-claude/compliance-api",
+        "https://claude.com/resources/articles/claude-platform-compliance-api"
+      ]
+    },
+    "slack_teams_ai": {
+      "summary": "Teams: Copilot/Facilitator audit operations AINotesUpdate, LiveNotesUpdate, TeamCopilotMsgInteraction with RecordType TeamCopilotInteraction and AppIdentity Copilot.TeamCopilot.* (official-doc). Slack AI: unknown (not researched).",
+      "confidence": "official-doc (Teams); unknown (Slack)",
+      "sources": [
+        "https://learn.microsoft.com/en-us/purview/audit-copilot"
+      ]
+    },
+    "proxy_casb_dlp": {
+      "netskope": {
+        "summary": "Predefined URL category 'Generative AI' (202 apps as of June 2024; subcategories require Generative AI Apps Upgrade license). Test domain for category 600: ns-catid-600-sn.netskopetools.com. Log field names for the category: unknown.",
+        "confidence": "third-party (Netskope community/docs)",
+        "sources": [
+          "https://community.netskope.com/generative-ai-general-127/day-1-netskope-and-generative-ai-6310",
+          "https://docs.netskope.com/en/category-definitions/"
+        ]
+      },
+      "zscaler": {
+        "summary": "unknown (search found nothing; Zscaler has an AI/ML applications category per model memory - unverified)",
+        "confidence": "unknown",
+        "sources": []
+      },
+      "palo_alto": {
+        "summary": "unknown (search found nothing)",
+        "confidence": "unknown",
+        "sources": []
+      },
+      "microsoft_purview_network_dlp": {
+        "summary": "Browser/network DLP produces AIApp workload records (AppIdentity AIApp.SaaS.<AppName>), pay-as-you-go, 180-day retention.",
+        "confidence": "official-doc",
+        "sources": [
+          "https://learn.microsoft.com/en-us/purview/audit-copilot"
+        ]
+      }
+    },
+    "dns_domain_list": "Use section 1 domains as a seed. Official-doc-verified: openrouter.ai, gateway.ai.cloudflare.com, api.deepseek.com, api.z.ai, *.openai.azure.com, api.anthropic.com. Others are unverified; wildcard-match amazonaws.com bedrock-* and *-aiplatform.googleapis.com hosts."
+  },
+  "5_korea_considerations": {
+    "note": "Not legal advice; statute text could not be fully fetched (law.go.kr returned titles only). Bullets 1-4 are unverified background to be checked against 국가법령정보센터 (law.go.kr) and 대법원 종합법률정보 (glaw.scourt.go.kr) before use.",
+    "bullets": [
+      {
+        "n": 1,
+        "topic": "Communications Secrecy Protection Act (통신비밀보호법)",
+        "text": "Art. 3 prohibits interception (감청) outside statutory procedure and Art. 4 bars use of evidence obtained by unlawful interception; real-time capture of an employee's in-flight messages/prompts (e.g. TLS-inspecting proxy reading live AI chat) risks this regime, whereas examining stored data after the fact is treated differently (distinction unverified). Article titles verified; text and application to corporate proxies unverified.",
+        "confidence": "official-doc for article titles only (law.go.kr page title listing); unverified for application",
+        "sources": [
+          "https://www.law.go.kr/법령/통신비밀보호법"
+        ]
+      },
+      {
+        "n": 2,
+        "topic": "Personal Information Protection Act (개인정보 보호법) and monitoring consent",
+        "text": "Employee PC/network monitoring involves processing personal information; a law-firm commentary reports courts accept messenger/PC review only with express consent or where the company's legitimate interest clearly outweighs the employee's rights, and only within a limited scope. Specific PIPA articles (e.g. 15, 17) and consent form requirements were searched but not confirmed. Recommend documented policy, notice and written consent in employment rules/onboarding.",
+        "confidence": "third-party (law-firm commentary via search summary); unverified (article numbers)",
+        "sources": [
+          "https://www.daeryunlaw.com/kr/practices/detail/workplace-surveillance-laws",
+          "https://www.shinkim.com/kor/media/newsletter/2629"
+        ]
+      },
+      {
+        "n": 3,
+        "topic": "Digital evidence admissibility: identity and integrity",
+        "text": "Korean case law as summarized by practitioners requires that printouts/copies be shown identical to the original storage medium and that integrity was preserved from seizure to output; hash comparison and participation of the data subject are used to prove it, and failure can lead to exclusion. Forensic workflow should record hashes at acquisition. Case numbers not captured this session.",
+        "confidence": "third-party (lawtalk and practitioner articles via search summary)",
+        "sources": [
+          "https://www.lawtalk.co.kr/posts/179012",
+          "https://www.lawtalk.co.kr/posts/15575"
+        ]
+      },
+      {
+        "n": 4,
+        "topic": "Illegally collected evidence (위법수집증거)",
+        "text": "A Supreme Court civil decision 2024다222212 on admissibility of illegally collected evidence in civil litigation exists but its holding was not retrieved; do not rely on it until read. Criminal Procedure Act principles (exclusion of illegally collected evidence) are background knowledge, unverified here.",
+        "confidence": "unverified",
+        "sources": [
+          "https://korea.legal/wiki/2024%eb%8b%a4222212/"
+        ]
+      },
+      {
+        "n": 5,
+        "topic": "Cross-border and vendor-held data",
+        "text": "AI vendor-side records (Compliance API exports, Purview, Workspace logs) are held by tenant admins; obtaining another party's tenant data, or data transferred abroad, raises PIPA overseas-transfer and consent issues and may need admin cooperation or legal process. Retention windows differ (OpenAI Logs Platform 30 days; Purview third-party AI audit 180 days), so preservation requests should be prompt. Korean cross-border transfer rules themselves: unverified.",
+        "confidence": "official-doc for retention figures (Purview) / unverified (OpenAI 30 days via summary); unverified for Korean transfer rules",
+        "sources": [
+          "https://learn.microsoft.com/en-us/purview/audit-copilot",
+          "https://help.openai.com/en/articles/9261474-compliance-api-for-chatgpt-enterprise-edu-and-chatgpt-for-teachers"
+        ]
+      }
+    ]
+  },
+  "6_browser_profiles_verified_on_test_pc": {
+    "verified_on": "Windows 11; Chrome and Edge",
+    "confidence": "verified-on-test-pc",
+    "source": "schema/structure probe on this PC, 2026-10-27 (names, counts, column/key names only; message bodies, URLs, titles and credentials not read)",
+    "chrome_profiles": "11 profile directories under %LOCALAPPDATA%\\Google\\Chrome\\User Data (Default, Profile 1, 3, 14-19, 21, 22) - AI use can be spread across profiles, so ALL Profile N directories must be enumerated",
+    "edge_profiles": "1 (Default)",
+    "per_profile_structure": [
+      "History (SQLite)",
+      "Local Storage/leveldb",
+      "IndexedDB",
+      "Session Storage",
+      "Cache/Cache_Data",
+      "Network",
+      "Sessions",
+      "Extensions"
+    ],
+    "history_tables_seen": "meta, urls, visits, visit_source, keyword_search_terms, downloads, downloads_url_chains, downloads_slices, segments, segment_usage, content_annotations, context_annotations, clusters, clusters_and_visits, cluster_keywords, cluster_visit_duplicates, visited_links, history_sync_metadata (+ journeys, journey_* tables on newer profiles). Edge adds edge_urls, edge_visits, edge_downloads, edge_favicons, typed_url_sync_metadata, edge_keyword_search_terms_source",
+    "ai_domains_observed_in_history": [
+      "chatgpt.com",
+      "openai.com",
+      "claude.ai",
+      "anthropic.com",
+      "gemini.google.com",
+      "grok.com / x.ai",
+      "openrouter.ai",
+      "z.ai",
+      "devin.ai",
+      "kiro.dev",
+      "antigravity",
+      "cursor.com",
+      "windsurf"
+    ],
+    "observations": [
+      "visit counts were obtained with a domain match on urls.url; per-profile totals ranged from 1 to ~160 visits per service",
+      "z.ai (GLM), OpenRouter, Devin, Kiro, Antigravity and Windsurf appeared, but rapid's browser.py AI_SERVICE_DOMAINS does not list z.ai, openrouter.ai, devin.ai, kiro.dev, cursor.com or windsurf (gap)",
+      "some urls rows have last_visit_time = 0, so timestamps must be validated (WebKit epoch 1601) before conversion",
+      "multiple Chrome profiles mean a parser that only reads 'Default' would miss most AI use on this PC"
+    ]
+  },
+  "7_os_level_findings_on_test_pc": {
+    "source": "schema/structure probe on this PC, 2026-10-27 (names, counts, column/key names only; content, emails, account ids and credentials not recorded)",
+    "confidence": "verified-on-test-pc",
+    "powershell_history": "%APPDATA%\\Microsoft\\Windows\\PowerShell\\PSReadLine\\ConsoleHost_history.txt exists (26KB, 364 lines, last modified 2026-10-22) - contains typed commands incl. installs/invocations of AI CLIs (contents not read)",
+    "windows_recall": "%LOCALAPPDATA%\\CoreAIPlatform.00 not present -> Recall not enabled on this PC",
+    "windows_copilot_app": "%LOCALAPPDATA%\\Packages\\Microsoft.Copilot_8wekyb3d8bbwe\\LocalState exists (contents not examined)",
+    "npm_global_packages_seen": [
+      "@anthropic-ai/claude-code (scope @anthropic-ai)",
+      "lazy-gravity",
+      "kordoc",
+      "pdfjs-dist"
+    ],
+    "native_messaging": "%APPDATA%\\Claude-NativeHost\\com.anthropic.claude_browser_extension.json -> Claude browser extension native host installed",
+    "home_dotfolders_without_catalog_entry": [
+      ".claude-swap-backup",
+      ".zcode",
+      ".codegraph",
+      ".lumos (user project)",
+      "~/..gemini"
+    ],
+    "lesson": "generic discovery found 3 AI-related tools that research did not list; keep the generic scan (home dot-folders + sqlite/jsonl with message/session structure) alongside the catalog"
+  }
+}
