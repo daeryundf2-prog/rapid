@@ -21,8 +21,10 @@ from rapidtriage.core.credential_files import (
     credential_file_reason,
     redact_credential_text,
 )
+from tests.schema_validation import validate
 from tests.test_ai_agents_presence import SECRET_VALUES, build_windows_image, write
 
+SCHEMA_DIR = Path(__file__).resolve().parent.parent / "rapidtriage" / "schemas"
 NORMAL_VALUE = "NORMALDOCVALUE0099"
 FAKE_VALUES = {
     "Users/alice/.netrc": ("machine h login u password {}", "FAKE-NETRC-0006"),
@@ -242,6 +244,7 @@ class CredentialFilePipelineTest(unittest.TestCase):
         docs_step = next(step for step in self.summary["steps"] if step["name"] == "docs")
         self.assertIn(note, docs_step["warning_messages"])
         self.assertIn(note, (self.out / "rapidtriage-run-report.md").read_text(encoding="utf-8"))
+        validate(docs, json.loads((SCHEMA_DIR / "docs.schema.json").read_text(encoding="utf-8")))
 
 
 class CredentialFileExtractAndViewerTest(unittest.TestCase):
@@ -272,6 +275,7 @@ class CredentialFileExtractAndViewerTest(unittest.TestCase):
         self.assertEqual(fake_hits_in_files(self.base / "extract"), {})
         extracted = {Path(str(entry["original_path"])).name for entry in result["entries"]}
         self.assertIn("notes.json", extracted)
+        validate(result, json.loads((SCHEMA_DIR / "extract.schema.json").read_text(encoding="utf-8")))
 
     def test_source_viewer_and_source_read_withhold(self) -> None:
         from rapidtriage.api.app import build_source_preview, build_source_search
