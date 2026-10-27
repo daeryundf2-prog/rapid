@@ -12,7 +12,7 @@ import { parseFlags } from "../../flags/flags";
 import { kindsForCategory } from "../../tree/categories";
 import { serverPathFilter } from "../gridUtils";
 import type { CollectionDef, ColumnSpec } from "../types";
-import { labelledCell } from "../valueLabels";
+import { labelledCell, valueListLabel } from "../valueLabels";
 import { AI_KIND_COLUMNS, AI_TYPE_FAMILY_COLUMNS } from "./ai";
 import { recordHighlight, registryCellKindLabel, summarizeArtifact } from "./artifactSummary";
 import {
@@ -596,7 +596,15 @@ export const KIND_COLUMNS: Record<string, KindColumnDef[]> = {
     { header: "암호화 항목", keys: ["encrypted_entry_count"], width: 100, number: true },
     { header: "크기", keys: ["source_size"], width: 100, bytes: true },
     { header: "수정", keys: ["modified_at"], width: 170 },
-    { header: "위험", keys: ["risk_flags"], width: 240, list: true },
+    {
+      header: "위험",
+      keys: ["risk_flags"],
+      width: 240,
+      list: true,
+      // Risk tags in Korean (desktop AI app / AI prompt history … — R7 AI 사용), raw ids in the tooltip.
+      display: (value) => valueListLabel("riskTag", value),
+      tooltip: (details) => flatValue(details.risk_flags),
+    },
   ],
 };
 

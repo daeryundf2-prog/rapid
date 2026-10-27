@@ -129,7 +129,10 @@ function ConversationList({
             }
           }}
         >
-          <span className="chat-list-title">{conversation.label}</span>
+          {/* Conversation names come from the evidence (chat titles, session ids): shown as written. */}
+          <span className="chat-list-title" data-raw-ok>
+            {conversation.label}
+          </span>
           <span className="chat-list-meta">
             {[conversation.service, `메시지 ${conversation.messages.length.toLocaleString("ko-KR")}개`]
               .filter(Boolean)
@@ -255,7 +258,9 @@ function MessageList({
   return (
     <section className="chat-thread" aria-label={`${conversation.label} 대화`}>
       <header className="chat-thread-head">
-        <span className="chat-thread-title">{conversation.label}</span>
+        <span className="chat-thread-title" data-raw-ok>
+          {conversation.label}
+        </span>
         <span className="chat-list-meta">
           {[
             conversation.service,
@@ -335,7 +340,8 @@ function MessageList({
                   ) : message.ai?.variant === "file" ? (
                     <AiFileLink message={message} runId={runId} />
                   ) : (
-                    <p className="chat-text">
+                    // Message bodies are evidence text, shown as written.
+                    <p className="chat-text" data-raw-ok>
                       <Highlighted text={message.text} terms={terms} />
                     </p>
                   )}
@@ -394,7 +400,11 @@ function AiToolBlock({
         }}
       >
         <span aria-hidden="true">{hasBody ? (open ? "▾ " : "▸ ") : ""}</span>
-        <Highlighted text={message.text} terms={terms} />
+        {/* The tool's own name (vendor id, e.g. read_file) as written; its kind in Korean. */}
+        <span data-raw-ok>
+          <Highlighted text={ai.toolName ?? message.text} terms={terms} />
+        </span>
+        {ai.toolKind ? ` · ${ai.toolKind}` : null}
         {ai.destructive ? <span className="chat-tool-flag"> · 파괴적 작업</span> : null}
         {ai.exitCode !== undefined ? (
           <span className="chat-list-meta"> · 종료 코드 {ai.exitCode}</span>

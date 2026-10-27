@@ -28,6 +28,14 @@ export const AI_TYPE_LABELS: Readonly<Record<string, string>> = {
   "ai-agent-parse-error": "AI 기록 읽기 오류",
 };
 
+/** AI types other collectors write (browser exports, desktop AI app stores). */
+export const OTHER_AI_TYPE_LABELS: Readonly<Record<string, string>> = {
+  "ai-service-export-conversation": "AI 서비스 내보내기 대화",
+  "desktop-ai-app-artifact": "데스크톱 AI 앱 파일",
+  "local-llm-artifact": "로컬 LLM 앱 파일",
+  "local-llm-prompt-candidate": "로컬 LLM 프롬프트 후보",
+};
+
 export const AI_TYPES: readonly string[] = Object.keys(AI_TYPE_LABELS);
 
 export function isAiType(type: string | null | undefined): boolean {

@@ -84,7 +84,7 @@ const EVIDENCE_COLUMNS = [
  * spellings, kept as written.
  */
 const EVIDENCE_KEY =
-  /(name|names|path|paths|title|url|uri|description|comment|strings|hash|publisher|product|value|values|data|target|user|account|host|computer|command|arguments|args|keyword|keywords|subject|sender|recipient|body|message|text|domain|email|file|folder|dir|key|sid|guid|id|version|guidance|location|address|serial|label)$/i;
+  /(name|names|path|paths|title|url|uri|description|comment|strings|hash|publisher|product|value|values|data|target|user|account|host|computer|command|arguments|args|keyword|keywords|subject|sender|recipient|body|message|text|domain|email|file|folder|dir|key|sid|guid|id|version|guidance|location|address|serial|label|model|models|server|commit)$/i;
 /** Catalogue keys with value labels (src/features/grid/valueLabels.ts KEY_DOMAINS): always checked. */
 const LABELLED_KEYS = [
   "browser",
@@ -131,6 +131,9 @@ const ALLOW_TOKENS = [
   "rapidtriage",
   "fastapi",
   "uvicorn",
+  // AI tool product names written in lower case (R7 AI 사용, catalog names).
+  "oh-my-opencode",
+  "claude-swap",
 ];
 
 interface Offender {

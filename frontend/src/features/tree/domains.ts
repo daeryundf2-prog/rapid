@@ -532,6 +532,18 @@ export const AI_USAGE_DOMAIN: DomainDef = {
       target: a("browser", ["browser-ai-usage", "browser-ai-conversation"]),
       typeLabels: { "browser-ai-usage": "AI 서비스 방문", "browser-ai-conversation": "AI 대화 후보" },
     },
+    {
+      // AI service exports (ChatGPT / Claude … JSON / JSONL) read by the browser collector.
+      id: "ai-service-exports",
+      label: "AI 서비스 내보내기 대화",
+      target: a("browser", ["ai-service-export-conversation"]),
+    },
+    {
+      // Desktop AI app stores (SQLite / LevelDB candidates) of the document scan.
+      id: "ai-desktop-apps",
+      label: "데스크톱 AI 앱 파일",
+      target: a("generic-documents", ["desktop-ai-app-artifact"]),
+    },
     { id: "ai-model-files", label: "로컬 LLM·모델 파일", target: aiTypes("ai-model-file") },
     {
       id: "ai-local-llm",
