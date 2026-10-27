@@ -89,6 +89,10 @@ class IrregularApiTests(unittest.TestCase):
         self.assertEqual(summary["total"], sum(item["count"] for item in summary["categories"]))
         self.assertEqual(summary["total"], 13)
         self.assertEqual(summary["unique_items"], 13)
+        self.assertEqual(summary["unique_by_list"], {"candidates": 7, "inventory": 1, "artifacts": 5})
+        every = ",".join(CATEGORIES)
+        self.assertEqual(self.get(f"artifacts?limit=500&irregular={every}")["cross_kind"]["matched"], 5)
+        self.assertEqual(self.get(f"files?limit=500&irregular={every}")["matched"], 7)
         for category, (candidates, inventory, artifacts) in EXPECTED.items():
             with self.subTest(category=category):
                 item = by_id[category]

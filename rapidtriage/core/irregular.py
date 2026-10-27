@@ -243,12 +243,14 @@ class IrregularIndex:
     def summary(self) -> dict[str, object]:
         categories = []
         unique: set[str] = set()
+        per_list: dict[str, set[str]] = {bucket: set() for bucket in BUCKETS}
         total = 0
         for name in CATEGORIES:
             refs = self.by_category[name]
             counts = {bucket: len(refs[bucket]) for bucket in BUCKETS}
             for bucket in BUCKETS:
                 unique.update(refs[bucket])
+                per_list[bucket].update(refs[bucket])
             count = sum(counts.values())
             total += count
             categories.append(
@@ -261,7 +263,13 @@ class IrregularIndex:
                     **counts,
                 }
             )
-        return {"categories": categories, "total": total, "unique_items": len(unique)}
+        return {
+            "categories": categories,
+            "total": total,
+            "unique_items": len(unique),
+            # Rows in at least one category, per list (what ``irregular=<every id>`` lists there).
+            "unique_by_list": {bucket: len(refs) for bucket, refs in per_list.items()},
+        }
 
 
 def classify(
