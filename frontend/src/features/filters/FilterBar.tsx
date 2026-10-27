@@ -29,7 +29,7 @@ import { type Grade, useCatalog } from "../flags/catalog";
 import { REVIEW_LABELS } from "../grid/columns/common";
 import { GRID_FILTER_DEBOUNCE_MS } from "../grid/gridUtils";
 import { DEFAULT_PRESET, DENSITY_LABELS, type Density, type GridPreset, PRESET_LABELS } from "../grid/types";
-import { ClockSection, IncidentRange, ResultSection } from "./ConditionSections";
+import { ClockSection, FamilySection, IncidentRange, ResultSection } from "./ConditionSections";
 import {
   recentRanges,
   rememberRange,
@@ -283,6 +283,7 @@ function FilterPopoverBody({ tagListId }: { tagListId: string }) {
 
       <ClockSection />
       <ResultSection />
+      <FamilySection />
 
       <fieldset className="popover-section" aria-label="아티팩트 유형">
         <legend className="popover-title">유형</legend>
@@ -846,6 +847,10 @@ export function FilterBar(props: FilterBarProps) {
                       partial: undefined,
                       content: undefined,
                       geo: undefined,
+                      family: undefined,
+                      dup: undefined,
+                      dupMode: undefined,
+                      irregular: undefined,
                     })
                   }
                 >

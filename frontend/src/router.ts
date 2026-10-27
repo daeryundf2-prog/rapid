@@ -37,8 +37,14 @@ import {
   type ServerSort,
 } from "./contracts/collection";
 import {
+  type DupMode,
+  type DupStatus,
+  isDupMode,
+  isDupStatus,
+  isFamilyRef,
   normalizeContent,
   normalizeHours,
+  normalizeIrregular,
   normalizeWeekdays,
   parseGeo,
   WEEKDAY_IDS,
@@ -185,6 +191,14 @@ export interface Route {
   content?: string[];
   /** Coordinate box `lat0,lon0,lat1,lon1` (map view cluster), URL `geo=`. */
   geo?: string;
+  /** 계열 (R7 갈래 A): item refs whose families are listed, URL `family=` (repeated). */
+  family?: string[];
+  /** 중복: original | duplicate | any, URL `dup=`. */
+  dup?: DupStatus;
+  /** 중복 비교 방식 (absent = 항목별), URL `dup_mode=family|custodian`. */
+  dupMode?: DupMode;
+  /** 예외 항목 category ids, URL `irregular=a,b`. */
+  irregular?: string[];
 }
 
 /** fs-tree special nodes the files listing filters (`GET /files?special=`). */
@@ -299,6 +313,7 @@ const VIEWER_MODES: readonly ViewerMode[] = [
   "email",
   "media",
   "meta",
+  "family",
 ];
 
 export const EMPTY_ROUTE: Route = Object.freeze({ runId: null, collection: null }) as Route;
@@ -455,8 +470,21 @@ export function parseHash(hash: string): Route {
     } else if (key === "ext" && value) {
       const list = listParam(value);
       if (list.length) route.ext = list;
+    } else if (key === "family" && value) {
+      const ref = safeDecode(value);
+      if (isFamilyRef(ref) && !(route.family ?? []).includes(ref))
+        route.family = [...(route.family ?? []), ref];
+    } else if (key === "dup" && isDupStatus(value)) {
+      route.dup = value;
+    } else if (key === "dup_mode" && isDupMode(value) && value !== "item") {
+      route.dupMode = value;
+    } else if (key === "irregular" && value) {
+      const list = normalizeIrregular(listParam(value));
+      if (list.length) route.irregular = list;
     }
   }
+  // 중복 비교 방식 only qualifies a 중복 condition.
+  if (route.dupMode && !route.dup) delete route.dupMode;
   return route;
 }
 
@@ -526,6 +554,10 @@ export function serializeRoute(route: Route): string {
   if (route.partial) query.push("partial=1");
   if (route.content?.length) query.push(`content=${route.content.map(encodeURIComponent).join(",")}`);
   if (route.geo) query.push(`geo=${route.geo}`);
+  for (const ref of route.family ?? []) query.push(`family=${encodeURIComponent(ref)}`);
+  if (route.dup) query.push(`dup=${route.dup}`);
+  if (route.dup && route.dupMode && route.dupMode !== "item") query.push(`dup_mode=${route.dupMode}`);
+  if (route.irregular?.length) query.push(`irregular=${route.irregular.join(",")}`);
   if (route.flagGrade) query.push(`flag_grade=${route.flagGrade}`);
   for (const id of route.flags ?? []) query.push(`flag=${encodeURIComponent(id)}`);
   for (const field of RECORD_FIELD_KEYS) {
