@@ -37,7 +37,7 @@ from ._common import (
 )
 from ._iface import AiAgentAdapter, AiLimits, AiRow, Found, register_adapter
 
-TOOL = "claude-desktop"
+TOOL = "claude"  # catalog id of the Claude app (chatbots.json "Claude"; desktop layout in local_verification_desktop)
 LABEL = "Claude (desktop)"
 SENSITIVE_FILES = {"buddy-tokens.json": "session-tokens", "ssh-remote-server-state.json": "ssh-tokens", "Cookies": "browser-cookies"}
 _MCP_LINE = re.compile(r"(?i)\bmcp\b")

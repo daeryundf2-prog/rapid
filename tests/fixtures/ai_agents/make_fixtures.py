@@ -750,7 +750,7 @@ def build_gemini_cli(home: Path) -> None:
 
 # --- presence-only stubs -------------------------------------------------------------------
 
-STUBS_EXPECTED = {"tools": {"copilot", "windsurf", "devin", "opencode", "aider", "goose", "cline"}, "credential_rows": 1}
+STUBS_EXPECTED = {"tools": {"copilot", "github_copilot", "windsurf", "devin", "opencode", "aider", "goose", "cline"}, "credential_rows": 1}
 
 
 def build_stubs(home: Path) -> None:

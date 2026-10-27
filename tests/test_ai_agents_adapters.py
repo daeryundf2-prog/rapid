@@ -94,7 +94,7 @@ class AllAdaptersTests(unittest.TestCase):
     def test_registry_has_every_lane_b_adapter(self) -> None:
         names = {adapter.name for adapter in lane_b_adapters()}
         expected = {"claude_code", "codex", "cursor", "antigravity", "kiro", "omo", "zcode", "claude_desktop", "claude_swap", "gemini_cli"}
-        expected |= {f"stub_{name}" for name in ("copilot", "windsurf", "devin", "opencode", "aider", "goose", "cline")}
+        expected |= {f"stub_{name}" for name in ("copilot", "github_copilot", "windsurf", "devin", "opencode", "aider", "goose", "cline")}
         self.assertEqual(names, expected)
         self.assertTrue(all(adapter.tool for adapter in lane_b_adapters()))
 
@@ -134,7 +134,7 @@ class AllAdaptersTests(unittest.TestCase):
             self.assertIn(record.details["coverage_status"], ("local-verified", "schema-not-validated"), record.artifact_type)
             self.assertTrue(record.details["tool"])
         unvalidated = {record.details["tool"] for record in self.records if record.details["coverage_status"] == "schema-not-validated"}
-        self.assertTrue({"github-copilot", "windsurf", "devin", "opencode", "aider", "goose", "cline", "gemini-cli"} <= unvalidated)
+        self.assertTrue({"github-copilot", "github-copilot-cli", "windsurf", "devin", "opencode", "aider", "goose", "cline", "gemini-cli"} <= unvalidated)
 
 
 class RedactionTests(unittest.TestCase):

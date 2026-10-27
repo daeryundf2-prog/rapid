@@ -39,7 +39,8 @@ STUB_CREDENTIAL_NAMES = frozenset({"hosts.json", "apps.json"})
 
 # name -> (catalog tool id, label, home-relative candidate locations)
 STUBS: dict[str, tuple[str, str, tuple[str, ...]]] = {
-    "copilot": ("github-copilot", "GitHub Copilot", (".copilot", ".config/github-copilot", "AppData/Local/github-copilot", "AppData/Local/Packages/Microsoft.Copilot_8wekyb3d8bbwe")),
+    "copilot": ("github-copilot-cli", "GitHub Copilot CLI", (".copilot",)),
+    "github_copilot": ("github-copilot", "GitHub Copilot", (".config/github-copilot", "AppData/Local/github-copilot")),
     "windsurf": ("windsurf", "Windsurf", (".codeium/windsurf", ".windsurf", "AppData/Roaming/Windsurf", "Library/Application Support/Windsurf", ".config/Windsurf")),
     "devin": ("devin", "Devin", (".devin", ".devin-shared", "AppData/Roaming/Devin", "AppData/Local/devin")),
     "opencode": ("opencode", "OpenCode", (".local/share/opencode", ".config/opencode", ".opencode")),

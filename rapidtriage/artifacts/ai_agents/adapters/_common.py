@@ -1080,4 +1080,3 @@ def summary_row(ctx: RowContext, path: Path | str, **fields: object) -> AiRow:
         record_type_counts=dict(sorted(ctx.record_type_counts.items())),
         **fields,
     )
-
