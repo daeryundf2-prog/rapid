@@ -25,10 +25,56 @@ from pathlib import Path
 
 from .base import AI_PROVIDER_NAME, AiRow
 
-__all__ = ["AI_KIND", "INDIRECT_PARSERS", "append_ai_indirect_rows", "retention_rows"]
+__all__ = ["AI_KIND", "AI_RUN_OPTION_KEYS", "INDIRECT_PARSERS", "append_ai_indirect_rows", "normalize_run_collector_options", "retention_rows"]
 
 AI_KIND = "ai-agent"
 INDIRECT_PARSERS = frozenset({"ai-tool-execution-match", "ai-git-trailers"})
+
+
+AI_RUN_OPTION_KEYS = ("ai_bodies", "ai_hash_dbs", "org_email_domain", "evidence_roots")
+MAX_EVIDENCE_ROOTS = 64
+
+
+def normalize_run_collector_options(value: object) -> dict[str, dict[str, object]] | None:
+    """Validated ``collector_options`` of a run request: only ``ai-agent`` with ``ai_bodies`` /
+    ``ai_hash_dbs`` (bool), ``org_email_domain`` (str) and ``evidence_roots`` (list of str).
+    ``ValueError`` (Korean) for anything else; ``None`` when nothing is set."""
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("collector_options는 {종류: {옵션: 값}} 객체여야 합니다")
+    unknown_kinds = sorted(str(kind) for kind in value if kind != AI_KIND)
+    if unknown_kinds:
+        raise ValueError(f"collector_options에서 지원하지 않는 종류입니다: {', '.join(unknown_kinds)} (가능: {AI_KIND})")
+    options = value.get(AI_KIND)
+    if options is None:
+        return None
+    if not isinstance(options, Mapping):
+        raise ValueError(f"collector_options[{AI_KIND}]는 객체여야 합니다")
+    unknown = sorted(str(key) for key in options if key not in AI_RUN_OPTION_KEYS)
+    if unknown:
+        raise ValueError(f"{AI_KIND} 옵션에 알 수 없는 키가 있습니다: {', '.join(unknown)} (가능: {', '.join(AI_RUN_OPTION_KEYS)})")
+    out: dict[str, object] = {}
+    for key in ("ai_bodies", "ai_hash_dbs"):
+        if options.get(key) is not None:
+            if not isinstance(options[key], bool):
+                raise ValueError(f"{AI_KIND}.{key}는 true/false여야 합니다")
+            out[key] = options[key]
+    domain = options.get("org_email_domain")
+    if domain is not None:
+        text = str(domain).strip().lower().lstrip("@") if isinstance(domain, str) else ""
+        if not isinstance(domain, str) or (text and ("." not in text or any(char.isspace() or char in "/\\@" for char in text))):
+            raise ValueError(f"{AI_KIND}.org_email_domain은 이메일 도메인(예: example.com)이어야 합니다")
+        if text:
+            out["org_email_domain"] = text
+    roots = options.get("evidence_roots")
+    if roots is not None:
+        if not isinstance(roots, list) or not all(isinstance(item, str) for item in roots) or len(roots) > MAX_EVIDENCE_ROOTS:
+            raise ValueError(f"{AI_KIND}.evidence_roots는 경로 문자열 목록(최대 {MAX_EVIDENCE_ROOTS}개)이어야 합니다")
+        cleaned = [item.strip() for item in roots if item.strip()]
+        if cleaned:
+            out["evidence_roots"] = cleaned
+    return {AI_KIND: out} if out else None
 
 
 def _parser_of(row: Mapping[str, object]) -> str:

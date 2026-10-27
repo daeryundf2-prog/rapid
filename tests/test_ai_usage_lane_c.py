@@ -513,8 +513,10 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(html.count("<table>"), 1)
         for secret in mf.secret_values():
             self.assertNotIn(secret, markdown)
-        off = build_case_report_markdown(run_summary={"output_dir": str(self.out)}, case_payload={}, submission_manifest={}, metadata={"include_ai_section": False})
+        off = build_case_report_markdown(run_summary={"output_dir": str(self.out)}, case_payload={}, submission_manifest={}, metadata={"sections": []})
         self.assertNotIn(AI_SECTION_HEADING, off)
+        explicit = build_case_report_markdown(run_summary={"output_dir": str(self.out)}, case_payload={}, submission_manifest={}, metadata={"sections": ["ai-usage"]})
+        self.assertIn(AI_SECTION_HEADING, explicit)
 
     def test_no_secrets_in_ai_tables_or_flags(self) -> None:
         tables = [(self.derived / f"{name}.jsonl").read_text(encoding="utf-8") for name in ("ai_usage", "ai_projects")]
@@ -527,6 +529,52 @@ class PipelineTests(unittest.TestCase):
         for secret in mf.secret_values():
             if secret not in mf.EMAIL_LOCALS:
                 self.assertNotIn(secret, flags)
+
+    # API (lane D hand-off) -------------------------------------------------------------------------
+
+    def test_api_gaps_tree_domain_and_facets(self) -> None:
+        try:
+            from fastapi.testclient import TestClient
+
+            from rapidtriage.api.app import create_app
+        except ImportError:  # pragma: no cover - API extras absent
+            self.skipTest("fastapi not installed")
+        from rapidtriage.core.jobs import RunJobStore
+
+        store = RunJobStore()
+        run_id = store.import_completed_run(self.out).run_id
+        client = TestClient(create_app(store, auth_token="ai-c-token"), headers={"X-RapidTriage-Token": "ai-c-token"})
+        gaps = client.get(f"/api/runs/{run_id}/ai-usage/gaps")
+        self.assertEqual(gaps.status_code, 200, gaps.text)
+        body = gaps.json()
+        by_tool = {item["tool"]: item for item in body["tools"]}
+        self.assertTrue(by_tool["claude-code"]["local_evidence"])
+        self.assertIn("벤더 API·콘솔 사용 기록(키·계정별 사용량)", by_tool["claude-code"]["server_evidence_needed"])
+        presence_only = [item for item in body["tools"] if not item["local_evidence"]]
+        self.assertTrue(presence_only)  # e.g. Aider / Windsurf: path presence without sessions
+        self.assertTrue(all(item["server_evidence_needed"] for item in presence_only))
+        self.assertEqual([row["category"] for row in body["categories"]][-1], "local_llm")
+        tree = client.get(f"/api/runs/{run_id}/tree").json()
+        text = json.dumps(tree, ensure_ascii=False)
+        self.assertIn("artifacts-group:ai", text)
+        self.assertIn('"install_kind"', text)
+        self.assertIn('"source"', text)
+
+    def test_run_request_collector_options(self) -> None:
+        from rapidtriage.api.app.models import RunCreateRequest
+        from rapidtriage.api.app.routes_runs import run_request_from_body
+        from rapidtriage.core.jobs import RunRequest
+
+        body = RunCreateRequest(root="x", mode="seizure", collector_options={"ai-agent": {"ai_bodies": False, "ai_hash_dbs": True, "org_email_domain": "@Corp.Example", "evidence_roots": ["C:\\Case", " "]}})
+        request = run_request_from_body(body)
+        self.assertEqual(request.collector_options, {"ai-agent": {"ai_bodies": False, "ai_hash_dbs": True, "org_email_domain": "corp.example", "evidence_roots": ["C:\\Case"]}})
+        self.assertEqual(RunRequest.from_dict(request.to_dict()).collector_options, request.collector_options)
+        from fastapi import HTTPException
+
+        for bad in ({"eventlog": {}}, {"ai-agent": {"ai_bodies": "yes"}}, {"ai-agent": {"unknown": 1}}, {"ai-agent": {"org_email_domain": "not a domain"}}):
+            with self.assertRaises(HTTPException):
+                run_request_from_body(RunCreateRequest(root="x", mode="seizure", collector_options=bad))
+        self.assertIsNone(run_request_from_body(RunCreateRequest(root="x", mode="seizure")).collector_options)
 
 
 class ZeroAiTests(unittest.TestCase):

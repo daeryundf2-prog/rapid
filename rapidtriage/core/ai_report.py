@@ -22,8 +22,10 @@ __all__ = [
     "AI_SECTION_HEADING",
     "AI_SECTION_ID",
     "SERVER_EVIDENCE_KO",
+    "ai_usage_gaps",
     "ai_usage_section_lines",
     "ai_usage_summary",
+    "server_evidence_list",
 ]
 
 AI_SECTION_ID = "ai-usage"
@@ -328,3 +330,56 @@ def ai_usage_section_lines(summary: Mapping[str, object], *, metadata: Mapping[s
         ]
     )
     return lines
+
+
+def server_evidence_list(category: str) -> list[str]:
+    """The server-side records of a category as a list (``SERVER_EVIDENCE_KO`` split on ``, ``)."""
+    return [part.strip() for part in SERVER_EVIDENCE_KO.get(category, "").split(", ") if part.strip()]
+
+
+def ai_usage_gaps(summary: Mapping[str, object]) -> dict[str, object]:
+    """``GET /api/runs/{id}/ai-usage/gaps`` body: per detected tool whether the run holds local *content*
+    evidence (session records — presence, installs or credentials alone are not) and which server-side
+    records would show what it was used for, plus the per-category gap table of the report section."""
+    catalog = load_catalog()
+    tools_out: list[dict[str, object]] = []
+    tools = summary.get("tools") if isinstance(summary.get("tools"), Mapping) else {}
+    for tool_id, entry in tools.items():  # type: ignore[union-attr]
+        if not isinstance(entry, Mapping):
+            continue
+        tool = catalog.tool(str(tool_id))
+        category = tool.category if tool is not None else ""
+        evidence = [str(item) for item in entry.get("evidence") or []]
+        tools_out.append(
+            {
+                "tool": str(tool_id),
+                "tool_label": str(entry.get("label") or tool_id),
+                "category": category,
+                "category_label": CATEGORY_LABELS_KO.get(category, category),
+                "evidence": evidence,
+                "evidence_labels": [EVIDENCE_LABELS_KO.get(item, item) for item in evidence],
+                "local_evidence": "session" in evidence,
+                "server_evidence_needed": server_evidence_list(category),
+            }
+        )
+    categories = summary.get("categories") if isinstance(summary.get("categories"), Mapping) else {}
+    category_rows: list[dict[str, object]] = []
+    for category in CATEGORY_ORDER:
+        entry = categories.get(category) if isinstance(categories.get(category), Mapping) else {}  # type: ignore[union-attr]
+        names = [str(name) for name in entry.get("tools") or []]  # type: ignore[union-attr]
+        category_rows.append(
+            {
+                "category": category,
+                "category_label": CATEGORY_LABELS_KO.get(category, category),
+                "local_evidence": bool(names),
+                "tools": names,
+                "evidence": [str(item) for item in entry.get("evidence") or []],  # type: ignore[union-attr]
+                "server_evidence_needed": server_evidence_list(category),
+            }
+        )
+    return {
+        "collected": bool(summary.get("collected")),
+        "tools": tools_out,
+        "categories": category_rows,
+        "note": "로컬 증거가 없다는 것은 사용하지 않았다는 뜻이 아님(부재 ≠ 미사용)",
+    }

@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
 
-from .ai_report import ai_usage_section_lines, ai_usage_summary
+from .ai_report import AI_SECTION_ID, ai_usage_section_lines, ai_usage_summary
 from .korean_report import TEMPLATE_ID as KOREAN_EXPERT_TEMPLATE_ID
 from .korean_report import build_korean_expert_report
 
@@ -153,8 +153,9 @@ def build_case_report_markdown(
     lines.append("")
 
     # R7 AI 갈래 C: "AI 사용" section with the server-side evidence gap table (report option
-    # ``include_ai_section``, default on; a run without the ai-agent kind still gets the gap table).
-    if metadata.get("include_ai_section", True) is not False and run_summary:
+    # ``sections``: absent = default on, ``["ai-usage"]`` on, ``[]`` off; a run without the
+    # ai-agent kind still gets the gap table).
+    if report_section_enabled(metadata, AI_SECTION_ID) and run_summary:
         lines.extend(ai_usage_section_lines(ai_usage_summary(run_summary.get("output_dir")), metadata=metadata))
 
     lines.extend(["## 5. 제출 증거 및 해시값", ""])
@@ -263,6 +264,14 @@ def build_case_report_markdown(
                     lines.append(f"- `{item.get('step', '')}` [{item.get('level', '')}]: {item.get('message', '')}")
             lines.append("")
     return "\n".join(lines)
+
+
+def report_section_enabled(metadata: Mapping[str, object], section_id: str) -> bool:
+    """Optional section ``section_id``: on unless the request's ``sections`` list omits it."""
+    sections = metadata.get("sections")
+    if sections is None:
+        return True
+    return isinstance(sections, (list, tuple)) and section_id in sections
 
 
 def template_noise_policy(template: str) -> str:
