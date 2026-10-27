@@ -91,7 +91,8 @@ def build_derived_router(store: RunJobStore) -> APIRouter:
         rows: [{value, normalized, semantic, semantics, count, kinds, families, first_seen, last_seen,
         sample_count, url_class?, url_class_label?, examples?, length?, sha256?}], next_cursor}``.
 
-        ``table`` ∈ people, devices, paths, attachments, credentials, urls (else 404). ``q`` = substring of
+        ``table`` ∈ people, devices, paths, attachments, credentials, urls, ai_usage, ai_projects (else 404;
+        the two ai_* tables are session aggregates with their own fields, core/derived/tables_ai.py). ``q`` = substring of
         the value or its normalised form (casefolded, ≤200 chars); ``kind`` = rows seen in that row source;
         ``sort`` = ``count`` (desc, default) | ``first_seen`` (oldest first) | ``last_seen`` (newest first);
         ``limit`` 1–500 (default 100); ``after`` = the previous page's ``next_cursor``. Bad parameters and
