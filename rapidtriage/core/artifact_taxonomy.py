@@ -409,6 +409,7 @@ TAXONOMY_TARGETS: tuple[TaxonomyTarget, ...] = (
         id="ai-agent-sessions",
         category="ai-usage",
         title="AI coding agent session stores",
+        required_collectors=("ai-agent",),
         expectation=(
             "Parse Claude Code, Codex, Cursor, Antigravity, Kiro, OmO, ZCode, Claude desktop, claude-swap and Gemini CLI "
             "local stores into sessions (parent/child), messages, tool calls, file touches, MCP servers, accounts, AI code "

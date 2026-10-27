@@ -324,6 +324,8 @@ class ClaudeCodeAdapter(AiAgentAdapter):
         for record in records:
             rtype = str(record.get("type") or "")
             ctx.count_type(rtype or "(none)", KNOWN_TYPES)
+            if acc is None and not rtype and not record.get("sessionId"):
+                continue  # nothing identifies a Claude Code record yet (e.g. ``{}``): no session from it
             if acc is None:
                 session_id = str(record.get("sessionId") or info.root_session)
                 agent_id = str(record.get("agentId") or "")

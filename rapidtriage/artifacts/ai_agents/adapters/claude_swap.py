@@ -71,6 +71,7 @@ class ClaudeSwapAdapter(AiAgentAdapter):
                         file_mtime=mtime,
                         key_name="",
                         value_collected=False,
+                        hash_collected=False,
                     )
                 )
         cache = base / "cache"

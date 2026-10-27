@@ -41,7 +41,7 @@ from tests.fixtures.ai_agents import make_fixtures as mf
 
 LANE_B_MODULES = {module.__name__ for module in lane_b.ADAPTER_MODULES}
 # Row types lane B adds beyond lane A's AI_ARTIFACT_TYPES (hand-off: register them there).
-LANE_B_EXTRA_TYPES = {"ai-account-switch", "ai-retention-cleanup"}
+LANE_B_EXTRA_TYPES: set[str] = set()  # ai-account-switch / ai-retention-cleanup are now in AI_ARTIFACT_TYPES
 CREDENTIAL_NAMES = (
     ".credentials.json",
     "1234.abcd.key",
@@ -179,6 +179,9 @@ class HelperTests(unittest.TestCase):
             profiles = iter_profiles([tmp], "windows")
             self.assertEqual(sorted(p.user for p in profiles if p.home != tmp), ["u1", "u2"])
             self.assertTrue(all(p.os == "windows" for p in profiles))
+            # the same home given twice (overlapping roots / profiles) yields one profile -> one Found per adapter
+            again = iter_profiles([tmp / "Users" / "u1", *profiles], "windows")
+            self.assertEqual(sum(1 for p in again if p.home.name == "u1"), 1)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
