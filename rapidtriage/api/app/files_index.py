@@ -492,6 +492,10 @@ def files_matched_positions(
         # own (no time, not partial, no content bits), so no category column is needed.
         if conditions is None:
             return positions
+        if conditions.resolved is not None:
+            # 계열·중복·예외 (R7 갈래 A): the lane's rows in the resolved row sets.
+            in_sets = conditions.resolved.files(collection)
+            positions = [position for position in positions if position in in_sets]
         if conditions.partial:
             flags = columns.partial(rows)
             positions = [position for position in positions if flags[position]]

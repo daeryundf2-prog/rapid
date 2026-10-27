@@ -21,6 +21,7 @@ from rapidtriage.artifacts.ai_agents.base import (
     EvidenceProfile,
     Found,
     clear_adapters,
+    mask_identity_in_path,
     register_adapter,
     registered_adapters,
     unregister_adapter,
@@ -132,10 +133,19 @@ def rows_of(rows: list[dict[str, object]], artifact_type: str) -> Iterator[dict[
             yield row
 
 
+def catalog_presence(rows: list[dict[str, object]]) -> Iterator[dict[str, object]]:
+    """Lane A catalog/install/execution ``ai-tool-presence`` rows. Lane B session adapters also
+    emit ``ai-tool-presence`` rows (tool home, settings, run summary); those always carry a
+    ``presence_kind`` and no ``install_kind``."""
+    for row in rows_of(rows, "ai-tool-presence"):
+        if "presence_kind" not in row["details"]:
+            yield row
+
+
 def presence(rows: list[dict[str, object]], *, kind: str = "path") -> set[tuple[str, str]]:
     return {
         (str(row["details"]["tool"]), str(row["details"]["account_key"]))
-        for row in rows_of(rows, "ai-tool-presence")
+        for row in catalog_presence(rows)
         if row["details"]["install_kind"] == kind
     }
 
@@ -182,17 +192,17 @@ class WindowsImageTests(unittest.TestCase):
         self.assertFalse(any(account == "Public" for _tool, account in found))
         self.assertNotIn(("ecc", "alice"), found)
         self.assertNotIn(("ccusage", "alice"), found)
-        claude = next(row for row in rows_of(self.rows, "ai-tool-presence") if row["details"]["tool"] == "claude-code" and row["details"]["install_kind"] == "path")
+        claude = next(row for row in catalog_presence(self.rows) if row["details"]["tool"] == "claude-code" and row["details"]["install_kind"] == "path")
         self.assertEqual(claude["details"]["coverage_status"], "local-verified")
         self.assertTrue(claude["details"]["retention_auto_delete"])
         self.assertIn("session_log", claude["details"]["matched_path_kinds"])
         self.assertTrue(claude["details"]["mtime"])
 
     def test_install_presence(self) -> None:
-        npm = [row for row in rows_of(self.rows, "ai-tool-presence") if row["details"]["install_kind"] == "npm-global"]
+        npm = [row for row in catalog_presence(self.rows) if row["details"]["install_kind"] == "npm-global"]
         self.assertEqual([(row["details"]["tool"], row["details"]["version"]) for row in npm], [("claude-code", "2.1.300")])
         self.assertIn(("aider", "alice"), presence(self.rows, kind="pip"))
-        extensions = {(row["details"]["tool"], row["details"]["package"], row["details"]["version"]) for row in rows_of(self.rows, "ai-tool-presence") if row["details"]["install_kind"] == "vscode-extension"}
+        extensions = {(row["details"]["tool"], row["details"]["package"], row["details"]["version"]) for row in catalog_presence(self.rows) if row["details"]["install_kind"] == "vscode-extension"}
         self.assertIn(("cline", "saoudrizwan.claude-dev", "3.17.0"), extensions)
         self.assertIn(("github-copilot-chat", "github.copilot-chat", "0.30.1"), extensions)
         # ``github.copilot`` must not match the ``github.copilot-chat-…`` folder.
@@ -210,9 +220,16 @@ class WindowsImageTests(unittest.TestCase):
             self.assertFalse(details["hash_collected"])
             self.assertIsInstance(details["size"], int)
             self.assertNotIn("sha256", json.dumps(details))
-        by_name = {Path(str(row["path"])).name: row["details"]["credential_kind"] for row in creds}
-        self.assertEqual(by_name[".credentials.json"], "catalog-credential")
-        self.assertEqual(by_name["Cookies"], "name-pattern")
+        # One row per file: a file lane B also reports is merged (``adapters``), the adapter-specific
+        # kind wins and lane A's catalog classification stays in ``credential_kinds``.
+        paths = [str(row["path"]).lower() for row in creds]
+        self.assertEqual(len(paths), len(set(paths)))
+        by_name = {Path(str(row["path"])).name: row["details"] for row in creds}
+        self.assertIn("catalog-credential", by_name[".credentials.json"]["credential_kinds"])
+        self.assertIn("ai-tool-presence", by_name[".credentials.json"]["adapters"])
+        self.assertIn("name-pattern", by_name["Cookies"]["credential_kinds"])
+        if by_name[".credentials.json"].get("adapter"):
+            self.assertEqual(by_name[".credentials.json"]["credential_kind"], "oauth-credentials")
 
     def test_no_credential_value_in_any_row(self) -> None:
         dumped = json.dumps(self.rows, ensure_ascii=False)
@@ -294,8 +311,9 @@ class MacLinuxTests(unittest.TestCase):
             self.assertIn(("codex", "dana"), presence(rows, kind="npm-global"))
             creds = {Path(str(row["path"])).name for row in rows_of(rows, "ai-credential-presence")}
             self.assertIn("oauth_creds.json", creds)
-            self.assertIn(".creds-1-dana@example.com.enc", creds)
+            self.assertIn(mask_identity_in_path(".creds-1-dana@example.com.enc"), creds)
             dumped = json.dumps(rows)
+            self.assertNotIn("dana@example.com", dumped)
             for secret in SECRET_VALUES:
                 self.assertNotIn(secret, dumped)
 
@@ -361,10 +379,12 @@ class AdapterRegistryTests(unittest.TestCase):
             root = Path(tmp)
             build_windows_image(root)
             rows = collect(root)
-        sessions = list(rows_of(rows, "ai-agent-session"))
+        # Only the fake adapter's rows: the registered lane B adapters also run (claude_code finds alice's session file).
+        sessions = [row for row in rows_of(rows, "ai-agent-session") if row["details"]["parser"] == "ai-agents"]
         self.assertEqual([row["details"]["account_key"] for row in sessions], ["alice"])
         self.assertEqual(sessions[0]["details"]["limit"], AiLimits().max_messages_per_session)
-        errors = list(rows_of(rows, "ai-agent-parse-error"))
+        errors = [row for row in rows_of(rows, "ai-agent-parse-error") if row["details"]["adapter"] == "fake_test"]
+        self.assertEqual(list(rows_of(rows, "ai-agent-parse-error")), errors, "no lane B adapter fails on this tree")
         self.assertEqual(len(errors), 1)
         self.assertTrue(errors[0]["details"]["parser_error"])
         self.assertEqual(errors[0]["details"]["reason_code"], "adapter-failed")

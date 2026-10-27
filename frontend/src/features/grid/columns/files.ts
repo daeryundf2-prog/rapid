@@ -26,6 +26,7 @@ import {
   signatureCell,
 } from "./FileCells";
 import { flagsColumn } from "./families";
+import { familyDedupColumns, familyDedupFields } from "./familyDedup";
 
 /** Shown on the NTFS columns while no NTFS-meta analysis has been joined (plan U-P1-3). */
 export const NTFS_EMPTY_HINT = "NTFS 메타 분석을 실행하면 채워집니다";
@@ -326,6 +327,9 @@ export const FILES_PRIORITY = [
   "review",
   "path",
   "ntfsCreated",
+  // R7 갈래 A: 중복 · 계열 last (hidden first; hidden while no loaded row has a value).
+  "dedup",
+  "family",
 ] as const;
 
 export const filesCollection: CollectionDef = {
@@ -401,6 +405,8 @@ export const filesCollection: CollectionDef = {
         isDirectory: isDirectoryRaw(raw, path),
         ...recoveryFields(raw.recovery),
         ...(Array.isArray(raw.flags) ? { flags: raw.flags, flagList: parseFlags(raw.flags) } : {}),
+        // 계열 · 중복 (R7 갈래 A): the listing's annotations once the run's derivation exists.
+        ...familyDedupFields(raw),
       },
     );
   },
@@ -442,6 +448,8 @@ export const filesCollection: CollectionDef = {
       presets: ["analysis", "source"],
     },
     { ...col.review(), width: 88, minWidth: 88 },
+    // 중복 · 계열 (R7 갈래 A): default, hidden while no loaded row has a value.
+    ...familyDedupColumns(),
     col.field("extension", "확장자", 80, ["compact"], (r) => fieldStr(r, "extension")),
     col.field("categories", "분류", 160, ["compact"], (r) => fieldStr(r, "categories")),
     col.field("recovery", "복구 유형", 100, ["source"], (r) => fieldStr(r, "recovery")),
