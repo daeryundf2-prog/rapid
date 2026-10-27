@@ -4,6 +4,7 @@ import datetime as dt
 import hashlib
 import json
 import re
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -144,6 +145,7 @@ def run_unified_search(
     ``metadata="compact"`` keeps only :data:`COMPACT_METADATA_KEYS` of each
     hit's source record.
     """
+    request_started = time.monotonic()
     offset = max(0, int(offset or 0))
     page_limit = limit
     # One lookahead hit tells whether another page exists.
@@ -168,7 +170,7 @@ def run_unified_search(
         "fuzzy_distance": normalized_fuzzy_distance,
         "proximity_window": normalized_proximity_window,
     }
-    budget = SearchBudget(resolve_scan_budget_seconds(scan_budget_seconds))
+    budget = SearchBudget(resolve_scan_budget_seconds(scan_budget_seconds), started=request_started)
     backend = SEARCH_BACKEND_SCAN
     index_error = ""
     index_path = None
@@ -206,7 +208,8 @@ def run_unified_search(
             )
         except CaseIndexError as exc:
             index_error = str(exc)
-            budget = SearchBudget(budget.seconds)
+            # The scan fallback keeps the request's deadline (the budget covers the whole request).
+            budget = SearchBudget(budget.seconds, started=request_started)
     if fts_result is not None:
         backend = SEARCH_BACKEND_FTS
         matches, document_errors, ocr_errors = fts_result
@@ -233,7 +236,10 @@ def run_unified_search(
         hide_known_good=hide_known_good,
     )
 
-    has_more = bool(page_limit) and len(matches) > offset + page_limit
+    found = len(matches)
+    # A budget stop ends the result at a point of the source order: what was found is a prefix of
+    # the full result, and there is no next page to ask for (the next search would stop again).
+    has_more = bool(page_limit) and found > offset + page_limit and not budget.truncated
     matches = matches[offset : offset + page_limit] if page_limit else matches[offset:]
     limit = page_limit
     # Readable rows for the grid: title, root-stripped path, record time, snippet, review locator.
@@ -316,6 +322,7 @@ def run_unified_search(
     if analysis is not None:
         payload["analysis"] = analysis
     complete = not budget.truncated and not has_more
+    truncated_reason = budget_stop_reason(budget, found=found, offset=offset) if budget.truncated else None
     payload["pagination"] = {
         "collection": "search",
         "offset": offset,
@@ -325,16 +332,40 @@ def run_unified_search(
         "next_offset": offset + len(matches) if has_more else None,
         # Exact only when the search reached the end (no lookahead hit, no budget stop).
         "total": offset + len(matches) if complete else None,
+        **({"budget_stopped": True, "stopped_reason": truncated_reason} if truncated_reason else {}),
     }
     payload["has_more"] = has_more
     payload["backend"] = backend
     payload["truncated"] = budget.truncated
+    if truncated_reason:
+        payload["truncated_reason"] = truncated_reason
     payload["scanned"] = budget.scanned()
     payload["scan_budget_seconds"] = budget.seconds
     if index_error:
         payload["index_error"] = index_error
-    payload["elapsed_ms"] = budget.elapsed_ms()
+    # The whole request (summary load, a failed index attempt, hit finalization), not only the scan.
+    payload["elapsed_ms"] = round((time.monotonic() - request_started) * 1000, 1)
     return payload
+
+
+SOURCE_LABELS_KO = {
+    "documents": "문서",
+    "files": "파일",
+    "artifacts": "아티팩트",
+    "indicators": "지표",
+    "timeline": "타임라인",
+    "ocr": "OCR",
+}
+
+
+def budget_stop_reason(budget: SearchBudget, *, found: int, offset: int) -> str:
+    """Korean reason of a budget-stopped search: where it stopped and why there is no next page."""
+    source = budget.stopped_source or ""
+    where = SOURCE_LABELS_KO.get(source, source)
+    head = f"시간 예산({budget.seconds:g}초)이 끝나 {where} 출처를 읽던 중 검색을 멈췄습니다"
+    if offset and found <= offset:
+        return f"{head}. 예산 안에 이 쪽({offset + 1:,}번째 결과)까지 찾지 못해 이 쪽은 비어 있습니다. 검색어를 좁히세요"
+    return f"{head}. 출처 순서상 앞부분 {found:,}건까지만 찾았고 그 뒤 쪽은 없습니다. 검색어를 좁히세요"
 
 
 def normalize_search_metadata_mode(value: str | None) -> str:
@@ -459,7 +490,7 @@ def scan_unified_matches(
     budget: SearchBudget,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
     """Scan backend: requested sources only, in scan order, each stopping at
-    the limit still open and at its share of the wall-clock budget."""
+    the limit still open; a wall-clock budget stop ends the scan there."""
     planned = [
         source
         for source in SCAN_SOURCE_ORDER
@@ -470,12 +501,15 @@ def scan_unified_matches(
     document_errors: list[dict[str, object]] = []
     ocr_errors: list[dict[str, str]] = []
     visible = 0
-    for position, source in enumerate(planned):
+    for source in planned:
         remaining = max(0, limit - visible) if limit else 0
         if limit and remaining == 0:
             budget.skip_source(source, "limit")
             continue
-        scan = budget.start_source(source, sources_left=len(planned) - position)
+        if budget.truncated:
+            budget.skip_source(source, "after-budget")
+            continue
+        scan = budget.start_source(source)
         if source == "documents":
             found, document_errors = search_docs(
                 outputs, keywords, limit=remaining, search_options=search_options, scan=scan

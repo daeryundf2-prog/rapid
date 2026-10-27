@@ -344,5 +344,52 @@ class ArchiveEntryLocatorTest(IsolatedEnv):
         connection.close()
 
 
+class BudgetPrefixTest(IsolatedEnv):
+    """#5: a budget-stopped v1 search returns a prefix of the full order and no next page."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        candidates = [
+            # Every 25th row matches: 1,001 hits need 25,000 rows, far past a 0.05 s budget.
+            {"path": f"E:\\root\\data\\{'zz' if index % 25 == 0 else 'yy'}-{index:05d}.bin", "name": f"f-{index:05d}.bin", "extension": ".bin", "size": index,
+             "categories": ["other"], "modified_at": "2025-01-01T00:00:00Z", "note": "padding " * 20}
+            for index in range(40_000)
+        ]
+        kinds = {"recent-files": [{"provider": "recent", "artifact_type": "lnk-file", "path": "E:\\root\\zz.lnk", "details": {"target_path": "C:\\zz.txt"}}]}
+        cls.syn = SearchRun(cls.base, candidates, kinds=kinds)
+
+    def pointers(self, payload: dict[str, object]) -> list[str]:
+        return [f"{hit['source']}{hit['pointer']}" for hit in payload["matches"]]  # type: ignore[index, union-attr]
+
+    def test_budget_stop_is_a_prefix_without_a_next_page(self) -> None:
+        full = self.syn.v1_payload(["zz"], limit=1000, scan_budget_seconds=0)
+        self.assertFalse(full["truncated"])
+        cut = self.syn.v1_payload(["zz"], limit=1000, scan_budget_seconds=0.05)
+        self.assertTrue(cut["truncated"])
+        self.assertGreater(len(cut["matches"]), 0)  # type: ignore[arg-type]
+        self.assertLess(len(cut["matches"]), 1000)  # type: ignore[arg-type]
+        self.assertEqual(self.pointers(cut), self.pointers(full)[: len(cut["matches"])])  # type: ignore[arg-type]
+        self.assertFalse(cut["has_more"])
+        pagination = cut["pagination"]
+        self.assertFalse(pagination["has_more"])  # type: ignore[index]
+        self.assertIsNone(pagination["next_offset"])  # type: ignore[index]
+        self.assertIsNone(pagination["total"])  # type: ignore[index]
+        self.assertTrue(pagination["budget_stopped"])  # type: ignore[index]
+        self.assertIn("시간 예산", cut["truncated_reason"])
+        # Later sources are skipped, never searched after the cut.
+        self.assertEqual(cut["scanned"]["files"]["stopped"], "budget")  # type: ignore[index]
+        self.assertEqual(cut["scanned"]["artifacts"]["stopped"], "after-budget")  # type: ignore[index]
+        # The whole request stays near its budget (summary load and hit finalization included).
+        self.assertLess(cut["elapsed_ms"], 3000)
+
+    def test_page_past_the_cut_is_empty_with_a_korean_reason(self) -> None:
+        page = self.syn.v1_payload(["zz"], limit=250, offset=20_000, scan_budget_seconds=0.05)
+        self.assertTrue(page["truncated"])
+        self.assertEqual(page["matches"], [])
+        self.assertFalse(page["pagination"]["has_more"])  # type: ignore[index]
+        self.assertIn("이 쪽은 비어 있습니다", page["pagination"]["stopped_reason"])  # type: ignore[index]
+
+
 if __name__ == "__main__":
     unittest.main()

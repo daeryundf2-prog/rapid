@@ -495,12 +495,15 @@ def fts_unified_matches(
             "indicators": _indicators,
             "timeline": _timeline,
         }
-        total_sources = len(wanted) + (1 if want_ocr else 0)
-        for position, source in enumerate(wanted):
+        for source in wanted:
             if collector.full:
                 budget.skip_source(source, "limit")
                 continue
-            scan = budget.start_source(source, sources_left=total_sources - position)
+            if budget.truncated:
+                # A budget stop ends the result at that point of the source order (a prefix).
+                budget.skip_source(source, "after-budget")
+                continue
+            scan = budget.start_source(source)
             guard.deadline = scan.deadline
             before = len(collector.matches)
             try:
@@ -520,8 +523,10 @@ def fts_unified_matches(
     if want_ocr:
         if collector.full:
             budget.skip_source("ocr", "limit")
+        elif budget.truncated:
+            budget.skip_source("ocr", "after-budget")
         else:
-            scan = budget.start_source("ocr", sources_left=1)
+            scan = budget.start_source("ocr")
             remaining = (limit - collector.visible) if limit else 0
             ocr_matches, ocr_errors = ocr_search(remaining, scan)
             for match in ocr_matches:
