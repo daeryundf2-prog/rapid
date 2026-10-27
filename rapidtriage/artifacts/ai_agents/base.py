@@ -77,6 +77,8 @@ AI_ARTIFACT_TYPES: tuple[str, ...] = (
     "ai-account",
     "ai-code-attribution",
     "ai-usage-stat",
+    "ai-account-switch",
+    "ai-retention-cleanup",
     # either lane: a source that could not be read (the run continues)
     "ai-agent-parse-error",
 )
