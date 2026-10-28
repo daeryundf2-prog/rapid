@@ -7,9 +7,9 @@ the parent's GIL. Only picklable inputs (``InputRoot``, rule set, paths, options
 go in and only the picklable payload comes back; scheduling, ordering and result
 handling stay in the parent, so outputs are identical to the thread path.
 
-Limits of the process path: the run plan's cooperative cancel check and live row
-counter cannot cross the process boundary, so a cancel of a running process-pool
-kind takes effect when the kind finishes. If the pool cannot start (or breaks, or
+The run plan's cooperative cancel check, partial rows and live row counter cannot
+cross the process boundary, so the artifact stage only uses the pool when it runs
+without a run plan (``progress is None``); planned runs keep these kinds on threads. If the pool cannot start (or breaks, or
 the inputs cannot be pickled) the collection runs on the calling thread instead.
 """
 

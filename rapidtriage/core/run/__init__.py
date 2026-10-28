@@ -2087,8 +2087,10 @@ def collect_artifact_stages(
                         "collector_options": options_by_kind.get(kind),
                     }
                     collect_root = scope_input_root if mode == "delta" else input_root
-                    if kind in PROCESS_KINDS and not parse_pool.disabled:
-                        # CPU-bound parsers run in worker processes; this thread only waits.
+                    if kind in PROCESS_KINDS and progress is None and not parse_pool.disabled:
+                        # CPU-bound parsers run in worker processes; this thread only waits. Only
+                        # without a run plan: its cooperative cancel, partial rows and live row
+                        # counter cannot cross the process boundary, so planned runs stay on threads.
                         future = executor.submit(
                             pooled_artifact_collection,
                             parse_pool,

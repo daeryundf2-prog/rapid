@@ -141,6 +141,42 @@
         "limitation": {"type": "string"}
       }
     },
+    "carving_unallocated": {
+      "type": "object",
+      "description": "Unallocated-cluster carving of the NTFS partitions of an E01 image (step carve-unallocated).",
+      "additionalProperties": false,
+      "required": ["enabled", "output", "summary", "partitions"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "output": {"type": "string"},
+        "summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["candidate_count", "extracted_count"],
+          "properties": {
+            "candidate_count": {"type": "integer"},
+            "extracted_count": {"type": "integer"}
+          }
+        },
+        "partitions": {"type": "array", "items": {"type": "object", "additionalProperties": true}}
+      }
+    },
+    "coverage": {
+      "type": "array",
+      "description": "Every limit that truncated parsing in this run (core/coverage.py entries).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["area", "reason_code", "limit", "observed", "unit"],
+        "properties": {
+          "area": {"type": "string"},
+          "reason_code": {"type": "string"},
+          "limit": {"type": ["integer", "null"]},
+          "observed": {"type": ["integer", "null"]},
+          "unit": {"type": "string"}
+        }
+      }
+    },
     "profile": {
       "type": "object",
       "additionalProperties": false,

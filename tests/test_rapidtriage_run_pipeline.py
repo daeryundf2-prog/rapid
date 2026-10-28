@@ -122,8 +122,8 @@ class RunPipelineTests(unittest.TestCase):
             original_write = run_module.write_result
             original_timed = run_module.timed_artifact_collection
 
-            def recording_write(payload, path):
-                original_write(payload, path)
+            def recording_write(payload, path, **kwargs):
+                original_write(payload, path, **kwargs)
                 writes.setdefault(str(path), []).append(
                     json.dumps(payload, ensure_ascii=False, sort_keys=True, default=json_default)
                 )
