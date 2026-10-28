@@ -25,6 +25,7 @@ if hasattr(_sys.stderr, "reconfigure"):
 
 import argparse
 import json
+import re
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -39,19 +40,21 @@ from rapidtriage.core.extraction_failures import (
 )
 
 SCHEMA_VERSION = "r8-recovery-diff-v1"
-RUN_PREFIXES = ("_e01/fs", "_e01")
+# Filesystem roots inside a run dir: native engine (_e01/fs, multi-partition _e01/fs/p<N>) and the
+# Sleuth Kit tsk_recover layout (_e01/filesystem). Everything else in a run dir is run output.
+RUN_PREFIXES = ("_e01/fs", "_e01/filesystem")
+_PARTITION_DIR = re.compile(r"^p\d+/")
 
 
 def strip_run_prefix(relative: str) -> str:
-    """Drop the rapid staging prefix (``_e01/fs``) from a run-dir relative path."""
+    """Path inside the extracted filesystem, or "" when the entry is not extracted file content."""
     path = relative.replace("\\", "/").strip("/")
     lowered = path.lower()
     for prefix in RUN_PREFIXES:
-        if lowered == prefix:
-            return ""
         if lowered.startswith(prefix + "/"):
-            return path[len(prefix) + 1 :]
-    return path
+            inner = path[len(prefix) + 1 :]
+            return _PARTITION_DIR.sub("", inner, count=1)
+    return ""
 
 
 def rate(numerator: int, denominator: int) -> float | None:

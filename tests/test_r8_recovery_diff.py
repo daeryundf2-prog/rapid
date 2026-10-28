@@ -34,7 +34,11 @@ class MatchEntriesTest(unittest.TestCase):
 
     def test_strip_run_prefix(self) -> None:
         self.assertEqual(mod.strip_run_prefix("_e01/fs/Users/a.txt"), "Users/a.txt")
-        self.assertEqual(mod.strip_run_prefix("Users/a.txt"), "Users/a.txt")
+        self.assertEqual(mod.strip_run_prefix("_e01\\filesystem\\Users\\a.txt"), "Users/a.txt")
+        self.assertEqual(mod.strip_run_prefix("_e01/fs/p2/Users/a.txt"), "Users/a.txt")
+        # Run outputs beside the extracted filesystem are not recovered files.
+        self.assertEqual(mod.strip_run_prefix("rapidtriage-run-summary.json"), "")
+        self.assertEqual(mod.strip_run_prefix("_e01/rapidtriage-e01-stage-status.json"), "")
 
 
 if __name__ == "__main__":
