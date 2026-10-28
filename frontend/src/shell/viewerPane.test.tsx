@@ -182,3 +182,35 @@ describe("tree auto-fold (plan r7 §3.2 L2, r7 S2 regression)", () => {
     expect(tree()).toBe(true);
   });
 });
+
+describe("narrow viewer drawer across stages (r8 visual QA v1)", () => {
+  const realMatchMedia = window.matchMedia;
+  beforeEach(() => {
+    // Every media query matches: the drawer layouts (viewer and tree) are on.
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })) as typeof window.matchMedia;
+  });
+  afterEach(() => {
+    window.matchMedia = realMatchMedia;
+  });
+
+  it("an open viewer drawer closes when the stage changes, so it cannot cover the review board", () => {
+    renderLayout();
+    expect(useAppStore.getState().viewerIsDrawer).toBe(true);
+    act(() => useAppStore.getState().setOverlay("viewerDrawer", true));
+    expect(useAppStore.getState().viewerDrawerOpen).toBe(true);
+    // Same stage (a row selection): the drawer stays open.
+    act(() => selectRow());
+    expect(useAppStore.getState().viewerDrawerOpen).toBe(true);
+    act(() => useAppStore.getState().navigate({ runId: "r1", collection: "review" }));
+    expect(useAppStore.getState().viewerDrawerOpen).toBe(false);
+  });
+});

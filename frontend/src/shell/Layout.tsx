@@ -626,6 +626,14 @@ export function Layout() {
   const setTreeIsDrawer = useAppStore((s) => s.setTreeIsDrawer);
   useEffect(() => setTreeIsDrawer(treeDrawer), [treeDrawer, setTreeIsDrawer]);
   const hasCase = useAppStore((s) => Boolean(s.route.runId));
+  // A stage change closes the narrow viewer drawer: its overlay must not cover the next stage's page.
+  const stage = useAppStore((s) => stageOf(s.route));
+  const lastStage = useRef(stage);
+  useEffect(() => {
+    if (stage === lastStage.current) return;
+    lastStage.current = stage;
+    useAppStore.getState().setOverlay("viewerDrawer", false);
+  }, [stage]);
   const withViewer = useAppStore((s) => stageHasViewer(stageOf(s.route)));
   const columns = !hasCase ? "landing" : withViewer ? "three" : "two";
   // 클래식 분할 (AXIOM E3): grid above, viewer below — wide 탐색·검토 only.
