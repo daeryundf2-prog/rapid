@@ -48,6 +48,7 @@ from ..columnar_store import (
     ColumnarStoreUnavailable,
     convert_jsonl_to_parquet,
 )
+from ..coverage import coverage_entries, reset_coverage
 from ..derived.stage import run_derived_stage
 from ..disk_image import (
     DiskImageExtractionError,
@@ -169,6 +170,7 @@ from .planned_out import (
     planned_out_timeline_payload,
 )
 from .preview_sandbox import *
+from .procpool import PROCESS_KINDS, ProcessParsePool, pooled_artifact_collection
 from .profiles import *
 from .progress import (
     RUN_PROGRESS_FILE_NAME,
@@ -551,6 +553,7 @@ def run_triage_mode(
             enforce_memory_cap(stage, effective_memory_cap, sequence=len(memory_cap_stage_checks) + 1)
         )
 
+    reset_coverage()
     try:
         record_memory_cap("prepare")
         input_root, image_result = prepare_run_input_root(
@@ -914,6 +917,7 @@ def _run_triage_stages(
         progress=progress,
         memory_check=record_memory_cap,
         collector_options=collector_options,
+        run_mode=normalized_mode,
     )
     write_result(artifact_scheduler_manifest, scheduler_path)
     for kind in profile.artifacts_kinds:
@@ -1540,6 +1544,7 @@ def _run_triage_stages(
                 "candidates are not validated against unallocated space."
             ),
         }
+    summary_payload["coverage"] = coverage_entries()
     memory_cap_manifest = summary_payload.get("processing", {}).get("memory_cap_enforcement", {}).get(
         "memory_cap_enforcement_manifest",
         {},
@@ -1813,6 +1818,7 @@ def collect_artifact_stages(
     progress: RunProgress | None = None,
     memory_check: Callable[[str], None] | None = None,
     collector_options: Mapping[str, Mapping[str, object]] | None = None,
+    run_mode: str | None = None,
 ) -> tuple[dict[str, tuple[dict[str, object], Path, bool, bool]], dict[str, object]]:
     """Collect artifact kinds on the bounded worker pool.
 
@@ -1839,6 +1845,10 @@ def collect_artifact_stages(
     mobile_options = dict(options_by_kind.get("mobile-export") or {})
     mobile_options.setdefault("inner_dir", artifacts_dir.parent / MOBILE_INNER_DIR_NAME)
     options_by_kind["mobile-export"] = mobile_options
+    if run_mode == "recovery":
+        # R8: recovery mode lifts the EVTX/registry parse caps (other modes disclose them via coverage).
+        for recovery_kind in ("eventlog", "windows-registry"):
+            options_by_kind[recovery_kind] = {**dict(options_by_kind.get(recovery_kind) or {}), "run_mode": run_mode}
     for kind in kinds:
         artifact_path = artifacts_dir / f"rapidtriage-artifacts-{kind}.json"
         reusable = load_reusable_artifact_payload(artifact_path) if (resume or delta is not None) else None
@@ -2004,6 +2014,7 @@ def collect_artifact_stages(
         )
         check_memory(kind)
 
+    parse_pool = ProcessParsePool()
     if pending or delta_pending:
         executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="rapidtriage-artifact")
         try:
@@ -2035,15 +2046,25 @@ def collect_artifact_stages(
                     mode, kind, artifact_path, previous = queue.pop(0)
                     if progress is not None and not progress.task_should_run(kind):
                         continue  # skipped/cancelled before it started: never submitted
-                    future = executor.submit(
-                        tracked_artifact_collection,
-                        progress,
-                        scope_input_root if mode == "delta" else input_root,
-                        kind=kind,
-                        rule_set=rule_set,
-                        records_path=artifact_records_path(artifact_path) if mode == "full" else None,
-                        collector_options=options_by_kind.get(kind),
-                    )
+                    collect_kwargs = {
+                        "kind": kind,
+                        "rule_set": rule_set,
+                        "records_path": artifact_records_path(artifact_path) if mode == "full" else None,
+                        "collector_options": options_by_kind.get(kind),
+                    }
+                    collect_root = scope_input_root if mode == "delta" else input_root
+                    if kind in PROCESS_KINDS and not parse_pool.disabled:
+                        # CPU-bound parsers run in worker processes; this thread only waits.
+                        future = executor.submit(
+                            pooled_artifact_collection,
+                            parse_pool,
+                            progress,
+                            collect_root,
+                            fallback=tracked_artifact_collection,
+                            **collect_kwargs,
+                        )
+                    else:
+                        future = executor.submit(tracked_artifact_collection, progress, collect_root, **collect_kwargs)
                     futures[future] = (mode, kind, artifact_path, previous)
                     return True
                 return False
@@ -2062,8 +2083,10 @@ def collect_artifact_stages(
             # Fail fast (e.g. memory cap): drop queued providers instead of
             # waiting for the whole pool; running workers finish on their own.
             executor.shutdown(wait=False, cancel_futures=True)
+            parse_pool.shutdown(wait=False)
             raise
         executor.shutdown(wait=True)
+        parse_pool.shutdown()
     scheduler_manifest = build_parser_scheduler_manifest(
         kinds=kinds,
         max_workers=max_workers,

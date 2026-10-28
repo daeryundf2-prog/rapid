@@ -11,6 +11,7 @@ import mmap
 import re
 import struct
 import tempfile
+import threading
 import xml.etree.ElementTree as ET
 import zlib
 from collections import Counter, defaultdict
@@ -20,6 +21,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from ...core.artifact_profiles import cap_list_field
+from ...core.coverage import record_coverage
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.json_safe import json_default
 from ...core.models import ArtifactRecord
@@ -221,6 +223,64 @@ MAX_NATIVE_EVTX_RECORD_SIZE = 16 * 1024 * 1024
 MAX_NATIVE_EVTX_STRINGS = 200
 MAX_NATIVE_EVTX_BINXML_TOKENS = 500
 MAX_NATIVE_EVTX_NESTED_BINXML_BYTES = 1024 * 1024
+
+# Recovery mode lifts these parse caps; other modes keep them and disclose each truncation through
+# ``record_coverage`` (one entry per cap per file, ``observed`` = records the cap truncated).
+_EVTX_CAP_DISCLOSURE: dict[str, tuple[str, int]] = {
+    "strings": ("evtx-string-cap", MAX_NATIVE_EVTX_STRINGS),
+    "binxml-tokens": ("evtx-binxml-token-cap", MAX_NATIVE_EVTX_BINXML_TOKENS),
+    "nested-binxml-bytes": ("evtx-nested-binxml-size-cap", MAX_NATIVE_EVTX_NESTED_BINXML_BYTES),
+    "record-size": ("evtx-record-size-cap", MAX_NATIVE_EVTX_RECORD_SIZE),
+}
+_EVTX_CAPS = threading.local()
+
+
+@contextmanager
+def _evtx_caps_scope(recovery: bool, cap_hits: Counter[str]) -> Iterable[None]:
+    """Scope one record's parse: recovery lifts the caps, otherwise each cap hit is counted once."""
+    previous = (getattr(_EVTX_CAPS, "recovery", False), getattr(_EVTX_CAPS, "hits", None))
+    hits: set[str] = set()
+    _EVTX_CAPS.recovery, _EVTX_CAPS.hits = recovery, hits
+    try:
+        yield
+    finally:
+        _EVTX_CAPS.recovery, _EVTX_CAPS.hits = previous
+        cap_hits.update(hits)
+
+
+def _evtx_recovery() -> bool:
+    return bool(getattr(_EVTX_CAPS, "recovery", False))
+
+
+def _evtx_cap_hit(name: str) -> None:
+    hits = getattr(_EVTX_CAPS, "hits", None)
+    if hits is not None:
+        hits.add(name)
+
+
+def _evtx_cap_strings(items: Sequence[str]) -> list[str]:
+    if _evtx_recovery() or len(items) <= MAX_NATIVE_EVTX_STRINGS:
+        return list(items)
+    _evtx_cap_hit("strings")
+    return list(items[:MAX_NATIVE_EVTX_STRINGS])
+
+
+def _evtx_tokens_open(offset: int, size: int, used: int) -> bool:
+    """Loop condition of the legacy BinXML token scans (a token consumes >= 1 byte, so recovery never truncates)."""
+    if offset >= size:
+        return False
+    if _evtx_recovery():
+        return used < size + 8
+    if used < MAX_NATIVE_EVTX_BINXML_TOKENS:
+        return True
+    _evtx_cap_hit("binxml-tokens")
+    return False
+
+
+def _evtx_flush_cap_coverage(cap_hits: Mapping[str, int]) -> None:
+    for name, count in cap_hits.items():
+        reason, limit = _EVTX_CAP_DISCLOSURE[name]
+        record_coverage("eventlog", reason, limit, int(count), "records")
 NATIVE_EVTX_READER_STRATEGY = "mmap-bounded-record-scan"
 NATIVE_EVTX_PARSE_SCOPE = "record-header-binxml-template-scalar-recovery-triage"
 NATIVE_EVTX_BINXML_STATUS = "not-decoded"
@@ -1744,6 +1804,7 @@ class WindowsEventLogProvider:
         *,
         structure_rows: bool = True,
         record_detail: str = EVENTLOG_RECORD_DETAIL_FULL,
+        recovery: bool = False,
     ):
         if record_detail not in EVENTLOG_RECORD_DETAILS:
             supported = ", ".join(EVENTLOG_RECORD_DETAILS)
@@ -1751,14 +1812,18 @@ class WindowsEventLogProvider:
         self.message_catalog_path = message_catalog_path
         self.structure_rows = bool(structure_rows)
         self.record_detail = record_detail
+        self.recovery = bool(recovery)
         self._message_catalog: dict[str, dict[str, dict[str, object]]] | None = None
 
     @property
     def options_key(self) -> str:
         """Collect-cache discriminator for non-default output shapes."""
-        if self.structure_rows and self.record_detail == EVENTLOG_RECORD_DETAIL_FULL:
-            return ""
-        return f"structure_rows={int(self.structure_rows)};record_detail={self.record_detail}"
+        parts: list[str] = []
+        if not (self.structure_rows and self.record_detail == EVENTLOG_RECORD_DETAIL_FULL):
+            parts.append(f"structure_rows={int(self.structure_rows)};record_detail={self.record_detail}")
+        if self.recovery:
+            parts.append("recovery=1")
+        return ";".join(parts)
 
     def with_options(self, **options: object) -> WindowsEventLogProvider:
         catalog = options.get("message_catalog_path")
@@ -1768,6 +1833,7 @@ class WindowsEventLogProvider:
             Path(str(catalog)).expanduser().resolve() if catalog else self.message_catalog_path,
             structure_rows=self.structure_rows if structure_rows is None else bool(structure_rows),
             record_detail=self.record_detail if record_detail is None else str(record_detail),
+            recovery=self.recovery or options.get("run_mode") == "recovery",
         )
 
     def supported(self) -> bool:
@@ -1850,6 +1916,7 @@ class WindowsEventLogProvider:
                         structure_rows=self.structure_rows,
                         record_detail=self.record_detail,
                         stats=native_stats,
+                        recovery=self.recovery,
                     ):
                         yield emit(record)
                     yield emit(
@@ -1998,8 +2065,13 @@ def collect_native_evtx_events(
     structure_rows: bool = True,
     record_detail: str = EVENTLOG_RECORD_DETAIL_FULL,
     stats: dict[str, int] | None = None,
+    recovery: bool = False,
 ) -> Iterable[ArtifactRecord]:
     """Yield native EVTX rows, walking the file chunk by chunk (no record cap).
+
+    ``recovery=True`` also lifts the per-record parse caps (extracted strings, legacy BinXML
+    token budget, nested BinXML size, declared record size in unchunked regions); otherwise each
+    cap that truncated a record is disclosed once per file via ``record_coverage``.
 
     Every record of every chunk is visited in file order with one 64 KiB
     chunk held in memory at a time. Live records (active chunks, header walk
@@ -2017,6 +2089,11 @@ def collect_native_evtx_events(
     """
     counters = stats if stats is not None else {}
     full_detail = record_detail != EVENTLOG_RECORD_DETAIL_TRIAGE
+    cap_hits: Counter[str] = Counter()
+
+    def scoped(function, *args, **kwargs):
+        with _evtx_caps_scope(recovery, cap_hits):
+            return function(*args, **kwargs)
 
     def bump(key: str, amount: int = 1) -> None:
         counters[key] = counters.get(key, 0) + amount
@@ -2044,14 +2121,19 @@ def collect_native_evtx_events(
             source_index = 0
             for kind, first, second in iter_native_evtx_regions(blob):
                 if kind == "gap":
-                    for candidate in iter_evtx_record_candidates(blob, start=first, end=second):
+                    for candidate in iter_evtx_record_candidates(blob, start=first, end=second, recovery=recovery):
                         if not candidate.parseable:
                             bump("candidate_count")
+                            if candidate.reason == "declared-size-too-large":
+                                cap_hits["record-size"] += 1
                             if structure_rows:
-                                yield native_evtx_record_candidate_record(path, source_index, source_hashes, blob, candidate)
+                                yield scoped(
+                                    native_evtx_record_candidate_record, path, source_index, source_hashes, blob, candidate
+                                )
                             source_index += 1
                             continue
-                        record = build_native_evtx_event_record(
+                        record = scoped(
+                            build_native_evtx_event_record,
                             context,
                             source_index=source_index,
                             candidate=candidate,
@@ -2096,7 +2178,9 @@ def collect_native_evtx_events(
                             candidate = NativeEvtxRecordCandidate(
                                 absolute, slot.declared_size, preview, False, slot.reason, len(blob) - absolute
                             )
-                            yield native_evtx_record_candidate_record(path, source_index, source_hashes, blob, candidate)
+                            yield scoped(
+                                native_evtx_record_candidate_record, path, source_index, source_hashes, blob, candidate
+                            )
                         source_index += 1
                         continue
                     record_blob = chunk[slot.relative_offset : slot.relative_offset + slot.declared_size]
@@ -2125,7 +2209,8 @@ def collect_native_evtx_events(
                     except (EvtxDecodeError, IndexError, struct.error, ValueError, RecursionError, UnicodeError) as exc:
                         decoded = None
                         decode_error = f"{type(exc).__name__}: {exc}"[:200]
-                    record = build_native_evtx_event_record(
+                    record = scoped(
+                        build_native_evtx_event_record,
                         context,
                         source_index=source_index,
                         candidate=candidate,
@@ -2146,6 +2231,8 @@ def collect_native_evtx_events(
                 counters["template_parse_count"] = counters.get("template_parse_count", 0) + decoder.template_parse_count
     except OSError:
         return
+    finally:
+        _evtx_flush_cap_coverage(cap_hits)
 
 
 EVTX_RECORD_ID_STALE_BELOW_FIRST = "stale-below-first"
@@ -2571,7 +2658,7 @@ def build_native_evtx_event_record(
             "evtx_record_sequence": sequence,
             "validation_required": validation_required,
             "caution_labels": list(recovery_context["caution_labels"]) if validation_required else [],
-            "extracted_strings": searchable_strings[:MAX_NATIVE_EVTX_STRINGS],
+            "extracted_strings": _evtx_cap_strings(searchable_strings),
             "extracted_string_count": len(searchable_strings),
             "native_indicators": native_indicators,
             "parameter_candidates": parameter_candidates,
@@ -2636,7 +2723,7 @@ def iter_native_evtx_chunks(blob: bytes) -> Iterable[dict[str, object]]:
 
 
 def iter_evtx_record_candidates(
-    blob: bytes | mmap.mmap, *, start: int = 0, end: int | None = None
+    blob: bytes | mmap.mmap, *, start: int = 0, end: int | None = None, recovery: bool = False
 ) -> Iterable[NativeEvtxRecordCandidate]:
     """Legacy magic scan of ``blob[start:end]`` (regions without a chunk header). No count cap."""
     offset = start
@@ -2656,7 +2743,7 @@ def iter_evtx_record_candidates(
             emitted += 1
             offset += len(EVTX_RECORD_MAGIC)
             continue
-        if declared_size > MAX_NATIVE_EVTX_RECORD_SIZE:
+        if declared_size > MAX_NATIVE_EVTX_RECORD_SIZE and not recovery:
             record_blob = blob[offset : min(len(blob), offset + 4096)]
             yield NativeEvtxRecordCandidate(
                 offset, declared_size, record_blob, False, "declared-size-too-large", available_size
@@ -4535,7 +4622,7 @@ def native_evtx_record_candidate_record(
         "parser_confidence": recovery_context["confidence"],
         "validation_required": True,
         "caution_labels": recovery_context["caution_labels"],
-        "extracted_strings": strings[:MAX_NATIVE_EVTX_STRINGS],
+        "extracted_strings": _evtx_cap_strings(strings),
         "extracted_string_count": len(strings),
         "native_indicators": indicators,
         "triage_recommendation": (
@@ -5045,7 +5132,7 @@ def parse_native_evtx_binxml(payload: bytes) -> dict[str, object]:
     version: dict[str, object] = {}
     warnings: list[str] = []
 
-    while offset < len(payload) and sum(tokens.values()) < MAX_NATIVE_EVTX_BINXML_TOKENS:
+    while _evtx_tokens_open(offset, len(payload), sum(tokens.values())):
         token = payload[offset]
         token_kind = token & 0xBF
         more = bool(token & 0x40)
@@ -5299,7 +5386,7 @@ def parse_binxml_fragment_tokens(
     warnings: list[str] = []
     substitution_values = list(substitutions or [])
 
-    while offset < len(payload) and sum(tokens.values()) < MAX_NATIVE_EVTX_BINXML_TOKENS:
+    while _evtx_tokens_open(offset, len(payload), sum(tokens.values())):
         token = payload[offset]
         token_kind = token & 0xBF
         more = bool(token & 0x40)
@@ -5761,7 +5848,8 @@ def walk_evtx_template_definition(
     offset = tree_offset
     end = min(len(chunk_data), tree_offset + max(tree_length, 0))
     guard = 0
-    while offset < end and guard < MAX_NATIVE_EVTX_BINXML_TOKENS:
+    guard_limit = max(tree_length, 0) + 1 if _evtx_recovery() else MAX_NATIVE_EVTX_BINXML_TOKENS
+    while offset < end and guard < guard_limit:
         guard += 1
         token = chunk_data[offset]
         kind = token & 0x3F
@@ -5819,7 +5907,9 @@ def walk_evtx_template_definition(
             continue
         warnings.append(f"definition-unsupported-token:0x{token:02x}@{offset}")
         break
-    if guard >= MAX_NATIVE_EVTX_BINXML_TOKENS:
+    if guard >= guard_limit:
+        if not _evtx_recovery():
+            _evtx_cap_hit("binxml-tokens")
         warnings.append("definition-token-budget-exhausted")
     return mapping, static_values, warnings
 
@@ -6852,7 +6942,8 @@ def decode_binxml_template_value(value_blob: bytes, value_type: int) -> tuple[st
 
 
 def parse_nested_binxml_value(value_blob: bytes) -> dict[str, object]:
-    if len(value_blob) > MAX_NATIVE_EVTX_NESTED_BINXML_BYTES:
+    if len(value_blob) > MAX_NATIVE_EVTX_NESTED_BINXML_BYTES and not _evtx_recovery():
+        _evtx_cap_hit("nested-binxml-bytes")
         return {
             "profile_version": "evtx-nested-binxml-value-v1",
             "status": "nested-binxml-too-large",
@@ -8214,6 +8305,8 @@ def build_eventlog_file_record(
 
 def build_etl_trace_inventory_record(path: Path) -> ArtifactRecord:
     stat_result = path.stat()
+    if stat_result.st_size > ETL_SCAN_LIMIT:
+        record_coverage("eventlog", "etl-scan-prefix-cap", ETL_SCAN_LIMIT, stat_result.st_size, "bytes")
     blob = read_prefix(path, ETL_SCAN_LIMIT)
     strings = unique_texts([*extract_ascii_strings(blob), *extract_utf16le_strings(blob)])
     provider_hints = [hint for hint in ETL_PROVIDER_HINTS if any(hint.lower() in value.lower() for value in strings)]
@@ -9363,7 +9456,8 @@ def extract_utf16le_strings(blob: bytes, *, min_chars: int = 4) -> list[str]:
                 text = decode_utf16le_string(blob[start:cursor])
                 if len(text) >= min_chars:
                     strings.append(text)
-                    if len(strings) >= MAX_NATIVE_EVTX_STRINGS:
+                    if len(strings) >= MAX_NATIVE_EVTX_STRINGS and not _evtx_recovery():
+                        _evtx_cap_hit("strings")
                         return strings
                 start = None
         cursor += 2

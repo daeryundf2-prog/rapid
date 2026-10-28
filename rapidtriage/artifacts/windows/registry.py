@@ -8,6 +8,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
+from ...core.coverage import record_coverage
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from ...core.recovery import build_recovery_record
@@ -276,6 +277,12 @@ class WindowsRegistryProvider:
     description = "Windows Registry hives (native full walk) and .reg exports"
     target_platform = "windows"
 
+    def __init__(self, *, recovery: bool = False) -> None:
+        self.recovery = recovery
+
+    def with_options(self, **options: object) -> WindowsRegistryProvider:
+        return WindowsRegistryProvider(recovery=self.recovery or options.get("run_mode") == "recovery")
+
     def supported(self) -> bool:
         return True
 
@@ -295,7 +302,7 @@ class WindowsRegistryProvider:
                 yield record
         context = RegistryCollectionContext(root)
         for path in candidate_native_registry_hive_paths(root):
-            for record in collect_registry_hive(path, context=context):
+            for record in collect_registry_hive(path, context=context, recovery=self.recovery):
                 if record.artifact_type == "registry-key-tree-node":
                     key_tree_counts[str(record.details.get("hive_mount") or record.path)] += 1
                 else:
@@ -361,6 +368,7 @@ def collect_registry_hive(
     *,
     context: RegistryCollectionContext | None = None,
     include_key_tree: bool = True,
+    recovery: bool = False,
 ) -> Iterable[ArtifactRecord]:
     """Full native walk of one hive: key tree rows, typed plugin rows, free-cell candidates, inventory."""
     try:
@@ -413,22 +421,29 @@ def collect_registry_hive(
             yield record
         free_candidates, allocator_stats = iter_registry_free_cell_candidates(hive)
         recovery_candidates = [*free_candidates, *native_parent_key_candidates(hive, free_candidates)]
-        scan_end = min(stat_result.st_size, MAX_HIVE_STRING_SCAN_BYTES)
-        strings = extract_utf16le_strings(bytes(hive._data[:scan_end]))
+        scan_end = stat_result.st_size if recovery else min(stat_result.st_size, MAX_HIVE_STRING_SCAN_BYTES)
+        strings = extract_utf16le_strings(bytes(hive._data[:scan_end]), limit=None if recovery else MAX_HIVE_STRINGS)
+        if not recovery and stat_result.st_size > MAX_HIVE_STRING_SCAN_BYTES:
+            record_coverage("registry-hive-strings", "scan-bytes-cap", MAX_HIVE_STRING_SCAN_BYTES, stat_result.st_size, "bytes")
+        if not recovery and len(strings) >= MAX_HIVE_STRINGS:
+            record_coverage("registry-hive-strings", "string-count-cap", MAX_HIVE_STRINGS, None, "strings")
         # R5 L2: PuTTY/WinSCP password values never reach the string pivot — neither the current
         # values nor the data of deleted/free vk cells named Password/ProxyPassword/… (old passwords).
         secrets = hive_secret_strings(hive) | deleted_secret_value_strings(hive._data, recovery_candidates)
         if secrets:
             strings = [item for item in strings if not any(secret in item for secret in secrets)]
         if strings:
-            strings_record = build_registry_hive_strings_record(path, strings, metadata, source_hashes)
-            strings_record.details["scan_truncated"] = stat_result.st_size > MAX_HIVE_STRING_SCAN_BYTES
-            strings_record.details["string_limit_reached"] = len(strings) >= MAX_HIVE_STRINGS
-            strings_record.details["string_limit"] = MAX_HIVE_STRINGS
-            strings_record.details["cap_disclosure"] = (
-                f"문자열 스캔은 앞 {MAX_HIVE_STRING_SCAN_BYTES // (1024 * 1024)}MB·최대 {MAX_HIVE_STRINGS}개로 제한된 "
-                "보조 피벗입니다(키/값 해석은 전체 트리 순회 결과를 사용)."
+            strings_record = build_registry_hive_strings_record(
+                path, strings, metadata, source_hashes, recovery=recovery
             )
+            strings_record.details["scan_truncated"] = not recovery and stat_result.st_size > MAX_HIVE_STRING_SCAN_BYTES
+            strings_record.details["string_limit_reached"] = not recovery and len(strings) >= MAX_HIVE_STRINGS
+            strings_record.details["string_limit"] = None if recovery else MAX_HIVE_STRINGS
+            if not recovery:
+                strings_record.details["cap_disclosure"] = (
+                    f"문자열 스캔은 앞 {MAX_HIVE_STRING_SCAN_BYTES // (1024 * 1024)}MB·최대 {MAX_HIVE_STRINGS}개로 제한된 "
+                    "보조 피벗입니다(키/값 해석은 전체 트리 순회 결과를 사용)."
+                )
             strings_record.details["evidence_strength"] = "string-candidate-not-evidence"
             yield strings_record
         for candidate in free_candidates:
@@ -558,6 +573,8 @@ def build_registry_hive_strings_record(
     strings: Sequence[str],
     metadata: Mapping[str, object],
     source_hashes: Mapping[str, str],
+    *,
+    recovery: bool = False,
 ) -> ArtifactRecord:
     suspicious = suspicious_hive_strings(strings)
     path_candidates = registry_path_candidates(strings)
@@ -581,7 +598,7 @@ def build_registry_hive_strings_record(
             "evidence_strength": "registry-hive-string-candidate",
             "scan_limit_bytes": MAX_HIVE_STRING_SCAN_BYTES,
             "extracted_string_count": len(strings),
-            "extracted_strings": list(strings[:MAX_HIVE_STRINGS]),
+            "extracted_strings": list(strings if recovery else strings[:MAX_HIVE_STRINGS]),
             "suspicious_strings": suspicious[:100],
             "path_candidates": path_candidates[:100],
             "url_candidates": url_candidates[:50],
@@ -4505,7 +4522,7 @@ def registry_url_candidates(strings: Sequence[str]) -> list[str]:
     return sorted(set(candidates))
 
 
-def extract_utf16le_strings(blob: bytes, *, min_chars: int = 4) -> list[str]:
+def extract_utf16le_strings(blob: bytes, *, min_chars: int = 4, limit: int | None = MAX_HIVE_STRINGS) -> list[str]:
     strings: list[str] = []
     seen: set[str] = set()
     for alignment in (0, 1):
@@ -4523,7 +4540,7 @@ def extract_utf16le_strings(blob: bytes, *, min_chars: int = 4) -> list[str]:
                     if len(text) >= min_chars and text not in seen:
                         strings.append(text)
                         seen.add(text)
-                        if len(strings) >= MAX_HIVE_STRINGS:
+                        if limit is not None and len(strings) >= limit:
                             return strings
                     start = None
             cursor += 2
@@ -4532,7 +4549,7 @@ def extract_utf16le_strings(blob: bytes, *, min_chars: int = 4) -> list[str]:
             if len(text) >= min_chars and text not in seen:
                 strings.append(text)
                 seen.add(text)
-                if len(strings) >= MAX_HIVE_STRINGS:
+                if limit is not None and len(strings) >= limit:
                     return strings
     return strings
 
