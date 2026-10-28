@@ -57,6 +57,66 @@ def strip_run_prefix(relative: str) -> str:
     return ""
 
 
+def partition_dir_of(relative: str) -> str:
+    """``p<N>`` when the entry sits in a multi-partition layout, else ``""`` (flat layout)."""
+    path = relative.replace("\\", "/").strip("/")
+    lowered = path.lower()
+    for prefix in RUN_PREFIXES:
+        if lowered.startswith(prefix + "/"):
+            match = _PARTITION_DIR.match(path[len(prefix) + 1 :])
+            return match.group(0).rstrip("/") if match else ""
+    return ""
+
+
+def _find_key(node: object, key: str) -> object:
+    if isinstance(node, dict):
+        if key in node:
+            return node[key]
+        for value in node.values():
+            found = _find_key(value, key)
+            if found is not None:
+                return found
+    elif isinstance(node, list):
+        for value in node:
+            found = _find_key(value, key)
+            if found is not None:
+                return found
+    return None
+
+
+def load_partition_map(run_dir: Path) -> tuple[dict[int, str], int | None]:
+    """(start_sector -> extracted directory, selected start sector) from the run's E01 stage status.
+
+    Lets each reference partition be compared only with the files rapid extracted from that same
+    partition; without it, same-named files of other partitions inflate small-partition recall."""
+    status_path = run_dir / "_e01" / "rapidtriage-e01-stage-status.json"
+    try:
+        status = json.loads(status_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}, None
+    mapping: dict[int, str] = {}
+    rows = _find_key(status, "native_extracted_partitions")
+    for row in rows if isinstance(rows, list) else []:
+        if isinstance(row, dict) and row.get("start_sector") is not None:
+            mapping[int(row["start_sector"])] = str(row.get("directory") or "")
+    selected = _find_key(status, "selected_start_sector")
+    return mapping, int(selected) if isinstance(selected, int) else None
+
+
+def keys_for_partition(
+    start_sector: int, by_dir: dict[str, list[str]], mapping: dict[int, str], selected: int | None
+) -> tuple[list[str], str]:
+    """Rapid keys belonging to the reference partition at ``start_sector`` and how they were chosen."""
+    if start_sector in mapping:
+        return by_dir.get(mapping[start_sector], []), "start-sector"
+    if mapping or selected is not None:
+        # Layout known: a partition absent from it was not extracted (flat layout = selected only).
+        if not mapping and selected == start_sector:
+            return by_dir.get("", []), "selected-partition"
+        return [], "not-extracted"
+    return [key for keys in by_dir.values() for key in keys], "unmapped"
+
+
 def rate(numerator: int, denominator: int) -> float | None:
     return round(numerator / denominator, 6) if denominator else None
 
@@ -83,13 +143,14 @@ def match_entries(
     }
 
 
-def load_rapid_paths(run_dir: Path) -> list[str]:
-    paths = []
+def load_rapid_paths(run_dir: Path) -> dict[str, list[str]]:
+    """Rapid match keys grouped by partition directory (``""`` for the flat single-partition layout)."""
+    by_dir: dict[str, list[str]] = {}
     for item in iter_extracted_files(run_dir):
         stripped = strip_run_prefix(item.relative_path)
         if stripped:
-            paths.append(rapid_key(stripped))
-    return paths
+            by_dir.setdefault(partition_dir_of(item.relative_path), []).append(rapid_key(stripped))
+    return by_dir
 
 
 def deleted_key(address: int) -> str:
@@ -256,19 +317,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args(argv)
 
-    rapid_paths = load_rapid_paths(args.run_dir)
+    by_dir = load_rapid_paths(args.run_dir)
+    mapping, selected = load_partition_map(args.run_dir)
     partitions: list[dict[str, object]] = []
     img = open_image(args.image)
     try:
         for index, start, offset in enumerate_partitions(img):
-            partitions.append(diff_partition(img, index, start, offset, rapid_paths, args.max_entries))
+            keys, how = keys_for_partition(start, by_dir, mapping, selected)
+            row = diff_partition(img, index, start, offset, keys, args.max_entries)
+            row["partition_mapping"] = how
+            partitions.append(row)
     finally:
         img.close()
     report = {
         "schema_version": SCHEMA_VERSION,
         "release_evidence_status": "engineering_check_only",
         "max_entries": args.max_entries,
-        "rapid_files": len(rapid_paths),
+        "rapid_files": sum(len(keys) for keys in by_dir.values()),
         "partitions": partitions,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

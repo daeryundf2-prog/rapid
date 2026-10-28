@@ -43,6 +43,17 @@ class MatchEntriesTest(unittest.TestCase):
         self.assertEqual(result["deleted_recall"], 0.5)
         self.assertEqual(result["allocated_recall"], 1.0)
 
+    def test_partition_keys_stay_within_their_partition(self) -> None:
+        by_dir = {"p1": ["a"], "p2": ["b"]}
+        self.assertEqual(mod.keys_for_partition(2048, by_dir, {2048: "p1", 9000: "p2"}, None), (["a"], "start-sector"))
+        self.assertEqual(mod.keys_for_partition(77, by_dir, {2048: "p1"}, None), ([], "not-extracted"))
+        flat = {"": ["x"]}
+        self.assertEqual(mod.keys_for_partition(500, flat, {}, 500), (["x"], "selected-partition"))
+        self.assertEqual(mod.keys_for_partition(600, flat, {}, 500), ([], "not-extracted"))
+        self.assertEqual(mod.keys_for_partition(600, flat, {}, None), (["x"], "unmapped"))
+        self.assertEqual(mod.partition_dir_of("_e01/fs/p3/Users/a.txt"), "p3")
+        self.assertEqual(mod.partition_dir_of("_e01/fs/Users/a.txt"), "")
+
     def test_strip_run_prefix(self) -> None:
         self.assertEqual(mod.strip_run_prefix("_e01/fs/Users/a.txt"), "Users/a.txt")
         self.assertEqual(mod.strip_run_prefix("_e01\\filesystem\\Users\\a.txt"), "Users/a.txt")
