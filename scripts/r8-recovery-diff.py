@@ -139,7 +139,8 @@ def walk_filesystem(
                 (int(name_info.flags) & pytsk3.TSK_FS_NAME_FLAG_UNALLOC)
                 or (int(meta.flags) & pytsk3.TSK_FS_META_FLAG_UNALLOC)
             )
-            if meta.type == pytsk3.TSK_FS_META_TYPE_DIR:
+            # $OrphanFiles (where TSK lists deleted NTFS files that lost their parent) is a VIRT_DIR.
+            if meta.type in (pytsk3.TSK_FS_META_TYPE_DIR, pytsk3.TSK_FS_META_TYPE_VIRT_DIR):
                 if meta.addr in seen_dirs:
                     continue
                 seen_dirs.add(meta.addr)
