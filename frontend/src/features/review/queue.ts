@@ -42,7 +42,11 @@ export function stepUnreviewed(
   return null;
 }
 
-/** The live-region sentence for a step: "미검토 k/n", or "미검토 없음" when none is left. */
-export function queueAnnouncement(step: QueueStep | null): string {
-  return step ? `미검토 ${step.ordinal}/${step.total}` : QUEUE_NONE_TEXT;
+/**
+ * The live-region sentence for a step: "미검토 k/n", or "미검토 없음" when none is left.
+ * `partial` = not every row is loaded yet, so the count covers only the loaded rows.
+ */
+export function queueAnnouncement(step: QueueStep | null, partial = false): string {
+  const text = step ? `미검토 ${step.ordinal}/${step.total}` : QUEUE_NONE_TEXT;
+  return partial ? `${text} (불러온 행 기준)` : text;
 }

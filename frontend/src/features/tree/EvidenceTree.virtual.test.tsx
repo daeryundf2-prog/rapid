@@ -81,4 +81,22 @@ describe("EvidenceTree virtualization", () => {
     });
     expect(screen.getAllByRole("treeitem").length).toBeLessThan(200);
   });
+
+  it("keeps the tab stop mounted after a scroll when the focused row is hidden", async () => {
+    render(<EvidenceTree runId="r1" />);
+    screen.getAllByRole("treeitem")[0]?.focus();
+    for (let i = 0; i < 80; i += 1) {
+      fireEvent.keyDown(document.activeElement ?? document, { key: "ArrowDown" });
+    }
+    await waitFor(() => expect((document.activeElement as HTMLElement).dataset.nodeId).toBe("n79"));
+    // "노드 1" hides the focused n79; the tab stop falls back to the 전체 보기 root (index 0).
+    fireEvent.change(screen.getByRole("searchbox", { name: "트리 검색" }), { target: { value: "노드 1" } });
+    const scroller = document.querySelector(".evidence-tree-scroll") as HTMLElement;
+    Object.defineProperty(scroller, "scrollTop", { configurable: true, value: 140_000 });
+    fireEvent.scroll(scroller);
+    await waitFor(() => {
+      const stops = screen.getAllByRole("treeitem").filter((el) => el.getAttribute("tabindex") === "0");
+      expect(stops.map((el) => el.dataset.nodeId)).toEqual(["views"]);
+    });
+  });
 });

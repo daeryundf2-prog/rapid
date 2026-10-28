@@ -142,18 +142,16 @@ export function EvidenceTree({ runId }: { runId: string }) {
   // The roving tab stop falls back to the first node when the focused one is not shown.
   const tabStopId = visible.some((entry) => entry.node.id === focusedId) ? focusedId : visible[0]?.node.id;
 
-  const focusedIndex = visible.findIndex((entry) => entry.node.id === focusedId);
-  const focusedIndexRef = useRef(focusedIndex);
-  focusedIndexRef.current = focusedIndex;
-  // The extractor identity changes with the focused row so it stays mounted (same as DataGrid).
+  // The tab stop's row stays mounted, so Tab still reaches the tree after a mouse scroll away from it.
+  const tabStopIndex = visible.findIndex((entry) => entry.node.id === tabStopId);
   const rangeExtractor = useCallback(
     (range: Range) => {
       const base = defaultRangeExtractor(range);
-      if (focusedIndex >= 0 && !base.includes(focusedIndex))
-        return [...base, focusedIndex].sort((a, b) => a - b);
+      if (tabStopIndex >= 0 && !base.includes(tabStopIndex))
+        return [...base, tabStopIndex].sort((a, b) => a - b);
       return base;
     },
-    [focusedIndex],
+    [tabStopIndex],
   );
   const virtualizer = useVirtualizer({
     count: visible.length,

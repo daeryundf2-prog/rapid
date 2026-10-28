@@ -39,6 +39,8 @@ export interface GridCommandHost {
   getSelectedRows: () => GridRow[];
   /** The rows on screen in display order (the review queue walks these). */
   getRows?: () => GridRow[];
+  /** False while some rows are not loaded yet (paged list): the queue count then covers loaded rows only. */
+  allRowsLoaded?: () => boolean;
   /** Move focus + selection to a row by key; the viewer follows the focus. */
   focusRowKey?: (key: string) => void;
   /** Publish the viewer target for a row (optionally with a preferred mode) and move focus to the viewer. */
@@ -403,7 +405,7 @@ export function buildQueueCommands(hostRef: { current: GridCommandHost }): Comma
     const items = (h.getRows?.() ?? []).map((row) => ({ key: row.rowKey, reviewed: isReviewedRow(row) }));
     const next = stepUnreviewed(items, h.getFocusedRow()?.rowKey ?? null, dir);
     if (next) h.focusRowKey?.(next.key);
-    announce(queueAnnouncement(next));
+    announce(queueAnnouncement(next, h.allRowsLoaded?.() === false));
   };
   const disabledReason = () => ((host().getRows?.() ?? []).length === 0 ? NO_QUEUE_ROWS : undefined);
   return [

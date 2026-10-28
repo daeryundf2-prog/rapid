@@ -1256,6 +1256,7 @@ export function DataGrid(props: DataGridProps = {}) {
     getFocusedRow: () => focusedRow,
     getSelectedRows: selectedRows,
     getRows: () => (compactMode ? displayRows : cq.loadedRows),
+    allRowsLoaded: () => !cq.canLoadMore,
     focusRowKey,
     openRow,
     setFilter: route.setQuery,

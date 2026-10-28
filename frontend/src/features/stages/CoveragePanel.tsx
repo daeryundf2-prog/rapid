@@ -56,6 +56,7 @@ const UNIT_LABEL: Record<string, string> = {
   files: "파일",
   entries: "항목",
   items: "항목",
+  tokens: "토큰",
 };
 
 const normalize = (code: string) => code.trim().toLowerCase().replaceAll("_", "-");
@@ -73,8 +74,11 @@ export function formatCoverageValue(value: number | null | undefined, unit: stri
 
 /** The measured part of the sentence, or "" when neither number is known. */
 function measureText(entry: CoverageEntry): string {
+  // A partition skip reports where it started, not a count; a limit of 0 is not a cap.
+  const start = entry.detail?.start_sector;
+  if (typeof start === "number") return `시작 섹터 ${formatCount(start)}`;
   const observed = formatCoverageValue(entry.observed, entry.unit);
-  const limit = formatCoverageValue(entry.limit, entry.unit);
+  const limit = entry.limit ? formatCoverageValue(entry.limit, entry.unit) : "";
   if (observed && limit) return `확인 ${observed} / 상한 ${limit}`;
   if (observed) return `확인 ${observed}`;
   if (limit) return `상한 ${limit}`;

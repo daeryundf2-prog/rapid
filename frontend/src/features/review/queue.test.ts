@@ -43,4 +43,10 @@ describe("review queue none-left", () => {
     const step = stepUnreviewed(items(false, false, true), null, 1);
     expect(queueAnnouncement(step)).toBe("미검토 1/2");
   });
+
+  it("says the count covers only the loaded rows when not all rows are loaded", () => {
+    const step = stepUnreviewed(items(false, false, true), null, 1);
+    expect(queueAnnouncement(step, true)).toBe("미검토 1/2 (불러온 행 기준)");
+    expect(queueAnnouncement(null, true)).toBe("미검토 없음 (불러온 행 기준)");
+  });
 });

@@ -210,6 +210,8 @@ export interface CoverageEntry {
   limit: number | null;
   observed: number | null;
   unit: string;
+  /** Extra facts of the limit, e.g. `start_sector` for a skipped partition. */
+  detail?: Record<string, unknown>;
 }
 
 export interface RunWarning {

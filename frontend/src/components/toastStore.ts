@@ -52,6 +52,14 @@ interface ToastState {
 
 let seq = 0;
 
+/** Two toasts are the same when text, tone and detail line all match. */
+function sameToast(
+  a: { text: string; tone: ToastTone; detail?: string },
+  b: { text: string; tone: ToastTone; detail?: string },
+): boolean {
+  return a.text === b.text && a.tone === b.tone && (a.detail ?? "") === (b.detail ?? "");
+}
+
 export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
   push: (text, tone = "info", options = {}) => {
@@ -59,14 +67,14 @@ export const useToastStore = create<ToastState>((set, get) => ({
     const clean = text.trim();
     if (!clean) return id;
     const now = Date.now();
-    const recent = get().toasts.find((t) => t.text === clean && now - (t.at ?? 0) < TOAST_DEDUPE_MS);
-    if (recent) return recent.id;
     const item: ToastItem = { id, text: clean, tone, at: now };
     if (options.detail) item.detail = options.detail;
     if (options.action) item.action = options.action;
+    const recent = get().toasts.find((t) => sameToast(t, item) && now - (t.at ?? 0) < TOAST_DEDUPE_MS);
+    if (recent) return recent.id;
     set((s) => ({
-      // The same sentence again replaces the old toast instead of stacking a copy.
-      toasts: [...s.toasts.filter((t) => t.text !== clean), item].slice(-TOAST_MAX),
+      // The same toast again replaces the old copy instead of stacking one.
+      toasts: [...s.toasts.filter((t) => !sameToast(t, item)), item].slice(-TOAST_MAX),
     }));
     return id;
   },

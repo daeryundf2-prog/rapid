@@ -62,6 +62,53 @@ describe("CoveragePanel (복구 범위)", () => {
     expect(screen.getByText("이 런은 복구 범위 기록 이전에 만들어졌습니다")).toBeTruthy();
   });
 
+  it("shows a start sector instead of an observed count and never a 0 cap", () => {
+    render(
+      <CoveragePanel
+        coverage={[
+          entry({
+            area: "partition",
+            reason_code: "partition-not-supported",
+            limit: null,
+            observed: 2048,
+            unit: "start_sector",
+            detail: { start_sector: 2048 },
+          }),
+          entry({
+            area: "e01_native.deleted_tsk",
+            reason_code: "deleted-sweep-cap",
+            limit: 0,
+            observed: 12,
+            unit: "files",
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getAllByTestId("coverage-item").map((li) => li.textContent)).toEqual([
+      "파티션: 지원하지 않는 파티션이라 처리하지 않음 — 시작 섹터 2,048",
+      "삭제 항목: 삭제 항목 탐색 상한에 걸려 일부만 처리됨 — 확인 12 파일",
+    ]);
+  });
+
+  it("names the tokens unit", () => {
+    render(
+      <CoveragePanel
+        coverage={[
+          entry({
+            area: "eventlog",
+            reason_code: "evtx-binxml-token-cap",
+            limit: 500,
+            observed: 1200,
+            unit: "tokens",
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByTestId("coverage-item").textContent).toBe(
+      "이벤트 로그: 레코드당 BinXML 토큰 상한에 걸려 일부만 처리됨 — 확인 1,200 토큰 / 상한 500 토큰",
+    );
+  });
+
   it("formats bytes and counts", () => {
     expect(formatCoverageValue(512, "bytes")).toBe("512 B");
     expect(formatCoverageValue(2048, "bytes")).toBe("2.0 KB");
