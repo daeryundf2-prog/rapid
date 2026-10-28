@@ -16,6 +16,7 @@ import hashlib
 import io
 import os
 import struct
+import sys
 import tempfile
 import threading
 import uuid
@@ -1318,7 +1319,10 @@ def extract_e01_native(
             else:
                 skipped.append(row)
         multi = len(plan) > 1
-        file_limit = native_extract_file_limit()
+        # Recovery mode extracts every file unless the operator set an explicit cap; other modes keep
+        # the default cap and disclose any truncation through coverage below.
+        explicit_cap = bool(os.environ.get(NATIVE_MAX_EXTRACT_FILES_ENV, "").strip())
+        file_limit = sys.maxsize if recovery and not explicit_cap else native_extract_file_limit()
         workers = native_extract_worker_count()
         stats = {**_new_stats(), "file_limit": file_limit, "workers": workers}
         digests: dict[str, dict[str, Any]] = {}
@@ -1376,6 +1380,10 @@ def extract_e01_native(
                 f"native E01 extraction supports NTFS, FAT, exFAT and ext only; partition at sector {start_sector} "
                 f"reports filesystem signature '{readable}' ({selected.get('description') or 'untyped'}). "
                 "Mount or export the image with a trusted tool, then select the resulting folder."
+            )
+        if stats["truncated"]:
+            record_coverage(
+                "e01_native.files", "file-count-cap", file_limit, stats["files"] + stats["truncated"], "files"
             )
         for row in skipped:
             description = str(row.get("description") or "").lower()
