@@ -351,6 +351,8 @@ python -m rapidtriage commercial-readiness --validation-package docs/validation/
 - [macOS/Linux quickstart](docs/rapidtriage-macos-linux-quickstart.md)
 - [Windows quickstart](docs/rapidtriage-windows-quickstart.md)
 - [E01 workflow](docs/rapidtriage-e01-workflow.md)
+- [R8 recovery mode](docs/r8-recovery-mode.md)
+- [R8 benchmark and recovery diff](docs/validation/r8-benchmark-and-recovery.md)
 - [Known limitations](docs/rapidtriage-known-limitations.md)
 - [Visible forensic feature taxonomy](docs/rapidforensic-visible-forensic-feature-taxonomy.md)
 - [Output schema](docs/rapidtriage-output-schema.md)
