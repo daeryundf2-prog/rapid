@@ -1,3 +1,9 @@
+import {
+  defaultRangeExtractor,
+  observeElementRect,
+  type Range,
+  useVirtualizer,
+} from "@tanstack/react-virtual";
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { announce } from "../../a11y";
 import { focusGridWhenReady } from "../../commands/builtin";
@@ -14,6 +20,11 @@ import "./tree.css";
 
 const DEFAULT_EXPANDED = ["evidence", "views", "search"];
 const TYPE_AHEAD_RESET_MS = 600;
+/** Row heights mirror tree.css: 28px items, 32px for level-1 section headers (24px + top gap). */
+const ROW_HEIGHT = 28;
+const SECTION_ROW_HEIGHT = 32;
+const OVERSCAN = 12;
+const INITIAL_RECT = { width: 300, height: 600 };
 
 function treeItemLabel(node: TreeModelNode): string {
   const label = node.marker ? `${node.label} (${node.marker})` : node.label;
@@ -59,6 +70,9 @@ export function EvidenceTree({ runId }: { runId: string }) {
   const [blockedReason, setBlockedReason] = useState("");
   const refs = useRef(new Map<string, HTMLLIElement>());
   const typeAhead = useRef({ buffer: "", timer: 0 });
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Id whose row was unmounted when focus moved to it; the row focuses itself once it mounts.
+  const pendingFocus = useRef<string | null>(null);
 
   // Tree search (트리 검색): matches ALL nodes, collapsed domains included; the matches and their
   // ancestors are shown expanded. Type-ahead keeps working on the visible nodes.
@@ -128,10 +142,47 @@ export function EvidenceTree({ runId }: { runId: string }) {
   // The roving tab stop falls back to the first node when the focused one is not shown.
   const tabStopId = visible.some((entry) => entry.node.id === focusedId) ? focusedId : visible[0]?.node.id;
 
-  const focusNode = useCallback((id: string) => {
-    setFocusedId(id);
-    refs.current.get(id)?.focus();
-  }, []);
+  const focusedIndex = visible.findIndex((entry) => entry.node.id === focusedId);
+  const focusedIndexRef = useRef(focusedIndex);
+  focusedIndexRef.current = focusedIndex;
+  // The extractor identity changes with the focused row so it stays mounted (same as DataGrid).
+  const rangeExtractor = useCallback(
+    (range: Range) => {
+      const base = defaultRangeExtractor(range);
+      if (focusedIndex >= 0 && !base.includes(focusedIndex))
+        return [...base, focusedIndex].sort((a, b) => a - b);
+      return base;
+    },
+    [focusedIndex],
+  );
+  const virtualizer = useVirtualizer({
+    count: visible.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: (i) => (visible[i]?.level === 1 ? SECTION_ROW_HEIGHT : ROW_HEIGHT),
+    overscan: OVERSCAN,
+    rangeExtractor,
+    initialRect: INITIAL_RECT,
+    // A zero-size viewport (hidden panel, no layout) keeps the initial window instead of rendering no rows.
+    observeElementRect: (instance, cb) =>
+      observeElementRect(instance, (rect) => cb(rect.height > 0 ? rect : INITIAL_RECT)),
+    getItemKey: (i) => visible[i]?.node.id ?? i,
+  });
+
+  const focusNode = useCallback(
+    (id: string) => {
+      setFocusedId(id);
+      const el = refs.current.get(id);
+      if (el) {
+        el.focus();
+        pendingFocus.current = null;
+        return;
+      }
+      pendingFocus.current = id;
+      const idx = visible.findIndex((entry) => entry.node.id === id);
+      if (idx >= 0) virtualizer.scrollToIndex(idx, { align: "auto" });
+    },
+    [visible, virtualizer],
+  );
 
   const activate = useCallback(
     (node: TreeModelNode) => {
@@ -272,99 +323,119 @@ export function EvidenceTree({ runId }: { runId: string }) {
       {searchView && visible.length === 0 ? (
         <p className="case-tree-reason">일치하는 노드가 없습니다.</p>
       ) : null}
-      {/* biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: ul is the ARIA tree container */}
-      <ul role="tree" aria-label="케이스 탐색 트리" onKeyDown={onKeyDown}>
-        {visible.map(({ node, level }, position) => {
-          const hasChildren = Boolean(node.children?.length);
-          const isOpen = expanded.has(node.id) || Boolean(searchView?.open.has(node.id));
-          const isSelected = selected(node);
-          const emptyReason = emptyView.hiddenIds.has(node.id) ? node.hiddenReason : undefined;
-          return (
-            // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard handled by the tree root (arrows/Enter/Space)
-            <li
-              key={node.id}
-              role="treeitem"
-              data-node-id={node.id}
-              ref={(el) => {
-                if (el) refs.current.set(node.id, el);
-                else refs.current.delete(node.id);
-              }}
-              tabIndex={tabStopId === node.id ? 0 : -1}
-              aria-label={treeItemLabel(node)}
-              aria-level={level}
-              aria-posinset={position + 1}
-              aria-setsize={visible.length}
-              aria-expanded={hasChildren ? isOpen : undefined}
-              aria-selected={isSelected}
-              aria-current={isSelected ? "page" : undefined}
-              aria-disabled={node.disabledReason ? true : undefined}
-              // The 특이사항 section's note (partial coverage) is read, not only hovered.
-              aria-description={
-                emptyReason ? `결과 없음: ${emptyReason}` : node.id === "flags" ? node.note : undefined
-              }
-              data-hidden-empty={emptyReason ? "" : undefined}
-              title={node.disabledReason ?? (emptyReason ? `결과 없음: ${emptyReason}` : node.note)}
-              className={`case-tree-item${isSelected ? " selected" : ""}${node.disabledReason ? " disabled" : ""}${node.count === 0 ? " is-empty" : ""}${node.dimmed || emptyReason ? " is-dimmed" : ""}`}
-              style={{ paddingInlineStart: `calc(var(--space-2) + ${level - 1} * var(--space-4))` }}
-              onFocus={() => setFocusedId(node.id)}
-              onClick={(event) => {
-                event.stopPropagation();
-                activate(node);
-              }}
-            >
-              {hasChildren ? (
-                <span
-                  className="case-tree-twisty"
-                  aria-hidden="true"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    toggle(node.id, !isOpen);
-                  }}
-                >
-                  <Icon name={isOpen ? "chevron-down" : "chevron-right"} />
-                </span>
-              ) : (
-                <span className="case-tree-twisty" aria-hidden="true" />
-              )}
-              {node.icon ? (
-                <Icon name={node.icon} className="case-tree-icon" />
-              ) : (
-                <span className="case-tree-icon" aria-hidden="true" />
-              )}
-              <span className="case-tree-label">{node.label}</span>
-              {node.marker ? (
-                <span className="case-tree-marker" aria-hidden="true">
-                  {node.marker}
-                </span>
-              ) : null}
-              {(() => {
-                // 특이사항 badge (U-F4): strongest grade and its rows; the full split is in the name.
-                const top = topFlag(node.flagCounts);
-                return top && node.flagCounts ? (
+      <div className="evidence-tree-scroll" ref={scrollRef}>
+        <ul
+          // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: ul is the ARIA tree container
+          role="tree"
+          aria-label="케이스 탐색 트리"
+          onKeyDown={onKeyDown}
+          style={{ height: virtualizer.getTotalSize() }}
+        >
+          {virtualizer.getVirtualItems().map((item) => {
+            const entry = visible[item.index];
+            if (!entry) return null;
+            const { node, level } = entry;
+            const position = item.index;
+            const hasChildren = Boolean(node.children?.length);
+            const isOpen = expanded.has(node.id) || Boolean(searchView?.open.has(node.id));
+            const isSelected = selected(node);
+            const emptyReason = emptyView.hiddenIds.has(node.id) ? node.hiddenReason : undefined;
+            return (
+              // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard handled by the tree root (arrows/Enter/Space)
+              <li
+                key={node.id}
+                role="treeitem"
+                data-node-id={node.id}
+                ref={(el) => {
+                  if (el) {
+                    refs.current.set(node.id, el);
+                    if (pendingFocus.current === node.id) {
+                      pendingFocus.current = null;
+                      el.focus();
+                    }
+                  } else refs.current.delete(node.id);
+                }}
+                tabIndex={tabStopId === node.id ? 0 : -1}
+                aria-label={treeItemLabel(node)}
+                aria-level={level}
+                aria-posinset={position + 1}
+                aria-setsize={visible.length}
+                aria-expanded={hasChildren ? isOpen : undefined}
+                aria-selected={isSelected}
+                aria-current={isSelected ? "page" : undefined}
+                aria-disabled={node.disabledReason ? true : undefined}
+                // The 특이사항 section's note (partial coverage) is read, not only hovered.
+                aria-description={
+                  emptyReason ? `결과 없음: ${emptyReason}` : node.id === "flags" ? node.note : undefined
+                }
+                data-hidden-empty={emptyReason ? "" : undefined}
+                title={node.disabledReason ?? (emptyReason ? `결과 없음: ${emptyReason}` : node.note)}
+                className={`case-tree-item${isSelected ? " selected" : ""}${node.disabledReason ? " disabled" : ""}${node.count === 0 ? " is-empty" : ""}${node.dimmed || emptyReason ? " is-dimmed" : ""}`}
+                style={{
+                  paddingInlineStart: `calc(var(--space-2) + ${level - 1} * var(--space-4))`,
+                  height: item.size,
+                  transform: `translateY(${item.start}px)`,
+                }}
+                onFocus={() => setFocusedId(node.id)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  activate(node);
+                }}
+              >
+                {hasChildren ? (
                   <span
-                    className="case-tree-flag flag-chip"
-                    data-grade={top.grade}
-                    title={flagCountsText(node.flagCounts)}
+                    className="case-tree-twisty"
+                    aria-hidden="true"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggle(node.id, !isOpen);
+                    }}
+                  >
+                    <Icon name={isOpen ? "chevron-down" : "chevron-right"} />
+                  </span>
+                ) : (
+                  <span className="case-tree-twisty" aria-hidden="true" />
+                )}
+                {node.icon ? (
+                  <Icon name={node.icon} className="case-tree-icon" />
+                ) : (
+                  <span className="case-tree-icon" aria-hidden="true" />
+                )}
+                <span className="case-tree-label">{node.label}</span>
+                {node.marker ? (
+                  <span className="case-tree-marker" aria-hidden="true">
+                    {node.marker}
+                  </span>
+                ) : null}
+                {(() => {
+                  // 특이사항 badge (U-F4): strongest grade and its rows; the full split is in the name.
+                  const top = topFlag(node.flagCounts);
+                  return top && node.flagCounts ? (
+                    <span
+                      className="case-tree-flag flag-chip"
+                      data-grade={top.grade}
+                      title={flagCountsText(node.flagCounts)}
+                      aria-hidden="true"
+                    >
+                      <span className="flag-chip-grade">{top.grade}</span>
+                      {top.count.toLocaleString("ko-KR")}
+                    </span>
+                  ) : null;
+                })()}
+                {/* Counts stay hidden until the first load settles (review #11): no "—" flicker. */}
+                {node.count !== undefined && !loading && (
+                  <span
+                    className={`badge muted${node.strongCount && node.count !== 0 ? " strong" : ""}`}
                     aria-hidden="true"
                   >
-                    <span className="flag-chip-grade">{top.grade}</span>
-                    {top.count.toLocaleString("ko-KR")}
+                    {typeof node.count === "number" ? node.count.toLocaleString("ko-KR") : node.count}
                   </span>
-                ) : null;
-              })()}
-              {/* Counts stay hidden until the first load settles (review #11): no "—" flicker. */}
-              {node.count !== undefined && !loading && (
-                <span
-                  className={`badge muted${node.strongCount && node.count !== 0 ? " strong" : ""}`}
-                  aria-hidden="true"
-                >
-                  {typeof node.count === "number" ? node.count.toLocaleString("ko-KR") : node.count}
-                </span>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
       {/* The foot stays pinned below the scrolling tree list (scroll review C1). */}
       <div className="evidence-tree-foot">
         {loading ? (

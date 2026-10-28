@@ -11,13 +11,18 @@
   flex: none;
 }
 
-.evidence-tree > ul[role="tree"] {
+.evidence-tree > .evidence-tree-scroll {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   padding-block-end: var(--space-2);
+}
+
+/* Virtualized rows: absolutely positioned inside a sized list (see EvidenceTree). */
+.evidence-tree-scroll > ul[role="tree"] {
+  position: relative;
 }
 
 /* Items sit flush with the scroller's edges: keep the focus ring inside so it is not clipped. */
@@ -59,6 +64,13 @@
   border-radius: var(--radius-sm);
 }
 
+.evidence-tree-scroll .case-tree-item {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  box-sizing: border-box;
+}
+
 /* Zero-count nodes stay listed but dim (nothing to open there yet). */
 .case-tree-item.is-empty:not(.selected) {
   color: var(--text-muted);
@@ -82,16 +94,12 @@
 
 /* Top-level nodes (증거 소스 · 전체 보기 · the domains) read as section headers (review #7). */
 .case-tree-item[aria-level="1"] {
-  height: 24px;
-  margin-top: var(--space-2);
+  /* Row height is set inline (32px = 24px + gap); the gap is top padding, rows are absolute. */
+  padding-block-start: var(--space-2);
   color: var(--text-subtle);
   font-size: var(--fs-aux);
   font-weight: 600;
   letter-spacing: 0.02em;
-}
-
-.case-tree-item[aria-level="1"]:first-child {
-  margin-top: 0;
 }
 
 .case-tree-item[aria-level="1"]:hover:not(.selected) {
