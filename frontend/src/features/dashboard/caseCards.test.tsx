@@ -260,8 +260,8 @@ describe("접수 case cards (Q-X1/Q-X3/Q-X4, r7 merged cards)", () => {
     const memo = cardOf("노트·메모");
     await waitFor(() => expect(within(memo).getByText("압수 목록 확인")).toBeTruthy());
     expect(within(memo).getByText("홍길동")).toBeTruthy();
-    // One 검사관 field (from the case) drives the memo author.
-    expect((within(memo).getByLabelText("검사관") as HTMLInputElement).value).toBe("홍길동");
+    // One 분석관 field (from the case) drives the memo author.
+    expect((within(memo).getByLabelText("분석관") as HTMLInputElement).value).toBe("홍길동");
     expect(within(memo).queryByLabelText("작성자")).toBeNull();
     expect(within(memo).getByRole("button", { name: "이력 1건" })).toBeTruthy();
     fireEvent.change(within(memo).getByLabelText("새 메모"), { target: { value: "USB 2개 확인" } });

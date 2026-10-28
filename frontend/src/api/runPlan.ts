@@ -59,7 +59,7 @@ export interface PlanTask {
   rows_so_far?: number | null;
   output?: { path?: string; records_path?: string } | null;
   message?: string;
-  /** Korean reason of a skipped / cancelled / partial task ("검사관 요청", "마치기 요청" …). */
+  /** Korean reason of a skipped / cancelled / partial task ("분석관 요청", "마치기 요청" …). */
   reason?: string | null;
   requested_by?: PlanRequester | null;
   parser_error_count?: number;

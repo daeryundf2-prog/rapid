@@ -113,7 +113,7 @@ function fixture(over: Partial<RunPlan> = {}): RunPlan {
           label: "메일",
           status: "partial",
           artifact_count: 51,
-          reason: "검사관 요청",
+          reason: "분석관 요청",
           requested_by: { actor: "web", at: "2026-10-18T01:00:00Z" },
         }),
       ],
@@ -187,8 +187,8 @@ describe("처리 계획표 (RunPlanTable)", () => {
     // Reasons of partial / skipped tasks are visible once the group is open.
     fireEvent.keyDown(screen.getByTestId("run-plan-group-email"), { key: "Enter" });
     const partial = screen.getByTestId("run-plan-task-email");
-    expect(partial.textContent).toContain("검사관 요청 · 요청: web");
-    expect(within(partial).getByText("일부 완료").getAttribute("title")).toContain("검사관 요청");
+    expect(partial.textContent).toContain("분석관 요청 · 요청: web");
+    expect(within(partial).getByText("일부 완료").getAttribute("title")).toContain("분석관 요청");
   });
 
   it("moves with ↑/↓, expands with → / Enter and collapses with ←", () => {

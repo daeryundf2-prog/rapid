@@ -139,7 +139,7 @@ describe("CaseWizard (Q-X1)", () => {
     expect(screen.getAllByText("사건 번호를 입력하세요.").length).toBeGreaterThan(0);
     // Accessible names come from the visible labels / button text, not placeholder or reason.
     expect(screen.getByLabelText("사건 번호", { exact: false }).getAttribute("aria-required")).toBe("true");
-    for (const label of ["사건명", "사건 유형", "검사관", "의뢰처", "소속", "설명", "케이스 폴더"]) {
+    for (const label of ["사건명", "사건 유형", "분석관", "의뢰처", "소속", "설명", "케이스 폴더"]) {
       expect(screen.getByLabelText(label, { exact: false })).toBeTruthy();
     }
     expect(screen.getByRole("button", { name: /다음/ })).toBe(next);
@@ -150,7 +150,7 @@ describe("CaseWizard (Q-X1)", () => {
     fireEvent.click(next);
     expect(screen.getByTestId("wizard-step-info")).toBeTruthy();
     fill("사건 번호", "2026-고단-1234");
-    fill("검사관", "홍길동");
+    fill("분석관", "홍길동");
     fireEvent.click(screen.getByTestId("wizard-next"));
 
     // Step 2: two evidence items, then delete the second one.

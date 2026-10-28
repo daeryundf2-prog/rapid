@@ -108,7 +108,7 @@ interface Progress {
 
 const CASE_FIELDS: Array<{ key: keyof CaseInfoForm; label: string; max: number; hint?: string }> = [
   { key: "name", label: "사건명", max: 200 },
-  { key: "examiner", label: "검사관", max: 200, hint: "메모·태그의 기본 작성자" },
+  { key: "examiner", label: "분석관", max: 200, hint: "메모·태그의 기본 작성자" },
   { key: "requester", label: "의뢰처", max: 200 },
   { key: "organization", label: "소속", max: 200 },
 ];
@@ -601,7 +601,7 @@ export function CaseWizard({
               ) : null}
               {info.examiner.trim() ? (
                 <>
-                  <dt>검사관</dt>
+                  <dt>분석관</dt>
                   <dd>{info.examiner.trim()}</dd>
                 </>
               ) : null}

@@ -394,13 +394,13 @@ describe("CaseDashboard (접수, r7 examiner-first)", () => {
     expect(window.location.hash).toBe("#/case/r1/explore/search?q=bank");
   });
 
-  it("saves the 요약 노트 (collapsed) with the single 검사관 field through PUT /case-notes", async () => {
+  it("saves the 요약 노트 (collapsed) with the single 분석관 field through PUT /case-notes", async () => {
     const { calls } = await renderDashboard();
     const notes = card("노트·메모");
-    expect(within(notes).getAllByLabelText(/검사관/)).toHaveLength(1);
+    expect(within(notes).getAllByLabelText(/분석관/)).toHaveLength(1);
     const summaryNote = within(notes).getByTestId("summary-note") as HTMLDetailsElement;
     expect(summaryNote.open).toBe(false);
-    fireEvent.change(within(notes).getByLabelText("검사관"), { target: { value: "홍길동" } });
+    fireEvent.change(within(notes).getByLabelText("분석관"), { target: { value: "홍길동" } });
     fireEvent.change(within(notes).getByLabelText("케이스 요약"), { target: { value: "이체 경위" } });
     expect(notes.textContent).toContain("저장하지 않은 변경이 있습니다");
     fireEvent.click(within(notes).getByRole("button", { name: "요약 노트 저장" }));

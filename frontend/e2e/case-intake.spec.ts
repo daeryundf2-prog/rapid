@@ -74,7 +74,7 @@ test("Q-X1: 케이스 만들기 3단계 → 실행 → 접수 5 cards, kept afte
   await expect(dialog.getByText("사건 번호를 입력하세요.").first()).toBeVisible();
   await dialog.getByLabel("사건 번호").fill(caseNumber);
   await dialog.getByLabel("사건명").fill("E2E 법인 자금 유출");
-  await dialog.getByLabel("검사관").fill("홍길동");
+  await dialog.getByLabel("분석관").fill("홍길동");
   await dialog.getByLabel("의뢰처").fill("서울중앙지검");
   expect(await quickAudit(page)).toEqual([]);
   // Enter in a one-line field moves on (review item 12: real browser, not only jsdom).

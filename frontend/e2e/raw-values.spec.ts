@@ -510,6 +510,42 @@ for (const runId of RUNS) {
     });
     assertClean(from);
   });
+
+  // R-7 / R-10: the accept-stage 단계 상세 card and the 출처 section of a record.
+  test(`stage details and source section have no raw values (${tag})`, async ({ page }) => {
+    const from = failures.length;
+    await start(page);
+    const names = await evidenceNames(page, runId);
+    await screen(`${tag} intake stage details`, async () => {
+      await openHash(page, `case/${runId}/intake`);
+      const details = page.getByTestId("stage-details");
+      await expect(details).toBeVisible({ timeout: 180_000 });
+      await details.locator("summary").click();
+      await page.waitForTimeout(500);
+      record(`${tag} intake stage details`, await scan(page, "[data-testid='stage-details']", names));
+    });
+    await screen(`${tag} viewer source section`, async () => {
+      await openHash(page, `case/${runId}/explore/artifacts/windows-execution`);
+      await settleGrid(page);
+      const first = page.locator("[role='grid'] [role='row'][aria-rowindex='2'] [role='gridcell']").nth(1);
+      if (!(await first.count())) throw new Error("no rows to open");
+      await first.click();
+      const source = page.locator("[data-testid='viewer-region'] section[aria-label='출처']");
+      await expect(source).toBeVisible({ timeout: 60_000 });
+      await page.waitForTimeout(500);
+      record(
+        `${tag} viewer source section`,
+        await scan(page, "[data-testid='viewer-region'] section[aria-label='출처']", names),
+      );
+      // Values under 출처 are not walked by scan() (dd = evidence); an enumerated id is never evidence.
+      const values = (await source.locator("dd").allInnerTexts()).map((text) => text.trim());
+      const enumerated = values
+        .filter((text) => text !== runId && /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/.test(text))
+        .map((token) => ({ token, where: "출처 dd" }));
+      record(`${tag} viewer source values`, enumerated);
+    });
+    assertClean(from);
+  });
 }
 
 test.afterAll(() => {

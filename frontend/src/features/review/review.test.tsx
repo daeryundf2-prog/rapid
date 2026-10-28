@@ -71,7 +71,7 @@ function tag(partial: Partial<CaseTag> & { id: number; name: string }): CaseTag 
     color_token: "tag-5",
     shortcut: null,
     description: "",
-    created_by: "검사관 A",
+    created_by: "분석관 A",
     created_at: "2026-10-17T00:00:00+00:00",
     updated_at: "2026-10-17T00:00:00+00:00",
     deleted_at: null,

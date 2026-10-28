@@ -2,7 +2,7 @@
  * 접수 case cards (AXIOM adoption E1, plan §3.1; r7 examiner-first redesign): 사건 정보 (편집) ·
  * 증거 (증거 목록 + 증거 소스: 번호 · 종류 · 이름 · 경로 · 항목 수 · 해시 · 런 시작 / 증거 추가) ·
  * 처리 경고·제한 사항 (처리 문제 사유별 + 단계 경고 + 확인 필요 사항, 공개 사항(정보) 접힘) ·
- * 노트·메모 (검사관 한 칸 · 케이스 메모 · 요약 노트 접힘). A run without a case keeps working:
+ * 노트·메모 (분석관 한 칸 · 케이스 메모 · 요약 노트 접힘). A run without a case keeps working:
  * 사건 정보 offers "케이스에 연결", 증거 shows the run's own evidence source, 메모 explains why it is
  * empty and the problems read the run summary.
  */
@@ -136,7 +136,7 @@ export function CaseInfoCard({ detail }: { detail: CaseDetail }) {
     ["사건 번호", detail.case_number],
     ["사건명", detail.name],
     ["사건 유형", detail.case_type],
-    ["검사관", detail.examiner],
+    ["분석관", detail.examiner],
     ["의뢰처", detail.requester],
     ["소속", detail.organization],
     ["상태", detail.status === "closed" ? "종결" : "진행 중"],
@@ -849,10 +849,10 @@ export function WarningsCard({
   );
 }
 
-// --- 노트·메모 (케이스 메모 + 요약 노트, 검사관 한 칸) ---------------------------------------
+// --- 노트·메모 (케이스 메모 + 요약 노트, 분석관 한 칸) ---------------------------------------
 
 /**
- * 노트·메모: one 검사관 field drives both the memo author and the run's 요약 노트 examiner. 케이스 메모
+ * 노트·메모: one 분석관 field drives both the memo author and the run's 요약 노트 examiner. 케이스 메모
  * (작성자 · 시각 · 이력, case DB) is on top; the 요약 노트 (PUT /case-notes, fills the report's 분석자 ·
  * 분석 범위) is collapsed below.
  */
@@ -934,7 +934,7 @@ export function NotesCard({
   return (
     <div className="dash-memo" data-testid="case-memo">
       <div className="dash-notes dash-examiner">
-        <label htmlFor={examinerId}>검사관</label>
+        <label htmlFor={examinerId}>분석관</label>
         <input
           id={examinerId}
           className="dash-input"
@@ -951,7 +951,7 @@ export function NotesCard({
         </h3>
         {!caseId ? (
           <CardEmpty title="케이스 없음" compact>
-            케이스에 연결하면 검사관·시각이 남는 케이스 메모를 쓸 수 있습니다
+            케이스에 연결하면 분석관·시각이 남는 케이스 메모를 쓸 수 있습니다
           </CardEmpty>
         ) : caseNotesState === "loading" ? (
           <p className="dash-note">불러오는 중…</p>
@@ -966,14 +966,14 @@ export function NotesCard({
                 {caseNotes.notes.map((note) => (
                   <li key={note.id} className="dash-memo-item">
                     <p className="dash-memo-meta">
-                      <strong>{note.author || "검사관 미지정"}</strong> ·{" "}
+                      <strong>{note.author || "분석관 미지정"}</strong> ·{" "}
                       <time dateTime={note.created_at}>{formatTime(note.created_at)}</time>
                     </p>
                     <p className="dash-memo-text">{note.text}</p>
                     <button
                       type="button"
                       className="button ghost"
-                      aria-label={`${note.author || "검사관 미지정"} 메모 삭제 (${formatTime(note.created_at)})`}
+                      aria-label={`${note.author || "분석관 미지정"} 메모 삭제 (${formatTime(note.created_at)})`}
                       onClick={() => remove.mutate(note.id)}
                     >
                       삭제
@@ -1025,7 +1025,7 @@ export function NotesCard({
               <ol className="dash-memo-history" aria-label="메모 이력">
                 {history.map((entry) => (
                   <li key={entry.id}>
-                    <time dateTime={entry.at}>{formatTime(entry.at)}</time> · {entry.actor || "검사관 미지정"}{" "}
+                    <time dateTime={entry.at}>{formatTime(entry.at)}</time> · {entry.actor || "분석관 미지정"}{" "}
                     · {entry.action === "deleted" ? "삭제" : "작성"} —{" "}
                     <span className="dash-memo-text">{entry.text}</span>
                   </li>
@@ -1083,7 +1083,7 @@ export function NotesCard({
             </p>
           ) : null}
           <p className="dash-note">
-            검사관 이름과 요약은 케이스 보고서의 분석자·분석 범위가 비어 있을 때 채워집니다.
+            분석관 이름과 요약은 케이스 보고서의 분석자·분석 범위가 비어 있을 때 채워집니다.
           </p>
         </form>
       </details>

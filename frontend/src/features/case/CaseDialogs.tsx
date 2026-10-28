@@ -261,7 +261,7 @@ const EDIT_FIELDS: Array<{ key: keyof CaseInfoForm; label: string; max: number }
   { key: "caseNumber", label: "사건 번호", max: 100 },
   { key: "name", label: "사건명", max: 200 },
   { key: "caseType", label: "사건 유형", max: 100 },
-  { key: "examiner", label: "검사관", max: 200 },
+  { key: "examiner", label: "분석관", max: 200 },
   { key: "requester", label: "의뢰처", max: 200 },
   { key: "organization", label: "소속", max: 200 },
 ];

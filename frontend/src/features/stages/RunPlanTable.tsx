@@ -109,7 +109,7 @@ export function rowActionReason(
   return undefined;
 }
 
-/** Reason text of a task ("검사관 요청 · web"), shown for partial / cancelled / skipped tasks. */
+/** Reason text of a task ("분석관 요청 · web"), shown for partial / cancelled / skipped tasks. */
 export function taskReasonText(task: PlanTask): string {
   const reason = task.reason?.trim() ?? "";
   const actor = task.requested_by?.actor ? `요청: ${task.requested_by.actor}` : "";
