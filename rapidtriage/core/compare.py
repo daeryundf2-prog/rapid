@@ -7,6 +7,7 @@ import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from .digest_cache import hash_file_digests
 from .forensic_accuracy import build_accuracy_gate
 
 
@@ -946,16 +947,7 @@ def describe_path(path: Path, *, label: str, hash_files: bool) -> dict[str, obje
 
 
 def compute_hashes(path: Path, *, chunk_size: int = 8 * 1024 * 1024) -> dict[str, str]:
-    hashers = {
-        "md5": hashlib.md5(usedforsecurity=False),
-        "sha1": hashlib.sha1(usedforsecurity=False),
-        "sha256": hashlib.sha256(),
-    }
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(chunk_size), b""):
-            for hasher in hashers.values():
-                hasher.update(chunk)
-    return {name: hasher.hexdigest() for name, hasher in hashers.items()}
+    return hash_file_digests(path, chunk_size=chunk_size)
 
 
 def build_field_differences(left: Mapping[str, object], right: Mapping[str, object]) -> list[dict[str, object]]:
