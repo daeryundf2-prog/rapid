@@ -16,6 +16,7 @@ import hashlib
 import io
 import os
 import struct
+import tempfile
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -793,10 +794,11 @@ def _record_deleted_outcome(
 class _WorkerContexts:
     """One pyewf handle + NTFS instance per worker thread (pyewf handles are not thread-safe)."""
 
-    def __init__(self, segments: list[Path], byte_offset: int, size: int):
+    def __init__(self, segments: list[Path], byte_offset: int, size: int, mft_path: Path | None = None):
         self._segments = segments
         self._byte_offset = byte_offset
         self._size = size
+        self._mft_path = mft_path
         self._local = threading.local()
         self._handles: list[Any] = []
         self._lock = threading.Lock()
@@ -807,7 +809,14 @@ class _WorkerContexts:
             handle = open_ewf_segments(self._segments)
             with self._lock:
                 self._handles.append(handle)
-            fs = NTFS(EwfSectorReader(handle, base=self._byte_offset, size=self._size))
+            reader = EwfSectorReader(handle, base=self._byte_offset, size=self._size)
+            if self._mft_path is None:
+                fs = NTFS(reader)
+            else:
+                mft_handle = _LocalMft(self._mft_path)  # each thread owns its handle on the local $MFT copy
+                with self._lock:
+                    self._handles.append(mft_handle)
+                fs = NTFS(reader, mft=mft_handle)
             self._local.fs = fs
         return fs
 
@@ -985,6 +994,39 @@ def _dump_ntfs_system_record(rec: Any, out_path: Path) -> int:
             dst.write(chunk)
             remaining -= len(chunk)
     return size - max(remaining, 0)
+
+
+class _LocalMft(io.BufferedReader):
+    """Read handle on a local ``$MFT`` copy; ``size`` mirrors the runlist stream dissect exposes."""
+
+    def __init__(self, path: Path):
+        super().__init__(io.FileIO(path, "rb"))  # type: ignore[arg-type]
+        self.size = os.fstat(self.fileno()).st_size
+
+
+def _write_local_mft(fs: Any, mft_path: Path | None, stats: dict[str, int]) -> tuple[Path | None, bool]:
+    """Copy ``$MFT`` sequentially from the image to ``mft_path`` (a temp file when ``None``).
+
+    Returns ``(path, is_temp)``; ``path`` is ``None`` after a failed copy, which keeps the
+    random-read EWF path and is disclosed as coverage.
+    """
+    target = mft_path
+    is_temp = target is None
+    try:
+        if target is None:
+            fd, name = tempfile.mkstemp(prefix="mft-", suffix=".bin")
+            os.close(fd)
+            target = Path(name)
+        _dump_ntfs_system_record(fs.mft.get(0), target)
+        return target, is_temp
+    except Exception:
+        if target is not None:
+            with contextlib.suppress(OSError):
+                target.unlink(missing_ok=True)
+        if not is_temp:
+            stats["errors"] += 1
+        record_coverage("partition", "mft-local-copy-failed", None, None, "partition")
+        return None, False
 
 
 def _probe_filesystem(reader: EwfSectorReader) -> str | None:
@@ -1196,25 +1238,32 @@ def _extract_ntfs_partition(
     byte_offset = int(row.get("byte_offset") or 0)
     size = int(row.get("size_bytes") or 0)
     fs = NTFS(EwfSectorReader(handle, base=byte_offset, size=size or None))
-    root = fs.mft.get(5)
-    jobs: list[_ExtractJob] = []
-    _plan_ntfs_dir(root, part_dir, stats, jobs, limit=limit)
-    if include_deleted:
-        _plan_deleted_mft_records(fs, part_dir, stats, jobs, None if recovery else limit, recovery=recovery)
-    contexts = _WorkerContexts(segments, byte_offset, size)
+    # $MFT is read once, sequentially, into a local file (outside the recovered tree, for
+    # reference-diff tooling too); planning and workers then read 1 KB records from it instead
+    # of decompressing an EWF chunk per record.
+    local_mft, mft_is_temp = _write_local_mft(fs, mft_path, stats)
+    if local_mft is not None and mft_path is not None:
+        system_artifacts[artifact_key] = str(mft_path)
+        system_artifacts.setdefault("mft", str(mft_path))
+    plan_mft = _LocalMft(local_mft) if local_mft is not None else None
+    try:
+        plan_fs = fs if plan_mft is None else NTFS(EwfSectorReader(handle, base=byte_offset, size=size or None), mft=plan_mft)
+        root = plan_fs.mft.get(5)
+        jobs: list[_ExtractJob] = []
+        _plan_ntfs_dir(root, part_dir, stats, jobs, limit=limit)
+        if include_deleted:
+            _plan_deleted_mft_records(plan_fs, part_dir, stats, jobs, None if recovery else limit, recovery=recovery)
+    finally:
+        if plan_mft is not None:
+            plan_mft.close()
+    contexts = _WorkerContexts(segments, byte_offset, size, local_mft)
     try:
         digests = _run_extract_jobs(contexts, jobs, part_dir, stats, workers)
     finally:
         contexts.close()
-    if mft_path is not None:
-        # Dump $MFT (record 0) outside the recovered tree so reference-diff
-        # tooling can compare the native view with ils/fls -rp output.
-        try:
-            _dump_ntfs_system_record(fs.mft.get(0), mft_path)
-            system_artifacts[artifact_key] = str(mft_path)
-            system_artifacts.setdefault("mft", str(mft_path))
-        except Exception:
-            stats["errors"] += 1
+        if mft_is_temp and local_mft is not None:
+            with contextlib.suppress(OSError):
+                local_mft.unlink(missing_ok=True)
     return digests, fs
 
 
