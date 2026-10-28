@@ -349,3 +349,41 @@ test("E3 fixes: propagation from the viewer acts on the viewer row; a tag key to
   await page.keyboard.press("Shift+KeyB");
   await expect(page.locator(".image-view")).not.toHaveAttribute("data-media-blur", "on");
 });
+
+test("R8 queue: N walks the unreviewed rows, a tag key reviews each, three distinct rows, keyboard only", async ({
+  page,
+}) => {
+  // A user tag on a free digit (1–5 stay the system 우선순위 tags, which do not count as reviewed).
+  await open(page, `#/case/${runId}/review/board`);
+  await page.getByRole("button", { name: "태그 관리…" }).click();
+  const dialog = page.getByRole("dialog", { name: "태그 관리" });
+  await expect(dialog).toBeVisible();
+  await createTag(page, "검토 완료", "빨강", "9");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+
+  await open(page, `#/case/${runId}/explore/files`);
+  const rows = page.locator('[role="grid"] [role="row"][aria-rowindex]:not([aria-rowindex="1"])');
+  await expect(rows.first()).toBeVisible();
+  const selected = page.locator('[role="grid"] [role="row"][aria-selected="true"]');
+  await page.locator("body").focus();
+
+  // The viewer's own load announcement can replace the queue sentence in the live region, so each
+  // step is asserted on the selected row: N lands on a row that has not been tagged yet.
+  const visited: string[] = [];
+  for (let step = 0; step < 3; step++) {
+    await page.keyboard.press("KeyN");
+    await expect(selected).toHaveCount(1);
+    await expect
+      .poll(async () => visited.includes((await selected.getAttribute("data-row-key")) ?? ""))
+      .toBe(false);
+    const key = (await selected.getAttribute("data-row-key")) ?? "";
+    expect(key).not.toBe("");
+    visited.push(key);
+    const batch = batchResponse(page);
+    await page.keyboard.press("9");
+    const body = (await batch).request().postDataJSON() as BatchBody;
+    expect(body.targets.map((t) => t.locator)).toEqual([locatorOf(key)]);
+  }
+  expect(new Set(visited).size).toBe(3);
+});

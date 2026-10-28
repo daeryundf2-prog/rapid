@@ -1066,6 +1066,18 @@ export function DataGrid(props: DataGridProps = {}) {
     [runId, publish, setRow, viewer],
   );
 
+  // Review queue: select + focus a row by key (the viewer follows the focus).
+  const focusRowKey = useCallback(
+    (key: string) => {
+      const index = compactMode ? displayRows.findIndex((row) => row.rowKey === key) : indexOfKey(key);
+      if (index < 0) return;
+      anchorRef.current = index;
+      setSelectionKeys([key]);
+      moveFocus(index, false);
+    },
+    [compactMode, displayRows, indexOfKey, setSelectionKeys, moveFocus],
+  );
+
   const pageRows = Math.max(1, virtualItems.length > 4 ? lastVisible - firstVisible - 12 : 10);
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -1243,6 +1255,8 @@ export function DataGrid(props: DataGridProps = {}) {
     collection: ref,
     getFocusedRow: () => focusedRow,
     getSelectedRows: selectedRows,
+    getRows: () => (compactMode ? displayRows : cq.loadedRows),
+    focusRowKey,
     openRow,
     setFilter: route.setQuery,
     navigate: route.navigate,
@@ -1312,6 +1326,13 @@ export function DataGrid(props: DataGridProps = {}) {
     def.source === "paged" && !serverSortable(spec) ? CLIENT_SORT_HINT : undefined;
   const cycleSort = (spec: ColumnSpec) => {
     const current = sortOf(spec);
+    announce(
+      current === "none"
+        ? `정렬: ${spec.header} 오름차순`
+        : current === "ascending"
+          ? `정렬: ${spec.header} 내림차순`
+          : "정렬: 해제",
+    );
     // Sorting never moves focus, the selection or the viewer (C-D2): hold the focused row.
     if (focusedRow) setSortHold(focusedRow.rowKey);
     if (serverSortable(spec) && spec.sortKey) {

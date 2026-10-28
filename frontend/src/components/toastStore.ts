@@ -23,6 +23,8 @@ export interface ToastItem {
   /** Second line, e.g. the path a write went to (monospace, selectable). */
   detail?: string;
   action?: ToastAction;
+  /** When the toast was pushed (Date.now()); drives the dedupe window. */
+  at?: number;
 }
 
 export interface ToastOptions {
@@ -32,6 +34,8 @@ export interface ToastOptions {
 
 /** At most this many toasts are stacked; the oldest goes first. */
 export const TOAST_MAX = 3;
+/** The same sentence pushed again within this window is not shown twice. */
+export const TOAST_DEDUPE_MS = 2000;
 /** Non-error toasts close themselves after this long (errors stay until closed). */
 export const TOAST_MS = 6000;
 
@@ -54,7 +58,10 @@ export const useToastStore = create<ToastState>((set, get) => ({
     const id = ++seq;
     const clean = text.trim();
     if (!clean) return id;
-    const item: ToastItem = { id, text: clean, tone };
+    const now = Date.now();
+    const recent = get().toasts.find((t) => t.text === clean && now - (t.at ?? 0) < TOAST_DEDUPE_MS);
+    if (recent) return recent.id;
+    const item: ToastItem = { id, text: clean, tone, at: now };
     if (options.detail) item.detail = options.detail;
     if (options.action) item.action = options.action;
     set((s) => ({

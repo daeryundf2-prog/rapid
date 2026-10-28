@@ -9,6 +9,8 @@ import type { GridRow } from "../../contracts/collection";
 
 export interface RowSource {
   getSelectedRows: () => GridRow[];
+  /** The rows on screen in display order (review queue N / Shift+N). */
+  getRows?: () => GridRow[];
   /** Optimistic row patch on the list's own cache; returns the rollback. */
   patchRows?: (keys: string[], patch: (row: GridRow) => GridRow) => () => void;
   refetch?: () => void;

@@ -1,14 +1,16 @@
 import { useEffect, useRef } from "react";
+import { announce } from "../../a11y";
 import type { RunExtractResult } from "../../api/extract";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
-import type { Command, CommandContext } from "../../contracts/command";
+import { type Command, type CommandContext, KEY_MAP } from "../../contracts/command";
 import type { ViewerMode, ViewerTarget } from "../../contracts/viewer";
 import { useAppStore } from "../../state/store";
 import { runDisabledReason } from "../analysis/commands";
 import { caseRoute, otherCaseIds } from "../analysis/crossCase";
 import { useAnalysisStore } from "../analysis/store";
 import { caseCitationParts, citationDisabledReason, resolveCaseLink } from "../case/caseLink";
-import { buildReviewToolGridCommands } from "../review/gridTools";
+import { buildReviewToolGridCommands, isSystemTagName } from "../review/gridTools";
+import { queueAnnouncement, stepUnreviewed } from "../review/queue";
 import { registerRowSource } from "../review/rowSource";
 import { recordCitationParts } from "../viewer/citation";
 import { PIVOT_LABELS, PIVOT_ORDER, type PivotId, recordPivots } from "../viewer/pivots";
@@ -35,6 +37,10 @@ export interface GridCommandHost {
   collection: CollectionRef;
   getFocusedRow: () => GridRow | undefined;
   getSelectedRows: () => GridRow[];
+  /** The rows on screen in display order (the review queue walks these). */
+  getRows?: () => GridRow[];
+  /** Move focus + selection to a row by key; the viewer follows the focus. */
+  focusRowKey?: (key: string) => void;
   /** Publish the viewer target for a row (optionally with a preferred mode) and move focus to the viewer. */
   openRow: (row: GridRow, mode?: ViewerMode) => void;
   setFilter: (q: string) => void;
@@ -380,6 +386,48 @@ export function buildGridCommands(hostRef: { current: GridCommandHost }): Comman
   return commands;
 }
 
+export const REVIEW_NEXT_COMMAND = "grid.reviewNext";
+export const REVIEW_PREV_COMMAND = "grid.reviewPrev";
+const NO_QUEUE_ROWS = "목록에 행이 없습니다.";
+
+/** A row is reviewed when it carries at least one non-system tag (북마크 · 우선순위 n do not count). */
+export function isReviewedRow(row: GridRow): boolean {
+  return row.tags.some((name) => !isSystemTagName(name));
+}
+
+/** Review queue (todo 17): N / Shift+N step to the next / previous unreviewed row on screen. */
+export function buildQueueCommands(hostRef: { current: GridCommandHost }): Command[] {
+  const host = () => hostRef.current;
+  const step = (dir: 1 | -1) => () => {
+    const h = host();
+    const items = (h.getRows?.() ?? []).map((row) => ({ key: row.rowKey, reviewed: isReviewedRow(row) }));
+    const next = stepUnreviewed(items, h.getFocusedRow()?.rowKey ?? null, dir);
+    if (next) h.focusRowKey?.(next.key);
+    announce(queueAnnouncement(next));
+  };
+  const disabledReason = () => ((host().getRows?.() ?? []).length === 0 ? NO_QUEUE_ROWS : undefined);
+  return [
+    {
+      id: REVIEW_NEXT_COMMAND,
+      label: "다음 미검토 항목",
+      group: "review",
+      icon: "chevron-down",
+      shortcut: KEY_MAP.reviewNext,
+      disabledReason,
+      run: step(1),
+    },
+    {
+      id: REVIEW_PREV_COMMAND,
+      label: "이전 미검토 항목",
+      group: "review",
+      icon: "chevron-up",
+      shortcut: KEY_MAP.reviewPrev,
+      disabledReason,
+      run: step(-1),
+    },
+  ];
+}
+
 export function pivotCommandId(id: PivotId): string {
   return `grid.pivot.${id}`;
 }
@@ -508,11 +556,13 @@ export function useGridCommands(host: GridCommandHost): void {
       ...buildGridCommands(hostRef).map(registerCommand),
       // 계열 보기 · 상위 항목으로 · 선택 확장 (R7 갈래 A).
       ...buildFamilyCommands(hostRef).map(registerCommand),
+      ...buildQueueCommands(hostRef).map(registerCommand),
       ...buildRowMarkCommands(hostRef).map(registerLocalCommand),
       ...buildReviewToolGridCommands(hostRef).map(registerCommand),
       // Shell review tools (tag propagation, digit keys) read the selection through this.
       registerRowSource({
         getSelectedRows: () => hostRef.current.getSelectedRows(),
+        getRows: () => hostRef.current.getRows?.() ?? [],
         patchRows: (keys, patch) => hostRef.current.patchRows(keys, patch),
         refetch: () => hostRef.current.refetch(),
       }),

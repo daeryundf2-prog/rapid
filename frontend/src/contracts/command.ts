@@ -82,4 +82,7 @@ export const KEY_MAP = {
   familyView: "Shift+F",
   /** 상위 항목으로 (R7 갈래 A): the focused row's parent item. */
   familyParent: "U",
+  /** Review queue (todo 17): next / previous unreviewed item in the current view. */
+  reviewNext: "N",
+  reviewPrev: "Shift+N",
 } as const;

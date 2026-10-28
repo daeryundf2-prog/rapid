@@ -158,6 +158,8 @@ export const KEY_DESCRIPTIONS: Record<keyof typeof KEY_MAP, string> = {
   bookmark: "북마크",
   viewerBack: "뷰어 이전 항목",
   viewerForward: "뷰어 다음 항목",
+  reviewNext: "다음 미검토 항목으로 이동 (뷰어에 열기)",
+  reviewPrev: "이전 미검토 항목으로 이동 (뷰어에 열기)",
   help: "단축키 도움말",
   close: "닫기",
   viewColumns: "열 보기",
