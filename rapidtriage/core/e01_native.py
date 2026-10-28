@@ -20,6 +20,7 @@ import sys
 import tempfile
 import threading
 import uuid
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -89,8 +90,8 @@ MAX_NATIVE_EXTRACT_BYTES = 0  # 0 = unbounded; callers may cap later
 NATIVE_MAX_EXTRACT_FILES_ENV = "RAPIDTRIAGE_NATIVE_MAX_EXTRACT_FILES"
 
 
-def native_extract_file_limit() -> int:
-    """Active per-image extraction cap; env override for large real evidence."""
+def _explicit_extract_cap() -> int | None:
+    """The operator's valid (positive integer) cap from the environment, else ``None``."""
     raw = os.environ.get(NATIVE_MAX_EXTRACT_FILES_ENV, "").strip()
     if raw:
         try:
@@ -99,7 +100,13 @@ def native_extract_file_limit() -> int:
                 return value
         except ValueError:
             pass
-    return MAX_NATIVE_EXTRACT_FILES
+    return None
+
+
+def native_extract_file_limit() -> int:
+    """Active per-image extraction cap; env override for large real evidence."""
+    explicit = _explicit_extract_cap()
+    return MAX_NATIVE_EXTRACT_FILES if explicit is None else explicit
 
 
 NATIVE_E01_WORKERS_ENV = "RAPIDTRIAGE_E01_WORKERS"
@@ -583,8 +590,33 @@ def _is_dos_name_entry(entry: Any) -> bool:
         return False
 
 
-def _plan_ntfs_dir(node: Any, out_dir: Path, stats: dict[str, int], jobs: list[_ExtractJob], depth: int = 0, limit: int = 0) -> None:
-    """Metadata-only twin of ``_walk_ntfs_dir``: collect file jobs instead of reading content."""
+def _unique_target(target: Path, segment: int | None, planned: set[str], stats: dict[str, int]) -> Path:
+    """``target``, renamed with a ``~<segment>`` suffix when its (case-folded) path is already planned."""
+    if str(target).casefold() in planned:
+        stats["path_renames"] = stats.get("path_renames", 0) + 1
+        target = target.with_name(f"{target.name}~{segment if segment is not None else ''}")
+        while str(target).casefold() in planned:
+            target = target.with_name(f"{target.name}~")
+    planned.add(str(target).casefold())
+    return target
+
+
+def _plan_ntfs_dir(
+    node: Any,
+    out_dir: Path,
+    stats: dict[str, int],
+    jobs: list[_ExtractJob],
+    depth: int = 0,
+    limit: int = 0,
+    planned: set[str] | None = None,
+) -> None:
+    """Metadata-only twin of ``_walk_ntfs_dir``: collect file jobs instead of reading content.
+
+    ``planned`` holds every output path already claimed (case-folded): distinct NTFS names can map
+    to one output name, and clashes are renamed so no two jobs write the same file.
+    """
+    if planned is None:
+        planned = set()
     if depth > 64:
         stats["depth_skips"] += 1
         return
@@ -620,10 +652,10 @@ def _plan_ntfs_dir(node: Any, out_dir: Path, stats: dict[str, int], jobs: list[_
                 stats["alias_skips"] += 1
                 continue
             seen_segments.add(segment)
-        target = out_dir / _safe_component(name)
+        target = _unique_target(out_dir / _safe_component(name), segment, planned, stats)
         try:
             if rec.is_dir():
-                _plan_ntfs_dir(rec, target, stats, jobs, depth + 1, limit)
+                _plan_ntfs_dir(rec, target, stats, jobs, depth + 1, limit, planned)
             elif rec.is_file():
                 if len(jobs) >= limit:
                     stats["truncated"] += 1
@@ -732,8 +764,8 @@ def _dump_hashed(rec: Any, out_path: Path) -> tuple[int, dict[str, str]] | None:
         return None
     hashers = {name: hashlib.new(name) for name in DIGEST_ALGORITHMS}
     remaining = size
-    out_path.parent.mkdir(parents=True, exist_ok=True)
     try:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         with out_path.open("wb") as dst:
             while remaining > 0:
                 chunk = src.read(min(8 << 20, remaining))
@@ -747,7 +779,11 @@ def _dump_hashed(rec: Any, out_path: Path) -> tuple[int, dict[str, str]] | None:
         with contextlib.suppress(OSError):
             out_path.unlink(missing_ok=True)
         return None
-    return size - max(remaining, 0), {name: h.hexdigest() for name, h in hashers.items()}
+    if remaining > 0:  # the source ended before its declared size: never record it as complete
+        with contextlib.suppress(OSError):
+            out_path.unlink(missing_ok=True)
+        return None
+    return size, {name: h.hexdigest() for name, h in hashers.items()}
 
 
 def _dump_hashed_salvage(
@@ -854,6 +890,9 @@ def _extract_job(contexts: _WorkerContexts, job: _ExtractJob) -> tuple[_ExtractJ
     return job, _dump_hashed(rec, job.out_path)
 
 
+_SUBMIT_WINDOW_PER_WORKER = 64  # bounds live Future objects on volumes with millions of files
+
+
 def _run_extract_jobs(
     contexts: _WorkerContexts,
     jobs: list[_ExtractJob],
@@ -868,10 +907,23 @@ def _run_extract_jobs(
     # One shared FIFO queue in on-disk order: workers always take the lowest remaining offset next.
     jobs = _order_jobs_by_lcn(jobs)
     pool = ThreadPoolExecutor(max_workers=max(1, min(workers, len(jobs))), thread_name_prefix="e01-extract")
+    window = max(1, workers) * _SUBMIT_WINDOW_PER_WORKER
+    pending: deque[Any] = deque()
+    job_iter = iter(jobs)
+
+    def _fill() -> None:
+        while len(pending) < window:
+            next_job = next(job_iter, None)
+            if next_job is None:
+                return
+            pending.append(pool.submit(_extract_job, contexts, next_job))
+
     try:
-        futures = [pool.submit(_extract_job, contexts, job) for job in jobs]
-        for future in futures:
+        _fill()
+        while pending:
+            future = pending.popleft()
             job, outcome = future.result()  # re-raises a worker exception: the run fails loudly
+            _fill()
             if outcome is None:
                 stats["errors"] += 1
                 if job.deleted:
@@ -1027,7 +1079,9 @@ class _LocalMft(io.BufferedReader):
         self.size = os.fstat(self.fileno()).st_size
 
 
-def _write_local_mft(fs: Any, mft_path: Path | None, stats: dict[str, int]) -> tuple[Path | None, bool]:
+def _write_local_mft(
+    fs: Any, mft_path: Path | None, stats: dict[str, int], start_sector: int | None = None
+) -> tuple[Path | None, bool]:
     """Copy ``$MFT`` sequentially from the image to ``mft_path`` (a temp file when ``None``).
 
     Returns ``(path, is_temp)``; ``path`` is ``None`` after a failed copy, which keeps the
@@ -1040,7 +1094,10 @@ def _write_local_mft(fs: Any, mft_path: Path | None, stats: dict[str, int]) -> t
             fd, name = tempfile.mkstemp(prefix="mft-", suffix=".bin")
             os.close(fd)
             target = Path(name)
-        _dump_ntfs_system_record(fs.mft.get(0), target)
+        mft_record = fs.mft.get(0)
+        expected = int(mft_record.size())
+        if _dump_ntfs_system_record(mft_record, target) != expected:
+            raise OSError("short $MFT copy")  # a truncated copy would silently shrink the record count
         return target, is_temp
     except Exception:
         if target is not None:
@@ -1048,7 +1105,9 @@ def _write_local_mft(fs: Any, mft_path: Path | None, stats: dict[str, int]) -> t
                 target.unlink(missing_ok=True)
         if not is_temp:
             stats["errors"] += 1
-        record_coverage("partition", "mft-local-copy-failed", None, None, "partition")
+        record_coverage(
+            "e01_native.mft", "mft-local-copy-failed", None, None, "partition", detail={"start_sector": start_sector}
+        )
         return None, False
 
 
@@ -1225,7 +1284,7 @@ def _extract_tsk_partition(
     sweep = recovery and include_deleted
     _walk_tsk_dir(fs.open_dir(path="/"), part_dir, part_dir, stats, digests, limit, recovery=sweep)
     if include_deleted and not sweep and stats["deleted_skipped"]:
-        record_coverage("e01_native.deleted_tsk", "deleted-sweep-cap", 0, stats["deleted_skipped"], "files")
+        record_coverage("e01_native.deleted_tsk", "deleted-sweep-cap", None, stats["deleted_skipped"], "files")
     return digests
 
 
@@ -1241,6 +1300,7 @@ def _new_stats() -> dict[str, int]:
         "deleted_partial": 0,
         "deleted_skipped": 0,
         "alias_skips": 0,
+        "path_renames": 0,
     }
 
 
@@ -1264,26 +1324,31 @@ def _extract_ntfs_partition(
     # $MFT is read once, sequentially, into a local file (outside the recovered tree, for
     # reference-diff tooling too); planning and workers then read 1 KB records from it instead
     # of decompressing an EWF chunk per record.
-    local_mft, mft_is_temp = _write_local_mft(fs, mft_path, stats)
-    if local_mft is not None and mft_path is not None:
-        system_artifacts[artifact_key] = str(mft_path)
-        system_artifacts.setdefault("mft", str(mft_path))
-    plan_mft = _LocalMft(local_mft) if local_mft is not None else None
-    try:
-        plan_fs = fs if plan_mft is None else NTFS(EwfSectorReader(handle, base=byte_offset, size=size or None), mft=plan_mft)
-        root = plan_fs.mft.get(5)
-        jobs: list[_ExtractJob] = []
-        _plan_ntfs_dir(root, part_dir, stats, jobs, limit=limit)
-        if include_deleted:
-            _plan_deleted_mft_records(plan_fs, part_dir, stats, jobs, None if recovery else limit, recovery=recovery)
+    start_sector = row.get("start_sector")
+    local_mft, mft_is_temp = _write_local_mft(fs, mft_path, stats, int(start_sector) if start_sector is not None else None)
+    try:  # one outer finally: a temp $MFT copy is unlinked even when planning raises
+        if local_mft is not None and mft_path is not None:
+            system_artifacts[artifact_key] = str(mft_path)
+            system_artifacts.setdefault("mft", str(mft_path))
+        plan_mft = _LocalMft(local_mft) if local_mft is not None else None
+        try:
+            plan_fs = (
+                fs if plan_mft is None else NTFS(EwfSectorReader(handle, base=byte_offset, size=size or None), mft=plan_mft)
+            )
+            root = plan_fs.mft.get(5)
+            jobs: list[_ExtractJob] = []
+            _plan_ntfs_dir(root, part_dir, stats, jobs, limit=limit)
+            if include_deleted:
+                _plan_deleted_mft_records(plan_fs, part_dir, stats, jobs, None if recovery else limit, recovery=recovery)
+        finally:
+            if plan_mft is not None:
+                plan_mft.close()
+        contexts = _WorkerContexts(segments, byte_offset, size, local_mft)
+        try:
+            digests = _run_extract_jobs(contexts, jobs, part_dir, stats, workers)
+        finally:
+            contexts.close()
     finally:
-        if plan_mft is not None:
-            plan_mft.close()
-    contexts = _WorkerContexts(segments, byte_offset, size, local_mft)
-    try:
-        digests = _run_extract_jobs(contexts, jobs, part_dir, stats, workers)
-    finally:
-        contexts.close()
         if mft_is_temp and local_mft is not None:
             with contextlib.suppress(OSError):
                 local_mft.unlink(missing_ok=True)
@@ -1343,7 +1408,7 @@ def extract_e01_native(
         multi = len(plan) > 1
         # Recovery mode extracts every file unless the operator set an explicit cap; other modes keep
         # the default cap and disclose any truncation through coverage below.
-        explicit_cap = bool(os.environ.get(NATIVE_MAX_EXTRACT_FILES_ENV, "").strip())
+        explicit_cap = _explicit_extract_cap() is not None
         file_limit = sys.maxsize if recovery and not explicit_cap else native_extract_file_limit()
         workers = native_extract_worker_count()
         stats = {**_new_stats(), "file_limit": file_limit, "workers": workers}
@@ -1407,11 +1472,17 @@ def extract_e01_native(
             record_coverage(
                 "e01_native.files", "file-count-cap", file_limit, stats["files"] + stats["truncated"], "files"
             )
+        if stats["path_renames"]:
+            record_coverage("e01_native.paths", "output-path-collision", None, stats["path_renames"], "files")
         for row in skipped:
             description = str(row.get("description") or "").lower()
             if any(token in description for token in _NON_FILESYSTEM_TOKENS):
                 continue
-            record_coverage("partition", "unsupported-filesystem", None, int(row.get("start_sector") or 0), "start_sector")
+            # observed stays None: the start sector identifies the partition, it is not a processed count
+            record_coverage(
+                "partition", "unsupported-filesystem", None, None, "partition",
+                detail={"start_sector": int(row.get("start_sector") or 0)},
+            )
         return {
             "media_size_bytes": int(handle.get_media_size()),
             "sector_size_bytes": sector_size,

@@ -97,7 +97,7 @@ class LocalMftTests(unittest.TestCase):
         new = coverage_entries()[before:]
         self.assertEqual(
             [(e["area"], e["reason_code"]) for e in new if e["reason_code"] == "mft-local-copy-failed"],
-            [("partition", "mft-local-copy-failed")],
+            [("e01_native.mft", "mft-local-copy-failed")],
         )
         self.assertEqual(result["stats"]["files"], 9)  # extraction itself is unchanged
 

@@ -165,8 +165,9 @@ class AllPartitionsTests(unittest.TestCase):
                     "area": "partition",
                     "reason_code": "unsupported-filesystem",
                     "limit": None,
-                    "observed": START_C,
-                    "unit": "start_sector",
+                    "observed": None,
+                    "unit": "partition",
+                    "detail": {"start_sector": START_C},
                 }
             ],
         )

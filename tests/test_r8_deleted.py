@@ -200,7 +200,7 @@ class TskDeletedTests(unittest.TestCase):
         self.assertEqual(result["stats"]["deleted_files"], 0)
         self.assertEqual(
             coverage.coverage_entries(),
-            [{"area": "e01_native.deleted_tsk", "reason_code": "deleted-sweep-cap", "limit": 0, "observed": 1, "unit": "files"}],
+            [{"area": "e01_native.deleted_tsk", "reason_code": "deleted-sweep-cap", "limit": None, "observed": 1, "unit": "files"}],
         )
 
     def test_unreadable_tsk_entry_is_flagged_partial(self) -> None:
