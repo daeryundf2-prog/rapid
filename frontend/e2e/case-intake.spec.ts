@@ -140,22 +140,23 @@ test("Q-X1: 케이스 만들기 3단계 → 실행 → 접수 5 cards, kept afte
     const info = await cardOf(page, "사건 정보");
     await expect(info.getByText(caseNumber).first()).toBeVisible();
     await expect(info.getByText("서울중앙지검")).toBeVisible();
-    const evidence = await cardOf(page, "증거 목록");
-    await expect(evidence.getByRole("rowheader", { name: "E-01" })).toBeVisible();
-    await expect(evidence.getByText("해당 없음 (폴더)")).toBeVisible();
-    const snapshot = await cardOf(page, "처리 설정 스냅샷");
-    await expect(snapshot.getByText("런 시작 시 케이스에 고정된 처리 옵션입니다.")).toBeVisible();
-    await expect(snapshot.getByText("문서·부정 조사 (fraud)")).toBeVisible();
-    const problems = await cardOf(page, "처리 문제");
+    // The merged 증거 card lists evidence as items (not a table); 증거 목록 + 증거 소스 became one card.
+    const evidence = await cardOf(page, "증거");
+    const e01 = evidence.locator("li.dash-evidence-item").filter({ hasText: "E-01" });
+    await expect(e01).toBeVisible();
+    await expect(e01.getByText("해당 없음 (폴더)")).toBeVisible();
+    // The 처리 설정 스냅샷 card was removed in the merged dashboard (LEGACY_CARD_MAP snapshot -> null),
+    // so its expectations are gone; 처리 문제 now lives in the merged 처리 경고·제한 사항 card.
+    const problems = await cardOf(page, "처리 경고·제한 사항");
     await expect(problems.locator(".dash-problems, .dash-empty").first()).toBeVisible({ timeout: 30_000 });
-    const memo = await cardOf(page, "케이스 메모");
+    const memo = await cardOf(page, "노트·메모");
     await expect(memo.getByLabel("새 메모")).toBeVisible();
     await expect(page.getByTestId("case-crumb")).toContainText(`${caseNumber} › E-01`);
   };
   await checkCards();
 
   // Q-X4: memo with author and time; soft delete keeps history.
-  const memo = await cardOf(page, "케이스 메모");
+  const memo = await cardOf(page, "노트·메모");
   await memo.getByLabel("새 메모").fill("압수 목록 확인");
   await memo.getByRole("button", { name: "메모 추가" }).click();
   await expect(memo.getByText("압수 목록 확인").first()).toBeVisible();
@@ -165,7 +166,7 @@ test("Q-X1: 케이스 만들기 3단계 → 실행 → 접수 5 cards, kept afte
   // Reload keeps everything (server state, not browser state).
   await page.reload();
   await checkCards();
-  await expect((await cardOf(page, "케이스 메모")).getByText("압수 목록 확인").first()).toBeVisible();
+  await expect((await cardOf(page, "노트·메모")).getByText("압수 목록 확인").first()).toBeVisible();
 
   // The switcher shows 케이스 › 증거 › 런.
   await page.keyboard.press("Escape");
@@ -207,18 +208,18 @@ test("Q-X1 review: register-only evidence is pre-checked, saved and skipped", as
   await expect(dialog.getByTestId("wizard-submit")).toHaveText("실행 (런 1개)");
   await dialog.getByTestId("wizard-submit").click();
   await expect(page).toHaveURL(/#\/case\/[0-9a-f]+\/intake/);
-  const evidence = await cardOf(page, "증거 목록");
-  const zipRow = evidence.getByRole("row").filter({ has: page.getByRole("rowheader", { name: "E-02" }) });
+  const evidence = await cardOf(page, "증거");
+  const zipRow = evidence.locator("li.dash-evidence-item").filter({ hasText: "E-02" });
   await expect(zipRow.getByTestId("evidence-register-only")).toBeVisible();
-  await expect(zipRow.getByRole("button", { name: "증거 E-02 런 추가" })).toHaveAttribute(
+  await expect(zipRow.getByRole("button", { name: "증거 E-02 런 시작" })).toHaveAttribute(
     "aria-disabled",
     "true",
   );
   await expect(
     evidence
-      .getByRole("row")
-      .filter({ has: page.getByRole("rowheader", { name: "E-01" }) })
-      .getByRole("button", { name: "증거 E-01 런 추가" }),
+      .locator("li.dash-evidence-item")
+      .filter({ hasText: "E-01" })
+      .getByRole("button", { name: "증거 E-01 런 시작" }),
   ).not.toHaveAttribute("aria-disabled", "true");
   expect(await quickAudit(page)).toEqual([]);
 });
@@ -249,8 +250,9 @@ test("Q-X2: a run without a case keeps working and offers 케이스에 연결", 
   const info = await cardOf(page, "사건 정보");
   await expect(info.getByTestId("no-case")).toBeVisible();
   // Existing cards still render for the caseless run.
-  await expect(page.getByRole("heading", { name: "케이스 요약 노트" })).toBeVisible();
-  await expect((await cardOf(page, "처리 설정 스냅샷")).getByText(/케이스 없이 실행된 런/)).toBeVisible();
+  // 케이스 요약 노트 is merged into the 노트·메모 card; the 처리 설정 스냅샷 card was removed
+  // (LEGACY_CARD_MAP snapshot -> null), so its caseless-run expectation is dropped.
+  await expect(page.getByRole("heading", { name: "노트·메모", exact: true })).toBeVisible();
   expect(await quickAudit(page)).toEqual([]);
 
   const linkButton = info.getByRole("button", { name: "케이스에 연결" });
