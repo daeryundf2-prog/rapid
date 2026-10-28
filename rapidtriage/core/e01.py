@@ -2141,13 +2141,15 @@ def _extract_e01_native_fallback(
     recovery_scope = build_tsk_recover_recovery_scope()
     recovery_scope = {
         **recovery_scope,
-        "tool": "pyewf+dissect.ntfs",
+        "tool": "pyewf+dissect.ntfs+pytsk3",
         "note": (
-            "Native Python decode path: pyewf reads the EWF segment set and "
-            "dissect.ntfs walks the selected NTFS partition (allocated tree "
-            "walk plus a best-effort deleted-record MFT sweep under "
-            "_deleted_mft/). Engineering-grade path; not a trusted-tool "
-            "substitute."
+            "Native Python decode path: pyewf reads the EWF segment set; every "
+            "MBR/GPT partition is extracted (NTFS via dissect.ntfs with an "
+            "allocated tree walk plus a deleted-record MFT sweep under "
+            "_deleted_mft/, other filesystems via pytsk3 with deleted entries "
+            "under _deleted/; unsupported filesystems are listed in the run "
+            "coverage). The deleted sweep is bounded outside recovery mode. "
+            "Engineering-grade path; not a trusted-tool substitute."
         ),
     }
     checkpoint_payload: dict[str, object] = {
