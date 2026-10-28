@@ -199,6 +199,17 @@ export interface RunSummary {
   warnings?: RunWarning[];
   /** Report-facing limits of the run (core/run/summary.py build_run_disclosures). */
   disclosures?: RunDisclosures;
+  /** 복구 범위: hand-added (the OpenAPI snapshot does not carry it). */
+  coverage?: CoverageEntry[];
+}
+
+/** One limit that truncated parsing (core/coverage.py); absent `coverage` = run predates the record. */
+export interface CoverageEntry {
+  area: string;
+  reason_code: string;
+  limit: number | null;
+  observed: number | null;
+  unit: string;
 }
 
 export interface RunWarning {

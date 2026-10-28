@@ -53,6 +53,7 @@ import { DisclosuresCard } from "../dashboard/cards";
 import { SnapshotCard } from "../dashboard/caseCards";
 import { disclosureDigest, disclosureItems, runWarnings, stepLabelKo } from "../dashboard/disclosures";
 import { formatCount } from "../grid/gridUtils";
+import { CoveragePanel } from "./CoveragePanel";
 import { isLegacyPlan, planSummaryText, RunPlanTable } from "./RunPlanTable";
 import { stepStatusLabel, stepWarningLabel } from "./stepLabels";
 import { useNow } from "./useNow";
@@ -502,6 +503,19 @@ function DisclosuresSection({ runId }: { runId: string }) {
   );
 }
 
+/** 복구 범위 of a finished run: the summary's `coverage` list. */
+function CoverageSection({ runId }: { runId: string }) {
+  const summary = useQuery({
+    queryKey: ["run-summary", runId],
+    queryFn: () => getRunSummary(runId),
+    retry: false,
+  });
+  if (!summary.data) return null;
+  return (
+    <CoveragePanel coverage={Array.isArray(summary.data.coverage) ? summary.data.coverage : undefined} />
+  );
+}
+
 /**
  * 처리 설정 스냅샷 (접수 후속): the options fixed for this run — the card the 접수 strip's
  * "처리 설정 보기" leads to. Read only (`GET /processing-snapshot`).
@@ -773,6 +787,7 @@ export function ProcessPage() {
           ) : null}
           <StepList runId={runId} results />
           <DisclosuresSection runId={runId} />
+          <CoverageSection runId={runId} />
           <SnapshotSection runId={runId} />
           {/* R7 AI 사용 기록: the ai group's state, rows and collection scope. */}
           <AiProcessSection
