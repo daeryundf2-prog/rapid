@@ -1,6 +1,6 @@
 # R8 복구 모드 (`--mode recovery`)
 
-근거: `feat/r8-overhaul` 브랜치 커밋(`081c97a..HEAD`), `rapidtriage/core/e01_native.py`, `rapidtriage/core/run/procpool.py`, `rapidtriage/core/carving.py`, `frontend/src/features/stages/CoveragePanel.tsx`.
+근거: `feat/r8-overhaul` 브랜치 커밋(`081c97a..HEAD`), `rapidtriage/core/e01_native.py`, `rapidtriage/core/carving.py`, `frontend/src/features/stages/CoveragePanel.tsx`.
 측정 절차와 판정 기준은 `docs/validation/r8-benchmark-and-recovery.md`에 있다.
 
 복구 모드는 "가능한 한 전부 꺼낸다"를 목표로 한다. 다른 모드는 속도를 위해 상한을 유지하되, 상한에 걸린 곳은 run summary의 `coverage` 목록에 남기고 콘솔의 **복구 범위** 패널에 보여 준다. 조용히 잘리는 곳은 없어야 한다.
@@ -21,8 +21,10 @@
 ### 공통 변경 (모든 모드)
 
 - **MFT 로컬 사본**: `$MFT`를 파티션의 `_system/MFT*.bin`으로 한 번 순차 복사하고, 계획 단계와 워커가 그 사본에서 MFT 레코드를 읽는다. 파일 내용은 여전히 이미지에서 읽는다. 복사에 실패하면 예전 경로(이미지에서 무작위 읽기)로 처리하고 `mft-local-copy-failed`를 기록한다.
-- **프로세스 풀**: EVTX, 레지스트리, ESE 수집기는 프로세스 풀에서 돈다. 단, 아티팩트 단계에 run plan이 **없을 때만** 쓴다. run plan이 있으면 협조적 취소, 부분 결과, 실시간 행 카운터를 지키기 위해 스레드로 처리한다.
-- **체크포인트**: E01 체크포인트 지문에 실행 모드가 들어가므로, 상한이 걸린 이전 단계 결과를 복구 모드 실행이 이어받지 않는다.
+- **파서 프로세스 풀은 넣지 않았다**: EVTX, 레지스트리, ESE 수집기를 프로세스 풀에서 돌리는 방안을 검토했지만 출시하지 않았다. 실제 실행은 항상 run plan을 쓰는데, run plan의 취소, 부분 결과 행, 실시간 행 카운터는 프로세스 경계를 넘을 수 없다. 그래서 풀은 실제 실행에서 한 번도 쓰이지 않았고 코드에서 제거했다. 아티팩트 수집기는 스레드에서 돈다.
+- **추출 해시 재사용**: 네이티브 E01 추출이 파일을 쓰면서 계산한 MD5/SHA-1/SHA-256(`native_file_digests`)을 실행 범위 다이제스트 캐시에 넣는다. 수집기가 같은 파일의 해시를 구하면 파일을 다시 읽지 않고 이 값을 쓴다. 추출 뒤 크기가 바뀌었거나 수정된 파일은 다시 읽는다.
+- **체크포인트**: E01 체크포인트 지문에 실행 모드와 파일 수 상한이 들어가므로, 상한이 걸린 이전 단계 결과를 복구 모드 실행이 이어받지 않고 그 반대도 없다.
+- **coverage 이어받기**: coverage는 실행마다 따로 모은다(한 서버에서 동시에 도는 실행끼리 섞이지 않는다). E01 추출 중 기록된 항목은 E01 체크포인트에, 아티팩트 수집기별 항목은 `artifacts/rapidtriage-coverage-<kind>.json`에 저장한다. `--resume`으로 단계나 수집 결과를 재사용하면 저장된 항목을 다시 기록하므로, 이어받은 실행의 coverage도 원래 실행과 같다.
 
 ---
 
@@ -86,7 +88,7 @@
 |---|---|---|
 | `RAPIDTRIAGE_NATIVE_MAX_EXTRACT_FILES` | 복구 모드: 상한 없음 / 다른 모드: 200,000 | 이미지당 추출 파일 수 상한. 양의 정수만 받는다. 복구 모드에서도 지정하면 그 값으로 자른다 |
 | `RAPIDTRIAGE_E01_WORKERS` | `min(8, CPU 수)` | E01 네이티브 추출 워커 수. 양의 정수만 받는다 |
-| `RAPIDTRIAGE_PARSE_PROCS` | `max(2, CPU 수 // 2)` | EVTX, 레지스트리, ESE 파서와 미할당 카빙의 프로세스 수. 0 이하면 프로세스 풀을 끄고 스레드로 처리한다 |
+| `RAPIDTRIAGE_PARSE_PROCS` | `max(2, CPU 수 // 2)` | 미할당 카빙의 프로세스 수. 0 이하면 프로세스 풀을 끄고 스레드로 처리한다. (파서 프로세스 풀은 출시하지 않았으므로 EVTX, 레지스트리, ESE에는 영향이 없다) |
 
 ---
 

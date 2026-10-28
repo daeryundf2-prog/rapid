@@ -5,6 +5,7 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
+from .digest_cache import RunDigestCache
 from .forensic_accuracy import build_accuracy_gate
 
 HASH_ALGORITHMS = ("md5", "sha1", "sha256")
@@ -30,6 +31,27 @@ _HASH_CACHE_STATS = {
 _HASH_CACHE_EVENTS: list[dict[str, object]] = []
 _HASH_CACHE_SESSION_SEQUENCE = 0
 _HASH_CACHE_SESSION_ID = hashlib.sha256(b"rapidtriage-hash-cache-session-0").hexdigest()
+# Run-scoped digest caches of the runs in progress (seeded from E01 extraction digests). Their keys
+# are absolute paths checked against size/mtime, so runs sharing the process cannot serve each other
+# a wrong digest.
+_RUN_DIGEST_CACHES: list[RunDigestCache] = []
+
+
+def activate_run_digest_cache(cache: RunDigestCache) -> None:
+    _RUN_DIGEST_CACHES.append(cache)
+
+
+def deactivate_run_digest_cache(cache: RunDigestCache) -> None:
+    if cache in _RUN_DIGEST_CACHES:
+        _RUN_DIGEST_CACHES.remove(cache)
+
+
+def _run_digest_lookup(resolved: Path, stat_result) -> dict[str, str] | None:
+    for cache in _RUN_DIGEST_CACHES:
+        hit = cache.lookup(resolved, stat_result)
+        if hit is not None:
+            return hit
+    return None
 
 
 def reset_hash_cache() -> None:
@@ -86,6 +108,14 @@ def compute_hashes_cached(path: Path, *, chunk_size: int = 8 * 1024 * 1024) -> d
         _HASH_CACHE_STATS["hits"] += 1
         append_hash_cache_event("hit", resolved, key, cache_hit=True)
         return dict(cached)
+    seeded = _run_digest_lookup(resolved, stat_result)
+    if seeded is not None:
+        # Hashed in the extraction write pass: no second read of the file.
+        _HASH_CACHE_STATS["hits"] += 1
+        append_hash_cache_event("hit", resolved, key, cache_hit=True)
+        _HASH_CACHE[key] = seeded
+        _HASH_CACHE_PATH_INDEX.setdefault(resolved_text, set()).add(key)
+        return dict(seeded)
     _HASH_CACHE_STATS["misses"] += 1
     append_hash_cache_event("miss", resolved, key, cache_hit=False)
     hashes = compute_hashes_fresh(resolved, chunk_size=chunk_size)

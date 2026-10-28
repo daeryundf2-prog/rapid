@@ -213,8 +213,9 @@ class UnallocatedCarvingStageTests(unittest.TestCase):
                     "area": "carving.unallocated",
                     "reason_code": "unsupported_filesystem",
                     "limit": None,
-                    "observed": 900000,
-                    "unit": "start_sector",
+                    "observed": None,
+                    "unit": "partitions",
+                    "detail": {"start_sector": 900000},
                 }
             ],
         )

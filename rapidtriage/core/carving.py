@@ -73,6 +73,10 @@ STATUS_REJECTED = "false-positive-rejected"
 STATUS_TEXT_BOUNDARY = formats.STATUS_TEXT_BOUNDARY
 
 
+class CarvingCancelled(RuntimeError):
+    """The run's cancel request stopped carving (distinct from a carving failure)."""
+
+
 class CarvingError(RuntimeError):
     """Raised when bounded carving cannot be completed safely."""
 
@@ -570,12 +574,14 @@ def _scan_unallocated_batch(
             except NativeImageError as exc:
                 return entries, str(exc)
             reader = EwfSectorReader(handle)
+            counted = 0  # per batch (not per chunk): the worker never builds more than the run cap
             for run_lo, run_hi, start, emit_end in tasks:
+                if counted >= max_candidates:
+                    break
                 view = _RunView(reader, run_lo, run_hi)
                 view.seek(start)
                 buffer = view.read(min(emit_end + SCAN_OVERLAP_BYTES, run_hi) - start)
                 claims = _Claims()
-                counted = 0
                 probes: dict[tuple[int, int], bytes] = {}
                 for offset, _tie, index in _buffer_matches(buffer, start, signatures):
                     if offset < start or offset >= emit_end:
@@ -626,35 +632,67 @@ def _carve_workers(workers: int | None) -> int:
     return max(2, (os.cpu_count() or 2) // 2)
 
 
+def _discard_result(result: tuple[list[dict[str, object]], str | None]) -> None:
+    for entry in result[0]:
+        extracted = entry.get("extracted_path")
+        if extracted:
+            Path(str(extracted)).unlink(missing_ok=True)
+
+
 def _run_batches(
     batches: Sequence[Sequence[tuple[int, int, int, int]]],
     workers: int,
     common: tuple,
     check_cancel: Callable[[], None] | None,
-) -> list[tuple[list[dict[str, object]], str | None]]:
-    """Batch results in batch order. Process pool (spawn); threads when the pool cannot run."""
+    consume: Callable[[tuple[list[dict[str, object]], str | None]], bool],
+) -> None:
+    """Feed batch results to ``consume`` in batch order until it returns True (the run cap).
+
+    Process pool (spawn); threads only when the pool cannot be built or breaks. Worker exceptions
+    propagate. A cancel (``check_cancel`` raising) or an early stop drops the queued batches."""
     if workers <= 1 or len(batches) <= 1:
-        results = []
         for batch in batches:
             if check_cancel is not None:
                 check_cancel()
-            results.append(_scan_unallocated_batch(common[0], common[1], batch, *common[2:]))
-        return results
+            if consume(_scan_unallocated_batch(common[0], common[1], batch, *common[2:])):
+                return
+        return
+    done = 0  # batches already consumed; a pool fallback continues after them
     for pool_factory in (
         lambda: futures.ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn")),
         lambda: futures.ThreadPoolExecutor(max_workers=workers),
     ):
         try:
-            with pool_factory() as pool:
-                pending = [pool.submit(_scan_unallocated_batch, common[0], common[1], batch, *common[2:]) for batch in batches]
-                results = []
+            pool = pool_factory()
+        except (OSError, PermissionError, ImportError, NotImplementedError):
+            continue
+        pending: list[futures.Future] = []
+        taken = 0
+        graceful = False
+        try:
+            try:
+                pending = [
+                    pool.submit(_scan_unallocated_batch, common[0], common[1], batch, *common[2:])
+                    for batch in batches[done:]
+                ]
                 for item in pending:
                     if check_cancel is not None:
                         check_cancel()
-                    results.append(item.result())
-                return results
-        except (BrokenProcessPool, OSError, PermissionError, RuntimeError, ImportError):
-            continue
+                    result = item.result()
+                    taken += 1
+                    done += 1
+                    if consume(result):
+                        graceful = True
+                        return
+                graceful = True
+                return
+            except BrokenProcessPool:
+                continue
+        finally:
+            pool.shutdown(wait=graceful, cancel_futures=True)
+            for item in pending[taken:]:
+                if item.done() and not item.cancelled() and item.exception() is None:
+                    _discard_result(item.result())
     raise CarvingError("carving worker pool could not run")
 
 
@@ -741,34 +779,46 @@ def run_unallocated_carving(
     common = (
         str(image), kind_tuple, str(carved_dir), extract, max_carve_bytes, max_candidates, partition_offset, cluster_size
     )
-    results = _run_batches(batches, worker_count, common, check_cancel) if batches else []
 
     # Merge in offset order and apply range claims across chunk boundaries (a docx spanning chunks
-    # claims its member entries, the same rule a single-pass scan applies).
+    # claims its member entries, the same rule a single-pass scan applies). Merging stops at the
+    # run-wide candidate cap and the remaining batches are cancelled.
     by_kind = {signature.kind: signature for signature in reversed(SIGNATURES)}
     claims = _Claims()
     entries: list[dict[str, object]] = []
     skipped: list[dict[str, object]] = []
     found = 0
-    for batch_entries, error in results:
+    batch_capped = False
+
+    def consume(result: tuple[list[dict[str, object]], str | None]) -> bool:
+        nonlocal found, batch_capped
+        batch_entries, error = result
         if error:
             skipped.append({"path": str(image), "reason": error})
+        if len(batch_entries) >= max_candidates:
+            batch_capped = True
         for entry in batch_entries:
             signature = by_kind[str(entry["kind"])]
             extracted = entry.get("extracted_path")
-            if claims.covers(signature.group, int(entry["offset"])):  # type: ignore[arg-type]
+            if found >= max_candidates:
+                if extracted:
+                    Path(str(extracted)).unlink(missing_ok=True)
+                continue
+            offset = int(entry["offset"])  # type: ignore[arg-type]
+            claims.prune(offset)  # offsets ascend: ranges ending before it can no longer cover
+            if claims.covers(signature.group, offset):
                 if extracted:
                     Path(str(extracted)).unlink(missing_ok=True)
                 continue
             claims.claim(signature, entry)
             entry.pop(_CLAIM_END, None)
             found += 1
-            if len(entries) >= max_candidates:
-                if extracted:
-                    Path(str(extracted)).unlink(missing_ok=True)
-                continue
             entries.append(entry)
-    candidate_capped = found > len(entries) or any(len(batch_entries) >= max_candidates for batch_entries, _e in results)
+        return found >= max_candidates
+
+    if batches:
+        _run_batches(batches, worker_count, common, check_cancel, consume)
+    candidate_capped = found >= max_candidates or batch_capped
     if candidate_capped:
         record_coverage(COVERAGE_AREA, "candidate_cap", max_candidates, found, "candidates")
 

@@ -7,12 +7,18 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .audit import compute_sha256
-from .e01_native import native_e01_available
+from .coverage import capture_coverage, replay_coverage
+from .e01_native import (
+    _explicit_extract_cap,
+    native_e01_available,
+    native_extract_file_limit,
+)
 from .extraction_failures import (
     E01_EXTRACT_DIR_NAME,
     E01_LEGACY_EXTRACT_DIR_NAMES,
@@ -1630,6 +1636,45 @@ def extract_e01_to_directory(
     stream_runner: StreamRunner | None = None,
     run_mode: str | None = None,
 ) -> E01ExtractionResult:
+    """Extract (or resume) the E01 stage; coverage entries travel with the checkpoint.
+
+    Entries recorded while extracting are stored as ``coverage`` in the stage
+    checkpoint, and a resume replays them, so a resumed run discloses the same
+    caps as the run that did the extraction."""
+    with capture_coverage() as captured:
+        result = _extract_e01_to_directory(
+            e01_path,
+            stage_dir,
+            partition_start_sector=partition_start_sector,
+            engine=engine,
+            runner=runner,
+            tool_resolver=tool_resolver,
+            stream_runner=stream_runner,
+            run_mode=run_mode,
+        )
+    checkpoint_path = result.stage_dir / E01_STAGE_CHECKPOINT_NAME
+    checkpoint = load_e01_stage_checkpoint(checkpoint_path)
+    stored = list(checkpoint.get("coverage") or []) if result.resume_status.get("resumed_from_checkpoint") else []
+    if stored:
+        replay_coverage(stored)
+    new_entries = captured.entries()
+    if checkpoint and (new_entries or "coverage" not in checkpoint):
+        checkpoint["coverage"] = [*stored, *new_entries]
+        write_e01_stage_checkpoint(checkpoint_path, checkpoint)
+    return result
+
+
+def _extract_e01_to_directory(
+    e01_path: Path,
+    stage_dir: Path,
+    *,
+    partition_start_sector: int | None = None,
+    engine: str | None = None,
+    runner: CommandRunner = default_runner,
+    tool_resolver: ToolResolver = shutil.which,
+    stream_runner: StreamRunner | None = None,
+    run_mode: str | None = None,
+) -> E01ExtractionResult:
     source_path = e01_path.expanduser().resolve()
     if not source_path.is_file():
         raise E01ExtractionError(f"E01 image not found: {source_path}")
@@ -2157,6 +2202,7 @@ def _extract_e01_native_fallback(
         "source_signature": source_signature,
         "requested_start_sector": partition_start_sector,
         "extraction_mode": e01_extraction_mode(run_mode),
+        "file_limit": e01_native_file_limit(run_mode),
         "segment_set_profile": segment_set_profile,
         "recovery_scope": recovery_scope,
         "mount_strategy": NATIVE_MOUNT_STRATEGY,
@@ -2393,6 +2439,13 @@ def e01_extraction_mode(run_mode: str | None) -> str:
     return "recovery" if run_mode == "recovery" else "bounded"
 
 
+def e01_native_file_limit(run_mode: str | None) -> int:
+    """The native engine's file cap for ``run_mode`` (same rule as ``extract_e01_native``)."""
+    if run_mode == "recovery" and _explicit_extract_cap() is None:
+        return sys.maxsize
+    return native_extract_file_limit()
+
+
 def tsk_recover_tool_inputs_match(tool_inputs: Mapping[str, object]) -> bool:
     recovery_scope = tool_inputs.get("recovery_scope")
     if not isinstance(recovery_scope, Mapping):
@@ -2415,6 +2468,9 @@ def e01_checkpoint_resume_ready(
     # A stage dir extracted with bounded caps must not stand in for a recovery run (and vice versa);
     # checkpoints written before the key existed were bounded.
     if str(checkpoint.get("extraction_mode") or "bounded") != e01_extraction_mode(run_mode):
+        return False
+    # A capped native extraction must not stand in for an uncapped one (and vice versa).
+    if "file_limit" in checkpoint and checkpoint.get("file_limit") != e01_native_file_limit(run_mode):
         return False
     if not checkpoint.get("completed") or not checkpoint.get("resume_ready"):
         return False

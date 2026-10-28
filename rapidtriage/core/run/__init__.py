@@ -35,6 +35,7 @@ from ..archive_image import (
 from ..artifact_profiles import iter_payload_records, resolve_records_path
 from ..artifact_store import artifact_record_with_fields, write_jsonl_artifacts
 from ..artifacts import (
+    PROVIDER_THREAD_PREFIX,
     finalize_artifact_payload,
     materialize_artifact_payload,
     run_artifact_collection,
@@ -43,13 +44,29 @@ from ..audit import (
     compute_sha256,
     write_audit_record,
 )
-from ..carving import CarvingError, run_bounded_carving, run_unallocated_carving
+from ..carving import (
+    CarvingCancelled,
+    CarvingError,
+    run_bounded_carving,
+    run_unallocated_carving,
+)
 from ..columnar_store import (
     ColumnarStoreUnavailable,
     convert_jsonl_to_parquet,
 )
-from ..coverage import coverage_entries, record_coverage, reset_coverage
+from ..coverage import (
+    CoverageCollector,
+    bind_coverage_thread,
+    capture_coverage,
+    coverage_entries,
+    current_coverage_collector,
+    finish_coverage_run,
+    record_coverage,
+    replay_coverage,
+    start_coverage_run,
+)
 from ..derived.stage import run_derived_stage
+from ..digest_cache import RunDigestCache
 from ..disk_image import (
     DiskImageExtractionError,
     DiskImageExtractionResult,
@@ -95,6 +112,7 @@ from ..files import (
 )
 from ..filetime import parse_iso_utc
 from ..forensic_accuracy import build_accuracy_gate
+from ..hash_cache import activate_run_digest_cache, deactivate_run_digest_cache
 from ..incremental import (
     EVIDENCE_DELTA_MANIFEST_NAME,
     EVIDENCE_DELTA_SCOPE_DIR_NAME,
@@ -170,7 +188,6 @@ from .planned_out import (
     planned_out_timeline_payload,
 )
 from .preview_sandbox import *
-from .procpool import PROCESS_KINDS, ProcessParsePool, pooled_artifact_collection
 from .profiles import *
 from .progress import (
     RUN_PROGRESS_FILE_NAME,
@@ -553,7 +570,16 @@ def run_triage_mode(
             enforce_memory_cap(stage, effective_memory_cap, sequence=len(memory_cap_stage_checks) + 1)
         )
 
-    reset_coverage()
+    # Per-run coverage collector (concurrent runs in one server never share entries) and the
+    # run's digest cache, seeded below with the hashes the E01 extraction computed while writing.
+    coverage_run, coverage_token = start_coverage_run()
+    run_digests = RunDigestCache()
+    activate_run_digest_cache(run_digests)
+
+    def end_run_scopes() -> None:
+        deactivate_run_digest_cache(run_digests)
+        finish_coverage_run(coverage_run, coverage_token)
+
     try:
         record_memory_cap("prepare")
         input_root, image_result = prepare_run_input_root(
@@ -564,6 +590,7 @@ def run_triage_mode(
             # Only recovery changes E01 extraction (unbounded deleted sweep); bounded modes keep the default.
             run_mode="recovery" if normalized_mode == "recovery" else None,
         )
+        seed_run_digest_cache(run_digests, image_result)
         progress.set_run_root(str(input_root.root_path))
         if image_result is None:
             progress.task_finished("image-extract", status="skipped", reason=REASON_FOLDER_INPUT)
@@ -611,9 +638,11 @@ def run_triage_mode(
             unregister_run_output_dir(output_dir)
             disable_evidence_path_cache()
     except BaseException as exc:
+        end_run_scopes()
         control_watcher.stop()
         progress.fail(exc)
         raise
+    end_run_scopes()
     control_watcher.stop()
     # The status follows plan.outcome (a cancel_all after the report stage started is rejected).
     progress.finish()
@@ -1157,6 +1186,7 @@ def _run_triage_stages(
             unallocated_carve_dir,
             recovery=normalized_mode == "recovery",
             extract=extract_enabled,
+            check_cancel=progress.cancel_checker(UNALLOCATED_CARVE_DIR_NAME),
         )
 
     write_result(docs_payload, docs_path, indent=None)
@@ -1841,6 +1871,60 @@ def load_reusable_artifact_payload(artifact_path: Path) -> dict[str, object] | N
     return payload
 
 
+def seed_run_digest_cache(cache: RunDigestCache, image_result: object | None) -> int:
+    """Seed ``cache`` with the digests the native E01 extraction computed while writing each file.
+
+    ``native_file_digests`` keys are POSIX paths relative to the extract dir; providers that hash
+    those files (``submission.compute_hashes``) then get the digest without reading the file again."""
+    if not isinstance(image_result, E01ExtractionResult):
+        return 0
+    digests = image_result.recovered_root_manifest.get("native_file_digests")
+    if not isinstance(digests, Mapping) or not digests:
+        return 0
+    return cache.seed_extracted(image_result.extract_dir, digests)
+
+
+def artifact_coverage_path(artifact_path: Path) -> Path:
+    """Coverage entries recorded while one provider ran (replayed when its payload is reused)."""
+    return artifact_path.with_name(artifact_path.stem.replace("rapidtriage-artifacts-", "rapidtriage-coverage-", 1) + ".json")
+
+
+def write_artifact_coverage(artifact_path: Path, entries: Sequence[Mapping[str, object]]) -> None:
+    path = artifact_coverage_path(artifact_path)
+    temp_path = path.with_name(path.name + ".tmp")
+    temp_path.write_text(json.dumps(list(entries), ensure_ascii=False), encoding="utf-8")
+    temp_path.replace(path)
+
+
+def load_artifact_coverage(artifact_path: Path) -> list[object]:
+    try:
+        stored = json.loads(artifact_coverage_path(artifact_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return stored if isinstance(stored, list) else []
+
+
+def collect_with_coverage(
+    run_coverage: CoverageCollector,
+    sink: dict[str, list[dict[str, object]]],
+    collect: Callable[..., object],
+    *args: object,
+    kind: str,
+    **kwargs: object,
+) -> object:
+    """Run one provider in a worker thread with the run's coverage collector.
+
+    The entries it records (also from its provider pump thread, matched by thread name) land in
+    the run collector and in ``sink[kind]`` so they are stored next to the provider's payload."""
+    with capture_coverage(run_coverage) as captured, bind_coverage_thread(
+        run_coverage, f"{PROVIDER_THREAD_PREFIX}{kind}", captured
+    ):
+        try:
+            return collect(*args, kind=kind, **kwargs)
+        finally:
+            sink[kind] = captured.entries()
+
+
 def collect_artifact_stages(
     input_root: InputRoot,
     kinds: Sequence[str],
@@ -1880,14 +1964,18 @@ def collect_artifact_stages(
     mobile_options.setdefault("inner_dir", artifacts_dir.parent / MOBILE_INNER_DIR_NAME)
     options_by_kind["mobile-export"] = mobile_options
     if run_mode == "recovery":
-        # R8: recovery mode lifts the EVTX/registry parse caps (other modes disclose them via coverage).
-        for recovery_kind in ("eventlog", "windows-registry"):
+        # R8: recovery mode lifts the EVTX/registry/SAM-cell/USN parse caps (other modes disclose them via coverage).
+        for recovery_kind in ("eventlog", "windows-registry", "windows-os-account", "windows-filesystem"):
             options_by_kind[recovery_kind] = {**dict(options_by_kind.get(recovery_kind) or {}), "run_mode": run_mode}
+    run_coverage = current_coverage_collector()
+    kind_coverage: dict[str, list[dict[str, object]]] = {}
     for kind in kinds:
         artifact_path = artifacts_dir / f"rapidtriage-artifacts-{kind}.json"
         reusable = load_reusable_artifact_payload(artifact_path) if (resume or delta is not None) else None
         if reusable is not None and resume and (progress is None or progress.task_should_run(kind)):
             results[kind] = (reusable, artifact_path, True, False)
+            # The reused provider's caps were recorded by the run that collected it.
+            replay_coverage(load_artifact_coverage(artifact_path))
             if progress is not None:
                 progress.provider_reused(
                     kind,
@@ -1935,6 +2023,12 @@ def collect_artifact_stages(
         )
         merged = finalize_artifact_payload(merged, records_path=artifact_records_path(artifact_path))
         results[kind] = (merged, artifact_path, False, True)
+        previous_coverage = load_artifact_coverage(artifact_path)
+        replay_coverage(previous_coverage)  # the merge keeps the previous rows, so their caps still apply
+        write_artifact_coverage(
+            artifact_path,
+            [*(entry for entry in previous_coverage if isinstance(entry, Mapping)), *kind_coverage.pop(kind, [])],
+        )
         write_result(merged, artifact_path)
         if progress is not None:
             progress.provider_finished(
@@ -2001,13 +2095,15 @@ def collect_artifact_stages(
             # Delta-scope collection failed; fall back to a full
             # collection so coverage is preserved (crash isolation).
             try:
-                payload, started_at, completed_at, duration_ms = timed_artifact_collection(
-                    input_root,
-                    kind=kind,
-                    rule_set=rule_set,
-                    records_path=artifact_records_path(artifact_path),
-                    collector_options=options_by_kind.get(kind),
-                )
+                with capture_coverage(run_coverage) as fallback_coverage:
+                    payload, started_at, completed_at, duration_ms = timed_artifact_collection(
+                        input_root,
+                        kind=kind,
+                        rule_set=rule_set,
+                        records_path=artifact_records_path(artifact_path),
+                        collector_options=options_by_kind.get(kind),
+                    )
+                kind_coverage[kind] = fallback_coverage.entries()
                 status = "completed"
             except Exception as exc:
                 started_at = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -2018,7 +2114,9 @@ def collect_artifact_stages(
         results[kind] = (payload, artifact_path, False, False)
         # Persist each provider the moment it finishes (I4); the run does not
         # rewrite these files later. A cancelled provider's output holds the
-        # rows written before the cancel (``cancelled-partial``).
+        # rows written before the cancel (``cancelled-partial``). Its coverage
+        # entries go first, so a payload on disk never outlives its coverage.
+        write_artifact_coverage(artifact_path, kind_coverage.pop(kind, []))
         write_result(payload, artifact_path)
         cancelled = artifact_payload_cancelled(payload)
         if progress is not None:
@@ -2048,7 +2146,6 @@ def collect_artifact_stages(
         )
         check_memory(kind)
 
-    parse_pool = ProcessParsePool()
     if pending or delta_pending:
         executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="rapidtriage-artifact")
         try:
@@ -2087,20 +2184,15 @@ def collect_artifact_stages(
                         "collector_options": options_by_kind.get(kind),
                     }
                     collect_root = scope_input_root if mode == "delta" else input_root
-                    if kind in PROCESS_KINDS and progress is None and not parse_pool.disabled:
-                        # CPU-bound parsers run in worker processes; this thread only waits. Only
-                        # without a run plan: its cooperative cancel, partial rows and live row
-                        # counter cannot cross the process boundary, so planned runs stay on threads.
-                        future = executor.submit(
-                            pooled_artifact_collection,
-                            parse_pool,
-                            progress,
-                            collect_root,
-                            fallback=tracked_artifact_collection,
-                            **collect_kwargs,
-                        )
-                    else:
-                        future = executor.submit(tracked_artifact_collection, progress, collect_root, **collect_kwargs)
+                    future = executor.submit(
+                        collect_with_coverage,
+                        run_coverage,
+                        kind_coverage,
+                        tracked_artifact_collection,
+                        progress,
+                        collect_root,
+                        **collect_kwargs,
+                    )
                     futures[future] = (mode, kind, artifact_path, previous)
                     return True
                 return False
@@ -2119,10 +2211,8 @@ def collect_artifact_stages(
             # Fail fast (e.g. memory cap): drop queued providers instead of
             # waiting for the whole pool; running workers finish on their own.
             executor.shutdown(wait=False, cancel_futures=True)
-            parse_pool.shutdown(wait=False)
             raise
         executor.shutdown(wait=True)
-        parse_pool.shutdown()
     scheduler_manifest = build_parser_scheduler_manifest(
         kinds=kinds,
         max_workers=max_workers,
@@ -2243,7 +2333,10 @@ def unallocated_carve_targets(image_result: E01ExtractionResult) -> list[dict[st
             continue
         start_sector = int(row.get("start_sector") or 0)
         if str(row.get("filesystem") or "") != "ntfs":
-            record_coverage("carving.unallocated", "unsupported_filesystem", None, start_sector, "start_sector")
+            record_coverage(
+                "carving.unallocated", "unsupported_filesystem", None, None, "partitions",
+                detail={"start_sector": start_sector},
+            )
             continue
         targets.append({"start_sector": start_sector, "partition_number": row.get("partition_number")})
     return targets
@@ -2255,21 +2348,33 @@ def run_unallocated_carving_stage(
     *,
     recovery: bool,
     extract: bool,
+    check_cancel: Callable[[], bool] | None = None,
 ) -> dict[str, object]:
     """Carve the unallocated clusters of every NTFS partition of the E01 image into ``carve_dir``.
 
     One partition writes ``carve_dir/rapidtriage-carve.json``; several write ``carve_dir/p<n>/``.
     A partition that cannot be carved is a failed row, not a failed run. Caps flow through
-    ``record_coverage`` inside ``run_unallocated_carving``. Returns the summary step row."""
+    ``record_coverage`` inside ``run_unallocated_carving``. ``check_cancel`` (the run's cooperative
+    cancel check, True = cancel) stops the scan; the interrupted and remaining partitions are failed
+    rows. Returns the summary step row."""
+
+    def raise_if_cancelled() -> None:
+        if check_cancel is not None and check_cancel():
+            raise CarvingCancelled("cancel requested")
+
     started = time.perf_counter()
     raw_image = Path(image_result.raw_image_path)
     image = raw_image if raw_image.is_file() else Path(image_result.source_path)
     targets = unallocated_carve_targets(image_result)
     multi = len(targets) > 1
     partitions: list[dict[str, object]] = []
+    cancelled = False
     for target in targets:
         part_dir = carve_dir / f"p{target['partition_number']}" if multi else carve_dir
         row: dict[str, object] = {**target, "output": str(part_dir / "rapidtriage-carve.json")}
+        if cancelled:
+            partitions.append({**row, "status": "failed", "error": "cancelled", "candidate_count": 0, "extracted_count": 0})
+            continue
         try:
             payload = run_unallocated_carving(
                 image,
@@ -2277,8 +2382,13 @@ def run_unallocated_carving_stage(
                 recovery=recovery,
                 partition_start_sector=target["start_sector"],  # type: ignore[arg-type]
                 extract=extract,
+                check_cancel=raise_if_cancelled,
             )
-        except CarvingError as exc:
+        except CarvingCancelled:
+            cancelled = True
+            partitions.append({**row, "status": "failed", "error": "cancelled", "candidate_count": 0, "extracted_count": 0})
+            continue
+        except Exception as exc:  # a partition that cannot be carved is a failed row, not a failed run
             partitions.append({**row, "status": "failed", "error": str(exc), "candidate_count": 0, "extracted_count": 0})
             continue
         summary = payload.get("summary")
