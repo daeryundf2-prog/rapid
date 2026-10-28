@@ -578,7 +578,10 @@ def build_runs_router(
             case_path = default_case_path(store, run_id)
         except HTTPException:
             case_path = None
-        return enrich_summary_counts(job.summary, case_path=case_path)
+        payload = enrich_summary_counts(job.summary, case_path=case_path)
+        # Summaries written before the coverage disclosure have no key.
+        payload.setdefault("coverage", [])
+        return payload
 
 
     @router.get("/api/runs/{run_id}/capabilities")
