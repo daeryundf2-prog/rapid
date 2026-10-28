@@ -9,11 +9,13 @@ from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
+from ...core.coverage import record_coverage
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .._walk import iter_evidence_paths
 from .common import build_forensic_review
 from .registry import (
+    MAX_HIVE_CELL_RECORDS,
     MAX_HIVE_CELL_SCAN_BYTES,
     filetime_to_iso_ticks,
     iter_registry_cell_candidates,
@@ -142,13 +144,23 @@ class WindowsOsAccountProvider:
     description = "Windows OS and account summary artifacts"
     target_platform = "windows"
 
+    def __init__(self, *, recovery: bool = False) -> None:
+        self.recovery = recovery
+
+    @property
+    def options_key(self) -> str:
+        return "recovery=1" if self.recovery else ""
+
+    def with_options(self, **options: object) -> WindowsOsAccountProvider:
+        return WindowsOsAccountProvider(recovery=self.recovery or options.get("run_mode") == "recovery")
+
     def supported(self) -> bool:
         return True
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
         yield from collect_user_profiles(root)
         yield from collect_registry_export_hints(root)
-        yield from collect_sam_hive_candidates(root)
+        yield from collect_sam_hive_candidates(root, recovery=self.recovery)
 
 
 def collect_user_profiles(root: Path) -> Iterable[ArtifactRecord]:
@@ -239,7 +251,8 @@ def collect_registry_export_hints(root: Path) -> Iterable[ArtifactRecord]:
             yield record
 
 
-def collect_sam_hive_candidates(root: Path) -> Iterable[ArtifactRecord]:
+def collect_sam_hive_candidates(root: Path, *, recovery: bool = False) -> Iterable[ArtifactRecord]:
+    """SAM cell candidates; recovery scans the whole hive with no candidate cap, other modes disclose the caps."""
     for path in candidate_sam_hive_paths(root):
         native_records, structure_found = collect_native_sam_records(path)
         if structure_found:
@@ -252,13 +265,25 @@ def collect_sam_hive_candidates(root: Path) -> Iterable[ArtifactRecord]:
             with path.open("rb") as handle:
                 header = handle.read(4096)
                 handle.seek(0)
-                scan_blob = handle.read(min(stat_result.st_size, MAX_HIVE_CELL_SCAN_BYTES))
+                scan_blob = handle.read(stat_result.st_size if recovery else min(stat_result.st_size, MAX_HIVE_CELL_SCAN_BYTES))
         except OSError:
             continue
         metadata = parse_registry_hive_header(header)
         if not metadata.get("regf_valid"):
             continue
-        key_candidates = [item for item in iter_registry_cell_candidates(scan_blob) if item.get("cell_kind") == "key-node"]
+        scan_stats: dict[str, object] = {}
+        cells = iter_registry_cell_candidates(
+            scan_blob,
+            record_limit=None if recovery else MAX_HIVE_CELL_RECORDS,
+            scan_bytes=None if recovery else MAX_HIVE_CELL_SCAN_BYTES,
+            stats=scan_stats,
+        )
+        if not recovery and stat_result.st_size > MAX_HIVE_CELL_SCAN_BYTES:
+            record_coverage("registry", "scan-bytes-cap", MAX_HIVE_CELL_SCAN_BYTES, stat_result.st_size, "bytes")
+        if scan_stats.get("record_limit_reached"):
+            # The scan stops at the cap, so the total number of cells is not known.
+            record_coverage("registry", "candidate-cap", MAX_HIVE_CELL_RECORDS, None, "candidates")
+        key_candidates = [item for item in cells if item.get("cell_kind") == "key-node"]
         cell_candidates = [item for item in key_candidates if is_sam_account_key_name(str(item.get("name") or ""))]
         rid_candidates = [item for item in cell_candidates if is_rid_key_name(str(item.get("name") or ""))]
         group_candidates = [item for item in key_candidates if is_sam_group_key_name(str(item.get("name") or ""))]

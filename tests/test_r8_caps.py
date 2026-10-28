@@ -62,7 +62,7 @@ class EvtxCapTests(unittest.TestCase):
         entries = [entry for entry in coverage_entries() if entry["area"] == "eventlog"]
         self.assertEqual(
             [(entry["reason_code"], entry["limit"], entry["observed"], entry["unit"]) for entry in entries],
-            [("evtx-string-cap", MAX_NATIVE_EVTX_STRINGS, 1, "records")],
+            [("evtx-string-cap", MAX_NATIVE_EVTX_STRINGS, STRING_COUNT, "strings")],
         )
 
     def test_recovery_keeps_every_string_without_coverage(self) -> None:

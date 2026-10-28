@@ -5,12 +5,14 @@ import datetime as dt
 import hashlib
 import json
 import math
+import mmap
 import os
 import re
 import subprocess
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
+from ...core.coverage import record_coverage
 from ...core.extraction_failures import ADS_SOURCE_ID, iter_recovered_ads_rows
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
@@ -206,11 +208,21 @@ class WindowsFilesystemProvider:
     description = "Windows MFT and USN Journal imports plus bounded native NTFS inventory"
     target_platform = "windows"
 
+    def __init__(self, *, recovery: bool = False) -> None:
+        self.recovery = recovery
+
+    @property
+    def options_key(self) -> str:
+        return "recovery=1" if self.recovery else ""
+
+    def with_options(self, **options: object) -> WindowsFilesystemProvider:
+        return WindowsFilesystemProvider(recovery=self.recovery or options.get("run_mode") == "recovery")
+
     def supported(self) -> bool:
         return True
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
-        yield from collect_native_ntfs_artifacts(root)
+        yield from collect_native_ntfs_artifacts(root, recovery=self.recovery)
         yield from collect_ntfs_logfile_artifacts(root)
         yield from collect_recycle_bin_artifacts(root)
         yield from collect_ads_stream_artifacts(root)
@@ -1105,7 +1117,7 @@ def detect_file_signature(blob: bytes) -> dict[str, object] | None:
     return None
 
 
-def collect_native_ntfs_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+def collect_native_ntfs_artifacts(root: Path, *, recovery: bool = False) -> Iterable[ArtifactRecord]:
     seen: set[Path] = set()
     candidate_paths = sorted((path for path in iter_evidence_paths(root, "*") if path.is_file()), key=lambda item: str(item).lower())
     mft_records_by_path: dict[Path, list[dict[str, object]]] = {}
@@ -1134,9 +1146,43 @@ def collect_native_ntfs_artifacts(root: Path) -> Iterable[ArtifactRecord]:
             bounded_path_cache = nearest_mft_path_cache(path, mft_path_caches_by_volume)
             usn_source_hashes = file_hashes(path)
             yield build_usn_journal_inventory_record(path, bounded_path_cache, source_hashes=usn_source_hashes)
-            for index, record in enumerate(parse_usn_records(read_prefix(path, NATIVE_SCAN_LIMIT))):
+            for index, record in enumerate(native_usn_journal_records(path, recovery=recovery)):
                 yield build_native_usn_record(path, record, index, bounded_path_cache, source_hashes=usn_source_hashes)
             seen.add(resolved)
+
+
+def native_usn_journal_records(path: Path, *, recovery: bool = False) -> list[dict[str, object]]:
+    """USN records of ``$UsnJrnl:$J``.
+
+    Recovery maps the whole journal and keeps every record. Other modes read the first
+    ``NATIVE_SCAN_LIMIT`` bytes and at most ``USN_RECORD_SCAN_LIMIT`` records, and disclose
+    each cap through ``record_coverage`` when it really dropped data.
+    """
+    if recovery:
+        try:
+            with path.open("rb") as handle:
+                size = os.fstat(handle.fileno()).st_size
+                if size == 0:
+                    return []
+                with mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as view:
+                    # A record is >= 60 bytes, so this limit can never be reached.
+                    return list(parse_usn_record_scan(view, record_limit=size // 60 + 1)["records"])
+        except (OSError, ValueError):
+            return []
+    try:
+        size = path.stat().st_size
+    except OSError:
+        size = 0
+    blob = read_prefix(path, NATIVE_SCAN_LIMIT)
+    scan = parse_usn_record_scan(blob)
+    if size > len(blob) and len(blob) == NATIVE_SCAN_LIMIT:
+        record_coverage("windows-filesystem.usn", "scan-bytes-cap", NATIVE_SCAN_LIMIT, size, "bytes")
+    if scan["record_limit_reached"]:
+        # Only when one more record really follows the cap; the total stays unknown (the scan stopped).
+        rest = parse_usn_record_scan(blob, start_offset=int(scan["last_scanned_offset"]), record_limit=1)
+        if rest["records"]:
+            record_coverage("windows-filesystem.usn", "candidate-cap", USN_RECORD_SCAN_LIMIT, None, "records")
+    return list(scan["records"])
 
 
 def collect_ntfs_logfile_artifacts(root: Path) -> Iterable[ArtifactRecord]:

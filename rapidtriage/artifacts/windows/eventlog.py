@@ -223,45 +223,60 @@ MAX_NATIVE_EVTX_RECORD_SIZE = 16 * 1024 * 1024
 MAX_NATIVE_EVTX_STRINGS = 200
 MAX_NATIVE_EVTX_BINXML_TOKENS = 500
 MAX_NATIVE_EVTX_NESTED_BINXML_BYTES = 1024 * 1024
+# Per-record token budget of the chunk decoder (``EvtxChunkDecoder``).
+EVTX_BINXML_MAX_TOKENS = 200_000
 
 # Recovery mode lifts these parse caps; other modes keep them and disclose each truncation through
-# ``record_coverage`` (one entry per cap per file, ``observed`` = records the cap truncated).
-_EVTX_CAP_DISCLOSURE: dict[str, tuple[str, int]] = {
-    "strings": ("evtx-string-cap", MAX_NATIVE_EVTX_STRINGS),
-    "binxml-tokens": ("evtx-binxml-token-cap", MAX_NATIVE_EVTX_BINXML_TOKENS),
-    "nested-binxml-bytes": ("evtx-nested-binxml-size-cap", MAX_NATIVE_EVTX_NESTED_BINXML_BYTES),
-    "record-size": ("evtx-record-size-cap", MAX_NATIVE_EVTX_RECORD_SIZE),
+# ``record_coverage`` (one entry per cap per file). ``limit`` and ``observed`` share the cap's unit;
+# ``observed`` is the largest truncated size seen, or ``None`` when the parse stopped before it was known.
+_EVTX_CAP_DISCLOSURE: dict[str, tuple[str, int, str]] = {
+    "strings": ("evtx-string-cap", MAX_NATIVE_EVTX_STRINGS, "strings"),
+    "binxml-tokens": ("evtx-binxml-token-cap", MAX_NATIVE_EVTX_BINXML_TOKENS, "tokens"),
+    "chunk-decoder-tokens": ("evtx-binxml-token-cap", EVTX_BINXML_MAX_TOKENS, "tokens"),
+    "nested-binxml-bytes": ("evtx-nested-binxml-size-cap", MAX_NATIVE_EVTX_NESTED_BINXML_BYTES, "bytes"),
+    "record-size": ("evtx-record-size-cap", MAX_NATIVE_EVTX_RECORD_SIZE, "bytes"),
 }
 _EVTX_CAPS = threading.local()
 
 
+def _evtx_note_observed(observed: dict[str, int | None], name: str, value: int | None) -> None:
+    """Keep the largest known size per cap (``None`` only while no size is known)."""
+    previous = observed.get(name)
+    observed[name] = value if previous is None else previous if value is None else max(previous, value)
+
+
 @contextmanager
-def _evtx_caps_scope(recovery: bool, cap_hits: Counter[str]) -> Iterable[None]:
+def _evtx_caps_scope(
+    recovery: bool, cap_hits: Counter[str], cap_observed: dict[str, int | None] | None = None
+) -> Iterable[None]:
     """Scope one record's parse: recovery lifts the caps, otherwise each cap hit is counted once."""
     previous = (getattr(_EVTX_CAPS, "recovery", False), getattr(_EVTX_CAPS, "hits", None))
-    hits: set[str] = set()
+    hits: dict[str, int | None] = {}
     _EVTX_CAPS.recovery, _EVTX_CAPS.hits = recovery, hits
     try:
         yield
     finally:
         _EVTX_CAPS.recovery, _EVTX_CAPS.hits = previous
-        cap_hits.update(hits)
+        cap_hits.update(hits.keys())
+        if cap_observed is not None:
+            for name, value in hits.items():
+                _evtx_note_observed(cap_observed, name, value)
 
 
 def _evtx_recovery() -> bool:
     return bool(getattr(_EVTX_CAPS, "recovery", False))
 
 
-def _evtx_cap_hit(name: str) -> None:
+def _evtx_cap_hit(name: str, observed: int | None = None) -> None:
     hits = getattr(_EVTX_CAPS, "hits", None)
     if hits is not None:
-        hits.add(name)
+        _evtx_note_observed(hits, name, observed)
 
 
 def _evtx_cap_strings(items: Sequence[str]) -> list[str]:
     if _evtx_recovery() or len(items) <= MAX_NATIVE_EVTX_STRINGS:
         return list(items)
-    _evtx_cap_hit("strings")
+    _evtx_cap_hit("strings", len(items))
     return list(items[:MAX_NATIVE_EVTX_STRINGS])
 
 
@@ -277,10 +292,10 @@ def _evtx_tokens_open(offset: int, size: int, used: int) -> bool:
     return False
 
 
-def _evtx_flush_cap_coverage(cap_hits: Mapping[str, int]) -> None:
-    for name, count in cap_hits.items():
-        reason, limit = _EVTX_CAP_DISCLOSURE[name]
-        record_coverage("eventlog", reason, limit, int(count), "records")
+def _evtx_flush_cap_coverage(cap_hits: Mapping[str, int], cap_observed: Mapping[str, int | None]) -> None:
+    for name in cap_hits:
+        reason, limit, unit = _EVTX_CAP_DISCLOSURE[name]
+        record_coverage("eventlog", reason, limit, cap_observed.get(name), unit)
 NATIVE_EVTX_READER_STRATEGY = "mmap-bounded-record-scan"
 NATIVE_EVTX_PARSE_SCOPE = "record-header-binxml-template-scalar-recovery-triage"
 NATIVE_EVTX_BINXML_STATUS = "not-decoded"
@@ -2090,9 +2105,10 @@ def collect_native_evtx_events(
     counters = stats if stats is not None else {}
     full_detail = record_detail != EVENTLOG_RECORD_DETAIL_TRIAGE
     cap_hits: Counter[str] = Counter()
+    cap_observed: dict[str, int | None] = {}
 
     def scoped(function, *args, **kwargs):
-        with _evtx_caps_scope(recovery, cap_hits):
+        with _evtx_caps_scope(recovery, cap_hits, cap_observed):
             return function(*args, **kwargs)
 
     def bump(key: str, amount: int = 1) -> None:
@@ -2126,6 +2142,7 @@ def collect_native_evtx_events(
                             bump("candidate_count")
                             if candidate.reason == "declared-size-too-large":
                                 cap_hits["record-size"] += 1
+                                _evtx_note_observed(cap_observed, "record-size", candidate.declared_size)
                             if structure_rows:
                                 yield scoped(
                                     native_evtx_record_candidate_record, path, source_index, source_hashes, blob, candidate
@@ -2205,7 +2222,9 @@ def collect_native_evtx_events(
                     )
                     decode_error = ""
                     try:
-                        decoded: dict[str, object] | None = decoder.decode_record(slot.relative_offset, slot.declared_size)
+                        decoded: dict[str, object] | None = scoped(
+                            decoder.decode_record, slot.relative_offset, slot.declared_size
+                        )
                     except (EvtxDecodeError, IndexError, struct.error, ValueError, RecursionError, UnicodeError) as exc:
                         decoded = None
                         decode_error = f"{type(exc).__name__}: {exc}"[:200]
@@ -2232,7 +2251,7 @@ def collect_native_evtx_events(
     except OSError:
         return
     finally:
-        _evtx_flush_cap_coverage(cap_hits)
+        _evtx_flush_cap_coverage(cap_hits, cap_observed)
 
 
 EVTX_RECORD_ID_STALE_BELOW_FIRST = "stale-below-first"
@@ -6039,7 +6058,6 @@ EVTX_RECORD_STATE_UNCHUNKED = "outside-chunk"
 # chunk recoveries do not).
 EVTX_SEQUENCED_RECORD_STATES = frozenset({EVTX_RECORD_STATE_LIVE, EVTX_RECORD_STATE_UNCHUNKED})
 EVTX_BINXML_MAX_DEPTH = 12
-EVTX_BINXML_MAX_TOKENS = 200_000
 EVTX_TEMPLATE_MAX_SUBSTITUTIONS = 4096
 EVTX_FILETIME_EPOCH = dt.datetime(1601, 1, 1, tzinfo=dt.timezone.utc)
 # Slack/out-of-range guard: FILETIME values before 1980-01-01 or later than
@@ -6239,7 +6257,7 @@ def _evtx_real_text(value: float) -> str:
 class EvtxChunkDecoder:
     """Decode BinXML records of one 64 KiB chunk (all offsets chunk-relative)."""
 
-    __slots__ = ("_names", "_templates", "_tokens", "chunk", "template_parse_count")
+    __slots__ = ("_names", "_templates", "_token_limit", "_tokens", "chunk", "template_parse_count")
 
     def __init__(self, chunk: bytes) -> None:
         self.chunk = chunk
@@ -6247,6 +6265,7 @@ class EvtxChunkDecoder:
         self._templates: dict[int, tuple[list[object], int]] = {}
         self.template_parse_count = 0
         self._tokens = 0
+        self._token_limit = EVTX_BINXML_MAX_TOKENS
 
     # -- primitives -------------------------------------------------------
     def _u16(self, offset: int) -> int:
@@ -6394,7 +6413,9 @@ class EvtxChunkDecoder:
         attr_parts: list[object] | None = None
         while pos < end:
             self._tokens += 1
-            if self._tokens > EVTX_BINXML_MAX_TOKENS:
+            if self._tokens > self._token_limit:
+                if not _evtx_recovery():
+                    _evtx_cap_hit("chunk-decoder-tokens")
                 raise EvtxDecodeError("token budget exhausted")
             token = chunk[pos]
             kind = token & 0x0F
@@ -6585,6 +6606,13 @@ class EvtxChunkDecoder:
     # -- records ----------------------------------------------------------
     def decode_record(self, record_offset: int, record_size: int) -> dict[str, object]:
         self._tokens = 0
+        # Recovery lifts the budget to a structural ceiling: every token consumes >= 1 chunk byte and each
+        # nesting level re-reads at most the whole chunk, so only cyclic/corrupt structures reach it.
+        self._token_limit = (
+            max(EVTX_BINXML_MAX_TOKENS, len(self.chunk) * (EVTX_BINXML_MAX_DEPTH + 1))
+            if _evtx_recovery()
+            else EVTX_BINXML_MAX_TOKENS
+        )
         body_start = record_offset + EVTX_RECORD_HEADER_SIZE
         body_end = record_offset + record_size - 4
         nodes, _ = self._parse(body_start, body_end, depth=0, stop_after_instance=True)
@@ -6943,7 +6971,7 @@ def decode_binxml_template_value(value_blob: bytes, value_type: int) -> tuple[st
 
 def parse_nested_binxml_value(value_blob: bytes) -> dict[str, object]:
     if len(value_blob) > MAX_NATIVE_EVTX_NESTED_BINXML_BYTES and not _evtx_recovery():
-        _evtx_cap_hit("nested-binxml-bytes")
+        _evtx_cap_hit("nested-binxml-bytes", len(value_blob))
         return {
             "profile_version": "evtx-nested-binxml-value-v1",
             "status": "nested-binxml-too-large",
@@ -9441,7 +9469,11 @@ def read_u64(blob: bytes, offset: int) -> int:
 
 
 def extract_utf16le_strings(blob: bytes, *, min_chars: int = 4) -> list[str]:
+    capped = not _evtx_recovery()
+    # Inside a cap scope the strings past the cap are still counted so the disclosure carries the real total.
+    counting = getattr(_EVTX_CAPS, "hits", None) is not None
     strings: list[str] = []
+    dropped = 0
     start: int | None = None
     cursor = 0
     while cursor + 1 < len(blob):
@@ -9455,16 +9487,23 @@ def extract_utf16le_strings(blob: bytes, *, min_chars: int = 4) -> list[str]:
             if start is not None:
                 text = decode_utf16le_string(blob[start:cursor])
                 if len(text) >= min_chars:
-                    strings.append(text)
-                    if len(strings) >= MAX_NATIVE_EVTX_STRINGS and not _evtx_recovery():
-                        _evtx_cap_hit("strings")
-                        return strings
+                    if capped and len(strings) >= MAX_NATIVE_EVTX_STRINGS:
+                        if not counting:
+                            return strings
+                        dropped += 1
+                    else:
+                        strings.append(text)
                 start = None
         cursor += 2
     if start is not None:
         text = decode_utf16le_string(blob[start:cursor])
         if len(text) >= min_chars:
-            strings.append(text)
+            if capped and len(strings) >= MAX_NATIVE_EVTX_STRINGS:
+                dropped += 1
+            else:
+                strings.append(text)
+    if dropped:
+        _evtx_cap_hit("strings", len(strings) + dropped)
     return strings
 
 

@@ -280,6 +280,11 @@ class WindowsRegistryProvider:
     def __init__(self, *, recovery: bool = False) -> None:
         self.recovery = recovery
 
+    @property
+    def options_key(self) -> str:
+        """Collect-cache discriminator: a recovery walk must not share a slot with a capped one."""
+        return "recovery=1" if self.recovery else ""
+
     def with_options(self, **options: object) -> WindowsRegistryProvider:
         return WindowsRegistryProvider(recovery=self.recovery or options.get("run_mode") == "recovery")
 
@@ -422,11 +427,14 @@ def collect_registry_hive(
         free_candidates, allocator_stats = iter_registry_free_cell_candidates(hive)
         recovery_candidates = [*free_candidates, *native_parent_key_candidates(hive, free_candidates)]
         scan_end = stat_result.st_size if recovery else min(stat_result.st_size, MAX_HIVE_STRING_SCAN_BYTES)
-        strings = extract_utf16le_strings(bytes(hive._data[:scan_end]), limit=None if recovery else MAX_HIVE_STRINGS)
+        strings = extract_utf16le_strings(bytes(hive._data[:scan_end]), limit=None)
+        # The cap is disclosed only when strings were really dropped, with the real total.
+        strings_dropped = not recovery and len(strings) > MAX_HIVE_STRINGS
         if not recovery and stat_result.st_size > MAX_HIVE_STRING_SCAN_BYTES:
             record_coverage("registry-hive-strings", "scan-bytes-cap", MAX_HIVE_STRING_SCAN_BYTES, stat_result.st_size, "bytes")
-        if not recovery and len(strings) >= MAX_HIVE_STRINGS:
-            record_coverage("registry-hive-strings", "string-count-cap", MAX_HIVE_STRINGS, None, "strings")
+        if strings_dropped:
+            record_coverage("registry-hive-strings", "string-count-cap", MAX_HIVE_STRINGS, len(strings), "strings")
+            strings = strings[:MAX_HIVE_STRINGS]
         # R5 L2: PuTTY/WinSCP password values never reach the string pivot — neither the current
         # values nor the data of deleted/free vk cells named Password/ProxyPassword/… (old passwords).
         secrets = hive_secret_strings(hive) | deleted_secret_value_strings(hive._data, recovery_candidates)
@@ -437,7 +445,7 @@ def collect_registry_hive(
                 path, strings, metadata, source_hashes, recovery=recovery
             )
             strings_record.details["scan_truncated"] = not recovery and stat_result.st_size > MAX_HIVE_STRING_SCAN_BYTES
-            strings_record.details["string_limit_reached"] = not recovery and len(strings) >= MAX_HIVE_STRINGS
+            strings_record.details["string_limit_reached"] = strings_dropped
             strings_record.details["string_limit"] = None if recovery else MAX_HIVE_STRINGS
             if not recovery:
                 strings_record.details["cap_disclosure"] = (
@@ -3283,9 +3291,17 @@ def suspicious_value_flags(value: str) -> list[str]:
 def iter_registry_cell_candidates(
     blob: bytes,
     *,
-    record_limit: int = MAX_HIVE_CELL_RECORDS,
+    record_limit: int | None = MAX_HIVE_CELL_RECORDS,
+    scan_bytes: int | None = MAX_HIVE_CELL_SCAN_BYTES,
+    stats: dict[str, object] | None = None,
 ) -> list[dict[str, object]]:
-    scan_blob = blob[:MAX_HIVE_CELL_SCAN_BYTES]
+    """Cell candidates of the first ``scan_bytes`` (``None``: all), at most ``record_limit`` (``None``: all).
+
+    ``stats["record_limit_reached"]`` is true only when a candidate past the limit really exists.
+    """
+    scan_blob = blob if scan_bytes is None else blob[:scan_bytes]
+    # One candidate past the limit is collected (then dropped) so a truncation is known, not guessed.
+    cap = len(scan_blob) + 1 if record_limit is None else record_limit + 1
     candidates: list[dict[str, object]] = []
     seen_offsets: set[int] = set()
     for hbin in iter_registry_hbin_descriptors(scan_blob):
@@ -3293,7 +3309,7 @@ def iter_registry_cell_candidates(
         hbin_size = int(hbin.get("hbin_size") or 0)
         cursor = hbin_offset + HIVE_BIN_HEADER_SIZE
         hbin_end = min(len(scan_blob), hbin_offset + hbin_size)
-        while cursor + 8 <= hbin_end and len(candidates) < record_limit:
+        while cursor + 8 <= hbin_end and len(candidates) < cap:
             cell_size_raw = read_i32(scan_blob, cursor)
             cell_size = abs(cell_size_raw)
             if cell_size < 8 or cell_size > MAX_HIVE_CELL_SIZE:
@@ -3320,7 +3336,7 @@ def iter_registry_cell_candidates(
 
     for signature in (b"nk", b"vk"):
         cursor = 0
-        while len(candidates) < record_limit:
+        while len(candidates) < cap:
             signature_offset = scan_blob.find(signature, cursor)
             if signature_offset < 0:
                 break
@@ -3349,6 +3365,11 @@ def iter_registry_cell_candidates(
             seen_offsets.add(cell_offset)
             candidate["cell_index"] = len(candidates)
             candidates.append(candidate)
+    limit_reached = record_limit is not None and len(candidates) > record_limit
+    if limit_reached:
+        candidates.pop()
+    if stats is not None:
+        stats["record_limit_reached"] = limit_reached
     return sorted(candidates, key=lambda item: int(item.get("cell_offset") or 0))
 
 
@@ -4522,30 +4543,20 @@ def registry_url_candidates(strings: Sequence[str]) -> list[str]:
     return sorted(set(candidates))
 
 
+# One printable UTF-16LE code unit (tab/LF/CR or U+0020..U+D7FF, U+E000..U+FFFD); surrogates break a run.
+_HIVE_PRINTABLE_RUN = re.compile("[\t\n\r\x20-\ud7ff\ue000-\ufffd]+")
+
+
 def extract_utf16le_strings(blob: bytes, *, min_chars: int = 4, limit: int | None = MAX_HIVE_STRINGS) -> list[str]:
+    """Distinct printable UTF-16LE runs at byte alignment 0, then 1 (first ``limit``; ``None``: all)."""
     strings: list[str] = []
     seen: set[str] = set()
     for alignment in (0, 1):
-        start: int | None = None
-        cursor = alignment
-        while cursor + 1 < len(blob):
-            value = int.from_bytes(blob[cursor : cursor + 2], "little", signed=False)
-            printable = value in (9, 10, 13) or 32 <= value <= 0xD7FF or 0xE000 <= value <= 0xFFFD
-            if printable and value != 0:
-                if start is None:
-                    start = cursor
-            else:
-                if start is not None:
-                    text = decode_utf16le_string(blob[start:cursor])
-                    if len(text) >= min_chars and text not in seen:
-                        strings.append(text)
-                        seen.add(text)
-                        if limit is not None and len(strings) >= limit:
-                            return strings
-                    start = None
-            cursor += 2
-        if start is not None:
-            text = decode_utf16le_string(blob[start:cursor])
+        end = alignment + max(len(blob) - alignment, 0) // 2 * 2
+        # ``surrogatepass`` maps every code unit to one character, so a regex run equals a code-unit run.
+        units = bytes(blob[alignment:end]).decode("utf-16le", errors="surrogatepass")
+        for match in _HIVE_PRINTABLE_RUN.finditer(units):
+            text = match.group().strip("\x00\r\n\t ")
             if len(text) >= min_chars and text not in seen:
                 strings.append(text)
                 seen.add(text)
