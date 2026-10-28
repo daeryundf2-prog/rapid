@@ -1628,6 +1628,7 @@ def extract_e01_to_directory(
     runner: CommandRunner = default_runner,
     tool_resolver: ToolResolver = shutil.which,
     stream_runner: StreamRunner | None = None,
+    run_mode: str | None = None,
 ) -> E01ExtractionResult:
     source_path = e01_path.expanduser().resolve()
     if not source_path.is_file():
@@ -1738,6 +1739,7 @@ def extract_e01_to_directory(
             missing_tools=list(missing),
             command_history=command_history,
             engine_note="requested",
+            run_mode=run_mode,
         )
 
     native_failure: E01ExtractionError | None = None
@@ -1756,6 +1758,7 @@ def extract_e01_to_directory(
                 missing_tools=list(missing),
                 command_history=command_history,
                 engine_note="preferred",
+                run_mode=run_mode,
             )
         except E01ExtractionError as exc:
             native_failure = exc
@@ -1816,6 +1819,7 @@ def extract_e01_to_directory(
                 tool_preflight=tool_preflight,
                 missing_tools=missing,
                 command_history=command_history,
+                run_mode=run_mode,
             )
         if blocked:
             blocked_payload: dict[str, object] = {
@@ -2127,6 +2131,7 @@ def _extract_e01_native_fallback(
     missing_tools: list[str],
     command_history: list[dict[str, object]],
     engine_note: str = "fallback",
+    run_mode: str | None = None,
 ) -> E01ExtractionResult:
     """Recover files with pyewf + dissect.ntfs (in-process, no external tools)."""
     from .e01_native import NATIVE_MOUNT_STRATEGY, extract_e01_native
@@ -2183,6 +2188,7 @@ def _extract_e01_native_fallback(
             extract_dir,
             partition_start_sector=partition_start_sector,
             system_dir=stage / "_system",
+            run_mode=run_mode,
         )
     except Exception as exc:
         checkpoint_payload["stages"] = {
@@ -2211,8 +2217,12 @@ def _extract_e01_native_fallback(
     recovered_manifest = {
         **recovered_manifest,
         "native_extraction_stats": stats,
+        # one row per extracted partition (layout: flat for one, p<index>/ under the root for several)
+        "native_extracted_partitions": list(result.get("extracted_partitions") or []),
         "engine": "pyewf+dissect.ntfs",
         "system_artifacts": dict(result.get("system_artifacts") or {}),
+        # relative POSIX path -> {size_bytes, md5, sha1, sha256}, hashed in the extraction write pass.
+        "native_file_digests": dict(result.get("file_digests") or {}),
     }
     command_history.append(
         {
