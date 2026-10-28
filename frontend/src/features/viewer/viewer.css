@@ -701,8 +701,14 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  flex-wrap: wrap;
   margin-bottom: var(--space-2);
   color: var(--text-muted);
+}
+
+/* Keep "1–1 / 1 행" and the buttons whole; the pager wraps between items instead. */
+.sqlite-pager > * {
+  white-space: nowrap;
 }
 
 /* Image ------------------------------------------------------------------- */

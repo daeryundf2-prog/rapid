@@ -225,9 +225,10 @@ button.stage-link {
   align-items: center;
   column-gap: var(--space-2);
   row-gap: var(--space-1);
-  /* Every card is the same 58px (review #11): one title line, one ellipsized meta line. */
+  /* 58px floor (review #11); a title that wraps to two lines grows the card instead of
+     overlapping the meta line (r8 visual QA). */
   box-sizing: border-box;
-  height: 58px;
+  min-height: 58px;
   padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
   border: 1px solid var(--line-subtle);
   border-radius: var(--radius);
