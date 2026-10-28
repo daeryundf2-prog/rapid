@@ -24,10 +24,14 @@
   --fs-table-aux: 0.75rem; /* 12px — 표 보조 */
   --fs-body: 0.8125rem; /* 13px — 기본 */
   --fs-panel-title: 0.875rem; /* 14px — 패널 제목 */
-  --fs-screen-title: 1rem; /* 16px — 화면 제목 */
-  --fs-case: 1.25rem; /* 20px — 케이스명 */
-  --lh: 1.4;
-  --tracking-heading: -0.01em;
+  --fs-screen-title: 0.9375rem; /* 15px — 화면 제목 */
+  --fs-case: 1.125rem; /* 18px — 케이스명 */
+  --lh: 1.45;
+  --tracking-heading: -0.012em;
+  --tracking-aux: 0.01em; /* small text opens up slightly */
+
+  /* Chrome heights (R8 density): top bar 44, status bar 28. */
+  --topbar-h: 44px;
 
   /* 6 spacings */
   --space-1: 4px;
@@ -70,22 +74,22 @@
 :root,
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --surface-0: #0e1217; /* app background */
-  --surface-1: #141920; /* panels, bars */
-  --surface-2: #1b222b; /* raised: buttons, hover, inputs-in-bars */
-  --surface-3: #232c37; /* popovers, menus, toasts */
-  --line: #68778a; /* control borders (≥ 3:1) */
-  --line-subtle: #262f3a; /* dividers, row rules */
-  --text: #e6eaef;
-  --text-muted: #a6b0bc;
+  --surface-0: #0c1015; /* app background */
+  --surface-1: #131921; /* panels, bars */
+  --surface-2: #1a222c; /* raised: buttons, hover, inputs-in-bars */
+  --surface-3: #232d39; /* popovers, menus, toasts */
+  --line: #6b7b8e; /* control borders (≥ 3:1) */
+  --line-subtle: #27313d; /* dividers, row rules */
+  --text: #edf0f4;
+  --text-muted: #aab4c0;
   --text-subtle: #939fac; /* placeholders, hints — still ≥ 4.5:1 */
   /* Disabled controls (incl. primary): never muted text on the accent fill (≈1.4:1). */
-  --disabled-bg: #1b222b;
+  --disabled-bg: #1a222c;
   --disabled-text: #9aa5b1;
 
-  --accent: #5aa2ff;
-  --accent-hover: #78b3ff;
-  --accent-active: #3d8ef5;
+  --accent: #62a6f7;
+  --accent-hover: #82b9fa;
+  --accent-active: #4a93ec;
   --on-accent: #0b1117;
   --scrim: #000000;
 
@@ -121,12 +125,13 @@
   --sb-track: transparent;
 
   --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(0 0 0 / 0.2);
+  --shadow-bar: 0 1px 0 rgb(0 0 0 / 0.35), 0 2px 8px rgb(0 0 0 / 0.18);
 }
 
 /* Light theme (explicit user choice only). */
 :root[data-theme="light"] {
   color-scheme: light;
-  --surface-0: #f3f5f8;
+  --surface-0: #f1f4f7;
   --surface-1: #ffffff;
   --surface-2: #eaeef3;
   --surface-3: #ffffff;
@@ -178,6 +183,7 @@
   --sb-track: transparent;
 
   --shadow-pop: 0 8px 24px rgb(16 24 32 / 0.14), 0 0 0 1px rgb(16 24 32 / 0.06);
+  --shadow-bar: 0 1px 0 rgb(16 24 32 / 0.04), 0 2px 6px rgb(16 24 32 / 0.05);
 }
 
 /* Print always uses the light palette (white paper for surface-0). Keep the
@@ -229,6 +235,7 @@
     --sb-thumb-hover: #5c6774;
     --sb-track: transparent;
     --shadow-pop: none;
+    --shadow-bar: none;
   }
 }
 

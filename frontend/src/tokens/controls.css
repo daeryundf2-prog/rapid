@@ -689,18 +689,19 @@ button.chip:hover {
 .grid-skeleton {
   display: block;
   width: 60%;
-  height: 8px;
+  height: 10px;
   border-radius: var(--radius-sm);
-  /* 1.2s shimmer (review #11); prefers-reduced-motion stops it (tokens.css). */
+  /* Calm 1.6s shimmer, a soft band over the surface-2 bar; prefers-reduced-motion stops it
+     (tokens.css) and leaves the flat bar. */
   background:
     linear-gradient(
       90deg,
       var(--surface-2) 0%,
-      color-mix(in srgb, var(--surface-2) 60%, var(--surface-3)) 50%,
+      color-mix(in srgb, var(--surface-2) 55%, var(--surface-3)) 50%,
       var(--surface-2) 100%
     )
     0 0 / 200% 100%;
-  animation: rt-shimmer 1.2s linear infinite;
+  animation: rt-shimmer 1.6s ease-in-out infinite;
 }
 
 @keyframes rt-shimmer {
