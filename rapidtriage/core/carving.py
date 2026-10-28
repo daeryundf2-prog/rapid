@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import hashlib
 import io
 import json
+import multiprocessing
 import os
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from concurrent import futures
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import carving_formats as formats
+from .coverage import record_coverage
 from .docs import write_result
 from .input_root import InputRoot, resolve_input_root
 from .recovery import (
@@ -29,6 +34,10 @@ from .recovery import (
 DEFAULT_MAX_SCAN_BYTES = 256 * 1024 * 1024
 DEFAULT_MAX_CARVE_BYTES = 50 * 1024 * 1024
 DEFAULT_MAX_CANDIDATES = 250
+# Recovery mode lifts the scan cap (all unallocated clusters) and raises the candidate cap.
+RECOVERY_MAX_CANDIDATES = 100_000
+CARVE_PROCS_ENV = "RAPIDTRIAGE_PARSE_PROCS"
+COVERAGE_AREA = "carving"
 
 # Source files are scanned in bounded windows so multi-GB inputs do not
 # load into memory. The overlap carries incomplete headers across chunk
@@ -363,6 +372,7 @@ def run_bounded_carving(
 
     sources = sorted(iter_carving_sources(source_root), key=lambda p: str(p).lower())
     cap_reached = len(entries) >= max_candidates
+    scan_capped_bytes = 0
     for path in sources:
         if cap_reached:
             break
@@ -382,6 +392,8 @@ def run_bounded_carving(
             completed_sources.add(source_key)
             continue
         read_limit = min(int(stat_result.st_size), max_scan_bytes)
+        if read_limit < int(stat_result.st_size):
+            scan_capped_bytes += int(stat_result.st_size)
         try:
             file_entries, file_scanned = _scan_source(
                 path,
@@ -418,6 +430,10 @@ def run_bounded_carving(
         if cap_reached and _source_key(path, source_root) not in completed_sources
     ]
     skipped.extend(unprocessed)
+    if scan_capped_bytes:
+        record_coverage(COVERAGE_AREA, "scan_bytes_cap", max_scan_bytes, scan_capped_bytes, "bytes")
+    if cap_reached:
+        record_coverage(COVERAGE_AREA, "candidate_cap", max_candidates, len(entries), "candidates")
 
     payload = {
         "command": "carve",
@@ -465,6 +481,332 @@ def run_bounded_carving(
         scanned_bytes=scanned_bytes,
         complete=True,
     )
+    return payload
+
+
+class _RunView:
+    """Read-only file view of the absolute byte range ``[lo, hi)`` of an image reader.
+
+    Carve windows may run past a scan chunk but never past the end of the unallocated run, so a
+    candidate never swallows allocated clusters that follow the run."""
+
+    def __init__(self, reader, lo: int, hi: int) -> None:
+        self.reader = reader
+        self.lo = lo
+        self.hi = hi
+        self.pos = lo
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        self.pos = offset if whence == 0 else self.pos + offset
+        return self.pos
+
+    def tell(self) -> int:
+        return self.pos
+
+    def read(self, size: int = -1) -> bytes:
+        if self.pos < self.lo or self.pos >= self.hi:
+            return b""
+        want = self.hi - self.pos if size is None or size < 0 else min(size, self.hi - self.pos)
+        self.reader.seek(self.pos)
+        data = self.reader.read(want)
+        self.pos += len(data)
+        return data
+
+
+def plan_unallocated_tasks(
+    runs: Sequence[tuple[int, int]],
+    *,
+    partition_offset: int,
+    cluster_size: int,
+    scan_limit: int | None,
+    chunk_bytes: int = SCAN_CHUNK_BYTES,
+) -> tuple[list[tuple[int, int, int, int]], bool]:
+    """``(run_lo, run_hi, start, emit_end)`` absolute byte tasks of ``chunk_bytes`` over the
+    unallocated cluster ``runs`` (``(first cluster, count)``), at most ``scan_limit`` bytes in all
+    (``None`` = all). Returns ``(tasks, truncated)``; ``truncated`` is true when the limit stopped it."""
+    tasks: list[tuple[int, int, int, int]] = []
+    budget = scan_limit
+    for first_cluster, count in runs:
+        lo = partition_offset + first_cluster * cluster_size
+        hi = lo + count * cluster_size
+        start = lo
+        while start < hi:
+            end = min(start + chunk_bytes, hi)
+            if budget is not None:
+                if budget <= 0:
+                    return tasks, True
+                if end - start > budget:
+                    end = start + budget
+            tasks.append((lo, hi, start, end))
+            if budget is not None:
+                budget -= end - start
+            start = end
+    return tasks, False
+
+
+def _scan_unallocated_batch(
+    image: str,
+    kinds: tuple[str, ...] | None,
+    tasks: Sequence[tuple[int, int, int, int]],
+    output_dir: str,
+    extract: bool,
+    max_carve_bytes: int,
+    max_candidates: int,
+    partition_offset: int,
+    cluster_size: int,
+) -> tuple[list[dict[str, object]], str | None]:
+    """Scan a batch of chunk tasks (runs in a worker process or thread; opens the image itself).
+
+    Entries keep their ``_CLAIM_END`` so the caller can apply range claims across chunks."""
+    from .e01_native import EwfSectorReader, NativeImageError, open_image_media
+
+    signatures = _select_signatures(kinds)
+    entries: list[dict[str, object]] = []
+    image_path = Path(image)
+    try:
+        with contextlib.ExitStack() as stack:
+            try:
+                handle, _kind = stack.enter_context(open_image_media(image_path))
+            except NativeImageError as exc:
+                return entries, str(exc)
+            reader = EwfSectorReader(handle)
+            for run_lo, run_hi, start, emit_end in tasks:
+                view = _RunView(reader, run_lo, run_hi)
+                view.seek(start)
+                buffer = view.read(min(emit_end + SCAN_OVERLAP_BYTES, run_hi) - start)
+                claims = _Claims()
+                counted = 0
+                probes: dict[tuple[int, int], bytes] = {}
+                for offset, _tie, index in _buffer_matches(buffer, start, signatures):
+                    if offset < start or offset >= emit_end:
+                        continue
+                    if counted >= max_candidates:
+                        break
+                    signature = signatures[index]
+                    if claims.covers(signature.group, offset):
+                        continue
+                    key = (offset, signature.probe_bytes)
+                    probe = probes.get(key)
+                    if probe is None:
+                        local = offset - start
+                        if local + signature.probe_bytes <= len(buffer):
+                            probe = buffer[local : local + signature.probe_bytes]
+                        else:
+                            view.seek(offset)
+                            probe = view.read(signature.probe_bytes)
+                        probes = {key: probe}
+                    entry = _build_candidate_entry(
+                        view,
+                        path=image_path,
+                        file_size=run_hi,
+                        offset=offset,
+                        signature=signature,
+                        output_dir=Path(output_dir),
+                        extract=extract,
+                        max_carve_bytes=max_carve_bytes,
+                        probe=probe,
+                    )
+                    if entry is None:
+                        continue
+                    claims.claim(signature, entry)
+                    entry["cluster"] = (offset - partition_offset) // cluster_size
+                    counted += 1
+                    entries.append(entry)
+    except OSError as exc:
+        return entries, f"read-error:{exc}"
+    return entries, None
+
+
+def _carve_workers(workers: int | None) -> int:
+    if workers is not None and workers > 0:
+        return workers
+    raw = os.environ.get(CARVE_PROCS_ENV, "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return max(2, (os.cpu_count() or 2) // 2)
+
+
+def _run_batches(
+    batches: Sequence[Sequence[tuple[int, int, int, int]]],
+    workers: int,
+    common: tuple,
+    check_cancel: Callable[[], None] | None,
+) -> list[tuple[list[dict[str, object]], str | None]]:
+    """Batch results in batch order. Process pool (spawn); threads when the pool cannot run."""
+    if workers <= 1 or len(batches) <= 1:
+        results = []
+        for batch in batches:
+            if check_cancel is not None:
+                check_cancel()
+            results.append(_scan_unallocated_batch(common[0], common[1], batch, *common[2:]))
+        return results
+    for pool_factory in (
+        lambda: futures.ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn")),
+        lambda: futures.ThreadPoolExecutor(max_workers=workers),
+    ):
+        try:
+            with pool_factory() as pool:
+                pending = [pool.submit(_scan_unallocated_batch, common[0], common[1], batch, *common[2:]) for batch in batches]
+                results = []
+                for item in pending:
+                    if check_cancel is not None:
+                        check_cancel()
+                    results.append(item.result())
+                return results
+        except (BrokenProcessPool, OSError, PermissionError, RuntimeError, ImportError):
+            continue
+    raise CarvingError("carving worker pool could not run")
+
+
+def run_unallocated_carving(
+    image: Path,
+    output_dir: Path,
+    *,
+    recovery: bool = False,
+    partition_start_sector: int | None = None,
+    extract: bool = False,
+    max_scan_bytes: int | None = None,
+    max_carve_bytes: int = DEFAULT_MAX_CARVE_BYTES,
+    max_candidates: int | None = None,
+    kinds: Sequence[str] | None = None,
+    workers: int | None = None,
+    check_cancel: Callable[[], None] | None = None,
+) -> dict[str, object]:
+    """Carve only the unallocated clusters (``$Bitmap``) of the NTFS volume in ``image``.
+
+    Unallocated runs are split into ``SCAN_CHUNK_BYTES`` chunks (``SCAN_OVERLAP_BYTES`` overlap)
+    scanned in parallel (spawn process pool, threads as fallback). ``recovery=True`` scans all
+    unallocated clusters and raises the candidate cap to ``RECOVERY_MAX_CANDIDATES``; otherwise the
+    default caps apply. Explicit ``max_scan_bytes`` / ``max_candidates`` win. Every cap that
+    stops the scan is reported through ``core.coverage.record_coverage``. Entry ``offset`` is the
+    absolute image byte offset."""
+    from .ntfs_unalloc import NtfsUnallocError, open_unallocated_image
+
+    if max_scan_bytes is None and not recovery:
+        max_scan_bytes = DEFAULT_MAX_SCAN_BYTES
+    if max_candidates is None:
+        max_candidates = RECOVERY_MAX_CANDIDATES if recovery else DEFAULT_MAX_CANDIDATES
+    if (max_scan_bytes is not None and max_scan_bytes < 1) or max_carve_bytes < 1 or max_candidates < 1:
+        raise CarvingError("carving caps must be positive integers")
+    image = Path(image)
+    if not image.is_file():
+        raise CarvingError(f"carving image does not exist: {image}")
+    output_dir = output_dir.expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    carved_dir = output_dir / "carved"
+    if extract:
+        carved_dir.mkdir(parents=True, exist_ok=True)
+    kind_tuple = tuple(kinds) if kinds else None
+    _select_signatures(kind_tuple)  # unknown kinds fail here, not in a worker
+
+    try:
+        with open_unallocated_image(
+            image,
+            partition_start_sector=partition_start_sector,
+            work_dir=output_dir / "unalloc",
+            check_cancel=check_cancel,
+        ) as source:
+            runs = list(source.runs.runs)
+            partition_offset = source.partition_offset
+            cluster_size = source.cluster_size
+            info = {
+                "image_media_kind": source.media_kind,
+                "bitmap_method": source.bitmap_method,
+                "partition_start_sector": source.partition.get("start_sector"),
+                "cluster_size": cluster_size,
+                "total_clusters": source.total_clusters,
+                "unallocated_bytes": source.unallocated_bytes,
+                "run_count": len(runs),
+                "runs_truncated": source.runs.truncated,
+            }
+    except NtfsUnallocError as exc:
+        raise CarvingError(str(exc)) from exc
+
+    unallocated_bytes = int(info["unallocated_bytes"])  # type: ignore[call-overload]
+    if info["runs_truncated"]:
+        from .ntfs_unalloc import MAX_RUNS
+
+        record_coverage(COVERAGE_AREA, "unallocated_run_cap", MAX_RUNS, None, "runs")
+    tasks, scan_truncated = plan_unallocated_tasks(
+        runs, partition_offset=partition_offset, cluster_size=cluster_size, scan_limit=max_scan_bytes,
+        chunk_bytes=SCAN_CHUNK_BYTES,
+    )
+    if scan_truncated:
+        record_coverage(COVERAGE_AREA, "scan_bytes_cap", max_scan_bytes, unallocated_bytes, "bytes")
+    scanned_bytes = sum(emit_end - start for _lo, _hi, start, emit_end in tasks)
+
+    worker_count = _carve_workers(workers)
+    per_batch = max(1, -(-len(tasks) // (worker_count * 2))) if tasks else 1
+    batches = [tasks[index : index + per_batch] for index in range(0, len(tasks), per_batch)]
+    common = (
+        str(image), kind_tuple, str(carved_dir), extract, max_carve_bytes, max_candidates, partition_offset, cluster_size
+    )
+    results = _run_batches(batches, worker_count, common, check_cancel) if batches else []
+
+    # Merge in offset order and apply range claims across chunk boundaries (a docx spanning chunks
+    # claims its member entries, the same rule a single-pass scan applies).
+    by_kind = {signature.kind: signature for signature in reversed(SIGNATURES)}
+    claims = _Claims()
+    entries: list[dict[str, object]] = []
+    skipped: list[dict[str, object]] = []
+    found = 0
+    for batch_entries, error in results:
+        if error:
+            skipped.append({"path": str(image), "reason": error})
+        for entry in batch_entries:
+            signature = by_kind[str(entry["kind"])]
+            extracted = entry.get("extracted_path")
+            if claims.covers(signature.group, int(entry["offset"])):  # type: ignore[arg-type]
+                if extracted:
+                    Path(str(extracted)).unlink(missing_ok=True)
+                continue
+            claims.claim(signature, entry)
+            entry.pop(_CLAIM_END, None)
+            found += 1
+            if len(entries) >= max_candidates:
+                if extracted:
+                    Path(str(extracted)).unlink(missing_ok=True)
+                continue
+            entries.append(entry)
+    candidate_capped = found > len(entries) or any(len(batch_entries) >= max_candidates for batch_entries, _e in results)
+    if candidate_capped:
+        record_coverage(COVERAGE_AREA, "candidate_cap", max_candidates, found, "candidates")
+
+    payload: dict[str, object] = {
+        "command": "carve",
+        "mode": "unallocated",
+        "root": str(image),
+        "input_kind": "image",
+        "generated_at": dt.datetime.now().isoformat(),
+        "output_dir": str(output_dir),
+        "safety": {
+            "extract": extract,
+            "recovery": recovery,
+            "max_scan_bytes": max_scan_bytes,
+            "max_carve_bytes": max_carve_bytes,
+            "max_candidates": max_candidates,
+            "signature_kinds": [signature.kind for signature in _select_signatures(kind_tuple)],
+            "scan_chunk_bytes": SCAN_CHUNK_BYTES,
+            "scan_overlap_bytes": SCAN_OVERLAP_BYTES,
+            "workers": worker_count,
+        },
+        "unallocated": {**info, "scanned_bytes": scanned_bytes, "scan_truncated": scan_truncated, "chunk_count": len(tasks)},
+        "summary": {
+            "scanned_file_count": 1,
+            "scanned_byte_count": scanned_bytes,
+            "candidate_count": len(entries),
+            "candidate_cap_reached": candidate_capped,
+            "candidate_kind_counts": count_candidate_kinds(entries),
+            "extracted_count": sum(1 for entry in entries if entry.get("extracted_path")),
+            "rejected_count": sum(1 for entry in entries if entry.get("status") == STATUS_REJECTED),
+            "skipped_count": len(skipped),
+            "kind_counts": count_kinds(entries),
+            "status_counts": count_statuses(entries),
+        },
+        "entries": entries,
+        "skipped": skipped,
+    }
+    write_result(payload, output_dir / "rapidtriage-carve.json")
     return payload
 
 
