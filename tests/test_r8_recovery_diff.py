@@ -32,6 +32,17 @@ class MatchEntriesTest(unittest.TestCase):
         self.assertIsNone(result["deleted_recall"])
         self.assertEqual(result["rapid_only"], 1)
 
+    def test_deleted_entries_match_by_address(self) -> None:
+        rapid = [
+            mod.rapid_key("_deleted_mft/42-report.docx"),
+            mod.rapid_key("_deleted/Users/7-a.txt"),
+            mod.rapid_key("Users/a.txt"),
+        ]
+        result = mod.match_entries(["/Users/a.txt"], [mod.deleted_key(42), mod.deleted_key(9)], rapid)
+        self.assertEqual(result["rapid_deleted_matched"], 1)
+        self.assertEqual(result["deleted_recall"], 0.5)
+        self.assertEqual(result["allocated_recall"], 1.0)
+
     def test_strip_run_prefix(self) -> None:
         self.assertEqual(mod.strip_run_prefix("_e01/fs/Users/a.txt"), "Users/a.txt")
         self.assertEqual(mod.strip_run_prefix("_e01\\filesystem\\Users\\a.txt"), "Users/a.txt")

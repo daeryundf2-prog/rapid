@@ -88,12 +88,31 @@ def load_rapid_paths(run_dir: Path) -> list[str]:
     for item in iter_extracted_files(run_dir):
         stripped = strip_run_prefix(item.relative_path)
         if stripped:
-            paths.append(stripped)
+            paths.append(rapid_key(stripped))
     return paths
 
 
-def walk_filesystem(fs, max_entries: int | None) -> tuple[list[str], list[str]]:
-    """Return (allocated paths, deleted paths) of regular files; loop-guarded by inode."""
+def deleted_key(address: int) -> str:
+    """Deleted entries are matched by metadata address (MFT record / inode), not by path:
+    rapid writes them as _deleted_mft/<addr>-<name> or _deleted/.../<addr>-<name>."""
+    return f"#deleted/{int(address)}"
+
+
+_RAPID_DELETED = re.compile(r"^(?:_deleted_mft|_deleted)/(?:.*/)?(\d+)-[^/]*$")
+
+
+def rapid_key(path: str) -> str:
+    match = _RAPID_DELETED.match(path.replace("\\", "/"))
+    return deleted_key(int(match.group(1))) if match else path
+
+
+def walk_filesystem(
+    fs, max_entries: int | None, counters: dict[str, int] | None = None
+) -> tuple[list[str], list[str]]:
+    """Return (allocated paths, deleted address keys) of regular files; loop-guarded by inode.
+
+    Deleted names whose metadata is gone (meta is None) cannot be recovered by any tool; they are
+    counted in counters["ref_deleted_name_only"] instead of the recall denominator."""
     import pytsk3
 
     allocated: list[str] = []
@@ -106,7 +125,11 @@ def walk_filesystem(fs, max_entries: int | None) -> tuple[list[str], list[str]]:
         for entry in directory:
             name_info = entry.info.name
             meta = entry.info.meta
-            if name_info is None or meta is None:
+            if name_info is None:
+                continue
+            if meta is None:
+                if counters is not None and int(name_info.flags) & pytsk3.TSK_FS_NAME_FLAG_UNALLOC:
+                    counters["ref_deleted_name_only"] = counters.get("ref_deleted_name_only", 0) + 1
                 continue
             name = name_info.name.decode("utf-8", errors="replace")
             if name in (".", ".."):
@@ -125,7 +148,10 @@ def walk_filesystem(fs, max_entries: int | None) -> tuple[list[str], list[str]]:
                 except OSError:
                     pass
             elif meta.type == pytsk3.TSK_FS_META_TYPE_REG:
-                (deleted if is_deleted else allocated).append(path)
+                if is_deleted:
+                    deleted.append(deleted_key(meta.addr))
+                else:
+                    allocated.append(path)
             if max_entries is not None and len(allocated) + len(deleted) >= max_entries:
                 return allocated, deleted
     return allocated, deleted
@@ -184,8 +210,10 @@ def diff_partition(img, index: int, start_sector: int, offset: int, rapid_paths:
         return row
     try:
         row["fs_type"] = str(fs.info.ftype).rsplit("_", 1)[-1].lower().removeprefix("tsk_fs_type_")
-        allocated, deleted = walk_filesystem(fs, max_entries)
+        counters: dict[str, int] = {"ref_deleted_name_only": 0}
+        allocated, deleted = walk_filesystem(fs, max_entries, counters)
         row.update(match_entries(allocated, deleted, rapid_paths))
+        row.update(counters)
         row["status"] = "ok"
     except Exception as exc:
         row.update(status="error", error_kind=type(exc).__name__)
