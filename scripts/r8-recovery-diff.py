@@ -200,6 +200,28 @@ def enumerate_partitions(img) -> list[tuple[int, int, int]]:
     return result
 
 
+def scan_unallocated_inodes(fs, max_entries: int | None) -> list[str]:
+    """Deleted regular files found by visiting every metadata entry (like Sleuth Kit ``ils``).
+
+    Independent of directories, so it also covers deleted NTFS files whose parent is gone; TSK's
+    $OrphanFiles directory cannot always be opened on real volumes."""
+    import pytsk3
+
+    found: list[str] = []
+    for inum in range(int(fs.info.first_inum), int(fs.info.last_inum) + 1):
+        try:
+            meta = fs.open_meta(inode=inum).info.meta
+        except OSError:
+            continue
+        if meta is None or meta.type != pytsk3.TSK_FS_META_TYPE_REG:
+            continue
+        if int(meta.flags) & pytsk3.TSK_FS_META_FLAG_UNALLOC:
+            found.append(deleted_key(inum))
+            if max_entries is not None and len(found) >= max_entries:
+                break
+    return found
+
+
 def diff_partition(img, index: int, start_sector: int, offset: int, rapid_paths: list[str], max_entries: int | None):
     import pytsk3
 
@@ -213,6 +235,11 @@ def diff_partition(img, index: int, start_sector: int, offset: int, rapid_paths:
         row["fs_type"] = str(fs.info.ftype).rsplit("_", 1)[-1].lower().removeprefix("tsk_fs_type_")
         counters: dict[str, int] = {"ref_deleted_name_only": 0}
         allocated, deleted = walk_filesystem(fs, max_entries, counters)
+        if int(fs.info.ftype) & int(pytsk3.TSK_FS_TYPE_NTFS):
+            deleted = sorted(set(deleted) | set(scan_unallocated_inodes(fs, max_entries)))
+            row["deleted_reference"] = "directory-walk+mft-scan"
+        else:
+            row["deleted_reference"] = "directory-walk"
         row.update(match_entries(allocated, deleted, rapid_paths))
         row.update(counters)
         row["status"] = "ok"
