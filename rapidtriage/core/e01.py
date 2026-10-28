@@ -1655,6 +1655,7 @@ def extract_e01_to_directory(
         source_signature=source_signature,
         requested_start_sector=partition_start_sector,
         extract_dir=extract_dir,
+        run_mode=run_mode,
     ):
         partition_selection = dict(checkpoint.get("partition_selection") or {})
         partition_table = list(checkpoint.get("partition_table") or [])
@@ -1868,6 +1869,7 @@ def extract_e01_to_directory(
         "profile_version": E01_STAGE_CHECKPOINT_VERSION,
         "source_signature": source_signature,
         "requested_start_sector": partition_start_sector,
+        "extraction_mode": e01_extraction_mode(run_mode),
         "segment_set_profile": segment_set_profile,
         "recovery_scope": recovery_scope,
         "mount_strategy": mount_strategy,
@@ -2152,6 +2154,7 @@ def _extract_e01_native_fallback(
         "profile_version": E01_STAGE_CHECKPOINT_VERSION,
         "source_signature": source_signature,
         "requested_start_sector": partition_start_sector,
+        "extraction_mode": e01_extraction_mode(run_mode),
         "segment_set_profile": segment_set_profile,
         "recovery_scope": recovery_scope,
         "mount_strategy": NATIVE_MOUNT_STRATEGY,
@@ -2383,6 +2386,11 @@ def write_e01_stage_checkpoint(path: Path, payload: Mapping[str, object]) -> Non
     temp_path.replace(path)
 
 
+def e01_extraction_mode(run_mode: str | None) -> str:
+    """Resume-fingerprint key of ``run_mode``: ``recovery`` (unbounded sweep) or ``bounded``."""
+    return "recovery" if run_mode == "recovery" else "bounded"
+
+
 def tsk_recover_tool_inputs_match(tool_inputs: Mapping[str, object]) -> bool:
     recovery_scope = tool_inputs.get("recovery_scope")
     if not isinstance(recovery_scope, Mapping):
@@ -2398,8 +2406,13 @@ def e01_checkpoint_resume_ready(
     source_signature: Mapping[str, object],
     requested_start_sector: int | None,
     extract_dir: Path,
+    run_mode: str | None = None,
 ) -> bool:
     if checkpoint.get("profile_version") != E01_STAGE_CHECKPOINT_VERSION:
+        return False
+    # A stage dir extracted with bounded caps must not stand in for a recovery run (and vice versa);
+    # checkpoints written before the key existed were bounded.
+    if str(checkpoint.get("extraction_mode") or "bounded") != e01_extraction_mode(run_mode):
         return False
     if not checkpoint.get("completed") or not checkpoint.get("resume_ready"):
         return False

@@ -382,7 +382,7 @@ def handle_ntfs_meta(args: argparse.Namespace, parser: argparse.ArgumentParser, 
             payload["parse"] = _run_ntfs_metadata_parse(payload)
 
         manifest_path = Path(str(payload["manifest_path"]))
-        write_result(payload, manifest_path)
+        write_result(payload, manifest_path, indent=None)
         audit_output = audit_path_for(manifest_path)
         write_audit_record(
             audit_output,

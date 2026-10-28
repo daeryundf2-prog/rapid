@@ -43,12 +43,12 @@ from ..audit import (
     compute_sha256,
     write_audit_record,
 )
-from ..carving import CarvingError, run_bounded_carving
+from ..carving import CarvingError, run_bounded_carving, run_unallocated_carving
 from ..columnar_store import (
     ColumnarStoreUnavailable,
     convert_jsonl_to_parquet,
 )
-from ..coverage import coverage_entries, reset_coverage
+from ..coverage import coverage_entries, record_coverage, reset_coverage
 from ..derived.stage import run_derived_stage
 from ..disk_image import (
     DiskImageExtractionError,
@@ -561,6 +561,8 @@ def run_triage_mode(
             input_kind=input_kind,
             output_dir=output_dir,
             e01_partition_start_sector=e01_partition_start_sector,
+            # Only recovery changes E01 extraction (unbounded deleted sweep); bounded modes keep the default.
+            run_mode="recovery" if normalized_mode == "recovery" else None,
         )
         progress.set_run_root(str(input_root.root_path))
         if image_result is None:
@@ -983,7 +985,7 @@ def _run_triage_stages(
     else:
         # Built after a cancelled/skipped provider: never reused by a later --resume.
         mark_inputs_partial(manifest_payload, partial_provider_kinds(progress.plan_snapshot()))
-    write_result(manifest_payload, manifest_path)
+    write_result(manifest_payload, manifest_path, indent=None)
     record_run_checkpoint(checkpoint_records, "manifest", manifest_path, reused=reused)
     finish_stage("manifest")
     # docs.json carries only per-provider counts; the full artifact rows live
@@ -1142,8 +1144,23 @@ def _run_triage_stages(
         record_run_checkpoint(checkpoint_records, "carve", carve_output_path, reused=False)
         finish_stage("carve")
 
-    write_result(docs_payload, docs_path)
-    write_result(files_payload, files_path)
+    # R8: unallocated-cluster carving over the E01 image itself (recovery mode, or --carve).
+    unallocated_carve_step: dict[str, object] | None = None
+    unallocated_carve_dir = output_dir / UNALLOCATED_CARVE_DIR_NAME
+    if (
+        isinstance(image_result, E01ExtractionResult)
+        and (normalized_mode == "recovery" or carve)
+        and not (carve and carve_planned is not None)
+    ):
+        unallocated_carve_step = run_unallocated_carving_stage(
+            image_result,
+            unallocated_carve_dir,
+            recovery=normalized_mode == "recovery",
+            extract=extract_enabled,
+        )
+
+    write_result(docs_payload, docs_path, indent=None)
+    write_result(files_payload, files_path, indent=None)
 
     progress.begin_stage("extract")
     extract_planned = (
@@ -1450,6 +1467,8 @@ def _run_triage_stages(
         outputs["evidence_delta"] = output_dir / EVIDENCE_DELTA_MANIFEST_NAME
     if carve_payload is not None:
         outputs["carve"] = carve_output_path
+    if unallocated_carve_step is not None:
+        outputs["carve_unallocated"] = Path(str(unallocated_carve_step["output"]))
     mobile_inner_index = output_dir / MOBILE_INNER_DIR_NAME / MOBILE_INNER_INDEX_NAME
     if mobile_inner_index.is_file():
         # R6 S2: index of the adb inner-database copies (label_ko "해제 사본, 증거 아님").
@@ -1527,7 +1546,12 @@ def _run_triage_stages(
         },
         rule_set=rule_set,
         source=build_run_source_record(input_root, image_result=image_result, outputs=outputs),
-        extra_steps=[*planned_out_steps, triage_step, derived_step],
+        extra_steps=[
+            *planned_out_steps,
+            *([unallocated_carve_step] if unallocated_carve_step is not None else []),
+            triage_step,
+            derived_step,
+        ],
         plan=final_plan,
     )
     audit_output = output_dir / "rapidtriage-run-audit.json"
@@ -1543,6 +1567,16 @@ def _run_triage_stages(
                 "Signature carving over the scan root is a bounded triage aid; "
                 "candidates are not validated against unallocated space."
             ),
+        }
+    if unallocated_carve_step is not None:
+        summary_payload["carving_unallocated"] = {
+            "enabled": True,
+            "output": unallocated_carve_step["output"],
+            "summary": {
+                "candidate_count": unallocated_carve_step["candidate_count"],
+                "extracted_count": unallocated_carve_step["extracted_count"],
+            },
+            "partitions": unallocated_carve_step["partitions"],
         }
     summary_payload["coverage"] = coverage_entries()
     memory_cap_manifest = summary_payload.get("processing", {}).get("memory_cap_enforcement", {}).get(
@@ -2189,12 +2223,106 @@ def timed_artifact_collection(
     return payload, started_at, completed_at, duration_ms
 
 
+UNALLOCATED_CARVE_DIR_NAME = "carve-unallocated"
+UNALLOCATED_CARVE_INDEX_NAME = "rapidtriage-carve-unallocated.json"
+
+
+def unallocated_carve_targets(image_result: E01ExtractionResult) -> list[dict[str, object]]:
+    """NTFS partitions of an E01 extraction to carve: ``{start_sector, partition_number}`` rows.
+
+    Native extraction lists every extracted partition; non-NTFS ones (no ``$Bitmap``) are reported
+    through ``record_coverage`` and left out. The external-tool path has one selected partition."""
+    rows = image_result.recovered_root_manifest.get("native_extracted_partitions")
+    if not isinstance(rows, list) or not rows:
+        return [{"start_sector": image_result.partition_start_sector, "partition_number": None}]
+    targets: list[dict[str, object]] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        start_sector = int(row.get("start_sector") or 0)
+        if str(row.get("filesystem") or "") != "ntfs":
+            record_coverage("carving.unallocated", "unsupported_filesystem", None, start_sector, "start_sector")
+            continue
+        targets.append({"start_sector": start_sector, "partition_number": row.get("partition_number")})
+    return targets
+
+
+def run_unallocated_carving_stage(
+    image_result: E01ExtractionResult,
+    carve_dir: Path,
+    *,
+    recovery: bool,
+    extract: bool,
+) -> dict[str, object]:
+    """Carve the unallocated clusters of every NTFS partition of the E01 image into ``carve_dir``.
+
+    One partition writes ``carve_dir/rapidtriage-carve.json``; several write ``carve_dir/p<n>/``.
+    A partition that cannot be carved is a failed row, not a failed run. Caps flow through
+    ``record_coverage`` inside ``run_unallocated_carving``. Returns the summary step row."""
+    started = time.perf_counter()
+    raw_image = Path(image_result.raw_image_path)
+    image = raw_image if raw_image.is_file() else Path(image_result.source_path)
+    targets = unallocated_carve_targets(image_result)
+    multi = len(targets) > 1
+    partitions: list[dict[str, object]] = []
+    for target in targets:
+        part_dir = carve_dir / f"p{target['partition_number']}" if multi else carve_dir
+        row: dict[str, object] = {**target, "output": str(part_dir / "rapidtriage-carve.json")}
+        try:
+            payload = run_unallocated_carving(
+                image,
+                part_dir,
+                recovery=recovery,
+                partition_start_sector=target["start_sector"],  # type: ignore[arg-type]
+                extract=extract,
+            )
+        except CarvingError as exc:
+            partitions.append({**row, "status": "failed", "error": str(exc), "candidate_count": 0, "extracted_count": 0})
+            continue
+        summary = payload.get("summary")
+        summary = summary if isinstance(summary, Mapping) else {}
+        partitions.append(
+            {
+                **row,
+                "status": "completed",
+                "candidate_count": int(summary.get("candidate_count") or 0),
+                "extracted_count": int(summary.get("extracted_count") or 0),
+                "candidate_cap_reached": bool(summary.get("candidate_cap_reached")),
+            }
+        )
+    failed = [row for row in partitions if row["status"] == "failed"]
+    if not partitions or len(failed) == len(partitions):
+        status = "failed"
+    else:
+        status = "partial" if failed else "completed"
+    index_path = carve_dir / UNALLOCATED_CARVE_INDEX_NAME
+    step: dict[str, object] = {
+        "name": "carve-unallocated",
+        "status": status,
+        "output": str(index_path),
+        "image": str(image),
+        "recovery": recovery,
+        "candidate_count": sum(int(row["candidate_count"]) for row in partitions),  # type: ignore[call-overload]
+        "extracted_count": sum(int(row["extracted_count"]) for row in partitions),  # type: ignore[call-overload]
+        "partitions": partitions,
+        "elapsed_seconds": round(time.perf_counter() - started, 3),
+    }
+    messages = [f"비할당 카빙 실패 (시작 섹터 {row['start_sector']}): {row['error']}" for row in failed]
+    if not partitions:
+        messages.append("비할당 카빙 대상 NTFS 파티션이 없습니다.")
+    annotate_step(step, warning_level="warning" if messages else "none", warning_messages=messages)
+    carve_dir.mkdir(parents=True, exist_ok=True)
+    write_result(step, index_path)
+    return step
+
+
 def prepare_run_input_root(
     root: InputRoot | Path,
     *,
     input_kind: str | None,
     output_dir: Path,
     e01_partition_start_sector: int | None = None,
+    run_mode: str | None = None,
 ) -> tuple[
     InputRoot,
     E01ExtractionResult | DiskImageExtractionResult | ArchiveImageExtractionResult | VirtualDiskExtractionResult | None,
@@ -2209,6 +2337,7 @@ def prepare_run_input_root(
                 root_path,
                 output_dir / "_e01",
                 partition_start_sector=e01_partition_start_sector,
+                **({"run_mode": run_mode} if run_mode is not None else {}),
             )
         except E01ExtractionError as exc:
             guidance = e01_failure_guidance(str(exc))

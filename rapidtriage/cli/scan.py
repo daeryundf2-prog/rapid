@@ -197,7 +197,7 @@ def handle_extract(args: argparse.Namespace, parser: argparse.ArgumentParser, ru
             )
         except ExtractError as exc:
             parser.error(str(exc))
-        write_result(payload, manifest_output)
+        write_result(payload, manifest_output, indent=None)
         audit_output = audit_path_for(manifest_output)
         write_audit_record(
             audit_output,

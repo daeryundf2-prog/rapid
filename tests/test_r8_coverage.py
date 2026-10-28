@@ -17,7 +17,10 @@ TEST_API_TOKEN = "rapidtriage-test-token"
 
 
 class _FakeSectorReader:
-    """Stands in for EwfSectorReader: the boot sector carries an exFAT OEM id."""
+    """Stands in for EwfSectorReader: the boot sector carries no filesystem signature at all.
+
+    exFAT/FAT/ext/NTFS are all extractable now, so the fixture is a genuinely unknown volume
+    (no OEM id, no 0x55AA boot signature, no ext superblock magic)."""
 
     def __init__(self, handle, base=0, size=None):
         pass
@@ -26,7 +29,7 @@ class _FakeSectorReader:
         return 0
 
     def read(self, size=-1):
-        return b"\x00" * 3 + b"EXFAT   " + b"\x00" * (size - 11)
+        return b"\x00" * 3 + b"UNKNOWN!" + b"\x00" * (size - 11)
 
 
 class CoverageCollectorTests(unittest.TestCase):
@@ -95,7 +98,7 @@ class NativeE01CoverageTests(unittest.TestCase):
             "sector_count": 1000,
             "byte_offset": 2048 * 512,
             "size_bytes": 512000,
-            "description": "Basic data partition",
+            "description": "Unknown partition type 0x7f",
             "partition_number": 1,
         }
         with tempfile.TemporaryDirectory() as tmp, patch.object(
@@ -105,7 +108,7 @@ class NativeE01CoverageTests(unittest.TestCase):
         ), patch.object(
             e01_native, "EwfSectorReader", _FakeSectorReader
         ):
-            with self.assertRaises(ValueError):
+            with self.assertRaisesRegex(ValueError, "filesystem signature 'unknown'"):
                 e01_native.extract_e01_native(
                     Path(tmp) / "image.E01",
                     [Path(tmp) / "image.E01"],
