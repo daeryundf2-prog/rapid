@@ -158,6 +158,15 @@ describe("tree auto-fold (plan r7 §3.2 L2, r7 S2 regression)", () => {
     expect(tree()).toBe(false);
   });
 
+  it("moving to the review stage of the same run unfolds the tree", () => {
+    renderLayout();
+    act(() => selectRow());
+    expect(tree()).toBe(true);
+    act(() => useAppStore.getState().navigate({ runId: "r1", collection: "review" }));
+    expect(tree()).toBe(false);
+    expect(useAppStore.getState().treeAutoFolded).toBe(false);
+  });
+
   it("closing the viewer unfolds it; a fold the analyst chose in between stays", () => {
     renderLayout();
     act(() => selectRow());

@@ -33,7 +33,8 @@ describe("C1 tree panel scrolls its list, not the frame", () => {
       "min-height": "0",
       display: "flex",
     });
-    expect(rule(tree, '.evidence-tree > ul[role="tree"]')).toMatchObject({
+    // The virtualized tree scrolls its .evidence-tree-scroll wrapper (rows are positioned inside the list).
+    expect(rule(tree, ".evidence-tree > .evidence-tree-scroll")).toMatchObject({
       "overflow-y": "auto",
       "min-height": "0",
       "overscroll-behavior": "contain",
