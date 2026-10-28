@@ -107,7 +107,7 @@ DIGEST_ALGORITHMS = ("md5", "sha1", "sha256")
 
 
 def native_extract_worker_count() -> int:
-    """Extraction worker count: env override, else ``min(8, cpu_count)``."""
+    """Extraction worker count: env override, else 2 (see the note below)."""
     raw = os.environ.get(NATIVE_E01_WORKERS_ENV, "").strip()
     if raw:
         try:
@@ -116,7 +116,11 @@ def native_extract_worker_count() -> int:
                 return value
         except ValueError:
             pass
-    return max(1, min(8, os.cpu_count() or 1))
+    # Jobs run in on-disk (first LCN) order, so few readers stream the image instead of seeking.
+    # Measured on a real 126 GB E01 on a SATA HDD (scripts/r8-extract-timing.py, 120 s per mode,
+    # adjacent slices of the LCN-sorted job list): 8 workers 232 files/s, 2 workers 389 files/s;
+    # directory order with 8 workers reached 4.75 files/s. Raise it with RAPIDTRIAGE_E01_WORKERS on SSDs.
+    return 2
 
 
 def native_e01_available() -> bool:
@@ -550,6 +554,22 @@ class _ExtractJob:
     # recovery mode: keep the readable bytes of a damaged deleted record and flag it partial
     salvage: bool = False
     reallocated: bool = False
+    # first LCN of the non-resident unnamed $DATA stream (0 when resident/empty): on-disk order key
+    lcn: int = 0
+
+
+def _first_lcn(rec: Any) -> int:
+    """First on-disk cluster of ``rec``'s unnamed $DATA runs; 0 for resident, empty or sparse-only data."""
+    with contextlib.suppress(Exception):
+        for lcn, _count in rec.dataruns():
+            if lcn is not None:
+                return int(lcn)
+    return 0
+
+
+def _order_jobs_by_lcn(jobs: list[_ExtractJob]) -> list[_ExtractJob]:
+    """Jobs in ascending on-disk order so a spinning disk streams; ties keep planning order (stable)."""
+    return sorted(jobs, key=lambda job: job.lcn)
 
 
 # NTFS $FILE_NAME namespace of a DOS 8.3-only name (dissect.ntfs.c_ntfs.FILE_NAME_DOS).
@@ -611,7 +631,7 @@ def _plan_ntfs_dir(node: Any, out_dir: Path, stats: dict[str, int], jobs: list[_
                 if segment is None:
                     stats["errors"] += 1
                     continue
-                jobs.append(_ExtractJob(int(segment), target))
+                jobs.append(_ExtractJob(int(segment), target, lcn=_first_lcn(rec)))
         except Exception:
             stats["errors"] += 1
             continue
@@ -697,7 +717,7 @@ def _plan_deleted_mft_records(
             continue
         reallocated = bitmap is not None and _runs_reallocated(rec, bitmap)
         target = deleted_dir / f"{index}-{_safe_component(filename)}"
-        jobs.append(_ExtractJob(index, target, deleted=True, salvage=recovery, reallocated=reallocated))
+        jobs.append(_ExtractJob(index, target, deleted=True, salvage=recovery, reallocated=reallocated, lcn=_first_lcn(rec)))
         queued += 1
     if capped:
         record_coverage("e01_native.deleted_mft", "deleted-sweep-cap", limit, queued + capped, "files")
@@ -845,6 +865,8 @@ def _run_extract_jobs(
     digests: dict[str, dict[str, Any]] = {}
     if not jobs:
         return digests
+    # One shared FIFO queue in on-disk order: workers always take the lowest remaining offset next.
+    jobs = _order_jobs_by_lcn(jobs)
     pool = ThreadPoolExecutor(max_workers=max(1, min(workers, len(jobs))), thread_name_prefix="e01-extract")
     try:
         futures = [pool.submit(_extract_job, contexts, job) for job in jobs]
