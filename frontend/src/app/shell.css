@@ -918,6 +918,12 @@ kbd {
   z-index: 500;
 }
 
+/* The handle is anchored to the right edge: its disabled reason grows leftward, not off-screen. */
+.drawer-handle .command-with-reason {
+  align-items: flex-end;
+  text-align: right;
+}
+
 .viewer-drawer {
   position: absolute;
   top: 0;
