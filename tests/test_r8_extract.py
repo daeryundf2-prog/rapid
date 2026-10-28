@@ -79,6 +79,20 @@ class _Dir:
     def get(self, name):
         return self._children.get(name)
 
+    def iterdir(self):
+        """$I30 index entries, like dissect.ntfs: a file name plus a direct record reference."""
+        for name, child in self._children.items():
+            yield _Entry(name, child)
+
+
+class _Entry:
+    def __init__(self, name: str, record) -> None:
+        self.attribute = mock.Mock(file_name=name, flags=1)  # 1 = WIN32 namespace (long name)
+        self._record = record
+
+    def dereference(self):
+        return self._record
+
 
 def _make_ntfs(files: dict[int, _File], root: _Dir):
     class _Mft:

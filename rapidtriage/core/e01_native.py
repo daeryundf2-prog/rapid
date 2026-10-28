@@ -550,23 +550,43 @@ class _ExtractJob:
     reallocated: bool = False
 
 
+# NTFS $FILE_NAME namespace of a DOS 8.3-only name (dissect.ntfs.c_ntfs.FILE_NAME_DOS).
+_FILE_NAME_DOS = 2
+
+
+def _is_dos_name_entry(entry: Any) -> bool:
+    try:
+        return int(entry.attribute.flags) == _FILE_NAME_DOS
+    except Exception:
+        return False
+
+
 def _plan_ntfs_dir(node: Any, out_dir: Path, stats: dict[str, int], jobs: list[_ExtractJob], depth: int = 0, limit: int = 0) -> None:
     """Metadata-only twin of ``_walk_ntfs_dir``: collect file jobs instead of reading content."""
     if depth > 64:
         stats["depth_skips"] += 1
         return
+    # Read the $I30 index once and follow each entry's MFT reference directly. Resolving every
+    # name again with node.get(name) re-searched the index from this directory per entry, which
+    # made planning a large volume take hours before the first byte was extracted.
     try:
-        preferred_names = list(node.listdir(ignore_dos=True))
-        dos_only_names = [n for n in node.listdir() if n not in preferred_names]
+        entries = list(node.iterdir())
     except Exception:
         stats["errors"] += 1
         return
+    # Long names first; a DOS 8.3 alias only counts when its record has no long name.
+    entries.sort(key=lambda entry: _is_dos_name_entry(entry))
     seen_segments: set[int] = set()
-    for name in (*preferred_names, *dos_only_names):
+    for entry in entries:
+        try:
+            name = entry.attribute.file_name
+        except Exception:
+            stats["errors"] += 1
+            continue
         if name in (".", ".."):
             continue
         try:
-            rec = node.get(name)
+            rec = entry.dereference()
         except Exception:
             stats["errors"] += 1
             continue
