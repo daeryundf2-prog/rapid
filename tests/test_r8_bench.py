@@ -163,6 +163,16 @@ class R8BenchTest(unittest.TestCase):
 
         self.assertEqual(len(bench.snapshot_segments(self.image)), 2)
 
+    def test_snapshot_covers_ex01_and_post_e99_segments(self) -> None:
+        for name in ("case.Ex01", "case.EAA", "case.ExAA", "case.E99"):
+            (self.root / name).write_bytes(b"segment")
+        (self.root / "case.E100").write_bytes(b"ignored")
+        before = bench.snapshot_segments(self.image)
+
+        self.assertEqual(len(before), 5)
+        (self.root / "case.ExAA").write_bytes(b"segment-changed")
+        self.assertNotEqual(bench.snapshot_segments(self.image), before)
+
 
 if __name__ == "__main__":
     unittest.main()

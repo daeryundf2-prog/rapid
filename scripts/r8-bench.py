@@ -37,7 +37,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "r8-bench-v1"
-SEGMENT_SUFFIX_RE = re.compile(r"[Ee](0[1-9]|[1-9][0-9])")
+# E01..E99, EAA..EZZ, and the Ex01.. / ExAA.. variants. Letter suffixes are uppercase-only, so
+# lowercase ordinary extensions such as .eml or .exe do not match; uppercase three-letter
+# extensions such as .EML could still match and are snapshotted as extra (harmless) entries.
+SEGMENT_SUFFIX_RE = re.compile(r"[Ee](?:0[1-9]|[1-9][0-9]|[A-Z]{2})|[Ee][Xx](?:0[1-9]|[1-9][0-9]|[A-Z]{2})")
 SAMPLE_INTERVAL_S = 2.0
 EXIT_SEGMENTS_CHANGED = 3
 
@@ -52,7 +55,7 @@ def image_set_id(image: Path) -> str:
 
 
 def snapshot_segments(image: Path) -> list[list[int]]:
-    """Size and mtime (ns) of every E01..E99 segment sharing the image stem, name-sorted."""
+    """Size and mtime (ns) of every EWF segment sharing the image stem, name-sorted."""
     names = {image.name}
     for entry in image.parent.iterdir():
         if (
