@@ -264,7 +264,7 @@ def build_manifest(
             check_cancel=cancel_checker(progress_key) if callable(cancel_checker) else None,
             on_rows=rows_reporter(progress_key) if callable(rows_reporter) else None,
         )
-        write_result(payload, output_path)
+        write_result(payload, output_path, indent=None)
         row = manifest_summary_row(provider, payload, output_path=output_path)
         summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
         if summary.get("provider_stop_timeout"):
@@ -855,7 +855,8 @@ def search_docs_index_payload(
 def write_result(payload: dict[str, object], output: Path, *, indent: int | None = 2) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", encoding="utf-8", buffering=4 * 1024 * 1024) as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=indent, default=json_default)
+        separators = (",", ":") if indent is None else None
+        json.dump(payload, handle, ensure_ascii=False, indent=indent, separators=separators, default=json_default)
         handle.write("\n")
 
 
