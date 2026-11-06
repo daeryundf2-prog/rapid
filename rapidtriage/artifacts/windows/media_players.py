@@ -21,7 +21,14 @@ MRU / playlist / last-play (``extraction: path-like-value-scan``). Such a
 row says "this path was in the player's recent list", never when it played:
 the list's own record time (ini modification time, registry key LastWrite)
 is kept as ``list_last_written`` — an upper bound for the newest entry, not
-a per-entry time — and the row-level ``timestamp`` stays empty.
+a per-entry time — and the row-level ``timestamp`` stays empty. Registry rows also carry
+the key time as ``key_last_written_at`` (+ ``key_path``), which the timeline maps as one
+``last-written`` event per key (``scope="key"``), like the other registry LastWrite rows.
+
+GOM Player ``_RECENTMEDIANAME#`` rows (hash only) carry the same-index companions observed on
+real hives (R6 S1): ``_RECENTMEDIAPOS#`` (``resume_position_raw`` / ``_raw_value``, unit
+unconfirmed), ``_RECENTMEDIAAUDIOINDEX#`` (``audio_index_raw``) and
+``_RECENTMEDIAAUDIOINDEXDVD#`` (``audio_index_dvd_raw``).
 
 Rows: ``media-player-recent`` (one per listed media path/URL),
 ``media-player-inventory`` (one per player per user: sources, counts, caps,
@@ -62,6 +69,8 @@ QT_ESCAPE_RE = re.compile(r"\\x([0-9a-fA-F]{4})")
 # GOM Player OPTION key (observed on a real NTUSER, R5 L1): ``_RECENTMEDIANAME###`` holds a 32-hex
 # identifier of the played file (not its path) and ``_RECENTMEDIAPOS###`` the resume position.
 GOM_RECENT_NAME_RE = re.compile(r"^_RECENTMEDIANAME(\d+)$", re.IGNORECASE)
+# R6 S1 (real NTUSER, 4 hives): per-item companions of ``_RECENTMEDIANAME#`` with the same index.
+GOM_COMPANION_RE = re.compile(r"^_RECENTMEDIA(POS|AUDIOINDEXDVD|AUDIOINDEX)(\d+)$", re.IGNORECASE)
 HEX32_RE = re.compile(r"^[0-9A-Fa-f]{32}$")
 
 
@@ -510,11 +519,14 @@ class WindowsMediaPlayersProvider:
             values = getattr(view, "values", {}) or {}
             rel = str(getattr(view, "rel", ""))
             product_key = rel[len(root_key):].strip("\\").split("\\", 1)[0] if len(rel) > len(root_key) else ""
+            key_written = str(getattr(view, "last_written", "") or "")
+            gom_companions = _gom_companions(values)
             for name, value in sorted(values.items(), key=lambda item: str(item[0]).lower()):
                 gom = GOM_RECENT_NAME_RE.match(str(name))
                 if gom and isinstance(value, str) and HEX32_RE.match(value.strip()):
                     taken += 1
-                    position = values.get(f"_RECENTMEDIAPOS{gom.group(1)}")
+                    companions = gom_companions.get(int(gom.group(1)), {})
+                    position = companions.get("pos")
                     self._emit(
                         run,
                         hive.path or Path(""),
@@ -523,15 +535,22 @@ class WindowsMediaPlayersProvider:
                          "location_kind": "hash-only", "drive_letter": "", "media_hash": value.strip().lower()},
                         recovery_method="registry-value",
                         locator=f"HKCU\\{rel}\\{name}",
-                        list_last_written=str(getattr(view, "last_written", "") or ""),
+                        list_last_written=key_written,
                         list_last_written_source="registry-key-last-written",
                         extra={
                             "mru_order": int(gom.group(1)),
                             "entry_name": str(name),
                             "product_key": product_key,
                             "registry_key_path": f"HKCU\\{rel}",
+                            "key_path": f"HKCU\\{rel}",
+                            "key_last_written_at": key_written,
                             "registry_value_name": str(name),
                             "resume_position_raw": position if isinstance(position, int) else None,
+                            "resume_position_raw_value": _raw_text(position),
+                            "resume_position_value_name": companions.get("pos_name", ""),
+                            "audio_index_raw": _raw_text(companions.get("audio")),
+                            "audio_index_dvd_raw": _raw_text(companions.get("audio_dvd")),
+                            "resume_position_note_ko": "_RECENTMEDIAPOS 단위 미확인(원값 보존)",
                             "extraction": "gom-recentmedia-hash",
                             "hash_note_ko": "곰플레이어는 최근 재생 파일을 경로 대신 32자리 16진 식별자로 남깁니다(해시 알고리즘·입력 미확인). "
                             "파일 경로는 알 수 없으며, 후보 파일 경로의 해시와 대조해야 합니다.",
@@ -552,13 +571,15 @@ class WindowsMediaPlayersProvider:
                         location,
                         recovery_method="registry-value",
                         locator=f"HKCU\\{rel}\\{name or '(기본값)'}",
-                        list_last_written=str(getattr(view, "last_written", "") or ""),
+                        list_last_written=key_written,
                         list_last_written_source="registry-key-last-written",
                         extra={
                             "mru_order": _mru_order(str(name)),
                             "entry_name": str(name),
                             "product_key": product_key,
                             "registry_key_path": f"HKCU\\{rel}",
+                            "key_path": f"HKCU\\{rel}",
+                            "key_last_written_at": key_written,
                             "registry_value_name": str(name),
                             "raw_value": text[:512],
                             "extraction": "path-like-value-scan",
@@ -637,6 +658,33 @@ class _UserHive:
             closer()
         self._hive = None
         self._source = None
+
+
+def _gom_companions(values: Mapping[str, object]) -> dict[int, dict[str, object]]:
+    """GOM ``_RECENTMEDIAPOS#`` / ``_RECENTMEDIAAUDIOINDEX#`` / ``_RECENTMEDIAAUDIOINDEXDVD#`` values
+    by item index (matched by number, so ``000`` and ``0`` padding both pair with ``NAME000``)."""
+    companions: dict[int, dict[str, object]] = {}
+    for name, value in values.items():
+        match = GOM_COMPANION_RE.match(str(name))
+        if match is None:
+            continue
+        slot = companions.setdefault(int(match.group(2)), {})
+        kind = {"POS": "pos", "AUDIOINDEX": "audio", "AUDIOINDEXDVD": "audio_dvd"}[match.group(1).upper()]
+        slot.setdefault(kind, value)
+        if kind == "pos":
+            slot.setdefault("pos_name", str(name))
+    return companions
+
+
+def _raw_text(value: object) -> str:
+    """A registry value kept as text (int → decimal, bytes → hex, list → ``|``-joined; bounded)."""
+    if value is None:
+        return ""
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value[:256]).hex()
+    if isinstance(value, (list, tuple)):
+        return "|".join(str(item) for item in value[:20])[:512]
+    return str(value)[:512]
 
 
 def _registry_texts(value: object) -> Iterator[str]:

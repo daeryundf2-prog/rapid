@@ -323,6 +323,9 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     "media-image": (F("exif_gps_profile.gps_datetime_utc_candidate", "gps-fix"),),
     "media-image-unreadable": (F("exif_gps_profile.gps_datetime_utc_candidate", "gps-fix"),),
     "media-video": (),
+    # R6 S1: player recent lists have no per-entry play time; the NTUSER key LastWrite (upper
+    # bound for the newest entry) is one event per key. ini/playlist rows (file mtime) stay unmapped.
+    "media-player-recent": (F("key_last_written_at", "last-written", scope="key"),),
     "sticky-note": (F("created_at", "note-created"), F("updated_at", "note-updated")),
     # --- R5 L3: P2P, GA cookies, Phone Link photos -----------------------------------------
     # The row ``timestamp`` carries one of these times (transfer-completed > transfer-added,
