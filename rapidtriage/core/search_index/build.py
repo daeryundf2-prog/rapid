@@ -51,6 +51,7 @@ from ..artifact_profiles import (
     read_artifact_output_head,
     resolve_records_path,
 )
+from ..credential_files import credential_file_reason, credential_index_text
 from ..json_stream import JsonStreamError, iter_array_items
 from ..search_hits import entry_locator, record_time
 from .schema import (
@@ -985,6 +986,9 @@ def load_document_bodies(case_db: Path | None) -> dict[str, tuple[str, bool]]:
         )
         for path, body, cut in rows:
             if path and body:
+                if credential_file_reason(str(path), sniff=False):
+                    # A case DB built before the credential-file policy may still hold the body.
+                    body, cut = credential_index_text(str(path)), False
                 bodies.setdefault(os.path.normcase(str(path)), (str(body), bool(cut)))
     except sqlite3.Error as exc:
         LOGGER.warning("search index: document bodies unavailable from %s: %s", case_db, exc)
@@ -999,6 +1003,8 @@ def extract_document_body(path: str, kind: str) -> tuple[str, bool] | None:
         source = Path(path)
         if not source.is_file() or source.stat().st_size > DOC_BODY_MAX_FILE_BYTES:
             return None
+        if credential_file_reason(source):
+            return credential_index_text(source), False
         from ..docs import extract_text
 
         text = extract_text(source, kind)
