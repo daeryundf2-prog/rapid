@@ -12,6 +12,7 @@ from typing import Any
 
 from .analysis import build_search_analysis
 from .artifact_profiles import iter_artifact_output_rows
+from .credential_files import credential_file_reason
 from .docs import build_preview, extract_text
 from .files import CATEGORY_RULES
 from .forensic_accuracy import build_accuracy_gate
@@ -1662,7 +1663,11 @@ def search_ocr(
             continue
         if scan is not None and not scan.tick():
             return matches, errors
+        if credential_file_reason(path, sniff=False):
+            continue  # credential / secret file (core/credential_files.py): no OCR sidecar text
         for sidecar in find_ocr_sidecars(path):
+            if credential_file_reason(sidecar, sniff=False):
+                continue
             try:
                 text = sidecar.read_text(encoding="utf-8", errors="replace")
             except OSError as exc:

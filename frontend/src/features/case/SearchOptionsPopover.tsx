@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type RefObject, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { saveSearch } from "../../api/caseDb";
 import { listKeywordPacks, SEARCH_SOURCES } from "../../api/keywordPacks";
 import { Popover } from "../../components/Popover";
 import { Icon } from "../../icons";
 import { ensureRunCaseDb } from "../grid/reviewActions";
+import { EntityPanel } from "./EntityPanel";
 import { ErrorText } from "./ErrorText";
 import { ReasonButton } from "./ReasonButton";
 import { invalidateSavedSearches } from "./savedSearches";
@@ -23,6 +25,8 @@ function toggle(list: string[], value: string, on: boolean): string[] {
 export function SearchOptionsButton({ runId }: { runId: string | null }) {
   const open = useSearchState((s) => s.popoverOpen);
   const setOpen = useSearchState((s) => s.setPopoverOpen);
+  const entityOpen = useSearchState((s) => s.entityPanelOpen);
+  const closeEntityPanel = useSearchState((s) => s.closeEntityPanel);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverId = useId();
   return (
@@ -51,9 +55,29 @@ export function SearchOptionsButton({ runId }: { runId: string | null }) {
           }}
         />
       )}
+      {/* Portaled: the top bar is a containing block for fixed children (the dialog would sit in it). */}
+      {entityOpen &&
+        runId &&
+        createPortal(<EntityPanel runId={runId} onClose={closeEntityPanel} />, document.body)}
     </span>
   );
 }
+
+/**
+ * Entity / language / hash-set chips of the options popover (R7 lane B): each opens the
+ * 개체·언어 검색 panel with its query (the panel shows the counts, masked values and the syntax).
+ */
+export const ENTITY_CHIPS: ReadonlyArray<{ q: string; label: string; title: string }> = [
+  { q: "rrn:*", label: "주민등록번호", title: "주민등록번호가 있는 행(값은 가려서)" },
+  { q: "card:*", label: "카드번호", title: "Luhn 검증을 통과한 카드번호" },
+  { q: "phone:*", label: "전화번호", title: "휴대전화·유선 전화번호" },
+  { q: "account:*", label: "계좌번호", title: "은행별 자릿수로 찾은 계좌번호 후보(신뢰도 낮음)" },
+  { q: "email:*", label: "이메일", title: "이메일 주소(앞부분은 가려서)" },
+  { q: "ip:*", label: "IP 주소", title: "IPv4·IPv6 주소" },
+  { q: "lang:ko", label: "한국어 문서", title: "한글이 대부분인 문서·메일" },
+  { q: "lang:ja", label: "일본어 문서", title: "가나·한자가 대부분인 문서·메일" },
+  { q: "hashset:known-bad", label: "알려진 악성 해시", title: "알려진 악성 해시 집합에 든 파일" },
+];
 
 /**
  * The options panel sits on the shared Popover (review B2-9): first option focused on open,
@@ -97,6 +121,8 @@ export function SearchOptionsPopover({
   const reset = useSearchState((s) => s.resetOptions);
   const [saveName, setSaveName] = useState("");
   const packs = useQuery({ queryKey: ["keyword-packs"], queryFn: listKeywordPacks, retry: false });
+
+  const openEntityPanel = useSearchState((s) => s.openEntityPanel);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -227,6 +253,25 @@ export function SearchOptionsPopover({
           알려진 정상 파일 숨기기
         </span>
       </label>
+      <fieldset className="case-field">
+        <legend>개체·언어 검색</legend>
+        <div className="entity-chips">
+          {ENTITY_CHIPS.map((chip) => (
+            <button
+              key={chip.q}
+              type="button"
+              className="chip"
+              title={chip.title}
+              onClick={() => openEntityPanel(chip.q)}
+            >
+              {chip.label}
+            </button>
+          ))}
+          <button type="button" className="chip" onClick={() => openEntityPanel("")}>
+            개체 요약·문법…
+          </button>
+        </div>
+      </fieldset>
       <fieldset className="case-field">
         <legend>키워드 팩</legend>
         {packs.isPending && <span aria-busy="true">불러오는 중…</span>}

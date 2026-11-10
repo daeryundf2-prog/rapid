@@ -12,6 +12,10 @@ from fastapi.responses import (
     Response,
 )
 
+from ...core.credential_files import (
+    credential_file_reason,
+    credential_withheld_reason_text,
+)
 from ...core.jobs import RunJobStore
 from ...core.sqlite_wal import SqliteWalPreviewError, build_sqlite_wal_preview
 from .analyses import AnalysisRowRef, analysis_row_ref
@@ -79,6 +83,13 @@ def stored_ocr_sidecar(store: RunJobStore, run_id: str, source_path: Path) -> di
         "analysis_id": found.get("analysis_id"),
         "source_path": str(source_path),
     }
+
+
+def reject_credential_source(source_path: Path) -> None:
+    """Credential / secret files (core/credential_files.py) never return their bytes or rows here."""
+    reason = credential_file_reason(source_path)
+    if reason:
+        raise HTTPException(status_code=403, detail=credential_withheld_reason_text(reason))
 
 
 def build_media_router(
@@ -149,6 +160,7 @@ def build_media_router(
         include_hashes: bool = False,
     ) -> dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
+        reject_credential_source(source_path)
         return build_hex_range_citation_package(
             run_id=run_id,
             source_path=source_path,
@@ -175,6 +187,7 @@ def build_media_router(
         """One table page; ``locate_rowid`` (no filter / order) opens the page holding that rowid
         (``pagination.located``) — the viewer's jump to a parsed row (e.g. a browser history row)."""
         source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
+        reject_credential_source(source_path)
         if not is_sqlite_candidate(source_path):
             raise HTTPException(status_code=400, detail="source file is not a supported SQLite database")
         return build_sqlite_table_page(
@@ -199,6 +212,7 @@ def build_media_router(
         max_frames: int = Query(20, ge=1, le=100),
     ) -> dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
+        reject_credential_source(source_path)
         if not is_sqlite_candidate(source_path):
             raise HTTPException(status_code=400, detail="source file is not a supported SQLite database")
         try:

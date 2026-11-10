@@ -26,6 +26,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ...artifacts import all_providers, clear_collect_cache
+from ...artifacts.ai_agents.run_indirect import append_ai_indirect_rows
 from ..archive_image import (
     ArchiveImageExtractionError,
     ArchiveImageExtractionResult,
@@ -126,6 +127,7 @@ from ..timeline import (
     run_timeline,
     write_timeline_result,
 )
+from ..triage_rules.ai import ai_rule_params
 from ..triage_rules.stage import run_triage_stage
 from ..virtual_disk import (
     VirtualDiskExtractionError,
@@ -1145,6 +1147,16 @@ def _run_triage_stages(
     )
     files_payload["scan_scope_root"] = str(scan_input_root.root_path)
     finish_stage("files")
+    # R7 AI 갈래 C: execution traces (other kinds' rows) + git trailers (files inventory) into the ai-agent output.
+    append_ai_indirect_rows(
+        artifacts_dir,
+        artifact_payloads,
+        artifact_outputs,
+        files_payload=files_payload,
+        manifest_payload=manifest_payload,
+        manifest_path=manifest_path,
+        manifest_summary=manifest_summary,
+    )
 
     carve_payload: dict[str, object] | None = None
     carve_output_path = output_dir / "carving" / "rapidtriage-carve.json"
@@ -1404,6 +1416,7 @@ def _run_triage_stages(
         artifact_payloads=artifact_payloads,
         files_path=files_path,
         files_payload=files_payload,
+        params=ai_rule_params(collector_options),  # R7 AI: org_email_domain / evidence_roots run options
     )
     finish_stage(
         "triage-flags",

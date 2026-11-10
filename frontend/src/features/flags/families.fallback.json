@@ -1,5 +1,5 @@
 {
- "version": "8e33eca66949f549",
+ "version": "161d1e08e2dee8ed",
  "families": [
   {
    "id": "sam-account",
@@ -494,6 +494,726 @@
    "rules": [
     "accounts.wer_anomaly"
    ]
+  },
+  {
+   "id": "ai-tool",
+   "label": "AI 도구·설치",
+   "types": [
+    "ai-tool-presence",
+    "unknown-ai-tool-candidate",
+    "ai-model-file",
+    "ai-agent-parse-error"
+   ],
+   "kinds": [
+    "ai-agent"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "시각",
+     "aliases": [
+      "file_mtime",
+      "mtime"
+     ],
+     "format": "time",
+     "ts_kind": "modified",
+     "width": 170
+    },
+    {
+     "key": "tool_label",
+     "label": "도구",
+     "aliases": [
+      "tool"
+     ]
+    },
+    {
+     "key": "install_kind",
+     "label": "흔적 종류",
+     "aliases": [
+      "presence_kind"
+     ],
+     "value_labels": {
+      "path": "경로 흔적",
+      "npm-global": "npm 전역 패키지",
+      "pip": "pip 패키지",
+      "winget": "winget 패키지",
+      "msix": "MSIX 앱 패키지",
+      "vscode-extension": "편집기 확장",
+      "execution": "실행 흔적",
+      "adapter-summary": "수집 요약",
+      "git-repo-scan": "git 저장소 검사"
+     }
+    },
+    {
+     "key": "version",
+     "label": "버전"
+    },
+    {
+     "key": "account_key",
+     "label": "사용자·계정",
+     "aliases": [
+      "user"
+     ]
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "위치",
+     "format": "path"
+    },
+    {
+     "key": "coverage_status",
+     "label": "확인 근거",
+     "value_labels": {
+      "local-verified": "실물 확인 경로",
+      "official": "공식 문서 근거",
+      "third-party": "외부 자료 근거",
+      "inferred": "추정 경로",
+      "unverified": "미검증",
+      "schema-not-validated": "구조 미검증",
+      "parser-error": "읽기 오류"
+     }
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "execution_source",
+     "label": "실행 흔적 출처"
+    },
+    {
+     "key": "execution_row_count",
+     "label": "실행 흔적 행 수",
+     "format": "number"
+    },
+    {
+     "key": "retention",
+     "label": "보존 정책"
+    },
+    {
+     "key": "category",
+     "label": "도구 분류"
+    }
+   ],
+   "rules": [
+    "ai.unknown_tool_candidate"
+   ]
+  },
+  {
+   "id": "ai-session",
+   "label": "AI 에이전트 세션",
+   "types": [
+    "ai-agent-session"
+   ],
+   "core_columns": [
+    {
+     "key": "started_at",
+     "label": "시작",
+     "aliases": [
+      "timestamp"
+     ],
+     "format": "time",
+     "ts_kind": "start",
+     "width": 170
+    },
+    {
+     "key": "ended_at",
+     "label": "마지막 활동",
+     "format": "time",
+     "ts_kind": "end",
+     "width": 170
+    },
+    {
+     "key": "tool_label",
+     "label": "도구",
+     "aliases": [
+      "tool"
+     ]
+    },
+    {
+     "key": "account_key",
+     "semantic": "account",
+     "label": "계정",
+     "aliases": [
+      "tool_account_key",
+      "user"
+     ]
+    },
+    {
+     "key": "cwd",
+     "semantic": "path",
+     "label": "작업 폴더",
+     "aliases": [
+      "project_label"
+     ],
+     "format": "path"
+    },
+    {
+     "key": "title",
+     "label": "제목",
+     "aliases": [
+      "preview"
+     ]
+    },
+    {
+     "key": "model",
+     "label": "모델"
+    },
+    {
+     "key": "messages",
+     "label": "메시지 수",
+     "format": "number"
+    },
+    {
+     "key": "tool_calls",
+     "label": "도구 호출 수",
+     "format": "number"
+    },
+    {
+     "key": "tokens_in",
+     "label": "입력 토큰",
+     "format": "number"
+    },
+    {
+     "key": "tokens_out",
+     "label": "출력 토큰",
+     "format": "number"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "session_id",
+     "label": "세션 ID",
+     "format": "mono"
+    },
+    {
+     "key": "parent_session_id",
+     "label": "상위 세션",
+     "format": "mono"
+    },
+    {
+     "key": "file_touches",
+     "label": "파일 접촉 수",
+     "format": "number"
+    },
+    {
+     "key": "git_branch",
+     "label": "git 브랜치"
+    },
+    {
+     "key": "permission_mode",
+     "label": "권한 모드",
+     "aliases": [
+      "sandbox_mode"
+     ]
+    },
+    {
+     "key": "source_path",
+     "label": "기록 파일",
+     "format": "path"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "ai-message",
+   "label": "AI 에이전트 메시지",
+   "types": [
+    "ai-agent-message"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "시각",
+     "aliases": [
+      "ts"
+     ],
+     "format": "time",
+     "ts_kind": "sent",
+     "width": 170
+    },
+    {
+     "key": "tool_label",
+     "label": "도구",
+     "aliases": [
+      "tool"
+     ]
+    },
+    {
+     "key": "role",
+     "label": "역할",
+     "value_labels": {
+      "user": "사용자",
+      "assistant": "어시스턴트",
+      "system": "시스템",
+      "tool": "도구"
+     }
+    },
+    {
+     "key": "text",
+     "label": "내용(가림 적용)"
+    },
+    {
+     "key": "session_id",
+     "label": "세션 ID",
+     "format": "mono"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "tool_use_count",
+     "label": "도구 호출 수",
+     "format": "number"
+    },
+    {
+     "key": "has_pasted",
+     "label": "붙여넣기 포함"
+    },
+    {
+     "key": "has_image",
+     "label": "이미지 포함"
+    }
+   ],
+   "rules": []
+  },
+  {
+   "id": "ai-tool-call",
+   "label": "AI 도구 호출",
+   "types": [
+    "ai-agent-tool-call"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "시각",
+     "aliases": [
+      "ts"
+     ],
+     "format": "time",
+     "ts_kind": "run",
+     "width": 170
+    },
+    {
+     "key": "tool_label",
+     "label": "도구",
+     "aliases": [
+      "tool"
+     ]
+    },
+    {
+     "key": "tool_name",
+     "label": "호출 도구"
+    },
+    {
+     "key": "tool_kind",
+     "label": "호출 종류",
+     "value_labels": {
+      "shell": "명령 실행",
+      "read": "읽기",
+      "write": "쓰기",
+      "edit": "편집",
+      "delete": "삭제",
+      "search": "검색",
+      "mcp": "MCP",
+      "browser": "웹·브라우저",
+      "other": "기타"
+     }
+    },
+    {
+     "key": "command",
+     "label": "명령(가림 적용)"
+    },
+    {
+     "key": "target_path",
+     "semantic": "path",
+     "label": "대상 경로",
+     "format": "path"
+    },
+    {
+     "key": "destructive",
+     "label": "파괴적 작업",
+     "value_labels": {
+      "true": "예",
+      "false": "아니오"
+     }
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "destructive_source",
+     "label": "파괴적 판단 근거",
+     "value_labels": {
+      "tool-record": "도구 기록",
+      "command-pattern": "명령 패턴 추정"
+     }
+    },
+    {
+     "key": "approval",
+     "label": "승인"
+    },
+    {
+     "key": "exit_code",
+     "label": "종료 코드"
+    },
+    {
+     "key": "session_id",
+     "label": "세션 ID",
+     "format": "mono"
+    }
+   ],
+   "rules": [
+    "ai.destructive_tool_call",
+    "ai.evidence_path_in_tool_call"
+   ]
+  },
+  {
+   "id": "ai-file-touch",
+   "label": "AI 파일 접촉",
+   "types": [
+    "ai-agent-file-touch"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "시각(도구 호출)",
+     "aliases": [
+      "ts"
+     ],
+     "format": "time",
+     "ts_kind": "event",
+     "width": 170
+    },
+    {
+     "key": "tool_label",
+     "label": "도구",
+     "aliases": [
+      "tool"
+     ]
+    },
+    {
+     "key": "op",
+     "label": "작업",
+     "value_labels": {
+      "read": "읽기",
+      "write": "쓰기",
+      "edit": "편집",
+      "delete": "삭제",
+      "create": "생성",
+      "workspace": "작업 폴더"
+     }
+    },
+    {
+     "key": "touched_path",
+     "semantic": "path",
+     "label": "파일 경로",
+     "format": "path"
+    },
+    {
+     "key": "tool_name",
+     "label": "호출 도구"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "op_source",
+     "label": "작업 판단 근거",
+     "value_labels": {
+      "tool-input": "도구 입력",
+      "command-heuristic": "명령 문자열 추정"
+     }
+    },
+    {
+     "key": "session_id",
+     "label": "세션 ID",
+     "format": "mono"
+    }
+   ],
+   "rules": [
+    "ai.evidence_path_in_tool_call"
+   ]
+  },
+  {
+   "id": "ai-mcp-server",
+   "label": "MCP 서버",
+   "types": [
+    "ai-mcp-server"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "시각",
+     "aliases": [
+      "first_seen"
+     ],
+     "format": "time",
+     "ts_kind": "event",
+     "width": 170
+    },
+    {
+     "key": "tool_label",
+     "label": "도구",
+     "aliases": [
+      "tool"
+     ]
+    },
+    {
+     "key": "server",
+     "label": "서버"
+    },
+    {
+     "key": "transport",
+     "label": "연결 방식"
+    },
+    {
+     "key": "endpoint",
+     "label": "명령·주소(가림 적용)"
+    },
+    {
+     "key": "remote",
+     "label": "원격",
+     "value_labels": {
+      "true": "원격",
+      "false": "로컬"
+     }
+    },
+    {
+     "key": "status",
+     "label": "상태"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "tool_count",
+     "label": "도구 수",
+     "format": "number"
+    },
+    {
+     "key": "config_scope",
+     "label": "설정 범위"
+    },
+    {
+     "key": "source_path",
+     "label": "설정·로그 파일",
+     "format": "path"
+    }
+   ],
+   "rules": [
+    "ai.mcp_server_remote"
+   ]
+  },
+  {
+   "id": "ai-config",
+   "label": "AI 지침·자격 증명 파일",
+   "types": [
+    "ai-instruction-file",
+    "ai-credential-presence",
+    "ai-retention-cleanup"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "시각",
+     "aliases": [
+      "file_mtime",
+      "mtime"
+     ],
+     "format": "time",
+     "ts_kind": "modified",
+     "width": 170
+    },
+    {
+     "key": "tool_label",
+     "label": "도구",
+     "aliases": [
+      "tool"
+     ]
+    },
+    {
+     "key": "instruction_kind",
+     "label": "종류",
+     "aliases": [
+      "credential_kind"
+     ]
+    },
+    {
+     "key": "source_path",
+     "semantic": "path",
+     "label": "파일",
+     "format": "path"
+    },
+    {
+     "key": "size",
+     "label": "크기",
+     "format": "bytes"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "key_name",
+     "label": "키 이름(값 미수집)"
+    },
+    {
+     "key": "retention_days",
+     "label": "보존 일수"
+    },
+    {
+     "key": "head_text",
+     "label": "앞부분(가림 적용)"
+    }
+   ],
+   "rules": [
+    "ai.credential_file_present",
+    "ai.retention_cleanup_observed"
+   ]
+  },
+  {
+   "id": "ai-account",
+   "label": "AI 계정·전환",
+   "types": [
+    "ai-account",
+    "ai-account-switch"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "시각",
+     "aliases": [
+      "ts",
+      "last_seen"
+     ],
+     "format": "time",
+     "ts_kind": "event",
+     "width": 170
+    },
+    {
+     "key": "tool_label",
+     "label": "도구",
+     "aliases": [
+      "tool"
+     ]
+    },
+    {
+     "key": "tool_account_key",
+     "semantic": "account",
+     "label": "도구 계정",
+     "aliases": [
+      "account_number",
+      "from_account"
+     ]
+    },
+    {
+     "key": "email_domain",
+     "label": "이메일 도메인"
+    },
+    {
+     "key": "org_label",
+     "label": "조직"
+    },
+    {
+     "key": "active",
+     "label": "활성"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "first_seen",
+     "label": "처음 확인",
+     "format": "time",
+     "ts_kind": "first"
+    },
+    {
+     "key": "source",
+     "label": "출처"
+    }
+   ],
+   "rules": [
+    "ai.account_switch",
+    "ai.personal_account_on_corporate"
+   ]
+  },
+  {
+   "id": "ai-code",
+   "label": "AI 코드 기여·사용량",
+   "types": [
+    "ai-code-attribution",
+    "ai-usage-stat"
+   ],
+   "core_columns": [
+    {
+     "key": "timestamp",
+     "label": "시각",
+     "aliases": [
+      "ts"
+     ],
+     "format": "time",
+     "ts_kind": "event",
+     "width": 170
+    },
+    {
+     "key": "tool_label",
+     "label": "도구",
+     "aliases": [
+      "tool"
+     ]
+    },
+    {
+     "key": "source",
+     "label": "근거",
+     "value_labels": {
+      "git-trailer": "git 커밋 트레일러"
+     }
+    },
+    {
+     "key": "commit",
+     "label": "커밋",
+     "format": "mono"
+    },
+    {
+     "key": "file",
+     "label": "파일·저장소",
+     "aliases": [
+      "repository"
+     ],
+     "format": "path"
+    },
+    {
+     "key": "ai_percent",
+     "label": "AI 비율(%)",
+     "format": "number"
+    },
+    {
+     "key": "tokens",
+     "label": "토큰",
+     "aliases": [
+      "tokens_in"
+     ],
+     "format": "number"
+    }
+   ],
+   "aux_columns": [
+    {
+     "key": "ai_lines",
+     "label": "AI 라인",
+     "format": "number"
+    },
+    {
+     "key": "human_lines",
+     "label": "사람 라인",
+     "format": "number"
+    },
+    {
+     "key": "commit_message",
+     "label": "커밋 제목(가림 적용)"
+    },
+    {
+     "key": "period",
+     "label": "기간"
+    },
+    {
+     "key": "model",
+     "label": "모델"
+    }
+   ],
+   "rules": []
   },
   {
    "id": "antiforensics",
@@ -12758,6 +13478,268 @@
    ],
    "version": 1,
    "status": "provisional",
+   "params": {}
+  },
+  {
+   "id": "ai.credential_file_present",
+   "family": "ai-config",
+   "grade": "C",
+   "label_ko": "AI 도구 자격 증명 파일 존재",
+   "rationale_ko": "AI 도구의 토큰·OAuth·쿠키·키 파일이 있음(값은 수집하지 않음): 이 PC에서 그 도구 계정에 로그인한 상태였다는 정황. 계정 소유·서버 측 기록 확인의 출발점.",
+   "false_positive_ko": "설치만 하고 쓰지 않은 도구의 빈 설정, 만료된 토큰 파일.",
+   "sources": [
+    "https://docs.anthropic.com/en/docs/claude-code/iam",
+    "https://developers.openai.com/codex/auth"
+   ],
+   "version": 1,
+   "status": "provisional",
+   "validation": {
+    "synthetic": true,
+    "real": [
+     {
+      "source": "run-subset10(AI 행 없음)",
+      "result": "not_applicable",
+      "hits": 0,
+      "checked_at": "2026-10-27",
+      "note_ko": "서브셋 런에 ai-agent 행이 0행이라 규칙 입력이 없음. 0적중은 음성 근거가 아님."
+     }
+    ],
+    "public": [],
+    "notes_ko": "합성 픽스처(tests/fixtures/ai_agents) 35행에서 적중 확인. 실데이터 양성은 이 PC 실물 런(Q-AI9) 승인 대기."
+   },
+   "params": {}
+  },
+  {
+   "id": "ai.destructive_tool_call",
+   "family": "ai-tool-call",
+   "grade": "B",
+   "label_ko": "AI 에이전트의 파괴적 명령·도구 호출",
+   "rationale_ko": "에이전트 도구 호출이 도구 자체 기록상 파괴적(destructive=true)이거나 명령이 rm·del·rmdir·Remove-Item·format·shred를 씀: 증거 인멸·대량 삭제 지시 정황(S4).",
+   "false_positive_ko": "빌드 산출물·임시 폴더 정리(rm -rf build, node_modules), 테스트 데이터 삭제.",
+   "sources": [
+    "https://docs.anthropic.com/en/docs/claude-code/settings",
+    "https://attack.mitre.org/techniques/T1070/004/"
+   ],
+   "version": 1,
+   "status": "provisional",
+   "validation": {
+    "synthetic": true,
+    "real": [
+     {
+      "source": "run-subset10(AI 행 없음)",
+      "result": "not_applicable",
+      "hits": 0,
+      "checked_at": "2026-10-27",
+      "note_ko": "서브셋 런에 ai-agent 행이 0행이라 규칙 입력이 없음. 0적중은 음성 근거가 아님."
+     }
+    ],
+    "public": [],
+    "notes_ko": "합성 픽스처의 ZCode destructive=1·Claude Code rm -rf·Codex/OmO Remove-Item 호출에서 적중, ls·git status 같은 읽기 호출에서는 미적중 확인."
+   },
+   "params": {
+    "command_patterns": [
+     "(?:^|[\\s;&|(`\"'])rm\\s",
+     "(?:^|[\\s;&|(`\"'])rmdir\\b",
+     "(?:^|[\\s;&|(`\"'])(?:del|erase)\\s",
+     "(?:^|[\\s;&|(`\"'])rd\\s+/s",
+     "(?:^|[\\s;&|(`\"'])remove-item\\b",
+     "(?:^|[\\s;&|(`\"'])format(?:\\.com)?\\s+[a-z]:",
+     "(?:^|[\\s;&|(`\"'])shred\\b"
+    ]
+   }
+  },
+  {
+   "id": "ai.evidence_path_in_tool_call",
+   "family": "ai-tool-call",
+   "grade": "B",
+   "label_ko": "AI 도구 호출 경로가 사건 증거·이동식 드라이브·클라우드 동기화 폴더",
+   "rationale_ko": "에이전트 도구 호출·파일 접촉 경로가 지정한 사건 증거 폴더, 이 런에서 이동식으로 확인된 드라이브 문자(또는 /Volumes·/media), 클라우드 동기화 폴더(동기화 클라이언트 행의 동기화 루트·기본 폴더 이름) 아래: 자료 반출·열람 지시 정황(S1).",
+   "false_positive_ko": "OneDrive로 리디렉션된 문서·바탕 화면 폴더에서의 정상 작업, 데이터용 외장 디스크에 둔 저장소.",
+   "sources": [
+    "https://docs.anthropic.com/en/docs/claude-code/settings",
+    "https://attack.mitre.org/techniques/T1052/001/",
+    "https://attack.mitre.org/techniques/T1567/002/"
+   ],
+   "version": 1,
+   "status": "provisional",
+   "validation": {
+    "synthetic": true,
+    "real": [
+     {
+      "source": "run-subset10(AI 행 없음)",
+      "result": "not_applicable",
+      "hits": 0,
+      "checked_at": "2026-10-27",
+      "note_ko": "서브셋 런에 ai-agent 행이 0행이라 규칙 입력이 없음. 0적중은 음성 근거가 아님."
+     }
+    ],
+    "public": [],
+    "notes_ko": "합성 픽스처에 OneDrive·E:(이동식)·사건 폴더 경로 도구 호출을 더해 적중, 사용자 프로젝트 폴더 경로에서는 미적중 확인."
+   },
+   "params": {
+    "evidence_roots": [],
+    "cloud_folder_markers": [
+     "\\onedrive\\",
+     "\\onedrive -",
+     "\\dropbox\\",
+     "\\google drive\\",
+     "\\my drive\\",
+     "\\icloud drive\\",
+     "\\iclouddrive\\",
+     "\\mybox\\",
+     "\\naver mybox\\",
+     "/library/cloudstorage/",
+     "/library/mobile documents/"
+    ],
+    "removable_mount_prefixes": [
+     "/volumes/",
+     "/media/",
+     "/run/media/"
+    ]
+   }
+  },
+  {
+   "id": "ai.account_switch",
+   "family": "ai-account",
+   "grade": "C",
+   "label_ko": "AI 도구 계정 전환",
+   "rationale_ko": "한 PC에서 AI 도구 계정을 바꾼 기록(claude-swap 전환 로그 등): 여러 계정(개인·회사) 사용 정황(S2).",
+   "false_positive_ko": "회사가 계정 여러 개를 배정한 경우, 사용량 한도 때문에 공용 계정을 돌려 쓴 경우.",
+   "sources": [
+    "https://github.com/realiti4/claude-swap"
+   ],
+   "version": 1,
+   "status": "provisional",
+   "validation": {
+    "synthetic": true,
+    "real": [
+     {
+      "source": "run-subset10(AI 행 없음)",
+      "result": "not_applicable",
+      "hits": 0,
+      "checked_at": "2026-10-27",
+      "note_ko": "서브셋 런에 ai-agent 행이 0행이라 규칙 입력이 없음. 0적중은 음성 근거가 아님."
+     }
+    ],
+    "public": [],
+    "notes_ko": "합성 claude-swap 로그의 전환 2줄에서 적중 확인."
+   },
+   "params": {}
+  },
+  {
+   "id": "ai.personal_account_on_corporate",
+   "family": "ai-account",
+   "grade": "B",
+   "label_ko": "업무용 PC의 개인 AI 계정",
+   "rationale_ko": "AI 도구 계정의 이메일 도메인이 런 옵션으로 지정한 조직 도메인과 다름: 업무 자료를 개인 계정 AI에 넣었을 정황(S2). 조직 도메인을 지정하지 않으면 규칙이 실행되지 않음.",
+   "false_positive_ko": "협력사·자회사 도메인, 조직이 승인한 개인 구독, 도메인 별칭.",
+   "sources": [
+    "https://support.anthropic.com/en/articles/9797531-what-is-the-enterprise-plan",
+    "https://attack.mitre.org/techniques/T1567/"
+   ],
+   "version": 1,
+   "status": "provisional",
+   "validation": {
+    "synthetic": true,
+    "real": [
+     {
+      "source": "run-subset10(AI 행 없음)",
+      "result": "not_applicable",
+      "hits": 0,
+      "checked_at": "2026-10-27",
+      "note_ko": "서브셋 런에 ai-agent 행이 0행이고 조직 도메인도 지정되지 않음."
+     }
+    ],
+    "public": [],
+    "notes_ko": "합성 계정(corp.example 조직, gmail.example 개인)에서 조직 도메인을 지정했을 때만 개인 계정에 적중, 지정하지 않으면 0적중 확인."
+   },
+   "params": {
+    "org_email_domain": ""
+   }
+  },
+  {
+   "id": "ai.retention_cleanup_observed",
+   "family": "ai-config",
+   "grade": "C",
+   "label_ko": "AI 기록 보존 정리 흔적",
+   "rationale_ko": "AI 도구의 보존 기간 정리 표식(Claude Code .last-cleanup 등)이 있음: 그 이전 세션 기록은 자동 삭제되었을 수 있어 부재 ≠ 미사용.",
+   "false_positive_ko": "해당 없음(한계 표기) — 기본 설정의 자동 정리.",
+   "sources": [
+    "https://docs.anthropic.com/en/docs/claude-code/settings"
+   ],
+   "version": 1,
+   "status": "provisional",
+   "validation": {
+    "synthetic": true,
+    "real": [
+     {
+      "source": "run-subset10(AI 행 없음)",
+      "result": "not_applicable",
+      "hits": 0,
+      "checked_at": "2026-10-27",
+      "note_ko": "서브셋 런에 ai-agent 행이 0행이라 규칙 입력이 없음."
+     }
+    ],
+    "public": [],
+    "notes_ko": "합성 Claude Code .last-cleanup 1행에서 적중 확인."
+   },
+   "params": {}
+  },
+  {
+   "id": "ai.unknown_tool_candidate",
+   "family": "ai-tool",
+   "grade": "C",
+   "label_ko": "미분류 AI 도구 후보",
+   "rationale_ko": "카탈로그에 없는 홈 숨김 폴더가 세션·대화·기록 구조(jsonl·sqlite)를 가짐: 카탈로그 밖 AI 도구일 수 있어 수동 확인 필요.",
+   "false_positive_ko": "AI와 무관한 개발 도구의 기록 폴더.",
+   "sources": [
+    "https://specifications.freedesktop.org/basedir-spec/latest/"
+   ],
+   "version": 1,
+   "status": "provisional",
+   "validation": {
+    "synthetic": true,
+    "real": [
+     {
+      "source": "run-subset10(AI 행 없음)",
+      "result": "not_applicable",
+      "hits": 0,
+      "checked_at": "2026-10-27",
+      "note_ko": "서브셋 런에 ai-agent 행이 0행이라 규칙 입력이 없음."
+     }
+    ],
+    "public": [],
+    "notes_ko": "합성 홈 폴더의 .<이름>/sessions/*.jsonl 후보에서 적중 확인."
+   },
+   "params": {}
+  },
+  {
+   "id": "ai.mcp_server_remote",
+   "family": "ai-mcp-server",
+   "grade": "C",
+   "label_ko": "원격 MCP 서버",
+   "rationale_ko": "AI 도구에 원격 URL MCP 서버가 설정·연결됨: 도구 호출 결과·파일 내용이 외부 서버로 갈 수 있는 경로.",
+   "false_positive_ko": "회사가 운영하는 사내 MCP 서버, 공식 벤더 MCP.",
+   "sources": [
+    "https://modelcontextprotocol.io/specification/2025-06-18/basic/transports",
+    "https://docs.anthropic.com/en/docs/claude-code/mcp"
+   ],
+   "version": 1,
+   "status": "provisional",
+   "validation": {
+    "synthetic": true,
+    "real": [
+     {
+      "source": "run-subset10(AI 행 없음)",
+      "result": "not_applicable",
+      "hits": 0,
+      "checked_at": "2026-10-27",
+      "note_ko": "서브셋 런에 ai-agent 행이 0행이라 규칙 입력이 없음."
+     }
+    ],
+    "public": [],
+    "notes_ko": "합성 Claude Code·Codex 설정의 원격 MCP(remote=true)에서 적중, 로컬 stdio 서버에서는 미적중 확인."
+   },
    "params": {}
   },
   {

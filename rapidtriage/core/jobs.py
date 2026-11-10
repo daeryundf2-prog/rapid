@@ -149,6 +149,14 @@ def int_or_default(value: object, default: int) -> int:
     return int(value)
 
 
+def _collector_options(value: object) -> dict[str, dict[str, object]] | None:
+    """Stored ``collector_options`` (``{kind: {option: value}}``); anything else is dropped."""
+    if not isinstance(value, Mapping):
+        return None
+    options = {str(kind): dict(item) for kind, item in value.items() if isinstance(item, Mapping) and item}
+    return options or None
+
+
 @dataclass(frozen=True)
 class RunRequest:
     root: str
@@ -171,6 +179,8 @@ class RunRequest:
     case_db: bool = True
     skip_groups: tuple[str, ...] = ()
     skip_tasks: tuple[str, ...] = ()
+    # Per-kind collector options (R7 AI: ``{"ai-agent": {"ai_bodies": ..., "ai_hash_dbs": ...}}``).
+    collector_options: Mapping[str, Mapping[str, object]] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -194,6 +204,7 @@ class RunRequest:
             "case_db": self.case_db,
             "skip_groups": list(self.skip_groups),
             "skip_tasks": list(self.skip_tasks),
+            "collector_options": {kind: dict(options) for kind, options in (self.collector_options or {}).items()},
         }
 
     @classmethod
@@ -226,6 +237,7 @@ class RunRequest:
             case_db=bool(payload.get("case_db", True)),
             skip_groups=string_tuple(payload.get("skip_groups", [])),
             skip_tasks=string_tuple(payload.get("skip_tasks", [])),
+            collector_options=_collector_options(payload.get("collector_options")),
         )
 
 
@@ -2280,6 +2292,7 @@ def execute_run_request(
             case_db=request.case_db,
             skip_groups=request.skip_groups,
             skip_tasks=request.skip_tasks,
+            collector_options=request.collector_options or None,
             actor=actor,
             control_since=control_since,
         )

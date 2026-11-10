@@ -1,6 +1,5 @@
 # RapidForensic / RapidTriage
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com/)
 [![Taxonomy](https://img.shields.io/badge/Taxonomy-51%20Targets-brightgreen.svg?style=flat-square)](docs/)

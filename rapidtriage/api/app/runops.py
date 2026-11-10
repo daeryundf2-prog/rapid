@@ -24,6 +24,12 @@ from ...core.case_report import (
     build_case_report_markdown,
     case_report_export_paths,
 )
+from ...core.credential_files import (
+    credential_file_reason,
+    credential_withheld_preview,
+    credential_withheld_reason_text,
+    redact_credential_text,
+)
 from ...core.docs import SUPPORTED_DOC_EXTS, TEXT_EXTS, extract_text
 from ...core.hash_cache import hash_cache_assessment
 from ...core.jobs import (
@@ -1084,6 +1090,18 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
             "parser_version": SOURCE_VIEWER_VERSION,
         },
     }
+    credential_reason = credential_file_reason(source_path)
+    if credential_reason:
+        # Credential / secret file (core/credential_files.py): no text, table, hex or media preview.
+        payload.update(credential_withheld_preview(credential_reason))
+        payload["viewer_metadata"] = {
+            "source_format": suffix.lstrip(".") or "unknown",
+            "strategy": "credential-file",
+            "preview_status": "withheld",
+            "parser": "rapidtriage.source-viewer",
+            "parser_version": SOURCE_VIEWER_VERSION,
+        }
+        return payload
     if mime_type.startswith("image/"):
         payload.update(build_image_preview(source_path, image_url=str(payload["download_url"]), run_id=run_id))
         return payload
@@ -1124,7 +1142,7 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
             return payload
     elif stat.st_size <= 2_000_000 and not is_probably_binary(source_path):
         try:
-            text = source_path.read_text(encoding="utf-8", errors="ignore")
+            text = redact_credential_text(source_path, source_path.read_text(encoding="utf-8", errors="ignore"))
         except UnicodeError as exc:
             payload["message"] = f"Text decoding failed: {exc}"
             return payload
@@ -1391,7 +1409,11 @@ def build_source_search(
     searchable = True
     message = "File search completed."
 
-    if mime_type.startswith("image/"):
+    credential_reason = credential_file_reason(source_path)
+    if credential_reason:
+        searchable = False
+        message = credential_withheld_reason_text(credential_reason)
+    elif mime_type.startswith("image/"):
         searchable = False
         message = "Image files are not text-searchable in the file viewer. Use OCR from the full evidence search."
     elif is_sqlite_candidate(source_path, suffix):

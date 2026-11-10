@@ -32,6 +32,7 @@ WARNING_REASONS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
     ("cap-truncated", "상한·절단 적용 (전수 아님)", re.compile(r"상한/절단 적용|truncat", re.IGNORECASE)),
     ("size-cap", "크기 상한 초과로 본문 미추출", re.compile(r"크기 상한 초과|too-large")),
     ("binary-rejected", "비인쇄 문자 비율 초과로 미색인", re.compile(r"비인쇄 문자|binary-rejected")),
+    ("credential-withheld", "자격 증명 파일 — 본문 미수집", re.compile(r"자격 증명 파일 \d+건")),
     ("file-count-cap", "파일 수 상한으로 미선별", re.compile(r"파일 수 상한|미선별")),
     ("no-rows", "수집된 행 없음", re.compile(r"No [\w-]+ artifact rows were collected|수집된 행 없음")),
     ("input-missing", "입력 없음 (해당 증거 없음)", re.compile(r"루트 없음|추출물 없음|not found|찾을 수 없")),

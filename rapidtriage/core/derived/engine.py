@@ -85,12 +85,13 @@ from ..triage_rules.engine import (
 )
 from .map_urls import maybe_map_url, parse_map_url
 from .normalize import clean, credential_record, normalize
+from .tables_ai import AI_TABLE_LABELS, AI_TABLES, AiTablesCollector
 from .url_classes import UrlClasses, load_url_classes
 
 SUMMARY_FILE_NAME = "summary.json"
 INDEX_SUFFIX = ".index.json"
 SUMMARY_VERSION = "derived-summary-v1"
-TABLES: tuple[str, ...] = ("people", "devices", "paths", "attachments", "credentials", "urls")
+TABLES: tuple[str, ...] = ("people", "devices", "paths", "attachments", "credentials", "urls", *AI_TABLES)
 TABLE_LABELS: dict[str, str] = {
     "people": "사람 식별자",
     "devices": "장치 식별자",
@@ -98,6 +99,7 @@ TABLE_LABELS: dict[str, str] = {
     "attachments": "첨부",
     "credentials": "자격 증명/토큰",
     "urls": "URL 분류",
+    **AI_TABLE_LABELS,  # R7 AI 갈래 C: session aggregates (tables_ai.py), not value tables
 }
 TABLE_OF_SEMANTIC: dict[str, str] = {
     "person": "people",
@@ -263,6 +265,7 @@ class DerivedCollector:
         self.max_values = max_values
         self.memory_cap = memory_cap
         self.tables: dict[str, _TableState] = {table: _TableState({}) for table in TABLES}
+        self.ai = AiTablesCollector()
         self.estimated_bytes = 0
         # R5 L3: path prefixes without their trailing "/" (cheap substring pre-filter before urlsplit).
         self.path_tokens = tuple(prefix.rstrip("/") for prefix in url_classes.paths)
@@ -363,6 +366,10 @@ class DerivedCollector:
 
     def rows(self, table: str) -> list[dict[str, object]]:
         """The table's rows, count desc then normalised value."""
+        if table in AI_TABLES:
+            rows = self.ai.rows(table)
+            self.tables[table].occurrences = self.ai.occurrences[table]
+            return rows
         state = self.tables[table]
         ordered = sorted(state.entries.items(), key=lambda item: (-item[1].count, item[0]))
         return [self._row(table, key, entry) for key, entry in ordered]
@@ -595,6 +602,8 @@ def run_derived(
                     family_id = "file" if source.collection == "files" else catalog.family_for(artifact_type, source.source_kind)
                     plan = plans.get(family_id) if family_id else None
                     family_cache[artifact_type] = plan
+                if source.collection == "artifacts" and artifact_type.startswith("ai-agent-"):
+                    collector.ai.observe(details, kind=source.kind, record_index=index, artifact_type=artifact_type)
                 if plan is None or not plan.columns:
                     continue
                 if collect_row(

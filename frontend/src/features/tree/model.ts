@@ -52,6 +52,8 @@ export type DomainRoute = RouteTail & {
   fields?: RecordFieldFilters;
   /** 파일 시스템 탐색기 folder (`dir=`; `""` = volume root). */
   dir?: string;
+  /** Search view query (`q=`, R7 lane B 해시 집합 nodes). */
+  q?: string;
   /** 예외 항목 categories (R7 갈래 A, `irregular=`). */
   irregular?: string[];
 };
@@ -837,6 +839,7 @@ export function domainRoute(target: DomainTarget): DomainRoute {
   const route: DomainRoute = { collection: target.collection };
   if (target.kind) route.kind = target.kind;
   if (target.dir !== undefined) route.dir = target.dir;
+  if (target.q) route.q = target.q; // R7 lane B: search-view nodes (해시 집합)
   if (target.irregular) route.irregular = target.irregular.split(",").filter(Boolean);
   if (target.fileScope) route.category = filesInventoryCategory(target.fileCategory);
   else if (target.fileCategory) route.category = target.fileCategory;

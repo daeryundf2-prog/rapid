@@ -17,6 +17,11 @@ interface SearchState {
    */
   cancelled: string | null;
   setCancelled: (key: string | null) => void;
+  /** 개체·언어 검색 panel (R7 lane B): open, and the advanced query it starts with. */
+  entityPanelOpen: boolean;
+  entityQuery: string;
+  openEntityPanel: (q?: string) => void;
+  closeEntityPanel: () => void;
   setKeywords: (keywords: string[]) => void;
   patchOptions: (patch: Partial<SearchOptions>) => void;
   resetOptions: () => void;
@@ -36,6 +41,10 @@ export const useSearchState = create<SearchState>((set) => ({
   popoverOpen: false,
   cancelled: null,
   setCancelled: (cancelled) => set({ cancelled }),
+  entityPanelOpen: false,
+  entityQuery: "",
+  openEntityPanel: (q = "") => set({ entityPanelOpen: true, entityQuery: q, popoverOpen: false }),
+  closeEntityPanel: () => set({ entityPanelOpen: false }),
   setKeywords: (keywords) => set({ keywords }),
   patchOptions: (patch) => set((s) => ({ options: { ...s.options, ...patch } })),
   resetOptions: () => set({ options: DEFAULT_SEARCH_OPTIONS }),

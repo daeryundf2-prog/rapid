@@ -133,6 +133,10 @@ def build_step_rows(
         messages.extend(f"{kind}: {note}" for note in notes)
         if notes and level == "none":
             level = "notice"
+        ai_messages, ai_level = ai_step_notes(kind, kind_summary)
+        if ai_messages:
+            messages.extend(ai_messages)
+            level = highest_warning_level([level, ai_level])
         row = {
             "name": f"artifacts-{kind}",
             "status": "failed_isolated" if parser_error_count else ("skipped" if skipped else "completed"),
@@ -140,6 +144,8 @@ def build_step_rows(
             "artifact_count": artifact_count,
             "parser_error_count": parser_error_count,
         }
+        if kind in AI_STEP_LABELS_KO:
+            row["label_ko"] = AI_STEP_LABELS_KO[kind]
         if notes:
             row["collection_notes"] = notes
         if skip_reasons:
@@ -303,6 +309,14 @@ def apply_row_truncation_warnings(
             count = int(status_counts.get(status) or 0)
             if count:
                 _add_step_warning(docs_row, f"문서 {count}건: {label} ({status})", cap=f"docs:{status}")
+    credential_files = summary.get("credential_files") if isinstance(summary, Mapping) else None
+    if docs_row is not None and isinstance(credential_files, Mapping) and int(credential_files.get("count") or 0):
+        # Policy, not a cut: disclosed as a notice (core/credential_files.py).
+        message = str(credential_files.get("note") or "")
+        messages = docs_row.setdefault("warning_messages", [])
+        if message and isinstance(messages, list) and message not in messages:
+            messages.append(message)
+        docs_row["warning_level"] = highest_warning_level([str(docs_row.get("warning_level") or "none"), "notice"])
 
 
 def _add_step_warning(row: dict[str, object], message: str, *, cap: str) -> None:
@@ -622,3 +636,35 @@ def highest_warning_level(levels: list[str]) -> str:
     if not levels:
         return "none"
     return max(levels, key=lambda level: priority.get(level, 0))
+
+
+# --- R7 AI 갈래 C: ai-agent step labels and notes -----------------------------------------------
+
+AI_STEP_LABELS_KO: dict[str, str] = {"ai-agent": "AI 사용 기록"}
+
+
+def ai_step_notes(kind: str, summary: Mapping[str, object]) -> tuple[list[str], str]:
+    """Korean step notes of the ai-agent kind: indirect rows added after the files stage (execution
+    traces, git trailers), their failure, and AI records under a retention limit (plan §3.2)."""
+    if kind not in AI_STEP_LABELS_KO:
+        return [], "none"
+    block = summary.get("ai_indirect") if isinstance(summary.get("ai_indirect"), Mapping) else None
+    if block is None:
+        return [], "none"
+    messages: list[str] = []
+    level = "none"
+    if block.get("status") == "failed_isolated":
+        messages.append(f"{kind}: 간접 증거(실행 흔적·git 트레일러) 추가 실패 — 수집기 행은 그대로임: {block.get('error') or '?'}")
+        level = "warning"
+    else:
+        execution = int(block.get("execution_rows") or 0)
+        commits = int(block.get("git_trailer_commits") or 0)
+        repos = int(block.get("git_repositories") or 0)
+        if execution or repos:
+            messages.append(f"{kind}: 실행 흔적 대조 {execution}건, git 저장소 {repos}개에서 AI 트레일러 커밋 {commits}건 추가")
+            level = "notice"
+    retention = int(block.get("retention_rows") or 0)
+    if retention:
+        messages.append(f"{kind}: 보존 기한 있는 AI 기록 {retention}건(자동 삭제 정책·정리 표식) — 그 이전 기록이 없다고 미사용은 아님")
+        level = highest_warning_level([level, "notice"])
+    return messages, level

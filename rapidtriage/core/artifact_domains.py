@@ -27,6 +27,7 @@ DOMAIN_LABELS: dict[str, str] = {
     "incident": "침해사고",
     "memory": "메모리",
     "location": "위치·여행",
+    "ai": "AI 사용",
 }
 ARTIFACT_DOMAIN_TABLE: tuple[tuple[str, str, tuple[str, ...] | None], ...] = (
     # --- kind defaults ----------------------------------------------------
@@ -56,6 +57,7 @@ ARTIFACT_DOMAIN_TABLE: tuple[tuple[str, str, tuple[str, ...] | None], ...] = (
     ("mobile", "android-apk", None),
     ("devices", "windows-remote-access", None),
     ("memory", "memory-volatility", None),
+    ("ai", "ai-agent", None),  # R7 AI: every ai-agent row type (tree domain "AI 사용", lane D domains.ts)
     # --- type routing -----------------------------------------------------
     ("devices", "windows-os-account", ("windows-mounted-device", "windows-usb-device")),
     ("devices", "windows-registry", ("windows-mounted-device", "windows-usb-device")),

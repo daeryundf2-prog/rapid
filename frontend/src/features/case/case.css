@@ -523,3 +523,87 @@
   justify-content: flex-start;
   align-items: center;
 }
+
+/* 개체·언어 검색 (R7 lane B, EntityPanel.tsx) */
+.entity-query {
+  display: grid;
+  gap: var(--space-2);
+}
+.entity-syntax {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-2) 0;
+}
+.entity-syntax > div {
+  display: contents;
+}
+.entity-syntax dd {
+  margin: 0;
+}
+.entity-summary h3 {
+  font-size: var(--fs-body);
+  margin: var(--space-3) 0 var(--space-1);
+}
+.entity-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.entity-chips .chip-note,
+.entity-values .chip-note {
+  color: var(--text-muted);
+}
+.entity-results {
+  margin-top: var(--space-3);
+}
+.entity-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.entity-rows > li {
+  border-top: 1px solid var(--line-subtle);
+  padding-top: var(--space-2);
+}
+.entity-row-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.entity-row-snippet {
+  overflow-wrap: anywhere;
+  max-height: 6em;
+  overflow: hidden;
+}
+.entity-values {
+  list-style: none;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+}
+.entity-kind {
+  color: var(--text-muted);
+}
+.entity-list-counts {
+  border-collapse: collapse;
+  margin: var(--space-2) 0;
+}
+.entity-list-counts th,
+.entity-list-counts td {
+  border-bottom: 1px solid var(--line-subtle);
+  padding: 2px var(--space-2);
+  text-align: left;
+}
+.entity-reveal-confirm {
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+  margin-top: var(--space-3);
+}

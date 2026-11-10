@@ -12,6 +12,7 @@ from ..artifacts.media import (
     language_hint_for_text,
     ocr_quality_metrics,
 )
+from .credential_files import credential_file_reason
 from .forensic_accuracy import build_accuracy_gate
 from .submission import compute_hashes
 
@@ -894,8 +895,10 @@ def ocr_queue_item_assessment(*, status: str, language_hint: str) -> dict[str, o
 
 
 def load_ocr_sidecar_with_metadata(path: Path) -> dict[str, object]:
+    if credential_file_reason(path, sniff=False):
+        return {}  # credential / secret file (core/credential_files.py): no sidecar text either
     for candidate in ocr_sidecar_candidates(path):
-        if not candidate.is_file():
+        if not candidate.is_file() or credential_file_reason(candidate, sniff=False):
             continue
         try:
             raw = candidate.read_text(encoding="utf-8", errors="replace")
