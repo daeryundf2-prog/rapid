@@ -103,11 +103,13 @@ REASON_CANCEL_ALL = "모두 취소 요청"
 REASON_BEFORE_START = "시작 전 취소"
 REASON_RUNNING_CANCEL = "실행 중 취소"
 REASON_INTERRUPTED = "서버 재시작으로 중단"
+REASON_KINDS_ONLY = "종류 제한 실행(--artifact-kinds)"
 
 MESSAGE_UNKNOWN_GROUP = "알 수 없는 그룹입니다: {}"
 MESSAGE_UNKNOWN_TASK = "알 수 없는 태스크입니다: {}"
 MESSAGE_UNSKIPPABLE_GROUP = "건너뛸 수 없는 그룹입니다: {}"
 MESSAGE_UNSKIPPABLE_TASK = "건너뛸 수 없는 태스크입니다: {}"
+MESSAGE_UNKNOWN_KIND = "알 수 없는 아티팩트 종류입니다: {}"
 MESSAGE_ALREADY_STARTED = "이미 시작된 태스크는 건너뛸 수 없습니다. 취소를 사용하세요"
 MESSAGE_ALREADY_FINISHED = "이미 끝난 태스크입니다"
 MESSAGE_NOT_CANCELLABLE = "취소할 수 없는 태스크입니다: {}"
@@ -192,6 +194,9 @@ STAGE_TASKS: dict[str, tuple[str, ...]] = {
     "report": ("report",),
 }
 UNSKIPPABLE_GROUPS = frozenset({"prepare", "fingerprint", "report"})
+# A kind-only run (``--artifact-kinds``) also leaves out the stages that walk the whole evidence
+# tree on their own; timeline / indicators / persist / triage-flags / derived work on the outputs.
+KINDS_ONLY_SKIPPED_GROUPS = ("docs", "files", "carve", "extract")
 UNSKIPPABLE_TASKS = frozenset({"image-extract", "fingerprint", "manifest", "report"})
 TASK_LABELS: dict[str, str] = {
     "image-extract": "증거 이미지 추출",
@@ -341,6 +346,27 @@ def validate_skip_targets(
     return normalized_groups, normalized_tasks
 
 
+def validate_artifact_kinds(
+    artifact_kinds: Iterable[str],
+    *,
+    provider_kinds: Sequence[str] | None = None,
+) -> list[str]:
+    """Normalized ``--artifact-kinds`` list (registry order kept as given, duplicates dropped);
+    raises :class:`PlanTargetError` (Korean) for a kind no provider registers."""
+    registered = list(provider_kinds) if provider_kinds is not None else builtin_provider_kinds()
+    known = set(registered)
+    kinds: list[str] = []
+    for raw in artifact_kinds:
+        kind = str(raw).strip().lower()
+        if not kind:
+            continue
+        if kind not in known:
+            raise PlanTargetError(MESSAGE_UNKNOWN_KIND.format(kind))
+        if kind not in kinds:
+            kinds.append(kind)
+    return kinds
+
+
 def _new_task(task_id: str, group_id: str, order: int) -> dict[str, object]:
     return {
         "id": task_id,
@@ -376,9 +402,21 @@ def build_run_plan(
     provider_kinds: Sequence[str] | None = None,
     actor: str = "cli",
     profile_kinds: Sequence[str] | None = None,
+    artifact_kinds: Sequence[str] = (),
 ) -> dict[str, object]:
-    """A fresh plan (every task ``queued``; pre-run skips and switched-off options ``skipped``)."""
-    kinds = tuple(profile_kinds) if profile_kinds is not None else _profile_kinds(mode)
+    """A fresh plan (every task ``queued``; pre-run skips and switched-off options ``skipped``).
+
+    ``artifact_kinds`` (``--artifact-kinds``) restricts the run to those provider kinds: they form
+    the profile, every other provider task and the :data:`KINDS_ONLY_SKIPPED_GROUPS` stages are
+    ``skipped`` (reason :data:`REASON_KINDS_ONLY`)."""
+    kinds_only = validate_artifact_kinds(artifact_kinds, provider_kinds=provider_kinds) if artifact_kinds else []
+    if profile_kinds is not None:
+        kinds = tuple(profile_kinds)
+    elif kinds_only:
+        _profile_kinds(mode)  # unknown mode still raises
+        kinds = tuple(kinds_only)
+    else:
+        kinds = _profile_kinds(mode)
     groups_spec = plan_groups(kinds, provider_kinds)
     if profile_kinds is None:
         normalized_groups, normalized_tasks = validate_skip_targets(
@@ -399,6 +437,10 @@ def build_run_plan(
             if group_id in normalized_groups or task_id in normalized_tasks:
                 if task["skippable"]:
                     task.update(status="skipped", reason=REASON_PRE_RUN, requested_by=dict(requested))
+            elif kinds_only and (
+                group_id in KINDS_ONLY_SKIPPED_GROUPS or (task_id not in STAGE_TASK_IDS and task_id not in kinds_only)
+            ):
+                task.update(status="skipped", reason=REASON_KINDS_ONLY)
             elif task_id == "carve" and not carve or task_id in {"docs-extract", "files-extract"} and not extract:
                 task.update(status="skipped", reason=REASON_OPTION_OFF)
             elif task_id == "persist" and not case_db:
@@ -429,6 +471,7 @@ def build_run_plan(
             "case_db": bool(case_db),
             "skip_groups": normalized_groups,
             "skip_tasks": normalized_tasks,
+            "artifact_kinds": list(kinds_only),
         },
         "outcome": None,
         "control": {"cancel_all_at": None, "finish_at": None, "requests": []},

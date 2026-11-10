@@ -225,6 +225,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--eventlog-message-catalog",
         help="JSON provider/event message catalog for --kind eventlog rendering",
     )
+    artifacts.add_argument(
+        "--ai-read-mb",
+        type=int,
+        default=None,
+        metavar="MB",
+        help="ai-agent: per-adapter read budget in MiB for parsed session files, newest first "
+        "(default: RAPIDTRIAGE_AI_READ_MB or 4096); files left out are listed in rapidtriage-ai-agent-skipped.json",
+    )
     add_eventlog_output_arguments(artifacts)
     add_rules_argument(artifacts)
 
@@ -2057,6 +2065,24 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         metavar="TASK",
         help="Leave one run-plan task (provider kind or stage) out before the run starts (repeatable)",
+    )
+    run.add_argument(
+        "--artifact-kinds",
+        "--only-kinds",
+        dest="artifact_kinds",
+        default="",
+        metavar="K1,K2",
+        help="Run only these artifact kinds (comma-separated, e.g. ai-agent). Every other provider and the "
+        "tree-walking docs/files/carve/extract stages are skipped, and the input fingerprint is sampled "
+        "(path/size/mtime of the first files, no content hash); the run summary records the restriction",
+    )
+    run.add_argument(
+        "--ai-read-mb",
+        type=int,
+        default=None,
+        metavar="MB",
+        help="ai-agent: per-adapter read budget in MiB for parsed session files, newest first "
+        "(default: RAPIDTRIAGE_AI_READ_MB or 4096); files left out are listed in rapidtriage-ai-agent-skipped.json",
     )
     run.add_argument(
         "--print-plan",

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import abc
 import datetime as dt
+import os
 import re
 import threading
 from collections.abc import Iterator, Mapping, Sequence
@@ -45,6 +46,7 @@ __all__ = [
     "AI_PROVIDER_NAME",
     "AI_PROVIDER_PARSER_VERSION",
     "COVERAGE_STATUSES",
+    "DEFAULT_AI_READ_MB",
     "INSTALL_KINDS",
     "AiAgentAdapter",
     "AiLimits",
@@ -52,6 +54,7 @@ __all__ = [
     "EvidenceProfile",
     "Found",
     "clear_adapters",
+    "default_adapter_read_bytes",
     "is_credential_name",
     "mask_identity_in_path",
     "mtime_iso",
@@ -153,6 +156,22 @@ class Found:
     extra: Mapping[str, object] = field(default_factory=dict)
 
 
+# Per-adapter read budget (files actually parsed). 4 GiB default: one heavy user's Claude Code /
+# Antigravity transcripts fit (Q-AI9: 200 MiB covered 31 of 1,042 Claude Code sessions).
+DEFAULT_AI_READ_MB = 4096
+AI_READ_MB_ENV = "RAPIDTRIAGE_AI_READ_MB"
+
+
+def default_adapter_read_bytes() -> int:
+    """``RAPIDTRIAGE_AI_READ_MB`` (MiB, > 0) or :data:`DEFAULT_AI_READ_MB`, in bytes."""
+    raw = str(os.environ.get(AI_READ_MB_ENV) or "").strip()
+    try:
+        value = int(raw) if raw else DEFAULT_AI_READ_MB
+    except ValueError:
+        value = DEFAULT_AI_READ_MB
+    return max(1, value) * 1024 * 1024
+
+
 @dataclass(frozen=True)
 class AiLimits:
     """Read limits (plan §3.2 공통 규칙). Exceeding one sets ``truncated`` on the row."""
@@ -160,7 +179,9 @@ class AiLimits:
     max_messages_per_session: int = 2000
     max_message_bytes: int = 16 * 1024
     max_tool_calls_per_session: int = 5000
-    max_adapter_read_bytes: int = 200 * 1024 * 1024
+    # Bytes of files an adapter parses (run option ``ai_read_mb`` / env ``RAPIDTRIAGE_AI_READ_MB``).
+    # Adapters read session files newest-first so the latest sessions are covered when it binds.
+    max_adapter_read_bytes: int = field(default_factory=default_adapter_read_bytes)
     # SQLite databases above this size are read for metadata tables only (reason recorded).
     max_sqlite_bytes: int = 1024 * 1024 * 1024
     # Run option ``ai_bodies``: message text included (masked) when True, metadata only otherwise.
@@ -190,6 +211,9 @@ class AiRow:
     tool_label: str = ""
     user: str = ""
     parser: str = ""
+    # Provider-side data that never becomes part of the record (e.g. the complete list of files
+    # skipped for the read budget, written to the ``rapidtriage-ai-agent-skipped.json`` sidecar).
+    side_data: dict[str, object] = field(default_factory=dict, repr=False, compare=False)
 
     def to_record(self, *, provider_name: str = AI_PROVIDER_NAME) -> ArtifactRecord:
         details: dict[str, object] = {

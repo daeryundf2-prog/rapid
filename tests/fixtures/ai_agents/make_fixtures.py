@@ -48,6 +48,8 @@ ZCODE_KEY = "ZCODE" + "Api" + "Key" + "0006"
 SWAP_CRED = "SWAP" + "Cred" + "0007"
 GEMINI_TOKEN = "GEMINI" + "Oauth" + "0008"
 EMAIL_LOCALS = ("alice.secret", "bob.private", "carol.hidden", "dave.cursor")
+# An address typed into a message body: evidence, kept as written (known-limitations decision).
+BODY_EMAIL = "evidence.contact@vendor.example"
 
 
 def secret_values() -> list[str]:
@@ -214,12 +216,14 @@ def build_claude_code(home: Path) -> None:
 
 # --- Codex ---------------------------------------------------------------------------------
 
+# Ledger app-format payloads add 2 messages / 2 tool calls / 3 file touches; ``thread_items`` adds
+# 2 messages / 3 tool calls / 1 file touch and one sub-agent session (thread-6).
 CODEX_EXPECTED = {
-    "sessions": 5,
-    "sessions_without_wal": 4,
-    "messages": 9,
-    "tool_calls": 2,
-    "file_touches": 2,
+    "sessions": 6,
+    "sessions_without_wal": 5,
+    "messages": 13,
+    "tool_calls": 7,
+    "file_touches": 6,
     "usage_rows": 2,
     "mcp_rows": 2,
     "instruction_rows": 4,
@@ -304,6 +308,35 @@ def build_codex(home: Path) -> None:
         ("thread-1", 4, {"type": "function_call_output", "call_id": "c1", "output": json.dumps({"output": "", "metadata": {"exit_code": 0}}), "timestamp": "2026-10-13T03:00:04Z"}),
         ("thread-1", 5, {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "removed"}], "timestamp": "2026-10-13T03:00:05Z"}),
         ("thread-1", 6, {"type": "ghost_snapshot_v9", "timestamp": "2026-10-13T03:00:06Z"}),
+        # Codex app thread-item format (the same shape as ``thread_items.item_json``)
+        ("thread-1", 7, {"item": {"type": "userMessage", "id": "u7", "clientId": None, "content": [{"type": "text", "text": f"mail the result to {BODY_EMAIL}", "text_elements": []}]}, "timestamp": "2026-10-13T03:01:00Z"}),
+        (
+            "thread-1",
+            8,
+            {
+                "item": {
+                    "type": "mcpToolCall", "id": "m8", "server": "git_bash", "tool": "run", "status": "completed", "error": None, "durationMs": 5,
+                    "arguments": {"command": f"cat {CWD}\\b.txt", "description": "read b", "timeout": 10, "workdir": CWD},
+                    "result": {"content": [{"type": "text", "text": "ok"}], "structuredContent": None},
+                },
+                "timestamp": "2026-10-13T03:01:01Z",
+            },
+        ),
+        (
+            "thread-1",
+            9,
+            {
+                "item": {
+                    "type": "fileChange", "id": "f9", "status": "completed",
+                    "changes": [
+                        {"path": f"{CWD}\\new.py", "kind": {"type": "add", "move_path": None}, "diff": "+x = 1"},
+                        {"path": f"{CWD}\\old.py", "kind": {"type": "delete", "move_path": None}, "diff": "-y = 2"},
+                    ],
+                },
+                "timestamp": "2026-10-13T03:01:02Z",
+            },
+        ),
+        ("thread-1", 10, {"item": {"type": "agentMessage", "id": "a10", "text": "done via ledger", "phase": "final_answer", "delivery": None, "memoryCitation": None, "questions": None}, "timestamp": "2026-10-13T03:01:03Z"}),
     ]
     _db(
         base / "sqlite" / "codex-dev.db",
@@ -323,6 +356,32 @@ def build_codex(home: Path) -> None:
             "thread_timeline_ledger": [("h", tid, seq, f"r{seq}", json.dumps(payload)) for tid, seq, payload in ledger],
             "automation_runs": [("thread-4", "nightly", CWD, f"run nightly with api_key={TOKEN_BARE}", "nightly done", t0 + 7200)],
         },
+    )
+    t_ms = (t0 + 120) * 1000
+    items = [
+        ("thread-2", "turn-1", "i1", 1, t_ms, {"type": "userMessage", "id": "i1", "clientId": None, "content": [{"type": "text", "text": "clean the temp log", "text_elements": []}]}),
+        ("thread-2", "turn-1", "i2", 2, t_ms + 1, {"type": "reasoning", "id": "i2", "content": [], "summary": ["thinking"]}),
+        (
+            "thread-2", "turn-1", "i3", 3, t_ms + 2,
+            {
+                "type": "mcpToolCall", "id": "i3", "server": "git_bash", "tool": "run", "status": "failed", "error": {"message": "denied"}, "durationMs": 9,
+                "arguments": {"command": f"Remove-Item {CWD}\\tmp.log", "description": "remove", "timeout": 10, "workdir": CWD},
+                "result": None, "pluginId": "git-bash@local",
+            },
+        ),
+        ("thread-2", "turn-1", "i4", 4, t_ms + 3, {"type": "webSearch", "id": "i4", "query": "", "action": {"type": "search", "query": None, "queries": ["sqlite wal read only"]}, "results": None}),
+        ("thread-2", "turn-1", "i5", 5, t_ms + 4, {"type": "commandExecution", "id": "i5", "command": "git status", "cwd": CWD, "status": "completed", "exitCode": 0, "aggregatedOutput": "clean", "durationMs": 3}),
+        ("thread-2", "turn-1", "i6", 6, t_ms + 5, {"type": "agentMessage", "id": "i6", "text": "log removal was denied", "phase": "final_answer"}),
+        ("thread-1", "turn-9", "i7", 7, t_ms + 6, {"type": "subAgentActivity", "id": "i7", "agentPath": "/root/worker", "agentThreadId": "thread-6", "kind": "spawned"}),
+        ("thread-1", "turn-9", "i8", 8, t_ms + 7, {"type": "contextCompaction", "id": "i8"}),
+    ]
+    _db(
+        base / "sqlite" / "thread_1.sqlite",
+        """
+        CREATE TABLE thread_items (thread_id TEXT, turn_id TEXT, item_id TEXT, rollout_ordinal INTEGER, created_at_ms INTEGER, item_json TEXT,
+          item_type TEXT, updated_at_ordinal INTEGER, started_at_ms INTEGER, completed_at_ms INTEGER);
+        """,
+        {"thread_items": [(tid, turn, iid, ordinal, ms, json.dumps(item), item["type"], ordinal, None, None) for tid, turn, iid, ordinal, ms, item in items]},
     )
     _db(
         base / "sqlite" / "logs_2.sqlite",

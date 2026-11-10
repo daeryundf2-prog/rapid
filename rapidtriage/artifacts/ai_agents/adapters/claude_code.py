@@ -28,6 +28,7 @@ from ._common import (
     make_found,
     mcp_row,
     mcp_rows_from_config,
+    newest_first,
     presence_row,
     read_small_json,
     retention_row,
@@ -215,7 +216,8 @@ class ClaudeCodeAdapter(AiAgentAdapter):
         session_rows: list[AiRow] = []
         if projects.is_dir():
             files = [p for p in walk_files(projects, limit=200_000) if p.suffix == ".jsonl"]
-            for path in sorted(files, key=lambda p: (len(p.parts), str(p))):
+            # Newest first: when the read budget binds, the most recent sessions are the ones kept.
+            for path in newest_first(files):
                 session_rows.extend(self._session(ctx, path, projects, file_history))
         rows.extend(session_rows)
         rows.extend(history_rows)

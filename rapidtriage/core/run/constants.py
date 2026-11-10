@@ -4,6 +4,15 @@ from __future__ import annotations
 
 from ..extract import SUPPORTED_DOC_KINDS
 
+# Input fingerprint modes recorded as ``fingerprint_mode`` in the fingerprint and run summary:
+# ``content-hash`` (--resume), ``metadata`` (path/size/mtime of up to 5,000 files) and ``sampled``
+# (a kind-only run, ``--artifact-kinds``: path/size/mtime of the first files a lazy walk yields,
+# without the run-wide evidence path snapshot, so a whole home folder is never enumerated).
+FINGERPRINT_MODE_CONTENT = "content-hash"
+FINGERPRINT_MODE_METADATA = "metadata"
+FINGERPRINT_MODE_SAMPLED = "sampled"
+KINDS_ONLY_FINGERPRINT_MAX_FILES = 1000
+
 __all__ = [
     "CHECKPOINT_RESUME_GAP_ID",
     "CHECKPOINT_RESUME_REPORT_GRADE_BLOCKERS",
@@ -12,6 +21,9 @@ __all__ = [
     "CROSS_PLATFORM_SYSTEM_ARTIFACT_KINDS",
     "DEFAULT_INCREMENTAL_HASH_MAX_BYTES",
     "DEFAULT_REUSABLE_JSON_MAX_BYTES",
+    "FINGERPRINT_MODE_CONTENT",
+    "FINGERPRINT_MODE_METADATA",
+    "FINGERPRINT_MODE_SAMPLED",
     "FUNCTIONAL_LARGE_DATA_BATCH_ID",
     "GENERAL_FORENSIC_ARTIFACT_KINDS",
     "IMPLEMENTED_RUN_MODES",
@@ -19,6 +31,7 @@ __all__ = [
     "INCREMENTAL_INDEXING_REPORT_GRADE_BLOCKERS",
     "INCREMENTAL_INDEXING_REPORT_GRADE_VALIDATION_PLAN_VERSION",
     "INCREMENTAL_TRUSTED_DIFF_BLOCKER_68",
+    "KINDS_ONLY_FINGERPRINT_MAX_FILES",
     "LARGE_SQLITE_FTS_GAP_ID",
     "LARGE_SQLITE_FTS_REPORT_GRADE_BLOCKERS",
     "LARGE_SQLITE_FTS_REPORT_GRADE_VALIDATION_PLAN_VERSION",

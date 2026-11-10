@@ -107,12 +107,47 @@ class CodexAdapterTests(unittest.TestCase):
         self.assertTrue(calls["c1"]["destructive"])
         self.assertEqual(calls["c9"]["exit_code"], 1)
         ops = sorted(r.details["op"] for r in mf.by_type(self.rows, "ai-agent-file-touch"))
-        self.assertEqual(ops, ["delete", "read"])
+        # c1 delete, c9 read (rollout / old ledger) + m8 read, f9 create+delete (ledger app items) + i3 delete (thread_items)
+        self.assertEqual(ops, ["create", "delete", "delete", "delete", "read", "read"])
         logs = next(r.details for r in mf.by_type(self.rows, "ai-tool-presence") if r.details.get("presence_kind") == "log-db")
         self.assertEqual(logs["log_rows"], 3)
         self.assertFalse(logs["bodies_collected"])
         summary = mf.summary_of(self.rows)
         self.assertEqual(summary["unknown_record_types"], {"ghost_snapshot_v9": 1})
+
+    def test_thread_items_and_app_format_ledger(self) -> None:
+        """Q-AI9: the Codex app keeps tool calls in ``thread_*.sqlite`` ``thread_items`` (and app-format
+        ledger payloads), not in response items - both become tool-call / message / file-touch rows."""
+        calls = {r.details["call_id"]: r.details for r in mf.by_type(self.rows, "ai-agent-tool-call")}
+        self.assertEqual(
+            {cid: (c["tool_name"], c["tool_kind"], c["source"]) for cid, c in calls.items() if cid in {"m8", "f9", "i3", "i4", "i5"}},
+            {
+                "m8": ("mcp__git_bash__run", "shell", "thread_timeline_ledger"),
+                "f9": ("apply_patch", "edit", "thread_timeline_ledger"),
+                "i3": ("mcp__git_bash__run", "shell", "thread_items"),
+                "i4": ("web_search", "search", "thread_items"),
+                "i5": ("shell", "shell", "thread_items"),
+            },
+        )
+        self.assertEqual((calls["m8"]["mcp_server"], calls["m8"]["mcp_tool"], calls["m8"]["result_bytes"]), ("git_bash", "run", 2))
+        self.assertTrue(calls["i3"]["destructive"])
+        self.assertTrue(calls["i3"]["is_error"])
+        self.assertEqual(calls["i3"]["status"], "failed")
+        self.assertEqual(calls["i4"]["pattern"], "sqlite wal read only")
+        self.assertEqual(calls["i5"]["exit_code"], 0)
+        self.assertEqual(calls["f9"]["change_count"], 2)
+        touches = sorted((r.details["op"], r.details["op_source"]) for r in mf.by_type(self.rows, "ai-agent-file-touch") if r.details.get("call_id") == "f9")
+        self.assertEqual(touches, [("create", "fileChange"), ("delete", "fileChange")])
+        messages = [(r.details["session_id"], r.details["role"], r.details["source"]) for r in mf.by_type(self.rows, "ai-agent-message") if r.details["source"] in {"thread_items", "thread_timeline_ledger"}]
+        self.assertIn(("thread-2", "user", "thread_items"), messages)
+        self.assertIn(("thread-2", "assistant", "thread_items"), messages)
+        self.assertIn(("thread-1", "assistant", "thread_timeline_ledger"), messages)
+        sessions = {r.details["session_id"]: r.details for r in mf.by_type(self.rows, "ai-agent-session")}
+        self.assertEqual(sessions["thread-6"]["parent_session_id"], "thread-1")
+        self.assertEqual(sessions["thread-1"]["subagent_activity"], 1)
+        self.assertIn("thread_items", sessions["thread-2"]["sources"])
+        # reasoning / compaction are known item types (counted, no rows)
+        self.assertEqual(mf.summary_of(self.rows)["unknown_record_types"], {"ghost_snapshot_v9": 1})
 
     def test_oversized_db_is_meta_only(self) -> None:
         rows = mf.collect_rows(CodexAdapter, self.tmp, AiLimits(max_sqlite_bytes=1))
@@ -121,6 +156,7 @@ class CodexAdapterTests(unittest.TestCase):
         self.assertEqual(dev["meta_only_reason"], "sqlite-over-size-cap")
         sources = [r.details.get("source") for r in mf.by_type(rows, "ai-agent-message")]
         self.assertNotIn("thread_timeline_ledger", sources)
+        self.assertNotIn("thread_items", sources)
 
     def test_no_secret_in_rows(self) -> None:
         blob = json.dumps([r.details for r in self.rows], ensure_ascii=False, default=str)
