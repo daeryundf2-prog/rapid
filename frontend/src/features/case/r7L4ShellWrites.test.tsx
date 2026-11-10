@@ -125,6 +125,28 @@ describe("toasts (C-G12, P2)", () => {
     });
     expect(useToastStore.getState().toasts.map((t) => t.text)).toEqual(["저장했습니다"]);
   });
+
+  it("an error toast does not follow the analyst to another node of the same stage (E01 QA D2)", () => {
+    render(<ToastRegion />);
+    act(() => {
+      useAppStore.getState().navigate({ runId: "r1", collection: "files" });
+    });
+    act(() => {
+      pushToast("리뷰어 번들 실패", "error");
+    });
+    act(() => {
+      useAppStore.getState().navigate({ runId: "r1", collection: "docs" });
+    });
+    expect(useToastStore.getState().toasts.map((t) => t.text)).toEqual([]);
+  });
+
+  it("the error toast has a close button", () => {
+    render(<ToastRegion />);
+    act(() => {
+      pushToast("실패", "error");
+    });
+    expect(screen.getByRole("button", { name: /알림 닫기/ })).toBeTruthy();
+  });
 });
 
 describe("palette without a case (C-G11)", () => {

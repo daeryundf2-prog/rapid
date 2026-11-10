@@ -3,7 +3,7 @@
  * cases → evidence → runs, processing snapshots, problems by reason, case notes.
  */
 
-import { api } from "./client";
+import { ApiError, api } from "./client";
 import type { RunCreateBody, RunJob } from "./runs";
 
 const enc = encodeURIComponent;
@@ -234,6 +234,32 @@ export async function checkEvidence(path: string, sourceType: EvidenceType): Pro
     runnable: raw?.runnable !== false,
     run_blocked_reason: raw?.run_blocked_reason ?? "",
   };
+}
+
+export interface OutputCheck {
+  ok: boolean;
+  problem: string;
+}
+
+/**
+ * `POST /api/cases/output-check` (E01 QA D5): the server's own path rules for a run output folder
+ * or a case folder, asked BEFORE the case is created so a bad path never leaves an orphan case.
+ * A server without the endpoint (404) is "unverified": the create call keeps its own check.
+ */
+export async function checkOutputFolder(
+  path: string,
+  kind: "output_dir" | "case_root",
+): Promise<OutputCheck> {
+  try {
+    const raw = await api<Partial<OutputCheck>>("/api/cases/output-check", {
+      method: "POST",
+      body: JSON.stringify({ path, kind }),
+    });
+    return { ok: raw?.ok !== false, problem: raw?.problem ?? "" };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return { ok: true, problem: "" };
+    throw error;
+  }
 }
 
 /** `POST /api/cases/{id}/evidence/{eid}/hash`: hash a file evidence item (again). */

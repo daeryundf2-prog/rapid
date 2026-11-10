@@ -20,6 +20,8 @@ from typing import NamedTuple
 
 from .extraction_failures import (
     ADS_SOURCE_ID,
+    E01_EXTRACT_DIR_NAME,
+    E01_LEGACY_EXTRACT_DIR_NAMES,
     FLS_LISTING_NAME,
     LONG_PATH_SOURCE_ID,
     ZERO_BYTE_SOURCE_ID,
@@ -41,6 +43,7 @@ from .hash_cache import (
 from .input_root import InputRoot, resolve_input_root
 from .models import FileCandidate
 from .recovery import (
+    CANDIDATE_KIND_DELETED_ENTRY,
     CANDIDATE_KIND_EXISTING,
     build_recovery_record,
     count_candidate_kinds,
@@ -723,6 +726,45 @@ def deletion_state_for(is_deleted: bool | None) -> str:
     return DELETION_STATE_UNKNOWN
 
 
+#: Folder of the native E01 engine's deleted-record sweep (``e01_native._sweep_deleted_mft_records``):
+#: every file under ``<extract root>/_deleted_mft/`` was dumped from an MFT record whose in-use flag
+#: is cleared, i.e. an unallocated (deleted) file. The engine encodes that only in the folder name.
+NATIVE_DELETED_MFT_DIR = "_deleted_mft"
+
+
+def native_deleted_sweep_root(root: Path) -> bool:
+    """True when ``root`` is an E01 extraction root holding the native deleted-record sweep."""
+    return root.name in (E01_EXTRACT_DIR_NAME, *E01_LEGACY_EXTRACT_DIR_NAMES) and (root / NATIVE_DELETED_MFT_DIR).is_dir()
+
+
+def mark_native_deleted_record(candidate: FileCandidate) -> None:
+    """E01 QA D18: propagate the engine's "unallocated MFT record" knowledge to the file row.
+
+    Only a row whose deletion state is still unknown is changed (an image listing that already
+    said allocated / deleted wins). Derivation only -- the recovery engine is not touched.
+    """
+    if candidate.is_deleted is not None:
+        return
+    first = candidate.relative_path.replace("\\", "/").split("/", 1)[0]
+    if first != NATIVE_DELETED_MFT_DIR:
+        return
+    candidate.is_deleted = True
+    record_name = candidate.name.split("-", 1)[0]
+    candidate.recovery = build_recovery_record(
+        CANDIDATE_KIND_DELETED_ENTRY,
+        subtype="native-mft-unallocated-record",
+        confidence="medium",
+        deletion_state="deleted",
+        source_id="e01-native-deleted-mft-sweep",
+        source_path=candidate.path,
+        source_record_id=record_name if record_name.isdigit() else None,
+        limitation=(
+            "Recovered from an MFT record whose in-use flag is cleared (native deleted-record sweep); "
+            "content may be overwritten by later allocations. Validate with a trusted tool."
+        ),
+    )
+
+
 def sync_deletion_state(candidate: FileCandidate) -> None:
     if isinstance(candidate.recovery, dict):
         candidate.recovery["deletion_state"] = deletion_state_for(candidate.is_deleted)
@@ -981,6 +1023,7 @@ def scan_file_candidates(
     # E01 extraction roots carry sidecars (inode map, long-path/zero-byte/ADS
     # recoveries) written by the extraction gap stage; plain folders do not.
     extraction_stage = extraction_stage_for_root(root)
+    native_deleted_sweep = native_deleted_sweep_root(root)
     inode_index = load_extraction_inode_index(root) if extraction_stage is not None else {}
     listing_times = load_listing_time_index(root) if extraction_stage is not None else {}
     on_disk_keys: set[str] | None = set() if extraction_stage is not None else None
@@ -1024,6 +1067,8 @@ def scan_file_candidates(
             listing = listing_times.get(inode) if inode is not None else None
             if listing:
                 apply_listing_times(record, listing)
+        if native_deleted_sweep:
+            mark_native_deleted_record(record)
         inventory.append(file_inventory_record(record, reason=reason))
 
     def classify_and_build(path: Path, entry_stat: os.stat_result, relative_key: str = "") -> FileCandidate | None:
@@ -1092,6 +1137,8 @@ def scan_file_candidates(
                             listing = listing_times.get(inode)
                             if listing:
                                 apply_listing_times(candidate, listing)
+                    if native_deleted_sweep:
+                        mark_native_deleted_record(candidate)
                     candidates.append(candidate)
                     if limit and len(candidates) >= limit:
                         limit_reached = True

@@ -151,6 +151,7 @@ describe("CaseWizard (Q-X1)", () => {
     expect(screen.getByTestId("wizard-step-info")).toBeTruthy();
     fill("사건 번호", "2026-고단-1234");
     fill("검사관", "홍길동");
+    fill("케이스 폴더", "D:\\cases\\2026");
     fireEvent.click(screen.getByTestId("wizard-next"));
 
     // Step 2: two evidence items, then delete the second one.
@@ -193,7 +194,11 @@ describe("CaseWizard (Q-X1)", () => {
       "/api/cases/case-1/runs",
     ]);
     expect(posts[0]?.body).toEqual({ path: "D:\\ev\\a.E01", source_type: "e01" });
-    expect(posts[1]?.body).toMatchObject({ case_number: "2026-고단-1234", examiner: "홍길동" });
+    expect(posts[1]?.body).toMatchObject({
+      case_number: "2026-고단-1234",
+      examiner: "홍길동",
+      case_root: "D:\\cases\\2026",
+    });
     expect(posts[2]?.body).toMatchObject({ evidence_number: "E-01", source_type: "e01", verify_hash: true });
     expect(posts[3]?.body).toEqual(caseRunBody(DEFAULT_RUN_FORM, "C-EVID-000001"));
     expect(onNotice).toHaveBeenCalledWith("케이스 2026-고단-1234를 만들고 런 1개를 시작했습니다.");
@@ -212,6 +217,7 @@ describe("CaseWizard (Q-X1)", () => {
     });
     renderWithQuery(<CaseWizard runIsActive={false} onClose={vi.fn()} />);
     fill("사건 번호", "9");
+    fill("케이스 폴더", "D:\\cases\\9");
     fireEvent.click(screen.getByTestId("wizard-next"));
     await screen.findByTestId("wizard-step-evidence");
     fill("증거 경로", "D:\\x.E01");

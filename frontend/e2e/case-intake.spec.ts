@@ -96,6 +96,8 @@ test("Q-X1: 케이스 만들기 3단계 → 실행 → 접수 5 cards, kept afte
   // Step 3: options + summary; the request the UI sends must match the summary 1:1.
   await expect(dialog.getByTestId("wizard-step-options")).toBeVisible();
   await dialog.getByLabel("모드").selectOption("fraud");
+  // E01 QA D4: no 케이스 폴더 was given, so the output folder (required) becomes the case folder.
+  await dialog.getByLabel("출력 폴더").fill(mkdtempSync(join(tmpdir(), "rt-e2e-case-out-")));
   const summaryKeys = await dialog
     .getByTestId("wizard-summary")
     .locator("tr[data-key]")
@@ -204,6 +206,7 @@ test("Q-X1 review: register-only evidence is pre-checked, saved and skipped", as
   // The server pre-check marked the zip register-only before anything was saved.
   await expect(dialog.getByTestId("wizard-step-options")).toBeVisible();
   await expect(dialog.getByTestId("wizard-skipped")).toContainText("E-02");
+  await dialog.getByLabel("출력 폴더").fill(mkdtempSync(join(tmpdir(), "rt-e2e-case-out-")));
   await expect(dialog.getByTestId("wizard-submit")).toHaveText("실행 (런 1개)");
   await dialog.getByTestId("wizard-submit").click();
   await expect(page).toHaveURL(/#\/case\/[0-9a-f]+\/intake/);

@@ -284,6 +284,15 @@ class CaseEvidenceCheckRequest(BaseModel):
     source_type: Literal["e01", "folder", "export", "mobile"] | None = None
 
 
+class CaseOutputCheckRequest(BaseModel):
+    """``POST /api/cases/output-check``: a run output folder or a case folder, before anything is saved."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(..., min_length=1, max_length=4096)
+    kind: Literal["output_dir", "case_root"] = "output_dir"
+
+
 class CaseRunCreateRequest(RunCreateRequest):
     """``POST /api/runs`` body + the case evidence the run processes (root defaults to its path)."""
 

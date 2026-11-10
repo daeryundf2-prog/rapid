@@ -283,6 +283,10 @@ describe("CaseWizard step 3 처리 그룹", () => {
     const onClose = vi.fn();
     renderWithQuery(<CaseWizard runIsActive={false} onClose={onClose} />);
     fireEvent.change(screen.getByLabelText("사건 번호", { exact: false }), { target: { value: "2026-1" } });
+    // E01 QA D4: a run needs a case folder (or an explicit output folder).
+    fireEvent.change(screen.getByLabelText("케이스 폴더", { exact: false }), {
+      target: { value: "D:\\cases\\2026-1" },
+    });
     fireEvent.click(screen.getByTestId("wizard-next"));
     await screen.findByTestId("wizard-step-evidence");
     fireEvent.change(screen.getByLabelText("증거 경로", { exact: false }), {

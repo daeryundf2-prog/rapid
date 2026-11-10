@@ -12,7 +12,14 @@ import { Modal } from "./Modal";
 import { ReasonButton } from "./ReasonButton";
 import { RunOptionsFields } from "./RunOptionsFields";
 import { RunPlanGroupsField } from "./RunPlanGroupsField";
-import { buildRunBody, DEFAULT_RUN_FORM, firstRunFormError, type RunForm, validateRunForm } from "./runForm";
+import {
+  buildRunBody,
+  DEFAULT_RUN_FORM,
+  firstRunFormError,
+  QUICK_RUN_OUTPUT_SPEC,
+  type RunForm,
+  validateRunForm,
+} from "./runForm";
 
 /** Korean names of the collection-plan profiles (core/collect_plan.PROFILE_TARGETS); the id stays the value. */
 export const COLLECT_PROFILE_LABEL: Record<string, string> = {
@@ -146,6 +153,7 @@ export function RunDialog({
           onChange={set}
           advanced={advanced}
           onAdvancedChange={setAdvanced}
+          output={QUICK_RUN_OUTPUT_SPEC}
           extra={
             <>
               <label htmlFor="run-collect-profile">수집 프로필 (계획 미리보기 전용)</label>

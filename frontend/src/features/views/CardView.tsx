@@ -23,6 +23,7 @@ import type { GridRow } from "../../contracts/collection";
 import { encodeRowRef } from "../../contracts/rowRef";
 import { useTimezone } from "../../state/hooks";
 import { formatGridTime } from "../../utils/time";
+import { timestampKindLabel } from "../../utils/timeKinds";
 import { kindLabel } from "../derived/tables";
 import { artifactTypeLabel } from "../filters/typeLabels";
 import { familyForType } from "../flags/catalog";
@@ -79,10 +80,25 @@ export interface CardModel {
   chips: Array<{ id: string; label: string; tone: "flag" | "review" | "tag"; grade?: string }>;
 }
 
+/**
+ * A timeline event type no label table names (`artifact-<type>-<time kind>`) never shows its raw
+ * id on a card (E01 QA D6): "아티팩트 이벤트 · <시각 종류>" when the time kind is known.
+ */
+export function unknownEventTypeLabel(type: string): string {
+  if (!type.startsWith("artifact-")) return type;
+  const rest = type.slice("artifact-".length);
+  for (let cut = rest.indexOf("-"); cut > 0; cut = rest.indexOf("-", cut + 1)) {
+    const kind = rest.slice(cut + 1);
+    const label = timestampKindLabel(kind);
+    if (label && label !== kind) return `아티팩트 이벤트 · ${label}`;
+  }
+  return "아티팩트 이벤트";
+}
+
 /** The text of one card (pure; tested). */
 export function cardModel(row: GridRow, tz: string): CardModel {
   const type = row.artifactType ?? "";
-  const typeText = type ? (artifactTypeLabel(type) ?? type) : "";
+  const typeText = type ? (artifactTypeLabel(type) ?? unknownEventTypeLabel(type)) : "";
   const family = familyForType(type)?.label ?? (row.ref.kind ? kindLabel(row.ref.kind) : "");
   const subtitle = [typeText, family && family !== typeText ? family : ""].filter(Boolean).join(" — ");
   // C-V3: a row whose title is only its container file ("History") is titled by its family's main

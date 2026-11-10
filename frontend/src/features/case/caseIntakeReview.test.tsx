@@ -62,8 +62,9 @@ function evidenceRow(over: Partial<CaseEvidence>): CaseEvidence {
 }
 
 /** Steps 1–2 of the wizard with the given evidence (type, path) items; ends on step 3. */
-async function fillWizard(items: Array<[string, string]>, caseNumber = "2026-1") {
+async function fillWizard(items: Array<[string, string]>, caseNumber = "2026-1", caseRoot = "D:\\cases\\c1") {
   fill("사건 번호", caseNumber);
+  if (caseRoot) fill("케이스 폴더", caseRoot);
   fireEvent.click(screen.getByTestId("wizard-next"));
   const step2 = await screen.findByTestId("wizard-step-evidence");
   for (let i = 1; i < items.length; i += 1) fireEvent.click(screen.getByTestId("wizard-add-evidence"));
@@ -222,9 +223,10 @@ describe("review 3: forced link", () => {
 
 describe("review 6: automatic output location text", () => {
   it("says folder evidence gets its output inside the folder", () => {
+    // E01 QA D4: the automatic output is a run folder under the case folder, never beside evidence.
     const row = summarizeRunRequest({ output_dir: null }).find((r) => r.key === "output_dir");
-    expect(row?.value).toContain("폴더 증거는 그 폴더 안에");
-    expect(row?.value).toContain("파일 증거는 파일 옆에");
+    expect(row?.value).toContain("케이스 폴더 아래");
+    expect(row?.value).not.toContain("파일 옆");
   });
 });
 

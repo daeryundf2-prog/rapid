@@ -85,9 +85,21 @@ export function hasFieldKeyword(keywords: readonly string[]): boolean {
   return keywords.some((keyword) => CONSOLE_FIELD_KEYWORD.test(keyword));
 }
 
-/** Shown when a field keyword cannot run: the run has no ready search index (or other options are on). */
+/** Shown when a field keyword cannot run because the run has no search index. */
 export const FIELD_SEARCH_NEEDS_INDEX =
-  "rrn:·card:·lang:·hashset: 같은 필드 검색은 검색 색인으로만 찾습니다. 처리 단계에서 검색 색인을 만들고, 검색 옵션(정규식·유사 일치·OCR·검색 범위·확장자·알려진 정상 숨기기)을 기본값으로 두세요.";
+  "rrn:·card:·lang:·hashset: 같은 필드 검색은 검색 색인으로만 찾습니다. 이 런에는 검색 색인이 없습니다. 처리 단계에서 검색 색인을 만드세요.";
+
+/** A field keyword search whose stale index could not be read (E01 QA D3: never "색인을 만드세요"). */
+export const FIELD_SEARCH_STALE_INDEX =
+  "검색 색인이 런 출력보다 오래되어 필드 검색을 하지 못했습니다. 처리 단계에서 검색 색인을 다시 만드세요.";
+
+/** A field keyword search while the run's index is being built. */
+export const FIELD_SEARCH_INDEX_BUILDING =
+  "검색 색인을 만드는 중입니다. 색인이 끝나면 rrn:·card:·lang:·hashset: 같은 필드 검색을 할 수 있습니다.";
+
+/** A field keyword search with search options the index does not cover. */
+export const FIELD_SEARCH_OPTIONS =
+  "rrn:·card:·lang:·hashset: 같은 필드 검색은 검색 색인으로만 찾습니다. 검색 옵션(정규식·유사 일치·OCR·검색 범위·확장자·알려진 정상 숨기기)을 기본값으로 두세요.";
 
 /** Options the v2 console query answers like v1 (anything else: v1 `GET /search`). */
 export function indexCoversSearch(spec: IndexSearchSpec, extensions: readonly string[] | undefined): boolean {

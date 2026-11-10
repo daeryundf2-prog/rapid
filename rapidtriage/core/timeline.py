@@ -1306,6 +1306,11 @@ def extract_artifact_events(
                 )
                 continue
             context = compact_event_context(detail_event["context"], event_path=artifact_path)
+            mft_target = mft_record_target(details) if artifact_type == "mft-record" else ""
+            if mft_target:
+                # E01 QA D6: an MFT record's times belong to the file the record names, not to
+                # the $MFT the row was read from (that stays the event path / 출처 행).
+                context["target_path"] = mft_target
             identity = detail_event.get("identity") or _record_identity(details) or f"row={row_index}"
             element_identity = str(detail_event.get("element_identity") or "")
             lnk_identity = jumplist_lnk_identity(artifact_type, detail_event["context"])
@@ -1332,7 +1337,9 @@ def extract_artifact_events(
                 "event_type": event_type,
                 "path": artifact_path,
                 "summary": _short(
-                    build_artifact_summary(
+                    mft_record_summary(str(detail_event["timestamp_kind"]), mft_target, details)
+                    if artifact_type == "mft-record"
+                    else build_artifact_summary(
                         artifact_type, artifact_path, {**context, **(detail_event.get("summary_context") or {})}
                     ),
                     MAX_SUMMARY_LENGTH,
@@ -1947,6 +1954,42 @@ def build_eventlog_summary(artifact_type: str, context: Mapping[str, object]) ->
         bits.append(f"명령 {command[:EVENTLOG_SUMMARY_MESSAGE_LENGTH]}")
     text = " · ".join(bits)
     return f"[탐지] {text}" if artifact_type == "eventlog-detection" else text
+
+
+#: Korean reading of an MFT record time kind (E01 QA D6): SI = $STANDARD_INFORMATION, FN = $FILE_NAME.
+MFT_TIME_KIND_LABELS = {
+    "si-created": "파일 생성(SI)",
+    "si-modified": "파일 수정(SI)",
+    "si-mft-modified": "MFT 항목 변경(SI)",
+    "si-accessed": "파일 접근(SI)",
+    "fn-created": "파일 생성(FN)",
+    "fn-modified": "파일 수정(FN)",
+    "fn-mft-modified": "MFT 항목 변경(FN)",
+    "fn-accessed": "파일 접근(FN)",
+}
+
+
+def mft_record_target(details: Mapping[str, object]) -> str:
+    """The file an MFT record names: its reconstructed path (FILE_NAME + parent path when the
+    parser resolved it), else the FILE_NAME, else ``""``."""
+    path = str(details.get("file_path") or "").strip()
+    if path:
+        return path
+    for entry in details.get("file_name_entries") or ():
+        if isinstance(entry, Mapping):
+            name = str(entry.get("file_name") or entry.get("name") or "").strip()
+            if name:
+                return name
+    return ""
+
+
+def mft_record_summary(kind: str, target: str, details: Mapping[str, object]) -> str:
+    """``파일 생성(SI): <file path>`` — the time kind in Korean and the file it belongs to."""
+    label = MFT_TIME_KIND_LABELS.get(kind, f"MFT 시각({kind})")
+    if not target:
+        number = str(details.get("record_number") or "").strip()
+        target = f"MFT 레코드 #{number}" if number else "MFT 레코드(파일 이름 없음)"
+    return f"{label}: {target}"
 
 
 def build_artifact_summary(artifact_type: str, artifact_path: str, context: Mapping[str, object]) -> str:

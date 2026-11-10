@@ -29,7 +29,13 @@ import { EvidenceFields } from "./EvidenceFields";
 import { Modal } from "./Modal";
 import { ReasonButton } from "./ReasonButton";
 import { RunOptionsFields } from "./RunOptionsFields";
-import { DEFAULT_RUN_FORM, type RunForm, validateRunForm } from "./runForm";
+import {
+  caseRunOutputSpec,
+  DEFAULT_RUN_FORM,
+  outputRequiredReason,
+  type RunForm,
+  validateRunForm,
+} from "./runForm";
 import { summarizeRunRequest } from "./runSummary";
 import {
   CASE_TYPE_SUGGESTIONS,
@@ -464,11 +470,14 @@ export function AddRunDialog({
   const chosen = evidence.find((item) => item.citation_id === evidenceId);
   const body = caseRunBody(form, evidenceId);
   const summary = summarizeRunRequest(body as unknown as Record<string, unknown>);
+  // E01 QA D4: the default is the case folder's run subfolder; without one the examiner chooses.
+  const outputSpec = caseRunOutputSpec(detail.data?.case_root);
   const reason = runIsActive
     ? "실행 중 런이 있습니다"
     : !evidenceId
       ? "증거를 고르세요"
-      : caseRunFormReason(form);
+      : (caseRunFormReason(form) ??
+        (detail.data ? outputRequiredReason(outputSpec, form.outputDir) : undefined));
   const start = useMutation({
     mutationFn: () => createCaseRun(caseId, body),
     onSuccess: (result) => {
@@ -532,6 +541,7 @@ export function AddRunDialog({
         advanced={advanced}
         onAdvancedChange={setAdvanced}
         idPrefix={`${id}-run`}
+        output={outputSpec}
       />
       <table className="data-table dash-table" aria-label="처리 옵션 요약">
         <tbody>

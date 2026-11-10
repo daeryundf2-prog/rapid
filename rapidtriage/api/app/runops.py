@@ -616,6 +616,15 @@ def load_case_payload_or_empty(case_path: Path) -> dict[str, object]:
         raise HTTPException(status_code=409, detail=str(exc))
 
 
+def _run_review_payload(store: RunJobStore, run_id: str) -> dict[str, object]:
+    """Bookmark JSON + case DB review marks (E01 QA D2: console marks live in the case DB)."""
+    from .review_payload import (
+        load_run_review_payload,
+    )
+
+    return load_run_review_payload(store, run_id)
+
+
 def build_run_submission_manifest(
     store: RunJobStore,
     run_id: str,
@@ -626,8 +635,7 @@ def build_run_submission_manifest(
     job = get_job(store, run_id)
     if job.summary is None:
         raise HTTPException(status_code=409, detail=run_not_finished_message(job))
-    case_path = default_case_path(store, run_id)
-    case_payload = load_case_payload_or_empty(case_path)
+    case_payload = _run_review_payload(store, run_id)
     try:
         return build_submission_manifest(
             case_payload,
@@ -648,7 +656,7 @@ def build_run_case_report(
     if job.summary is None:
         raise HTTPException(status_code=409, detail=run_not_finished_message(job))
     case_path = default_case_path(store, run_id)
-    case_payload = load_case_payload_or_empty(case_path)
+    case_payload = _run_review_payload(store, run_id)
     manifest = build_run_submission_manifest(
         store,
         run_id,
