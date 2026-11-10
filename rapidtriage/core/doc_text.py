@@ -108,10 +108,27 @@ SCRIPT_CLASSES: dict[str, re.Pattern[str]] = {
     name: re.compile("[" + "".join(f"{chr(low)}-{chr(high)}" for low, high in ranges) + "]") for name, ranges in SCRIPT_RANGES.items()
 }
 SCRIPT_MIN_LETTERS = 20
+# Characters of a body that ``script_profile`` samples (the writing-system mix of the first 256 Ki
+# characters stands for the document; the search index samples only 16 Ki).
+SCRIPT_SAMPLE_CHARS = 256 * 1024
 _LETTER_RE = re.compile(r"[^\W\d_]")
 # Addresses, URLs, paths and dotted names are not prose: their Latin letters would make a Korean
 # mail ("보낸 사람 kim@example.com") read as mixed.
-_NON_PROSE_RE = re.compile(r"\S*[@/\\:]\S*|\S+\.\S+")
+# Checked token by token (whitespace split + character tests, linear): the former regex
+# ``\S*[@/\\:]\S*|\S+\.\S+`` backtracked quadratically on long whitespace-free runs (a 1.5 MB
+# single-token file stalled the run pipeline). A token is non-prose when it holds @ / \ : or a dot
+# with a character on both sides; the whole token is dropped, exactly as the regex did.
+_NON_PROSE_CHARS = frozenset("@/\\:")
+
+
+def _is_non_prose(token: str) -> bool:
+    return not _NON_PROSE_CHARS.isdisjoint(token) or "." in token[1:-1]
+
+
+def _prose_only(text: str) -> str:
+    return " ".join(token for token in text.split() if not _is_non_prose(token))
+
+
 # A language needs this share of the letters (Japanese: kana + kanji with at least KANA_MIN kana).
 LANGUAGE_MIN_SHARE = 0.6
 KANA_MIN_SHARE = 0.15
@@ -120,10 +137,11 @@ KANA_MIN_SHARE = 0.15
 def script_profile(text: str) -> dict[str, float]:
     """Share (0..1, 4 decimals) of each writing system among ``text``'s counted letters; ``{}`` when
     fewer than ``SCRIPT_MIN_LETTERS`` letters. ``other`` = letters of any other script. Tokens that
-    are addresses, URLs, paths or dotted names are not counted."""
+    are addresses, URLs, paths or dotted names are not counted. Only the first
+    ``SCRIPT_SAMPLE_CHARS`` characters are profiled (bounded cost on multi-MB bodies)."""
     if not text:
         return {}
-    text = _NON_PROSE_RE.sub(" ", text)
+    text = _prose_only(text[:SCRIPT_SAMPLE_CHARS])
     counts = {name: pattern.subn("", text)[1] for name, pattern in SCRIPT_CLASSES.items()}
     other = _LETTER_RE.subn("", text)[1] - sum(counts.values())
     counts["other"] = max(0, other)
