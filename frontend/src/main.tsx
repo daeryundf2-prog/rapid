@@ -3,6 +3,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
 import { registerAppSlots } from "./app/registerSlots";
+import { RegionBoundary } from "./components/RegionBoundary";
 import { PopoutApp } from "./features/viewer/popout/PopoutApp";
 import { isPopoutWindow } from "./features/viewer/popout/protocol";
 import { canonicalizeHash, captureLaunchToken } from "./router";
@@ -46,6 +47,8 @@ if (!container) throw new Error("missing #root container");
 
 createRoot(container).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>{popout ? <PopoutApp /> : <App />}</QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      <RegionBoundary region="콘솔">{popout ? <PopoutApp /> : <App />}</RegionBoundary>
+    </QueryClientProvider>
   </StrictMode>,
 );

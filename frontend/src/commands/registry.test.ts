@@ -77,9 +77,21 @@ describe("registry", () => {
     expect(useAppStore.getState().notice?.tone).toBe("error");
   });
 
-  it("rejects duplicate ids, non-canonical keys and double bindings", () => {
+  it("skips duplicate ids with a warning instead of throwing (never blanks the app)", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    registerCommand(cmd());
+    const off = registerCommand(cmd({ label: "두 번째" }));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("명령 id 중복"));
+    expect(getCommands().filter((c) => c.id === "test.cmd")).toHaveLength(1);
+    expect(getCommands()[0]?.label).toBe("테스트");
+    off(); // the skipped registration's unregister must not remove the first one
+    expect(getCommands()).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it("rejects non-canonical keys and double bindings", () => {
     registerCommand(cmd({ shortcut: "ctrl+k" }));
-    expect(() => registerCommand(cmd())).toThrow(CommandRegistrationError);
+    expect(() => registerCommand(cmd({ id: "x", shortcut: "Ctrl+P" }))).toThrow(CommandRegistrationError);
     expect(() => registerCommand(cmd({ id: "x", shortcut: "Ctrl+P" }))).toThrow(/KEY_MAP/);
     expect(() => registerCommand(cmd({ id: "y", shortcut: "Ctrl+K" }))).toThrow(/이미/);
     expect(commandForShortcut("Meta+K")?.id).toBe("test.cmd");

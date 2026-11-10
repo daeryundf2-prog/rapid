@@ -274,8 +274,10 @@ export function evidenceNode(
   };
   if (!evidence) return root;
   const items = counts ? (counts.files ?? 0) + (counts.artifacts ?? 0) : undefined;
-  const partitions = evidence.partitions.map<TreeModelNode>((partition) => ({
-    id: `evidence:partition:${partition.number}`,
+  // Node (and tree.goto.* command) ids use the row position, never the partition number:
+  // GPT tables number from 0 and older servers could emit the same number twice (R7 S1).
+  const partitions = evidence.partitions.map<TreeModelNode>((partition, position) => ({
+    id: `evidence:partition:${position + 1}`,
     label: partitionLabel(partition),
     icon: "partition",
     marker: partition.selected ? "선택됨" : undefined,

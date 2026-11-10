@@ -59,6 +59,7 @@ from .artifact_filter import (
 )
 from .artifact_path_index import PATH_INDEX_SERVICE
 from .artifact_sort import SORT_ORDERS, paginate_sorted_artifact_output
+from .compact_views import compact_artifacts_response, compact_run_summary
 from .dashboard import (
     build_run_dashboard,
     notes_output_dir,
@@ -587,7 +588,10 @@ def build_runs_router(
 
 
     @router.get("/api/runs/{run_id}/summary")
-    def get_run_summary(run_id: str) -> dict[str, object]:
+    def get_run_summary(run_id: str, compact: bool = Query(default=False)) -> dict[str, object]:
+        """The run summary. ``compact=1`` (the console) leaves out the embedded per-file lists
+        (``source.recovered_root_manifest.files``, ``safety.input_fingerprint.files``), each
+        replaced by ``files_omitted`` (its length); see ``compact_views``."""
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail=run_not_finished_message(job))
@@ -595,7 +599,8 @@ def build_runs_router(
             case_path = default_case_path(store, run_id)
         except HTTPException:
             case_path = None
-        return enrich_summary_counts(job.summary, case_path=case_path)
+        payload = enrich_summary_counts(job.summary, case_path=case_path)
+        return compact_run_summary(payload) if compact else payload
 
     @router.get("/api/runs/{run_id}/ai-usage/gaps")
     def get_run_ai_usage_gaps(run_id: str) -> dict[str, object]:
@@ -950,8 +955,14 @@ def build_runs_router(
         dup: str | None = Query(default=None),
         dup_mode: str | None = Query(default=None),
         irregular: list[str] = Query(default=[]),
+        compact: bool = Query(default=False),
     ) -> dict[str, object]:
         """Page per-kind artifact rows; every row carries its JSONL ``record_index``.
+
+        ``compact=1`` (the console grid): large nested ``details`` values (parser profiles,
+        citation manifests, raw record dumps > 512 bytes of JSON) are left out of each row and
+        named in ``details_omitted``; scalars and scalar arrays are always kept. The full row is
+        ``kind=<k>&offset=<record_index>&limit=1`` without ``compact`` (see ``compact_views``).
 
         Row conditions (plan r4 §2.3, ``row_conditions``): ``from``/``to`` (inclusive ISO-8601
         bounds on the row time; no offset = ``tz``), ``weekday`` (repeatable or comma-joined
@@ -1129,6 +1140,8 @@ def build_runs_router(
             _attach_family_fields(response, annotation_source(store, run_id) if live is None else None)
             if live is not None:
                 response["live"] = live
+            if compact:
+                compact_artifacts_response(response)
             return response
         artifacts = {}
         kind_payloads: dict[str, dict[str, object]] = {}
@@ -1288,6 +1301,8 @@ def build_runs_router(
                 if isinstance(page, dict) and isinstance(page.get("sort"), dict)
             ]
             response["sort_supported"] = bool(statuses) and all(status != "unsupported" for status in statuses)
+        if compact:
+            compact_artifacts_response(response)
         return response
 
 

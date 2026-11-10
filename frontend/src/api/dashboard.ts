@@ -10,6 +10,9 @@ import { api } from "./client";
 const run = (runId: string) => `/api/runs/${encodeURIComponent(runId)}`;
 
 export interface EvidencePartition {
+  /** 1-based row position in the partition table (unique; older servers omit it). */
+  index?: number;
+  /** Partition number for display (0 is valid for GPT slot 0). */
   number: number;
   description: string;
   /** `filesystem_guess` from mmls (ntfs, fat32, …; "unknown"). */

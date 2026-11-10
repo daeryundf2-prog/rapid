@@ -232,7 +232,10 @@ function PartitionDetails({ source, onOpenFiles }: { source: EvidenceSource; onO
           </thead>
           <tbody>
             {source.partitions.map((partition) => (
-              <tr key={partition.number} className={partition.selected ? "selected" : undefined}>
+              <tr
+                key={`${partition.index ?? ""}:${partition.number}:${partition.start_sector ?? ""}`}
+                className={partition.selected ? "selected" : undefined}
+              >
                 <td>{partition.number}</td>
                 <td title={partition.description}>
                   {partition.filesystem === "unknown" ? "알 수 없음" : partition.filesystem.toUpperCase()}

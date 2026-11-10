@@ -18,6 +18,7 @@ import {
   VIEWER_ID,
 } from "../commands/builtin";
 import { CommandButton } from "../commands/CommandButton";
+import { RegionBoundary } from "../components/RegionBoundary";
 import { ToastRegion } from "../components/ToastRegion";
 import { Landing } from "../features/case/Landing";
 import { WriteConfirmHost } from "../features/case/WriteConfirm";
@@ -97,11 +98,13 @@ function TreePane({ hidden = false }: { hidden?: boolean }) {
         {stage || "케이스"}
       </h1>
       {/* 접수 has its own left panel (r7 L4, C-I3); every other stage the stage's tree slot. */}
-      {intake ? (
-        <IntakePanel />
-      ) : (
-        <Slot name="tree" fallback={<p className="pane-empty">탐색 트리를 불러오는 중…</p>} />
-      )}
+      <RegionBoundary region="탐색 트리">
+        {intake ? (
+          <IntakePanel />
+        ) : (
+          <Slot name="tree" fallback={<p className="pane-empty">탐색 트리를 불러오는 중…</p>} />
+        )}
+      </RegionBoundary>
     </nav>
   );
 }
@@ -270,13 +273,19 @@ function TreeDrawer() {
 function GridPane() {
   return (
     <main id={MAIN_ID} tabIndex={-1} className="pane-frame" aria-label="목록" data-testid="grid-region">
-      <Slot name="grid" fallback={<p className="pane-empty">목록을 불러오는 중…</p>} />
+      <RegionBoundary region="목록">
+        <Slot name="grid" fallback={<p className="pane-empty">목록을 불러오는 중…</p>} />
+      </RegionBoundary>
     </main>
   );
 }
 
 function ViewerSlot({ drawer }: { drawer: boolean }) {
-  return <Slot name="viewer" drawer={drawer} fallback={<p className="pane-empty">선택된 행이 없습니다</p>} />;
+  return (
+    <RegionBoundary region="뷰어">
+      <Slot name="viewer" drawer={drawer} fallback={<p className="pane-empty">선택된 행이 없습니다</p>} />
+    </RegionBoundary>
+  );
 }
 
 export { stageHasViewer, VIEWER_STAGES } from "../router";
@@ -300,7 +309,9 @@ function TwoPanes({ narrow, treeDrawer }: { narrow: boolean; treeDrawer: boolean
 function LandingPane() {
   return (
     <main id={MAIN_ID} tabIndex={-1} className="pane-frame landing-frame" aria-label="시작">
-      <Landing />
+      <RegionBoundary region="시작 화면">
+        <Landing />
+      </RegionBoundary>
     </main>
   );
 }
