@@ -12,7 +12,9 @@ presence scan, one parse-error row per failing adapter location.
 
 from __future__ import annotations
 
+import datetime as dt
 import importlib
+import json
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
@@ -23,6 +25,8 @@ from .base import (
     AiLimits,
     AiRow,
     EvidenceProfile,
+    default_adapter_read_bytes,
+    mask_identity_in_path,
     registered_adapters,
 )
 from .execution_match import execution_presence_from_artifacts_dir
@@ -35,7 +39,11 @@ from .presence import (
     presence_rows_for_profile,
 )
 
-__all__ = ["AiAgentsProvider", "load_adapters"]
+__all__ = ["AI_SKIPPED_SIDECAR_NAME", "AiAgentsProvider", "load_adapters"]
+
+# Complete list of files an adapter did not parse because its read budget was spent (masked
+# paths). Written next to the kind's output when the run passes ``output_dir``.
+AI_SKIPPED_SIDECAR_NAME = "rapidtriage-ai-agent-skipped.json"
 
 _ADAPTERS_LOADED = False
 
@@ -92,35 +100,57 @@ class AiAgentsProvider:
         ai_hash_dbs: bool = False,
         execution_artifacts_dir: Path | None = None,
         os_hint: str = "",
+        ai_read_mb: int | None = None,
+        output_dir: Path | None = None,
     ) -> None:
         self.ai_bodies = bool(ai_bodies)
         self.ai_hash_dbs = bool(ai_hash_dbs)
         self.execution_artifacts_dir = Path(execution_artifacts_dir) if execution_artifacts_dir else None
         self.os_hint = str(os_hint or "")
+        # Per-adapter read budget in MiB (run option ``ai_read_mb``); ``None`` = env / 4 GiB default.
+        self.ai_read_mb = int(ai_read_mb) if ai_read_mb else None
+        # Where the skipped-files sidecar goes (the run's artifacts folder); ``None`` = not written.
+        self.output_dir = Path(output_dir) if output_dir else None
         self.collection_notes: list[str] = []
+        self.skipped_sidecar: Path | None = None
         self._profiles: list[EvidenceProfile] = []
 
     @property
     def options_key(self) -> str:
-        defaults = self.ai_bodies and not self.ai_hash_dbs and self.execution_artifacts_dir is None and not self.os_hint
+        defaults = (
+            self.ai_bodies
+            and not self.ai_hash_dbs
+            and self.execution_artifacts_dir is None
+            and not self.os_hint
+            and self.ai_read_mb is None
+            and self.output_dir is None
+        )
         if defaults:
             return ""
-        return f"bodies={int(self.ai_bodies)};hash={int(self.ai_hash_dbs)};exec={self.execution_artifacts_dir or ''};os={self.os_hint}"
+        return (
+            f"bodies={int(self.ai_bodies)};hash={int(self.ai_hash_dbs)};exec={self.execution_artifacts_dir or ''};"
+            f"os={self.os_hint};read_mb={self.ai_read_mb or ''};out={self.output_dir or ''}"
+        )
 
     def with_options(self, **options: object) -> AiAgentsProvider:
         execution_dir = options.get("execution_artifacts_dir")
+        output_dir = options.get("output_dir")
+        read_mb = options.get("ai_read_mb")
         return AiAgentsProvider(
             ai_bodies=self.ai_bodies if options.get("ai_bodies") is None else bool(options["ai_bodies"]),
             ai_hash_dbs=self.ai_hash_dbs if options.get("ai_hash_dbs") is None else bool(options["ai_hash_dbs"]),
             execution_artifacts_dir=Path(str(execution_dir)) if execution_dir else self.execution_artifacts_dir,
             os_hint=str(options.get("os_hint") or self.os_hint),
+            ai_read_mb=int(str(read_mb)) if read_mb not in (None, "", 0) else self.ai_read_mb,
+            output_dir=Path(str(output_dir)) if output_dir else self.output_dir,
         )
 
     def supported(self) -> bool:
         return True
 
     def limits(self) -> AiLimits:
-        return AiLimits(include_bodies=self.ai_bodies, hash_large_dbs=self.ai_hash_dbs)
+        read_bytes = self.ai_read_mb * 1024 * 1024 if self.ai_read_mb else default_adapter_read_bytes()
+        return AiLimits(include_bodies=self.ai_bodies, hash_large_dbs=self.ai_hash_dbs, max_adapter_read_bytes=read_bytes)
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
         for row in self.collect_rows(Path(root)):
@@ -154,6 +184,9 @@ class AiAgentsProvider:
     def _adapter_rows(self, profiles: list[EvidenceProfile]) -> Iterator[AiRow]:
         load_adapters()
         limits = self.limits()
+        skipped: list[dict[str, object]] = []
+        skipped_by_tool: dict[str, int] = {}
+        self.skipped_sidecar = None
         for adapter in registered_adapters():
             try:
                 found_list = adapter.detect(profiles, self.os_hint)
@@ -162,6 +195,51 @@ class AiAgentsProvider:
                 continue
             for found in found_list:
                 try:
-                    yield from adapter.collect(found, limits)
+                    for row in adapter.collect(found, limits):
+                        entries = row.side_data.get("skipped_for_budget")
+                        if isinstance(entries, list) and entries:
+                            for label, size in entries:
+                                skipped.append(
+                                    {
+                                        "adapter": adapter.name,
+                                        "tool": row.tool,
+                                        "account_key": row.account_key,
+                                        "path": mask_identity_in_path(label),
+                                        "size_bytes": size,
+                                    }
+                                )
+                            skipped_by_tool[row.tool] = skipped_by_tool.get(row.tool, 0) + len(entries)
+                            if self.output_dir is not None:
+                                row.payload["skipped_sidecar"] = AI_SKIPPED_SIDECAR_NAME
+                        yield row
                 except Exception as exc:
                     yield _parse_error(adapter.name, adapter.tool, str(found.path), exc, found.profile)
+        for tool, count in sorted(skipped_by_tool.items()):
+            self.collection_notes.append(
+                f"AI 기록 읽기 상한 도달: {tool} {count}파일 미수집 "
+                f"(어댑터당 {limits.max_adapter_read_bytes // (1024 * 1024)} MiB, 최신 파일부터 읽음; "
+                f"전체 목록 {AI_SKIPPED_SIDECAR_NAME}; 상한은 ai_read_mb 실행 옵션 또는 RAPIDTRIAGE_AI_READ_MB)"
+            )
+        if skipped and self.output_dir is not None:
+            self.skipped_sidecar = write_skipped_sidecar(self.output_dir, skipped, skipped_by_tool, limits.max_adapter_read_bytes)
+
+
+def write_skipped_sidecar(output_dir: Path, entries: list[dict[str, object]], by_tool: dict[str, int], budget_bytes: int) -> Path | None:
+    """``rapidtriage-ai-agent-skipped.json``: every file not parsed for the read budget (masked)."""
+    path = Path(output_dir) / AI_SKIPPED_SIDECAR_NAME
+    payload = {
+        "command": "ai-agent-skipped",
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "read_budget_bytes_per_adapter": budget_bytes,
+        "read_order": "newest-first",
+        "skipped_count": len(entries),
+        "skipped_by_tool": dict(sorted(by_tool.items())),
+        "paths_masked": True,
+        "entries": entries,
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
+    except OSError:
+        return None
+    return path

@@ -24,6 +24,7 @@ import tempfile
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 
+from ..base import mask_identity_in_path
 from ..redact import cap_text, redact_str
 from ._iface import (
     AiAgentAdapter,
@@ -190,22 +191,44 @@ def has_zone(text: str) -> bool:
 
 
 class ReadBudget:
-    """Bytes an adapter may read (``AiLimits.max_adapter_read_bytes``); exhaustion is recorded."""
+    """Bytes an adapter may parse (``AiLimits.max_adapter_read_bytes``); exhaustion is recorded.
+
+    Only files that are actually opened for parsing are charged (their size), never listings.
+    Every file refused for the budget is kept in ``skipped`` as ``(label, size)`` - the complete
+    list goes to the ``rapidtriage-ai-agent-skipped.json`` sidecar, the summary row shows the
+    first :data:`MAX_LIST_ITEMS`."""
 
     def __init__(self, limit: int) -> None:
         self.limit = limit
         self.used = 0
+        self.files = 0
         self.exhausted = False
-        self.skipped: list[str] = []
+        self.skipped: list[tuple[str, int]] = []
+        self.skipped_bytes = 0
 
     def take(self, size: int, label: str = "") -> bool:
         if self.used + size > self.limit:
             self.exhausted = True
-            if label and len(self.skipped) < MAX_LIST_ITEMS:
-                self.skipped.append(label)
+            self.skipped.append((label, int(size)))
+            self.skipped_bytes += int(size)
             return False
         self.used += size
+        self.files += 1
         return True
+
+
+def newest_first(paths: Iterable[Path]) -> list[Path]:
+    """``paths`` ordered by ``st_mtime`` descending (ties and unreadable stats by path), so the most
+    recent sessions are parsed first when the read budget binds."""
+
+    def key(path: Path) -> tuple[float, str]:
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        return (-mtime, str(path))
+
+    return sorted(paths, key=key)
 
 
 def read_small_json(path: Path, budget: ReadBudget, *, max_bytes: int = 8 * 1024 * 1024) -> object:
@@ -260,13 +283,16 @@ def _strip_jsonc(text: str) -> str:
 def iter_jsonl(path: Path, budget: ReadBudget, stats: dict[str, int] | None = None) -> Iterator[dict]:
     """Records of a JSONL file (bad lines and non-objects counted, never fatal)."""
     size, _ = safe_stat(path)
-    if size is None or not budget.take(size, str(path)):
-        if stats is not None:
-            stats["files_skipped_budget"] = stats.get("files_skipped_budget", 0) + 1
+    if size is None:
         return
     try:
         handle = path.open("r", encoding="utf-8", errors="replace")
     except OSError:
+        return
+    if not budget.take(size, str(path)):
+        handle.close()
+        if stats is not None:
+            stats["files_skipped_budget"] = stats.get("files_skipped_budget", 0) + 1
         return
     with handle:
         for line in handle:
@@ -287,11 +313,14 @@ def iter_jsonl(path: Path, budget: ReadBudget, stats: dict[str, int] | None = No
 
 def iter_text_lines(path: Path, budget: ReadBudget) -> Iterator[str]:
     size, _ = safe_stat(path)
-    if size is None or not budget.take(size, str(path)):
+    if size is None:
         return
     try:
         handle = path.open("r", encoding="utf-8", errors="replace")
     except OSError:
+        return
+    if not budget.take(size, str(path)):
+        handle.close()
         return
     with handle:
         for line in handle:
@@ -1079,17 +1108,25 @@ def parse_mcp_log(ctx: RowContext, path: Path) -> list[AiRow]:
 
 def summary_row(ctx: RowContext, path: Path | str, **fields: object) -> AiRow:
     """Adapter run summary (``ai-tool-presence`` with ``presence_kind=adapter-summary``): read
-    budget, unknown record types, skips."""
-    return ctx.row(
+    budget, unknown record types, skips. The complete budget-skip list rides in
+    ``side_data["skipped_for_budget"]`` (the provider writes it to the skipped-files sidecar)."""
+    skipped = list(ctx.budget.skipped)
+    row = ctx.row(
         "ai-tool-presence",
         path,
         presence_kind="adapter-summary",
         read_bytes=ctx.budget.used,
+        read_files=ctx.budget.files,
         read_budget_bytes=ctx.budget.limit,
         read_budget_exhausted=ctx.budget.exhausted,
-        skipped_for_budget=list(ctx.budget.skipped),
+        read_order="newest-first",
+        skipped_for_budget=[mask_identity_in_path(label) for label, _size in skipped[:MAX_LIST_ITEMS]],
+        skipped_for_budget_count=len(skipped),
+        skipped_for_budget_bytes=ctx.budget.skipped_bytes,
         unknown_record_types=dict(sorted(ctx.unknown_record_types.items())),
         unknown_record_count=sum(ctx.unknown_record_types.values()),
         record_type_counts=dict(sorted(ctx.record_type_counts.items())),
         **fields,
     )
+    row.side_data["skipped_for_budget"] = skipped
+    return row

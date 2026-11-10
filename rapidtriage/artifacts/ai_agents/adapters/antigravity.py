@@ -77,6 +77,17 @@ def _workspace_uris(value: object) -> list[str]:
     return []
 
 
+def _brain_order_key(conv: Path) -> tuple[float, str]:
+    logs = conv / ".system_generated" / "logs"
+    stamps = [0.0]
+    for path in (logs / "transcript_full.jsonl", logs / "transcript.jsonl", conv):
+        try:
+            stamps.append(path.stat().st_mtime)
+        except OSError:
+            continue
+    return (-max(stamps), conv.name)
+
+
 class AntigravityAdapter(AiAgentAdapter):
     name = "antigravity"
     tool = TOOL
@@ -113,7 +124,8 @@ class AntigravityAdapter(AiAgentAdapter):
                 rows.extend(self._conversation_db(ctx, path, session(path.stem, path)))
         brain = base / "brain"
         if brain.is_dir():
-            for conv in sorted(p for p in brain.iterdir() if p.is_dir()):
+            # Newest first (transcript / folder mtime): the read budget keeps the latest transcripts.
+            for conv in sorted((p for p in brain.iterdir() if p.is_dir()), key=_brain_order_key):
                 self._brain(ctx, conv, session, rows)
         mcp = base / "mcp"
         if mcp.is_dir():

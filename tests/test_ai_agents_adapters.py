@@ -197,7 +197,7 @@ class HelperTests(unittest.TestCase):
     def test_limits_defaults_match_plan(self) -> None:
         limits = AiLimits()
         self.assertEqual((limits.max_message_bytes, limits.max_messages_per_session, limits.max_tool_calls_per_session), (16 * 1024, 2000, 5000))
-        self.assertEqual((limits.max_adapter_read_bytes, limits.max_sqlite_bytes), (200 * 1024 * 1024, 1024 * 1024 * 1024))
+        self.assertEqual((limits.max_adapter_read_bytes, limits.max_sqlite_bytes), (4096 * 1024 * 1024, 1024 * 1024 * 1024))  # Q-AI9: 4 GiB
 
 
 if __name__ == "__main__":
