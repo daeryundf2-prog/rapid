@@ -6,6 +6,7 @@
 import { filesInventoryCategory } from "../../api/collections";
 import type { Route } from "../../router";
 import { formatGridTime } from "../../utils/time";
+import { aiToolName } from "../ai/aiLabels";
 import { nodeOfKind } from "../analysis/kinds";
 import { familyById } from "../flags/catalog";
 import type { DerivedRow, DerivedSample, DerivedSort, DerivedTableId } from "./api";
@@ -17,6 +18,8 @@ export const DERIVED_TABLE_LABELS: Record<DerivedTableId, string> = {
   attachments: "첨부",
   credentials: "자격 증명/토큰",
   urls: "URL 분류",
+  ai_usage: "AI 사용량(도구·계정·일)",
+  ai_projects: "AI 프로젝트",
 };
 
 /** One-sentence description under the pane title. */
@@ -27,6 +30,10 @@ export const DERIVED_TABLE_HINTS: Record<DerivedTableId, string> = {
   attachments: "메일·메신저 첨부 파일 이름입니다.",
   credentials: "암호·토큰 후보입니다. 원문은 저장하지 않고 가린 값·길이·SHA-256만 보여 줍니다.",
   urls: "방문·다운로드·북마크 등에 나온 URL을 호스트별로 모으고 분류했습니다. URL 카빙으로만 찾은 호스트는 '카빙'으로 표시합니다.",
+  ai_usage:
+    "AI 도구 세션을 도구·계정·날짜별로 모았습니다(세션·대화 턴·도구 호출·토큰). 값을 고르면 그 세션 행으로 갑니다.",
+  ai_projects:
+    "AI 도구 세션의 작업 폴더(프로젝트)별 세션 수·접촉 파일 수입니다. 값을 고르면 세션·파일 접촉 행으로 갑니다.",
 };
 
 export const SEMANTIC_LABELS: Record<string, string> = {
@@ -37,6 +44,8 @@ export const SEMANTIC_LABELS: Record<string, string> = {
   device: "장치",
   path: "경로",
   url: "URL",
+  ai_usage: "AI 사용량",
+  ai_project: "AI 프로젝트",
   hash: "해시",
   geo: "좌표",
   search_term: "검색어",
@@ -120,6 +129,9 @@ const sources = (row: DerivedRow) =>
     .map(([family, n]) => `${familyLabel(family)} ${n.toLocaleString("ko-KR")}`)
     .join(" · ");
 const time = (value: string | null, tz: string) => (value ? formatGridTime(value, tz) : "");
+const num = (value: number | undefined) => (typeof value === "number" ? value.toLocaleString("ko-KR") : "");
+const tokens = (row: DerivedRow) =>
+  row.tokens_in || row.tokens_out ? `${num(row.tokens_in ?? 0)} / ${num(row.tokens_out ?? 0)}` : "";
 
 const COMMON_TAIL: DerivedColumn[] = [
   { id: "count", header: "건수", width: "84px", numeric: true, text: count },
@@ -196,6 +208,44 @@ export const DERIVED_COLUMNS: Record<DerivedTableId, DerivedColumn[]> = {
       },
     },
     ...COMMON_TAIL,
+  ],
+  ai_usage: [
+    { id: "value", header: "도구 · 계정 · 날짜", width: "minmax(220px, 1.6fr)", text: (row) => row.value },
+    { id: "turns", header: "대화 턴", width: "84px", numeric: true, text: (row) => num(row.turns) },
+    {
+      id: "tool_calls",
+      header: "도구 호출",
+      width: "84px",
+      numeric: true,
+      text: (row) => num(row.tool_calls),
+    },
+    { id: "tokens", header: "토큰(입력/출력)", width: "150px", numeric: true, text: tokens },
+    { id: "projects", header: "프로젝트", width: "76px", numeric: true, text: (row) => num(row.projects) },
+    { id: "count", header: "세션", width: "72px", numeric: true, text: count },
+    { id: "first", header: "처음 본 시각", width: "160px", text: (row, tz) => time(row.first_seen, tz) },
+    { id: "last", header: "마지막 본 시각", width: "160px", text: (row, tz) => time(row.last_seen, tz) },
+  ],
+  ai_projects: [
+    { id: "value", header: "작업 폴더", width: "minmax(240px, 2fr)", mono: true, text: (row) => row.value },
+    {
+      id: "tools",
+      header: "도구",
+      width: "minmax(140px, 1fr)",
+      text: (row) =>
+        Object.entries(row.tools ?? {})
+          .map(([tool, n]) => `${aiToolName(tool) ?? tool} ${n.toLocaleString("ko-KR")}`)
+          .join(" · "),
+    },
+    {
+      id: "files",
+      header: "접촉 파일",
+      width: "84px",
+      numeric: true,
+      text: (row) => num(row.file_touch_rows),
+    },
+    { id: "count", header: "세션", width: "72px", numeric: true, text: count },
+    { id: "first", header: "처음 본 시각", width: "160px", text: (row, tz) => time(row.first_seen, tz) },
+    { id: "last", header: "마지막 본 시각", width: "160px", text: (row, tz) => time(row.last_seen, tz) },
   ],
 };
 

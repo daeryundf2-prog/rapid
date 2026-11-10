@@ -38,7 +38,11 @@ describe("C1 tree panel scrolls its list, not the frame", () => {
       "min-height": "0",
       "overscroll-behavior": "contain",
       "scrollbar-gutter": "stable",
+      // The list is a grid (case.css `.case-tree ul`) stretched to the panel: rows stay packed at
+      // the top, so a filtered (short) tree shows no gaps between rows (R7 gate, 해시 집합).
+      "align-content": "start",
     });
+    expect(rule(css("features/case/case.css"), ".case-tree,\n.case-tree ul").display).toBe("grid");
     expect(rule(tree, ".evidence-tree-foot")["border-top"]).toContain("var(--line-subtle)");
   });
 

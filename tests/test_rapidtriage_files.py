@@ -317,6 +317,39 @@ class RapidTriageFilesTests(unittest.TestCase):
                 1,
             )
 
+    def test_fuzzy_text_ratio_work_is_bounded(self) -> None:
+        # R7 gate: two dissimilar 140 KB JSONL outputs (same character mix, so quick_ratio passed)
+        # took ~2 minutes in difflib.ratio and stalled a run whose output folder was under its root.
+        import time
+        from types import SimpleNamespace
+
+        from rapidtriage.core.files import build_fuzzy_text_duplicate_groups
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            for name, tag in (("a.jsonl", "srch"), ("b.jsonl", "regk")):
+                rows = [json.dumps({"provider": f"{tag}{n}", "path": f"c:/users/hp/{tag}x{n * 7919 % 10007}"}) for n in range(1800)]
+                (root / name).write_text("\n".join(rows), encoding="utf-8")
+            (root / "statement-a.txt").write_text("alpha beta gamma delta epsilon", encoding="utf-8")
+            (root / "statement-b.txt").write_text("alpha beta gamma delta epsilon zeta", encoding="utf-8")
+            candidates = [
+                SimpleNamespace(path=str(path), name=path.name, extension=path.suffix, size=path.stat().st_size)
+                for path in sorted(root.iterdir())
+            ]
+            stats: dict[str, object] = {}
+            started = time.perf_counter()
+            groups = build_fuzzy_text_duplicate_groups(candidates, stats=stats)
+            self.assertLess(time.perf_counter() - started, 5.0)
+            self.assertEqual([group["file_count"] for group in groups], [2])
+            self.assertEqual(stats["ratio_pairs_skipped"], 0)
+            self.assertFalse(stats["truncated"])
+            # Out of ratio budget: the remaining pairs are decided by token overlap and disclosed.
+            stats = {}
+            groups = build_fuzzy_text_duplicate_groups(candidates, stats=stats, ratio_budget_seconds=0.0)
+            self.assertEqual([group["file_count"] for group in groups], [2])  # token overlap 5/6 >= 0.82
+            self.assertGreater(stats["ratio_pairs_skipped"], 0)
+            self.assertTrue(stats["truncated"])
+
     def test_hash_cache_and_duplicate_trusted_diffs_promote_core_gates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             path = Path(tmp_dir) / "same.bin"

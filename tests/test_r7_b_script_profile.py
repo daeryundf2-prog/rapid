@@ -4,6 +4,7 @@ documents -- synthetic HWP, DOCX and EML with a known mix of Korean, Chinese, Ja
 from __future__ import annotations
 
 import tempfile
+import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -107,6 +108,20 @@ class ScriptProfileTests(unittest.TestCase):
         self.assertEqual(profile["latin"], 0.0)
         self.assertEqual(language_hint(profile), "ko")
         self.assertEqual(script_profile(""), {})
+
+    def test_long_whitespace_free_tokens_are_linear(self) -> None:
+        # Regression (R7 gate): the former non-prose regex was quadratic on one long token;
+        # 40 Ki characters took ~17 s and a 1.5 MB file hung the run pipeline.
+        for body in ("A" * 2_000_000, "가" * 2_000_000, "a." * 1_000_000, "x@" * 1_000_000):
+            started = time.perf_counter()
+            script_profile(body)
+            self.assertLess(time.perf_counter() - started, 1.0, body[:4])
+        self.assertEqual(language_hint(script_profile("A" * 2_000_000)), "en")
+        self.assertEqual(script_profile("a.b" * 10), {})
+
+    def test_dotted_tokens_need_a_character_on_both_sides(self) -> None:
+        self.assertEqual(language_hint(script_profile(".hidden " + "가나다라마바사아자차카타파하" * 2)), "ko")
+        self.assertEqual(script_profile("trailing. " * 5)["latin"], 1.0)
 
 
 if __name__ == "__main__":

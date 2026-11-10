@@ -20,7 +20,7 @@ import { installFetch, jsonResponse, renderWithClient } from "../grid/testSuppor
 import type { DomainNodeDef } from "../tree/domains";
 import { domainNodeCount, domainTotal, NO_DERIVED_REASON } from "../tree/model";
 import { buildCitation } from "../viewer/citation";
-import type { DerivedRow } from "./api";
+import { type DerivedRow, isDerivedTable } from "./api";
 import { registerDerivedCommands } from "./commands";
 import { DerivedPane } from "./DerivedPane";
 import {
@@ -188,8 +188,10 @@ describe("RDP direction · EXIF state · auto logon", () => {
       // + R5 L3 (11: location-url-candidate, browser-analytics-cookie, carved-url-candidate, 6 p2p, 2 android-backup).
       // + R5 L2 (15: startup, banner, Office x2, SSH x5, VM, wallet, AV, wallpaper, credential stores, NTFS volume)
       // + R6 S2 lane A (1: av-product-presence)
-      // + timeline/grid readability C8 (2: shimcache, amcache-file).
-      expect(FALLBACK_CATALOG.families).toHaveLength(122);
+      // + timeline/grid readability C8 (2: shimcache, amcache-file)
+      // + R7 AI lane C (9: ai-tool, ai-session, ai-message, ai-tool-call, ai-file-touch, ai-mcp-server,
+      //   ai-config, ai-account, ai-code).
+      expect(FALLBACK_CATALOG.families).toHaveLength(131);
       expect(familyById("sam-account")?.core_columns.find((c) => c.key === "user_name")?.semantic).toBe(
         "account",
       );
@@ -654,5 +656,32 @@ describe("URL table: carved-only hosts", () => {
     });
     expect(column?.text(carved, "UTC")).toBe("붙여넣기 · 카빙");
     expect(column?.text(row("example.com", 2), "UTC")).toBe("분류 없음");
+  });
+});
+
+describe("AI tables (R7 gate: ai_usage / ai_projects in 통합 보기)", () => {
+  it("are known tables with their own columns", () => {
+    expect(isDerivedTable("ai_usage")).toBe(true);
+    expect(isDerivedTable("ai_projects")).toBe(true);
+    const usage = row("claude-code|u1|2026-10-10", 3, {
+      value: "Claude Code · u1 · 2026-10-10",
+      turns: 5,
+      tool_calls: 7,
+      tokens_in: 1200,
+      tokens_out: 300,
+      projects: 1,
+    });
+    const text = (table: "ai_usage" | "ai_projects", id: string, value: DerivedRow) =>
+      DERIVED_COLUMNS[table].find((column) => column.id === id)?.text(value, "UTC");
+    expect(text("ai_usage", "value", usage)).toBe("Claude Code · u1 · 2026-10-10");
+    expect(text("ai_usage", "tool_calls", usage)).toBe("7");
+    expect(text("ai_usage", "tokens", usage)).toBe("1,200 / 300");
+    const project = row("c:/users/u1/proj", 2, {
+      value: "C:\\Users\\u1\\proj",
+      tools: { "claude-code": 2 },
+      file_touch_rows: 4,
+    });
+    expect(text("ai_projects", "tools", project)).toBe("Claude Code 2");
+    expect(text("ai_projects", "files", project)).toBe("4");
   });
 });

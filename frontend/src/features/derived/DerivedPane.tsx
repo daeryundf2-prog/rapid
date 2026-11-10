@@ -562,7 +562,8 @@ function OriginalRows({
   const detail = useQuery({
     queryKey: ["derived-rows", runId, table, row?.normalized ?? ""],
     queryFn: ({ signal }) => fetchDerivedValueRows(runId, table, row?.normalized ?? "", signal),
-    enabled: Boolean(row) && !graphMode,
+    // The endpoint answers 422 without a value: never ask before a row with a key is chosen.
+    enabled: Boolean(row?.normalized) && !graphMode,
     retry: false,
   });
   const samples = detail.data?.samples ?? [];

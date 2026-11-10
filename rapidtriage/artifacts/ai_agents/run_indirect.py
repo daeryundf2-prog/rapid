@@ -10,10 +10,11 @@ the Prefetch / Amcache / SRUM / ShimCache rows (other kinds) nor the files inven
   inventory (``ai-code-attribution``, ``source = git-trailer``, + one ``git-repo-scan`` row per repo).
 
 It is idempotent: rows a previous call added (same parsers) are replaced, so a resumed run never
-doubles them. The ``.json`` summary (``artifact_count``, ``artifact_type_counts``) and the JSONL are
-rewritten together, ``summary.ai_indirect`` records what was added, and the ``ai-agents`` provider
-row of the manifest (and of the docs manifest summary) gets the new count. A failure is recorded in
-the returned block and never fails the run.
+doubles them. The JSONL is rewritten and the in-memory payload (``artifact_payloads["ai-agent"]``:
+``artifact_count``, ``artifact_type_counts``, ``summary.ai_indirect``) is replaced; the run writes the
+``.json`` once afterwards (the artifact stage defers it), so the file on disk is that one payload. The
+``ai-agents`` provider row of the manifest (and of the docs manifest summary) gets the new count. A
+failure is recorded in the returned block and never fails the run.
 """
 
 from __future__ import annotations
@@ -181,7 +182,6 @@ def append_ai_indirect_rows(
         materialized["summary"] = summary
         materialized["artifacts"] = all_rows
         finalized = finalize_artifact_payload(materialized, records_path=Path(artifact_path).with_suffix(".jsonl"))
-        write_result(finalized, Path(artifact_path))
         artifact_payloads[AI_KIND] = finalized
         if manifest_payload is not None:
             _patch_provider_rows(manifest_payload.get("providers"), len(all_rows), type_counts)
@@ -197,7 +197,7 @@ def append_ai_indirect_rows(
             "error": f"{type(exc).__name__}: {exc}"[:300],
             "elapsed_seconds": round(time.monotonic() - started, 3),
         }
-        # In memory only (the step row reports it); the written output stays the provider's own.
+        # Recorded on the payload the run writes (fresh collection) or reports (reused output).
         current = artifact_payloads.get(AI_KIND)
         if isinstance(current, dict) and isinstance(current.get("summary"), dict):
             current["summary"]["ai_indirect"] = dict(failed)

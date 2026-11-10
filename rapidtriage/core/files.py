@@ -12,6 +12,7 @@ import re
 import stat as stat_module
 import sys
 import threading
+import time
 import zipfile
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -2669,6 +2670,15 @@ def build_duplicate_content_groups(
     return groups
 
 
+# Character similarity (difflib) is quadratic in the text length: one pair of dissimilar 140 KB
+# JSONL outputs whose character mix passed ``quick_ratio`` took ~2 minutes (R7 gate: a run whose
+# output folder sits inside the scanned root). The ratio compares the first FUZZY_RATIO_MAX_CHARS
+# characters of each text, and all ratio work of one scan stops after FUZZY_RATIO_BUDGET_SECONDS
+# (remaining pairs are decided by token overlap alone; disclosed as ``ratio_pairs_skipped``).
+FUZZY_RATIO_MAX_CHARS = 8192
+FUZZY_RATIO_BUDGET_SECONDS = 10.0
+
+
 def build_fuzzy_text_duplicate_groups(
     candidates: Sequence[FileCandidate],
     *,
@@ -2676,6 +2686,7 @@ def build_fuzzy_text_duplicate_groups(
     max_text_bytes: int = 256 * 1024,
     min_similarity: float = 0.82,
     stats: dict[str, object] | None = None,
+    ratio_budget_seconds: float = FUZZY_RATIO_BUDGET_SECONDS,
 ) -> list[dict[str, object]]:
     # Pairwise comparison is O(n^2): the first ``max_files`` eligible text
     # files are compared and the remainder is disclosed via ``stats``.
@@ -2705,17 +2716,27 @@ def build_fuzzy_text_duplicate_groups(
             }
         )
     adjacency: dict[int, set[int]] = {index: set() for index in range(len(text_items))}
+    ratio_seconds = 0.0
+    ratio_skipped = 0
     for left_index, left in enumerate(text_items):
         for right_index in range(left_index + 1, len(text_items)):
             right = text_items[right_index]
             token_score = jaccard_similarity(left["tokens"], right["tokens"])
             if token_score < min_similarity:
-                matcher = difflib.SequenceMatcher(None, left["normalized"], right["normalized"])
-                if matcher.real_quick_ratio() < min_similarity:
+                if ratio_seconds >= ratio_budget_seconds:
+                    ratio_skipped += 1
                     continue
-                if matcher.quick_ratio() < min_similarity:
-                    continue
-                if matcher.ratio() < min_similarity:
+                started = time.perf_counter()
+                matcher = difflib.SequenceMatcher(
+                    None, left["normalized"][:FUZZY_RATIO_MAX_CHARS], right["normalized"][:FUZZY_RATIO_MAX_CHARS]
+                )
+                similar = (
+                    matcher.real_quick_ratio() >= min_similarity
+                    and matcher.quick_ratio() >= min_similarity
+                    and matcher.ratio() >= min_similarity
+                )
+                ratio_seconds += time.perf_counter() - started
+                if not similar:
                     continue
             adjacency[left_index].add(right_index)
             adjacency[right_index].add(left_index)
@@ -2772,7 +2793,9 @@ def build_fuzzy_text_duplicate_groups(
                 "eligible_text_file_count": eligible,
                 "compared_text_file_count": len(text_items),
                 "max_files": max_files,
-                "truncated": eligible > max_files,
+                "ratio_max_chars": FUZZY_RATIO_MAX_CHARS,
+                "ratio_pairs_skipped": ratio_skipped,
+                "truncated": eligible > max_files or ratio_skipped > 0,
             }
         )
     return groups

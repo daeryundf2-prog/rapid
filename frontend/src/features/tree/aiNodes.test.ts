@@ -179,6 +179,19 @@ describe("AI 사용 domain", () => {
     expect(filterEmptyNodes(model, false).nodes.some((n) => n.id === "domain:ai")).toBe(false);
   });
 
+  it("an empty ai-agent kind (0 rows, facets never loaded): views 0, domain 0 and hidden (R7 gate)", () => {
+    // The run collected the kind but found nothing: the 도구·설치 views used to read "—" (facets
+    // unknown), which kept the domain listed next to children that all read 0.
+    const tree = runTree([kindNode(AI_KIND, {}), kindNode("browser", { "browser-history": 5 })]);
+    const model = buildTreeModel({ tree });
+    for (const id of ["ai-tools-install", "ai-tools-execution", "ai-tools-path", "ai-all"]) {
+      expect(find(model, `domain:ai:${id}`)?.count, id).toBe(0);
+    }
+    expect(find(model, "domain:ai")?.count).toBe(0);
+    expect(find(model, "domain:ai")?.hiddenReason).toBeTruthy();
+    expect(filterEmptyNodes(model, false).nodes.some((n) => n.id === "domain:ai")).toBe(false);
+  });
+
   it("keeps the 도구·설치 views apart in the selection key", () => {
     const keys = ["ai-tools-all", "ai-tools-install", "ai-tools-execution", "ai-tools-path"].map((id) =>
       targetKey(node(id).target),

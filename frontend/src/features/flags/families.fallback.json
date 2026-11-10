@@ -1,5 +1,5 @@
 {
- "version": "161d1e08e2dee8ed",
+ "version": "3d7b35f7254dcd23",
  "families": [
   {
    "id": "sam-account",
@@ -13515,7 +13515,7 @@
    "grade": "B",
    "label_ko": "AI 에이전트의 파괴적 명령·도구 호출",
    "rationale_ko": "에이전트 도구 호출이 도구 자체 기록상 파괴적(destructive=true)이거나 명령이 rm·del·rmdir·Remove-Item·format·shred를 씀: 증거 인멸·대량 삭제 지시 정황(S4).",
-   "false_positive_ko": "빌드 산출물·임시 폴더 정리(rm -rf build, node_modules), 테스트 데이터 삭제.",
+   "false_positive_ko": "빌드 산출물·임시 폴더 정리(빌드 폴더·패키지 의존성 폴더 rm -rf), 테스트 데이터 삭제.",
    "sources": [
     "https://docs.anthropic.com/en/docs/claude-code/settings",
     "https://attack.mitre.org/techniques/T1070/004/"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import hashlib
 import json
@@ -12,6 +13,7 @@ import time
 from collections import Counter
 from collections.abc import (
     Callable,
+    Collection,
     Iterator,
     Mapping,
     Sequence,
@@ -26,7 +28,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ...artifacts import all_providers, clear_collect_cache
-from ...artifacts.ai_agents.run_indirect import append_ai_indirect_rows
+from ...artifacts.ai_agents.run_indirect import AI_KIND, append_ai_indirect_rows
 from ..archive_image import (
     ArchiveImageExtractionError,
     ArchiveImageExtractionResult,
@@ -587,6 +589,7 @@ def run_triage_mode(
         own_inner_dir = output_dir / MOBILE_INNER_DIR_NAME
         register_tool_output_dir(own_inner_dir)
         register_run_output_dir(output_dir)
+        deferred_ai_output = DeferredAiOutput()
         try:
             summary_payload = _run_triage_stages(
                 input_root,
@@ -618,7 +621,15 @@ def run_triage_mode(
                 skip_groups=plan["options"]["skip_groups"],
                 skip_tasks=plan["options"]["skip_tasks"],
                 artifact_kinds=kinds_only,
+                deferred_ai_output=deferred_ai_output,
             )
+        except BaseException:
+            # A stage after the artifacts failed before the ai-agent output was completed: the
+            # provider's own payload is written now, so every finished provider output persists (I4).
+            # (A write error here must not mask the stage error the caller sees.)
+            with contextlib.suppress(Exception):
+                deferred_ai_output.flush()
+            raise
         finally:
             unregister_tool_output_dir(own_inner_dir)
             unregister_run_output_dir(output_dir)
@@ -746,8 +757,10 @@ def _run_triage_stages(
     skip_groups: Sequence[str] = (),
     skip_tasks: Sequence[str] = (),
     artifact_kinds: Sequence[str] = (),
+    deferred_ai_output: DeferredAiOutput | None = None,
 ) -> dict[str, object]:
     """Run every stage after the input root is prepared (see run_triage_mode)."""
+    deferred_ai_output = deferred_ai_output if deferred_ai_output is not None else DeferredAiOutput()
 
     def finish_stage(stage: str, details: Mapping[str, object] | None = None) -> None:
         record_memory_cap(stage)
@@ -945,6 +958,9 @@ def _run_triage_stages(
         progress=progress,
         memory_check=record_memory_cap,
         collector_options=collector_options,
+        # The ai-agent output is completed after the files stage (run-level indirect rows) and
+        # written once there: the artifact files are never rewritten (I4).
+        deferred_write_kinds=(AI_KIND,),
     )
     write_result(artifact_scheduler_manifest, scheduler_path)
     for kind in profile.artifacts_kinds:
@@ -977,6 +993,7 @@ def _run_triage_stages(
         )
         artifact_outputs[kind] = artifact_path
         artifact_payloads[kind] = artifact_payload
+    deferred_ai_output.arm(artifact_results, artifact_payloads, artifact_outputs)
     parser_crash_ledger = build_parser_crash_isolation_ledger(
         artifact_payloads=artifact_payloads,
         scheduler_manifest=artifact_scheduler_manifest,
@@ -1157,6 +1174,7 @@ def _run_triage_stages(
         manifest_path=manifest_path,
         manifest_summary=manifest_summary,
     )
+    deferred_ai_output.flush()
 
     carve_payload: dict[str, object] | None = None
     carve_output_path = output_dir / "carving" / "rapidtriage-carve.json"
@@ -1864,6 +1882,48 @@ def load_reusable_artifact_payload(artifact_path: Path) -> dict[str, object] | N
     return payload
 
 
+class DeferredAiOutput:
+    """The ``ai-agent`` output the artifact stage leaves unwritten (``deferred_write_kinds``),
+    written exactly once: after the run-level indirect rows completed it (:meth:`flush` after
+    ``append_ai_indirect_rows``), or with the provider's own payload when a later stage fails first
+    (:meth:`flush` from ``run_triage_mode``'s error path). Flushing twice writes nothing more."""
+
+    def __init__(self) -> None:
+        self._pending: tuple[Mapping[str, tuple[dict[str, object], Path, bool, bool]], Mapping[str, dict[str, object]], Mapping[str, Path]] | None = None
+
+    def arm(
+        self,
+        artifact_results: Mapping[str, tuple[dict[str, object], Path, bool, bool]],
+        artifact_payloads: Mapping[str, dict[str, object]],
+        artifact_outputs: Mapping[str, Path],
+    ) -> None:
+        self._pending = (artifact_results, artifact_payloads, artifact_outputs)
+
+    def flush(self) -> None:
+        pending, self._pending = self._pending, None
+        if pending is not None:
+            write_deferred_ai_output(*pending)
+
+
+def write_deferred_ai_output(
+    artifact_results: Mapping[str, tuple[dict[str, object], Path, bool, bool]],
+    artifact_payloads: Mapping[str, dict[str, object]],
+    artifact_outputs: Mapping[str, Path],
+) -> None:
+    """Write the ``ai-agent`` output once, after the run-level indirect rows completed it
+    (``collect_artifact_stages(deferred_write_kinds=...)`` left it unwritten). A reused output is
+    already on disk and is rewritten only when the indirect step replaced its payload. Stage
+    checkpoints re-read output size from disk when written (``write_run_checkpoints``)."""
+    result = artifact_results.get(AI_KIND)
+    payload = artifact_payloads.get(AI_KIND)
+    path = artifact_outputs.get(AI_KIND)
+    if result is None or payload is None or path is None:
+        return
+    if result[2] and payload is result[0]:
+        return
+    write_result(payload, path)
+
+
 def collect_artifact_stages(
     input_root: InputRoot,
     kinds: Sequence[str],
@@ -1875,6 +1935,7 @@ def collect_artifact_stages(
     progress: RunProgress | None = None,
     memory_check: Callable[[str], None] | None = None,
     collector_options: Mapping[str, Mapping[str, object]] | None = None,
+    deferred_write_kinds: Collection[str] = (),
 ) -> tuple[dict[str, tuple[dict[str, object], Path, bool, bool]], dict[str, object]]:
     """Collect artifact kinds on the bounded worker pool.
 
@@ -1886,7 +1947,10 @@ def collect_artifact_stages(
     payloads are already on disk and are not rewritten. ``progress``
     (optional) receives queued/running/terminal state per kind;
     ``memory_check`` runs after every provider and fails the run fast when
-    it raises (memory cap).
+    it raises (memory cap). Kinds in ``deferred_write_kinds`` keep their
+    rows in the JSONL but their ``.json`` summary is left to the caller, which
+    completes the payload later and writes it once (``ai-agent``: run-level
+    indirect rows after the files stage).
     """
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     results: dict[str, tuple[dict[str, object], Path, bool, bool]] = {}
@@ -1957,7 +2021,8 @@ def collect_artifact_stages(
         )
         merged = finalize_artifact_payload(merged, records_path=artifact_records_path(artifact_path))
         results[kind] = (merged, artifact_path, False, True)
-        write_result(merged, artifact_path)
+        if kind not in deferred_write_kinds:
+            write_result(merged, artifact_path)
         if progress is not None:
             progress.provider_finished(
                 kind,
@@ -2040,8 +2105,10 @@ def collect_artifact_stages(
         results[kind] = (payload, artifact_path, False, False)
         # Persist each provider the moment it finishes (I4); the run does not
         # rewrite these files later. A cancelled provider's output holds the
-        # rows written before the cancel (``cancelled-partial``).
-        write_result(payload, artifact_path)
+        # rows written before the cancel (``cancelled-partial``). Deferred
+        # kinds are written once by the caller after completing the payload.
+        if kind not in deferred_write_kinds:
+            write_result(payload, artifact_path)
         cancelled = artifact_payload_cancelled(payload)
         if progress is not None:
             count = artifact_payload_count(payload)

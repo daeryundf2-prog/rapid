@@ -18,6 +18,10 @@
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   padding-block-end: var(--space-2);
+  /* The list is a grid (.case-tree ul) stretched to the panel height: without this its row tracks
+     shared the spare height, so a short (filtered) list showed large gaps between rows (R7 gate:
+     the gap above 해시 집합 under the tree filter). */
+  align-content: start;
 }
 
 /* Items sit flush with the scroller's edges: keep the focus ring inside so it is not clipped. */
