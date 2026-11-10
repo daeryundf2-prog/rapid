@@ -132,7 +132,8 @@ class NoEvidenceAdjacentOutputTests(unittest.TestCase):
             with patch("rapidtriage.api.app.routes_runs.validate_run_evidence_source"):
                 response = client.post("/api/runs", json={"root": str(image), "mode": "fraud", "read_only": True})
             self.assertEqual(response.status_code, 422, response.text)
-            self.assertIn("출력 폴더를 지정하세요", response.json()["detail"])
+            self.assertIn("출력 폴더를 지정하세요", response.json()["detail"]["message"])
+            self.assertEqual(response.json()["detail"]["code"], "OUTPUT_DIR_REQUIRED")
             self.assertEqual(sorted(p.name for p in image.parent.iterdir()), ["disk.raw"])
 
     def test_output_check_mirrors_the_server_rules(self) -> None:

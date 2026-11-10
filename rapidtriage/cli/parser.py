@@ -118,7 +118,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage timeline . --output rapidtriage-timeline.json --report rapidtriage-timeline-report.md
               rapidtriage case ./incident-case.json --source rapidtriage-timeline.json --pointer /events/0 --tag suspicious
               rapidtriage manifest /Volumes/case-mount --input-kind mounted-image
-              rapidtriage run . --mode fraud --output-dir ./rapidtriage-run --read-only
+              rapidtriage run . --mode fraud --output-dir ../rapidtriage-run --read-only
               rapidtriage run ./case.E01 --mode fraud --output-dir ./rapidtriage-run-e01
               rapidtriage search ./rapidtriage-run-fraud -k invoice -k password
               rapidtriage indicators ./rapidtriage-run-fraud --output rapidtriage-indicators.json
@@ -1984,15 +1984,19 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=textwrap.dedent(
             """\
             Examples:
-              rapidtriage run . --mode fraud
+              rapidtriage run . --mode fraud --output-dir ../rapidtriage-run-fraud
               rapidtriage run /cases/image-mount --mode seizure --output-dir ./rapidtriage-run
               rapidtriage run /cases/image-mount --mode recovery --output-dir ./rapidtriage-run-recovery
               rapidtriage run /cases/image.E01 --mode fraud --output-dir ./rapidtriage-run-e01
-              rapidtriage run . --mode hacking --read-only --max-file-count 50
-              rapidtriage run . --mode fraud --extract
-              rapidtriage run . --mode hacking --skip-group messaging --skip-group mobile
+              rapidtriage run . --mode hacking --output-dir ../rapidtriage-run-hacking --read-only --max-file-count 50
+              rapidtriage run . --mode fraud --output-dir ../rapidtriage-run-fraud --extract
+              rapidtriage run . --mode hacking --output-dir ../rapidtriage-run-hacking --skip-group messaging --skip-group mobile
               rapidtriage run . --mode hacking --print-plan
               rapidtriage run . --mode hacking --print-plan json
+
+            --output-dir is required (except with --print-plan) and must be outside the
+            evidence: never the evidence path, inside it, or a folder that contains it.
+            출력 폴더(--output-dir)는 필수이며 증거 밖이어야 합니다 (증거 안·증거와 같은 경로·증거를 담은 폴더 불가).
 
             Run plan: the run is planned as groups -> tasks (rapidtriage-run-plan.json).
             Ctrl+C cancels everything still running but keeps the rows written so far,
@@ -2008,7 +2012,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--output-dir",
         help="Directory that receives the generated JSON, extract manifests (with --extract), "
-        "and execution report (default: ROOT/rapidtriage-run-MODE)",
+        "and execution report. Required (except with --print-plan); must be outside the evidence "
+        "(증거 밖의 출력 폴더 필수)",
     )
     run.add_argument("--dry-run", action="store_true", help="Skip evidence copying during extract stages")
     run.add_argument("--read-only", action="store_true", help="Run triage without copying evidence files during extract stages")

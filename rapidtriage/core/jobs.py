@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .files import DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES
 from .forensic_accuracy import build_accuracy_gate
+from .output_guard import check_output_outside_evidence
 from .rules import RuleConfigError, load_rule_set
 from .run import RunModeError, run_triage_mode
 from .run.plan import (
@@ -542,6 +543,7 @@ class RunJobStore:
 
     def submit(self, request: RunRequest, *, retry_of_run_id: str | None = None, retry_attempt: int = 0) -> RunJob:
         run_id = uuid.uuid4().hex[:12]
+        check_request_output_outside_evidence(request, run_id=run_id)
         job = RunJob(
             run_id=run_id,
             request=request,
@@ -566,6 +568,7 @@ class RunJobStore:
 
     def run_sync(self, request: RunRequest) -> RunJob:
         job = RunJob(run_id=uuid.uuid4().hex[:12], request=request)
+        check_request_output_outside_evidence(request, run_id=job.run_id)
         append_job_transition(job, event_type="job-queued", status="queued", message="Synchronous job submitted")
         with self._lock:
             self._raise_if_output_dir_busy_locked(job)
@@ -946,6 +949,8 @@ class RunJobStore:
                     raise RunOutputDirBusy(busy)
             else:
                 request = replace(request, resume=False, output_dir=fresh_retry_output_dir(previous))
+            # A run recorded before the R7 output guard may write inside its evidence: never again.
+            check_request_output_outside_evidence(request, run_id=previous.run_id)
             next_attempt = int(previous.retry_attempt or 0) + 1
             append_job_transition(
                 previous,
@@ -2315,7 +2320,29 @@ def persist_step_message(summary: Mapping[str, object]) -> str:
     return "Run summary persisted; case DB index skipped, search uses scan"
 
 
+def check_request_output_outside_evidence(request: RunRequest, *, run_id: str | None = None) -> None:
+    """Raise ``OutputInsideEvidenceError`` when the request's output folder overlaps its evidence.
+
+    Without ``output_dir`` the (legacy) default folder is checked: for a folder evidence it is
+    inside the evidence, so a folder run without an explicit output folder is refused.
+    """
+    if not request.root:
+        return
+    root = Path(request.root).expanduser().resolve()
+    output = (
+        Path(request.output_dir).expanduser().resolve()
+        if request.output_dir
+        else default_run_output_dir(root, request.mode, run_id=run_id)
+    )
+    check_output_outside_evidence(output, [root])
+
+
 def default_run_output_dir(root: Path, mode: str, *, run_id: str | None = None) -> Path:
+    """Legacy default run folder (``<file>-rapidtriage-run-…`` beside a file, ``<folder>/rapidtriage-run-…``).
+
+    Kept to find the output of job records written without ``output_dir``; a new run never
+    writes to the in-folder default (``check_request_output_outside_evidence``).
+    """
     suffix = f"rapidtriage-run-{mode.lower()}"
     if run_id:
         suffix = f"{suffix}-{run_id}"

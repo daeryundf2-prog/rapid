@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from ..core.cross_tool import iter_rows as iter_cross_tool_rows
+from ..core.output_guard import OutputInsideEvidenceError, check_output_outside_evidence
 
 
 def compact_commercial_readiness_payload(payload: dict[str, object], *, limit: int) -> dict[str, object]:
@@ -85,6 +86,29 @@ def compact_commercial_readiness_payload(payload: dict[str, object], *, limit: i
         "full_report_hint": "Use --output-dir to write complete JSON/Markdown reports; stdout is compacted for terminal usability.",
     }
     return compact
+
+
+#: ``rapidtriage run`` without ``--output-dir`` (R7: no default output folder inside the evidence).
+CLI_RUN_OUTPUT_DIR_REQUIRED = (
+    "--output-dir 를 지정하세요. 증거 밖의 출력 폴더가 필요합니다 (증거 안에는 쓰지 않습니다) / "
+    "--output-dir is required: choose an output folder outside the evidence (no output is written inside the evidence)."
+)
+
+
+def refuse_output_inside_evidence(
+    parser: argparse.ArgumentParser,
+    output: Path | str | None,
+    evidence: list[Path | str | None],
+    *,
+    allow_evidence_inside: bool = False,
+) -> None:
+    """``parser.error`` (exit 2, Korean + English) when ``output`` overlaps an evidence path (R7)."""
+    if output is None:
+        return
+    try:
+        check_output_outside_evidence(output, evidence, allow_evidence_inside=allow_evidence_inside)
+    except OutputInsideEvidenceError as exc:
+        parser.error(exc.cli_message)
 
 
 def add_eventlog_output_arguments(command: argparse.ArgumentParser) -> None:

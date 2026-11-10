@@ -176,6 +176,7 @@ describe("RunDialog 처리 그룹", () => {
     fireEvent.click(checkbox("보고서")); // disabled: no effect
 
     fireEvent.change(screen.getByLabelText(/증거 경로/), { target: { value: "D:/case/img.E01" } });
+    fireEvent.change(screen.getByLabelText(/^출력 폴더/), { target: { value: "D:/out/run1" } });
     fireEvent.click(screen.getByRole("button", { name: "실행" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     const post = calls.find((c) => c.method === "POST");
@@ -250,6 +251,7 @@ describe("RunDialog 처리 그룹", () => {
     await waitFor(() => expect(extract().disabled).toBe(true));
     expect(screen.getByTestId("run-plan-groups-count").textContent).toBe("3개 그룹 중 2개 실행");
     fireEvent.change(screen.getByLabelText(/증거 경로/), { target: { value: "D:/case/img.E01" } });
+    fireEvent.change(screen.getByLabelText(/^출력 폴더/), { target: { value: "D:/out/run1" } });
     fireEvent.click(screen.getByRole("button", { name: "실행" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(calls.find((c) => c.method === "POST")?.body).not.toHaveProperty("skip_groups");
@@ -261,6 +263,7 @@ describe("RunDialog 처리 그룹", () => {
     renderWithQuery(<RunDialog runIsActive={false} onClose={onClose} />);
     expect(await screen.findByTestId("run-plan-groups-error")).toBeTruthy();
     fireEvent.change(screen.getByLabelText(/증거 경로/), { target: { value: "D:/case/img.E01" } });
+    fireEvent.change(screen.getByLabelText(/^출력 폴더/), { target: { value: "D:/out/run1" } });
     fireEvent.click(screen.getByRole("button", { name: "실행" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(calls.find((c) => c.method === "POST")?.body).not.toHaveProperty("skip_groups");

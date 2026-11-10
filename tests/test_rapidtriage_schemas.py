@@ -39,10 +39,10 @@ class RapidTriageSchemaValidationTests(unittest.TestCase):
             self.assertEqual(main(["files", str(root), "--output", str(files_path)]), 0)
             self.assertEqual(main(["artifacts", str(root), "--kind", "browser", "--output", str(artifacts_path)]), 0)
             self.assertEqual(
-                main(["run", str(root), "--mode", "fraud", "--output-dir", str(root / "run-output")]),
+                main(["run", str(root), "--mode", "fraud", "--output-dir", str(Path(tmp_dir) / "run-output")]),
                 0,
             )
-            self.assertEqual(main(["indicators", str(root / "run-output"), "--output", str(indicators_path)]), 0)
+            self.assertEqual(main(["indicators", str(Path(tmp_dir) / "run-output"), "--output", str(indicators_path)]), 0)
             self.assertEqual(main(["extract", str(files_path), str(extract_dir)]), 0)
             self.assertEqual(
                 main(

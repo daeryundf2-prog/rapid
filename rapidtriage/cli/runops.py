@@ -38,7 +38,11 @@ from ..core.run.plan import (
 )
 from ..core.run.progress import active_run_progress, load_run_progress_view
 from ..core.worker import RustWorkerClient, WorkerError
-from .helpers import eventlog_collector_options
+from .helpers import (
+    CLI_RUN_OUTPUT_DIR_REQUIRED,
+    eventlog_collector_options,
+    refuse_output_inside_evidence,
+)
 from .web import run_web_server
 
 EXIT_CANCELLED = 130
@@ -161,11 +165,8 @@ def _run_interruptibly(handlers_installed: bool, function, *args, **kwargs):
 
 def handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
         root = Path(args.root).expanduser().resolve()
-        output_dir = (
-            Path(args.output_dir).expanduser().resolve()
-            if args.output_dir
-            else root / f"rapidtriage-run-{args.mode.lower()}"
-        )
+        # R7: no default output folder (the old ROOT/rapidtriage-run-MODE was inside the evidence).
+        output_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else None
         skip_groups = list(getattr(args, "skip_group", None) or [])
         skip_tasks = list(getattr(args, "skip_task", None) or [])
         artifact_kinds = [item.strip() for item in str(getattr(args, "artifact_kinds", "") or "").split(",") if item.strip()]
@@ -197,6 +198,9 @@ def handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_s
             else:
                 print(format_plan_table(plan))
             return 0
+        if output_dir is None:
+            parser.error(CLI_RUN_OUTPUT_DIR_REQUIRED)
+        refuse_output_inside_evidence(parser, output_dir, [root])
         previous_handlers = _install_cancel_handlers(output_dir)
         try:
             payload = _run_interruptibly(

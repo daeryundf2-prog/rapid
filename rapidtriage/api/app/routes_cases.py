@@ -22,6 +22,11 @@ from fastapi import APIRouter, HTTPException, Query
 from ...core.case_db.base import CaseDatabaseError
 from ...core.case_db.intake import CaseConflictError, CaseNotFoundError
 from ...core.jobs import RunJobStore, RunOutputDirBusy
+from ...core.output_guard import (
+    OutputInsideEvidenceError,
+    check_output_outside_evidence,
+    output_evidence_problem,
+)
 from ...core.run.profiles import RUN_PROFILES
 from .case_workspace import (
     SNAPSHOT_FILE_NAME,
@@ -52,7 +57,7 @@ from .models import (
     CaseRunCreateRequest,
     CaseRunLinkRequest,
 )
-from .routes_runs import run_request_from_body
+from .routes_runs import output_guard_http_error, run_request_from_body
 from .run_problems import PROBLEM_MAX_LIMIT, PROBLEM_PREVIEW_LIMIT, build_run_problems
 
 #: A case run with no output folder and no case folder (E01 QA D4: never beside / inside evidence).
@@ -222,6 +227,12 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
         lexical = checked_local_path(request.path, label="증거", confine_to_analysis_roots=True)
         path = Path(lexical)
         validate_evidence_kind(path, request.source_type)
+        if case.get("case_root"):
+            # R7: case runs default to a folder under the case folder, so it never sits inside evidence.
+            try:
+                check_output_outside_evidence(str(case["case_root"]), [lexical], allow_evidence_inside=True)
+            except OutputInsideEvidenceError as exc:
+                raise output_guard_http_error(exc) from exc
         algorithm = expected_hash_algorithm(request.expected_hash) if request.verify_hash else None
         if request.expected_hash.strip() and request.source_type == "e01":
             raise HTTPException(
@@ -301,13 +312,22 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
             return {"command": "case.output.check", "path": request.path, "ok": False, "problem": str(exc.detail)}
         target = Path(lexical)
         problem = ""
-        if target.exists() and not target.is_dir():
+        code = ""
+        guard = output_evidence_problem(
+            lexical,
+            [item for item in request.evidence_paths if item.strip()],
+            allow_evidence_inside=request.kind == "case_root",
+        )
+        if guard is not None:
+            # R7: reported before the case exists (the wizard asks first), never after a write.
+            problem, code = str(guard), guard.code
+        elif target.exists() and not target.is_dir():
             problem = f"{label} 자리에 파일이 있습니다: {lexical}"
         elif request.kind == "output_dir":
             busy = _same_output_dir_job(store, lexical)
             if busy:
                 problem = f"같은 출력 폴더를 쓰는 런({busy})이 대기·실행 중입니다. 출력 폴더를 비우거나 다른 폴더를 지정하세요"
-        return {"command": "case.output.check", "path": lexical, "ok": not problem, "problem": problem}
+        return {"command": "case.output.check", "path": lexical, "ok": not problem, "problem": problem, "code": code}
 
     @router.post("/api/cases/evidence-check")
     def check_evidence(request: CaseEvidenceCheckRequest) -> dict[str, Any]:
@@ -366,6 +386,12 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
         else:
             # E01 QA D4: never default beside the evidence file or inside the evidence folder.
             raise HTTPException(status_code=422, detail=CASE_RUN_NEEDS_OUTPUT)
+        try:
+            # R7: neither inside this evidence nor inside any other evidence of the case.
+            case_evidence = [str(item["path"]) for item in intake().list_evidence(case_id) if item.get("path")]
+            check_output_outside_evidence(output_dir, [root, *case_evidence])
+        except OutputInsideEvidenceError as exc:
+            raise output_guard_http_error(exc) from exc
         run_request = run_request_from_body(request, root=root, output_dir=output_dir)
         with submit_lock:
             if explicit_output and output_dir:
@@ -380,11 +406,15 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
                 job = store.submit(run_request) if not request.wait else None
             except RunOutputDirBusy as exc:
                 raise HTTPException(status_code=409, detail=str(exc))
+            except OutputInsideEvidenceError as exc:
+                raise output_guard_http_error(exc) from exc
         if job is None:
             try:
                 job = store.run_sync(run_request)
             except RunOutputDirBusy as exc:
                 raise HTTPException(status_code=409, detail=str(exc))
+            except OutputInsideEvidenceError as exc:
+                raise output_guard_http_error(exc) from exc
         snapshot = build_processing_snapshot(run_request=run_request, case=case, evidence=evidence, origin="case-run")
         # Written into the run's own output folder: with wait=false (the default) this happens right
         # after the run is queued, before its first step, so the file is part of the run output from

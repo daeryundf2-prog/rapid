@@ -127,7 +127,7 @@ class ReadBudgetTests(unittest.TestCase):
     def test_run_disclosure_and_sidecar(self) -> None:
         """A kind-only run with ``collector_options["ai-agent"]["ai_read_mb"]`` (lane C path) carries
         the budget note in the run disclosures and writes the sidecar into ``artifacts/``."""
-        out = self.tmp / "run-out"
+        out = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="ai-budget-out-"))) / "run-out"
         summary = run_triage_mode(
             self.tmp,
             mode="seizure",

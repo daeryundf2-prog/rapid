@@ -16,6 +16,8 @@ import {
   buildRunBody,
   DEFAULT_RUN_FORM,
   firstRunFormError,
+  outputOverlapReason,
+  outputRequiredReason,
   QUICK_RUN_OUTPUT_SPEC,
   type RunForm,
   validateRunForm,
@@ -58,7 +60,11 @@ export function RunDialog({
 
   const errors = validateRunForm(form);
   const invalidReason = firstRunFormError(errors);
-  const submitReason = runIsActive ? "실행 중 런이 있습니다" : invalidReason;
+  // R7: the output folder is required and never inside / around the evidence (server re-checks).
+  const outputError = outputOverlapReason(form.outputDir, [form.root]);
+  const submitReason = runIsActive
+    ? "실행 중 런이 있습니다"
+    : (invalidReason ?? outputRequiredReason(QUICK_RUN_OUTPUT_SPEC, form.outputDir) ?? outputError);
 
   const profiles = useQuery({
     queryKey: ["collect-profiles"],
@@ -154,6 +160,7 @@ export function RunDialog({
           advanced={advanced}
           onAdvancedChange={setAdvanced}
           output={QUICK_RUN_OUTPUT_SPEC}
+          outputError={outputError}
           extra={
             <>
               <label htmlFor="run-collect-profile">수집 프로필 (계획 미리보기 전용)</label>

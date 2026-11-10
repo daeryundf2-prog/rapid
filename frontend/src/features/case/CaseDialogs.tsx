@@ -32,6 +32,7 @@ import { RunOptionsFields } from "./RunOptionsFields";
 import {
   caseRunOutputSpec,
   DEFAULT_RUN_FORM,
+  outputOverlapReason,
   outputRequiredReason,
   type RunForm,
   validateRunForm,
@@ -472,12 +473,18 @@ export function AddRunDialog({
   const summary = summarizeRunRequest(body as unknown as Record<string, unknown>);
   // E01 QA D4: the default is the case folder's run subfolder; without one the examiner chooses.
   const outputSpec = caseRunOutputSpec(detail.data?.case_root);
+  // R7: never inside / around any evidence of the case (the server checks the same, on real paths).
+  const outputError = outputOverlapReason(
+    form.outputDir,
+    allEvidence.map((item) => item.path),
+  );
   const reason = runIsActive
     ? "실행 중 런이 있습니다"
     : !evidenceId
       ? "증거를 고르세요"
       : (caseRunFormReason(form) ??
-        (detail.data ? outputRequiredReason(outputSpec, form.outputDir) : undefined));
+        (detail.data ? outputRequiredReason(outputSpec, form.outputDir) : undefined) ??
+        outputError);
   const start = useMutation({
     mutationFn: () => createCaseRun(caseId, body),
     onSuccess: (result) => {
@@ -542,6 +549,7 @@ export function AddRunDialog({
         onAdvancedChange={setAdvanced}
         idPrefix={`${id}-run`}
         output={outputSpec}
+        outputError={outputError}
       />
       <table className="data-table dash-table" aria-label="처리 옵션 요약">
         <tbody>
