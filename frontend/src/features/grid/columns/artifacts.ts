@@ -8,6 +8,7 @@ import {
   familyForTypes,
   majorityFamilyForTypes,
 } from "../../flags/catalog";
+import { isAiType } from "../../ai/aiLabels";
 import { parseFlags } from "../../flags/flags";
 import { kindsForCategory } from "../../tree/categories";
 import { serverPathFilter } from "../gridUtils";
@@ -394,13 +395,31 @@ export function resolveArtifactFamily(
   kind: string | undefined,
   types?: readonly string[],
 ): CatalogFamily | undefined {
+  if (isAiGrid(kind, types)) return undefined;
   // Several types of one kind: the family holding most of their rows (C6), else the mixed layout.
   return familyForTypes(types) ?? (types?.length ? majorityFamilyForTypes(kind, types) : familyForKind(kind));
+}
+
+/**
+ * AI 사용 grids (kind `ai-agent`, or a 유형 filter of AI row types only) keep the console's own
+ * column sets (ai.ts: labelled enums, 종료, 수집 여부 on credential rows): the backend catalogue's
+ * ai-* families (R7 lane C) serve semantic tags and rules, not the grid layout. Without this the
+ * catalogue family won and the AI nodes showed its raw column set (R7 gate).
+ */
+function isAiGrid(kind: string | undefined, types: readonly string[] | undefined): boolean {
+  if (types?.length) return types.every((type) => isAiType(type));
+  return kind === "ai-agent";
 }
 
 /** The type family every selected type belongs to (one family only), else undefined. */
 export function artifactTypeFamily(types: readonly string[] | undefined): string | undefined {
   if (!types?.length) return undefined;
+  if (isAiGrid(undefined, types)) {
+    for (const [family, def] of Object.entries(AI_TYPE_FAMILY_COLUMNS)) {
+      if (types.every((type) => def.types.includes(type))) return family;
+    }
+    return undefined;
+  }
   const catalogued = familyForTypes(types);
   if (catalogued) return `catalog:${catalogued.id}`;
   for (const [family, def] of Object.entries(TYPE_FAMILY_COLUMNS)) {

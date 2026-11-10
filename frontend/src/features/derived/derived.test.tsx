@@ -188,8 +188,10 @@ describe("RDP direction · EXIF state · auto logon", () => {
       // + R5 L3 (11: location-url-candidate, browser-analytics-cookie, carved-url-candidate, 6 p2p, 2 android-backup).
       // + R5 L2 (15: startup, banner, Office x2, SSH x5, VM, wallet, AV, wallpaper, credential stores, NTFS volume)
       // + R6 S2 lane A (1: av-product-presence)
-      // + timeline/grid readability C8 (2: shimcache, amcache-file).
-      expect(FALLBACK_CATALOG.families).toHaveLength(122);
+      // + timeline/grid readability C8 (2: shimcache, amcache-file)
+      // + R7 AI lane C (9: ai-tool, ai-session, ai-message, ai-tool-call, ai-file-touch, ai-mcp-server,
+      //   ai-config, ai-account, ai-code).
+      expect(FALLBACK_CATALOG.families).toHaveLength(131);
       expect(familyById("sam-account")?.core_columns.find((c) => c.key === "user_name")?.semantic).toBe(
         "account",
       );

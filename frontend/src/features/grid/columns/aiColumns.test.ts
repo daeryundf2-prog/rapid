@@ -8,9 +8,10 @@ import { describe, expect, it } from "vitest";
 import type { GridRow } from "../../../contracts/collection";
 import { AI_TYPES } from "../../ai/aiLabels";
 import { AI_SAMPLE_ROWS } from "../../ai/aiSampleRows";
+import { FALLBACK_CATALOG, setCatalog } from "../../flags/catalog";
 import { AI_USAGE_DOMAIN, flattenDomainNodes } from "../../tree/domains";
 import { AI_TYPE_FAMILY_COLUMNS } from "./ai";
-import { artifactColumnsForKind, artifactTypeFamily } from "./artifacts";
+import { artifactColumnsForKind, artifactTypeFamily, resolveArtifactFamily } from "./artifacts";
 import { COLLECTIONS } from "./index";
 
 const RAW_ID = /^[a-z0-9_-]{3,}$/;
@@ -118,5 +119,28 @@ describe("AI 사용 columns", () => {
     }
     const session = rowsOf("ai-agent-session")[0] as GridRow;
     expect(session.title).not.toMatch(/^sess-/);
+  });
+
+  it("keeps the AI column sets when the backend catalogue carries ai-* families (R7 gate)", () => {
+    // The served catalogue (and the bundled fallback) holds lane C's ai-* families; they used to win
+    // over ai.ts, so the session grid lost 종료 and credential rows lost 값 (수집 안 함).
+    setCatalog(FALLBACK_CATALOG);
+    try {
+      expect(FALLBACK_CATALOG.families.some((family) => family.id === "ai-session")).toBe(true);
+      expect(resolveArtifactFamily("ai-agent", ["ai-agent-session"])).toBeUndefined();
+      expect(resolveArtifactFamily("ai-agent", undefined)).toBeUndefined();
+      expect(artifactTypeFamily(["ai-agent-session"])).toBe("ai-session");
+      const session = artifactColumnsForKind("ai-agent", ["ai-agent-session"]).map((c) => c.header);
+      expect(session).toEqual(expect.arrayContaining(["도구", "시작", "종료"]));
+      const credential = artifactColumnsForKind("ai-agent", ["ai-credential-presence"]);
+      expect(credential.some((c) => c.id === "d:value_collected")).toBe(true);
+      for (const node of nodes) {
+        expect(AI_TYPE_FAMILY_COLUMNS[artifactTypeFamily(node.target.types) as string], node.id).toBeDefined();
+      }
+      // Non-AI types still resolve to their catalogue family.
+      expect(resolveArtifactFamily("windows-prefetch", ["prefetch-file"])).toBeDefined();
+    } finally {
+      setCatalog(null);
+    }
   });
 });
