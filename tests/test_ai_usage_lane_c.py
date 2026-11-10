@@ -413,6 +413,28 @@ class PipelineTests(unittest.TestCase):
         for sample in proj["samples"]:
             self.assertIn(self.rows[sample["record_index"]]["artifact_type"], {"ai-agent-session", "ai-agent-file-touch"})
 
+    def test_ai_tables_pivot_to_original_rows_over_the_api(self) -> None:
+        # R7 gate: GET …/derived/ai_usage/rows answered 422; it takes the row's ``normalized`` key as
+        # ``value`` (the console's 통합 보기 now lists both AI tables and sends it), 422 only without one.
+        from fastapi.testclient import TestClient
+
+        from rapidtriage.api import create_app
+        from rapidtriage.core.jobs import RunJobStore
+
+        store = RunJobStore()
+        run_id = store.import_completed_run(self.out).run_id
+        client = TestClient(create_app(store, auth_token="t"), headers={"X-RapidTriage-Token": "t"})
+        for table in ("ai_usage", "ai_projects"):
+            page = client.get(f"/api/runs/{run_id}/derived/{table}")
+            self.assertEqual(page.status_code, 200, page.text)
+            first = page.json()["rows"][0]
+            response = client.get(f"/api/runs/{run_id}/derived/{table}/rows", params={"value": first["normalized"]})
+            self.assertEqual(response.status_code, 200, response.text)
+            samples = response.json()["samples"]
+            self.assertTrue(samples, table)
+            self.assertTrue(all(sample["collection"] == "artifacts" and sample["kind"] == "ai-agent" for sample in samples), samples)
+            self.assertEqual(client.get(f"/api/runs/{run_id}/derived/{table}/rows").status_code, 422)
+
     # rules -------------------------------------------------------------------------------------------
 
     def test_rules_fire_on_expected_rows_only(self) -> None:

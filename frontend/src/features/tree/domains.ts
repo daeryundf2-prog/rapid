@@ -609,6 +609,9 @@ export const DOMAINS: readonly DomainDef[] = [
       { id: "derived-attachments", label: "첨부", target: derived("attachments") },
       { id: "derived-credentials", label: "자격 증명/토큰", target: derived("credentials") },
       { id: "derived-urls", label: "URL 분류", target: derived("urls") },
+      // R7 AI lane C: session aggregates (도구×계정×일, 작업 폴더) → pivot to the session rows.
+      { id: "derived-ai-usage", label: "AI 사용량(도구·계정·일)", target: derived("ai_usage") },
+      { id: "derived-ai-projects", label: "AI 프로젝트", target: derived("ai_projects") },
       // --- R5 L3: map-URL location candidates (browser rows with latitude/longitude → 지도 대체 보기).
       {
         id: "derived-location-urls",
