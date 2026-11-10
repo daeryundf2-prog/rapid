@@ -152,6 +152,7 @@ from .persist import (
     skipped_case_db_record,
 )
 from .plan import (
+    KINDS_ONLY_SKIPPED_GROUPS,
     PLAN_FILE_NAME,
     REASON_FOLDER_INPUT,
     PlanTargetError,
@@ -450,8 +451,14 @@ def run_triage_mode(
     skip_tasks: Sequence[str] = (),
     actor: str = "cli",
     control_since: str | None = None,
+    artifact_kinds: Sequence[str] = (),
 ) -> dict[str, object]:
     """Run every triage stage for ``root`` into ``output_dir``.
+
+    ``artifact_kinds`` (``--artifact-kinds``) makes a kind-only run: the artifacts stage runs only
+    those kinds, every other provider and the tree-walking docs/files/carve/extract stages are
+    skipped, and the unskippable fingerprint stage is ``sampled`` (no run-wide evidence path
+    snapshot, no content hash). The summary records ``run_scope`` and a disclosure note.
 
     ``case_db`` (default on) makes the ``persist`` stage build the run-local
     search index ``<output_dir>/rapidtriage-case.db``.
@@ -496,7 +503,11 @@ def run_triage_mode(
         skip_groups=skip_groups,
         skip_tasks=skip_tasks,
         actor=actor,
+        artifact_kinds=artifact_kinds,
     )
+    kinds_only = [str(kind) for kind in plan["options"].get("artifact_kinds") or []]
+    if kinds_only:
+        profile = replace(profile, artifacts_kinds=tuple(kinds_only))
     output_dir = output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     # A resumed run reuses stage outputs (manifest/docs/files/timeline/...)
@@ -565,7 +576,11 @@ def run_triage_mode(
         progress.complete_stage("prepare")
         # Every provider walks the same evidence tree; the run-scoped path
         # cache makes each tree walk happen once per run (see core/files.py).
-        enable_evidence_path_cache()
+        # A kind-only run keeps it off: its first user (the fingerprint) would
+        # enumerate the whole tree that the few selected providers never need.
+        path_cache_enabled = not kinds_only
+        if path_cache_enabled:
+            enable_evidence_path_cache()
         # R6 S2: this run's own adb copy folder is the only ``mobile-inner`` pruned from walks.
         own_inner_dir = output_dir / MOBILE_INNER_DIR_NAME
         register_tool_output_dir(own_inner_dir)
@@ -600,11 +615,13 @@ def run_triage_mode(
                 stage_reuse_blocked=stage_reuse_blocked,
                 skip_groups=plan["options"]["skip_groups"],
                 skip_tasks=plan["options"]["skip_tasks"],
+                artifact_kinds=kinds_only,
             )
         finally:
             unregister_tool_output_dir(own_inner_dir)
             unregister_run_output_dir(output_dir)
-            disable_evidence_path_cache()
+            if path_cache_enabled:
+                disable_evidence_path_cache()
     except BaseException as exc:
         control_watcher.stop()
         progress.fail(exc)
@@ -726,6 +743,7 @@ def _run_triage_stages(
     stage_reuse_blocked: bool = False,
     skip_groups: Sequence[str] = (),
     skip_tasks: Sequence[str] = (),
+    artifact_kinds: Sequence[str] = (),
 ) -> dict[str, object]:
     """Run every stage after the input root is prepared (see run_triage_mode)."""
 
@@ -787,10 +805,21 @@ def _run_triage_stages(
         write_result(image_result.to_dict(), virtual_disk_metadata_path)
 
     # Per-file content hashing is only needed for --resume reuse decisions;
-    # non-resume runs fingerprint on path+size+mtime metadata only.
-    if resume:
-        progress.task_set_message("fingerprint", "이어서 실행 지문 계산 중 (파일 내용 해시, 파일당 16 MB 상한)")
-    current_fingerprint = build_run_input_fingerprint(scan_root, hash_contents=resume)
+    # non-resume runs fingerprint on path+size+mtime metadata only. A kind-only
+    # run (--artifact-kinds) samples: metadata of the first files a lazy walk
+    # yields, never content (the full-tree walk cost 45 min on a home folder).
+    if artifact_kinds:
+        fingerprint_mode = FINGERPRINT_MODE_SAMPLED
+        progress.task_set_message("fingerprint", "종류 제한 실행: 입력 지문 표본 계산 중 (내용 해시 없음)")
+        current_fingerprint = build_run_input_fingerprint(
+            scan_root, hash_contents=False, max_files=KINDS_ONLY_FINGERPRINT_MAX_FILES
+        )
+    else:
+        fingerprint_mode = FINGERPRINT_MODE_CONTENT if resume else FINGERPRINT_MODE_METADATA
+        if resume:
+            progress.task_set_message("fingerprint", "이어서 실행 지문 계산 중 (파일 내용 해시, 파일당 16 MB 상한)")
+        current_fingerprint = build_run_input_fingerprint(scan_root, hash_contents=resume)
+    current_fingerprint["fingerprint_mode"] = fingerprint_mode
     finish_stage("fingerprint")
     previous_fingerprint = (
         load_reusable_json(
@@ -1471,6 +1500,12 @@ def _run_triage_stages(
         if columnar_artifacts_sidecar.get("jsonl_path"):
             outputs["columnar_artifacts_jsonl"] = Path(str(columnar_artifacts_sidecar["jsonl_path"]))
     final_plan = progress.finalize_plan()
+    run_scope = {
+        "artifact_kinds": list(artifact_kinds),
+        "kinds_only": bool(artifact_kinds),
+        "fingerprint_mode": fingerprint_mode,
+        "skipped_stage_groups": list(KINDS_ONLY_SKIPPED_GROUPS) if artifact_kinds else [],
+    }
     summary_payload = build_run_summary(
         root=input_root.root_path,
         output_dir=output_dir,
@@ -1526,6 +1561,18 @@ def _run_triage_stages(
         extra_steps=[*planned_out_steps, triage_step, derived_step],
         plan=final_plan,
     )
+    summary_payload["run_scope"] = run_scope
+    summary_payload["fingerprint_mode"] = fingerprint_mode
+    if artifact_kinds:
+        disclosures = summary_payload.get("disclosures")
+        if isinstance(disclosures, dict):
+            notes = disclosures.setdefault("collection_notes", {})
+            if isinstance(notes, dict):
+                notes["run-scope"] = [
+                    f"종류 제한 실행(--artifact-kinds {','.join(artifact_kinds)}): 다른 수집기와 "
+                    f"{'/'.join(KINDS_ONLY_SKIPPED_GROUPS)} 단계는 실행하지 않았고, 입력 지문은 표본"
+                    f"(fingerprint_mode: sampled, 앞쪽 최대 {KINDS_ONLY_FINGERPRINT_MAX_FILES}개 파일의 경로·크기·수정 시각, 내용 해시 없음)입니다."
+                ]
     audit_output = output_dir / "rapidtriage-run-audit.json"
     summary_payload["audit"] = str(audit_output)
     summary_payload["search_backend"] = str(case_db_record["search_backend"])
@@ -1583,6 +1630,8 @@ def _run_triage_stages(
             "reused_outputs": sorted(reused_outputs),
             "skip_groups": list(skip_groups),
             "skip_tasks": list(skip_tasks),
+            "artifact_kinds": list(artifact_kinds),
+            "fingerprint_mode": fingerprint_mode,
             "plan_control": plan_control_requests(final_plan),
             "plan_outcome": (final_plan or {}).get("outcome"),
             "image_source": str(image_result.source_path) if image_result else None,
@@ -1839,6 +1888,10 @@ def collect_artifact_stages(
     mobile_options = dict(options_by_kind.get("mobile-export") or {})
     mobile_options.setdefault("inner_dir", artifacts_dir.parent / MOBILE_INNER_DIR_NAME)
     options_by_kind["mobile-export"] = mobile_options
+    # R7: files the ai-agent adapters left out for the read budget are listed next to its output.
+    ai_options = dict(options_by_kind.get("ai-agent") or {})
+    ai_options.setdefault("output_dir", artifacts_dir)
+    options_by_kind["ai-agent"] = ai_options
     for kind in kinds:
         artifact_path = artifacts_dir / f"rapidtriage-artifacts-{kind}.json"
         reusable = load_reusable_artifact_payload(artifact_path) if (resume or delta is not None) else None

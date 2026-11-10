@@ -167,6 +167,14 @@ def handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_s
         )
         skip_groups = list(getattr(args, "skip_group", None) or [])
         skip_tasks = list(getattr(args, "skip_task", None) or [])
+        artifact_kinds = [item.strip() for item in str(getattr(args, "artifact_kinds", "") or "").split(",") if item.strip()]
+        run_collector_options: dict[str, dict[str, object]] = {}
+        if eventlog_collector_options(args):
+            run_collector_options["eventlog"] = eventlog_collector_options(args)
+        if getattr(args, "ai_read_mb", None):
+            if args.ai_read_mb < 1:
+                parser.error("--ai-read-mb must be a positive number of MiB")
+            run_collector_options["ai-agent"] = {"ai_read_mb": int(args.ai_read_mb)}
         if getattr(args, "print_plan", None):
             try:
                 plan = build_run_plan(
@@ -176,6 +184,7 @@ def handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_s
                     case_db=getattr(args, "case_db", True),
                     skip_groups=skip_groups,
                     skip_tasks=skip_tasks,
+                    artifact_kinds=artifact_kinds,
                 )
             except PlanTargetError as exc:
                 parser.error(str(exc))
@@ -208,12 +217,11 @@ def handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_s
                 rule_set=rule_set,
                 columnar_store=args.columnar_store,
                 carve=getattr(args, "carve", False),
-                collector_options=(
-                    {"eventlog": eventlog_collector_options(args)} if eventlog_collector_options(args) else None
-                ),
+                collector_options=run_collector_options or None,
                 case_db=getattr(args, "case_db", True),
                 skip_groups=skip_groups,
                 skip_tasks=skip_tasks,
+                artifact_kinds=artifact_kinds,
                 actor="cli",
             )
         except (RunModeError, PlanTargetError) as exc:
@@ -336,6 +344,15 @@ def handle_artifacts(args: argparse.Namespace, parser: argparse.ArgumentParser, 
                     file=sys.stderr,
                 )
             collector_options["inner_dir"] = inner_dir
+        if getattr(args, "ai_read_mb", None) is not None and args.kind != "ai-agent":
+            parser.error("--ai-read-mb can only be used with --kind ai-agent")
+        if args.kind == "ai-agent":
+            # The complete list of files left out for the read budget goes next to --output.
+            collector_options["output_dir"] = output.parent
+            if getattr(args, "ai_read_mb", None):
+                if args.ai_read_mb < 1:
+                    parser.error("--ai-read-mb must be a positive number of MiB")
+                collector_options["ai_read_mb"] = int(args.ai_read_mb)
         try:
             payload = run_artifact_collection(
                 root,
