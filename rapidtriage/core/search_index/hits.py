@@ -14,10 +14,16 @@ What v2 does not cover (documented in docs/rapidtriage-known-limitations.md "R7 
 * OCR sidecars (``ocr=1``) and IOC-scanner hits (``/ioc_scanner_hits/<n>``) are not indexed;
 * file inventory rows (``/inventory/<n>``) and analysis result rows are indexed but v1 never
   searched them: the console query leaves them out (``-type:file-inventory -in:analysis``).
+
+R7 lane B: a console keyword written as an entity / language / hash-set / list field
+(``rrn:*``, ``card:verified``, ``email:@naver.com``, ``lang:ko``, ``-hashset:known-good``,
+``list:ioc-50`` -- :data:`CONSOLE_FIELD_RE`) is a filter ANDed to the keywords, never a phrase;
+the other keywords keep their v1 meaning (any of them).
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path, PureWindowsPath
 
@@ -29,11 +35,25 @@ from ..search import (
 )
 from ..search_fts import docs_result_index
 from ..search_hits import finalize_search_hit, scan_root_of, summary_title
+from .patterns import mask_sensitive
 
 # The artifact kind whose hits v1 calls "web" (search_fts.BROWSER_OUTPUT_NAME).
 BROWSER_KIND = "browser"
 CONSOLE_SCOPE = "-in:analysis -type:file-inventory"
 MAX_CONSOLE_KEYWORDS = 32
+# Console keywords that are query fields (R7 lane B): ANDed filters, not phrases.
+CONSOLE_FIELD_RE = re.compile(
+    r"^-?(?:rrn|corpno|card|bizno|phone|account|passport|email|ip|host|lang|hashset|list):[^\s()\"]+$"
+)
+
+
+def is_console_field(keyword: str) -> bool:
+    return CONSOLE_FIELD_RE.match(keyword) is not None
+
+
+def text_keywords(keywords: Sequence[str]) -> list[str]:
+    """The keywords that are words (highlights, matched keywords), without the field filters."""
+    return [keyword for keyword in keywords if not is_console_field(keyword)]
 
 
 def console_keywords(keywords: Sequence[str]) -> list[str]:
@@ -46,11 +66,15 @@ def _phrase(keyword: str) -> str:
 
 
 def console_query(keywords: Sequence[str]) -> str:
-    """Index query matching a row that contains any keyword, over the collections v1 searches."""
-    terms = [_phrase(keyword) for keyword in keywords]
-    if not terms:
+    """Index query matching a row that contains any keyword (and every field filter), over the
+    collections v1 searches."""
+    terms = [_phrase(keyword) for keyword in keywords if not is_console_field(keyword)]
+    filters = [keyword for keyword in keywords if is_console_field(keyword)]
+    if not terms and not filters:
         raise ValueError("at least one keyword is required")
-    return f"({' OR '.join(terms)}) {CONSOLE_SCOPE}"
+    head = f"({' OR '.join(terms)}) " if terms else ""
+    tail = f"{' '.join(filters)} " if filters else ""
+    return f"{head}{tail}{CONSOLE_SCOPE}"
 
 
 def _ordinal(locator: str) -> int | None:
@@ -129,6 +153,8 @@ def index_hit(
         if isinstance(item, Mapping)
     }
     matched = [keyword for keyword in keywords if keyword.casefold() in matched_terms] or list(keywords)
+    # A keyword typed as a whole personal number is echoed as its mask (R7 lane B).
+    matched = [mask_sensitive(keyword) for keyword in matched]
     match: dict[str, object] = {
         "path": path,
         "title": title,
@@ -250,7 +276,7 @@ def attach_console_hits(
     result["matches"] = index_hits(
         rows,
         root=scan_root_of(summary),
-        keywords=keywords,
+        keywords=text_keywords(keywords),
         run_id=run_id,
         offset=offset,
         docs_results=docs_results,

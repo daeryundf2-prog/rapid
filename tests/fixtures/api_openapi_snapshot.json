@@ -330,6 +330,12 @@
     "/api/runs/{run_id}/search/count": {
       "post": "search_count_api_runs__run_id__search_count_post"
     },
+    "/api/runs/{run_id}/search/entities": {
+      "post": "search_entities_api_runs__run_id__search_entities_post"
+    },
+    "/api/runs/{run_id}/search/entities/reveal": {
+      "post": "reveal_entity_value_api_runs__run_id__search_entities_reveal_post"
+    },
     "/api/runs/{run_id}/search/hashes": {
       "post": "search_hashes_api_runs__run_id__search_hashes_post"
     },
@@ -341,6 +347,14 @@
     },
     "/api/runs/{run_id}/search/index/build": {
       "post": "build_search_index_api_runs__run_id__search_index_build_post"
+    },
+    "/api/runs/{run_id}/search/lists": {
+      "get": "get_search_lists_api_runs__run_id__search_lists_get",
+      "post": "create_search_list_api_runs__run_id__search_lists_post"
+    },
+    "/api/runs/{run_id}/search/lists/{list_id}": {
+      "delete": "delete_search_list_api_runs__run_id__search_lists__list_id__delete",
+      "get": "get_search_list_api_runs__run_id__search_lists__list_id__get"
     },
     "/api/runs/{run_id}/search/query": {
       "post": "search_query_api_runs__run_id__search_query_post"

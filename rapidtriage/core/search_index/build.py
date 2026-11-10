@@ -41,7 +41,7 @@ import time
 import uuid
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from ..artifact_profiles import (
@@ -52,8 +52,20 @@ from ..artifact_profiles import (
     resolve_records_path,
 )
 from ..credential_files import credential_file_reason, credential_index_text
+from ..doc_text import language_hint, script_profile
 from ..json_stream import JsonStreamError, iter_array_items
-from ..search_hits import entry_locator, record_time
+from ..search_hits import base_locator, entry_locator, record_time
+from .patterns import (
+    ENTITY_RULE,
+    KIND_BITS,
+    ROW_CAP,
+    SENSITIVE_KINDS,
+    TOTAL_CAP,
+    Entity,
+    entity_sha256,
+    find_entities,
+    mask_text,
+)
 from .schema import (
     BIGRAM_RULE,
     BUILDING_SUFFIX,
@@ -299,14 +311,33 @@ def is_payload_key(key: str) -> bool:
 def capped_value(text: str, key: str, budget: int, cuts: Counter[str] | None) -> str:
     """``text`` cut to ``VALUE_MAX_CHARS`` (payload keys: whole) and to the row budget; every cut counted."""
     if not is_payload_key(key) and len(text) > VALUE_MAX_CHARS:
-        text = text[:VALUE_MAX_CHARS]
+        text = cut_text(text, VALUE_MAX_CHARS)
         if cuts is not None:
             cuts[f"value-truncated:{key}"] += 1
     if len(text) > budget:
-        text = text[: max(0, budget)]
+        text = cut_text(text, max(0, budget))
         if cuts is not None:
             cuts[f"text-truncated:{key}"] += 1
     return text
+
+
+# The token a cut went through: a word/number/address, with space-separated digit groups before it.
+_CUT_TAIL_RE = re.compile(r"(?:[0-9]{1,8}[ \-]){0,5}[0-9A-Za-z@._%+\-]{1,128}$")
+# A cut next to one of these characters splits no token.
+_CUT_KEEP = frozenset(",;()[]{}<>\"'|")
+
+
+def cut_text(text: str, limit: int) -> str:
+    """``text[:limit]`` without the token the cut went through (R7 lane B): a number or e-mail
+    address cut in half would escape entity masking, so the partial last token is dropped."""
+    if len(text) <= limit:
+        return text
+    head = text[:limit]
+    following = text[limit]
+    if not head or head[-1].isspace() or head[-1] in _CUT_KEEP or following.isspace() or following in _CUT_KEEP:
+        return head
+    tail = head[-192:]
+    return head[: len(head) - len(tail)] + _CUT_TAIL_RE.sub("", tail, count=1)
 
 
 _NOISE_CACHE: dict[str, bool] = {}
@@ -464,7 +495,7 @@ def _compact_fields(details: Mapping[str, object], *, preferred: Iterable[str] =
         elif isinstance(value, str):
             if not value.strip():
                 continue
-            shown = value[:256]
+            shown = cut_text(value, 256)
         else:
             continue
         used += len(key) + len(str(shown))
@@ -808,14 +839,14 @@ def flatten_doc(ctx: BuildContext, index: int, row: Mapping[str, object], body: 
     doc.fields = {key: row.get(key) for key in ("kind", "size", "text_status", "extraction_method", "text_length", "encrypted") if row.get(key) not in (None, "")}
     doc.fields.update(meta)
     if row.get("text_status") not in (None, "ok"):
-        doc.fields["text_reason"] = str(row.get("text_reason") or "")[:256]
+        doc.fields["text_reason"] = cut_text(str(row.get("text_reason") or ""), 256)
     return doc
 
 
 def flatten_indicator(ctx: BuildContext, index: int, row: Mapping[str, object]) -> Doc:
     kind = str(row.get("type") or "indicator")
     value = str(row.get("value") or "")
-    doc = Doc(collection="indicators", locator=f"/indicators/{index}", domain="incident", artifact_type=f"indicator-{kind}", title=f"{kind}: {value}"[:512])
+    doc = Doc(collection="indicators", locator=f"/indicators/{index}", domain="incident", artifact_type=f"indicator-{kind}", title=cut_text(f"{kind}: {value}", 512))
     doc.ts_text = record_time("indicators", row) or ""
     flags = row.get("risk_flags") if isinstance(row.get("risk_flags"), list) else []
     doc.body = [value, kind, str(row.get("classification") or ""), *(str(flag) for flag in flags[:20])]
@@ -823,7 +854,7 @@ def flatten_indicator(ctx: BuildContext, index: int, row: Mapping[str, object]) 
         normalized = normalize_hash(value)
         if normalized is not None:
             doc.hashes.append(normalized)
-    doc.fields = {"type": kind, "value": value[:256], "count": row.get("count"), "severity": row.get("severity") or "", "classification": row.get("classification") or ""}
+    doc.fields = {"type": kind, "value": cut_text(value, 256), "count": row.get("count"), "severity": row.get("severity") or "", "classification": row.get("classification") or ""}
     return doc
 
 
@@ -849,7 +880,7 @@ def flatten_analysis_row(ctx: BuildContext, analysis_id: str, analysis_kind: str
     if isinstance(text, str) and text.strip():
         if len(text) > TEXT_MAX_CHARS // 2:
             doc.cuts["text-truncated:text"] += 1
-        parts.append(text[: TEXT_MAX_CHARS // 2])
+        parts.append(cut_text(text, TEXT_MAX_CHARS // 2))
     doc.path2 = target_path(details)
     walk_values(details, parts, set(parts), doc.text_cap, skip=frozenset({"text"}), cuts=doc.cuts)
     doc.body = parts
@@ -982,14 +1013,15 @@ def load_document_bodies(case_db: Path | None) -> dict[str, tuple[str, bool]]:
         rows = connection.execute(
             "SELECT f.path, substr(d.body, 1, ?), length(d.body) > ? FROM indexed_document d JOIN file_record f ON f.id = d.file_record_id "
             "WHERE d.source_type = 'document'",
-            (DOC_TEXT_MAX_CHARS, DOC_TEXT_MAX_CHARS),
+            (DOC_TEXT_MAX_CHARS + 1, DOC_TEXT_MAX_CHARS),
         )
         for path, body, cut in rows:
             if path and body:
                 if credential_file_reason(str(path), sniff=False):
                     # A case DB built before the credential-file policy may still hold the body.
                     body, cut = credential_index_text(str(path)), False
-                bodies.setdefault(os.path.normcase(str(path)), (str(body), bool(cut)))
+                # One character past the cap: the cut never leaves half a number (``cut_text``).
+                bodies.setdefault(os.path.normcase(str(path)), (cut_text(str(body), DOC_TEXT_MAX_CHARS), bool(cut)))
     except sqlite3.Error as exc:
         LOGGER.warning("search index: document bodies unavailable from %s: %s", case_db, exc)
     finally:
@@ -1008,7 +1040,7 @@ def extract_document_body(path: str, kind: str) -> tuple[str, bool] | None:
         from ..docs import extract_text
 
         text = extract_text(source, kind)
-        return text[:DOC_TEXT_MAX_CHARS], len(text) > DOC_TEXT_MAX_CHARS
+        return cut_text(text, DOC_TEXT_MAX_CHARS), len(text) > DOC_TEXT_MAX_CHARS
     except Exception:  # extraction failures never stop the build
         return None
 
@@ -1020,19 +1052,201 @@ def extract_document_body(path: str, kind: str) -> tuple[str, bool] | None:
 DOC_COLUMNS = (
     "doc_id, group_id, collection, kind, locator, analysis_id, domain, artifact_type, title, path, path_fold, path2, path2_fold, "
     "ext, size, ts, ts_kind, ts_text, ts_family, ts_labels, actor, actor_sid, computer, md5, sha1, sha256, text, text_fold, fields_json, deleted, "
-    "sig_mismatch, in_archive, pii_count, truncated"
+    "sig_mismatch, in_archive, pii_count, truncated, entity_mask"
 )
 DOC_INSERT = f"INSERT INTO search_doc ({DOC_COLUMNS}) VALUES ({', '.join('?' for _ in DOC_COLUMNS.split(','))})"
+TITLE_MAX_CHARS = 512
+PATH2_MAX_CHARS = 2048
+# Row text kinds whose language is recorded (``lang:``): documents and mail/messenger rows.
+LANG_DOMAINS = frozenset({"messaging"})
+LANG_SAMPLE_CHARS = 16 * 1024
+
+
+@dataclass
+class EntityPiece:
+    """One piece of a row the entities are read from (and masked in)."""
+
+    source: str  # title | path | body | meta
+    text: str
+    sensitive_only: bool = False  # only the masked kinds (the piece repeats values of the body)
+
+
+@dataclass
+class MaskedDoc:
+    """A row's stored strings with every sensitive entity masked, and its entities."""
+
+    title: str
+    path: str
+    path2: str
+    body: str
+    fields_json: str
+    search_fields: list[tuple[str, str, int | None]]
+    entities: list[tuple[str, Entity]]  # (source, entity) in piece order
+
+
+def _scan(text: str, *, sensitive_only: bool) -> list[Entity]:
+    found = find_entities(text, sensitive_only=sensitive_only)
+    return [entity for entity in found if entity.sensitive] if sensitive_only else found
+
+
+def mask_doc(doc: Doc, display_path: str) -> MaskedDoc:
+    """``doc``'s title, paths, body, fields and search fields with sensitive entities masked.
+
+    Every cap is applied before the scan with :func:`cut_text` (a value is never cut in half
+    past its mask). The same pieces are re-read by :func:`doc_entity_pieces` for a reveal.
+    """
+    entities: list[tuple[str, Entity]] = []
+
+    def masked(source: str, text: str, *, sensitive_only: bool = False) -> str:
+        if not text:
+            return text
+        found = _scan(text, sensitive_only=sensitive_only)
+        if not found:
+            return text
+        entities.extend((source, entity) for entity in found)
+        return mask_text(text, found)
+
+    body = "\n".join(part for part in doc.body if part)
+    if len(body) > doc.text_cap:
+        body = cut_text(body, doc.text_cap)
+        doc.cuts["text-truncated:body"] += 1
+    # Title, paths and body in one scan (one call per row; a line break is a boundary like the
+    # text's edge, and no entity spans one), then split back into the pieces.
+    pieces = [
+        ("title", cut_text(nfc(doc.title), TITLE_MAX_CHARS), False),
+        ("path", display_path, True),
+        ("path", cut_text(doc.path2.strip(), PATH2_MAX_CHARS), True),
+        ("body", body, False),
+    ]
+    joined = "\n".join(text for _source, text, _sensitive in pieces)
+    found = find_entities(joined)
+    outputs: list[str] = []
+    offset = 0
+    position = 0
+    for source, text, sensitive_only in pieces:
+        end = offset + len(text)
+        own: list[Entity] = []
+        while position < len(found) and found[position].start < end:
+            entity = found[position]
+            position += 1
+            if entity.start < offset or entity.end > end or (sensitive_only and not entity.sensitive):
+                continue
+            own.append(replace(entity, start=entity.start - offset, end=entity.end - offset))
+        entities.extend((source, entity) for entity in own)
+        outputs.append(mask_text(text, own) if own else text)
+        offset = end + 1
+    title, path, path2, body = outputs
+    fields_json = "{}"
+    if doc.fields:
+        raw = json.dumps(doc.fields, ensure_ascii=False, default=str)
+        fields_json = cut_text(masked("meta", cut_text(raw, FIELDS_MAX_CHARS + 64), sensitive_only=True), FIELDS_MAX_CHARS)
+    search_fields = [(name, masked("meta", value, sensitive_only=True), value_int) for name, value, value_int in doc.search_fields]
+    return MaskedDoc(title, path, path2, body, fields_json, search_fields, entities)
+
+
+def doc_entity_pieces(doc: Doc, display_path: str) -> list[EntityPiece]:
+    """The unmasked pieces :func:`mask_doc` reads (a reveal re-reads them from the run outputs)."""
+    body = "\n".join(part for part in doc.body if part)
+    pieces = [
+        EntityPiece("title", cut_text(nfc(doc.title), TITLE_MAX_CHARS)),
+        EntityPiece("path", display_path, True),
+        EntityPiece("path", cut_text(doc.path2.strip(), PATH2_MAX_CHARS), True),
+        EntityPiece("body", cut_text(body, doc.text_cap)),
+    ]
+    if doc.fields:
+        raw = json.dumps(doc.fields, ensure_ascii=False, default=str)
+        pieces.append(EntityPiece("meta", cut_text(raw, FIELDS_MAX_CHARS + 64), True))
+    pieces.extend(EntityPiece("meta", value, True) for _name, value, _int in doc.search_fields)
+    return pieces
+
+
+def doc_language(doc: Doc, body: str) -> str:
+    """``language_hint`` of a document / mail / messenger row's text ("" for other rows)."""
+    if doc.collection != "docs" and doc.domain not in LANG_DOMAINS:
+        return ""
+    return language_hint(script_profile(body[:LANG_SAMPLE_CHARS]))
+
+
+class EntityStore:
+    """Distinct entity values (``search_entity_value``) and per-row postings (``search_entity``).
+
+    Values are keyed by their SHA-256 (never the value); at most ``ROW_CAP`` distinct values
+    are posted per row and ``TOTAL_CAP`` postings per index -- past the caps the text is still
+    masked, the postings are counted in ``skipped`` (``entity-row-capped`` / ``entity-capped``).
+    """
+
+    def __init__(self, connection: sqlite3.Connection, *, existing: bool = False) -> None:
+        self.connection = connection
+        self.ids: dict[bytes, int] = {}
+        self.next_id = 1
+        self.total = 0
+        self.values: list[tuple[object, ...]] = []
+        self.postings: list[tuple[int, int, str]] = []
+        self.by_kind: Counter[str] = Counter()
+        if existing:
+            for sha, value_id in connection.execute("SELECT value_sha256, value_id FROM search_entity_value"):
+                self.ids[bytes(sha)] = int(value_id)
+                self.next_id = max(self.next_id, int(value_id) + 1)
+            self.total = int(connection.execute("SELECT COUNT(*) FROM search_entity").fetchone()[0])
+
+    def add(self, doc_id: int, entities: list[tuple[str, Entity]], skipped: Counter[str]) -> tuple[int, int]:
+        """Post the row's entities; ``(entity_mask, pii_count)`` of the row."""
+        mask = 0
+        seen: set[bytes] = set()
+        pii = 0
+        for source, entity in entities:
+            sha = entity_sha256(entity.kind, entity.normalized)
+            if sha in seen:
+                continue
+            seen.add(sha)
+            mask |= KIND_BITS[entity.kind]
+            if entity.kind in SENSITIVE_KINDS:
+                pii += 1
+            if len(seen) > ROW_CAP:
+                skipped["entity-row-capped"] += 1
+                continue
+            if self.total >= TOTAL_CAP:
+                skipped["entity-capped"] += 1
+                continue
+            value_id = self.ids.get(sha)
+            if value_id is None:
+                value_id = self.next_id
+                self.next_id += 1
+                self.ids[sha] = value_id
+                self.values.append((value_id, entity.kind, sha, entity.masked, 1 if entity.verified else 0, entity.net))
+            self.postings.append((value_id, doc_id, source))
+            self.total += 1
+            self.by_kind[entity.kind] += 1
+        return mask, pii
+
+    def flush(self) -> None:
+        if self.values:
+            self.connection.executemany(
+                "INSERT INTO search_entity_value(value_id, kind, value_sha256, masked, verified, net) VALUES (?, ?, ?, ?, ?, ?)", self.values
+            )
+            self.values.clear()
+        if self.postings:
+            self.connection.executemany("INSERT OR IGNORE INTO search_entity(value_id, doc_id, source) VALUES (?, ?, ?)", self.postings)
+            self.postings.clear()
 
 
 class IndexWriter:
     """Assigns doc ids, expands per-time rows and batches inserts."""
 
-    def __init__(self, connection: sqlite3.Connection, ctx: BuildContext, *, next_id: int = 1, fts_inline: bool = False) -> None:
+    def __init__(
+        self,
+        connection: sqlite3.Connection,
+        ctx: BuildContext,
+        *,
+        next_id: int = 1,
+        fts_inline: bool = False,
+        entities: EntityStore | None = None,
+    ) -> None:
         self.connection = connection
         self.ctx = ctx
         self.next_id = next_id
         self.fts_inline = fts_inline
+        self.entities = entities if entities is not None else EntityStore(connection)
         self.docs: list[tuple[object, ...]] = []
         self.fields: list[tuple[object, ...]] = []
         self.hashes: list[tuple[object, ...]] = []
@@ -1042,23 +1256,23 @@ class IndexWriter:
         self.row_count = 0
         self.text_bytes = 0
         self.by_domain: Counter[str] = Counter()
+        self.by_lang: Counter[str] = Counter()
 
     def add(self, doc: Doc) -> None:
         display_path = self.ctx.evidence_path(doc.path)
-        body = "\n".join(part for part in doc.body if part)
-        if len(body) > doc.text_cap:
-            body = body[: doc.text_cap]
-            doc.cuts["text-truncated:body"] += 1
-        text = nfc("\n".join(part for part in (doc.title, display_path if doc.text_path else "", body) if part))
+        masked = mask_doc(doc, display_path)
+        display_path = masked.path
+        body = masked.body
+        text = nfc("\n".join(part for part in (masked.title, display_path if doc.text_path else "", body) if part))
         if len(text) > doc.text_cap + 1024:
-            text = text[: doc.text_cap + 1024]
+            text = cut_text(text, doc.text_cap + 1024)
             doc.cuts["text-truncated:title"] += 1
         truncated = 1 if doc.cuts else 0
         for key, count in doc.cuts.items():
             reason, _sep, name = key.partition(":")
             self.ctx.skipped[reason] += count
             self.ctx.skipped_fields.setdefault(reason, Counter())[name] += count
-        path2 = doc.path2.strip()
+        path2 = masked.path2
         path2_fold = target_path_key(path2) if path2 else ""
         fold_path = path_key(display_path)
         name = fold_path.rsplit("/", 1)[-1]
@@ -1068,7 +1282,11 @@ class IndexWriter:
         content = text_fold if text_fold is not None else text  # what search_text / search_bigram index
         times = sorted(set(doc.times), key=lambda item: (item[0], item[1])) or [(None, "", ())]
         primary = self.next_id
-        fields_json = json.dumps(doc.fields, ensure_ascii=False, default=str)[:FIELDS_MAX_CHARS] if doc.fields else "{}"
+        entity_mask, pii_count = self.entities.add(primary, masked.entities, self.ctx.skipped)
+        language = doc_language(doc, body)
+        if language:
+            self.fields.append((primary, "lang", language, None))
+            self.by_lang[language] += 1
         for position, (millis, label, labels) in enumerate(times):
             doc_id = self.next_id
             self.next_id += 1
@@ -1083,11 +1301,11 @@ class IndexWriter:
                     doc.analysis_id,
                     doc.domain,
                     doc.artifact_type,
-                    nfc(doc.title)[:512],
+                    masked.title,
                     display_path,
                     fold_path,
-                    path2[:2048],
-                    path2_fold[:2048],
+                    path2,
+                    path2_fold[:PATH2_MAX_CHARS],
                     ext[:16],
                     doc.size,
                     millis,
@@ -1103,12 +1321,13 @@ class IndexWriter:
                     hashes.get("sha256", ""),
                     text if position == 0 else None,
                     text_fold if position == 0 else None,
-                    fields_json if position == 0 else "{}",
+                    masked.fields_json if position == 0 else "{}",
                     doc.deleted,
                     doc.sig_mismatch,
                     doc.in_archive,
-                    0,
+                    pii_count,
                     truncated,
+                    entity_mask,
                 )
             )
             self.row_count += 1
@@ -1117,7 +1336,7 @@ class IndexWriter:
         pairs = bigram_tokens(content)
         if pairs:
             self.bigrams.append((primary, pairs))
-        self.fields.extend((primary, name, value, value_int) for name, value, value_int in doc.search_fields)
+        self.fields.extend((primary, name, value, value_int) for name, value, value_int in masked.search_fields)
         self.hashes.extend((alg, value, primary) for alg, value in doc.hashes)
         self.doc_count += 1
         self.text_bytes += len(text.encode("utf-8"))
@@ -1141,6 +1360,16 @@ class IndexWriter:
         if self.bigrams:
             self.connection.executemany("INSERT INTO search_bigram(rowid, g) VALUES (?, ?)", self.bigrams)
             self.bigrams.clear()
+        self.entities.flush()
+
+    def entity_summary(self) -> dict[str, object]:
+        return {
+            "rule": ENTITY_RULE,
+            "postings": self.entities.total,
+            "values": len(self.entities.ids),
+            "by_kind": dict(sorted(self.entities.by_kind.items())),
+            "languages": dict(sorted(self.by_lang.items())),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -1423,6 +1652,7 @@ def build_search_index(
             "truncated_by_domain": truncated_by_domain(connection),
             "truncated_by_collection": truncated_by_collection(connection),
             "tokenizer": tokenizer,
+            "entities": writer.entity_summary(),
         }
         write_meta(
             connection,
@@ -1440,6 +1670,7 @@ def build_search_index(
                 "tokenizer": tokenizer,
                 "bigram": BIGRAM_RULE,
                 "fold": FOLD_RULE,
+                "entities": ENTITY_RULE,
                 "analyses_indexed": indexed,
                 "summary": build_summary,
             },
@@ -1555,7 +1786,7 @@ def _build_incremental(
         meta = read_meta(connection)
         ctx = BuildContext(output_dir=output_dir, roots=_evidence_roots(summary), domain_of=domain_of, timeline={})
         row = connection.execute("SELECT COALESCE(MAX(doc_id), 0) FROM search_doc").fetchone()
-        writer = IndexWriter(connection, ctx, next_id=int(row[0]) + 1, fts_inline=True)
+        writer = IndexWriter(connection, ctx, next_id=int(row[0]) + 1, fts_inline=True, entities=EntityStore(connection, existing=True))
         try:
             indexed = json.loads(meta.get("analyses_indexed") or "[]")
         except ValueError:
@@ -1577,6 +1808,10 @@ def _build_incremental(
             )
             connection.execute("DELETE FROM search_field WHERE doc_id IN (SELECT doc_id FROM search_doc WHERE analysis_id = ?)", (analysis_id,))
             connection.execute("DELETE FROM search_hash WHERE doc_id IN (SELECT doc_id FROM search_doc WHERE analysis_id = ?)", (analysis_id,))
+            removed_postings = connection.execute(
+                "DELETE FROM search_entity WHERE doc_id IN (SELECT doc_id FROM search_doc WHERE analysis_id = ?)", (analysis_id,)
+            ).rowcount
+            writer.entities.total -= max(0, removed_postings)
             connection.execute("DELETE FROM search_doc WHERE analysis_id = ?", (analysis_id,))
             analysis = available.get(analysis_id)
             if analysis is not None:
@@ -1601,6 +1836,11 @@ def _build_incremental(
             "truncated_by_domain": truncated_by_domain(connection),
             "truncated_by_collection": truncated_by_collection(connection),
             "tokenizer": meta.get("tokenizer") or "",
+            "entities": {
+                **(previous.get("entities") if isinstance(previous.get("entities"), dict) else {}),
+                "postings": writer.entities.total,
+                "values": len(writer.entities.ids),
+            },
         }
         build_summary["row_count"] = int(connection.execute("SELECT COUNT(*) FROM search_doc").fetchone()[0])
         write_meta(
@@ -1707,6 +1947,11 @@ def stale_reasons(meta: Mapping[str, object], summary: Mapping[str, object], out
         reasons.append(
             "이전 형식 색인입니다: 영문 외 대소문자(É·Ａ·Σ·ß 등)를 구분 없이 찾지 못하고 파일·문서 적중 시각이 비어 있습니다. 색인을 다시 만드세요"
         )
+    elif meta.get("index_version") == "search-index-v4" and meta.get("flatten_version") == FLATTEN_VERSION:
+        reasons.append(
+            "개체 추출 이전 형식 색인(v4)입니다: 주민등록번호·카드·전화 같은 개인정보 번호가 본문에 가려지지 않았고 "
+            "rrn:·card:·phone:·lang: 같은 개체·언어 필드를 쓸 수 없습니다. 색인을 다시 만드세요"
+        )
     elif meta.get("index_version") != INDEX_VERSION or meta.get("flatten_version") != FLATTEN_VERSION:
         reasons.append("색인 형식이 바뀌었습니다. 다시 만드세요")
     if meta.get("source_summary_sha256") != summary_sha256(summary):
@@ -1724,3 +1969,128 @@ def stale_reasons(meta: Mapping[str, object], summary: Mapping[str, object], out
     if missing:
         reasons.append(f"색인에 없는 분석 결과가 있습니다({len(missing)}개)")
     return reasons
+
+
+# ---------------------------------------------------------------------------
+# reveal: one row re-read from the run outputs (R7 lane B)
+# ---------------------------------------------------------------------------
+
+_LOCATOR_INDEX_RE = re.compile(r"^/(candidates|inventory|artifacts|indicators|rows)/(\d+)$")
+
+
+def _nth(items: Iterable[object], index: int) -> object | None:
+    for position, item in enumerate(items):
+        if position == index:
+            return item
+    return None
+
+
+def load_source_docs(
+    output_dir: Path,
+    summary: Mapping[str, object],
+    *,
+    collection: str,
+    kind: str,
+    locator: str,
+    case_db: Path | None = None,
+    domain_of: Callable[[str, str], str] | None = None,
+) -> tuple[list[Doc], BuildContext] | None:
+    """The index rows of one source record, flattened again exactly as the build did (unmasked,
+    in memory only): ``None`` when the record is not in the run outputs.
+
+    A reveal re-reads the value here -- the index never stored it.
+    """
+    match = _LOCATOR_INDEX_RE.match(base_locator(locator))
+    if match is None:
+        return None
+    scope, index = match.group(1), int(match.group(2))
+    outputs = run_outputs(summary)
+    ctx = BuildContext(output_dir=Path(output_dir), roots=_evidence_roots(summary), domain_of=domain_of or default_domain_of, timeline={})
+    docs: list[Doc] = []
+    if collection == "artifacts" and scope == "artifacts":
+        path = outputs.get(f"artifacts_{kind}")
+        if path is None or not path.is_file():
+            return None
+        large = large_types(read_artifact_output_head(path))
+        for record_index, row, text in iter_kind_output(path):
+            if record_index != index:
+                continue
+            if row is None:
+                return None
+            if str(row.get("artifact_type") or "") in large:
+                ctx.row_text_cap, ctx.row_list_cap = ARTIFACT_TEXT_MAX_CHARS, LIST_MAX_ITEMS
+            else:
+                ctx.row_text_cap, ctx.row_list_cap = SMALL_TYPE_TEXT_MAX_CHARS, SMALL_TYPE_LIST_MAX_ITEMS
+            docs = flatten_artifact_row(ctx, kind, record_index, row, text)
+            break
+    elif collection == "files" and scope in {"candidates", "inventory"}:
+        path = outputs.get("files")
+        row = _nth(iter_array_items(path, scope), index) if path is not None and path.is_file() else None
+        if isinstance(row, dict):
+            docs = [flatten_file(ctx, scope, index, row)]
+    elif collection == "docs" and scope == "candidates":
+        path = outputs.get("docs")
+        row = _nth(iter_array_items(path, "candidates"), index) if path is not None and path.is_file() else None
+        if isinstance(row, dict):
+            _collect_doc_meta(ctx, outputs.get("artifacts_generic-documents"), BuildHooks())
+            source = str(row.get("path") or "")
+            body = _document_body(case_db if case_db is not None else Path(output_dir) / "rapidtriage-case.db", source)
+            if body is None and row.get("text_status") == "ok":
+                body = extract_document_body(source, str(row.get("kind") or ""))
+            text, cut = body if body is not None else (None, False)
+            docs = [flatten_doc(ctx, index, row, text, body_cut=cut)]
+    elif collection == "indicators" and scope == "indicators":
+        path = outputs.get("indicators")
+        row = _nth(iter_array_items(path, "indicators"), index) if path is not None and path.is_file() else None
+        if isinstance(row, dict):
+            docs = [flatten_indicator(ctx, index, row)]
+    elif collection == "analysis" and scope == "rows" and ANALYSIS_ID_RE.fullmatch(kind):
+        rows_path = Path(output_dir) / "analyses" / kind / "rows.jsonl"
+        if rows_path.is_file():
+            state_kind = ""
+            try:
+                state = json.loads((rows_path.parent / "analysis.json").read_text(encoding="utf-8"))
+                state_kind = str(state.get("kind") or "") if isinstance(state, Mapping) else ""
+            except (OSError, ValueError):
+                pass
+            for row_index, row in iter_jsonl_rows(rows_path, limit=index + 1):
+                if row_index == index and row is not None:
+                    docs = [flatten_analysis_row(ctx, kind, state_kind, index, row)]
+    wanted = [doc for doc in docs if doc.locator == locator]
+    return (wanted, ctx) if wanted else None
+
+
+def _document_body(case_db: Path, path: str) -> tuple[str, bool] | None:
+    """One document body from the run case DB (as :func:`load_document_bodies` reads it)."""
+    if not case_db.is_file() or not path:
+        return None
+    try:
+        connection = sqlite3.connect(f"{case_db.resolve().as_uri()}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        for stored, body, cut in connection.execute(
+            "SELECT f.path, substr(d.body, 1, ?), length(d.body) > ? FROM indexed_document d JOIN file_record f ON f.id = d.file_record_id "
+            "WHERE d.source_type = 'document'",
+            (DOC_TEXT_MAX_CHARS + 1, DOC_TEXT_MAX_CHARS),
+        ):
+            if stored and body and os.path.normcase(str(stored)) == os.path.normcase(path):
+                return cut_text(str(body), DOC_TEXT_MAX_CHARS), bool(cut)
+    except sqlite3.Error:
+        return None
+    finally:
+        connection.close()
+    return None
+
+
+def reveal_entity(docs: list[Doc], ctx: BuildContext, value_sha256: bytes) -> tuple[str, Entity] | None:
+    """``(text as written, entity)`` of the entity with this SHA-256 in the rows' pieces."""
+    for doc in docs:
+        display_path = ctx.evidence_path(doc.path)
+        for piece in doc_entity_pieces(doc, display_path):
+            if not piece.text:
+                continue
+            for entity in _scan(piece.text, sensitive_only=piece.sensitive_only):
+                if entity_sha256(entity.kind, entity.normalized) == value_sha256:
+                    return piece.text[entity.start : entity.end], entity
+    return None

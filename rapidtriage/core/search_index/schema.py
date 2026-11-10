@@ -41,6 +41,16 @@ Deviations from the plan text (documented in docs/plans/search-2026-10-13.md §3
   artifacts the first ``_TIME_KEYS`` member of details/record), spelled as the
   record spells it, on the primary row. Console hits show it (v1 hit ``timestamp``);
   ``ts`` stays the per-kind epoch time rows for sorting and time filters.
+* ``search_entity_value`` / ``search_entity`` (index v5, R7 lane B): named entities
+  (주민등록번호·카드·전화·계좌·사업자/법인등록번호·여권·이메일·IP·호스트, :mod:`.patterns`).
+  A value row holds only ``value_sha256`` (32-byte BLOB), the mask, ``verified`` and, for IPs,
+  a fixed-width hex ``net`` key (CIDR ranges); a posting ties a value to a primary row
+  (``source``: title/path/body/meta). The stored row text, title, paths, ``fields_json`` and
+  ``search_field`` values carry the masks instead of the personal numbers.
+  ``search_doc.entity_mask`` is the row's kind bit set (result facets) and ``pii_count`` its
+  number of distinct personal values. The language of document and mail/messenger rows is a
+  ``search_field`` ``lang`` row (ko/ja/zh/en/ru/mixed). ``meta.entities`` names the rule; a v4
+  index stays readable (its entity fields answer 409) and is reported stale.
 """
 
 from __future__ import annotations
@@ -50,10 +60,10 @@ from pathlib import Path
 
 INDEX_FILE_NAME = "rapidtriage-search.db"
 BUILDING_SUFFIX = ".building"
-INDEX_VERSION = "search-index-v4"
+INDEX_VERSION = "search-index-v5"
 # Older formats the engine still reads (a v2 index has no ``search_bigram``: its
 # 2-character terms scan and the status asks for a rebuild).
-READABLE_INDEX_VERSIONS = frozenset({"search-index-v2", "search-index-v3", INDEX_VERSION})
+READABLE_INDEX_VERSIONS = frozenset({"search-index-v2", "search-index-v3", "search-index-v4", INDEX_VERSION})
 BIGRAM_RULE = "nonascii-pairs-v1"
 BIGRAM_SQL = "CREATE VIRTUAL TABLE IF NOT EXISTS search_bigram USING fts5(g, content='', tokenize='ascii', detail=none)"
 FOLD_RULE = "nfc-casefold-v1"
@@ -110,7 +120,8 @@ CREATE TABLE IF NOT EXISTS search_doc (
     sig_mismatch INTEGER NOT NULL DEFAULT 0,
     in_archive INTEGER NOT NULL DEFAULT 0,
     pii_count INTEGER NOT NULL DEFAULT 0,
-    truncated INTEGER NOT NULL DEFAULT 0
+    truncated INTEGER NOT NULL DEFAULT 0,
+    entity_mask INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS search_field (
     doc_id INTEGER NOT NULL,
@@ -141,6 +152,21 @@ CREATE TABLE IF NOT EXISTS search_ident (
     masked TEXT NOT NULL DEFAULT '',
     hmac TEXT NOT NULL DEFAULT ''
 );
+-- v5 (R7 lane B): named entities -- a value's SHA-256 and mask only, never the value.
+CREATE TABLE IF NOT EXISTS search_entity_value (
+    value_id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
+    value_sha256 BLOB NOT NULL,
+    masked TEXT NOT NULL,
+    verified INTEGER NOT NULL DEFAULT 0,
+    net TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS search_entity (
+    value_id INTEGER NOT NULL,
+    doc_id INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (value_id, doc_id)
+) WITHOUT ROWID;
 """
 
 SCHEMA_INDEXES = """
@@ -159,6 +185,10 @@ CREATE INDEX IF NOT EXISTS search_field_name_int ON search_field(name, value_int
 CREATE INDEX IF NOT EXISTS search_field_doc ON search_field(doc_id);
 CREATE INDEX IF NOT EXISTS search_hash_value ON search_hash(algorithm, value);
 CREATE INDEX IF NOT EXISTS search_hash_doc ON search_hash(doc_id);
+CREATE UNIQUE INDEX IF NOT EXISTS search_entity_value_sha ON search_entity_value(value_sha256);
+CREATE INDEX IF NOT EXISTS search_entity_value_kind ON search_entity_value(kind, masked);
+CREATE INDEX IF NOT EXISTS search_entity_value_net ON search_entity_value(kind, net) WHERE net != '';
+CREATE INDEX IF NOT EXISTS search_entity_doc ON search_entity(doc_id);
 """
 
 

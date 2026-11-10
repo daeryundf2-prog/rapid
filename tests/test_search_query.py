@@ -121,8 +121,8 @@ class QueryGrammarTests(unittest.TestCase):
         self.assert_error("re:/(a)\\1/", 4, "정규식이 너무 복잡합니다")
         self.assert_error("re:/[a/", 4, "정규식이 올바르지 않습니다")
         self.assert_error("-a -b", 0, "제외 조건만으로는")
-        self.assert_error("ip:10.0.0.0/8", 1, "S2")
-        self.assert_error("list:patients", 1, "S2")
+        self.assert_error("url:example.com", 1, "S2")  # ip:/list: are implemented since R7 lane B
+        self.assert_error("regkey:Run", 1, "S2")
         self.assert_error("geo:near(37.5, 126.9, 3km)", 1, "S3")
         self.assert_error("NOT gap:>=6h x", 5, "NOT·OR 안에")
 

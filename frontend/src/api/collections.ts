@@ -14,8 +14,10 @@ import {
 import { ApiError, api } from "./client";
 import { type ArtifactsQuery, artifactsQueryString } from "./runs";
 import {
+  FIELD_SEARCH_NEEDS_INDEX,
   fetchIndexSearchPage,
   forgetSearchIndex,
+  hasFieldKeyword,
   indexCoversSearch,
   koreanSearchError,
   type SearchIndexStatus,
@@ -1060,6 +1062,8 @@ export async function fetchSearchRows(
     return { rows: [], total: 0, offset, backend: "none", truncated: false, elapsedMs: 0 };
   }
   const pageLimit = Math.min(Math.max(1, limit || SEARCH_PAGE_SIZE), 1000);
+  // R7 lane B: field keywords (rrn:*, lang:ko, -hashset:known-good …) exist only in the v2 index.
+  const fieldSearch = hasFieldKeyword(spec.keywords);
   // R7 P2: the run's v2 search index answers the default console search when it is ready.
   let indexStatus: SearchIndexStatus | undefined;
   if (indexCoversSearch(spec, query.extension)) {
@@ -1074,6 +1078,8 @@ export async function fetchSearchRows(
         // such limits; the index itself is fine. Anything else (a cancelled request) is the
         // search's error.
         if (!(error instanceof ApiError && [400, 404, 409, 422, 503].includes(error.status))) throw error;
+        // A field search the index rejected (its Korean reason) has no v1 meaning.
+        if (fieldSearch && error.status !== 404 && error.status !== 503) throw koreanSearchError(error);
         if (error.status === 400 || error.status === 422) {
           indexStatus = undefined;
         } else {
@@ -1083,6 +1089,7 @@ export async function fetchSearchRows(
       }
     }
   }
+  if (fieldSearch) throw new ApiError(FIELD_SEARCH_NEEDS_INDEX, 409, null);
   const params = new URLSearchParams();
   for (const keyword of spec.keywords) params.append("keyword", keyword);
   params.set("limit", String(pageLimit));

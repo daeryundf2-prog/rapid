@@ -73,6 +73,22 @@ export function isUnindexedKeyword(keyword: string): boolean {
   return chars.length === 2 && chars.some((char) => (char.codePointAt(0) ?? 0) < 0x80);
 }
 
+/**
+ * A top-bar keyword that is a search-index field (R7 lane B, hits.py `CONSOLE_FIELD_RE`):
+ * `rrn:*`, `card:verified`, `email:@naver.com`, `lang:ko`, `-hashset:known-good`, `list:ioc-50`.
+ * Only the v2 index answers them (v1 would look for the literal text).
+ */
+export const CONSOLE_FIELD_KEYWORD =
+  /^-?(?:rrn|corpno|card|bizno|phone|account|passport|email|ip|host|lang|hashset|list):[^\s()"]+$/i;
+
+export function hasFieldKeyword(keywords: readonly string[]): boolean {
+  return keywords.some((keyword) => CONSOLE_FIELD_KEYWORD.test(keyword));
+}
+
+/** Shown when a field keyword cannot run: the run has no ready search index (or other options are on). */
+export const FIELD_SEARCH_NEEDS_INDEX =
+  "rrn:·card:·lang:·hashset: 같은 필드 검색은 검색 색인으로만 찾습니다. 처리 단계에서 검색 색인을 만들고, 검색 옵션(정규식·유사 일치·OCR·검색 범위·확장자·알려진 정상 숨기기)을 기본값으로 두세요.";
+
 /** Options the v2 console query answers like v1 (anything else: v1 `GET /search`). */
 export function indexCoversSearch(spec: IndexSearchSpec, extensions: readonly string[] | undefined): boolean {
   return (
