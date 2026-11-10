@@ -666,6 +666,9 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
     if (liveState?.live) return liveState;
     const zero = inventoryReason(kindNode, target.types) ?? zeroReason(kindNode);
     if (target.rowFacet) {
+      // An empty kind has no rows to facet: its views are 0 (hidden), not "—" — an unknown view
+      // kept the AI 사용 domain listed on runs without AI rows (R7 gate).
+      if (kindNode.count === 0) return known(0, true, zero);
       const facets = input.rowFacets?.[target.kind];
       if (!facets) return { count: UNKNOWN_COUNT };
       return known(facets[target.rowFacet] ?? 0, true, zero);
