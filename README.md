@@ -383,9 +383,15 @@ Contract maturity:
 Example output commands:
 
 ```bash
-rapidtriage run . --mode fraud --output-dir ./rapidtriage-run-fraud
+rapidtriage run . --mode fraud --output-dir ../rapidtriage-run-fraud
 rapidtriage artifacts . --kind browser
 ```
+
+`run` needs `--output-dir`, and it must be outside the evidence: never the
+evidence path itself, a folder inside it, or a folder that contains it
+(`OUTPUT_INSIDE_EVIDENCE` / `EVIDENCE_INSIDE_OUTPUT`). The web console and API
+apply the same rule; there is no automatic output folder inside an evidence
+folder.
 
 `compare` compares two individual evidence/export files and validates against
 `rapidtriage/schemas/compare.schema.json`.

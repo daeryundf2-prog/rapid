@@ -52,6 +52,8 @@ export interface OutputFieldSpec {
   label: string;
   hint: string;
   required: boolean;
+  /** Why the run cannot start while a required folder is empty (default: the case-folder text). */
+  requiredReason?: string;
 }
 
 /** 출력 폴더 of a case run (런 추가): the case folder's run subfolder, else an explicit choice. */
@@ -71,16 +73,60 @@ export function caseRunOutputSpec(caseRoot: string | null | undefined): OutputFi
   };
 }
 
-/** 출력 폴더 of the quick run (no case): a file evidence (E01 …) needs one. */
+/**
+ * 출력 폴더 of the quick run (no case): always required (R7). There is no automatic folder: the old
+ * default for a folder evidence was inside the evidence, and evidence never receives a write.
+ */
 export const QUICK_RUN_OUTPUT_SPEC: OutputFieldSpec = {
   label: "출력 폴더",
-  hint: "파일 증거(E01 등)는 원본 옆에 쓰지 않으므로 출력 폴더를 반드시 지정하세요. 폴더 증거는 비우면 그 폴더 안에 만듭니다.",
-  required: false,
+  hint: "증거 밖의 출력 폴더를 반드시 지정하세요. 증거 폴더 안·증거와 같은 경로·증거를 담은 폴더에는 쓰지 않습니다.",
+  required: true,
+  requiredReason: "출력 폴더를 지정하세요 (증거 밖의 폴더)",
 };
 
 /** The required-output reason of a form (undefined when the folder is given or optional). */
 export function outputRequiredReason(spec: OutputFieldSpec, outputDir: string): string | undefined {
-  return spec.required && !outputDir.trim() ? "출력 폴더를 지정하세요 (케이스 폴더가 없습니다)" : undefined;
+  if (!spec.required || outputDir.trim()) return undefined;
+  return spec.requiredReason ?? "출력 폴더를 지정하세요 (케이스 폴더가 없습니다)";
+}
+
+/** Same message as the server's ``OUTPUT_INSIDE_EVIDENCE`` (core/output_guard.py). */
+export const OUTPUT_INSIDE_EVIDENCE_REASON =
+  "출력 위치가 증거 경로 안(또는 증거와 같은 경로)입니다. 증거에는 아무것도 쓰지 않습니다. 증거 밖의 출력 폴더를 지정하세요";
+/** Same message as the server's ``EVIDENCE_INSIDE_OUTPUT``. */
+export const EVIDENCE_INSIDE_OUTPUT_REASON =
+  "증거가 출력 폴더 안에 있습니다. 출력 폴더는 덮어쓰기·정리 대상이라 증거를 담을 수 없습니다. 증거 밖의 다른 출력 폴더를 지정하세요";
+
+/** Lexical path form for the overlap check: separators unified, case folded, no trailing separator. */
+function overlapKey(path: string): string {
+  const text = path.trim().replace(/\//g, "\\").toLowerCase();
+  return /^[a-z]:\\$/.test(text) ? text : text.replace(/\\+$/, "");
+}
+
+function within(child: string, parent: string): boolean {
+  if (child === parent) return true;
+  return child.startsWith(parent.endsWith("\\") ? parent : `${parent}\\`);
+}
+
+/**
+ * Inline (pre-server) reason an output folder overlaps an evidence path (R7). The server check
+ * (real paths, junctions, case) stays authoritative; this only catches what the text shows.
+ * `allowEvidenceInside` = a case folder, which may hold evidence but never sit inside one.
+ */
+export function outputOverlapReason(
+  outputDir: string,
+  evidencePaths: readonly string[],
+  { allowEvidenceInside = false }: { allowEvidenceInside?: boolean } = {},
+): string | undefined {
+  const output = overlapKey(outputDir);
+  if (!output) return undefined;
+  for (const raw of evidencePaths) {
+    const evidence = overlapKey(raw);
+    if (!evidence) continue;
+    if (within(output, evidence)) return OUTPUT_INSIDE_EVIDENCE_REASON;
+    if (!allowEvidenceInside && within(evidence, output)) return EVIDENCE_INSIDE_OUTPUT_REASON;
+  }
+  return undefined;
 }
 
 export const RUN_MODES: Array<{ id: string; label: string }> = [

@@ -291,6 +291,9 @@ class CaseOutputCheckRequest(BaseModel):
 
     path: str = Field(..., min_length=1, max_length=4096)
     kind: Literal["output_dir", "case_root"] = "output_dir"
+    #: Evidence paths the folder must stay out of (R7 output guard): an output folder may be
+    #: neither inside nor around one; a case folder may hold evidence but not sit inside one.
+    evidence_paths: list[str] = Field(default_factory=list, max_length=256)
 
 
 class CaseRunCreateRequest(RunCreateRequest):

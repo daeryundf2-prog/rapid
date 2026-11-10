@@ -114,6 +114,7 @@ from ..input_root import (
     derive_child_input_root,
     resolve_input_root,
 )
+from ..output_guard import check_output_outside_evidence
 from ..reporting import (
     build_run_report_context,
     render_run_markdown_report,
@@ -513,6 +514,13 @@ def run_triage_mode(
     if kinds_only:
         profile = replace(profile, artifacts_kinds=tuple(kinds_only))
     output_dir = output_dir.expanduser().resolve()
+    # Forensic integrity (R7): the run never writes into (or over) the evidence. Checked before
+    # the output folder is created, so a refused run leaves no file behind.
+    if isinstance(root, InputRoot):
+        evidence_paths: list[Path | str] = [root.root_path, root.source_path]
+    else:
+        evidence_paths = [root]
+    check_output_outside_evidence(output_dir, evidence_paths)
     output_dir.mkdir(parents=True, exist_ok=True)
     # A resumed run reuses stage outputs (manifest/docs/files/timeline/...)
     # only when the previous run's plan finished ``complete``: after a

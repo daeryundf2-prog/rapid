@@ -23,6 +23,7 @@ from ..artifacts.windows.registry import (
     registry_value_data_preview,
 )
 from .docs import write_result
+from .output_guard import check_output_outside_evidence
 from .submission import compute_hashes
 
 KAKAOTALK_DECRYPT_VERSION = "kakaotalk-windows-decrypt-v1"
@@ -929,7 +930,10 @@ def run_kakaotalk_decrypt(
         if decrypted_dir is not None
         else output.parent / f"{output.stem}-decrypted"
     )
+    # R7: the JSON and the decrypted copies (default: beside the JSON) never land inside the evidence.
+    check_output_outside_evidence(output, [root])
     if write_decrypted:
+        check_output_outside_evidence(decrypt_output_dir, [root])
         decrypt_output_dir.mkdir(parents=True, exist_ok=True)
 
     entries: list[dict[str, object]] = []
@@ -1057,6 +1061,10 @@ def run_kakaotalk_memory_carve(
         if carve_dir is not None
         else output.parent / f"{output.stem}-carves"
     )
+    # R7: the JSON and the carved fragments (default: beside the JSON) never land inside the evidence.
+    check_output_outside_evidence(output, [root])
+    if write_carves:
+        check_output_outside_evidence(resolved_carve_dir, [root])
     if root.is_file():
         if root.suffix.lower() != ".zip":
             raise KakaoTalkDecryptError("kakaotalk-memory-carve expects an extracted KakaoTalk folder or ZIP archive")

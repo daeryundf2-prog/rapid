@@ -116,6 +116,16 @@ describe("RunDialog", () => {
 
     fireEvent.change(screen.getByLabelText(/증거 경로/), { target: { value: "D:/case/img.E01" } });
     fireEvent.change(screen.getByLabelText("모드"), { target: { value: "hacking" } });
+    // R7: no automatic output folder; one inside the evidence is refused inline.
+    expect(submit.getAttribute("aria-disabled")).toBe("true");
+    expect(submit.getAttribute("title")).toBe("출력 폴더를 지정하세요 (증거 밖의 폴더)");
+    const output = screen.getByLabelText(/^출력 폴더/);
+    fireEvent.change(output, { target: { value: "d:\\CASE\\img.e01\\out" } });
+    expect(submit.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByTestId("output-dir-error").textContent).toContain("증거 경로 안");
+    expect(output.getAttribute("aria-invalid")).toBe("true");
+    fireEvent.change(output, { target: { value: "D:/out/run1" } });
+    expect(screen.queryByTestId("output-dir-error")).toBeNull();
     expect(submit.getAttribute("aria-disabled")).toBeNull();
     fireEvent.click(submit);
     await waitFor(() => expect(onClose).toHaveBeenCalled());
@@ -125,7 +135,7 @@ describe("RunDialog", () => {
       root: "D:/case/img.E01",
       mode: "hacking",
       input_kind: null,
-      output_dir: null,
+      output_dir: "D:/out/run1",
       dry_run: false,
       read_only: true,
       overwrite: false,

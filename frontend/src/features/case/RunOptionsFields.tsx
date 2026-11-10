@@ -16,6 +16,7 @@ export function RunOptionsFields({
   idPrefix = "run",
   extra,
   output,
+  outputError,
 }: {
   form: RunForm;
   errors: RunFormErrors;
@@ -26,6 +27,8 @@ export function RunOptionsFields({
   extra?: ReactNode;
   /** How 출력 폴더 reads; a required one is shown outside 고급 옵션 (E01 QA D4). */
   output?: OutputFieldSpec;
+  /** Inline problem of the 출력 폴더 value (R7: never inside / around the evidence). */
+  outputError?: string;
 }) {
   const id = (name: string) => `${idPrefix}-${name}`;
   const outputField = (
@@ -40,9 +43,19 @@ export function RunOptionsFields({
         value={form.outputDir}
         required={output?.required}
         aria-required={output?.required ? "true" : undefined}
-        aria-describedby={output ? id("output-dir-hint") : undefined}
+        aria-describedby={
+          [output ? id("output-dir-hint") : "", outputError ? id("output-dir-error") : ""]
+            .filter(Boolean)
+            .join(" ") || undefined
+        }
+        aria-invalid={outputError ? "true" : undefined}
         onChange={(e) => onChange("outputDir", e.target.value)}
       />
+      {outputError ? (
+        <p id={id("output-dir-error")} className="case-error" role="alert" data-testid="output-dir-error">
+          {outputError}
+        </p>
+      ) : null}
       {output ? (
         <p id={id("output-dir-hint")} className="case-reason" data-testid="output-dir-hint">
           {output.hint}

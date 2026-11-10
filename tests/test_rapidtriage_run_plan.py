@@ -520,7 +520,8 @@ class JobStoreTests(unittest.TestCase):
     def test_canceled_spelling_and_restart_interrupted(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             state = Path(tmp) / "runs.json"
-            request = RunRequest(root=tmp, mode="hacking", output_dir=str(Path(tmp) / "out"))
+            # R7: evidence and output are siblings (an output inside the evidence is refused).
+            request = RunRequest(root=str(Path(tmp) / "evidence"), mode="hacking", output_dir=str(Path(tmp) / "out"))
             records = [
                 {**RunJob(run_id="old1", request=request, status="canceled").to_record(), "status": "canceled"},
                 {**RunJob(run_id="run1", request=request, status="running").to_record()},

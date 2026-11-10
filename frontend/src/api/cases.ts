@@ -239,6 +239,8 @@ export async function checkEvidence(path: string, sourceType: EvidenceType): Pro
 export interface OutputCheck {
   ok: boolean;
   problem: string;
+  /** Stable reason code (R7: `OUTPUT_INSIDE_EVIDENCE` / `EVIDENCE_INSIDE_OUTPUT`), "" otherwise. */
+  code?: string;
 }
 
 /**
@@ -249,13 +251,16 @@ export interface OutputCheck {
 export async function checkOutputFolder(
   path: string,
   kind: "output_dir" | "case_root",
+  evidencePaths: readonly string[] = [],
 ): Promise<OutputCheck> {
+  const evidence = evidencePaths.map((item) => item.trim()).filter(Boolean);
   try {
     const raw = await api<Partial<OutputCheck>>("/api/cases/output-check", {
       method: "POST",
-      body: JSON.stringify({ path, kind }),
+      // R7: the server also refuses a folder inside / around these evidence paths.
+      body: JSON.stringify(evidence.length ? { path, kind, evidence_paths: evidence } : { path, kind }),
     });
-    return { ok: raw?.ok !== false, problem: raw?.problem ?? "" };
+    return { ok: raw?.ok !== false, problem: raw?.problem ?? "", code: raw?.code ?? "" };
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) return { ok: true, problem: "" };
     throw error;

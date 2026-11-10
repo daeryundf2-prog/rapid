@@ -35,6 +35,7 @@ import {
   DEFAULT_RUN_FORM,
   firstRunFormError,
   type OutputFieldSpec,
+  outputOverlapReason,
   outputRequiredReason,
   type RunForm,
   validateRunForm,
@@ -213,6 +214,18 @@ export function CaseWizard({
   const registerOnly = sortedDrafts.filter((draft) => freshChecks[draft.key]?.runnable === false);
   const outputSpec = wizardOutputSpec(info.caseRoot, toRun.length);
   const plan = wizardPlan(info, runForm);
+  // R7: no write inside the evidence. The case folder may hold evidence but never sit inside one;
+  // an explicit run output folder may do neither. The server re-checks both before the case exists.
+  const evidencePaths = drafts.map((draft) => draft.path);
+  const caseRootProblem = outputOverlapReason(plan.caseInfo.caseRoot, evidencePaths, {
+    allowEvidenceInside: true,
+  });
+  const runOutputProblem = toRun.length
+    ? outputOverlapReason(plan.runForm.outputDir, evidencePaths)
+    : undefined;
+  // Without a 케이스 폴더 the 출력 폴더 field becomes it: its problem is the case-folder one.
+  const outputFieldProblem = info.caseRoot.trim() ? runOutputProblem : caseRootProblem;
+  const caseRootFieldProblem = info.caseRoot.trim() ? caseRootProblem : undefined;
   // Several runs into one explicit folder only when it is a per-run folder (a case folder is shared).
   const explicitOutput = info.caseRoot.trim() ? runForm.outputDir : "";
   const submitReason = busy
@@ -225,6 +238,8 @@ export function CaseWizard({
         checkProblem ??
         runReason ??
         outputRequiredReason(outputSpec, runForm.outputDir) ??
+        outputFieldProblem ??
+        (caseRootFieldProblem ? `케이스 폴더: ${caseRootFieldProblem}` : undefined) ??
         outputDirReason(explicitOutput, toRun.length));
   const caseLocked = Boolean(progress.caseId);
   const previewBody = caseRunBody(plan.runForm, "");
@@ -260,9 +275,17 @@ export function CaseWizard({
       // E01 QA D5: the output folder is checked by the server's own rules BEFORE the case exists,
       // so a refused path never leaves an orphan case behind.
       const outputPath = toRun.length ? runForm.outputDir.trim() : "";
+      const caseRootPath = plan.caseInfo.caseRoot.trim();
+      const evidence = drafts.map((draft) => draft.path);
       if (outputPath) {
-        const check = await checkOutputFolder(outputPath, "output_dir");
+        // Without a 케이스 폴더 this folder becomes it (a case folder may hold the evidence).
+        const kind = info.caseRoot.trim() ? "output_dir" : "case_root";
+        const check = await checkOutputFolder(outputPath, kind, evidence);
         if (!check.ok) throw new Error(check.problem || "출력 폴더를 쓸 수 없습니다");
+      }
+      if (caseRootPath && caseRootPath !== outputPath) {
+        const check = await checkOutputFolder(caseRootPath, "case_root", evidence);
+        if (!check.ok) throw new Error(`케이스 폴더: ${check.problem || "쓸 수 없습니다"}`);
       }
       stage = "케이스 만들기";
       if (!state.caseId) {
@@ -630,7 +653,13 @@ export function CaseWizard({
               onAdvancedChange={setAdvanced}
               idPrefix={`${baseId}-run`}
               output={outputSpec}
+              outputError={outputFieldProblem}
             />
+            {caseRootFieldProblem ? (
+              <p className="case-error" role="alert" data-testid="wizard-case-root-problem">
+                케이스 폴더: {caseRootFieldProblem}
+              </p>
+            ) : null}
             <RunPlanGroupsField
               form={runForm}
               onChange={(skipGroups) => setRun("skipGroups", skipGroups)}

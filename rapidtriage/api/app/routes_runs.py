@@ -39,6 +39,7 @@ from ...core.jobs import (
     read_output_json,
     run_output_dir,
 )
+from ...core.output_guard import OUTPUT_DIR_REQUIRED, OutputInsideEvidenceError
 from ...core.run.plan import PlanTargetError, plan_counts_brief, validate_skip_targets
 from ...core.search_budget import resolve_scan_budget_seconds
 from ...core.visible_capabilities import build_visible_capability_response
@@ -485,6 +486,15 @@ def run_request_from_body(request: RunCreateRequest, *, root: str | None = None,
 FILE_EVIDENCE_NEEDS_OUTPUT = (
     "파일 증거(E01 등)는 원본 옆에 런 출력을 만들지 않습니다. 출력 폴더를 지정하세요"
 )
+#: ``POST /api/runs`` for a folder evidence without an output folder (R7: never inside the evidence).
+FOLDER_EVIDENCE_NEEDS_OUTPUT = (
+    "폴더 증거 안에는 런 출력을 만들지 않습니다. 증거 폴더 밖의 출력 폴더를 지정하세요"
+)
+
+
+def output_guard_http_error(exc: OutputInsideEvidenceError) -> HTTPException:
+    """422 for an output folder that overlaps the evidence (``detail.code`` is stable)."""
+    return HTTPException(status_code=422, detail=exc.to_detail())
 
 
 def build_runs_router(
@@ -495,15 +505,20 @@ def build_runs_router(
     @router.post("/api/runs", status_code=202)
     def create_run(request: RunCreateRequest) -> dict[str, Any]:
         validate_run_evidence_source(request.root)
-        if not (request.output_dir or "").strip() and Path(request.root).expanduser().is_file():
+        run_request = run_request_from_body(request)  # body errors (400) first
+        if not (request.output_dir or "").strip():
             # E01 QA D4: the automatic output folder of a file evidence (E01 …) is next to the
-            # evidence; a forensic run never writes beside read-only evidence by default.
-            raise HTTPException(status_code=422, detail=FILE_EVIDENCE_NEEDS_OUTPUT)
-        run_request = run_request_from_body(request)
+            # evidence; R7: the one of a folder evidence was inside it. A forensic run never
+            # picks an output folder on its own: the examiner names one outside the evidence.
+            is_file = Path(request.root).expanduser().is_file()
+            message = FILE_EVIDENCE_NEEDS_OUTPUT if is_file else FOLDER_EVIDENCE_NEEDS_OUTPUT
+            raise HTTPException(status_code=422, detail={"code": OUTPUT_DIR_REQUIRED, "message": message})
         try:
             job = store.run_sync(run_request) if request.wait else store.submit(run_request)
         except RunOutputDirBusy as exc:
             raise HTTPException(status_code=409, detail=str(exc))
+        except OutputInsideEvidenceError as exc:
+            raise output_guard_http_error(exc) from exc
         return job.to_dict(include_summary=request.wait)
 
 
@@ -581,6 +596,8 @@ def build_runs_router(
             payload = store.retry(run_id, resume=resume).to_dict(include_summary=True)
         except KeyError:
             raise HTTPException(status_code=404, detail="런을 찾을 수 없습니다")
+        except OutputInsideEvidenceError as exc:
+            raise output_guard_http_error(exc) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
         payload["retry_mode"] = "resume" if resume else "fresh"

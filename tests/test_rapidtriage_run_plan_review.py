@@ -22,6 +22,10 @@ from rapidtriage.core.jobs import (
     RunOutputDirBusy,
     RunRequest,
 )
+from rapidtriage.core.output_guard import (
+    OUTPUT_INSIDE_EVIDENCE,
+    OutputInsideEvidenceError,
+)
 from rapidtriage.core.run import run_triage_mode
 from rapidtriage.core.run.incremental_indexing import load_reusable_json
 from rapidtriage.core.run.plan import (
@@ -143,10 +147,13 @@ class OutputDirGuardTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.base = Path(self._tmp.name)
+        # R7: the evidence and the output folders are siblings (never one inside the other).
+        self.evidence = self.base / "evidence"
+        self.evidence.mkdir()
         self.out = self.base / "out"
         self.store = BlockingExecuteStore()
         self.addCleanup(self.store.release.set)
-        request = RunRequest(root=str(self.base), mode="hacking", output_dir=str(self.out))
+        request = RunRequest(root=str(self.evidence), mode="hacking", output_dir=str(self.out))
         self.store._jobs["old"] = RunJob(run_id="old", request=request, status="interrupted")
 
     def test_second_resume_and_same_folder_submit_are_rejected(self) -> None:
@@ -159,13 +166,13 @@ class OutputDirGuardTests(unittest.TestCase):
         self.assertIn(first.run_id, str(caught.exception))
         self.assertIn("같은 출력 폴더", str(caught.exception))
         with self.assertRaises(RunOutputDirBusy):
-            self.store.submit(RunRequest(root=str(self.base), mode="hacking", output_dir=str(self.out) + os.sep))
+            self.store.submit(RunRequest(root=str(self.evidence), mode="hacking", output_dir=str(self.out) + os.sep))
         # Another folder is fine.
-        other = self.store.submit(RunRequest(root=str(self.base), mode="hacking", output_dir=str(self.base / "other")))
+        other = self.store.submit(RunRequest(root=str(self.evidence), mode="hacking", output_dir=str(self.base / "other")))
         self.assertEqual(other.status, "queued")
 
     def test_fresh_retry_of_a_resumed_run_does_not_resume_and_writes_a_new_folder(self) -> None:
-        request = RunRequest(root=str(self.base), mode="hacking", output_dir=str(self.out), resume=True)
+        request = RunRequest(root=str(self.evidence), mode="hacking", output_dir=str(self.out), resume=True)
         self.store._jobs["resumed"] = RunJob(run_id="resumed", request=request, status="failed")
         retry = self.store.retry("resumed", resume=False)
         self.assertFalse(retry.request.resume)
@@ -176,11 +183,14 @@ class OutputDirGuardTests(unittest.TestCase):
         resumed = self.store.get("resumed")
         self.assertEqual(resumed.retried_by, retry.run_id)
         self.assertIsNone(resumed.superseded_by)
-        # A run without an explicit folder keeps the per-run default folder.
-        self.store._jobs["plain"] = RunJob(run_id="plain", request=RunRequest(root=str(self.base), mode="hacking"), status="failed")
-        plain_retry = self.store.retry("plain")
-        self.assertIsNone(plain_retry.request.output_dir)
-        self.assertNotEqual(plain_retry.output_dir(), self.store.get("plain").output_dir())
+        # A run recorded without an explicit folder had its default folder inside the evidence
+        # folder: R7 refuses to retry it there (nothing recorded, nothing written).
+        self.store._jobs["plain"] = RunJob(run_id="plain", request=RunRequest(root=str(self.evidence), mode="hacking"), status="failed")
+        with self.assertRaises(OutputInsideEvidenceError) as caught:
+            self.store.retry("plain")
+        self.assertEqual(caught.exception.code, OUTPUT_INSIDE_EVIDENCE)
+        self.assertIsNone(self.store.get("plain").retried_by)
+        self.assertEqual(list(self.evidence.iterdir()), [])
 
     @unittest.skipUnless(HAS_FASTAPI, "fastapi is required")
     def test_api_conflicts_and_superseded_plan(self) -> None:
@@ -203,7 +213,7 @@ class OutputDirGuardTests(unittest.TestCase):
         again = client.post("/api/runs/old/retry", json={"resume": True})
         self.assertEqual(again.status_code, 409)
         self.assertIn("같은 출력 폴더", again.json()["detail"])
-        create = client.post("/api/runs", json={"root": str(self.base), "mode": "hacking", "output_dir": str(self.out)})
+        create = client.post("/api/runs", json={"root": str(self.evidence), "mode": "hacking", "output_dir": str(self.out)})
         self.assertEqual(create.status_code, 409)
         old_plan = client.get("/api/runs/old/plan").json()
         self.assertEqual(old_plan["superseded_by"], new_id)
