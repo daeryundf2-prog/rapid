@@ -14,7 +14,7 @@ function gridRow(fields: Record<string, unknown>, locator = "/artifacts/7"): Gri
     artifactType: "mft-file",
     provider: null,
     sha256: null,
-    reviewStatus: "reviewed",
+    reviewStatus: "relevant",
     tags: [],
     fields,
   };
@@ -50,7 +50,7 @@ describe("full artifact row for the viewer (compact grid rows)", () => {
     expect(result.current).toBe(row); // compact row until the full one arrives
     await waitFor(() => expect(result.current?.fields.details).toEqual({ size: 1, raw: { header: "FILE0" } }));
     expect(result.current?.fields.detailsOmitted).toBeUndefined();
-    expect(result.current?.reviewStatus).toBe("reviewed");
+    expect(result.current?.reviewStatus).toBe("relevant");
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toContain("kind=windows-filesystem&offset=7&limit=1");
     expect(calls[0]?.url).not.toContain("compact");
