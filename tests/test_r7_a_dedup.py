@@ -140,6 +140,28 @@ class DedupApiTests(unittest.TestCase):
         self.assertEqual(modes["custodian"]["duplicates"], 6)
         self.assertFalse(body["custodians_assigned"])
 
+    def test_summary_reads_only_the_stored_dedup_file_when_current(self) -> None:
+        # R7 gate: the cold summary parsed the family edges and irregular sets too (22-27 s reported
+        # on a 667k-document run). With current stored files it reads rapidtriage-dedup.json alone.
+        first = self.get("dedup/summary")  # builds and stores the three files
+        FAMILIES_SERVICE.clear()
+        with mock.patch("rapidtriage.api.app.families.family_index_from_records") as families, mock.patch(
+            "rapidtriage.api.app.families.irregular_index_from_document"
+        ) as irregular, mock.patch("rapidtriage.api.app.families.derive") as rebuild:
+            second = self.get("dedup/summary")
+        families.assert_not_called()
+        irregular.assert_not_called()
+        rebuild.assert_not_called()
+        self.assertEqual(second["source"], "file")
+        self.assertEqual(second["modes"], first["modes"])
+        # A stale dedup file (another stamp) falls back to the full derivation.
+        dedup_path = self.run_dir / "rapidtriage-dedup.json"
+        dedup_path.write_text(dedup_path.read_text(encoding="utf-8").replace('"stamp":', '"stamp_old":', 1), encoding="utf-8")
+        FAMILIES_SERVICE.clear()
+        third = self.get("dedup/summary")
+        self.assertEqual(third["modes"], first["modes"])
+        self.assertIn(third["source"], {"built", "memory"})
+
     def test_q_a3_duplicates_of_the_mail_listing(self) -> None:
         duplicates = self.get("artifacts?limit=100&kind=email&dup=duplicate")["artifacts"]["email"]
         self.assertEqual([row["record_index"] for row in duplicates["artifacts"]], [2, 5, 7, 8])

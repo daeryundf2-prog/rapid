@@ -84,7 +84,7 @@ def _tree(derived: RunDerived, root: str, budget: list[int]) -> dict[str, object
 def build_families_router(store: RunJobStore) -> APIRouter:
     router = APIRouter()
 
-    def _derived(run_id: str) -> RunDerived:
+    def _run_outputs(run_id: str) -> tuple[dict[str, object], Path | None]:
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail=NOT_FINISHED)
@@ -95,6 +95,10 @@ def build_families_router(store: RunJobStore) -> APIRouter:
             output_dir: Path | None = run_output_dir(job.summary)
         except RuntimeError:
             output_dir = None
+        return outputs, output_dir
+
+    def _derived(run_id: str) -> RunDerived:
+        outputs, output_dir = _run_outputs(run_id)
         try:
             return FAMILIES_SERVICE.get(run_id, outputs, output_dir)
         except (OSError, ValueError) as exc:
@@ -216,12 +220,17 @@ def build_families_router(store: RunJobStore) -> APIRouter:
         """중복 제거 요약: per mode (``item``·``family``·``custodian``) items, groups, originals and
         duplicates, with the Korean mode label. ``custodian`` ranks by evidence until custodians are
         assigned (one run = one evidence source: equal to ``item``)."""
-        derived = _derived(run_id)
+        outputs, output_dir = _run_outputs(run_id)
+        try:
+            # The stored dedup file alone when current (no family edges / irregular sets to parse).
+            dedup, source = FAMILIES_SERVICE.dedup(run_id, outputs, output_dir)
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail=f"계열·중복·예외 항목을 만들지 못했습니다: {type(exc).__name__}") from exc
         modes = []
         for name in DEDUP_MODES:
-            summary = derived.dedup.mode(name).summary()
+            summary = dedup.mode(name).summary()
             modes.append({"id": name, "label": DEDUP_MODE_LABELS[name], **summary})
-        return {"modes": modes, "custodians_assigned": False, "source": derived.source}
+        return {"modes": modes, "custodians_assigned": False, "source": source}
 
     @router.get("/api/runs/{run_id}/irregular/summary")
     def get_irregular_summary(run_id: str) -> dict[str, object]:
