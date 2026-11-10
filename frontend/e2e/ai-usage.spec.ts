@@ -92,10 +92,10 @@ test("Q-AI10 tree: the AI 사용 domain lists its nodes with the fixture's count
   await expect(domain).toBeVisible({ timeout: 30_000 });
   if ((await domain.getAttribute("aria-expanded")) !== "true") await domain.click();
   for (const [label, count] of [
-    ["세션", 28],
-    ["메시지", 45],
-    ["도구 호출", 19],
-    ["파일 접촉", 19],
+    ["세션", 29],
+    ["메시지", 49],
+    ["도구 호출", 24],
+    ["파일 접촉", 23],
     ["MCP 서버", 17],
     ["지침·메모리 파일", 12],
     ["자격 증명 존재(값 없음)", 23],
@@ -108,7 +108,7 @@ test("Q-AI10 tree: the AI 사용 domain lists its nodes with the fixture's count
       page.getByRole("treeitem", { name: new RegExp(`^${label.replace(/[()]/g, "\\$&")}, ${count}건`) }),
     ).toBeVisible();
   }
-  const tools = page.getByRole("treeitem", { name: /^도구·설치, 83건/ });
+  const tools = page.getByRole("treeitem", { name: /^도구·설치, 84건/ });
   await expect(tools).toBeVisible();
   // A group opens its own view on click; ArrowRight expands it.
   await tools.click();
@@ -136,8 +136,10 @@ test("Q-AI10 grid: session columns read in Korean; the session's 메타 links op
   for (const header of ["도구", "시작", "종료", "메시지", "도구 호출"]) {
     expect(headers.join("|")).toContain(header);
   }
-  // The Claude Code main session (title "fix the bug" — fixture sess-A).
-  const session = rows(page).filter({ hasText: "Claude Code" }).first();
+  // The Claude Code main session: fixture sess-A, custom title "Fix app" with its 2 sub-agent sessions
+  // ("하위 2개"; the sub-agent rows only say "상위: Fix app", so this pins the parent row exactly).
+  const session = rows(page).filter({ hasText: "Fix app" }).filter({ hasText: "하위 2개" });
+  await expect(session).toHaveCount(1);
   await session.click();
   const viewer = page.getByRole("region", { name: "원본 뷰어" });
   await viewer.getByRole("tab", { name: "메타" }).click();
@@ -189,7 +191,7 @@ test("Q-AI10 intake: AI 사용 요약 block", async ({ page }) => {
   const block = page.getByTestId("case-ai-usage");
   await expect(block).toBeVisible({ timeout: 60_000 });
   await expect(block.getByTestId("ai-usage-facts")).toBeVisible({ timeout: 60_000 });
-  await expect(block.getByRole("link", { name: "AI 세션 28개 보기" })).toBeVisible();
+  await expect(block.getByRole("link", { name: "AI 세션 29개 보기" })).toBeVisible();
   await expect(block.getByTestId("ai-usage-credentials")).toContainText("값 미수집");
   await expect(block.getByTestId("ai-usage-retention")).toBeVisible();
   await expect(block).not.toContainText(/ai-agent|claude-code|ai-tool-presence/);
