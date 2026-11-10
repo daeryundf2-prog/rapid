@@ -3,7 +3,11 @@
 The verified store is SQLite, not rollout JSONL: ``sqlite/state_*.sqlite`` ``threads`` (+
 ``thread_spawn_edges`` parent/child, ``thread_dynamic_tools``), ``codex-dev.db``
 ``local_thread_catalog`` / ``thread_timeline_ledger(payload_json)`` / ``automation_runs``,
-``logs_*.sqlite`` (meta only: row count, body bytes, first/last time - bodies are never read),
+``thread_*.sqlite`` ``thread_items(item_json)`` (the Codex app's per-thread item store: user /
+agent messages, ``mcpToolCall`` / ``commandExecution`` tool calls, ``fileChange`` patches, web
+searches, sub-agent links), ``logs_*.sqlite`` (meta only: row count, body bytes, first/last time -
+bodies are never read: the table is a generic tracing log - ``target`` / ``feedback_log_body`` free
+text - with no structured tool / exec record),
 ``memories_*.sqlite`` ``stage1_outputs`` and ``goals_*.sqlite`` ``thread_goals``. Databases are
 recognised by their tables, not their file names. Every database is in WAL mode on the
 reference PC, so a database with a ``-wal`` sidecar is opened ``mode=ro`` (WAL included, see
@@ -33,6 +37,7 @@ from ._common import (
     iter_profiles,
     make_found,
     mcp_rows_from_config,
+    newest_first,
     open_sqlite_ro,
     presence_row,
     select_rows,
@@ -63,8 +68,25 @@ KNOWN_ITEM_TYPES = frozenset(
         "turn_context",
         "compacted",
         "token_count",
+        # thread item store (``thread_items.item_json`` / ledger payloads of the app format)
+        "userMessage",
+        "agentMessage",
+        "mcpToolCall",
+        "commandExecution",
+        "dynamicToolCall",
+        "collabToolCall",
+        "fileChange",
+        "webSearch",
+        "imageView",
+        "subAgentActivity",
+        "contextCompaction",
+        "enteredReviewMode",
+        "exitedReviewMode",
     }
 )
+THREAD_ITEM_COLUMNS = ("thread_id", "turn_id", "item_id", "rollout_ordinal", "created_at_ms", "item_json", "item_type", "started_at_ms", "completed_at_ms")
+# ``fileChange`` change kinds -> file-touch op
+_CHANGE_OPS = {"add": "create", "create": "create", "update": "edit", "modify": "edit", "delete": "delete", "remove": "delete"}
 THREAD_COLUMNS = (
     "id", "rollout_path", "created_at", "updated_at", "created_at_ms", "updated_at_ms", "source", "model_provider", "cwd", "title",
     "sandbox_policy", "approval_mode", "tokens_used", "archived", "git_sha", "git_branch", "git_origin_url", "cli_version",
@@ -137,8 +159,9 @@ class _Sessions:
         return acc
 
 
-def _item(acc: SessionAccumulator, item: Mapping[str, object], stamp: str, path: Path, source: str) -> None:
-    """One Codex response item (rollout line payload or ledger payload)."""
+def _item(acc: SessionAccumulator, item: Mapping[str, object], stamp: str, path: Path, source: str, sessions: _Sessions | None = None) -> None:
+    """One Codex item: a response item (rollout line payload / ledger payload) or an app thread
+    item (``thread_items.item_json`` / a ledger payload in that format)."""
     item = _unwrap(item)
     itype = str(item.get("type") or "")
     acc.ctx.count_type(itype or "(none)", KNOWN_ITEM_TYPES)
@@ -161,6 +184,123 @@ def _item(acc: SessionAccumulator, item: Mapping[str, object], stamp: str, path:
                 exit_code = meta.get("exit_code")
         size = len(output.encode("utf-8", "replace")) if isinstance(output, str) else None
         acc.tool_result(str(item.get("call_id") or ""), result_bytes=size, exit_code=exit_code)
+    else:
+        _thread_item(acc, itype, item, stamp, path, source, sessions)
+
+
+def _text_bytes(value: object) -> int | None:
+    """UTF-8 bytes of the text parts of a tool result (``None`` when there is no result)."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return len(value.encode("utf-8", "replace"))
+    if isinstance(value, Mapping):
+        content = value.get("content")
+        return _text_bytes(content) if content is not None else None
+    if isinstance(value, list):
+        return sum(len(str(part.get("text") or "").encode("utf-8", "replace")) for part in value if isinstance(part, Mapping))
+    return None
+
+
+def _int_or_none(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _thread_item(acc: SessionAccumulator, itype: str, item: Mapping[str, object], stamp: str, path: Path, source: str, sessions: _Sessions | None) -> None:
+    """Codex app thread items (``userMessage`` / ``agentMessage`` / ``mcpToolCall`` /
+    ``commandExecution`` / ``fileChange`` / ``webSearch`` / ``subAgentActivity`` ...). Reasoning and
+    compaction items are counted only; ``fileChange`` diffs are measured, never stored."""
+    call_id = str(item.get("id") or "")
+    status = str(item.get("status") or "")
+    if itype == "userMessage":
+        text = _content_text(item.get("content"))
+        if text:
+            acc.message("user", stamp, text, source_path=path, source=source, has_image=False, record_uuid=call_id)
+    elif itype == "agentMessage":
+        text = item.get("text")
+        if isinstance(text, str) and text:
+            acc.message("assistant", stamp, text, source_path=path, source=source, has_image=False, record_uuid=call_id, phase=str(item.get("phase") or ""))
+    elif itype == "mcpToolCall":
+        server = str(item.get("server") or "")
+        tool = str(item.get("tool") or "")
+        arguments = item.get("arguments")
+        has_command = isinstance(arguments, Mapping) and any(arguments.get(key) for key in ("command", "cmd", "script"))
+        error = item.get("error")
+        row = acc.tool_call(
+            f"mcp__{server}__{tool}" if server else tool,
+            stamp,
+            arguments,
+            call_id=call_id,
+            source_path=path,
+            source=source,
+            kind="shell" if has_command else "mcp",
+            status=status,
+            duration_ms=_int_or_none(item.get("durationMs")),
+            plugin_id=redact_str(item.get("pluginId") or ""),
+        )
+        if row is not None:
+            acc.tool_result(call_id, result_bytes=_text_bytes(item.get("result")), is_error=bool(error) or status == "failed")
+    elif itype == "commandExecution":
+        command = item.get("command")
+        row = acc.tool_call(
+            "shell",
+            stamp,
+            {"command": command} if command else None,
+            call_id=call_id,
+            source_path=path,
+            source=source,
+            kind="shell",
+            status=status,
+            duration_ms=_int_or_none(item.get("durationMs")),
+        )
+        if row is not None:
+            acc.tool_result(call_id, result_bytes=_text_bytes(item.get("aggregatedOutput")), exit_code=item.get("exitCode"), is_error=status == "failed")
+    elif itype in ("dynamicToolCall", "collabToolCall"):
+        acc.tool_call(str(item.get("tool") or item.get("name") or itype), stamp, item.get("arguments"), call_id=call_id, source_path=path, source=source, status=status)
+    elif itype == "fileChange":
+        raw = item.get("changes")
+        changes = [change for change in raw if isinstance(change, Mapping)] if isinstance(raw, list) else []
+        row = acc.tool_call("apply_patch", stamp, None, call_id=call_id, source_path=path, source=source, kind="edit", status=status, change_count=len(changes))
+        for change in changes[:MAX_LIST_ITEMS]:
+            kind = change.get("kind")
+            kind_name = str((kind.get("type") if isinstance(kind, Mapping) else kind) or "").lower()
+            target = change.get("path")
+            if not isinstance(target, str) or not target:
+                continue
+            diff = change.get("diff")
+            acc.file_touch(
+                _CHANGE_OPS.get(kind_name, "edit"),
+                target,
+                stamp,
+                tool_name="apply_patch",
+                op_source="fileChange",
+                source_path=path,
+                diff_bytes=len(diff.encode("utf-8", "replace")) if isinstance(diff, str) else None,
+                call_id=call_id,
+            )
+            move = kind.get("move_path") if isinstance(kind, Mapping) else None
+            if isinstance(move, str) and move:
+                acc.file_touch("create", move, stamp, tool_name="apply_patch", op_source="fileChange-move", source_path=path, call_id=call_id)
+        if row is not None and len(changes) > MAX_LIST_ITEMS:
+            row.payload["file_touches_capped"] = True
+    elif itype == "webSearch":
+        query = item.get("query")
+        action = item.get("action")
+        if not query and isinstance(action, Mapping):
+            queries = action.get("queries")
+            query = action.get("query") or (queries[0] if isinstance(queries, list) and queries else "")
+        acc.tool_call("web_search", stamp, {"query": query} if isinstance(query, str) and query else None, call_id=call_id, source_path=path, source=source, kind="search", status=status)
+    elif itype == "subAgentActivity":
+        acc.see_time(stamp)
+        acc.meta["subagent_activity"] = _int_or_none(acc.meta.get("subagent_activity")) or 0
+        acc.meta["subagent_activity"] = int(acc.meta["subagent_activity"]) + 1  # type: ignore[call-overload]
+        child = str(item.get("agentThreadId") or "")
+        if child and sessions is not None and child != acc.session_id:
+            child_acc = sessions.get(child, path)
+            if not child_acc.parent_session_id:
+                child_acc.parent_session_id = acc.session_id
+    else:
+        acc.see_time(stamp)
 
 
 class CodexAdapter(AiAgentAdapter):
@@ -204,7 +344,7 @@ class CodexAdapter(AiAgentAdapter):
         for folder in ("sessions", "archived_sessions"):
             root = base / folder
             if root.is_dir():
-                for path in walk_files(root, limit=50_000):
+                for path in newest_first(p for p in walk_files(root, limit=50_000) if p.suffix == ".jsonl"):
                     if path.suffix == ".jsonl":
                         self._rollout(ctx, path, sessions, archived=folder == "archived_sessions")
         memories = base / "memories"
@@ -277,7 +417,9 @@ class CodexAdapter(AiAgentAdapter):
                     acc = sessions.get(str(item["thread_id"] or ""), path)
                     acc.note(acc.meta["sources"], "thread_timeline_ledger")  # type: ignore[arg-type]
                     stamp = to_iso(payload.get("timestamp") or payload.get("created_at"))
-                    _item(acc, payload, stamp, path, "thread_timeline_ledger")
+                    _item(acc, payload, stamp, path, "thread_timeline_ledger", sessions)
+            if "thread_items" in tables and not over:
+                self._thread_items(conn, path, tables["thread_items"], sessions)
             if "automation_runs" in tables and not over:
                 cols = ("thread_id", "thread_title", "source_cwd", "archived_user_message", "archived_assistant_message", "created_at")
                 for item in select_rows(conn, "automation_runs", cols, tables["automation_runs"]):
@@ -362,6 +504,21 @@ class CodexAdapter(AiAgentAdapter):
                 stat = usage.setdefault(key, {"tokens": 0, "threads": 0, "path": path})
                 stat["tokens"] = int(stat["tokens"]) + tokens
                 stat["threads"] = int(stat["threads"]) + 1
+
+    def _thread_items(self, conn: sqlite3.Connection, path: Path, cols: Sequence[str], sessions: _Sessions) -> None:
+        """``thread_items``: one JSON item per row in thread / rollout order (``item_json`` decoded,
+        every text value redacted and capped by :class:`SessionAccumulator`)."""
+        for item in select_rows(conn, "thread_items", THREAD_ITEM_COLUMNS, cols, order="thread_id, rollout_ordinal"):
+            thread_id = str(item["thread_id"] or "")
+            payload = decode_json_value(item["item_json"])
+            if not thread_id or not isinstance(payload, Mapping):
+                continue
+            if not payload.get("type") and item["item_type"]:
+                payload = {**payload, "type": item["item_type"]}
+            acc = sessions.get(thread_id, path)
+            acc.note(acc.meta["sources"], "thread_items")  # type: ignore[arg-type]
+            stamp = to_iso(item["completed_at_ms"] or item["started_at_ms"] or item["created_at_ms"])
+            _item(acc, payload, stamp, path, "thread_items", sessions)
 
     def _logs_meta(self, ctx: RowContext, conn: sqlite3.Connection, path: Path, cols: Sequence[str]) -> AiRow:
         """``logs`` table: counts and time range only; ``feedback_log_body`` is measured, not read."""
