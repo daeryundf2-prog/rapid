@@ -1,6 +1,7 @@
 import { fetchArtifactsPage, locateArtifactRow } from "../../../api/collections";
 import { clipValue, flatValue } from "../../../utils/flatValue";
 import { formatGridTime } from "../../../utils/time";
+import { isAiType } from "../../ai/aiLabels";
 import { artifactTypeLabel } from "../../filters/typeLabels";
 import {
   type CatalogFamily,
@@ -8,7 +9,6 @@ import {
   familyForTypes,
   majorityFamilyForTypes,
 } from "../../flags/catalog";
-import { isAiType } from "../../ai/aiLabels";
 import { parseFlags } from "../../flags/flags";
 import { kindsForCategory } from "../../tree/categories";
 import { serverPathFilter } from "../gridUtils";

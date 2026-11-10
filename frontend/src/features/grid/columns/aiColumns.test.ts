@@ -135,7 +135,10 @@ describe("AI 사용 columns", () => {
       const credential = artifactColumnsForKind("ai-agent", ["ai-credential-presence"]);
       expect(credential.some((c) => c.id === "d:value_collected")).toBe(true);
       for (const node of nodes) {
-        expect(AI_TYPE_FAMILY_COLUMNS[artifactTypeFamily(node.target.types) as string], node.id).toBeDefined();
+        expect(
+          AI_TYPE_FAMILY_COLUMNS[artifactTypeFamily(node.target.types) as string],
+          node.id,
+        ).toBeDefined();
       }
       // Non-AI types still resolve to their catalogue family.
       expect(resolveArtifactFamily("windows-prefetch", ["prefetch-file"])).toBeDefined();
