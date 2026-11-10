@@ -142,22 +142,41 @@ test("Q-X1: 케이스 만들기 3단계 → 실행 → 접수 5 cards, kept afte
     const info = await cardOf(page, "사건 정보");
     await expect(info.getByText(caseNumber).first()).toBeVisible();
     await expect(info.getByText("서울중앙지검")).toBeVisible();
-    const evidence = await cardOf(page, "증거 목록");
-    await expect(evidence.getByRole("rowheader", { name: "E-01" })).toBeVisible();
+    // 증거 목록 + 증거 소스 are one "증거" card now: a list of items, E-01 as the item number.
+    const evidence = await cardOf(page, "증거");
+    await expect(
+      evidence.locator("li.dash-evidence-item .dash-evidence-number", { hasText: "E-01" }),
+    ).toBeVisible();
     await expect(evidence.getByText("해당 없음 (폴더)")).toBeVisible();
-    const snapshot = await cardOf(page, "처리 설정 스냅샷");
-    await expect(snapshot.getByText("런 시작 시 케이스에 고정된 처리 옵션입니다.")).toBeVisible();
-    await expect(snapshot.getByText("문서·부정 조사 (fraud)")).toBeVisible();
-    const problems = await cardOf(page, "처리 문제");
+    // 처리 문제 + 공개 사항 are "처리 경고·제한 사항" now.
+    const problems = await cardOf(page, "처리 경고·제한 사항");
     await expect(problems.locator(".dash-problems, .dash-empty").first()).toBeVisible({ timeout: 30_000 });
-    const memo = await cardOf(page, "케이스 메모");
+    // 케이스 메모 + 요약 노트 are "노트·메모" now.
+    const memo = await cardOf(page, "노트·메모");
     await expect(memo.getByLabel("새 메모")).toBeVisible();
     await expect(page.getByTestId("case-crumb")).toContainText(`${caseNumber} › E-01`);
   };
   await checkCards();
 
+  // 처리 설정 스냅샷 left the 접수 dashboard: the 처리 stage holds it (접수 strip "처리 설정 보기").
+  await expect(page.getByRole("heading", { name: "처리 설정 스냅샷" })).toHaveCount(0);
+  const checkSnapshot = async () => {
+    const snapshot = page.getByTestId("process-snapshot");
+    await expect(snapshot.getByText("런 시작 시 케이스에 고정된 처리 옵션입니다.")).toBeVisible();
+    // The mode label dropped its "(fraud)" id suffix; the row is addressed by its key.
+    await expect(snapshot.locator('tr[data-key="mode"]')).toContainText("문서·부정 조사");
+  };
+  await page.evaluate((run) => {
+    window.location.hash = `#/case/${run}/process`;
+  }, runId);
+  await checkSnapshot();
+  await page.evaluate((run) => {
+    window.location.hash = `#/case/${run}/intake`;
+  }, runId);
+  await checkCards();
+
   // Q-X4: memo with author and time; soft delete keeps history.
-  const memo = await cardOf(page, "케이스 메모");
+  const memo = await cardOf(page, "노트·메모");
   await memo.getByLabel("새 메모").fill("압수 목록 확인");
   await memo.getByRole("button", { name: "메모 추가" }).click();
   await expect(memo.getByText("압수 목록 확인").first()).toBeVisible();
@@ -167,7 +186,7 @@ test("Q-X1: 케이스 만들기 3단계 → 실행 → 접수 5 cards, kept afte
   // Reload keeps everything (server state, not browser state).
   await page.reload();
   await checkCards();
-  await expect((await cardOf(page, "케이스 메모")).getByText("압수 목록 확인").first()).toBeVisible();
+  await expect((await cardOf(page, "노트·메모")).getByText("압수 목록 확인").first()).toBeVisible();
 
   // The switcher shows 케이스 › 증거 › 런.
   await page.keyboard.press("Escape");
@@ -210,19 +229,21 @@ test("Q-X1 review: register-only evidence is pre-checked, saved and skipped", as
   await expect(dialog.getByTestId("wizard-submit")).toHaveText("실행 (런 1개)");
   await dialog.getByTestId("wizard-submit").click();
   await expect(page).toHaveURL(/#\/case\/[0-9a-f]+\/intake/);
-  const evidence = await cardOf(page, "증거 목록");
-  const zipRow = evidence.getByRole("row").filter({ has: page.getByRole("rowheader", { name: "E-02" }) });
+  const evidence = await cardOf(page, "증거");
+  const evidenceItem = (number: string) =>
+    evidence.locator("li.dash-evidence-item").filter({
+      has: page.locator(".dash-evidence-number", { hasText: number }),
+    });
+  const zipRow = evidenceItem("E-02");
   await expect(zipRow.getByTestId("evidence-register-only")).toBeVisible();
-  await expect(zipRow.getByRole("button", { name: "증거 E-02 런 추가" })).toHaveAttribute(
+  await expect(zipRow.getByRole("button", { name: "증거 E-02 런 시작" })).toHaveAttribute(
     "aria-disabled",
     "true",
   );
-  await expect(
-    evidence
-      .getByRole("row")
-      .filter({ has: page.getByRole("rowheader", { name: "E-01" }) })
-      .getByRole("button", { name: "증거 E-01 런 추가" }),
-  ).not.toHaveAttribute("aria-disabled", "true");
+  await expect(evidenceItem("E-01").getByRole("button", { name: "증거 E-01 런 시작" })).not.toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
   expect(await quickAudit(page)).toEqual([]);
 });
 
@@ -252,9 +273,17 @@ test("Q-X2: a run without a case keeps working and offers 케이스에 연결", 
   const info = await cardOf(page, "사건 정보");
   await expect(info.getByTestId("no-case")).toBeVisible();
   // Existing cards still render for the caseless run.
-  await expect(page.getByRole("heading", { name: "케이스 요약 노트" })).toBeVisible();
-  await expect((await cardOf(page, "처리 설정 스냅샷")).getByText(/케이스 없이 실행된 런/)).toBeVisible();
+  // 요약 노트 lives inside the merged 노트·메모 card; 처리 설정 스냅샷 is on the 처리 stage.
+  await expect(page.getByRole("heading", { name: "노트·메모", exact: true })).toBeVisible();
+  await expect(page.getByText("요약 노트 —")).toBeVisible();
   expect(await quickAudit(page)).toEqual([]);
+  await page.evaluate((run) => {
+    window.location.hash = `#/case/${run}/process`;
+  }, runId);
+  await expect(page.getByTestId("process-snapshot").getByText(/케이스 없이 실행된 런/)).toBeVisible();
+  await page.evaluate((run) => {
+    window.location.hash = `#/case/${run}/intake`;
+  }, runId);
 
   const linkButton = info.getByRole("button", { name: "케이스에 연결" });
   await linkButton.click();
