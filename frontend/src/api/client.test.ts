@@ -95,3 +95,33 @@ describe("422 details (D1 /flags/row, review follow-up)", () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe("empty success bodies (E01 QA D1: run delete 204)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("resolves a 204 with a JSON content type instead of throwing a JSON parse error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 204, headers: { "content-type": "application/json" } })),
+    );
+    await expect(api("/api/runs/r1", { method: "DELETE" })).resolves.toBeUndefined();
+  });
+
+  it("resolves an empty 200 JSON body to undefined", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("", { status: 200, headers: { "content-type": "application/json" } })),
+    );
+    await expect(api("/api/x")).resolves.toBeUndefined();
+  });
+
+  it("still parses a JSON body", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () => new Response('{"a":1}', { status: 200, headers: { "content-type": "application/json" } }),
+      ),
+    );
+    await expect(api("/api/x")).resolves.toEqual({ a: 1 });
+  });
+});

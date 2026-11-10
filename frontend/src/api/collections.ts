@@ -14,7 +14,10 @@ import {
 import { ApiError, api } from "./client";
 import { type ArtifactsQuery, artifactsQueryString } from "./runs";
 import {
+  FIELD_SEARCH_INDEX_BUILDING,
   FIELD_SEARCH_NEEDS_INDEX,
+  FIELD_SEARCH_OPTIONS,
+  FIELD_SEARCH_STALE_INDEX,
   fetchIndexSearchPage,
   forgetSearchIndex,
   hasFieldKeyword,
@@ -1040,6 +1043,17 @@ async function fetchArtifactKindsPage(
   };
 }
 
+/**
+ * Why a field keyword search could not run (E01 QA D3): a missing index, one still being built,
+ * a stale index that could not be read, or search options the index does not cover differ.
+ */
+export function fieldSearchRefusal(covered: boolean, status: SearchIndexStatus | undefined): string {
+  if (!covered) return FIELD_SEARCH_OPTIONS;
+  if (status === "building") return FIELD_SEARCH_INDEX_BUILDING;
+  if (status === "stale") return FIELD_SEARCH_STALE_INDEX;
+  return FIELD_SEARCH_NEEDS_INDEX;
+}
+
 /** Server page size of the unified search (the API default). */
 export const SEARCH_PAGE_SIZE = 250;
 
@@ -1066,11 +1080,16 @@ export async function fetchSearchRows(
   const fieldSearch = hasFieldKeyword(spec.keywords);
   // R7 P2: the run's v2 search index answers the default console search when it is ready.
   let indexStatus: SearchIndexStatus | undefined;
-  if (indexCoversSearch(spec, query.extension)) {
+  const covered = indexCoversSearch(spec, query.extension);
+  if (covered) {
     indexStatus = await searchIndexStatus(runId);
-    if (indexStatus === "ready") {
+    // E01 QA D3: a stale index still answers a field search (v1 has no meaning for it). The
+    // server adds its "색인이 런 출력보다 오래되었습니다" note and the footer offers a rebuild.
+    const queryStale = fieldSearch && indexStatus === "stale";
+    if (indexStatus === "ready" || queryStale) {
       try {
-        return await fetchIndexSearchPage(runId, spec.keywords, offset, pageLimit, signal);
+        const page = await fetchIndexSearchPage(runId, spec.keywords, offset, pageLimit, signal);
+        return queryStale ? { ...page, meta: { ...page.meta, searchIndex: "stale" } } : page;
       } catch (error) {
         // No index any more (404), an unreadable / older-format index (409) or a locked one (503):
         // v1 answers instead (the index status is re-read). A request v2 rejects (400 / 422: too
@@ -1089,7 +1108,7 @@ export async function fetchSearchRows(
       }
     }
   }
-  if (fieldSearch) throw new ApiError(FIELD_SEARCH_NEEDS_INDEX, 409, null);
+  if (fieldSearch) throw new ApiError(fieldSearchRefusal(covered, indexStatus), 409, null);
   const params = new URLSearchParams();
   for (const keyword of spec.keywords) params.append("keyword", keyword);
   params.set("limit", String(pageLimit));

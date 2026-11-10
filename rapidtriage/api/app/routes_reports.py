@@ -41,6 +41,7 @@ from .models import (
 from .previews import (
     write_json_file,
 )
+from .review_payload import load_run_review_payload
 from .runops import (
     build_run_case_report,
     build_run_submission_manifest,
@@ -52,6 +53,11 @@ from .runops import (
 from .search import (
     normalize_bookmark_source,
     normalize_bookmark_tags,
+)
+
+REVIEWER_BUNDLE_CASE_SNAPSHOT = "rapidtriage-reviewer-bundle.review-case.json"
+REVIEWER_BUNDLE_EMPTY_MESSAGE = (
+    "리뷰어 번들에 넣을 검토 항목이 없습니다. 행에 검토 상태나 태그를 표시한 뒤 다시 내보내세요."
 )
 
 # ``POST /case-report`` export formats, in the order its ``written`` list names them.
@@ -251,14 +257,29 @@ def build_reports_router(
         return FileResponse(path, filename=path.name, media_type=media_types[normalized])
 
 
+    def _reviewer_bundle_case_json(store: RunJobStore, run_id: str) -> Path:
+        """Snapshot of the run's review (bookmark JSON + case DB marks) for the bundle.
+
+        Console marks/tags live in the case DB, not in ``rapidtriage-case.json``
+        (E01 QA D2), so the bundle reads a merged snapshot written beside the
+        bundle folder. Neither review store is modified.
+        """
+        payload = load_run_review_payload(store, run_id)
+        if not payload.get("bookmarks"):
+            raise HTTPException(status_code=404, detail=REVIEWER_BUNDLE_EMPTY_MESSAGE)
+        snapshot = default_reviewer_bundle_dir_path(store, run_id).with_name(REVIEWER_BUNDLE_CASE_SNAPSHOT)
+        try:
+            save_case_payload(snapshot, payload)
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=f"리뷰어 번들 검토 목록을 쓰지 못했습니다: {exc}")
+        return snapshot
+
     @router.post("/api/runs/{run_id}/reviewer-bundle")
     def create_reviewer_bundle(run_id: str, request: ReviewerBundleCreateRequest) -> dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail=run_not_finished_message(job))
-        case_path = default_case_path(store, run_id)
-        if not case_path.is_file():
-            raise HTTPException(status_code=404, detail="case review file not found")
+        case_path = _reviewer_bundle_case_json(store, run_id)
         try:
             return build_submission_bundle(
                 case_json=case_path,
@@ -277,9 +298,7 @@ def build_reports_router(
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail=run_not_finished_message(job))
-        case_path = default_case_path(store, run_id)
-        if not case_path.is_file():
-            raise HTTPException(status_code=404, detail="case review file not found")
+        case_path = _reviewer_bundle_case_json(store, run_id)
         try:
             payload = build_submission_bundle(
                 case_json=case_path,

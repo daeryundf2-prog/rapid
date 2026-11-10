@@ -47,12 +47,19 @@ from .models import (
     CaseEvidenceCheckRequest,
     CaseEvidenceCreateRequest,
     CaseNoteCreateRequest,
+    CaseOutputCheckRequest,
     CasePatchRequest,
     CaseRunCreateRequest,
     CaseRunLinkRequest,
 )
 from .routes_runs import run_request_from_body
 from .run_problems import PROBLEM_MAX_LIMIT, PROBLEM_PREVIEW_LIMIT, build_run_problems
+
+#: A case run with no output folder and no case folder (E01 QA D4: never beside / inside evidence).
+CASE_RUN_NEEDS_OUTPUT = (
+    "케이스 폴더가 없어 런 출력 위치를 정할 수 없습니다. 출력 폴더를 지정하거나 케이스 폴더를 설정하세요 "
+    "(원본 증거 옆이나 증거 폴더 안에는 쓰지 않습니다)"
+)
 
 #: Korean field names for 422 bodies on these routes (factory exception handler).
 CASE_FIELD_LABELS = {
@@ -280,6 +287,28 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
                              expected=str(evidence.get("hash_expected") or ""))
         return {"command": "case.evidence.hash", "evidence": workspace.present_evidence(evidence)}
 
+    @router.post("/api/cases/output-check")
+    def check_output(request: CaseOutputCheckRequest) -> dict[str, Any]:
+        """Pre-check a run output / case folder before anything is saved (E01 QA D5).
+
+        Mirrors the checks ``POST /api/cases`` (케이스 폴더) and ``POST /api/cases/{id}/runs``
+        (출력 폴더) apply, so a wizard failure leaves no orphan case behind.
+        """
+        label = "케이스 폴더" if request.kind == "case_root" else "출력 폴더"
+        try:
+            lexical = checked_local_path(request.path, label=label)
+        except HTTPException as exc:
+            return {"command": "case.output.check", "path": request.path, "ok": False, "problem": str(exc.detail)}
+        target = Path(lexical)
+        problem = ""
+        if target.exists() and not target.is_dir():
+            problem = f"{label} 자리에 파일이 있습니다: {lexical}"
+        elif request.kind == "output_dir":
+            busy = _same_output_dir_job(store, lexical)
+            if busy:
+                problem = f"같은 출력 폴더를 쓰는 런({busy})이 대기·실행 중입니다. 출력 폴더를 비우거나 다른 폴더를 지정하세요"
+        return {"command": "case.output.check", "path": lexical, "ok": not problem, "problem": problem}
+
     @router.post("/api/cases/evidence-check")
     def check_evidence(request: CaseEvidenceCheckRequest) -> dict[str, Any]:
         """Pre-check one evidence path before anything is saved: path policy, kind, runnable."""
@@ -334,6 +363,9 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
                 Path(str(case["case_root"]))
                 / f"{evidence_slug(str(evidence['evidence_number']))}-rapidtriage-run-{request.mode}-{stamp}"
             )
+        else:
+            # E01 QA D4: never default beside the evidence file or inside the evidence folder.
+            raise HTTPException(status_code=422, detail=CASE_RUN_NEEDS_OUTPUT)
         run_request = run_request_from_body(request, root=root, output_dir=output_dir)
         with submit_lock:
             if explicit_output and output_dir:

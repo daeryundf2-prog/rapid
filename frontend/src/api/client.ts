@@ -94,8 +94,21 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     const raw = (detail as { detail?: unknown }).detail ?? detail;
     throw new ApiError(errorMessageFromDetail(raw), response.status, raw);
   }
+  return readBody<T>(response);
+}
+
+/**
+ * Parse a successful response body. 204/205 and empty bodies resolve to
+ * `undefined` instead of throwing "Unexpected end of JSON input" — DELETE
+ * endpoints answer 204 with no body (and sometimes a JSON content type).
+ */
+async function readBody<T>(response: Response): Promise<T> {
+  if (response.status === 204 || response.status === 205) return undefined as T;
+  const text = await response.text();
   const contentType = response.headers.get("content-type") || "";
-  return (contentType.includes("application/json") ? response.json() : response.text()) as Promise<T>;
+  if (!contentType.includes("application/json")) return text as T;
+  if (!text.trim()) return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 /**

@@ -1965,7 +1965,13 @@ def stale_reasons(meta: Mapping[str, object], summary: Mapping[str, object], out
         for item in (meta.get("analyses_indexed") or [])
         if isinstance(item, Mapping)
     }
-    missing = [item for item in indexable_analyses(output_dir, load_state) if indexed.get(str(item["analysis_id"])) != int(item["row_count"])]
+    # An analysis that ended without rows (e.g. an OCR batch that failed because tesseract is
+    # missing, E01 QA D3) adds nothing to index: it must not make an existing index stale.
+    missing = [
+        item
+        for item in indexable_analyses(output_dir, load_state)
+        if indexed.get(str(item["analysis_id"]), 0) != int(item["row_count"])
+    ]
     if missing:
         reasons.append(f"색인에 없는 분석 결과가 있습니다({len(missing)}개)")
     return reasons

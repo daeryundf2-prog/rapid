@@ -1,6 +1,6 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { Icon } from "../icons";
-import { stageOf } from "../router";
+import { type Route, stageOf } from "../router";
 import { useAppStore } from "../state/store";
 import { TOAST_MS, type ToastItem, useToastStore } from "./toastStore";
 import "./toast.css";
@@ -81,11 +81,24 @@ function ToastView({ toast }: { toast: ToastItem }) {
 }
 
 /**
- * Error toasts belong to the page they were raised on: a stage change (or another case) drops
- * them (r7 L4, C-G12). Info / ok toasts close on their own timer.
+ * Error toasts belong to the screen they were raised on: a stage change, another case, or another
+ * node / view of the same stage drops them (r7 L4, C-G12; E01 QA D2 — an export failure raised
+ * in 보고 must not follow the analyst to every later screen). Row selection, filters and the
+ * viewer do not count as a screen change. Info / ok toasts close on their own timer.
  */
+export function screenKeyOf(route: Route): string {
+  return [
+    route.runId ?? "",
+    stageOf(route),
+    route.collection ?? "",
+    route.kind ?? "",
+    route.analysisId ?? "",
+    route.view ?? "",
+  ].join("|");
+}
+
 function useClearErrorsOnStageChange(): void {
-  const stageKey = useAppStore((s) => `${s.route.runId ?? ""}|${stageOf(s.route)}`);
+  const stageKey = useAppStore((s) => screenKeyOf(s.route));
   const first = useRef(true);
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs on every stage change
   useEffect(() => {

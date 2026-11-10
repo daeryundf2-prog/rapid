@@ -5,7 +5,7 @@
  */
 
 import type { ReactNode } from "react";
-import { INPUT_KINDS, RUN_MODES, type RunForm, type RunFormErrors } from "./runForm";
+import { INPUT_KINDS, type OutputFieldSpec, RUN_MODES, type RunForm, type RunFormErrors } from "./runForm";
 
 export function RunOptionsFields({
   form,
@@ -15,6 +15,7 @@ export function RunOptionsFields({
   onAdvancedChange,
   idPrefix = "run",
   extra,
+  output,
 }: {
   form: RunForm;
   errors: RunFormErrors;
@@ -23,10 +24,35 @@ export function RunOptionsFields({
   onAdvancedChange: (open: boolean) => void;
   idPrefix?: string;
   extra?: ReactNode;
+  /** How 출력 폴더 reads; a required one is shown outside 고급 옵션 (E01 QA D4). */
+  output?: OutputFieldSpec;
 }) {
   const id = (name: string) => `${idPrefix}-${name}`;
+  const outputField = (
+    <>
+      <label htmlFor={id("output-dir")}>
+        {output?.label ?? "출력 폴더"}
+        {output?.required ? <span aria-hidden="true"> *</span> : null}
+      </label>
+      <input
+        id={id("output-dir")}
+        type="text"
+        value={form.outputDir}
+        required={output?.required}
+        aria-required={output?.required ? "true" : undefined}
+        aria-describedby={output ? id("output-dir-hint") : undefined}
+        onChange={(e) => onChange("outputDir", e.target.value)}
+      />
+      {output ? (
+        <p id={id("output-dir-hint")} className="case-reason" data-testid="output-dir-hint">
+          {output.hint}
+        </p>
+      ) : null}
+    </>
+  );
   return (
     <>
+      {output?.required ? <div className="case-field">{outputField}</div> : null}
       <div className="case-field">
         <label htmlFor={id("mode")}>모드</label>
         <select id={id("mode")} value={form.mode} onChange={(e) => onChange("mode", e.target.value)}>
@@ -74,13 +100,7 @@ export function RunOptionsFields({
       {advanced && (
         <fieldset id={id("advanced")} className="case-field">
           <legend>고급 옵션</legend>
-          <label htmlFor={id("output-dir")}>출력 폴더 (비우면 자동)</label>
-          <input
-            id={id("output-dir")}
-            type="text"
-            value={form.outputDir}
-            onChange={(e) => onChange("outputDir", e.target.value)}
-          />
+          {output?.required ? null : outputField}
           <label htmlFor={id("max-mb")}>최대 추출 크기 (MB, 0 = 제한 없음)</label>
           <input
             id={id("max-mb")}

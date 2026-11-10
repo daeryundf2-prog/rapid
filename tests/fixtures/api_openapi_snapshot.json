@@ -38,6 +38,9 @@
     "/api/cases/evidence-check": {
       "post": "check_evidence_api_cases_evidence_check_post"
     },
+    "/api/cases/output-check": {
+      "post": "check_output_api_cases_output_check_post"
+    },
     "/api/cases/{case_id}": {
       "get": "get_case_api_cases__case_id__get",
       "patch": "patch_case_api_cases__case_id__patch"

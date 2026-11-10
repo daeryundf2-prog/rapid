@@ -216,6 +216,25 @@ describe("DeleteCaseDialog", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(calls[0]).toMatchObject({ method: "DELETE", url: "/api/runs/r9" });
   });
+
+  it("closes, navigates home and shows no JSON error when the 204 carries a JSON content type (E01 QA D1)", async () => {
+    window.location.hash = "#/case/r9/intake";
+    mockFetch({
+      "DELETE /api/runs/r9": new Response(null, {
+        status: 204,
+        headers: { "content-type": "application/json" },
+      }),
+    });
+    const onClose = vi.fn();
+    const onNotice = vi.fn();
+    renderWithQuery(<DeleteCaseDialog runId="r9" currentRunId="r9" onClose={onClose} onNotice={onNotice} />);
+    expect(screen.getByText(/디스크에 그대로/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "삭제" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(window.location.hash).toBe("");
+    expect(onNotice.mock.calls[0]?.[0]).toContain("출력 폴더는 디스크에 남아");
+    expect(screen.queryByText(/JSON/)).toBeNull();
+  });
 });
 
 describe("DoctorDialog", () => {

@@ -16,11 +16,11 @@ export interface SummaryRow {
 const yesNo = (value: unknown) => (value ? "예" : "아니오");
 
 /**
- * Where an automatic run output goes (core/jobs.default_run_output_dir): under the case folder when
- * one is set, otherwise a folder evidence gets it INSIDE that folder and a file evidence next to it.
+ * Where an automatic run output goes (E01 QA D4): a run folder under the case folder. Without a case
+ * folder the console asks for an output folder (case runs; quick runs of a file evidence) — the
+ * server never writes next to an evidence file.
  */
-export const AUTO_OUTPUT_TEXT =
-  "자동 (케이스 폴더가 있으면 그 아래, 없으면 폴더 증거는 그 폴더 안에 · 파일 증거는 파일 옆에)";
+export const AUTO_OUTPUT_TEXT = "자동 (케이스 폴더 아래 증거별 런 폴더)";
 const n = (value: number) => value.toLocaleString("ko-KR");
 
 /** Label + formatter for every RunCreateRequest / RunRequest key (rapidtriage/core/jobs.py). */

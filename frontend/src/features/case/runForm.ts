@@ -43,6 +43,46 @@ export const DEFAULT_RUN_FORM: RunForm = {
   aiHashDbs: false,
 };
 
+/**
+ * How the 출력 폴더 field reads (E01 QA D4). A forensic run never writes next to an evidence file
+ * or inside an evidence folder by default: with a case folder the default is a run folder under
+ * it; without one the field is required (shown outside 고급 옵션).
+ */
+export interface OutputFieldSpec {
+  label: string;
+  hint: string;
+  required: boolean;
+}
+
+/** 출력 폴더 of a case run (런 추가): the case folder's run subfolder, else an explicit choice. */
+export function caseRunOutputSpec(caseRoot: string | null | undefined): OutputFieldSpec {
+  const root = (caseRoot ?? "").trim();
+  if (root) {
+    return {
+      label: "출력 폴더 (비우면 케이스 폴더 아래)",
+      hint: `비우면 케이스 폴더(${root}) 아래에 증거별 런 폴더를 만듭니다.`,
+      required: false,
+    };
+  }
+  return {
+    label: "출력 폴더",
+    hint: "케이스 폴더가 없어 런 출력 위치를 직접 지정해야 합니다. 원본 증거 옆이나 증거 폴더 안에는 쓰지 않습니다.",
+    required: true,
+  };
+}
+
+/** 출력 폴더 of the quick run (no case): a file evidence (E01 …) needs one. */
+export const QUICK_RUN_OUTPUT_SPEC: OutputFieldSpec = {
+  label: "출력 폴더",
+  hint: "파일 증거(E01 등)는 원본 옆에 쓰지 않으므로 출력 폴더를 반드시 지정하세요. 폴더 증거는 비우면 그 폴더 안에 만듭니다.",
+  required: false,
+};
+
+/** The required-output reason of a form (undefined when the folder is given or optional). */
+export function outputRequiredReason(spec: OutputFieldSpec, outputDir: string): string | undefined {
+  return spec.required && !outputDir.trim() ? "출력 폴더를 지정하세요 (케이스 폴더가 없습니다)" : undefined;
+}
+
 export const RUN_MODES: Array<{ id: string; label: string }> = [
   { id: "fraud", label: "문서·부정 조사" },
   { id: "seizure", label: "전수 수집" },

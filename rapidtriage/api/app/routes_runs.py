@@ -480,6 +480,12 @@ def run_request_from_body(request: RunCreateRequest, *, root: str | None = None,
     )
 
 
+#: ``POST /api/runs`` for a file evidence without an output folder (E01 QA D4).
+FILE_EVIDENCE_NEEDS_OUTPUT = (
+    "파일 증거(E01 등)는 원본 옆에 런 출력을 만들지 않습니다. 출력 폴더를 지정하세요"
+)
+
+
 def build_runs_router(
     store: RunJobStore,
 ) -> APIRouter:
@@ -488,6 +494,10 @@ def build_runs_router(
     @router.post("/api/runs", status_code=202)
     def create_run(request: RunCreateRequest) -> dict[str, Any]:
         validate_run_evidence_source(request.root)
+        if not (request.output_dir or "").strip() and Path(request.root).expanduser().is_file():
+            # E01 QA D4: the automatic output folder of a file evidence (E01 …) is next to the
+            # evidence; a forensic run never writes beside read-only evidence by default.
+            raise HTTPException(status_code=422, detail=FILE_EVIDENCE_NEEDS_OUTPUT)
         run_request = run_request_from_body(request)
         try:
             job = store.run_sync(run_request) if request.wait else store.submit(run_request)

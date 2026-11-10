@@ -207,16 +207,18 @@ export function DeleteCaseDialog({
     mutationFn: () => deleteRun(runId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["runs"] });
-      onNotice?.("런을 목록에서 제거했습니다.");
-      if (runId === currentRunId) window.location.hash = "";
+      onNotice?.("런을 목록에서 제거했습니다. 출력 폴더는 디스크에 남아 있습니다.");
       onClose();
+      // The deleted run's URL must not stay open: return to the case home.
+      if (runId === currentRunId) window.location.hash = "";
     },
   });
   return (
     <Modal title="런 삭제" onClose={onClose}>
       <p>
-        이 런을 목록에서 제거합니다. 출력 폴더의 파일은 삭제되지 않으며, 같은 폴더를 불러오기로 다시 열 수
-        있습니다.
+        이 런을 목록(등록 정보)에서만 제거합니다.{" "}
+        <strong>출력 폴더와 그 안의 결과 파일은 디스크에 그대로 남으며 자동으로 지워지지 않습니다.</strong>{" "}
+        같은 폴더를 불러오기로 다시 열 수 있고, 폴더가 더 이상 필요 없으면 직접 삭제하세요.
       </p>
       {mutation.error && (
         <ErrorText>
