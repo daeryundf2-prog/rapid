@@ -11,6 +11,7 @@ import threading
 from collections.abc import Mapping
 from pathlib import Path
 
+from ..artifacts.ai_agents.run_indirect import normalize_run_collector_options
 from ..core.artifacts import ArtifactCollectionError, run_artifact_collection
 from ..core.audit import audit_path_for, write_audit_record
 from ..core.docs import write_result
@@ -171,10 +172,13 @@ def handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_s
         run_collector_options: dict[str, dict[str, object]] = {}
         if eventlog_collector_options(args):
             run_collector_options["eventlog"] = eventlog_collector_options(args)
-        if getattr(args, "ai_read_mb", None):
-            if args.ai_read_mb < 1:
-                parser.error("--ai-read-mb must be a positive number of MiB")
-            run_collector_options["ai-agent"] = {"ai_read_mb": int(args.ai_read_mb)}
+        if getattr(args, "ai_read_mb", None) is not None:
+            # Same validation as the web run request (lane C ``collector_options["ai-agent"]``).
+            try:
+                ai_options = normalize_run_collector_options({"ai-agent": {"ai_read_mb": args.ai_read_mb}})
+            except ValueError as exc:
+                parser.error(f"--ai-read-mb: {exc}")
+            run_collector_options.update(ai_options or {})
         if getattr(args, "print_plan", None):
             try:
                 plan = build_run_plan(
@@ -349,10 +353,12 @@ def handle_artifacts(args: argparse.Namespace, parser: argparse.ArgumentParser, 
         if args.kind == "ai-agent":
             # The complete list of files left out for the read budget goes next to --output.
             collector_options["output_dir"] = output.parent
-            if getattr(args, "ai_read_mb", None):
-                if args.ai_read_mb < 1:
-                    parser.error("--ai-read-mb must be a positive number of MiB")
-                collector_options["ai_read_mb"] = int(args.ai_read_mb)
+            if getattr(args, "ai_read_mb", None) is not None:
+                try:
+                    ai_options = normalize_run_collector_options({"ai-agent": {"ai_read_mb": args.ai_read_mb}})
+                except ValueError as exc:
+                    parser.error(f"--ai-read-mb: {exc}")
+                collector_options.update((ai_options or {}).get("ai-agent") or {})
         try:
             payload = run_artifact_collection(
                 root,

@@ -31,13 +31,16 @@ AI_KIND = "ai-agent"
 INDIRECT_PARSERS = frozenset({"ai-tool-execution-match", "ai-git-trailers"})
 
 
-AI_RUN_OPTION_KEYS = ("ai_bodies", "ai_hash_dbs", "org_email_domain", "evidence_roots")
+AI_RUN_OPTION_KEYS = ("ai_bodies", "ai_hash_dbs", "org_email_domain", "evidence_roots", "ai_read_mb")
 MAX_EVIDENCE_ROOTS = 64
+# ``ai_read_mb``: per-adapter read budget in MiB (1 MiB .. 1 TiB).
+MAX_AI_READ_MB = 1024 * 1024
 
 
 def normalize_run_collector_options(value: object) -> dict[str, dict[str, object]] | None:
     """Validated ``collector_options`` of a run request: only ``ai-agent`` with ``ai_bodies`` /
-    ``ai_hash_dbs`` (bool), ``org_email_domain`` (str) and ``evidence_roots`` (list of str).
+    ``ai_hash_dbs`` (bool), ``org_email_domain`` (str), ``evidence_roots`` (list of str) and
+    ``ai_read_mb`` (positive int, per-adapter read budget in MiB).
     ``ValueError`` (Korean) for anything else; ``None`` when nothing is set."""
     if value is None:
         return None
@@ -74,6 +77,11 @@ def normalize_run_collector_options(value: object) -> dict[str, dict[str, object
         cleaned = [item.strip() for item in roots if item.strip()]
         if cleaned:
             out["evidence_roots"] = cleaned
+    read_mb = options.get("ai_read_mb")
+    if read_mb is not None:
+        if isinstance(read_mb, bool) or not isinstance(read_mb, int) or not 1 <= read_mb <= MAX_AI_READ_MB:
+            raise ValueError(f"{AI_KIND}.ai_read_mb는 1~{MAX_AI_READ_MB} 사이의 MiB 정수여야 합니다")
+        out["ai_read_mb"] = read_mb
     return {AI_KIND: out} if out else None
 
 

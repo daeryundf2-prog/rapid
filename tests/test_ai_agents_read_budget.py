@@ -20,6 +20,8 @@ from rapidtriage.artifacts.ai_agents.base import (
     DEFAULT_AI_READ_MB,
     default_adapter_read_bytes,
 )
+from rapidtriage.artifacts.ai_agents.run_indirect import normalize_run_collector_options
+from rapidtriage.core.run import run_triage_mode
 from tests.fixtures.ai_agents import make_fixtures as mf
 
 FILE_COUNT = 300
@@ -120,6 +122,31 @@ class ReadBudgetTests(unittest.TestCase):
         self.assertEqual(len(sessions), FILE_COUNT)
         self.assertFalse((out / AI_SKIPPED_SIDECAR_NAME).exists())
         self.assertFalse([note for note in provider.collection_notes if "읽기 상한" in note])
+
+
+    def test_run_disclosure_and_sidecar(self) -> None:
+        """A kind-only run with ``collector_options["ai-agent"]["ai_read_mb"]`` (lane C path) carries
+        the budget note in the run disclosures and writes the sidecar into ``artifacts/``."""
+        out = self.tmp / "run-out"
+        summary = run_triage_mode(
+            self.tmp,
+            mode="seizure",
+            output_dir=out,
+            artifact_kinds=["ai-agent"],
+            collector_options=normalize_run_collector_options({"ai-agent": {"ai_read_mb": 1}}),
+            case_db=False,
+        )
+        notes = summary["disclosures"]["collection_notes"]["ai-agent"]
+        expected_skipped = FILE_COUNT - MIB // FILE_BYTES
+        self.assertTrue(any(f"AI 기록 읽기 상한 도달: claude-code {expected_skipped}파일 미수집" in note for note in notes), notes)
+        sidecar = json.loads((out / "artifacts" / AI_SKIPPED_SIDECAR_NAME).read_text(encoding="utf-8"))
+        self.assertEqual(sidecar["skipped_count"], expected_skipped)
+
+    def test_run_option_validation(self) -> None:
+        self.assertEqual(normalize_run_collector_options({"ai-agent": {"ai_read_mb": 512}}), {"ai-agent": {"ai_read_mb": 512}})
+        for bad in (0, -1, "64", True, 1.5):
+            with self.assertRaises(ValueError):
+                normalize_run_collector_options({"ai-agent": {"ai_read_mb": bad}})
 
 
 class BodyEmailDecisionTests(unittest.TestCase):
