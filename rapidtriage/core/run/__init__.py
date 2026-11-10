@@ -12,6 +12,7 @@ import time
 from collections import Counter
 from collections.abc import (
     Callable,
+    Collection,
     Iterator,
     Mapping,
     Sequence,
@@ -26,7 +27,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ...artifacts import all_providers, clear_collect_cache
-from ...artifacts.ai_agents.run_indirect import append_ai_indirect_rows
+from ...artifacts.ai_agents.run_indirect import AI_KIND, append_ai_indirect_rows
 from ..archive_image import (
     ArchiveImageExtractionError,
     ArchiveImageExtractionResult,
@@ -916,6 +917,9 @@ def _run_triage_stages(
         progress=progress,
         memory_check=record_memory_cap,
         collector_options=collector_options,
+        # The ai-agent output is completed after the files stage (run-level indirect rows) and
+        # written once there: the artifact files are never rewritten (I4).
+        deferred_write_kinds=(AI_KIND,),
     )
     write_result(artifact_scheduler_manifest, scheduler_path)
     for kind in profile.artifacts_kinds:
@@ -1128,6 +1132,7 @@ def _run_triage_stages(
         manifest_path=manifest_path,
         manifest_summary=manifest_summary,
     )
+    write_deferred_ai_output(artifact_results, artifact_payloads, artifact_outputs)
 
     carve_payload: dict[str, object] | None = None
     carve_output_path = output_dir / "carving" / "rapidtriage-carve.json"
@@ -1815,6 +1820,25 @@ def load_reusable_artifact_payload(artifact_path: Path) -> dict[str, object] | N
     return payload
 
 
+def write_deferred_ai_output(
+    artifact_results: Mapping[str, tuple[dict[str, object], Path, bool, bool]],
+    artifact_payloads: Mapping[str, dict[str, object]],
+    artifact_outputs: Mapping[str, Path],
+) -> None:
+    """Write the ``ai-agent`` output once, after the run-level indirect rows completed it
+    (``collect_artifact_stages(deferred_write_kinds=...)`` left it unwritten). A reused output is
+    already on disk and is rewritten only when the indirect step replaced its payload. Stage
+    checkpoints re-read output size from disk when written (``write_run_checkpoints``)."""
+    result = artifact_results.get(AI_KIND)
+    payload = artifact_payloads.get(AI_KIND)
+    path = artifact_outputs.get(AI_KIND)
+    if result is None or payload is None or path is None:
+        return
+    if result[2] and payload is result[0]:
+        return
+    write_result(payload, path)
+
+
 def collect_artifact_stages(
     input_root: InputRoot,
     kinds: Sequence[str],
@@ -1826,6 +1850,7 @@ def collect_artifact_stages(
     progress: RunProgress | None = None,
     memory_check: Callable[[str], None] | None = None,
     collector_options: Mapping[str, Mapping[str, object]] | None = None,
+    deferred_write_kinds: Collection[str] = (),
 ) -> tuple[dict[str, tuple[dict[str, object], Path, bool, bool]], dict[str, object]]:
     """Collect artifact kinds on the bounded worker pool.
 
@@ -1837,7 +1862,10 @@ def collect_artifact_stages(
     payloads are already on disk and are not rewritten. ``progress``
     (optional) receives queued/running/terminal state per kind;
     ``memory_check`` runs after every provider and fails the run fast when
-    it raises (memory cap).
+    it raises (memory cap). Kinds in ``deferred_write_kinds`` keep their
+    rows in the JSONL but their ``.json`` summary is left to the caller, which
+    completes the payload later and writes it once (``ai-agent``: run-level
+    indirect rows after the files stage).
     """
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     results: dict[str, tuple[dict[str, object], Path, bool, bool]] = {}
@@ -1904,7 +1932,8 @@ def collect_artifact_stages(
         )
         merged = finalize_artifact_payload(merged, records_path=artifact_records_path(artifact_path))
         results[kind] = (merged, artifact_path, False, True)
-        write_result(merged, artifact_path)
+        if kind not in deferred_write_kinds:
+            write_result(merged, artifact_path)
         if progress is not None:
             progress.provider_finished(
                 kind,
@@ -1987,8 +2016,10 @@ def collect_artifact_stages(
         results[kind] = (payload, artifact_path, False, False)
         # Persist each provider the moment it finishes (I4); the run does not
         # rewrite these files later. A cancelled provider's output holds the
-        # rows written before the cancel (``cancelled-partial``).
-        write_result(payload, artifact_path)
+        # rows written before the cancel (``cancelled-partial``). Deferred
+        # kinds are written once by the caller after completing the payload.
+        if kind not in deferred_write_kinds:
+            write_result(payload, artifact_path)
         cancelled = artifact_payload_cancelled(payload)
         if progress is not None:
             count = artifact_payload_count(payload)

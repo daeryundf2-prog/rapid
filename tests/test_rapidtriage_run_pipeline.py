@@ -149,6 +149,10 @@ class RunPipelineTests(unittest.TestCase):
                 self.assertEqual(len(recorded), 1, path)
                 on_disk = json.dumps(load_json(path), ensure_ascii=False, sort_keys=True)
                 self.assertEqual(on_disk, recorded[0])
+            # The ai-agent output is completed by the run-level indirect rows before its single
+            # write (R7 gate regression: it used to be rewritten after the artifact stage).
+            ai_output = artifact_outputs["artifacts_ai-agent"]
+            self.assertIn("ai_indirect", load_json(ai_output)["summary"])
 
     def test_failing_provider_is_isolated_and_other_outputs_persist(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

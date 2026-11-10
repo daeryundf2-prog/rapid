@@ -211,8 +211,11 @@ class IndirectHookTests(unittest.TestCase):
             self.assertEqual(manifest["providers"][0]["artifact_count"], 6)
             self.assertEqual(manifest_summary["providers"][0]["artifact_count"], 6)
             self.assertTrue((root / "out" / "manifest.json").is_file())
+            # The .json is the run's to write once (deferred artifact write): the hook only replaces
+            # the in-memory payload and the JSONL.
             on_disk = json.loads(ai_path.read_text(encoding="utf-8"))
-            self.assertEqual(on_disk["summary"]["ai_indirect"]["git_trailer_commits"], 2)
+            self.assertNotIn("ai_indirect", on_disk["summary"])
+            self.assertEqual(payloads["ai-agent"]["summary"]["ai_indirect"]["git_trailer_commits"], 2)
             self.assertTrue(all("artifact_record" in row for row in rows if row["details"].get("parser") in {"ai-tool-execution-match", "ai-git-trailers"}))
             notes, level = ai_step_notes("ai-agent", payloads["ai-agent"]["summary"])
             self.assertEqual(level, "notice")
