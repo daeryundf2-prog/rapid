@@ -21,6 +21,8 @@ from fastapi.responses import (
     PlainTextResponse,
 )
 
+from ...artifacts.ai_agents.run_indirect import normalize_run_collector_options
+from ...core.ai_report import ai_usage_gaps, ai_usage_summary
 from ...core.artifact_profiles import payload_record_count
 from ...core.columnar_store import query_columnar_artifact_records
 from ...core.eventlog_channels import ChannelFilter
@@ -450,6 +452,10 @@ def run_request_from_body(request: RunCreateRequest, *, root: str | None = None,
         except PlanTargetError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         skip_groups, skip_tasks = tuple(groups), tuple(tasks)
+    try:
+        collector_options = normalize_run_collector_options(request.collector_options)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return RunRequest(
         root=root if root is not None else request.root,
         mode=request.mode,
@@ -470,6 +476,7 @@ def run_request_from_body(request: RunCreateRequest, *, root: str | None = None,
         known_good_max_hash_bytes=request.known_good_max_hash_bytes,
         skip_groups=skip_groups,
         skip_tasks=skip_tasks,
+        collector_options=collector_options,
     )
 
 
@@ -579,6 +586,19 @@ def build_runs_router(
         except HTTPException:
             case_path = None
         return enrich_summary_counts(job.summary, case_path=case_path)
+
+    @router.get("/api/runs/{run_id}/ai-usage/gaps")
+    def get_run_ai_usage_gaps(run_id: str) -> dict[str, object]:
+        """AI 사용 gap report (R7 AI 갈래 C): ``{collected, tools: [{tool, tool_label, category,
+        category_label, evidence, evidence_labels, local_evidence, server_evidence_needed}],
+        categories: [...], note}``. ``local_evidence`` = the run holds session records of the tool;
+        presence / install / credential rows alone leave it ``false``. Read only; 409 while the run
+        has not finished."""
+        job = get_job(store, run_id)
+        if job.summary is None:
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
+        output_dir = job.summary.get("output_dir")
+        return ai_usage_gaps(ai_usage_summary(output_dir if isinstance(output_dir, str) else None))
 
 
     @router.get("/api/runs/{run_id}/capabilities")

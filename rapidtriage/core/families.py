@@ -15,6 +15,8 @@ Nothing is re-parsed: the relations come from fields the parsers already wrote.
   parsed from it (``details.container_backup_path`` + ``container_member``).
 * chat-message → chat-attachment rows of the same source row (``path``, ``conversation_id``,
   ``timestamp``, ``sender``; messages with ``attachment_count`` > 0 only).
+* ai-agent-session → its sub-agent sessions (``parent_session_id`` = the parent's ``session_id``,
+  same kind and ``tool``; R7 AI 갈래 C, relation ``subagent``).
 * carved rows (``recovery_method = carved``: carve analysis rows, carved files candidates) → the
   files row of the source file; a source that is no row is a virtual ``source::<path>`` parent.
 
@@ -50,6 +52,7 @@ RELATION_LABELS: dict[str, str] = {
     "extracted": "백업에서 추출",
     "chat-attachment": "대화 첨부",
     "carved": "카빙",
+    "subagent": "하위 세션",  # R7 AI 갈래 C: AI agent session -> sub-agent session
 }
 # Relations whose parent is a container: the child stays a top-level item (Nuix: mail stores).
 CONTAINER_RELATIONS = frozenset({"message"})
@@ -59,6 +62,7 @@ MAILBOX_TYPES = frozenset({"email-mailbox", "email-container-inventory"})
 ARCHIVE_TYPE = "archive-file-inventory"
 BACKUP_TYPE = "android-backup"
 BACKUP_MEMBER_TYPE = "android-backup-member"
+AI_SESSION_TYPE = "ai-agent-session"
 
 _LOCATOR = {
     "artifacts": re.compile(r"^/artifacts/(\d+)(?:(#entry:|#attachment:)(\d+))?$"),
@@ -258,6 +262,8 @@ def row_title(source: SourceRow) -> str:
         return text_of(details.get("message_text_preview"), 80) or "(본문 없음)"
     if kind == BACKUP_MEMBER_TYPE:
         return text_of(details.get("member_path") or details.get("member_name"))
+    if kind == AI_SESSION_TYPE:
+        return text_of(details.get("title") or details.get("agent_name") or details.get("session_id")) or "(AI 세션)"
     if source.collection == "analysis":
         signature = text_of(details.get("signature_kind")) or "카빙"
         offset = details.get("offset")
@@ -292,6 +298,9 @@ class _Collector:
     chat_attachments: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
     files_by_path: dict[str, str] = field(default_factory=dict)
     carved: list[tuple[str, str, str]] = field(default_factory=list)  # (ref, source norm path, source path)
+    # R7 AI 갈래 C: (kind, tool, session id) -> session ref; sub-agent sessions naming a parent session.
+    ai_sessions: dict[tuple[str, str, str], str] = field(default_factory=dict)
+    ai_children: list[tuple[str, tuple[str, str, str]]] = field(default_factory=list)
 
 
 def _mail_key(source: SourceRow, details: Mapping[str, object]) -> tuple[str, ...]:
@@ -396,6 +405,14 @@ class FamilyBuilder:
         elif artifact_type == "chat-attachment":
             c.chat_attachments.append((ref, _chat_key(source, details)))
             self._remember(source, ref)
+        elif artifact_type == AI_SESSION_TYPE:
+            tool, session_id = text_of(details.get("tool"), 200), text_of(details.get("session_id"), 1000)
+            if session_id:
+                c.ai_sessions.setdefault((source.kind, tool, session_id), ref)
+            parent_id = text_of(details.get("parent_session_id"), 1000)
+            if parent_id and parent_id != session_id:
+                c.ai_children.append((ref, (source.kind, tool, parent_id)))
+            self._remember(source, ref)
         if details.get("container_member") and details.get("container_backup_path"):
             c.extracted.append((ref, (norm_path(details.get("container_backup_path")), text_of(details.get("container_member"), 1000))))
             self._remember(source, ref)
@@ -445,6 +462,10 @@ class FamilyBuilder:
             elif parent not in index.nodes:
                 self._node(parent, text_of(base_name(source_path)), "file")
             index.add(parent, child, "carved")
+        for child, key in c.ai_children:
+            parent = c.ai_sessions.get(key)
+            if parent is not None:
+                index.add(parent, child, "subagent")
         # Drop node infos of rows that ended up without any relation.
         linked = set(index.parent) | set(index.children)
         index.nodes = {ref: info for ref, info in index.nodes.items() if ref in linked}

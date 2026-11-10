@@ -62,6 +62,9 @@ NO_IDENTIFIER_FAMILIES = frozenset(
         "timezone",  # one registry value
         "web-upload-candidate",  # restates its source row (r2 console fix m3)
         "messenger-error",  # store read failures (r2 console fix m2)
+        "ai-message",  # AI agent message bodies (masked text; identifiers live on the session row)
+        "ai-mcp-server",  # MCP server name / masked command or URL (not an account, path or visit)
+        "ai-code",  # AI code attribution / usage counters (commit ids, line counts)
         "email-client-error",  # mail client store read failures (r5 L1)
         "ntfs-logfile-transaction",  # LSN / op codes; file names are bare candidates, not paths (R3 §3.3)
         "logon-banner",  # caption/text of a legal notice (R5 L2)
@@ -184,8 +187,10 @@ class CatalogSemanticTests(unittest.TestCase):
         # + R5 L3 (11: location-url-candidate, browser-analytics-cookie, carved-url-candidate, 6 p2p, 2 android-backup)
         # + R5 L2 (15: startup, banner, Office x2, SSH x5, VM, wallet, AV, wallpaper, credential stores, NTFS volume)
         # + R6 S2 lane A (1: av-product-presence)
-        # + timeline/grid readability C8 (2: shimcache, amcache-file).
-        self.assertEqual(len(catalog.families), 122)
+        # + timeline/grid readability C8 (2: shimcache, amcache-file)
+        # + R7 AI lane C (9: ai-tool, ai-session, ai-message, ai-tool-call, ai-file-touch, ai-mcp-server,
+        #   ai-config, ai-account, ai-code).
+        self.assertEqual(len(catalog.families), 131)
         for family in catalog.families:
             columns = [*family["core_columns"], *(family.get("aux_columns") or [])]
             tagged = [column for column in columns if column.get("semantic")]

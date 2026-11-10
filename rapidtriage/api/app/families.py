@@ -86,6 +86,7 @@ FAMILY_PROBES: tuple[bytes, ...] = (
     b'"chat-message"',
     b'"chat-attachment"',
     b'"container_member"',
+    b'"ai-agent-session"',  # R7 AI 갈래 C: session -> sub-agent session
 )
 ARTIFACT_PROBES: tuple[bytes, ...] = tuple(dict.fromkeys(FAMILY_PROBES + IRREGULAR_PROBES))
 # Exact probes for the (small) shared profiles of a kind.
@@ -99,6 +100,7 @@ LINE_PROBES: tuple[bytes, ...] = (
     b'"android-backup',
     b'"chat-',
     b'"container_member"',
+    b'"ai-agent-session"',
     b'"file-signature-mismatch"',
     b'"parser_error"',
     b'"parse_status"',

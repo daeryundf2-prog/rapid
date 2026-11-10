@@ -142,6 +142,9 @@
       "delete": "delete_run_api_runs__run_id__delete",
       "get": "get_run_api_runs__run_id__get"
     },
+    "/api/runs/{run_id}/ai-usage/gaps": {
+      "get": "get_run_ai_usage_gaps_api_runs__run_id__ai_usage_gaps_get"
+    },
     "/api/runs/{run_id}/analyses": {
       "get": "list_analyses_api_runs__run_id__analyses_get",
       "post": "create_analysis_api_runs__run_id__analyses_post"

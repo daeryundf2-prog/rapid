@@ -112,6 +112,7 @@ def run_triage_stage(
     artifact_payloads: Mapping[str, Mapping[str, object]] | None = None,
     files_path: Path | None = None,
     files_payload: Mapping[str, object] | None = None,
+    params: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     """Run the engine over a run's outputs into a new ``analyses/run-triage-flags-<time>-<hex>/``; returns the run-summary step row."""
     root = Path(output_dir) / ANALYSES_DIR_NAME
@@ -135,6 +136,7 @@ def run_triage_stage(
             ),
             directory,
             source_label="run-stage",
+            params=params,
             progress=Progress(begin=lambda kind, _index, _count: sources.append(kind)),
         )
     except Exception as exc:  # the run never fails on the triage pass

@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
 
+from .ai_report import AI_SECTION_ID, ai_usage_section_lines, ai_usage_summary
 from .korean_report import TEMPLATE_ID as KOREAN_EXPERT_TEMPLATE_ID
 from .korean_report import build_korean_expert_report
 
@@ -151,6 +152,12 @@ def build_case_report_markdown(
         lines.append("- 저장된 compare 리뷰 항목 없음.")
     lines.append("")
 
+    # R7 AI 갈래 C: "AI 사용" section with the server-side evidence gap table (report option
+    # ``sections``: absent = default on, ``["ai-usage"]`` on, ``[]`` off; a run without the
+    # ai-agent kind still gets the gap table).
+    if report_section_enabled(metadata, AI_SECTION_ID) and run_summary:
+        lines.extend(ai_usage_section_lines(ai_usage_summary(run_summary.get("output_dir")), metadata=metadata))
+
     lines.extend(["## 5. 제출 증거 및 해시값", ""])
     items = submission_manifest.get("items")
     if isinstance(items, list) and items:
@@ -257,6 +264,14 @@ def build_case_report_markdown(
                     lines.append(f"- `{item.get('step', '')}` [{item.get('level', '')}]: {item.get('message', '')}")
             lines.append("")
     return "\n".join(lines)
+
+
+def report_section_enabled(metadata: Mapping[str, object], section_id: str) -> bool:
+    """Optional section ``section_id``: on unless the request's ``sections`` list omits it."""
+    sections = metadata.get("sections")
+    if sections is None:
+        return True
+    return isinstance(sections, (list, tuple)) and section_id in sections
 
 
 def template_noise_policy(template: str) -> str:
@@ -471,6 +486,7 @@ def render_case_report_html(markdown: str) -> str:
     in_list = False
     in_code = False
     code_lines: list[str] = []
+    table_rows: list[str] = []
 
     for raw_line in markdown.splitlines():
         line = raw_line.rstrip()
@@ -489,7 +505,13 @@ def render_case_report_html(markdown: str) -> str:
             continue
         if not stripped:
             in_list = close_list(body, in_list)
+            table_rows = flush_table(body, table_rows)
             continue
+        if stripped.startswith("|") and stripped.endswith("|"):
+            in_list = close_list(body, in_list)
+            table_rows.append(stripped)
+            continue
+        table_rows = flush_table(body, table_rows)
         if stripped.startswith("# "):
             in_list = close_list(body, in_list)
             title = strip_markdown_inline(stripped[2:])
@@ -513,6 +535,7 @@ def render_case_report_html(markdown: str) -> str:
             body.append(f"<p>{render_inline_markdown(stripped)}</p>")
     if in_code:
         body.append(f"<pre><code>{html.escape(chr(10).join(code_lines))}</code></pre>")
+    flush_table(body, table_rows)
     close_list(body, in_list)
     return "\n".join(
         [
@@ -531,6 +554,7 @@ def render_case_report_html(markdown: str) -> str:
             "blockquote{margin:1rem 0;padding:.75rem 1rem;border-left:4px solid #9f7b4d;background:#faf6ef}",
             "code{background:#f4efe6;padding:.1rem .3rem;border-radius:4px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#162326;color:#f6efe1;padding:1rem;border-radius:10px}",
             "li{margin:.25rem 0}ul{padding-left:1.35rem}",
+            "table{border-collapse:collapse;margin:1rem 0;width:100%;font-size:.92rem}th,td{border:1px solid #dccfbd;padding:.35rem .5rem;text-align:left;vertical-align:top}th{background:#faf6ef}",
             ".meta{margin-bottom:1.5rem;color:#5b645f;font-size:.92rem}",
             "</style>",
             "</head>",
@@ -545,6 +569,22 @@ def render_case_report_html(markdown: str) -> str:
 
 def report_export_csp() -> str:
     return "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+
+
+def flush_table(body: list[str], rows: list[str]) -> list[str]:
+    """Render collected Markdown table lines (``| a | b |``; a ``| --- |`` second line marks the header)."""
+    if not rows:
+        return rows
+    cells = [[cell.strip() for cell in row.strip("|").split("|")] for row in rows]
+    has_header = len(cells) > 1 and all(cell and set(cell) <= set("-: ") for cell in cells[1])
+    body.append("<table>")
+    for index, row in enumerate(cells):
+        if has_header and index == 1:
+            continue
+        tag = "th" if has_header and index == 0 else "td"
+        body.append("<tr>" + "".join(f"<{tag}>{render_inline_markdown(cell)}</{tag}>" for cell in row) + "</tr>")
+    body.append("</table>")
+    return []
 
 
 def close_list(body: list[str], in_list: bool) -> bool:

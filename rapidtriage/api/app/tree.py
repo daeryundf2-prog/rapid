@@ -137,7 +137,12 @@ KIND_LABELS: dict[str, str] = {
 # kind -> the record field counted per value and artifact_type
 # (``field_type_counts``; the console's per-browser / per-app nodes and the
 # ``browser=`` / ``service=`` filters of ``GET /artifacts``).
-FIELD_FACET_KINDS: dict[str, str] = {"browser": "browser", "windows-messenger": "service"}
+FIELD_FACET_KINDS: dict[str, tuple[str, ...]] = {
+    "browser": ("browser",),
+    "windows-messenger": ("service",),
+    # R7 AI: presence rows by trace source / install kind (갈래 D 도구·설치 views).
+    "ai-agent": ("install_kind", "source"),
+}
 # kind -> (inventory artifact_type, status field): rows counted by status with
 # their Korean ``reason`` (``inventory_notes``; why a typed node is empty —
 # PST tools switched off / missing, KakaoTalk key material missing).
@@ -163,11 +168,11 @@ def _file_signature(path: Path | None) -> tuple[object, ...]:
 
 def scan_kind_facets(payload: Mapping[str, object], payload_path: Path, kind: str) -> dict[str, Any]:
     """``field_type_counts`` / ``inventory_notes`` of one kind output (one bounded row scan)."""
-    field = FIELD_FACET_KINDS.get(kind)
+    fields = FIELD_FACET_KINDS.get(kind, ())
     note = INVENTORY_NOTE_KINDS.get(kind)
-    if field is None and note is None:
+    if not fields and note is None:
         return {}
-    by_value: dict[str, dict[str, int]] = {}
+    by_field: dict[str, dict[str, dict[str, int]]] = {field: {} for field in fields}
     notes: dict[str, dict[str, Any]] = {}
     truncated = False
     for scanned, (_index, row) in enumerate(iter_artifact_records(payload, payload_path=payload_path)):
@@ -175,10 +180,10 @@ def scan_kind_facets(payload: Mapping[str, object], payload_path: Path, kind: st
             truncated = True
             break
         artifact_type = str(row.get("artifact_type") or "")
-        if field is not None:
+        for field in fields:
             value = record_field_value(row, field)
             if value:
-                per_type = by_value.setdefault(value, {})
+                per_type = by_field[field].setdefault(value, {})
                 per_type[artifact_type] = per_type.get(artifact_type, 0) + 1
         if note is not None and artifact_type == note[0]:
             status = record_field_value(row, note[1]) or "unknown"
@@ -194,9 +199,10 @@ def scan_kind_facets(payload: Mapping[str, object], payload_path: Path, kind: st
             )
             entry["count"] += 1
     facets: dict[str, Any] = {}
-    if field is not None:
+    if fields:
         facets["field_type_counts"] = {
             field: {value: dict(sorted(types.items())) for value, types in sorted(by_value.items())}
+            for field, by_value in by_field.items()
         }
     if note is not None:
         facets["inventory_notes"] = sorted(notes.values(), key=lambda item: (-int(item["count"]), str(item["status"])))
