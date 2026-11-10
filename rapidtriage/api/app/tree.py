@@ -11,6 +11,7 @@ near the top of the pretty-printed output).
 from __future__ import annotations
 
 import json
+import re
 import threading
 from collections import OrderedDict
 from collections.abc import Mapping
@@ -49,6 +50,7 @@ from .jsonl_records import iter_artifact_records, jsonl_records_path
 from .triage_flags import kind_flag_counts, tree_flags_section
 
 SUMMARY_SCAN_BYTES = 65536
+_JSON_WHITESPACE = re.compile(r"[ \t\n\r]*")
 
 # Rows that are pivots/strings, not evidence records (W2 ``*-string-candidate``).
 NON_EVIDENCE_TYPE_SUFFIXES: tuple[str, ...] = ("-string-candidate",)
@@ -252,8 +254,12 @@ def read_output_key(path: Path, key: str) -> Any:
         if marker >= 0:
             colon = head.find(":", marker)
             if colon >= 0:
+                # raw_decode does not skip whitespace: pretty-printed outputs put a space (or a
+                # newline) after the colon, which made every head scan miss and fall back to a
+                # full parse (302 MB rapidtriage-files.json: 3.3 s on the first /tree, R7 S1).
+                start = _JSON_WHITESPACE.match(head, colon + 1).end()
                 try:
-                    decoded, _ = json.JSONDecoder().raw_decode(head, colon + 1)
+                    decoded, _ = json.JSONDecoder().raw_decode(head, start)
                     return decoded
                 except json.JSONDecodeError:
                     pass

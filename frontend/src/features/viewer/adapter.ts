@@ -45,6 +45,7 @@ import type { GridRow } from "../../contracts/collection";
 import type { Command, CommandContext } from "../../contracts/command";
 import type { ViewerMode, ViewerTarget } from "../../contracts/viewer";
 import { useAppStore } from "../../state/store";
+import { useFullArtifactRow } from "./fullRow";
 import { resetViewerSession } from "./session";
 
 // ---------------------------------------------------------------------------
@@ -147,9 +148,14 @@ export function setViewerRouteMode(mode: ViewerMode | undefined): void {
   if (state.routeMode !== mode) setState({ routeMode: mode });
 }
 
-/** Row context for the current target only (a stale row for another target is ignored). */
+/**
+ * Row context for the current target only (a stale row for another target is ignored). A grid
+ * row whose `details` the server compacted gets its full `details` once loaded (fullRow.ts).
+ */
 export function useViewerRowContext(): GridRow | null {
-  return useAdapter((s) => (rowMatches(s.row, s.target) ? s.row : null));
+  const row = useAdapter((s) => (rowMatches(s.row, s.target) ? s.row : null));
+  const runId = useAdapter((s) => s.target?.runId ?? null);
+  return useFullArtifactRow(runId, row);
 }
 
 /** Route `q=` keywords (S1 store); falls back to parsing the hash when no case is routed. */

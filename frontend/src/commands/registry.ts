@@ -6,7 +6,7 @@
  *
  * Shortcuts: a command's `shortcut` must be one of the canonical keys in
  * KEY_MAP (U5) and no two commands may hold the same key; registering a
- * conflicting or non-canonical shortcut throws.
+ * conflicting or non-canonical shortcut throws; a duplicate id is skipped with a warning.
  */
 
 import { useMemo, useSyncExternalStore } from "react";
@@ -103,10 +103,18 @@ export function getCommandsSnapshot(): readonly Command[] {
   return snapshot;
 }
 
-/** Register a command; returns its unregister function. Throws on id or shortcut conflicts. */
+const NOOP = (): void => {};
+
+/**
+ * Register a command; returns its unregister function. A duplicate id is skipped with a
+ * console warning (data-driven ids such as tree nodes must never blank the console); the
+ * first registration keeps the id. Non-canonical or conflicting shortcuts still throw —
+ * those are static programming errors the tests catch.
+ */
 export function registerCommand(command: Command): () => void {
   if (commands.has(command.id)) {
-    throw new CommandRegistrationError(`명령 id 중복: ${command.id}`);
+    console.warn(`[commands] 명령 id 중복 — 건너뜀: ${command.id}`);
+    return NOOP;
   }
   let key: string | undefined;
   if (command.shortcut) {

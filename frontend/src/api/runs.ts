@@ -302,7 +302,8 @@ export function getRun(runId: string): Promise<RunJob> {
 }
 
 export function getRunSummary(runId: string): Promise<RunSummary> {
-  return api<RunSummary>(`/api/runs/${encodeURIComponent(runId)}/summary`);
+  // compact=1 (R7 S1): without the per-file lists the case report embeds (2.2 → 0.4 MB on IMG-B).
+  return api<RunSummary>(`/api/runs/${encodeURIComponent(runId)}/summary?compact=1`);
 }
 
 export interface TreeNode {
@@ -620,6 +621,11 @@ export interface ArtifactsQuery {
   channel_group?: string[];
   /** Row conditions (r4 §2.3): `from`, `to`, `weekday`, `hours`, `offhours`, `tz`, `partial`, `content`, `geo`. */
   conditions?: Record<string, string | string[]>;
+  /**
+   * Grid listing (R7 S1): `compact=1` leaves large nested `details` values out of each row (named in
+   * `details_omitted`); the viewer loads the one full row (features/viewer/fullRow.ts).
+   */
+  compact?: boolean;
 }
 
 export function artifactsQueryString(query: ArtifactsQuery): string {
@@ -643,5 +649,6 @@ export function artifactsQueryString(query: ArtifactsQuery): string {
     params.set("order", query.order ?? "asc");
     if (query.locate !== undefined) params.set("locate", String(query.locate));
   }
+  if (query.compact) params.set("compact", "1");
   return params.toString();
 }

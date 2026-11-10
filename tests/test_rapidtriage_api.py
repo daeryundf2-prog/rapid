@@ -4717,6 +4717,88 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(pdf["download_url"], f"/api/runs/{run_id}/case-report/file/pdf")
             self.assertEqual(client.get("/api/runs/missing/dashboard").status_code, 404)
 
+    def test_dashboard_partitions_keep_number_zero_and_stay_unique(self) -> None:
+        from rapidtriage.api.app.dashboard import _normalize_partitions
+
+        def row(slot: int | None, number: int | None, start: int) -> dict[str, object]:
+            return {"slot": slot, "partition_number": number, "start_sector": start, "filesystem_guess": "ntfs"}
+
+        # GPT tables number partitions from 0; 0 must not be treated as "missing".
+        gpt = _normalize_partitions(
+            {"partition_table": [row(0, 0, 2048), row(1, 1, 4096), row(2, 2, 8192)], "partition_start_sector": 4096}
+        )
+        self.assertEqual([p["number"] for p in gpt], [0, 1, 2])
+        self.assertEqual([p["index"] for p in gpt], [1, 2, 3])
+        self.assertEqual([p["selected"] for p in gpt], [False, True, False])
+        # Duplicate / missing numbers fall back to a unique value.
+        dup = _normalize_partitions(
+            {"partition_table": [row(None, 1, 1), row(None, 1, 2), row(None, None, 3), row(None, 2, 4)]}
+        )
+        numbers = [p["number"] for p in dup]
+        self.assertEqual(len(set(numbers)), len(numbers), numbers)
+        self.assertEqual(numbers[0], 1)
+
+    def test_tree_summary_head_scan_reads_pretty_printed_outputs_without_full_parse(self) -> None:
+        from unittest.mock import patch
+
+        from rapidtriage.api.app import tree
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "rapidtriage-files.json"
+            payload = {"command": "files", "summary": {"scanned_file_count": 3}, "files": [{"p": "x" * 64}] * 4000}
+            for indent, newline in ((2, "\n"), (2, "\r\n"), (None, "\n")):
+                text = json.dumps(payload, indent=indent)
+                path.write_bytes(text.replace("\n", newline).encode("utf-8"))
+                self.assertGreater(path.stat().st_size, tree.SUMMARY_SCAN_BYTES)
+                with patch.object(tree, "read_output_json", side_effect=AssertionError("full parse")):
+                    self.assertEqual(tree.read_output_summary(path), {"scanned_file_count": 3})
+
+    def test_compact_views_drop_large_nested_details_and_summary_file_lists(self) -> None:
+        from rapidtriage.api.app.compact_views import (
+            COMPACT_NESTED_MAX_BYTES,
+            compact_artifact_row,
+            compact_artifacts_response,
+            compact_run_summary,
+        )
+
+        big = {"profile": "x" * (COMPACT_NESTED_MAX_BYTES + 10)}
+        row = {
+            "record_index": 7,
+            "details": {
+                "name": "a" * 4000,  # long scalars stay (grid columns / filters)
+                "size": 1,
+                "risk_flags": ["r"] * 300,  # scalar arrays stay (promotable columns)
+                "source_hashes": {"sha256": "ab" * 32},  # small nested stays
+                "mft_full_parser_profile": big,
+                "raw": [big],
+            },
+        }
+        compacted = compact_artifact_row(row)
+        self.assertEqual(compacted["details_omitted"], ["mft_full_parser_profile", "raw"])
+        self.assertEqual(set(compacted["details"]), {"name", "size", "risk_flags", "source_hashes"})
+        self.assertEqual(compacted["record_index"], 7)
+        self.assertIn("raw", row["details"])  # the source row is not mutated
+        small = {"record_index": 1, "details": {"a": 1}}
+        self.assertIs(compact_artifact_row(small), small)
+        self.assertNotIn("details_omitted", small)
+        response = {"artifacts": {"windows-filesystem": {"artifacts": [row, small]}}}
+        compact_artifacts_response(response)
+        rows = response["artifacts"]["windows-filesystem"]["artifacts"]
+        self.assertEqual(rows[0]["details_omitted"], ["mft_full_parser_profile", "raw"])
+
+        summary = {
+            "summary": {"counts": {"files": 2}},
+            "source": {"type": "e01", "recovered_root_manifest": {"root": "r", "files": [{"p": 1}, {"p": 2}]}},
+            "safety": {"input_fingerprint": {"summary": {"n": 2}, "files": [{"p": 1}]}},
+        }
+        slim = compact_run_summary(summary)
+        self.assertEqual(slim["source"]["recovered_root_manifest"], {"root": "r", "files_omitted": 2})
+        self.assertEqual(slim["source"]["type"], "e01")
+        self.assertEqual(slim["safety"]["input_fingerprint"], {"summary": {"n": 2}, "files_omitted": 1})
+        self.assertEqual(slim["summary"], summary["summary"])
+        self.assertEqual(len(summary["source"]["recovered_root_manifest"]["files"]), 2)  # not mutated
+        self.assertEqual(compact_run_summary({"steps": []}), {"steps": []})
+
     def test_run_case_notes_round_trip_and_feed_the_case_report(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             run_dir, run_id, client = self._dashboard_run_fixture(temp)

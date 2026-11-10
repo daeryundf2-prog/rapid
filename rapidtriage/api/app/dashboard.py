@@ -137,17 +137,34 @@ def _partition_rows(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     return [row for row in table if isinstance(row, Mapping)] if isinstance(table, list) else []
 
 
+def _unique_partition_number(row: Mapping[str, Any], index: int, used: set[int]) -> int:
+    """Partition number for display: 0 is a valid number (mmls/GPT slot 0), so only
+    ``None`` falls through. A number already taken falls back to the 1-based row
+    index (then the next free integer) so ``number`` stays unique per source."""
+    number = _int_or_none(row.get("partition_number"))
+    if number is None:
+        number = _int_or_none(row.get("slot"))
+    if number is None or number in used:
+        number = index
+        while number in used:
+            number += 1
+    used.add(number)
+    return number
+
+
 def _normalize_partitions(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
     selection = payload.get("partition_selection") if isinstance(payload.get("partition_selection"), Mapping) else {}
     selected_sector = _int_or_none(selection.get("selected_start_sector"))
     if selected_sector is None:
         selected_sector = _int_or_none(payload.get("partition_start_sector"))
     partitions: list[dict[str, Any]] = []
+    used_numbers: set[int] = set()
     for index, row in enumerate(_partition_rows(payload), start=1):
         start = _int_or_none(row.get("start_sector"))
         partitions.append(
             {
-                "number": _int_or_none(row.get("partition_number")) or _int_or_none(row.get("slot")) or index,
+                "index": index,
+                "number": _unique_partition_number(row, index, used_numbers),
                 "description": str(row.get("description") or ""),
                 "filesystem": str(row.get("filesystem_guess") or "unknown"),
                 "size_bytes": _int_or_none(row.get("size_bytes")),

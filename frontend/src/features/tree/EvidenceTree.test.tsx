@@ -284,6 +284,54 @@ describe("EvidenceTree (탐색 domain tree)", () => {
 });
 
 describe("tree commands", () => {
+  it("keeps partition node/command ids unique when partition numbers repeat or start at 0", () => {
+    const partition = (number: number, selected = false) => ({
+      number,
+      description: "",
+      filesystem: "ntfs",
+      size_bytes: 1024,
+      start_sector: number * 2048,
+      byte_offset: null,
+      selected,
+      recommended: false,
+    });
+    const model = buildTreeModel({
+      summary: { summary: { counts } },
+      evidence: {
+        path: "D:/x.E01",
+        name: "x.E01",
+        kind: "image",
+        image_output: "rapidtriage-e01.json",
+        size_bytes: null,
+        // What the pre-fix server sent for a GPT disk numbered from 0: two "1"s.
+        partitions: [partition(1), partition(1), partition(2), partition(3, true)],
+        selected_partition: 3,
+      },
+    });
+    const ids: string[] = [];
+    const visit = (nodes: TreeModelNode[]) => {
+      for (const node of nodes) {
+        ids.push(node.id);
+        if (node.children) visit(node.children);
+      }
+    };
+    visit(model);
+    const partitionIds = ids.filter((id) => id.startsWith("evidence:partition:"));
+    expect(partitionIds).toEqual([
+      "evidence:partition:1",
+      "evidence:partition:2",
+      "evidence:partition:3",
+      "evidence:partition:4",
+    ]);
+    expect(new Set(ids).size).toBe(ids.length);
+    const commandIds = buildTreeCommands("r1", model).map((c) => c.id);
+    expect(new Set(commandIds).size).toBe(commandIds.length);
+    // Labels still show the partition's own number.
+    const labels = model[0]?.children?.[0]?.children?.map((n) => n.label) ?? [];
+    expect(labels[0]).toContain("파티션 1");
+    expect(labels[1]).toContain("파티션 1");
+  });
+
   it("registers one tree.goto.* command per node with disabled reasons", () => {
     const model = buildTreeModel({ summary: { summary: { counts } } });
     const commands = buildTreeCommands("r1", model);

@@ -547,7 +547,11 @@ async function crossKindRequest(
   signal?: AbortSignal,
 ): Promise<{ artifacts?: Record<string, ArtifactKindPage>; cross_kind?: CrossKindBlock }> {
   const params = new URLSearchParams(
-    artifactsQueryString({ ...query, offset: query.after ? undefined : query.offset || undefined }),
+    artifactsQueryString({
+      ...query,
+      offset: query.after ? undefined : query.offset || undefined,
+      compact: true,
+    }),
   );
   if (query.after) params.set("after", query.after);
   return api(`/api/runs/${enc(runId)}/artifacts?${params}`, { signal });
@@ -742,7 +746,8 @@ async function artifactWindow(
   query: ArtifactsQuery,
   signal?: AbortSignal,
 ): Promise<Record<string, ArtifactKindPage>> {
-  const url = `/api/runs/${enc(runId)}/artifacts?${artifactsQueryString({ ...query, offset: query.offset || undefined })}`;
+  // Grid pages are compact (R7 S1): the viewer loads a row's full details itself (fullRow.ts).
+  const url = `/api/runs/${enc(runId)}/artifacts?${artifactsQueryString({ ...query, offset: query.offset || undefined, compact: true })}`;
   let payload: { artifacts?: Record<string, ArtifactKindPage> };
   try {
     payload = await api<{ artifacts?: Record<string, ArtifactKindPage> }>(url, { signal });
