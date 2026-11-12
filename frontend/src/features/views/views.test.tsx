@@ -19,6 +19,7 @@ import { barsFromRows, barsFromTree, rangeOf, rebucket, type TimelineHistogramPa
 import { loadThumbBlob, THUMB_CONCURRENCY, THUMB_SIZE, ThumbnailView } from "./ThumbnailView";
 import { createLimiter, gridMove, isImageRow, sortThumbs } from "./thumbnails";
 import { useToolbarLead } from "./toolbarSlot";
+import { autoLoadPending } from "./useViewRows";
 
 let restoreLayout: () => void = () => {};
 
@@ -373,6 +374,37 @@ describe("ThumbnailView", () => {
     );
     const thumb = calls.find((c) => c.url.includes("/source-thumbnail"));
     expect(new URL(thumb?.url ?? "", "http://x").searchParams.get("size")).toBe(String(THUMB_SIZE));
+  });
+
+  it("settles the toolbar once enough tiles are loaded though the server has more rows (r8 verify F4)", async () => {
+    installFetch({
+      "/files": () =>
+        jsonResponse({
+          candidates: Array.from({ length: 60 }, (_, i) => ({
+            path: `C:/case/img${String(i).padStart(2, "0")}.jpg`,
+            name: `img${String(i).padStart(2, "0")}.jpg`,
+            extension: "jpg",
+          })),
+          total: 100_000,
+        }),
+      "/artifacts": () => jsonResponse({ artifacts: {} }),
+      "/source-thumbnail": () => new Response("thumb", { status: 200 }),
+    });
+    renderQ(<ThumbnailView />);
+    expect(await screen.findByRole("grid", { name: /이미지 60개/ })).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByText(/이미지 60건 \(\d+행 검사\)/).textContent).not.toContain("불러오는 중"),
+    );
+  });
+
+  it("autoLoadPending: in flight or still auto-paging only (r8 verify F4)", () => {
+    const base = { isFetching: false, canLoadMore: true, loadedCount: 100, error: null };
+    expect(autoLoadPending(base, false, 1000)).toBe(false); // enough rows: more on the server is not loading
+    expect(autoLoadPending(base, true, 1000)).toBe(true);
+    expect(autoLoadPending({ ...base, loadedCount: 1000 }, true, 1000)).toBe(false); // capped → 더 불러오기
+    expect(autoLoadPending({ ...base, error: new Error("x") }, true, 1000)).toBe(false); // failed page
+    expect(autoLoadPending({ ...base, canLoadMore: false }, true, 1000)).toBe(false);
+    expect(autoLoadPending({ ...base, isFetching: true }, false, 1000)).toBe(true);
   });
 
   it("explains an empty node", async () => {

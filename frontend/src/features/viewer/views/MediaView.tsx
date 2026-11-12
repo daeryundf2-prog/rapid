@@ -44,8 +44,22 @@ export function MediaView({ runId, preview, onCopy }: MediaViewProps) {
   );
   const playerRef = useRef<HTMLMediaElement | null>(null);
   const [cueError, setCueError] = useState<string | null>(null);
+  // The player's own length (loadedmetadata) when the metadata has none (r8 verify F5).
+  // Keyed by the blob URL so another file never shows the previous player's length.
+  const [playerDuration, setPlayerDuration] = useState<{ url: string; seconds: number } | null>(null);
+  const onLoadedMetadata = (event: { currentTarget: HTMLMediaElement }) => {
+    const seconds = event.currentTarget.duration;
+    if (blob.url && Number.isFinite(seconds) && seconds >= 0) setPlayerDuration({ url: blob.url, seconds });
+  };
   const sidecars = media.transcript_sidecars || [];
   const metadata = media.metadata || {};
+  const metaSeconds = metadata.duration_seconds;
+  const durationSeconds =
+    typeof metaSeconds === "number" && Number.isFinite(metaSeconds) && metaSeconds >= 0
+      ? metaSeconds
+      : playerDuration && playerDuration.url === blob.url
+        ? playerDuration.seconds
+        : null;
 
   const seek = (start: string | undefined) => {
     const seconds = parseCueTime(start);
@@ -88,6 +102,7 @@ export function MediaView({ runId, preview, onCopy }: MediaViewProps) {
           src={blob.url}
           controls
           preload="metadata"
+          onLoadedMetadata={onLoadedMetadata}
           aria-label={`${preview.name} 재생`}
         />
       ) : (
@@ -100,11 +115,12 @@ export function MediaView({ runId, preview, onCopy }: MediaViewProps) {
           src={blob.url}
           controls
           preload="metadata"
+          onLoadedMetadata={onLoadedMetadata}
           aria-label={`${preview.name} 재생`}
         />
       )}
       <p className="viewer-note">
-        {mime || "미디어"} · {formatMediaDuration(metadata.duration_seconds)}
+        {mime || "미디어"} · {formatMediaDuration(durationSeconds)}
         {metadata.sample_rate ? ` · 샘플레이트 ${metadata.sample_rate}` : ""}
         {metadata.audio_channels ? ` · 채널 ${metadata.audio_channels}` : ""}
       </p>

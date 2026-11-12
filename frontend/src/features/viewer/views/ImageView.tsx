@@ -9,6 +9,7 @@ import {
 } from "../../../api/viewer";
 import "../../review/review.css";
 import { useViewPrefs } from "../../review/viewPrefs";
+import { ThumbGlyph } from "../../views/ThumbGlyph";
 import { errorText, useAsync, useBlobUrl } from "../useAsync";
 import { latestOcrFailure } from "./ocrFailure";
 
@@ -26,10 +27,21 @@ function AuthImage({
   className?: string;
 }) {
   const image = useBlobUrl(`${runId}|${path}`, (signal) => fetchSourceBlob(runId, path, signal));
+  // A blob the browser cannot decode: the 썸네일 보기's "미리보기 없음" glyph tile instead of the
+  // broken-image icon (r8 verify F2), once per URL (no retry).
+  const [brokenUrl, setBrokenUrl] = useState<string | null>(null);
   if (image.status === "error")
     return <span className="viewer-error">이미지를 불러오지 못했습니다: {image.error}</span>;
   if (!image.url) return <span className="viewer-note">이미지 불러오는 중…</span>;
-  return <img src={image.url} alt={alt} className={className} />;
+  if (image.url === brokenUrl) {
+    return (
+      <span className={`${className ?? ""} image-glyph`} data-testid="image-glyph">
+        <ThumbGlyph path={path} withheld={false} />
+      </span>
+    );
+  }
+  const url = image.url;
+  return <img src={url} alt={alt} className={className} onError={() => setBrokenUrl(url)} />;
 }
 
 interface ImageViewProps {

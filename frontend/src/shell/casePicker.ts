@@ -41,6 +41,12 @@ export function caseStatusLabel(status: string): string {
   return STATUS_LABEL[status] ?? status;
 }
 
+/** Why a run cannot be deleted from the picker (a queued / running run), or undefined. */
+export const RUN_ACTIVE_DELETE_REASON = "실행 중인 런은 먼저 취소해야 합니다";
+export function runDeleteReason(status: string): string | undefined {
+  return status === "queued" || status === "running" ? RUN_ACTIVE_DELETE_REASON : undefined;
+}
+
 /** ISO time → "YYYY-MM-DD HH:mm" in `timezone` ("" when missing or unparsable) — `formatRunTime`. */
 export function shortDateTime(iso: string | undefined | null, timezone = "local"): string {
   if (!iso || !parseInstant(iso)) return "";

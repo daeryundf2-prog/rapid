@@ -1,5 +1,11 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../../../api/viewer", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../api/viewer")>()),
+  fetchSourceBlob: vi.fn(async () => new Blob(["x"], { type: "video/mp4" })),
+}));
+
 import type { SourcePreview } from "../../../api/viewer";
 import { formatMediaDuration, MEDIA_INLINE_MAX_BYTES, MediaView } from "./MediaView";
 
@@ -42,5 +48,46 @@ describe("MediaView duration line", () => {
 
     render(<MediaView runId="run-1" preview={preview(83)} onCopy={() => undefined} />);
     expect(screen.getByText(/audio\/mpeg · 길이 1:23/)).toBeTruthy();
+  });
+});
+
+describe("MediaView player length (r8 verify F5)", () => {
+  it("uses the player's loadedmetadata duration when the metadata has none", async () => {
+    URL.createObjectURL = vi.fn(() => "blob:clip");
+    URL.revokeObjectURL = vi.fn();
+    const video = {
+      path: "C:/case/clip.mp4",
+      name: "clip.mp4",
+      extension: "mp4",
+      size: 1024,
+      mime_type: "video/mp4",
+      preview_type: "media",
+      media: { mime_type: "video/mp4", metadata: {} },
+    } as SourcePreview;
+    render(<MediaView runId="run-1" preview={video} onCopy={() => undefined} />);
+    const player = await screen.findByLabelText("clip.mp4 재생");
+    expect(screen.getByText(/video\/mp4 · 길이 정보 없음/)).toBeTruthy();
+    Object.defineProperty(player, "duration", { configurable: true, value: 10 });
+    fireEvent.loadedMetadata(player);
+    expect(await screen.findByText(/video\/mp4 · 길이 0:10/)).toBeTruthy();
+  });
+
+  it("keeps the metadata length when it is known", async () => {
+    URL.createObjectURL = vi.fn(() => "blob:clip2");
+    URL.revokeObjectURL = vi.fn();
+    const video = {
+      path: "C:/case/clip2.mp4",
+      name: "clip2.mp4",
+      extension: "mp4",
+      size: 1024,
+      mime_type: "video/mp4",
+      preview_type: "media",
+      media: { mime_type: "video/mp4", metadata: { duration_seconds: 83 } },
+    } as SourcePreview;
+    render(<MediaView runId="run-1" preview={video} onCopy={() => undefined} />);
+    const player = await screen.findByLabelText("clip2.mp4 재생");
+    Object.defineProperty(player, "duration", { configurable: true, value: 10 });
+    fireEvent.loadedMetadata(player);
+    expect(screen.getByText(/video\/mp4 · 길이 1:23/)).toBeTruthy();
   });
 });

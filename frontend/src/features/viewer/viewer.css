@@ -774,6 +774,19 @@
   object-fit: cover;
 }
 
+/* Undecodable image (r8 verify F2): the "미리보기 없음" glyph tile in the image's box. */
+.image-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.image-original.image-glyph {
+  width: 240px;
+  height: 180px;
+}
+
 /* Email / media ----------------------------------------------------------- */
 
 .email-message {

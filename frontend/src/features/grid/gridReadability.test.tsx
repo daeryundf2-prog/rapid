@@ -5,6 +5,9 @@
  * node and the primary-family rule (C6), time column width (C7), ShimCache labels (C8), Korean
  * readings (C9), the timeline viewer's 메타 tab (C10) and empty-column hiding (P1).
  */
+
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchTimelinePage } from "../../api/collections";
@@ -472,6 +475,19 @@ describe("UX-round review follow-ups", () => {
     expect(document.querySelector('[role="columnheader"][data-col="d:target_user_name"]')).toBeNull();
     expect(screen.queryByTestId("grid-novalue-d:target_user_name")).toBeNull();
     expect(KEPT_EMPTY_COLUMN_NOTE).toBe("이 페이지 값 없음");
+    // r8 verify F6: the header text sits in an ellipsizing label inside the sort button, so a
+    // narrow column (1280 + viewer) truncates it instead of running over the 값 없음 note.
+    const header = document.querySelector('[role="columnheader"][data-col="d:computer"]');
+    const label = header?.querySelector(".grid-sort > .grid-sort-label");
+    expect(label?.textContent).toBeTruthy();
+    const css = readFileSync(resolve(__dirname, "grid.css"), "utf8");
+    const rule = (selector: string) =>
+      new RegExp(`${selector.replace(/[.]/g, "\\.")} \\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+    expect(rule(".grid-sort-label")).toMatch(
+      /min-width: 0;[\s\S]*overflow: hidden;[\s\S]*text-overflow: ellipsis/,
+    );
+    expect(rule(".grid-sort")).toMatch(/overflow: hidden/);
+    expect(rule(".grid-hcell-novalue")).toMatch(/min-width: 0;[\s\S]*text-overflow: ellipsis/);
   });
 
   it("a timeline written before the readability builder shows the regenerate hint", async () => {
