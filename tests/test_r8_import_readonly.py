@@ -199,6 +199,17 @@ class ReadOnlyRunTests(Base):
             ("post", f"/api/runs/{self.run_id}/case-db/ensure", {}),
             ("post", f"/api/runs/{self.run_id}/analyses", {"kind": "ocr-batch"}),
             ("post", f"/api/runs/{self.run_id}/extract", {"rows": [{"path": str(self.evidence)}]}),
+            (
+                "post",
+                "/api/case-db/review",
+                {
+                    "database": str(self.legacy / "rapidtriage-case.db"),
+                    "case_id": "legacy-out",
+                    "target_type": "document",
+                    "target_id": "a",
+                    "status": "relevant",
+                },
+            ),
         )
         for method, url, body in refused:
             with self.subTest(url=url):

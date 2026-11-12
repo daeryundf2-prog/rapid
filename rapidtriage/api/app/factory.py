@@ -22,6 +22,7 @@ from ...core.readonly_runs import (
     RUN_READ_ONLY_MESSAGE,
     ReadOnlyRunWriteError,
     install_write_guard,
+    readonly_reason_for,
 )
 from .analyses import ANALYSIS_RUNNER, COMPLETION_HOOKS
 from .case_workspace import CaseWorkspace
@@ -193,6 +194,12 @@ def create_app(
 
     def open_request_case_database(raw_path: str | Path):
         database_path = resolve_case_db_path(store, raw_path, configured_case_db_roots)
+        reason = readonly_reason_for(database_path)
+        if reason is not None:
+            # D37: the case DB of a read-only run folder is never opened for writing (opening it
+            # initializes the schema). The ``/api/case-db/*`` routes name it in the body, so the
+            # path gate in ``read_only_run_refusal`` cannot see it.
+            raise ReadOnlyRunWriteError(str(database_path), reason)
         return open_case_database(database_path)
 
     def resolve_request_catalog_path(raw_path: str | Path) -> Path:
