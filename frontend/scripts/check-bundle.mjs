@@ -25,9 +25,11 @@ const committedDir = join(frontendRoot, "..", "rapidtriage", "web", "static", "v
 
 // Ratchet baseline (2026-11-12, feat/r6-ux 7790624): JS 1,879,137 B single chunk (spec baseline),
 // CSS 150,268 B, fonts 269,432 B. Limits = baseline + 2%, rounded up.
+// Re-baselined 2026-11-12 after WB-5/WB-6 (T-036 undo, T-086, T-130, T-144, T-169..T-174 merged):
+// JS 1,916,766 B, CSS 153,462 B -> limits + 1.5%. Shrinking is T-116's job (code splitting).
 const BUDGET = {
-  js: 1_916_720,
-  css: 153_274,
+  js: 1_945_518,
+  css: 155_764,
   font: 274_821,
 };
 

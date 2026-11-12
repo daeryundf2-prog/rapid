@@ -778,12 +778,9 @@ button.chip:hover {
   unicode-bidi: isolate;
 }
 
-.mid-path-front .mid-path-head,
-.mid-path-front .mid-path-parents,
-.mid-path-front .mid-path-tail {
+/* Inline parts: min-width and overflow do not apply to inline boxes, so only `display` changes. */
+.mid-path-text > * {
   display: inline;
-  min-width: 0;
-  overflow: visible;
 }
 
 /* Files 경로 cell (r8 C.9.1): a `복구` marker before the folder or "원래 위치 알 수 없음". */
@@ -795,11 +792,8 @@ button.chip:hover {
   max-width: 100%;
 }
 
-.grid-path-cell > .mid-path {
-  min-width: 0;
-}
-
-.grid-path-cell > .tone-chip {
+.grid-path-cell > .tone-chip,
+.grid-copytime-mark {
   flex: 0 0 auto;
 }
 

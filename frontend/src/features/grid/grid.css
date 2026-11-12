@@ -404,10 +404,6 @@
   color: var(--text-muted);
 }
 
-.grid-copytime-mark {
-  flex: 0 0 auto;
-}
-
 .grid-header .grid-cell-select,
 .grid-header .grid-cell-first {
   /* Must stay sticky: `.grid-hcell { position: relative }` below would otherwise win, and
