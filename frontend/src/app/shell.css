@@ -306,7 +306,7 @@ kbd {
   flex: none;
 }
 
-.global-search input {
+.global-search input[type="search"] {
   padding: 0 var(--space-2);
   font: inherit;
   font-size: var(--fs-body);
@@ -441,7 +441,9 @@ kbd {
   min-width: 0;
 }
 
-.global-search input {
+/* Only the search field itself (T-013): the search-options popover lives inside
+   .global-search, and its checkboxes / number fields must keep their own geometry. */
+.global-search input[type="search"] {
   width: 100%;
   padding-left: calc(var(--space-2) + 22px);
   padding-right: 36px;
