@@ -18,6 +18,7 @@ from fastapi import HTTPException
 
 from ...core.jobs import RunJob, RunJobStore
 from .helpers import get_job, get_output_path
+from .run_steps_summary import classify_step_status
 from .tree import read_output_key
 
 PROBLEM_PREVIEW_LIMIT = 20
@@ -40,6 +41,7 @@ WARNING_REASONS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
 FIXED_REASONS = {
     "parser-error": "파서 오류",
     "step-failed": "실패한 단계",
+    "step-partial": "일부만 완료된 단계",
     "step-skipped": "건너뛴 단계",
     "silent-failure": "조용한 실패 위험",
     "run-failed": "런 실패",
@@ -117,7 +119,7 @@ def collect_problem_items(store: RunJobStore, run_id: str, job: RunJob) -> list[
             detail = str(check.get("detail") or "")
             message = f"{check.get('id') or ''}: {check.get('message') or ''}" + (f" ({detail})" if detail else "")
             items.append({"reason_id": "silent-failure", "source": "silent_failure",
-                          "step": "silent-failure-detector", "level": "error" if level == "fail" else "warning",
+                          "step": "silent-failure-detector", "level": "error" if level in ("fail", "failed", "error") else "warning",
                           "message": message})
     steps = summary.get("steps")
     if isinstance(steps, list):
@@ -125,11 +127,17 @@ def collect_problem_items(store: RunJobStore, run_id: str, job: RunJob) -> list[
             if not isinstance(step, Mapping):
                 continue
             status = str(step.get("status") or "")
-            if status == "skipped":
+            # Same classification as the screens' step counts (T-021 summarize_steps): failed_isolated is
+            # partial (a warning here), never an error, so every screen reports the same failed count.
+            step_class = classify_step_status(status)
+            if step_class == "skipped":
                 reason, level = "step-skipped", "notice"
                 message = str(step.get("disabled_reason") or step.get("message") or "건너뜀")
-            elif "fail" in status:
+            elif step_class == "failed":
                 reason, level = "step-failed", "error"
+                message = str(step.get("error") or step.get("message") or status)
+            elif step_class == "partial":
+                reason, level = "step-partial", "warning"
                 message = str(step.get("error") or step.get("message") or status)
             else:
                 continue
