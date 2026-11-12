@@ -17,6 +17,7 @@ import {
   strOrNull,
 } from "./common";
 import { fileCategoryLabel } from "./files";
+import { pathCellText, pathCellTooltip } from "./PathCell";
 import { searchPathCell, snippetCell, snippetSpans } from "./SearchCells";
 
 /** Korean names of the unified-search sources (core/search.py `source`). */
@@ -196,14 +197,15 @@ export const searchCollection: CollectionDef = {
       render: (r) =>
         snippetCell(fieldStr(r, "preview"), (r.fields.snippetHighlights as [number, number][]) ?? []),
     }),
-    col.timestamp(170, ["analysis", "compact"]),
+    col.timestamp(["analysis", "compact"]),
     {
       ...col.path(360, ["analysis", "source"]),
-      // Under the acquisition root (same as the timeline 출처 행); the full path on hover.
-      value: (r) => fieldStr(r, "displayPath") || r.sourcePath,
-      format: (r) => fieldStr(r, "displayPath") || r.sourcePath || "",
-      tooltip: (r) => r.sourcePath ?? "",
-      render: (r) => searchPathCell(fieldStr(r, "displayPath"), r.sourcePath),
+      // Under the acquisition root (same as the timeline 출처 행); the in-evidence path on hover,
+      // never the result folder (T-171, IS-128).
+      value: (r) => fieldStr(r, "displayPath") || pathCellText(r.sourcePath),
+      format: (r) => fieldStr(r, "displayPath") || pathCellText(r.sourcePath) || "",
+      tooltip: (r) => pathCellTooltip(r.sourcePath),
+      render: (r) => searchPathCell(fieldStr(r, "displayPath"), pathCellTooltip(r.sourcePath) || null),
     },
     col.sha256(),
   ],

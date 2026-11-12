@@ -11,7 +11,7 @@ import { useAnalysisStore } from "../analysis/store";
 import { caseCitationParts, citationDisabledReason, resolveCaseLink } from "../case/caseLink";
 import { buildReviewToolGridCommands } from "../review/gridTools";
 import { registerRowSource } from "../review/rowSource";
-import { recordCitationParts } from "../viewer/citation";
+import { evidenceSourceText, recordCitationParts, SOURCE_LOCATION_UNKNOWN } from "../viewer/citation";
 import { PIVOT_LABELS, PIVOT_ORDER, type PivotId, recordPivots } from "../viewer/pivots";
 import { registerCommand, registerLocalCommand } from "./adapter";
 import { baseName, currentTimezone, isRecord } from "./columns/common";
@@ -111,7 +111,11 @@ export function citationLocator(row: GridRow): string {
  * sha256, then the record id and record time.
  */
 export function citationText(row: GridRow, runId?: string | null): string {
-  const parts = [...caseCitationParts(runId), row.sourcePath ?? row.title, `[${citationLocator(row)}]`];
+  // The in-evidence path, never the result folder (T-172, IS-128).
+  const source = row.sourcePath
+    ? (evidenceSourceText(row.sourcePath) ?? `(${SOURCE_LOCATION_UNKNOWN})`)
+    : row.title;
+  const parts = [...caseCitationParts(runId), source, `[${citationLocator(row)}]`];
   const artifactRow = row.ref.collection === "artifacts" || reviewLocatorOf(row)?.collection === "artifacts";
   if (row.sha256) parts.push(`${artifactRow ? "컨테이너 sha256" : "sha256"}=${row.sha256}`);
   const record = recordCitationParts(row, currentTimezone());
@@ -233,11 +237,14 @@ export function buildGridCommands(hostRef: { current: GridCommandHost }): Comman
       label: "경로 복사",
       group: "grid",
       icon: "copy",
-      disabledReason: rowDisabled(true),
+      // The path inside the evidence (T-171/T-172, IS-128); a recovered item has none to copy.
+      disabledReason: (ctx) =>
+        rowDisabled(true)(ctx) ??
+        (evidenceSourceText(focused()?.sourcePath) ? undefined : SOURCE_LOCATION_UNKNOWN),
       run: async () => {
-        const row = focused();
-        if (!row?.sourcePath) return;
-        await copyText(row.sourcePath);
+        const path = evidenceSourceText(focused()?.sourcePath);
+        if (!path) return;
+        await copyText(path);
         host().toast("경로를 복사했습니다.", "info");
       },
     },

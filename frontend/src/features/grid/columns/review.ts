@@ -13,7 +13,6 @@ import {
   sha256Of,
   str,
   strOrNull,
-  TIME_COLUMN_MIN,
   toReviewStatus,
 } from "./common";
 import { reviewStatusCell } from "./StatusCells";
@@ -179,7 +178,7 @@ export const reviewCollection: CollectionDef = {
           : null,
     }),
     // 시각 never narrower than its 15 characters + padding (review #9: no clipped seconds).
-    col.timestamp(TIME_COLUMN_MIN, ["analysis", "source"]),
+    col.timestamp(["analysis", "source"]),
     col.path(420, ["source"]),
     col.field("pointer", "위치", 160, ["source"], (r) => fieldStr(r, "pointer"), { mono: true }),
   ],

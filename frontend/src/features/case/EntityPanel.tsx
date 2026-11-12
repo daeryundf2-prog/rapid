@@ -14,6 +14,7 @@ import {
   type SearchRow,
 } from "../../api/searchEntities";
 import { useRoute } from "../../state/hooks";
+import { evidencePathOf } from "../../utils/pathDisplay";
 import { ensureRunCaseDb } from "../grid/reviewActions";
 import { ErrorText } from "./ErrorText";
 import { Modal } from "./Modal";
@@ -290,7 +291,7 @@ export function EntityPanel({ runId, onClose }: { runId: string; onClose: () => 
         <ul className="entity-rows" data-testid="entity-rows">
           {rows.map((row) => (
             <li key={`${row.collection}:${row.kind}:${row.locator}`} data-testid="entity-row">
-              <div className="entity-row-title">{row.title || row.path}</div>
+              <div className="entity-row-title">{row.title || evidencePathOf(row.path).path}</div>
               {row.snippet?.text && <div className="entity-row-snippet">{row.snippet.text}</div>}
               {(row.entities ?? []).length > 0 && (
                 <ul className="entity-values" aria-label="이 행의 개체">

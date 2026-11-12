@@ -140,7 +140,7 @@ describe("responsive default columns (files, 분석 기본)", () => {
       );
     expect(width("title")).toBeGreaterThan(220);
     expect(width("path")).toBeGreaterThan(200);
-    expect(width("timestamp")).toBe(180);
+    expect(width("timestamp")).toBe(176);
     expect(width("size")).toBe(80);
     // Every column together fills the pane exactly: no sideways scroll.
     const total = ["title", "path", "size", "timestamp"].reduce((sum, id) => sum + width(id), 0);
@@ -247,7 +247,7 @@ describe("browser kind layout fits the pane (r7 S1, real-data 1920 overflow 43px
       expect(widthOf("d:title")).toBeGreaterThanOrEqual(150);
       expect(widthOf("title")).toBeGreaterThanOrEqual(240);
       // A time cell never loses its seconds.
-      expect(widthOf("d:timestamp")).toBeGreaterThanOrEqual(180);
+      expect(widthOf("d:timestamp")).toBeGreaterThanOrEqual(176);
     });
   }
 

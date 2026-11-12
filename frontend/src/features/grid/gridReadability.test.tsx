@@ -36,7 +36,7 @@ import {
   familyCoreFacts,
   keyTail,
   rowTimestampKind,
-  TIME_COLUMN_WIDTH,
+  TIME_CHIP_COLUMN_WIDTH,
   tsKindLabel,
 } from "./columns/families";
 import {
@@ -221,7 +221,8 @@ describe("C4/C5 timeline columns", () => {
     // 출처 수 · 특이사항 · 선별 go when no loaded row has a value (empty-column hiding).
     const priority = timelineCollection.widthPriority?.({ id: "timeline" }) ?? [];
     expect(priority).toEqual(expect.arrayContaining(["sourceCount", "flags", "review"]));
-    expect(column("timestamp")?.width).toBe(190);
+    // T-175: the one fixed 176px 시각 width (was 190).
+    expect(column("timestamp")?.width).toBe(176);
     expect(column("tsKind")?.width).toBe(140); // C-D14: "마지막 방문 +2" whole
     // 출처 (constant "artifacts") and 이벤트 (raw id) stay selectable, off by default.
     expect(column("source")?.presets).toEqual([]);
@@ -385,10 +386,12 @@ describe("C6 USB node and the primary-family rule", () => {
 describe("C7 / C8 / C9 family cells", () => {
   const timeDef = { key: "timestamp", label: "시각", format: "time", ts_kind: "event" } as const;
 
-  it("time columns are 200 px wide by default", () => {
-    expect(TIME_COLUMN_WIDTH).toBe(200);
+  it("a timestamp column that can carry a kind chip is 200 px (chip room), never below 176 px (T-175)", () => {
+    expect(TIME_CHIP_COLUMN_WIDTH).toBe(200);
     expect(catalogColumn(timeDef).width).toBe(200);
-    expect(catalogColumn({ ...timeDef, width: 170 }).width).toBe(170);
+    expect(catalogColumn(timeDef).minWidth).toBe(176);
+    // A catalogue width no longer narrows a time column below what its content needs.
+    expect(catalogColumn({ ...timeDef, width: 170 }).width).toBe(200);
   });
 
   it("ShimCache rows read 파일 수정(실행 아님), not 이벤트 시각", () => {

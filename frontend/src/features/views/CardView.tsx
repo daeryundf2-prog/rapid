@@ -22,6 +22,7 @@ import { announce } from "../../a11y";
 import type { GridRow } from "../../contracts/collection";
 import { encodeRowRef } from "../../contracts/rowRef";
 import { useTimezone } from "../../state/hooks";
+import { evidencePathOf } from "../../utils/pathDisplay";
 import { formatGridTime } from "../../utils/time";
 import { timestampKindLabel } from "../../utils/timeKinds";
 import { kindLabel } from "../derived/tables";
@@ -128,7 +129,8 @@ export function cardModel(row: GridRow, tz: string): CardModel {
     time,
     date,
     clock,
-    path: row.sourcePath ?? "",
+    // The in-evidence path, never the result folder (T-171, IS-128).
+    path: evidencePathOf(row.sourcePath).path ?? "",
     chips,
   };
 }

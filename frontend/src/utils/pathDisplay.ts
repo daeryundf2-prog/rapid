@@ -129,6 +129,30 @@ export function evidencePathOf(path: string | null | undefined, volume?: string 
 }
 
 /**
+ * A record value as the screen shows it (IS-128): every string holding a result-folder path
+ * (`…\_e01\fs\…`), at any depth, reads as its in-evidence path, or `unknown` when it sits in a
+ * recovery pseudo folder. Other values are returned as they are (the same object when untouched).
+ */
+export function evidenceDisplayValue(value: unknown, unknown: string): unknown {
+  if (typeof value === "string") {
+    if (!RESULT_STAGE.test(value)) return value;
+    return evidencePathOf(value).path ?? unknown;
+  }
+  if (Array.isArray(value)) {
+    const mapped = value.map((item) => evidenceDisplayValue(item, unknown));
+    return mapped.some((item, index) => item !== value[index]) ? mapped : value;
+  }
+  if (value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+    const entries = Object.entries(value as Record<string, unknown>);
+    const mapped = entries.map(([key, item]) => [key, evidenceDisplayValue(item, unknown)] as const);
+    return mapped.some(([, item], index) => item !== entries[index]?.[1])
+      ? Object.fromEntries(mapped)
+      : value;
+  }
+  return value;
+}
+
+/**
  * The folder a files 경로 cell shows (the 이름 column already names the file): the in-evidence
  * parent folder; a file at the volume root shows the root. null when the location is unknown.
  */

@@ -6,9 +6,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { GridRow } from "../../../contracts/collection";
 import { useAppStore } from "../../../state/store";
+import { analysisCollection } from "./analysis";
 import { artifactsCollection, kindColumn } from "./artifacts";
 import { fitMinWidth, growWeight, makeRef, makeRow } from "./common";
+import { catalogColumn, mixedSummaryColumns, TIME_CHIP_COLUMN_WIDTH } from "./families";
+import { filesCollection } from "./files";
+import { reviewCollection } from "./review";
+import { searchCollection } from "./search";
 import { gridTimeText, TIME_COLUMN_WIDTH } from "./TimelineCells";
+import { timelineCollection } from "./timeline";
 
 const ISO = "2026-03-01T00:12:33Z";
 const WALL = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
@@ -57,6 +63,50 @@ describe("시각 열 고정 폭 (T-175)", () => {
     expect(kindColumn({ header: "제목", keys: ["title"], width: 140 }).width).toBe(140);
   });
 
+  it("every grid's 시각 columns share the fixed 176px width and zone-free text (timeline · search · review · files · analysis · family)", () => {
+    const timeColumns = [
+      timelineCollection,
+      searchCollection,
+      reviewCollection,
+      analysisCollection,
+      filesCollection,
+    ].flatMap((collection) =>
+      collection.columns.filter((c) => c.filterKind === "time" || c.id === "timestamp"),
+    );
+    const ids = timeColumns.map((c) => c.id);
+    expect(ids).toEqual(expect.arrayContaining(["timestamp", "ntfsCreated"]));
+    for (const column of timeColumns) {
+      expect([column.id, column.width]).toEqual([column.id, TIME_COLUMN_WIDTH]);
+      expect([column.id, column.minWidth]).toEqual([column.id, TIME_COLUMN_WIDTH]);
+      expect(fitMinWidth(column)).toBe(TIME_COLUMN_WIDTH);
+      expect(growWeight(column)).toBe(0);
+    }
+    const plain = row({});
+    const timelineTime = timelineCollection.columns.find((c) => c.id === "timestamp");
+    expect(timelineTime?.format?.(plain)).toMatch(WALL);
+    const files = makeRow(makeRef("files", "/candidates/0"), { title: "a" }, { modifiedAt: ISO });
+    const modified = filesCollection.columns.find((c) => c.id === "timestamp");
+    expect(modified?.format?.(files)).toBe("2026-03-01 00:12:33");
+    expect(modified?.tooltip?.(files)).toContain("UTC");
+    // Family catalogue: a time-only column is 176px; one that can show a kind chip is 200px fixed.
+    const visited = catalogColumn({ key: "visited_at", label: "방문", format: "time", ts_kind: "visit" });
+    expect([visited.width, visited.minWidth]).toEqual([TIME_COLUMN_WIDTH, TIME_COLUMN_WIDTH]);
+    const family = row({ visited_at: ISO });
+    expect(visited.format?.(family)).toBe("2026-03-01 00:12:33");
+    expect(visited.tooltip?.(family)).toContain("UTC");
+    const chip = catalogColumn({ key: "timestamp", label: "시각", format: "time", ts_kind: "event" });
+    expect([chip.width, chip.minWidth]).toEqual([TIME_CHIP_COLUMN_WIDTH, TIME_COLUMN_WIDTH]);
+  });
+
+  it("전체 아티팩트 날짜 및 시각 is 176px fixed with the zone-free time under its kind label", () => {
+    const sumTime = mixedSummaryColumns().find((c) => c.id === "sum:time");
+    expect([sumTime?.width, sumTime?.minWidth]).toEqual([TIME_COLUMN_WIDTH, TIME_COLUMN_WIDTH]);
+    expect(sumTime && fitMinWidth(sumTime)).toBe(TIME_COLUMN_WIDTH);
+    expect(sumTime && growWeight(sumTime)).toBe(0);
+    const r = row({});
+    expect(sumTime?.value?.(r)).toBe("2026-03-01 00:12:33");
+    expect(sumTime?.tooltip?.(r)).toContain("UTC");
+  });
   it("gridTimeText reads empty values as empty", () => {
     expect(gridTimeText(null, "utc")).toBe("");
     expect(gridTimeText("", "utc")).toBe("");

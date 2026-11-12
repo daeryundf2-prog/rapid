@@ -61,3 +61,25 @@ export function pathCell(path: string | null, options: PathCellOptions = {}): Re
     </span>
   );
 }
+
+/**
+ * 이름 cell of a files row (T-171, r8 C.9.1): a recovered item carries the same `복구` marker as
+ * its 경로 cell, so the marker shows in the default column set even when 경로 is hidden (a narrow
+ * grid or a large image run). The tooltip names the in-evidence location.
+ */
+export function recoveredNameCell(
+  name: string,
+  options: PathCellOptions & { path?: string | null },
+): ReactNode {
+  if (!options.recovered && !options.locationUnknown) return <span className="grid-cell-text">{name}</span>;
+  return (
+    <span
+      className="grid-path-cell"
+      data-testid="name-cell-recovered"
+      title={pathCellTooltip(options.path ?? null, options) || RECOVERED_MARK}
+    >
+      <ToneChip tone="warn">{RECOVERED_MARK}</ToneChip>
+      <span className="grid-cell-text">{name}</span>
+    </span>
+  );
+}
