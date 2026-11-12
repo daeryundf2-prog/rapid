@@ -23,6 +23,7 @@ from ..review_reporting_controls import build_review_reporting_contract
 from ..search import load_run_summary
 from ..submission_qc_controls import build_submission_qc_contract
 from ..textnorm import normalize_nfc
+from . import write_lock
 from .base import (
     CaseDatabaseError,
     CaseRecord,
@@ -147,6 +148,7 @@ from .search import (
 from .trusted_diffs import (
     build_forensic_integrity_matrix,
 )
+from .write_lock import retrying_when_locked
 
 __all__ = [
     "CaseDatabase",
@@ -263,12 +265,21 @@ class CaseDatabase:
         self._hash_record_count = 0
 
     @contextmanager
-    def connect(self) -> Iterator[sqlite3.Connection]:
+    def connect(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
+        """One connection = one transaction (committed on success, rolled back on error).
+
+        Every connection waits ``write_lock.BUSY_TIMEOUT_MS`` for another writer (R8 T-131: two
+        windows on one case DB). ``write=True`` opens it with ``BEGIN IMMEDIATE``: a read-modify-write
+        (a review mark reads the mark, then writes it and its history) is serialized against other
+        writers instead of racing on a stale read. Such writes are ``@retrying_when_locked``.
+        """
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(self.path)
+        busy_ms = write_lock.BUSY_TIMEOUT_MS
+        connection = sqlite3.connect(self.path, timeout=busy_ms / 1000)
         connection.row_factory = sqlite3.Row
         # SQL functions of the compressed artifact layout (view/triggers).
         register_case_db_functions(connection)
+        connection.execute(f"PRAGMA busy_timeout = {int(busy_ms)}")
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA temp_store = MEMORY")
         connection.execute("PRAGMA cache_size = -262144" if self.bulk_load else "PRAGMA cache_size = -65536")
@@ -280,6 +291,12 @@ class CaseDatabase:
                 connection.execute("PRAGMA journal_mode = WAL")
         except sqlite3.DatabaseError:
             pass
+        if write and not self.bulk_load:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+            except BaseException:
+                connection.close()
+                raise
         try:
             yield connection
             try:
@@ -965,6 +982,7 @@ class CaseDatabase:
             raise CaseDatabaseError(f"saved search not found: {name}")
         return saved_search_to_dict(row)
 
+    @retrying_when_locked
     def mark_review(
         self,
         *,
@@ -990,10 +1008,14 @@ class CaseDatabase:
         then has no reviewer and the audit/history actor is ``local-user``. ``actor_source`` says
         where the name came from (``client-supplied`` / ``server-env`` / ``local-default``); by
         default ``client-supplied`` for a non-empty name, else ``local-default`` (R8 T-036/T-180).
+
+        Concurrent writers (R8 T-131): reading the mark and writing it, its history and audit rows
+        is one ``BEGIN IMMEDIATE`` transaction, so two windows marking the same row both land (two
+        history rows, the later write current); a lasting lock is retried before it is an error.
         """
         normalized_case_id = normalize_identifier(case_id, fallback="case")
         timestamp = now_iso()
-        with self.connect() as connection:
+        with self.connect(write=True) as connection:
             apply_schema(connection)
             if connection.execute("SELECT 1 FROM case_record WHERE case_id = ?", (normalized_case_id,)).fetchone() is None:
                 raise CaseDatabaseError(f"case not found: {normalized_case_id}")

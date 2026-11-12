@@ -2,15 +2,19 @@
  * Review state overlay: the run's case-DB marks (GET /review-map, react-query
  * key ["review-map", runId]) laid over grid rows by run-output locator, so the
  * status chips show the stored state after a reload. Marks invalidate the map
- * and the review counts (useReviewInvalidation).
+ * and the review counts (useReviewInvalidation). A fetch that finds marks another
+ * window changed shows one merged "다른 창에서 변경됨" toast (r8 T-131).
  */
 
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
+import { announce } from "../../a11y/announcer";
 import { getReviewMap, type ReviewMapMark } from "../../api/caseDb";
+import type { ReviewMarkBody } from "../../api/collections";
+import { pushToast } from "../../components/toastStore";
 import type { GridRow } from "../../contracts/collection";
 import { toReviewStatus } from "./columns/common";
-import { onReviewApplied, reviewLocatorTarget } from "./reviewActions";
+import { onReviewApplied, onReviewWrite, type ReviewWrite, reviewLocatorTarget } from "./reviewActions";
 
 export type ReviewMap = ReadonlyMap<string, ReviewMapMark>;
 
@@ -77,11 +81,121 @@ export function overlayReview(row: GridRow, map: ReviewMap | undefined): GridRow
   };
 }
 
+// ---- changes made in another window (r8 T-131) ------------------------------
+
+/** The one toast for marks another window (or another examiner) changed; repeats replace it. */
+export const REMOTE_CHANGE_NOTICE = "다른 창에서 변경됨";
+/** A write of this tab is matched against fetched maps for this long, then forgotten. */
+export const OWN_WRITE_TTL_MS = 120_000;
+/** After a write whose rows this tab cannot key (tag tools, 검토 목록 rows), fetches stay quiet this long. */
+export const QUIET_AFTER_UNKEYED_WRITE_MS = 10_000;
+
+export function remoteChangeDetail(count: number): string {
+  return `표시 ${count.toLocaleString("ko-KR")}건이 다른 창(또는 다른 검토자)에서 바뀌어 목록에 반영했습니다.`;
+}
+
+interface OwnWrite {
+  mark: ReviewMarkBody;
+  at: number;
+}
+
+/** Per run: the last fetched map (the baseline), this tab's pending writes, the quiet deadline. */
+interface RemoteTracking {
+  baseline: ReviewMap | null;
+  own: Map<string, OwnWrite>;
+  quietUntil: number;
+}
+
+const tracking = new Map<string, RemoteTracking>();
+
+function trackingOf(runId: string): RemoteTracking {
+  let entry = tracking.get(runId);
+  if (!entry) {
+    entry = { baseline: null, own: new Map(), quietUntil: 0 };
+    tracking.set(runId, entry);
+  }
+  return entry;
+}
+
+/** Forget every baseline and pending write (tests; a new session). */
+export function resetRemoteChangeTracking(): void {
+  tracking.clear();
+}
+
+/** Remember a write of this tab so the next fetched map does not report it as another window's. */
+export function recordOwnReviewWrite(write: ReviewWrite, now = Date.now()): void {
+  const entry = trackingOf(write.runId);
+  const keys = write.rows?.map(rowReviewKey) ?? [null];
+  if (!write.mark || keys.some((key) => key === null)) {
+    entry.quietUntil = now + QUIET_AFTER_UNKEYED_WRITE_MS;
+  }
+  if (!write.mark) return;
+  for (const key of keys) if (key) entry.own.set(key, { mark: write.mark, at: now });
+}
+
+/** Does the stored mark show what this tab wrote (status, report flag, note, added tags)? */
+function showsOwnWrite(stored: ReviewMapMark, mark: ReviewMarkBody): boolean {
+  if (mark.status !== undefined && stored.status !== mark.status) return false;
+  if (mark.include_in_report !== undefined && stored.include_in_report !== mark.include_in_report)
+    return false;
+  if (mark.note !== undefined && stored.note !== mark.note) return false;
+  return (mark.add_tags ?? []).every((tag) => stored.tags.includes(tag));
+}
+
+function changed(before: ReviewMapMark | undefined, after: ReviewMapMark): boolean {
+  if (!before) return true;
+  return (
+    before.updated_at !== after.updated_at ||
+    before.status !== after.status ||
+    before.include_in_report !== after.include_in_report ||
+    before.note !== after.note ||
+    before.tags.join("\u0000") !== after.tags.join("\u0000")
+  );
+}
+
+/**
+ * Compare a freshly fetched map with the run's previous one: the marks that changed and were not
+ * written by this tab (or no longer show what this tab wrote) were changed elsewhere. The first
+ * fetch of a run only sets the baseline. Returns how many rows another window changed.
+ */
+export function detectRemoteChanges(runId: string, map: ReviewMap, now = Date.now()): number {
+  const entry = trackingOf(runId);
+  const previous = entry.baseline;
+  entry.baseline = map;
+  for (const [key, write] of entry.own) if (now - write.at > OWN_WRITE_TTL_MS) entry.own.delete(key);
+  if (previous === null) return 0;
+  let remote = 0;
+  for (const [key, mark] of map) {
+    if (!changed(previous.get(key), mark)) continue;
+    const own = entry.own.get(key);
+    if (own) {
+      entry.own.delete(key);
+      if (showsOwnWrite(mark, own.mark)) continue;
+    }
+    remote += 1;
+  }
+  if (now < entry.quietUntil) return 0;
+  return remote;
+}
+
+/** One merged toast per fetch that found changes from another window (T-131). */
+export function notifyRemoteChanges(count: number): void {
+  if (count <= 0) return;
+  announce(`${REMOTE_CHANGE_NOTICE}. ${remoteChangeDetail(count)}`);
+  pushToast(REMOTE_CHANGE_NOTICE, "info", { detail: remoteChangeDetail(count) });
+}
+
+onReviewWrite((write) => recordOwnReviewWrite(write));
+
 /** The run's review map (cached; invalidated after every applied mark). */
 export function useReviewMap(runId: string | null, enabled = true): ReviewMap | undefined {
   const query = useQuery({
     queryKey: reviewMapKey(runId),
-    queryFn: async ({ signal }) => buildReviewMap((await getReviewMap(runId as string, signal)).marks ?? []),
+    queryFn: async ({ signal }) => {
+      const map = buildReviewMap((await getReviewMap(runId as string, signal)).marks ?? []);
+      notifyRemoteChanges(detectRemoteChanges(runId as string, map));
+      return map;
+    },
     enabled: enabled && runId !== null,
     staleTime: 30_000,
     retry: false,

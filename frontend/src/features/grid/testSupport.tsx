@@ -4,6 +4,7 @@ import type { ReactElement, ReactNode } from "react";
 import { vi } from "vitest";
 import { useGridLocalStore } from "./adapter";
 import { resetCaseDbHandles } from "./reviewActions";
+import { resetRemoteChangeTracking } from "./reviewMap";
 
 export function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -88,6 +89,7 @@ export function renderWithClient(ui: ReactElement) {
 
 export function resetGridStore(): void {
   resetCaseDbHandles();
+  resetRemoteChangeTracking();
   useGridLocalStore.setState({
     route: { runId: "run-1", collection: { id: "files" }, q: "", rowRef: null },
     selectedKeys: new Set<string>(),
