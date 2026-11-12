@@ -17,14 +17,15 @@ from ...core.commercial_readiness import (
     CommercialReadinessError,
 )
 from ...core.docs import SUPPORTED_DOC_EXTS
+from ...core.e01 import discover_e01_segments, ewf_segment_number
 from ...core.forensic_accuracy import build_accuracy_gate
+from ...core.hash_cache import compute_hashes_fresh
 from ...core.jobs import (
     is_relative_to,
 )
 from ...core.source_paths import (
     candidate_source_paths,
 )
-from ...core.submission import compute_hashes
 from .constants import (
     BROWSER_E2E_PERFORMANCE_CONTRACT_VERSION,
     DEFAULT_INTERNAL_VALIDATION_PACKAGE,
@@ -797,8 +798,15 @@ def build_run_validation_source_integrity(summary: Mapping[str, object]) -> dict
     if root.is_file():
         result["kind"] = "file"
         result["size"] = root.stat().st_size
-        result["hashes"] = compute_hashes(root)
+        # R8 T-179: integrity values are re-read from disk, never served from the metadata-keyed
+        # cache, so a same-size, mtime-preserving modification still changes the digest.
+        result["hashes"] = compute_hashes_fresh(root)
         result["hash_status"] = "computed"
+        result["hash_source"] = "fresh-file-read"
+        if ewf_segment_number(root) is not None:
+            result["kind"] = "e01"
+            result["scope"] = "container-segments"
+            result["segments"] = build_container_segment_hashes(root, selected_hashes=result["hashes"])
     elif root.is_dir():
         result["kind"] = "directory"
         result["hash_status"] = "directory-hash-not-computed"
@@ -815,6 +823,32 @@ def build_run_validation_source_integrity(summary: Mapping[str, object]) -> dict
             if key in {"input_kind", "analysis_root", "stage_dir", "workflow_status", "e01_metadata"}
         }
     return result
+
+
+def build_container_segment_hashes(
+    selected: Path, *, selected_hashes: Mapping[str, str] | None = None
+) -> list[dict[str, object]]:
+    """Every discovered segment of an E01/Ex01 container (name, size, fresh SHA-256), in order.
+
+    The selected segment alone does not identify the evidence: the package lists the whole set
+    (``scope: container-segments``) so a missing or altered later segment is visible.
+    ``selected_hashes`` (the selected segment's digests just read) avoids reading it twice."""
+    selected_resolved = selected.resolve()
+    rows: list[dict[str, object]] = []
+    for segment in discover_e01_segments(selected):
+        row: dict[str, object] = {"name": segment.name, "path": str(segment), "segment_number": ewf_segment_number(segment)}
+        if segment.is_file():
+            row["size"] = segment.stat().st_size
+            if selected_hashes is not None and segment.resolve() == selected_resolved:
+                row["sha256"] = str(selected_hashes.get("sha256") or "")
+            else:
+                row["sha256"] = compute_hashes_fresh(segment)["sha256"]
+        else:
+            row["size"] = None
+            row["sha256"] = ""
+            row["hash_status"] = "missing"
+        rows.append(row)
+    return rows
 
 
 def build_run_validation_output_hashes(summary: Mapping[str, object], *, output_dir: Path) -> dict[str, object]:
@@ -834,13 +868,14 @@ def build_run_validation_output_hashes(summary: Mapping[str, object], *, output_
                 stat = path.stat()
                 row["size"] = stat.st_size
                 row["modified_at"] = dt_from_epoch(stat.st_mtime)
-                row["hashes"] = compute_hashes(path)
+                row["hashes"] = compute_hashes_fresh(path)
                 rows.append(row)
             else:
                 row["hash_status"] = "missing"
                 missing.append(row)
     return {
         "algorithm": ["md5", "sha1", "sha256"],
+        "hash_source": "fresh-file-read",
         "item_count": len(rows),
         "missing_count": len(missing),
         "items": rows,
