@@ -301,7 +301,7 @@ describe("처리 stage (Q-IA-3)", () => {
     expect(table.textContent).toContain("기본 설정에서 꺼짐");
     expect(table.textContent).toContain("메시지 1건");
     expect(table.textContent).not.toMatch(/disabled-by-default|No browser/);
-    expect(screen.getByText("3단계 · 완료 2 · 건너뜀 1")).toBeTruthy();
+    expect(screen.getByText("단계 3 · 완료 2 · 건너뜀 1")).toBeTruthy();
     // No "P2" placeholder sentence any more: the table is the plan.
     expect(screen.queryByText(/P2/)).toBeNull();
   });

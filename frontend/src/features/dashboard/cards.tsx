@@ -8,7 +8,12 @@ import { useQueries } from "@tanstack/react-query";
 import { type ReactNode, useEffect } from "react";
 import { announce } from "../../a11y";
 import { downloadFile } from "../../api/client";
-import { buildExportFile, type ExportEntry, getKeywordHitCount } from "../../api/dashboard";
+import {
+  buildExportFile,
+  type ExportEntry,
+  getKeywordHitCount,
+  type StepsSummary,
+} from "../../api/dashboard";
 import type { CanonicalCounts, ItemRow, RunWarning } from "../../api/runs";
 import { RUN_MODE_LABEL, runDisplayName } from "../../app/collections";
 import { StatusBadge } from "../../components/Badge";
@@ -26,6 +31,7 @@ import {
   type KeywordRow,
   type ReviewSummaryRow,
   type StageRow,
+  stepProgress,
 } from "./model";
 import type { ProviderProgress, RunDetail } from "./useDashboardData";
 
@@ -59,12 +65,13 @@ export function runTiming(run: RunDetail, stages: StageRow[], now = Date.now()) 
 
 /**
  * The sticky status strip of the 접수 dashboard: run name · 상태 · 모드 · 시작→완료 · 총 소요 ·
- * 단계 N/N 완료 (bar) · 처리 요약 보기 · 처리 설정 보기. The raw run id is not printed: it is the
+ * 단계 집계 (bar) · 처리 요약 보기 · 처리 설정 보기. The raw run id is not printed: it is the
  * name's tooltip and the 런 ID 복사 action.
  */
 export function StatusStrip({
   run,
   stages,
+  steps,
   crumb,
   onOpenSummary,
   onOpenSettings,
@@ -72,6 +79,8 @@ export function StatusStrip({
 }: {
   run: RunDetail;
   stages: StageRow[];
+  /** `/dashboard` `steps` (T-021); null until the run ends. */
+  steps?: StepsSummary | null;
   crumb: string | null;
   onOpenSummary: () => void;
   onOpenSettings: () => void;
@@ -80,7 +89,8 @@ export function StatusStrip({
   const completed = run.status === "completed";
   const timing = runTiming(run, stages);
   const mode = run.request?.mode ?? "";
-  const percent = timing.stagesTotal ? Math.round((timing.stagesDone / timing.stagesTotal) * 100) : 0;
+  const bar = stepProgress(steps, completed, timing.stagesDone, timing.stagesTotal);
+  const percent = bar?.max ? Math.round((bar.now / bar.max) * 100) : 0;
   const copyId = () => {
     const write = navigator.clipboard?.writeText?.(run.run_id);
     Promise.resolve(write)
@@ -120,25 +130,25 @@ export function StatusStrip({
           <dt>총 소요</dt>
           <dd>{formatDuration(timing.totalMs)}</dd>
         </div>
-        <div className="dash-strip-progress">
-          <dt className="visually-hidden">단계 진행</dt>
-          <dd>
-            <span
-              className="dash-progress"
-              role="progressbar"
-              aria-label="처리 단계 진행"
-              aria-valuemin={0}
-              aria-valuemax={timing.stagesTotal || 1}
-              aria-valuenow={timing.stagesDone}
-              aria-valuetext={`단계 ${timing.stagesDone}/${timing.stagesTotal} 완료`}
-            >
-              <span className="dash-progress-fill" style={{ inlineSize: `${percent}%` }} />
-            </span>
-            <span>
-              단계 {timing.stagesDone}/{timing.stagesTotal} 완료
-            </span>
-          </dd>
-        </div>
+        {bar ? (
+          <div className="dash-strip-progress">
+            <dt className="visually-hidden">단계 진행</dt>
+            <dd>
+              <span
+                className="dash-progress"
+                role="progressbar"
+                aria-label="처리 단계 진행"
+                aria-valuemin={0}
+                aria-valuemax={bar.max || 1}
+                aria-valuenow={bar.now}
+                aria-valuetext={bar.text}
+              >
+                <span className="dash-progress-fill" style={{ inlineSize: `${percent}%` }} />
+              </span>
+              <span data-testid="dash-strip-steps">{bar.text}</span>
+            </dd>
+          </div>
+        ) : null}
       </dl>
       <div className="dash-strip-actions">
         <button
@@ -185,12 +195,15 @@ const COUNT_TILES: Array<{ key: keyof CanonicalCounts; label: string }> = [
 export function StatusCard({
   run,
   stages,
+  steps,
   counts,
   outputDir,
   issues,
 }: {
   run: RunDetail;
   stages: StageRow[];
+  /** `/dashboard` `steps` (T-021); null until the run ends. */
+  steps?: StepsSummary | null;
   counts: CanonicalCounts | undefined;
   outputDir: string;
   issues: ItemRow[] | undefined;
@@ -200,12 +213,16 @@ export function StatusCard({
     [string, ProviderProgress]
   >;
   const running = stages.find((stage) => stage.state === "running");
-  const providerDone =
-    progress?.completed_count ?? providers.filter(([, p]) => p.status === "completed").length;
+  // T-022: the step counts are the server's (`summarize_steps`), the same line the strip and 처리
+  // print. The collector count is its own "수집기 n" label — it counts providers, not steps — and
+  // its errors read "수집기 오류 n" only when there are some (no "오류 0" beside a failed step).
   const providerTotal = progress?.total_count ?? providers.length;
+  const providerErrors = progress?.error_count ?? 0;
+  const done = stages.filter((s) => s.state === "done").length;
   const summaryParts = [
-    `단계 ${stages.filter((s) => s.state === "done").length}/${stages.length}`,
-    providers.length ? `수집기 ${providerDone}/${providerTotal} · 오류 ${progress?.error_count ?? 0}` : "",
+    stepProgress(steps, run.status === "completed", done, stages.length)?.text ?? "",
+    providers.length ? `수집기 ${n(providerTotal)}` : "",
+    providers.length && providerErrors > 0 ? `수집기 오류 ${n(providerErrors)}` : "",
     issues?.length ? `검증 이슈 ${n(issues.length)}건` : "",
   ].filter(Boolean);
   return (

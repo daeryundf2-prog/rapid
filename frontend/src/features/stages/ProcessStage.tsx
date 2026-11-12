@@ -11,6 +11,7 @@ import { announce, DisabledReason } from "../../a11y";
 import { type AnalysisState, isAnalysisActive } from "../../api/analyses";
 import { getProcessingSnapshot } from "../../api/cases";
 import { ApiError } from "../../api/client";
+import { getRunDashboard } from "../../api/dashboard";
 import { useRunPlan } from "../../api/runPlan";
 import {
   getRunSummary,
@@ -52,6 +53,7 @@ import { runDurationText, runModeText, runStartText, runTimeTooltip } from "../c
 import { DisclosuresCard } from "../dashboard/cards";
 import { SnapshotCard } from "../dashboard/caseCards";
 import { disclosureDigest, disclosureItems, runWarnings, stepLabelKo } from "../dashboard/disclosures";
+import { stepCountsText } from "../dashboard/model";
 import { formatCount } from "../grid/gridUtils";
 import { isLegacyPlan, planSummaryText, RunPlanTable } from "./RunPlanTable";
 import { stepStatusLabel, stepWarningLabel } from "./stepLabels";
@@ -380,6 +382,14 @@ function StepList({
     queryFn: () => getRunSummary(runId),
     retry: false,
   });
+  // T-022: the step counts come from the server (`/dashboard` `steps`, T-021 summarize_steps) —
+  // the same query and the same line as the 접수 strip and 처리 상태 card.
+  const dashboard = useQuery({
+    queryKey: ["run-dashboard", runId],
+    queryFn: () => getRunDashboard(runId),
+    enabled: !planned,
+    retry: false,
+  });
   const steps = (summary.data?.steps ?? []) as Array<Record<string, unknown>>;
   const disclosures = disclosureItems(summary.data);
   const warnings = runWarnings(summary.data);
@@ -394,10 +404,15 @@ function StepList({
   const text = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : "");
   const timed = steps.some((step) => stepElapsedText(step) !== "");
   const totalMs = stepsElapsedMs(steps);
+  const serverCounts = stepCountsText(dashboard.data?.steps);
+  // Without server counts (a run still going, an older server) the raw statuses are listed by
+  // label — never folded into 완료/실패 classes on the client.
   const tally = new Map<string, number>();
-  for (const step of steps) {
-    const label = text(step.status) ? stepStatusLabel(text(step.status)) : "상태 없음";
-    tally.set(label, (tally.get(label) ?? 0) + 1);
+  if (!serverCounts) {
+    for (const step of steps) {
+      const label = text(step.status) ? stepStatusLabel(text(step.status)) : "상태 없음";
+      tally.set(label, (tally.get(label) ?? 0) + 1);
+    }
   }
   return (
     <section className="stage-section process-plan" aria-labelledby="process-plan-title">
@@ -406,7 +421,7 @@ function StepList({
         {steps.length ? (
           <p className="process-plan-tally" data-testid="process-step-tally">
             {[
-              `${steps.length}단계`,
+              ...(serverCounts ? [serverCounts] : [`단계 ${steps.length}`]),
               ...[...tally].map(([label, n]) => `${label} ${n}`),
               ...(results && totalMs !== null ? [`단계 소요 합계 ${formatElapsed(totalMs) || "00:00"}`] : []),
             ].join(" · ")}
@@ -723,7 +738,9 @@ export function ProcessPage() {
                 <dd>{runProgressText(run) || "—"}</dd>
               </>
             ) : null}
-            <dt>오류</dt>
+            {/* Collector errors (progress.error_count), not step failures — those are in the
+                처리 단계 count line (T-022). */}
+            <dt>수집기 오류</dt>
             <dd>{run.progress?.error_count ?? 0}</dd>
           </dl>
         ) : (

@@ -4,7 +4,7 @@
  */
 
 import type { ReviewCounts, SavedSearch } from "../../api/caseDb";
-import type { ExportEntry } from "../../api/dashboard";
+import type { ExportEntry, StepsSummary } from "../../api/dashboard";
 import type { CanonicalCounts, RunTree } from "../../api/runs";
 import type { ReviewStatus } from "../../contracts/collection";
 import { formatElapsed } from "../../shell/StatusBar";
@@ -69,6 +69,45 @@ export function stageRows(progress: ProgressLike | null | undefined, now = Date.
     });
   }
   return rows;
+}
+
+// --- step counts (T-022) ------------------------------------------------------
+
+/**
+ * The one step-count line of the 접수 cards and the 처리 screen (T-022, GAP-029): the server's
+ * `summarize_steps` classes in a fixed order — "단계 42 · 완료 39 · 부분 1 · 실패 1 · 건너뜀 1".
+ * 단계 · 완료 · 부분 · 실패 always print; 건너뜀 and 미완료 only when non-zero, so the parts add up
+ * to 단계. "" when the server sent no counts (a run still in progress, an older server) — never a
+ * client-side guess. The collector count is a separate "수집기 n" label.
+ */
+export function stepCountsText(steps: StepsSummary | null | undefined): string {
+  if (!steps) return "";
+  return [
+    `단계 ${steps.total}`,
+    `완료 ${steps.completed}`,
+    `부분 ${steps.partial}`,
+    `실패 ${steps.failed}`,
+    ...(steps.skipped ? [`건너뜀 ${steps.skipped}`] : []),
+    ...(steps.incomplete ? [`미완료 ${steps.incomplete}`] : []),
+  ].join(" · ");
+}
+
+/**
+ * The step bar of the 접수 strip and the 처리 상태 summary (T-022): with the server's counts it fills
+ * by the steps that ran (all but 미완료) and reads {@link stepCountsText}; while the run is still
+ * going (no counts yet) it shows the live pipeline progress as "진행 단계 n/m". A finished run
+ * without counts gets null — never a guessed "n/n 완료".
+ */
+export function stepProgress(
+  steps: StepsSummary | null | undefined,
+  finished: boolean,
+  stagesDone: number,
+  stagesTotal: number,
+): { now: number; max: number; text: string } | null {
+  const text = stepCountsText(steps);
+  if (steps && text) return { now: steps.total - steps.incomplete, max: steps.total, text };
+  if (finished || !stagesTotal) return null;
+  return { now: stagesDone, max: stagesTotal, text: `진행 단계 ${stagesDone}/${stagesTotal}` };
 }
 
 /**

@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewCounts } from "../../api/caseDb";
-import { normalizeDashboard } from "../../api/dashboard";
+import { normalizeDashboard, normalizeSteps } from "../../api/dashboard";
 import type { RunTree } from "../../api/runs";
-import { categoryBars, formatDuration, keywordRows, reviewSummary, stageRows } from "./model";
+import {
+  categoryBars,
+  formatDuration,
+  keywordRows,
+  reviewSummary,
+  stageRows,
+  stepCountsText,
+  stepProgress,
+} from "./model";
+import { IMG_B_STEPS, IMG_B_STEPS_TEXT } from "./stepsFixture";
 
 describe("stageRows", () => {
   it("derives per-stage durations from consecutive completions plus the running stage", () => {
@@ -141,5 +150,48 @@ describe("normalizeDashboard", () => {
     expect(empty.evidence_source.partitions).toEqual([]);
     expect(empty.exports).toEqual([]);
     expect(empty.run_id).toBe("r1");
+  });
+});
+
+describe("stepCountsText (T-022)", () => {
+  it("prints the IMG-B-like counts as the one shared line (failed_isolated is 부분, never 완료)", () => {
+    expect(stepCountsText(normalizeSteps(IMG_B_STEPS))).toBe(IMG_B_STEPS_TEXT);
+    expect(IMG_B_STEPS_TEXT).toBe("단계 42 · 완료 39 · 부분 1 · 실패 1 · 건너뜀 1");
+  });
+
+  it("always prints 단계 · 완료 · 부분 · 실패; 건너뜀 · 미완료 only when non-zero", () => {
+    const steps = normalizeSteps({ total: 3, completed: 1, incomplete: 2 });
+    expect(stepCountsText(steps)).toBe("단계 3 · 완료 1 · 부분 0 · 실패 0 · 미완료 2");
+  });
+
+  it("is empty without server counts (no client-side guess)", () => {
+    expect(stepCountsText(null)).toBe("");
+    expect(stepCountsText(undefined)).toBe("");
+  });
+});
+
+describe("stepProgress (T-022)", () => {
+  it("uses the server counts; live runs show 진행 단계 n/m; finished runs without counts get no bar", () => {
+    expect(stepProgress(normalizeSteps(IMG_B_STEPS), true, 12, 12)).toEqual({
+      now: 42,
+      max: 42,
+      text: IMG_B_STEPS_TEXT,
+    });
+    expect(stepProgress(null, false, 3, 5)).toEqual({ now: 3, max: 5, text: "진행 단계 3/5" });
+    expect(stepProgress(null, true, 12, 12)).toBeNull();
+    expect(stepProgress(undefined, false, 0, 0)).toBeNull();
+  });
+});
+
+describe("normalizeSteps", () => {
+  it("keeps the server's classes and names; null for missing or malformed payloads", () => {
+    const steps = normalizeSteps(IMG_B_STEPS);
+    expect(steps?.partial_names).toEqual(["artifacts-browser"]);
+    expect(steps?.by_status).toEqual({ completed: 39, failed: 1, failed_isolated: 1, skipped: 1 });
+    expect(normalizeSteps(null)).toBeNull();
+    expect(normalizeSteps({ completed: 3 })).toBeNull();
+    expect(normalizeSteps("x")).toBeNull();
+    expect(normalizeDashboard("r1", { run_id: "r1" }).steps).toBeNull();
+    expect(normalizeDashboard("r1", { run_id: "r1", steps: IMG_B_STEPS }).steps?.total).toBe(42);
   });
 });
