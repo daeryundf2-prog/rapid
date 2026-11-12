@@ -1,397 +1,851 @@
-# R8 부록 F — 작업 분해 (T-001 ~ T-144, 유효 143개)
+# R8 부록 F — 작업 분해 (T-001 ~ T-346, 유효 344개) · 계획 v3
 
 마스터 10절. 소유자 방식: 큰 레인 대신 **작은 quick 과제**(한 영역, 형제와 파일이 겹치지 않음, 4시간 이하, 독립 검증 가능)로 쪼개 병렬로 돌리고, 검증을 더 엄격하게 한다.
 
-**읽는 순서**: 이 표는 한 줄 요약이다. 구현자가 질문 없이 시작하는 데 필요한 것(대상 함수·동작 명세·수치 수용 검사·검증 명령·깨질 수 있는 기존 테스트·하지 말 것)은 **[부록 H — 과제 상세 카드](r8-task-cards.md)** 에 과제마다 있다. 표와 카드가 다르면 카드가 우선한다. 2차 적대적 리뷰(2026-11-11)가 고친 행에는 `〔2차〕`를 붙였다.
+**v3(2026-11-12)**: v2의 과제 T-001~144 가운데 50개는 그대로 두고, 92개는 수용 기준·의존·QA를 고치거나 비고를 달았으며(제목에 "재정의"가 붙은 것이 내용을 바꾼 과제다), 2개를 폐기했다. 다섯 소유자 리뷰의 과제를 T-145~346(202개)로 더했다(v2와 같은 일은 새 번호를 주지 않고 기존 과제의 수용 기준에 더했다). 물결은 W0~W11에서 **WA~WH + 엔진 차선 WP1~WP5 + WZ**로 다시 짰다(F.6에 대응표). 묶음은 스크립트가 만든다(F.1).
 
-## F.1 공통 규칙
+## F.1 공통 규칙 (v3)
 
-- **역할**: 구현 Opus(과제당 워크트리 1개) → 검증 Sonnet(구현자와 다른 세션이 수용 검사·검증 명령을 처음부터 다시 실행, 실데이터 QA 수행) → 적대적 리뷰 Fable(묶음마다 diff 전체 + 추적표 대조). 표에서 담당이 다르면 따로 적는다(`QA` = Sonnet 단독, `RV` = Fable 단독).
-- **묶음**: 물결 W0~W11, 물결 안의 묶음(a·b·c…)마다 과제 6개 이하. 같은 묶음의 과제는 파일이 겹치지 않는다(표의 "파일"이 배타 소유 범위). 묶음은 앞 묶음이 통합 브랜치에 들어간 뒤 시작한다.
-- **묶음 안 단계**〔2차〕: 같은 묶음 안에 선후 의존이 있으면 병렬이 아니다. F.6의 단계표(1단계 → 2단계 …)를 따른다. 뒤 단계 과제는 앞 단계 과제가 **통합 브랜치에 들어간 뒤** 시작한다. 예외는 카드에 "인터페이스 선합의"라고 적힌 과제뿐이다(카드에 적힌 응답 모양·함수 시그니처를 고정하고 병렬 구현, 통합 검증은 뒤 단계에서).
-- **화면 장착**〔2차〕: 새 화면·패널은 `export`까지만 만든다. 슬롯·경로에 장착하는 파일(`frontend/src/app/registerSlots.tsx`, `frontend/src/app/ViewSwitch.tsx`, `frontend/src/app/IntakePane.tsx`)과 백엔드 라우터 등록(`rapidtriage/api/app/factory.py`의 `include_router`)은 금지 구역이다. 표에 그 파일이 적힌 과제만 직접 고치고, 나머지는 코디네이터가 묶음 끝에 한 번에 장착한다(장착 diff는 과제당 10줄 이하).
-- **기존 테스트**〔2차〕: 과제가 기존 테스트의 단언을 바꿔야 하면 (a) 계약표(부록 D)에 있는 이름·주소·인용·키면 **바꾸지 않는다**(과제가 틀린 것), (b) 계약표에 없는 문구·클래스·치수면 같은 PR에서 testid·역할 선택자로 옮기고 PR 본문에 "바꾼 단언 n개" 목록을 적는다. 삭제·`skip`은 금지.
-- **브랜치**: 통합 `feat/r8`(`feat/r6-ux` ffab479에서 분기, D13), 과제 `r8/T-xxx-짧은이름`. 머지는 소유자 지시 때만.
-- **공유 파일 금지 구역**(한 묶음에서 한 과제만): `frontend/src/features/grid/DataGrid.tsx`, `frontend/src/app/shell.css`, `frontend/src/shell/Layout.tsx`, `frontend/src/router.ts`, `frontend/src/tokens/tokens.css`, `frontend/src/app/registerSlots.tsx`, `frontend/src/app/ViewSwitch.tsx`, `frontend/src/app/IntakePane.tsx`, `frontend/index.html`, `rapidtriage/api/app/routes_runs.py`, `rapidtriage/api/app/routes_case_db.py`, `rapidtriage/api/app/routes_reports.py`, `rapidtriage/api/app/routes_search_index.py`, `rapidtriage/api/app/factory.py`, `rapidtriage/core/case_report.py`, `rapidtriage/cli/parser.py`, 카탈로그 YAML, `docs/console-glossary.md`, `docs/rapidtriage-known-limitations.md`, OpenAPI 스냅샷(코디네이터가 묶음 끝에 재생성).
-- **[승인]**: AGENTS.md 계약(복구 엔진·파서·핵심 포렌식 로직·API 동작·DB 스키마). 승인 전 착수 금지. 표시·API 응답 추가·보고서 생성기·검색 색인 질의·케이스 워크플로는 승인 불필요로 분류했고, 경계가 애매한 것은 `[확인]`으로 표시했다(결정 D6 범위 확인).
-- **과제 공통 검증 명령**(수용 검사와 별개로 항상):
+- **역할**: 구현 **Opus**(과제당 워크트리 1개, `python scripts/dev/wt.py new r8/T-xxx-짧은이름`) → 검증 **Sonnet**(구현자와 다른 세션이 수용 검사·검증 명령을 처음부터 다시 실행하고 그 과제의 QA를 실데이터 콘솔에서 수행) → 적대적 리뷰 **Fable**(묶음마다 diff 전체 + 추적표 + 마스터 2절 시나리오 걷기). 표의 "모델" 열이 과제별 배정이다. 코디네이터 과제(`C`)는 Opus 한 세션이 묶음 끝에 순차로 한다. 운영자 과제(`H`)는 사람이 하고 Sonnet이 산출물을 확인한다.
+- **크기·병렬**: 과제는 4시간 이하, 동시 6개 이하. 묶음(`WA-1` …)은 **생성 스크립트가 만든다** — 같은 물결의 과제를 번호순으로 훑어 ① 묶음당 6개 이하 ② 같은 묶음 안에서 파일(표의 "파일" 열에서 뽑은 경로, 글롭·폴더 포함)이 겹치지 않고 ③ 같은 물결 안의 의존이 앞 묶음에 있도록 탐욕적으로 채운다. 같은 파일을 고치는 과제는 자동으로 다른 묶음이 된다. 묶음은 앞 묶음이 통합 브랜치에 들어간 뒤 시작한다. 과제를 더하거나 고치면 스크립트를 다시 돌려 묶음과 추적표를 새로 만든다(손으로 묶음을 고치지 않는다).
+- **물결 순서**: WA → WB → WC → (WD ∥ WE) → WF → WG → WH → WZ. **엔진 차선 WP1~WP5는 사업 소유자 승인이 나는 즉시 WC 뒤 어디서든 병행**한다(파일이 화면 과제와 겹치지 않는다. WP1 → WP2 → WP3 순서, WP4·WP5는 독립). 화면 과제는 WP 과제에 의존하지 않는다 — 승인이 늦어도 WA~WH는 끝까지 간다.
+- **이미 병합된 레인**: `fix/r8-ci-green`(T-145·T-146 전부, T-147·T-153 일부)과 `fix/r8-security`(T-025·T-030·T-031·T-032·T-177)는 이 계획을 쓰는 동안 `feat/r6-ux`에 병합됐다(bc6c970). 이 계획은 그 과제를 다시 설계하지 않는다. 표에서 "병합됨 — 검증 대기"인 과제는 **구현 없이** Sonnet이 표의 수용 검사와 QA를 실데이터에서 돌려 닫고, 미달이면 남은 범위만 새 과제로 낸다. "부분 병합"인 과제는 표에 적힌 남은 범위만 구현한다.
+- **화면·라우터 장착**: 새 화면·패널·라우터는 `export`까지만 만든다. 장착 파일(`frontend/src/app/registerSlots.tsx`·`ViewSwitch.tsx`·`IntakePane.tsx`, `rapidtriage/api/app/factory.py`의 `include_router`, `rapidtriage/core/run/__init__.py`의 훅 호출)은 금지 구역이다. 표에 그 파일이 적힌 과제만 직접 고치고, 나머지는 코디네이터가 묶음 끝에 한 번에 장착한다(장착 diff는 과제당 10줄 이하).
+- **`cli/parser.py`**: T-159(WA)가 `cli/parsers/<묶음>.py`로 나눈다. 그 뒤의 과제가 "`cli/parser.py`"라고 적었으면 해당 묶음 파일을 고친다.
+- **번들**: 과제 워크트리는 `rapidtriage/web/static/v2/**`를 커밋하지 않는다(T-149 가드가 막는다). 코디네이터가 묶음 끝에 한 번 빌드해 커밋하고, CI가 "소스로 빌드한 결과 = 커밋된 번들"을 검사한다(T-156, D57).
+- **기존 테스트**: 과제가 기존 테스트의 단언을 바꿔야 하면 (a) 사용자 계약(주소·인용·단축키·저장 키·접근성 이름·랜드마크, 부록 D)이면 **바꾸지 않는다**(과제가 틀린 것), (b) testid면 `frontend/src/contracts/testIds.ts`의 상수를 같은 PR에서 고친다(D65), (c) 문구·클래스·치수면 `copy.ts` 키나 역할 선택자로 옮기고 PR 본문에 "바꾼 단언 n개"를 적는다. 삭제·`skip`은 금지.
+- **브랜치**: 통합 `feat/r8`(T-167이 분기, D13), 과제 `r8/T-xxx-짧은이름`. 병합은 CI 초록(D42) + 소유자 지시 때만.
+- **[승인]**: AGENTS.md 계약(복구 엔진·파서·핵심 포렌식 로직·API 동작·DB 스키마). 승인 전 착수 금지. WP1~WP5 전부가 여기에 든다. 표시 계층·API 응답 추가·보고서 생성기·검색 색인 질의·케이스 워크플로·QA 도구는 승인 불필요로 분류했고, 경계가 애매한 것은 `[확인]`으로 표시했다(착수 전 코디네이터가 소유자에게 한 줄로 확인).
+- **검증 명령 묶음**(표의 "검증" 열이 가리킨다. 과제별 명령은 그 앞에 따로 적혀 있다):
   ```bash
+  # V-PY
   python -m ruff check rapidtriage tests scripts && python -m vulture rapidtriage tests scripts --min-confidence 80
   python -m compileall -q rapidtriage tests scripts
-  python scripts/run-tests-parallel.py --changed   # T-011 이전에는 관련 모듈만 python -m unittest tests.<module>
-  (cd frontend && npm run typecheck && npm run lint && npx vitest run <관련 폴더> && npm run build)
-  (cd frontend && npm run e2e -- <과제에 적힌 스펙>)   # = playwright test --config e2e/playwright.config.ts. 설정 없이 npx playwright test 는 스펙을 못 찾는다〔2차〕
-  git diff --check && git status --short
+  python scripts/dev/run-tests.py --changed        # T-006 전에는 python -m unittest tests.<관련 모듈>
+  # V-FE
+  (cd frontend && npm run typecheck && npm run lint && npx vitest run <관련 폴더> && npm run build && npm run check:bundle)
+  # V-E2E
+  (cd frontend && npm run e2e -- <과제에 적힌 스펙>)   # = playwright test --config e2e/playwright.config.ts, 포트는 wt.py가 배정
+  # V-CI
+  gh run list --workflow "RapidTriage CI" --limit 5 --json conclusion,headSha
+  # V-DOC
+  python scripts/dev/check-eol.py && git diff --check && git status --short
+  # V-RD (실데이터 콘솔 E2E — 그 과제의 QA를 부록 E의 절차대로)
+  python scripts/r8-evidence-snapshot.py --before && <QA 절차> && python scripts/r8-evidence-snapshot.py --after --diff
+  # 모든 과제 공통(T-152 뒤)
+  python scripts/dev/gate.py --tier fast --json      # 묶음 끝(코디네이터): --tier full + 회귀 묶음(부록 E.6)
   ```
-  묶음 끝(코디네이터): AGENTS.md 검증 명령 전부 + vitest 전체 + e2e 전체 + 계약 테스트 + 번들 예산 + 부록 E의 회귀 묶음(E.6).
-- **닫는 조건**: 수용 검사 통과 + Sonnet 재실행 통과 + (화면 과제) 실데이터 스크린샷 1장 이상 + 추적표 갱신. vitest·TestClient만으로 닫지 않는다(IS-125).
+- **닫는 조건**: 수용 검사 통과 + Sonnet 재실행 통과 + V-RD(화면·API·보고서 과제는 실데이터 스크린샷·JSON 1건 이상, 저장 위치 `D:\rapid-qa\derived\r8\<묶음>\T-xxx\`) + 추적표 갱신. vitest·TestClient·합성만으로 닫지 않는다(IS-121·125). QA 열이 "—(사유)"인 과제는 도구·문서·측정 과제이고 게이트 JSON이나 결과표가 증거다.
+- **표의 상세**: v2에서 온 과제의 동작 명세는 [부록 H 카드](r8-task-cards.md)에 있다("상세: 부록 H 카드"). v3가 고친 것은 표의 "〔v3〕" 줄이 카드보다 우선한다. v3 신규 과제는 표의 **동작**·**수용**이 전부다.
 
 ## F.2 물결 요약
 
-| 물결 | 주제 | 과제 수 | 묶음 | 승인 |
-|---|---|---|---|---|
-| W0 | 계약·측정·기반 | 12 | a(6)·b(6) | 불필요 |
-| W1 | 깨진 것·거짓 표시·방어 가능성 긴급 수정 | 31 | a·b·c·d·e(각 6)·f(1) | 불필요(T-036·T-129·T-131·T-132 `[확인]`) |
-| W2 | 실데이터 기준선 구축·재확인 | 9 | a(6)·b(3: T-043·T-044·T-138) | D24·D32(미승인 시 부록 E.7 대체 경로) |
-| W3 | 백엔드 지원(`/brief`·색인·백그라운드·분류) | 15 | a(6)·b(5)·c(4) | 불필요 |
-| W4 | 디자인 시스템 컴포넌트 | 10 | a(6)·b(4) | 불필요 |
-| W5 | 셸·브리핑·내비·접수 흐름 | 12 | a(6)·b(6) | 불필요 |
-| W6 | 목록·뷰어 | 12 | a(6)·b(6) | 불필요 |
-| W7 | 검색·검토·시간순·AI·사람·장치 | 15 | a(6)·b(6)·c(3) | 불필요 |
-| W8 | 보고서 | 6 | a(6) | 불필요 |
-| W9 | AX·정리·잔여 | 12 | a(6)·b(6) | 불필요 |
-| W10 | 엔진·수집기(승인 묶음) | 7 | a(6)·b(1) | **필요(D6·D6a·D7·D8·D10·D34)** |
-| W11 | 1:1 최종 검증·사람 테스트 | 2 | a(2) | — |
-| 합계 | | 143 | 28묶음(1차 표의 "23"은 오산 — 1차 기준 25) | |
+| 물결 | 주제 | 과제 수 | 묶음 | 승인·결정 | 끝나면 참인 문장 |
+|---|---|---|---|---|---|
+| WA | CI 초록·가드레일·계약 | 36 | 7 (6·6·6·6·6·5·1) | D42·D13 | CI가 초록이고 초록이 병합 조건이다. 게이트가 한 줄이다. 워크트리가 서로를 건드리지 않는다. 사용자 계약이 테스트로 고정돼 있다 |
+| WB | 거짓 표시 제거·보안/무결성 P0 | 59 | 10 (6·6·6·6·6·6·6·6·6·5) | D66(이름). `[확인]` 5건 | 화면·보고서가 틀린 사실을 말하지 않는다(범위 네 축, 예산 중단 ≠ 빈 상태, 단계 수 일치, 잡음 ≠ 위장, 감정서·후보 수·해시 문구). 자격 증명이 새지 않고 API로 폴더를 지울 수 없다 |
+| WC | 실데이터 코퍼스·기준선(C1~C6) | 33 | 8 (6·6·6·6·6·1·1·1) | **D24·D32·D43** | 코퍼스 C1~C6과 기준선 수치가 있다. 범위 진단이 `fls`로 확정됐다. 수집기 재현율을 처음 쟀다 |
+| WD | 백엔드 지원 | 20 | 4 (6·6·6·2) | `[확인]` 4건 | `/brief`·0건 사유·유형 색인·문서 단위 검색·백그라운드 작업·멱등 키가 있다 |
+| WE | 디자인 기반·브리핑 v0 (WD와 병행) | 11 | 4 (3·5·1·2) | — | 토큰·첫 컴포넌트 묶음과 **브리핑 v0**이 있다(변호사가 볼 첫 화면) |
+| WF | 화면: 셸·브리핑·내비·목록·뷰어·검색·검토·시간순·AI | 51 | 9 (6·6·6·6·6·6·6·6·3) | D2(사람 테스트) | 첫 화면이 사건이고, 읽는 화면이 읽기 좋고, 한 건씩 키 하나로 판단한다 |
+| WG | 보고서 | 12 | 3 (5·4·3) | — | 미리보기 = 출력인 A4 보고서가 판마다 보존된다 |
+| WH | AX 완성·수렴·정리 | 35 | 9 (6·6·6·6·5·1·1·3·1) | D58 | CLI·OpenAPI가 계약이고 옛 컴포넌트·v1 콘솔이 없다 |
+| WP1 | 엔진 1차: 목록·시각·삭제·무결성 [승인] | 16 | 7 (6·4·2·1·1·1·1) | **D6·D44·D45·D34b·D29** | 파일 시각이 증거의 시각이다. 삭제 레코드가 전수 목록이다. 매체 해시가 취득 해시와 대조된다 |
+| WP2 | 엔진 2차: 선별 추출·우선순위·병렬 [승인] | 8 | 4 (2·3·2·1) | **D44** | 첫 브리핑 15분, 출력은 사용 바이트의 10% |
+| WP3 | 수집기 품질 [승인] | 32 | 7 (6·6·6·6·5·2·1) | **D6·D6a·D8·D10·D46** | MFT·USN 전량, 침묵 실패가 부분 실패를 잡는다, 무고지 상한 0 |
+| WP4 | 한국 인벤토리 수집기 [승인] | 7 | 2 (6·1) | **D47** | 한국 환경 인벤토리 6종이 정답표와 맞는다 |
+| WP5 | AI 수집 깊이 [승인] | 17 | 3 (6·6·5) | **D48·D50** | AI 행이 원본으로 되돌아가고 계정·파일·웹 대화에 답한다 |
+| WZ | 1:1 최종 검증 | 7 | 2 (6·1) | — | IS 전부가 "일치" 또는 사유 있는 "미검증"이다 |
+| 합계 | | 344 | 79 | | |
 
-순서의 근거: (1) 계약이 없으면 재설계가 테스트를 한꺼번에 깬다 → W0. (2) 지금 화면이 **틀린 사실**을 말하는 곳(GAP S1)을 구조 변경보다 먼저 → W1. (3) 소유자의 의심(실데이터 미검증)을 설계 전에 수치로 닫는다 → W2가 W1 직후. (4) W3·W4는 서로 파일이 겹치지 않아(백엔드 vs 컴포넌트) **동시에** 진행 가능. (5) W10은 승인 시점에 맞춰 W3 이후 어디든 끼울 수 있다(파일이 겹치지 않음).
+순서의 근거: (1) 초록이 아닌 CI와 서로를 죽이는 워크트리 위에서는 어떤 "통과"도 믿을 수 없다 → **WA**. (2) 지금 화면·보고서가 **틀린 사실**을 말하는 곳과 새는 곳을 구조 변경보다 먼저 → **WB**. (3) 사업 소유자의 의심(실데이터 미검증)을 설계 전에 수치로 닫고, 그 결과로 뒤 물결을 조정한다 → **WC**. (4) 백엔드(WD)와 디자인 기반(WE)은 파일이 겹치지 않아 동시에. 브리핑 v0을 WE에 넣어 변호사가 볼 첫 화면을 과제 70개 뒤가 아니라 여기서 낸다. (5) 화면(WF) → 보고서(WG) → 수렴·정리(WH). 공용 컴포넌트의 수렴은 화면이 끌어낸 뒤 마지막에 한다. (6) **엔진(WP)은 끝이 아니다.** 브리핑이 말할 숫자가 엔진에서 나오므로 승인 즉시 병행한다.
+
+최소 충족선: **WA~WC** = "지금 틀린 것을 바로잡고 실데이터로 확인"(사업 소유자의 의심 해소) · **WE** = 첫 화면이 사건 · **WG** = UI/UX 개편 완료 · **WH** = 정리 · **WP** = 승인 시.
 
 ## F.3 과제표
 
-열: ID · 제목 · 배타 파일 · 의존 · 크기(h) · 수용 검사 · 닫는 GAP/IS · QA. 묶음 제목의 "(병렬 n)"은 묶음 크기다 — 실제 동시 수와 순서는 F.6 단계표를 따른다. 과제별 상세는 [부록 H](r8-task-cards.md).
-
-### W0-a 계약·측정 (병렬 6)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-001 | UI 계약 추출기와 계약 테스트 〔2차: 범위 확대〕 | `scripts/extract-ui-contract.mjs`, `frontend/src/contracts/uiContract.ts`, `frontend/src/contracts/*.contract.test.ts` | — | 4 | testid 전수 목록 + **e2e·vitest의 `getByRole` 이름 전수(e2e 173회·vitest 536회의 고유 이름 표)** + 주소 왕복 30종 + 인용 스냅샷 12종 + sessionStorage 4키·팝아웃 메시지 종류(부록 D.11) 테스트가 현 코드에서 통과, 부록 D와 표 일치. 일부러 이름 1개를 바꾸면 계약 테스트가 실패 | GAP-149·172·194·208 / IS-116 | QA-041·104·111 |
-| T-002 | 토큰 lint·대비 검사 확장 | `frontend/scripts/check-tokens.mjs`(신규), `frontend/scripts/check-contrast.mjs`(기존 확장), `frontend/package.json`(scripts 블록) | — | 3 | 현 위반 수를 기준선 JSON으로 기록(색 0·radius 42·px 124·font-size 9), 새 위반은 실패 | GAP-140 / IS-110 | QA-096 |
-| T-003 | 증거 스냅샷·로그 스캔·보고서 감사 스크립트 | `scripts/r8-evidence-snapshot.py`, `scripts/r8-log-scan.py`, `scripts/r8-report-audit.py`, `scripts/r8-trace-audit.py`(부록 A·B·E·F에서 추적표 생성·구멍 검사), `tests/test_r8_qa_scripts.py` | — | 4 | 합성 폴더에서 변경 1바이트·신규 파일 검출, 가짜 비밀·경로 검출, 보고서 필드 누락 검출 단위 테스트. `r8-trace-audit.py`는 (a) GAP 없는 IS·과제 없는 GAP·QA 없는 IS, (b) 같은 묶음 안 파일 중복, (c) F.6 단계표와 의존 열의 모순을 실패로 보고 | GAP-204 / IS-067·074·059 | QA-001·013·009·078 |
-| T-004 | 합성 풍부 픽스처 생성기(가짜 값) | `scripts/make-r8-fixture.py`, `tests/fixtures/r8_rich/`(생성 스크립트·매니페스트만), `frontend/e2e/r8_fixture.py` | — | 4 | Tier 1 9카드 전부 행 > 0, 가짜 비밀·가짜 개체 포함, 실데이터·PII 0(스캔), 생성 60 s 이하 | GAP-057 / IS-121(CI용) | QA-045 |
-| T-005 | 용어 lint와 용어집 R8 개정 | `scripts/check-glossary-terms.py`, `docs/console-glossary.md`, `tests/test_glossary_lint.py` | — | 4 | 부록 C.7 표가 용어집에 반영(보고서 포함 키 표기 오류 수정 포함), lint가 금지 표기를 경고 모드로 집계(기준선 기록) | GAP-130·182 / IS-096 | QA-035 |
-| T-006 | 병렬 테스트 실행기와 CI 전환 | `scripts/run-tests-parallel.py`, `.github/workflows/rapidtriage-ci.yml` | — | 4 | 빠른 묶음 8분 이하(느린 4모듈 분리), 전체 결과가 단일 discover와 같은 테스트 수 | GAP-152 / IS-119 | QA-104 |
-
-### W0-b 기반 (병렬 6)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-007 | 서버 오류 봉투와 500 경로 제거 〔2차: 추가 방식〕 | `rapidtriage/api/app/errors.py`(신규: 예외 처리기 + 영문 리터럴 → 한국어 대응표), `rapidtriage/api/app/factory.py`(처리기 등록·500 본문), `docs/api-error-codes.md`, `tests/test_error_envelope.py` | — | 4 | 모든 4xx·5xx 본문에 최상위 `code`·`message`·`hint`가 **추가**된다. **기존 `detail`은 형·값 그대로**(문자열·배열·`{code,message}` 객체 모두 불변) → `tests/`의 `["detail"]` 단언 190곳 무수정 통과. 영문 `detail` 리터럴 36종은 `message`만 한국어(대응표). 500 본문에 `crash_report` 절대경로 0(`crash_id`만). API 스냅샷 차이는 오류 스키마 추가뿐 | GAP-126·018·156·193 / IS-091·074 | QA-083·111 |
-| T-008 | 프런트 오류 정규화 | `frontend/src/api/client.ts`, `frontend/src/api/errors.ts`(신규), 해당 테스트 | —(T-007과 인터페이스 선합의: 부록 D.7) | 3 | `ApiError`가 `code`·`message`·`hint`·`status`를 가진다. 서버가 최상위 `message`를 주면 그것을, 없으면 `detail`에서 만든 문장을 쓴다(옛 서버 호환). 네트워크 실패(`TypeError`)→`NETWORK_UNREACHABLE`, 중단→`REQUEST_ABORTED`(화면에 표시 안 함), 시간 초과→`REQUEST_TIMEOUT`. "Failed to fetch"·"Request failed" 문자열 0(grep `frontend/src`, 테스트 제외) | GAP-126·051·193 / IS-091 | QA-083 |
-| T-009 | Python 잠금 파일과 프로젝트 기준 감사 | `pyproject.toml`, `requirements.lock`, `.github/workflows/dependency-monitoring.yml`, `scripts/check-dependencies.py` | — | 4 | 잠금 기준 pip_audit 실행, `requires-python>=3.12` 정렬, 권고 목록과 D25 판단 근거 문서 | GAP-151 / IS-118 | QA-104 |
-| T-010 | 비결정·기준 실패 테스트 4건 수정 `[확인: 파생 표 단계의 폴더 이름 충돌만, 수집·복구 불변]` | `rapidtriage/core/derived/stage.py`(`:77-79` `new_run_stage_analysis_id` 충돌만), `tests/`의 해당 3파일, `frontend/src/features/grid/qaRealData.test.tsx`·`frontend/src/features/analysis/qaRealData.test.tsx`·`qaRealData2.test.tsx` | — | 4 | 4건 각각 20회 반복 통과, `test_rapidtriage_email_external…` 원인 기록 | GAP-152 / IS-119 | — |
-| T-011 | 과제 측정 하네스(T1~T5 골격·지표 수집) | `frontend/e2e/tasks/`(신규 폴더), `scripts/r8-measure.py` | T-001 | 4 | 현 화면에서 UX 감사 수치(트리 366±10%, 잘림 29~37%, Tab 32)를 재현하는 기준선 JSON | IS-121 | QA-033·044·091 |
-| T-012 | e2e CSS 클래스 선택자 제거 | `frontend/e2e/*.spec.ts`(기존 13개), 선택자 대체에 필요한 testid 추가는 `frontend/src/features/views/ChatView.tsx`·`frontend/src/features/case/EntityPanel.tsx`·`frontend/src/features/viewer/views/ImageView.tsx`만(그 밖의 클래스 — `.grid-row-stripe`·`.grid-scroll`·`.dash-*`·`.hist-cat-label`·`.flag-popover`·`.thumb-view` — 는 기존 testid·역할로 대체, 컴포넌트 수정 없이) | T-001 | 4 | e2e에서 `locator('.…')` 0(lint), 13스펙 통과 수 변화 없음 | GAP-150 / IS-117 | QA-104 |
-
-### W1-a 깨진 컴포넌트 (병렬 6)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-013 | 검색 옵션 체크박스가 빈 막대로 그려지는 결함 | `frontend/src/app/shell.css`(`.global-search input` 범위를 검색 입력 하나로), `frontend/src/tokens/controls.css` | — | 2 | 체크박스 폭 ≤24px·라벨 우측(boundingBox), 라이트·다크 스크린샷 | GAP-105 / IS-034 | QA-060 |
-| T-014 | 메뉴 포털·충돌 보정(뷰어 … 메뉴 잘림) | `frontend/src/components/MenuButton.tsx`, `frontend/src/components/popover.css`, `frontend/src/components/Popover.tsx` | — | 4 | 뷰어 최소 폭·880에서 메뉴 사각형이 뷰포트 안, Esc·포커스 복귀 유지 | GAP-095 / IS-102 | QA-049 |
-| T-015 | 트리 건수 잘림·가로 스크롤·이탤릭·검색 공백 | `frontend/src/features/tree/tree.css`, `frontend/src/features/tree/EvidenceTree.tsx`, `frontend/src/features/case/case.css`(`.case-tree` 블록만) | — | 4 | 스크롤바가 있어도 건수 `scrollWidth==clientWidth`, 가로 스크롤 0, 이탤릭 0("자료 없음" 글자), 검색 결과 사이 공백 ≤행 높이 | GAP-082 / IS-012·106 | QA-094 |
-| T-016 | 추가 분석 카드 글자 겹침·격자 구멍 | `frontend/src/features/stages/stages.css`(`.process-card`·`.analysis-cards` 블록) | — | 2 | 2줄 제목에서 겹침 0(요소 사각형 교차 검사), 880~1920 | GAP-078 | QA-094 |
-| T-017 | 미디어 길이 문구·썸네일 대체 글리프 | `frontend/src/features/viewer/views/MediaView.tsx`(`:97`), `frontend/src/features/views/ThumbnailView.tsx`, 〔2차: `thumb.css`는 없다〕 `frontend/src/features/views/views.css`(`.thumb*` 블록만) | —(T-018과 인터페이스 선합의: 204 = 미리보기 불가) | 3 | "알 수 없음초" 0, 미리보기 실패 칸에 형식 글리프 + "미리보기 없음", 콘솔 오류 0 | GAP-093·097·098 / IS-027 | QA-046·050 |
-| T-018 | 썸네일 415를 정상 응답(대체 가능 신호)으로 | `rapidtriage/api/app/routes_media.py`(thumbnail 핸들러), `rapidtriage/api/app/thumbnail.py`, 테스트 | — | 3 | 깨진 이미지에 204 또는 `{placeholder:true}` + 서버 로그 1줄(경로 없음), 영문 오류 0 | GAP-097 / IS-027·091 | QA-050 |
-
-### W1-b 거짓 표시(범위·건수) (병렬 6)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-019 | 목록 응답 부분 결과 계약(서버) | `rapidtriage/api/app/artifact_filter.py`(`filter_artifact_page` `:132-216`, `filter_across_kinds` `:350` 부근), `rapidtriage/api/app/pagination.py`(`paginate_payload`), 테스트 | T-007 | 4 | `budget_stopped`·`truncated`·`scanned`는 **이미 있다**(`:214-215`) → 추가만: `total_lower_bound`(= `offset + returned + (1 if has_more else 0)`, 중단 시 지금까지 일치한 수), `budget_stopped`를 항상 불리언으로, `notice:{code,message}`(`SCAN_BUDGET_STOPPED`·`TOTAL_NOT_COUNTED`). 기존 필드 이름·값 불변(스냅샷) | GAP-031·033 / IS-029·088 | QA-021·022 |
-| T-020 | 부분 결과 띠와 정직한 빈 상태(프런트) 〔2차: 메모리 윈도는 T-143으로 분리〕 | `frontend/src/api/collections.ts`(pagination 형), `frontend/src/features/grid/GridToolbar.tsx`(`:420-425`), `frontend/src/features/grid/DataGrid.tsx`(빈 상태 분기 `:1467-1518`, 바닥 문구 `:1441-1453`만) | T-019 | 4 | `budget_stopped`면 빈 상태 대신 호박 띠 "시간 제한으로 일부만 확인했습니다(n행 확인) — 다시 시도 · 조건 좁히기", "이 노드에는 표시할 행이 없습니다"는 `total===0 && !budget_stopped && !truncated`일 때만. "총 세는 중…"은 실제 요청 중에만, 끝나면 `total` 또는 "n건 이상"(`total_lower_bound`). "전체 건수 미확정"·"전체 미확인" 문자열 0 | GAP-031·033 / IS-029·088 | QA-021·022 |
-| T-021 | 단계 상태 집계 단일 함수(서버) | `rapidtriage/api/app/run_steps_summary.py`(신규: `summarize_steps(summary) -> {total,completed,partial,failed,skipped,failed_names[]}`), `rapidtriage/api/app/dashboard.py`(`build_run_dashboard` `:327`에 `steps` 키 추가) | — | 3 | 입력은 처리 요약의 `steps[].status`. 대응: `completed`→완료, `failed_isolated`(`core/run/steps.py:142`)→**부분**, `error`·`failed`→실패, `skipped`→건너뜀, `cancelled-partial`→부분. IMG-B 요약(Git 밖)을 줄인 픽스처로 42 / 부분 1 / 실패 1 재현. 수집기 progress(12단계)와 별개 수임을 응답 필드 이름으로 구분(`steps` vs `providers`) | GAP-029 / IS-086 | QA-019 |
-| T-022 | 접수·처리 화면이 같은 집계를 쓰게 | `frontend/src/features/dashboard/model.ts`, `frontend/src/features/dashboard/cards.tsx`, `frontend/src/features/stages/ProcessStage.tsx`(집계 부분만) | T-021 | 3 | 접수·처리·문제 목록 수치 동일, "12/12 완료·오류 0" 재현 불가 | GAP-029 / IS-086 | QA-019 |
-| T-023 | 처리 범위 % 고지(서버 표시 계층) | `rapidtriage/api/app/run_scope.py`(신규: 추출 통계 → 범위), `rapidtriage/api/app/run_problems.py` | — | 3 | `scope:{percent,files_skipped,file_limit}` 산출, 문구의 상한은 실제 설정값, 영문 경고를 한국어 제한 사항으로 대체 | GAP-027 / IS-004·085 | QA-017·018 |
-| T-024 | 접수 화면 범위 띠(임시, 브리핑 전까지) | `frontend/src/features/dashboard/CaseDashboard.tsx`(머리 블록만), `frontend/src/features/dashboard/dashboard.css` | T-023 | 2 | IMG-B(31%)에서 첫 화면 최상단에 "볼륨의 31%만 처리" | GAP-027·073 / IS-004 | QA-017 |
-
-### W1-c 보고서·검토 수치의 정확성 (병렬 6)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-025 | 보고서 포함 수 단일 출처 | `rapidtriage/api/app/review_payload.py`(신규 함수 `report_candidate_count(summary, run_id, case_json) -> {count, db, case_json, error}`), `rapidtriage/api/app/routes_case_db.py`(review-counts `:99-163`만), 테스트 | — | 3 | 표시 5건(포함 3: DB 2 + 케이스 JSON 1) 픽스처에서 보고서 본문 항목 수 = `/review-counts.report_candidates` = 3. JSON 측은 `bookmark.review.include_in_report`를 읽는다(`:147-148` 수정). DB·JSON 양쪽에 같은 대상이 있으면 1로 센다(중복 제거 키 = 인용 id). `sqlite3.Error`는 `[]`·0이 아니라 응답의 `error:{code:"CASE_DB_UNREADABLE",message}` + `report_candidates:null`(`review_payload.py:76-77`, `routes_case_db.py:134-137`) | GAP-012·167 / IS-057 | QA-075 |
-| T-026 | 감정서 증거 표·버전·검토 수 정정 | `rapidtriage/core/korean_report.py`, `tests/`의 감정서 테스트, 출력 샘플 스냅샷 | — | 3 | 해시·경로 실제 값, 도구 버전 기재, "검토 완료 항목 수" = 검토 판단이 있는 항목 수, "미기재"·"-" 0(값이 있는 경우) | GAP-009·010 / IS-060 | QA-009·115 |
-| T-027 | 사건 보고서 영문 제거·방어 필드 추가 〔2차: "표는 실제 표"는 T-108(PDF)·T-109(DOCX)로 이동 — 4 h 초과〕 | `rapidtriage/core/case_report.py`(Markdown 생성부 `:40-290`, 제목 `:484,562,797`), 출력 샘플 스냅샷 | — | 4 | 영문 제목·필드 0(허용 목록 외; 대상 줄 `:53-54,76-78,130-152,173-207,247-264,279-283,484,562,797`). 신규 절 "처리 정보와 한계"가 5템플릿 전부·4형식 전부에: 도구 버전(`rapidtriage.__version__`), 카탈로그 버전(`core/triage_rules/catalog.py`의 `version`), 증거 해시(매니페스트 `item.evidence.hashes`), 처리 범위 %(T-023 값, 없으면 "산정 정보 없음"), 실패·부분 단계 이름, 표시 시간대, 적용 조건·숨긴 건수(요청에 실려 온 값) | GAP-011·122·021 / IS-058·059 | QA-009·078 |
-| T-028 | 번들·검증 패키지가 케이스 DB 검토 반영 + 감사 입력에 케이스 DB | `rapidtriage/api/app/viewer_core.py`(`build_run_validation_review_status` `:850-880`), `rapidtriage/core/bundle.py`(`:97-102` `run_summary={}`), 〔2차: 경로 정정〕 `rapidtriage/api/app/runops.py`(`:695` 호출부, `:895-949` 감사 3함수의 `input_files`에 케이스 DB 추가) | —(기존 `case_db_mark_bookmarks` `review_payload.py:57` 사용 — T-025와 파일 무충돌) | 3 | DB에만 표시가 있는 처리에서 `bookmark_count`·`report_item_count` = DB 표시 수, "검토 없음"·`case review file has not been created` 0, 번들 보고서에 처리 정보(`run_summary` 전달), limitation 문장 한국어, 감사 기록 `input_files`에 `case-db`(경로·SHA-256) | GAP-013·014 / IS-064·063 | QA-081·010·115 |
-| T-029 | 내보내기 감사 누적·시간대·도구 버전 〔2차: 동시 쓰기는 T-131, 나머지 시각 34곳은 T-132로 분리. 사이드카 이름 유지〕 | `rapidtriage/core/audit.py`(`audit_path_for` `:24-27`, `write_audit_record` `:112-154`), `rapidtriage/core/case_db/database.py`(`:1145-1146` `tool_version` 값만, 스키마 불변 `[확인]`), 테스트 | — | 3 | 기존 사이드카(`<이름>.audit.<확장자>`)는 **이름·내용 형식 그대로**(최신 1건, 응답의 `audit` 경로·기존 테스트 불변) + 같은 폴더의 누적 파일 `rapidtriage-export-audit.jsonl`에 호출마다 1줄 추가(덮어쓰기 없음). 각 줄: `command`·`generated_at`(오프셋 포함)·`tool_version`·`user`·`input_files[]`·`generated_outputs[]`(SHA-256). 내보내기 4회 → 4줄. 리뷰 `audit_event.tool_version` = `rapidtriage.__version__` | GAP-014·015·177·208 / IS-063·071 | QA-010 |
-| T-030 | GET이 쓰지 않게 〔2차: 3경로가 아니라 6경로〕 | `rapidtriage/api/app/routes_reports.py`(`:83-98`, `:139-145`, `:148-154`, `:192-198`, `:221-229`, `:232-249`), `frontend/src/features/case/exports.ts`, `frontend/src/api/reports.ts` | — | 4 | 여섯 GET은 **쓰지 않는다**: `/submission-manifest`·`/validation-package`(JSON 조회)는 메모리에서 만들어 반환만, `…/file`·`/case-report/file[/{format}]`은 저장된 파일만 반환(없으면 404 `EXPORT_NOT_WRITTEN` + "먼저 내보내기를 실행하세요"). 생성은 POST(매니페스트는 신규 `POST /submission-manifest`, 검증 패키지·보고서는 기존 POST). 프런트 내보내기는 POST → 저장본 GET 순서. OpenAPI의 모든 GET을 한 번씩 부른 뒤 결과 폴더 스냅샷 동일 | GAP-016 / IS-066 | QA-011·108 |
-
-### W1-d 증거 보호 잔여·안전한 조작 (병렬 6)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-031 | 가져오기·샘플·찾아보기 경로 범위 〔2차: 모드별 규칙 명세〕 | `rapidtriage/api/app/routes_runs.py`(import `:525-531`만), `rapidtriage/api/app/routes_case_db.py`(sample `:78-95`만), `rapidtriage/api/app/routes_meta.py`(browse `:132-152`), `rapidtriage/core/browse.py`, `rapidtriage/core/sample_case.py`(`:25-28` 삭제 조건) | T-025 | 4 | (1) **샘플**: `output_dir`는 `~/.rapidtriage/` 아래만 허용(밖이면 403 `PATH_OUTSIDE_ALLOWED_ROOT`), 요청 기본 `overwrite=False`, 삭제는 폴더에 샘플 표식 파일 `rapidtriage-sample-expected.json`이 있을 때만(없는 비어 있지 않은 폴더는 409, **삭제 0**). (2) **가져오기**: 결과 폴더가 그 처리의 증거 경로 안/같음이면 가져오되 `readonly_reason:"OUTPUT_INSIDE_EVIDENCE"`를 처리에 기록(T-032가 소비). (3) **찾아보기**: 루프백(로컬) 서버는 현행대로 전체 — 분석 담당이 증거를 골라야 한다. `--remote` 서버는 `--browse-root`(반복 가능, 기본 = 사건 폴더들 + 홈)로 준 루트 안만, 밖은 403. 기존 `scope=analysis-*` 동작 불변 | GAP-003·004·005·207 / IS-068·073 | QA-005·006·107 |
-| T-032 | 읽기 전용 결과 모드 — 관문 〔2차: 재정의. 지점별 차단은 T-133·T-134〕 | `rapidtriage/api/app/readonly_run.py`(신규: `run_readonly_reason(job) -> str\|None`, `may_persist(output_dir) -> bool`, 미들웨어 `reject_writes_for_readonly_run`), `rapidtriage/api/app/index_cache.py`(`index_persist_enabled` `:21-23`가 처리별 판단을 받도록 인자 추가, 환경 변수 동작 불변), `rapidtriage/api/app/thumbnail.py`(`cached_thumbnail` `:87`), `rapidtriage/api/app/dashboard.py`(`write_case_notes` `:71`) | T-031 | 4 | 읽기 전용 처리에 대한 **비-GET 요청은 전부 409 `RUN_READ_ONLY`**(허용 목록: 없음. 삭제 = 목록에서 빼기만 허용)를 미들웨어 한 곳에서 거부. `GET /api/runs/{id}`·`/dashboard`에 `readonly_reason`. 썸네일은 디스크 캐시 없이 메모리 응답, 메모 쓰기는 409. 가드 이전 결과가 아닌 처리의 동작·성능 불변(전/후 타이밍 ±5%) | GAP-003·175·192 / IS-068 | QA-005 |
-| T-034 | 파괴적 동작 표현·기본 포커스 | `frontend/src/features/case/Modal.tsx`, `frontend/src/features/case/CasePicker.tsx`, `frontend/src/features/case/commands.ts` | — | 3 | 삭제 버튼 위험 스타일, 기본 포커스 "취소", 명령명 = 대화상자 제목, 포커스 트랩이 비활성·숨김 제외 | GAP-129 / IS-094 | QA-086 |
-| T-035 | 한글 모드 단축키·팔레트 순위 〔2차: 재시도·폴링은 T-130으로 분리〕 | `frontend/src/shortcuts.ts`(`:61-66` 물리 키 폴백, `:84-85`), `frontend/src/shell/CommandPalette.tsx`(`:11-20` 그룹 순서, `:97-103` 정렬), `frontend/src/commands/fuzzy.ts` | — | 3 | 물리 키 폴백을 `Key[A-Z]` → `Key*`·`Digit*`·`Slash`·`Backquote`로 확대: `{key:"Process",code:"Slash",shiftKey:true}` → 도움말 열림, `isComposing` 중 발화 0. 질의가 있으면 그룹을 넘어 점수순(라벨 일치 > id 일치 > 부분 일치), "CSV" → "선택 행 CSV 내보내기" 1위. 질의가 없으면 현행 그룹 순서. 비활성 명령은 질의 결과 하단(사유 유지) | GAP-131 / IS-099 | QA-092 |
-| T-036 | 표시 해제 = 직전 상태, 실행 취소, 작성자 〔2차: 메모 보호는 T-144로 분리, 경로 정정〕 | `frontend/src/features/grid/reviewActions.ts`(`unmarkActionOf` `:30-34`, 표시 실행부 `:433` 부근), 〔정정〕 `frontend/src/components/ToastRegion.tsx`·`frontend/src/components/toastStore.ts`(동작 버튼 있는 토스트), `frontend/src/features/review/author.ts`(`DEFAULT_REVIEWER` `:10`) | — | 4 | 직전 상태의 출처는 **표시 직전 클라이언트가 가진 상태**(`grid/reviewMap.ts`)를 실행 취소 스택(최근 20, 세션 한정)에 넣은 것 — 서버 이력 조회·스키마 변경 없음. 해제 = 스택의 직전 상태로 `review-batch` 재요청(없으면 미검토). 토스트 "n건 표시했습니다 · 실행 취소"(5 s) + `Ctrl+Z`. 작성자 미설정이면 첫 표시 전에 담당자 이름을 한 번 묻고(사건 담당자 값이 있으면 기본값) `web-ui`를 서버로 보내지 않는다 `[확인: review-batch 요청 형태만 사용, 스키마 불변]` | GAP-024·025 / IS-042·043 | QA-065·067 |
-| T-144 | 〔2차 신규: T-036에서 분리〕 메모 보호·태그 관리 작성자 칸 | `frontend/src/features/dashboard/caseCards.tsx`(메모 블록 `:880-990`만), `frontend/src/features/review/TagManagerDialog.tsx`(`:180-187` 자리 표시자) | — | 3 | 메모 삭제는 확인 대화상자(기본 포커스 "취소") 뒤에만, 삭제·저장 실패는 메모 영역 안 오류 문장(영문 원문 0), 편집 중(`dirty` `:888`) 다른 화면으로 가면 "저장하지 않은 내용이 있습니다" 확인, 자리 표시자 `web-ui` → "담당자 이름", 이력 문구 "태그 없음→없음" 0 | GAP-025·113 / IS-043 | QA-067·086 |
-
-> W1-d는 6개다: T-031·T-032·T-034·T-035·T-036·T-144. T-033은 W1-e로 옮겼다(파일이 겹치지 않아 순서 무관, 묶음 6개 상한 때문).
-
-### W1-e 방어 가능성 보강 〔2차 신규 묶음〕 (병렬 6)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-033 | CLI 단일 파일 출력 기본 위치 가드 〔2차: W1-d에서 이동, 경로 정정〕 | `rapidtriage/cli/helpers.py`(공용 `resolve_output_path(args, evidence_root)`), `rapidtriage/cli/parser.py`(`--output` 기본값 약 60곳을 지연 해석 표식으로), 〔정정〕 `rapidtriage/artifacts/mobile/vendor.py`(`:345` 제안 경로 문자열만 `[확인: 수집 로직 불변, 문자열만]`), `tests/test_cli_output_guard.py` | — | 4 | 증거 폴더(또는 그 하위)가 cwd이고 `--output`이 없으면 종료 코드 2 + `CLI_OUTPUT_INSIDE_EVIDENCE` 문장(기존 `core/output_guard.py` 재사용), 증거 밖 cwd에서는 현행 기본 파일명 그대로(호환). 대표 12명령(QA-004 목록) 단위 테스트 + 전 명령 매개변수화 테스트(파서에서 `--output` 가진 명령 전수) | GAP-002·006 / IS-068 | QA-004 |
-| T-129 | 증거 해시 표시 정직화(승인 전, 표시 계층) `[확인: 메시지 문구만, 상태값·스키마·해시 계산 불변]` | `frontend/src/features/dashboard/caseCards.tsx`(해시 상태 라벨·색 맵 `:55-75`만 — T-144가 끝난 뒤), `frontend/src/features/case/EvidenceFields.tsx`(기대 해시 라벨 `:154`), `rapidtriage/api/app/case_workspace.py`(`_hash_worker` 메시지 `:257-262`만) | T-144 | 3 | E01·Ex01 증거에서 상태가 `mismatched`일 때 화면은 빨강 "해시 불일치"가 아니라 호박 "컨테이너 해시가 입력값과 다름 — 매체 해시 미대조" + 설명 "E01 파일 자체의 해시입니다. 취득 로그의 매체(디스크) 해시와는 값이 다른 것이 정상입니다". `matched`는 "컨테이너 해시 일치", `computed`는 "컨테이너 해시 계산됨". 입력 라벨: "기대 해시(선택 · E01 **파일 자체**의 MD5/SHA-1/SHA-256 — 취득 로그의 매체 해시 아님)". 단일 파일(dd·raw) 증거는 현행 문구 유지 | GAP-191·007·008 / IS-069·003 | QA-106 |
-| T-131 | 케이스 DB 동시 쓰기(두 창) `[확인: PRAGMA·재시도만, 스키마 불변]` | `rapidtriage/core/case_db/database.py`(연결 설정 `:270-282`에 `busy_timeout`, 쓰기 재시도), `frontend/src/features/grid/reviewMap.ts`(다른 창의 변경 감지 시 알림 — T-036 뒤) | T-029·T-036 | 4 | `PRAGMA busy_timeout=5000`, `database is locked`는 3회 지수 재시도 뒤에만 오류. 창 2개가 같은 100행에 교차 표시(QA-012): 유실 0, 이력 200건, 마지막 쓰기가 현재 값. 다른 창이 바꾼 행은 다음 조회에서 "다른 창에서 변경됨" 토스트 1회(같은 종류 합침) | GAP-017·205 / IS-076 | QA-012 |
-| T-132 | 산출물·감사 시각에 시간대 포함(35곳) `[확인: 시각 문자열 형식만, 로직 불변]` | 신규 `rapidtriage/core/clock.py`(`now_local_iso()` = 오프셋 포함 ISO), `datetime.now().isoformat()` 호출 35곳(`grep -rn "datetime.now()" rapidtriage`로 전수; `core/audit.py`는 T-029 소유라 제외) | T-029 | 3 | `grep -rn "datetime.now()" rapidtriage` 결과 0(전부 `now_local_iso()` 또는 `datetime.now(timezone.utc)`), 산출 JSON의 `generated_at`이 정규식 `[+-]\d\d:\d\d$\|Z$`에 전부 일치, 서버 시간대를 UTC·뉴욕으로 바꿔 만든 보고서의 표시 시각이 같은 순간을 가리킴. 시각을 **읽는** 쪽(오프셋 없는 옛 산출물)은 계속 읽힘(호환 테스트) | GAP-015·177·196 / IS-071·049 | QA-109 |
-| T-133 | 읽기 전용 결과: 색인·캐시 지연 쓰기 차단 | `rapidtriage/api/app/timeline_index.py`(`:886,1023`), `geo_index.py`(`:470`), `families.py`(`:592`), `fs_tree.py`, `files_ntfs.py`, `registry_tree.py`, `artifact_sort.py`, `timeline_hist.py`, `files_index.py` | T-032 | 4 | 위 9파일의 디스크 쓰기 지점 전부가 `may_persist(output_dir)`를 거친다(쓰기 호출 직접 사용 0 — 테스트가 AST로 검사). 읽기 전용 처리에서 타임라인·지도·계열·폴더 탐색기·레지스트리 탐색기·정렬을 연 뒤 결과 폴더 스냅샷 동일, 기능은 메모리로 동작 | GAP-192·003·175 / IS-068 | QA-005·108 |
-| T-134 | 읽기 전용 결과: 그 밖의 지연 쓰기 차단 | `rapidtriage/api/app/media_similar.py`, `media.py`, `sqlite.py`, `previews.py`(`write_json_file` `:21`), `triage_flags.py`, `row_conditions.py`, `search_index_service.py`(검색 이력·색인 생성 거부) | T-032 | 4 | 위 7파일 동일 규칙. 읽기 전용 처리에서 미디어 유사·SQLite 미리보기(WAL 임시 복사는 OS 임시 폴더)·특이사항·조건·검색을 쓴 뒤 스냅샷 동일. 색인이 없으면 "읽기 전용 결과라 색인을 만들 수 없습니다 — 결과 폴더를 증거 밖으로 옮긴 뒤 다시 가져오세요" | GAP-192·003·175 / IS-068 | QA-005·108 |
-
-> T-129는 `caseCards.tsx`를 T-144(W1-d)와 나눠 쓴다(블록이 다르고 묶음이 달라 충돌 없음).
-
-### W1-f 〔2차 신규 묶음〕 (1)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-130 | 〔T-035에서 분리〕 4xx 재시도 금지·유휴 폴링·숨은 탭 | `frontend/src/main.tsx`(`:33-38` retry), `frontend/src/api/runsProgress.ts`(`IDLE_POLL_MS` `:58`), `frontend/src/features/analysis/store.ts`(`:83` `refetchIntervalInBackground`) | T-008 | 2 | 4xx(400~499)는 재시도 0(408·429 제외), 5xx·네트워크만 2회. 유휴 폴링 5 s → 30 s, 문서가 숨겨지면(`visibilitychange`) 0. 유휴 5분 요청 수 ≤ 10, 숨은 탭 5분 0 | GAP-066 / IS-082 | QA-101 |
-
-### W2 실데이터 기준선(QA 담당 Sonnet, 코드 변경 없음)
-
-| ID | 제목 | 산출물(Git 밖 `D:\rapid-qa\derived\r8\w2\`) | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-037 | C1 재처리와 수정분 브라우저 재확인(AD1·2·4·5, 출력 가드, 가져오기) | 스크린샷·events.jsonl·요약 md | W1 | 4 | QA-002·003·037·086 통과 기록, 증거 전/후 동일 | GAP-001·052·179 / IS-125 | QA-001~003·037·086·087 |
-| T-038 | C2 100% 재처리 **[D24]** 〔2차: 사전 조건 수치〕 | 처리 로그·추출 통계·시간·출력 크기 | W1, 사전 조건: 출력 볼륨 여유 ≥ 500 GB(예상 출력 약 230 GB + 임시 약 2배; 11-11 실측 여유 453 GB → **D40 정리 또는 다른 볼륨 지정이 먼저**), `RAPIDTRIAGE_NATIVE_MAX_EXTRACT_FILES=2000000` | 4(+무인 7~9: 31%에 143분 실측을 파일 수 비례로 환산) | 추출 범위 ≥99%(`stats.truncated == 0`), 원본 불변, 단계별 시간·메모리 표. 조건 미충족이면 중간안 C2-60(상한 40만, 여유 ≥ 300 GB)으로 내리고 사유 기록 — 부록 E.7 | GAP-046·026(측정)·202 / IS-122 | QA-001·017 |
-| T-039 | C2 전수 순회 재실행(건수 계약·타이밍·원시값) | `tree-sweep.json`·`timing.json`·`cells.json` | T-038(없으면 C2-31) | 4 | 부록 E의 QA-020·021·044·045·100을 현 화면 기준선으로 기록(실패 목록이 W3~W7의 입력) | GAP-032·059·089·090·053·054·055·180·181 | QA-020·021·044·045·100·054·055 |
-| T-040 | C4 AI 스캔 런과 콘솔 확인(앱 종료 뒤 전/후 해시) | 건수표·스크린샷 | — | 4 | 13노드 순회, CLI 건수 = 콘솔 건수, 원본 불변 확정 | GAP-048·022 / IS-055 | QA-015·072 |
-| T-041 | C3 구축 **[D32]** 〔2차: 주 경로를 VM 시나리오로, 기준선 재처리는 선택〕 | 구축 절차 md(식별자 없음), 시나리오 스크립트(가짜 계정), 건수표 | D32. (선택) D24 | 4(+무인 2~3) | **주 경로 C3-VM**: 일회용 Windows VM(디스크 60 GB 이하)에서 시나리오 12단계(USB 연결·파일 복사·웹메일 업로드·압축·삭제·메신저 설치/대화·브라우저 방문/다운로드·클라우드 동기화·LNK·공개 메일 표본 MBOX 배치·복원 지점·로그 삭제 없음) → E01 취득 → 상한 해제 처리. 수용: 메신저·이메일·USB·브라우저 방문·다운로드·클라우드·LNK 7종 각각 행 ≥ 10. **선택 C3-R**(기준선 일반 모드 재처리)은 실측 28시간·120만 파일이라 기본으로 하지 않는다 — 대신 T-138(C3-0) | GAP-049·056·050·202 / IS-122 | QA-047·043 |
-| T-042 | 미실행 분석 실행: OCR·VSS·NTFS 메타(TSK 설치)·교차 사건·메모리 | 분석별 결과·오류 | T-038·T-041 | 4 | 각 분석 "성공/부분/실패+사유" 기록, 실패는 GAP 추가. 증거 추가·재처리 뒤 파생 결과가 오래됐음을 화면이 말하는지 기록(GAP-199) | GAP-047·199 / IS-123 | QA-024·088 |
-| T-043 | C5 A등급 양성 데이터 **[D32]** | 규칙별 양성 표 | D32 | 4 | 7규칙 중 양성 확보 수, 미확보는 "검증 전" 대상 | GAP-044 / IS-124 | QA-032 |
-| T-044 | 기준선 종합과 재계획 입력(Fable) `RV` | `docs/research/r8-w2-baseline.md`(건수만) | T-037~043·T-138 | 3 | coverage-matrix 갱신, 새 결함을 **GAP-209 이후**로 등록(191~208은 2차 리뷰가 사용), W3~W8 과제 조정안, 부록 E.7의 "미검증으로 남는 QA" 목록 확정 | GAP-058·162·173·203 / IS-121·123 | QA-105 |
-| T-138 | 〔2차 신규〕 C3-0: 기존 R8 기준선 산출물을 콘솔에 가져오기(재처리 없음, 승인 불필요) | 가져오기 기록·건수표·스크린샷 | T-031·T-032(결과 폴더가 증거 안이면 읽기 전용으로 열림) | 3 | 기준선 결과 폴더를 QA 서버에 가져오기 → 대화 보기 메시지 수 = CLI 산출 1,044, 장치 5대, 계정·클라우드 행 > 0. 처리 중 쓰기가 필요한 화면(색인 생성 등)은 "읽기 전용" 사유 표시. 복구 모드라 브라우저·실행 흔적 0 → 0건 사유 `not_collected_mode` 화면의 실데이터 표본으로 쓴다 | GAP-049·202·203 / IS-122·123 | QA-112·047 |
-
-### W3-a 백엔드: 브리핑·분류 (병렬 6)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-045 | 카탈로그 분류 키와 검증기 | `rapidtriage/core/triage_rules/catalog/*.yaml`(키 추가만), `catalog/type_defaults.yaml`(신규), `rapidtriage/core/triage_rules/catalog.py`, 검증 테스트 | — | 4 | 131계열 + IMG-B·기준선 유형 전부 `tier`·`card`·`section` 해석, 누락은 오류, 기존 화면 동작 변화 0 | GAP-087 / IS-019 | QA-020 |
-| T-046 | `/brief` 엔드포인트(골격·건수·통합) | `rapidtriage/api/app/brief.py`(신규), `rapidtriage/api/app/routes_brief.py`(신규), 라우터 등록은 코디네이터(F.1 화면 장착 규칙), `tests/test_brief_count_contract.py` | T-021·T-023·T-025·T-045·T-047·T-048(F.6: W3-a 2단계) | 4 | 부록 D.6 스키마, 30 KB·200 ms(IMG-B), 카드·검토·특이사항 수 = 목록 total(계약 테스트) | GAP-071·144·034 / IS-001·005·111 | QA-033·103·029 |
-| T-047 | 0건 사유 판정기 | `rapidtriage/api/app/zero_reason.py`(신규), 테스트 | T-045 | 4 | 8코드 판정 규칙(수집기 상태·모드·범위·대상 존재) 단위 테스트 24종, `none_found`는 완료+대상 읽음일 때만 | GAP-038·169·037·158 / IS-006·089 | QA-023 |
-| T-048 | 사용 기간·주요 프로그램·다음 할 일 산정 | `rapidtriage/api/app/brief_insights.py`(신규), 테스트 | T-045 | 4 | Tier 1 사용자 행위만으로 기간 산정, 폴더 증거는 `unavailable`, 프로그램 상위 3은 OS 구성 요소 제외, `next_action` 규칙 5종 | GAP-171 / IS-001 | QA-033 |
-| T-049 | `/summary`·`/runs/{id}` 다이어트, 압축·ETag | `rapidtriage/api/app/routes_runs.py`(summary·run 상세만), `rapidtriage/api/app/factory.py`(gzip) | T-007 | 4 | `?fields=`·ETag·304, 1 KB 초과 응답 gzip, 런 상세 ≤100 KB, 스냅샷 호환 | GAP-062·063 / IS-079 | QA-101 |
-| T-050 | `CLI brief --json` | `rapidtriage/cli/brief.py`(신규), `rapidtriage/cli/parser.py`(등록 블록만) | T-046 | 2 | 봉투·종료 코드, `/brief`와 같은 값 | GAP-144 / IS-111 | QA-103 |
-
-### W3-b 백엔드: 성능·필터 (병렬 5)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-051 | 유형 색인(artifact_type → 오프셋)과 캐시 | `rapidtriage/api/app/artifact_type_index.py`(신규), `rapidtriage/api/app/artifact_filter.py`(색인 사용 분기) | T-019 | 4 | 레지스트리 유형 필터 ≤1 s(IMG-B), total 확정, 색인은 결과 폴더(읽기 전용이면 메모리), 결과 행 동일(전/후 비교) | GAP-059·061 / IS-078 | QA-100 |
-| T-052 | 검색 `lang:`·`list:`·부정 조건 구동·예산 고지 | `rapidtriage/core/search_index/engine.py`, `rapidtriage/api/app/routes_search_index.py`, 테스트 | — | 4 | `-lang:ko 계약`·`list:execution` ≤3 s(IMG-B), 후처리도 예산 안, 초과 시 `notice` | GAP-060·108·163 / IS-032 | QA-058·059 |
-| T-053 | 파일 목록 서버 필터(확장자 등)·정렬 키 검증 | `rapidtriage/api/app/files_index.py`, `frontend/src/features/filters/filterModel.ts` | — | 4 | `ext=` 서버 처리, 건수 = 전수 집계, 무효 `sort` 422(봉투), "불러온 행에서만" 경로 제거 | GAP-043 / IS-028 | QA-027 |
-| T-054 | 백그라운드 작업 틀(202·진행·취소) | `rapidtriage/api/app/bg_jobs.py`(신규), `rapidtriage/api/app/routes_bg_jobs.py`(신규), 테스트 | — | 4 | 등록·진행률·취소·직전 결과 반환 계약, 프로세스 재시작 시 "중단됨" | GAP-065·070 / IS-081 | QA-102 |
-| T-055 | 계열·중복·예외·케이스 DB 준비·추출 zip을 작업으로 | `rapidtriage/api/app/routes_families.py`(`:218-245` dedup·irregular summary, `:113`·`:184` 계열), `rapidtriage/api/app/routes_case_db.py`(ensure만), `rapidtriage/api/app/routes_runs.py`(extract만) | T-054(F.6: W3-b 2단계) | 4 | 요청 응답 ≤1 s, 직전 결과 + "다시 계산 중" | GAP-065 / IS-081 | QA-102 |
-| T-056 | 개체 요약 상한·진행·오류 | `rapidtriage/api/app/routes_search_index.py`(entities는 T-052와 충돌 → **W3-c로 이동**) | — | — | (아래 T-060으로 대체) | — | — |
-
-> T-056은 파일 충돌로 폐기 번호다(번호 재사용 금지). 묶음 W3-b는 5개로 진행한다.
-
-### W3-c 백엔드: 읽는 단위·정직성 (병렬 4)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-057 | 문서 단위 검색 응답 | `rapidtriage/api/app/search_documents.py`(신규), `rapidtriage/api/app/routes_search_index.py`(등록·호출) | T-052 | 4 | 한 파일 = 한 그룹(적중 수·위치·관련 행), 스니펫 ≥40자·가림, 숨긴 Tier 3 적중 수 | GAP-103·106 / IS-031·033·035 | QA-057·031 |
-| T-058 | 사람·장치 롤업 파생 표 | `rapidtriage/core/derived/tables_people_devices.py`(신규), `rapidtriage/core/derived/engine.py`(등록만) `[확인: 파생 표는 수집기 불변]` | T-045 | 4 | 계정 묶음(시스템 숨김 규칙)·장치 병합(시리얼 키) 표, 기준선에서 장치 5대 = 5줄 | GAP-088·161 / IS-030 | QA-043 |
-| T-059 | 확장자 위장 잡음 분리(표시 계층)·복구본 내용 상태(미리보기) | `rapidtriage/api/app/tree.py`(예외·불일치 집계), `rapidtriage/api/app/previews.py`, `rapidtriage/api/app/irregular_view.py`(신규) | T-045 | 4 | `_deleted_mft` 유래·0 채움·고엔트로피를 "내용 복구 불가"로 분리 집계, 미리보기 응답에 `content_state`, 수집기 출력 불변(D33 기본값) | GAP-040·041·176 / IS-022·023 | QA-025·026 |
-| T-060 | 개체 요약 작업화·검색 색인 분석 건수 | `rapidtriage/api/app/entity_summary.py`(신규), `rapidtriage/api/app/analysis_kinds.py`(`run_search_index` `:2458-2494`의 건수 기록만), `rapidtriage/api/app/routes_search_index.py`(`POST …/search/entities` 처리기만 — T-057이 끝난 뒤, F.6: W3-c 2단계) | T-054·T-057 | 3 | 개체 요약 202+진행, IMG-B에서 성공, 색인 분석이 문서 수를 건수로 표시 | GAP-051·035 / IS-037·089 | QA-061 |
-
-### W4-a 디자인 시스템 1 (병렬 6, W3와 동시 가능)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-061 | 토큰 v3(글자 7단·간격·색 역할 4계열·테마 system) | `frontend/src/tokens/tokens.css`, `frontend/src/state/slices/prefs.ts`(`systemTheme` `:48-60,92`), 〔2차: `themeBoot.ts`는 없다〕 `frontend/index.html`(`:14` 부근 인라인 테마 부트 스크립트), `frontend/src/app/themeBoot.test.ts`(부트 스크립트를 읽는 기존 테스트 — 기대값 갱신) | T-002(F.6: W4-a 1단계 단독) | 4 | 새 토큰은 추가(옛 토큰은 별칭), OS 테마 추종 + 리스너, 대비 검사 통과, `tnum` 실측 결과 기록 | GAP-135·136·138 / IS-105·106·108 | QA-093·097 |
-| T-062 | `Chip`·`CountBadge` | `frontend/src/components/ui/Chip.tsx`·`CountBadge.tsx`·css·테스트(신규 폴더) | T-061 | 4 | 6종 kind, 색+모양+글자, 줄임 규칙·접근성 이름 | GAP-137 / IS-107 | QA-095·098 |
-| T-063 | `EmptyState`·`InlineAlert`·`Skeleton`·`PartialBanner`·`HiddenBanner` | `frontend/src/components/ui/feedback/*`(신규) | T-061 | 4 | 빈 상태 5유형·알림 4종, 오류 틀(무슨 일/영향/할 일/기술 정보), 카드·패널 단위 오류 경계 `SectionBoundary` | GAP-127·128 / IS-092 | QA-084·085 |
-| T-064 | `Dialog`(포커스 규칙·위험·폭 3종) | `frontend/src/components/ui/Dialog.tsx`(신규)·테스트 | T-061 | 4 | 트랩·기본 포커스·복귀, 단계 전환에도 위치 고정 | GAP-137·129 / IS-094·107 | QA-086 |
-| T-065 | `Button`·`Checkbox`·`Radio`·`Switch`·`Tabs` | `frontend/src/components/ui/controls/*`(신규) | T-061 | 4 | 4변형, 점선 0, 타깃 ≥28, 부모 선택자에 덮이지 않음 | GAP-137·133·139 / IS-107·109 | QA-093·095 |
-| T-066 | `TimeText`·`HashValue`·`PathText`·`CopyButton` | `frontend/src/components/ui/values/*`(신규), `frontend/src/utils/time.ts`(단일 포맷터 정리) | T-061 | 4 | 표시 시간대 한 형식 + UTC title + 사본 시각 표식, 중복 `formatDuration` 제거 | GAP-116 / IS-049 | QA-071 |
-
-### W4-b 디자인 시스템 2 (병렬 4)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-067 | `Menu` 단일화(행·뷰어·카드) | `frontend/src/components/ui/Menu.tsx`(신규), `frontend/src/components/MenuButton.tsx`(위임) | T-014 | 4 | 세 메뉴가 한 구현, 타입어헤드, 항목 ≥24px | GAP-137 / IS-107 | QA-049 |
-| T-068 | `PageHeader`·`StatRow`·`ZeroReason`·`Disclosure`·`EvidenceStrip` | `frontend/src/components/ui/page/*`(신규) | T-062·T-063 | 4 | 숫자=링크+`data-count`, 무결성 4상태 표현 | IS-003·005·017 | QA-033 |
-| T-069 | 전역 링크·입력·포커스 스타일 | `frontend/src/tokens/controls.css`, `frontend/src/tokens/base.css`(신규; `frontend/src/main.tsx`의 import 1줄 포함) | T-061 | 3 | 방문 색 없음, 라이트 입력 회색 채움 0, 포커스 링 통일 | GAP-133·134·099 / IS-101 | QA-093 |
-| T-070 | 인쇄 스타일·화면 복사용 보기 | `frontend/src/tokens/print.css`(신규) | T-061 | 2 | 인쇄 시 패널·도구 막대 숨김, 본문 전폭 | GAP-124·189 / IS-108 | QA-082·117 |
-
-### W5-a 셸·브리핑 (병렬 6)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-071 | 주소 추가·구 주소 변환(`home`·`tools/*`·`review/set|one`·`report/preview`) | `frontend/src/router.ts`(`parseHash` `:334`, `serializeRoute` `:492`, `canonicalizeHash` `:611`), 〔2차: 경로 정정〕 `frontend/src/features/stages/stages.ts`, 계약 테스트 갱신 | T-001 | 4 | 부록 D.1 표 전부 왕복, 쿼리 키 불변 | GAP-172 / IS-015 | QA-041 |
-| T-072 | 전역 내비 4·⚙ 메뉴·상태바·역할 모드 | 〔2차: 경로 정정〕 `frontend/src/features/stages/StageRail.tsx`, `frontend/src/shell/TopBar.tsx`, `frontend/src/shell/StatusBar.tsx`, `frontend/src/state/slices/role.ts`(신규), `frontend/src/state/store.ts`(slice 등록) | T-061·T-067 | 4 | 4항목 + ⚙, 모드 기억, 상태바에 처리 ID 없음, 상태바 연결 표시(끊기면 5 s 안에 "연결이 끊겼습니다" 띠, 복구되면 새로고침 없이 자동 복구 — QA-089), 기존 e2e는 분석 담당 모드로 통과 | GAP-080·086·072·170 / IS-011·018·097 | QA-040·035·089 |
-| T-073 | 사건 브리핑 화면 | `frontend/src/features/brief/*`(신규), `frontend/src/api/brief.ts`(신규), `frontend/src/app/IntakePane.tsx`(홈 분기 — 이 묶음에서 이 파일의 유일한 주인) | T-046·T-068 | 4 | 부록 C (2) 와이어, 1440×900 스크롤 0, 6문항 DOM, 상태 5종 | GAP-071·074 / IS-001~006 | QA-033·017·023·117 |
-| T-074 | 랜딩·토큰 화면 | `frontend/src/features/case/Landing.tsx`, `frontend/src/app/TokenGate.tsx` | T-065 | 3 | 주 동작 2 + 최근 사건 + 준비물, 토큰 안내 문장 | GAP-075·186 / IS-007 | QA-037·118 |
-| T-075 | 처리 진행 띠·처리 중 409 제거 | `frontend/src/shell/ProgressStrip.tsx`(신규), `frontend/src/api/runPlan.ts`, `frontend/src/shell/Layout.tsx`(띠 삽입만) | T-022 | 4 | 한국어 단계·n/m·경과, 409 0, 중지는 실행 중만 | GAP-077·066·184 / IS-009 | QA-039·090 |
-| T-076 | 다중 증거·케이스 미연결 홈 | `frontend/src/features/brief/EvidenceSwitcher.tsx`·`AllEvidenceTable.tsx`(신규, T-073 폴더와 파일 분리) | T-073(인터페이스 합의) | 3 | 증거 전환·비교 표·"사건에 연결" 머리줄 | GAP-079 / IS-010 | QA-036 |
-
-### W5-b 내비·접수 흐름 (병렬 6)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-077 | 살펴보기 범주 내비(검토자 모드) | `frontend/src/features/nav/CategoryNav.tsx`(신규), `frontend/src/features/tree/useTreeModel.ts`(카탈로그 분류 사용) | T-045·T-062·T-072 | 4 | 기본 ≤12, 0건=사유, 숨김 건수, 분석 담당 모드는 기존 트리 | GAP-080·081·083·084 / IS-012·013 | QA-040·020·042 |
-| T-078 | 분류 사본 제거(`categories.ts` 폐기, `domains.ts` 생성화) | `frontend/src/features/tree/domains.ts`, 〔2차: 경로 정정〕 `frontend/src/features/tree/categories.ts`, `scripts/gen-domains.py`(신규), `rapidtriage/core/artifact_domains.py`(생성물 `[확인: 표시용 분류표, 수집 불변]`) | T-045 | 4 | 생성 스크립트 + 동기화 테스트, 노드 id 불변(계약) | GAP-087 / IS-019 | QA-041 |
-| T-079 | 새 사건 2단계·경로 사전 검사·폴더 선택기·여유 공간 | `frontend/src/features/case/CaseWizard.tsx`, 〔2차: 새 `PathPicker`를 만들지 않는다〕 기존 `frontend/src/features/case/BrowsePanel.tsx`·`EvidenceFields.tsx`(선택기를 필드 옆 "고르기" 버튼으로 승격, 결과 폴더에도 적용), `rapidtriage/api/app/routes_cases.py`(output-check 응답에 `free_bytes`·`estimated_bytes` 추가) | T-064·T-065 | 4 | 입력 ≤5, 고아 0, 필드 옆 오류, 모달 위치 고정 | GAP-076·183·141 / IS-008·095 | QA-037·038 |
-| T-080 | 새 처리 대화상자(입력 5 + 세부 설정) | `frontend/src/features/case/RunDialog.tsx`, `frontend/src/features/case/RunPlanGroupsField.tsx` | T-064 | 4 | 처리 깊이 3·프리셋·세부 설정 접힘, `ai_read_mb`·`org_email_domain` 입력, 프로필 한국어명 | GAP-076·190 / IS-008 | QA-037 |
-| T-081 | ⚙ 처리 이력·더 분석하기·작업 센터 | `frontend/src/features/stages/ProcessStage.tsx`, `frontend/src/features/stages/RunPlanTable.tsx`, `frontend/src/features/jobs/JobCenter.tsx`(신규), `frontend/src/shell/TopBar.tsx`(작업 센터 아이콘 1개 — T-072 뒤) | T-054·T-062·T-072 | 4 | 상태 6종 글자+모양, X 제거(글자 "중지"), 분석 목록형(미실행/부분/실패 사유), 작업 진행·취소, 증거 추가·재처리 뒤 오래된 파생 결과(계열·중복·통합 보기·검색 색인)에 "다시 계산 필요" 표시(서버 stale 판정 사용), 예외 항목 표는 `StatRow`(합계와 내역 분리) | GAP-077·078·036·020·199·201 / IS-070·081·089 | QA-016·024·102 |
-| T-082 | 설정 화면 | `frontend/src/features/settings/*`(신규) | T-061·T-065 | 3 | 표시·검토·처리 기본값·보안·고급 5절 | GAP-155 / IS-108 | QA-097 |
-
-### W6-a 목록·뷰어 1 (병렬 6)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-083 | DataGrid 분해(동작 불변) | `frontend/src/features/grid/DataGrid.tsx` → `GridBody`·`GridHeader`·`GridFooter`·`useGridKeyboard` | T-020 | 4 | 기존 grid vitest 341건·e2e 통과, 파일 ≤600줄 | GAP-150·143·132 / IS-117 | QA-104·099 |
-| T-084 | 카드별 열 정의(6열)·그리드 값 라벨 단일 출처 〔2차: 나머지 라벨 맵 4곳은 T-139로 분리 — 4 h 초과〕 | 카탈로그 `card_columns`·`value_labels`(YAML 블록), `frontend/src/features/grid/columns/*`(생성물 사용), `frontend/src/features/grid/valueLabels.ts`(생성물), `scripts/gen-labels.py`(신규) | T-045 | 4 | 하위 탭마다 ≤6열, 그리드 값 라벨이 생성물(손 편집 금지 머리말 + 동기화 테스트), 원시 슬러그 요약 0(`artifactSummary.ts:123-124` 포함) | GAP-089·090 / IS-020·021 | QA-044·045 |
-| T-085 | 뷰어 머리·판단 버튼 줄·메모 영역 | `frontend/src/features/viewer/ViewerToolbar.tsx`, `frontend/src/features/viewer/viewer.css` | T-065·T-067 | 4 | 판단 버튼 3 + 보고서 포함 토글(P), 메모가 머리를 밀지 않음, 반영 ≤200 ms(낙관적) | GAP-096·069 / IS-039·046 | QA-064 |
-| T-086 | 뷰어 탭(가능한 것만)·보류 사유·이진 안내 | `frontend/src/features/viewer/modes.ts`, `frontend/src/features/viewer/ModeTabs.tsx`, `frontend/src/api/viewer.ts`, `frontend/src/features/viewer/views/SourceView.tsx` | T-059·T-063 | 4 | 평균 탭 ≤4, `withheld`·`content_state` 문장, 원본 가림 + 해제 감사, 탭 전환 ≤ 500 ms(이미 받은 탭은 재요청 없음) | GAP-092·093·019·206 / IS-024·053 | QA-046·014 |
-| T-087 | 메타 12필드·출처 구역 | `frontend/src/features/viewer/views/MetaView.tsx` → `MetaSummary`·`MetaTech`·`ProvenancePanel` | T-066·T-084 | 4 | 첫 화면 ≤12, 출처 고정, 영문 키 0 | GAP-094 / IS-025 | QA-048 |
-| T-088 | 트리 단일 구현 | `frontend/src/components/ui/Tree.tsx`(신규), `frontend/src/features/explorers/ExplorerTree.tsx`(위임) | T-015 | 4 | 탐색기 트리가 공용 구현 사용, 동작 불변 | GAP-137 / IS-107 | QA-052 |
-
-### W6-b 목록·뷰어 2 (병렬 6)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-089 | 목록 머리(제목·설명·건수 1회)·숨김 띠·보기 메뉴 | `frontend/src/features/grid/GridToolbar.tsx`, `frontend/src/app/ViewSwitch.tsx` | T-063·T-083 | 4 | h1 + 건수 한 번, "n건 숨김", `보기: 표 ▾` | GAP-085·045·097 / IS-017·027·072 | QA-031·051·054 |
-| T-090 | 행·뷰어 메뉴 8 + 더 보기, 일괄 막대 | `frontend/src/features/grid/RowMenu.tsx`, `frontend/src/features/grid/BatchBar.tsx`, `frontend/src/features/grid/gridCommands.ts` | T-067 | 4 | 두 메뉴 동일 목록, 비활성 미노출, 막대가 행을 가리지 않음, 라벨 정본 import | GAP-095·101·109 / IS-026·044·039 | QA-049·064 |
-| T-091 | 조건 띠(칩 5)·날짜 입력 | `frontend/src/features/filters/FilterBar.tsx` → `ChipFilterBar`·`ConditionDrawer` | T-065 | 4 | 그리드를 덮지 않음, 칩 5 + 더 보기, 파일 ≤600줄 | GAP-100 / IS-034 | QA-044 |
-| T-092 | 복구본 표식·기본 정렬·폴더 트리 가상 위치 | `frontend/src/features/grid/columns/files.ts`, `frontend/src/features/explorers/FsExplorer.tsx` | T-059 | 3 | 복구본 칩, 기본 정렬 첫 화면 복구본 0, "복구된 항목(가상)" | GAP-042 / IS-023 | QA-026 |
-| T-139 | 〔2차 신규〕 라벨 맵 단일 출처 — 나머지 4곳(`metaLabels`·`stepLabels`·`fieldSheets`·유형 라벨) | `frontend/src/features/viewer/metaLabels.ts`, `frontend/src/features/stages/stepLabels.ts`, `frontend/src/features/grid/columns/fieldSheets.ts`, 유형 라벨 맵(착수 때 `grep -rl typeLabels frontend/src`로 위치 확정), `scripts/gen-labels.py`(T-084 뒤 확장) | T-084 | 4 | 네 맵이 카탈로그 생성물(동기화 테스트 4개), 기존 라벨 문자열 diff 0(생성 전/후 스냅샷 동일 — 문구 변경은 이 과제에서 하지 않는다), 영문 원어 잔존 목록(GAP-091)만 한국어 병기로 교체 | GAP-154·091 / IS-021·096 | QA-045 |
-| T-143 | 〔2차 신규〕 그리드 페이지 윈도 상한(메모리 고정) | `frontend/src/features/grid/useCollectionQuery.ts`(`:428-432` 페이지 집합이 늘기만 함) | T-083 | 3 | 보이는 범위 ± 4페이지만 유지(나머지 페이지는 해제 후 재요청), 54만 행 끝까지 스크롤에서 JS 힙 ≤ 1.5 GB·스크롤 p95 ≤ 100 ms, 선택·검토 표시 상태는 페이지 해제와 무관하게 유지 | GAP-067 / IS-083 | QA-056 |
-
-### W7-a 검색·검토 (병렬 6)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-093 | 문서 단위 검색 화면 | `frontend/src/features/search/*`(신규), `frontend/src/api/search.ts` | T-057·T-063 | 4 | 한 파일 한 행·펼침, 전부 색인 경로, "전문가 항목에 n건" | GAP-103·104 / IS-031·032·035 | QA-057·058 |
-| T-094 | 검색 옵션·도움말 예시 | `frontend/src/features/case/SearchOptionsPopover.tsx`, `frontend/src/shell/SearchHelp.tsx`(신규) | T-065 | 3 | 범위 칩 3 + 접힘, 예시 5 | GAP-105·106 / IS-034·036 | QA-060·063 |
-| T-095 | 개체 패널 | `frontend/src/features/case/EntityPanel.tsx`, `frontend/src/api/searchEntities.ts` | T-060·T-063 | 3 | 진행률·성공, 오류 봉투 | GAP-051 / IS-037 | QA-061 |
-| T-096 | 검토 묶음 v1(저장 검색 기반) | `frontend/src/features/review/sets/*`(신규), `frontend/src/api/caseDb.ts` | T-093 | 4 | 묶음 생성·진행률·다음 미검토, 스키마 불변 | GAP-111 / IS-040 | QA-066 |
-| T-097 | 한 건 보기 | `frontend/src/features/review/one/*`(신규) | T-085·T-096 | 4 | 50건 키보드만·건당 ≤2조작, 모순 경고 | GAP-111·112 / IS-041·045 | QA-066·068·119 |
-| T-098 | 검토 색·라벨 정본·토스트 | `frontend/src/features/viewer/citation.ts`(정본 export), `frontend/src/features/grid/reviewActions.ts`(import로 교체 — T-036 뒤), `frontend/src/features/stages/ReviewReportStage.tsx` | T-062·T-036 | 3 | 라벨 정의 1곳, 색 역할표 적용(D35), 토스트 ≤2·성공 초록 | GAP-109·110 / IS-039·105 | QA-064·095 |
-
-### W7-b 시간순·AI·사람·장치·키워드 (병렬 6)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-099 | 하루 보기 | `frontend/src/features/timeline/DayView.tsx`(신규), `frontend/src/features/views/HistogramView.tsx` | T-066 | 4 | 막대+목록 한 화면, 합계 = 목록, 축·값 | GAP-114·039 / IS-047·051 | QA-069·028 |
-| T-100 | 타임라인 기본 "사용자 행위만"·사본 시각 표식 | `rapidtriage/api/app/timeline_view.py`(신규: Tier 필터, 수집 불변), `frontend/src/features/grid/columns/timeline.ts` | T-045 | 4 | 기본 필터 Tier 1, 유형 한국어, 사본 시각 아이콘·필터 사유 | GAP-115·117 / IS-048·050 | QA-070 |
-| T-101 | 대화 보기 시각·서브에이전트 관계 | `frontend/src/features/views/ChatView.tsx`, `frontend/src/features/views/chat.ts` | T-066 | 3 | ISO Z 0, 표시 시간대 일치 | GAP-116·118 / IS-049 | QA-071 |
-| T-102 | AI 사용 개요 | `frontend/src/features/ai/AiOverview.tsx`(신규), `frontend/src/api/aiUsage.ts`, 픽스처 `aiSampleRows.ts`를 `frontend/tests/fixtures/`로 이동 | T-077 | 4 | T4 ≤2조작, 0건 문구, 유형 집합 보완 | GAP-118·119·150 / IS-052·054 | QA-072·073 |
-| T-103 | 사람·장치 화면 | `frontend/src/features/people/*`(신규) | T-058·T-077 | 4 | 계정 묶음·장치 표·숨김 수·필터 카드 | GAP-088 / IS-030 | QA-043 |
-| T-104 | 한국어 기본 키워드·사건 키워드·팩 적중 | `rapidtriage/core/run/profiles.py`(키워드 추가만), `rapidtriage/api/app/brief.py`(keywords — T-046 뒤 단독), 키워드 팩 YAML | T-046 | 4 | 프리셋 6종 한국어 키워드(초안 표시, D4), 브리핑 적중 = 검색 결과 | GAP-107·159 / IS-038 | QA-062 |
-
-### W7-c 보강 〔2차 신규 묶음〕 (병렬 3)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-135 | "검증 전" 규칙 표시(팝오버 밖) | `frontend/src/features/flags/FlagCell.tsx`(칩), `frontend/src/features/flags/flags.ts`·`catalog.ts`(규칙 상태 조회), `rapidtriage/core/case_report.py`는 건드리지 않는다(보고서 표기는 T-109) | T-062·T-077 | 3 | `status: provisional` 규칙(현재 55) 또는 실데이터 참양성 기록이 없는 A등급 규칙(T-043 결과표 기준)의 칩 옆에 `검증 전` 보조 글자(색·점선 없음), 내비 "먼저 확인할 것" 건수는 `검증됨 n · 검증 전 m`으로 나눠 표기, 브리핑은 `findings.top[].validated=false` 항목에 같은 글자. A등급 "즉시 확인" 문구는 검증된 규칙에만 | GAP-197·044 / IS-124 | QA-110·032 |
-| T-136 | 질문형 진입점 8개(D41) | `rapidtriage/core/triage_rules/catalog/questions.yaml`(신규: 질문 → 범주·조건·열, 이 묶음에서 카탈로그의 유일한 주인), `frontend/src/features/nav/QuestionEntry.tsx`(신규), `rapidtriage/api/app/brief.py`(`questions[]` 추가 — T-104 뒤) | T-077·T-104 | 4 | v1 4.5의 8문항(예: "무엇을 가지고 나갔나"·"무엇을 지웠나"·"누구와 연락했나"·"어떤 문서를 열었나"·"어떤 프로그램을 썼나"·"언제 PC를 썼나"·"어디에 접속했나"·"AI 도구를 썼나") 각각이 조건이 걸린 목록 주소를 연다(주소 공유 가능, 쿼리 키는 부록 D.1 기존 키만). 0건이면 0건 사유. 살펴보기 내비 상단 "질문으로 찾기 ▾" 메뉴(브리핑 본문에는 넣지 않는다 — 스크롤 0 유지) | GAP-198 / IS-012·013 | QA-113 |
-| T-137 | 단축키 끄기 스위치·범례 | `frontend/src/shortcuts.ts`(전역 가드 1곳 — T-035 뒤), `frontend/src/shell/HelpOverlay.tsx`(범례 인쇄 보기), `frontend/src/features/settings/ShortcutsSection.tsx`(신규) | T-035·T-082 | 2 | 설정 "글자 키 단축키 사용" 끄면 R·I·X·B·P·J·K·1~9 발화 0(`Ctrl+K`·`Esc`·`/`는 유지), 기본값 켬, 값은 `rapidtriage.v3.shortcuts`. 도움말에 "인쇄" → 한 쪽 범례 | GAP-200 / IS-099 | QA-120 |
-
-### W8 보고서 (병렬 6)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-105 | 보고서 미리보기 API(절 구조 JSON) | `rapidtriage/api/app/report_preview.py`(신규), `rapidtriage/api/app/routes_reports.py`(등록만) | T-027·T-030 | 4 | 미리보기 구조 = 내보낸 파일 제목 구조(테스트), 절 선택·순서·의견·범위 | GAP-120·124 / IS-056 | QA-076 |
-| T-106 | 보고서 화면(구성·종이·점검) | `frontend/src/features/report/*`(신규), `frontend/src/api/reports.ts` | T-105·T-068 | 4 | 부록 C (8), 0건 빈 상태, 주 버튼 1 | GAP-120·121·123 / IS-056·057·062 | QA-075·077·080·119 |
-| T-107 | 제출 전 점검 계산 | `rapidtriage/api/app/report_checks.py`(신규) | T-025·T-023 | 3 | 7항목(무결성·사건 번호·담당자·메모 없음·모순·제한·가림 수) | GAP-123·112·174 / IS-062·045 | QA-080·068 |
-| T-108 | PDF 한글 글꼴 포함·줄바꿈·실제 표 | `rapidtriage/core/report_pdf.py`(신규: `case_report.py:640-700` PDF 부분 분리 — 이 묶음에서 `case_report.py`의 1단계 주인), 글꼴 자산(Pretendard 서브셋, 라이선스 OFL 고지 포함) | T-027 | 4 | `pdffonts` 출력에 `emb yes` 글꼴 1개 이상·`HYGoThic-Medium` 0, 해시 64자·경로를 복사하면 원값(줄바꿈은 글자 수가 아니라 폭 기준, 소프트 줄바꿈), 증거 표가 세로선 문자가 아닌 표 그리기 | GAP-023·122 / IS-061 | QA-079 |
-| T-109 | 보고서 프로파일·머리글/바닥글·AI 절 전 템플릿·DOCX 실제 표 | `rapidtriage/core/report_profiles.py`(신규), `rapidtriage/core/case_report.py`(템플릿 데이터 `:279-283`·DOCX 생성부 — T-108이 끝난 뒤, F.6: W8 2단계) | T-027·T-108 | 4 | 3프로파일, 기밀 문구 반복, `korean-expert`·`hash-only`에 AI 절 | GAP-124 / IS-056·058 | QA-074·078·114 |
-| T-110 | 내보내기 이력·파일 해시·알림 한 줄 | `frontend/src/features/case/ReportDialog.tsx`, `frontend/src/features/case/WriteConfirm.tsx` | T-029 | 3 | 이력에 해시 앞 8자·복사, 알림 한 줄 + 폴더 열기, "확인 중" 고착 0 | GAP-123·125·188 / IS-063·065 | QA-082·077 |
-
-### W9-a AX·정리 (병렬 6)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-111 | CLI `--json` 100%·봉투·종료 코드 〔2차: 추가 방식. 예시·그룹·`--dry-run`은 T-141, `--lang ko`는 T-142로 분리 — 4 h 초과〕 | `rapidtriage/cli/helpers.py`(공용 `emit_json`·`exit_code`), `rapidtriage/cli/parser.py`(누락 12명령에 `--json`: docs·manifest·artifacts·cloud-collect·files·extract·timeline·search·case·run·run-control·web), 각 명령 출력부(`cli/web.py` 제외 — T-112 소유) | T-033·T-050 | 4 | 89명령 `--json` 스냅샷 테스트. 기존 77명령의 **최상위 키는 그대로** + `status`·`warnings`·`errors` 추가(부록 D.8 개정). `search --json` 동작. 종료 코드 0/1/2/3/4 표와 일치, 이름 불변(D16 수정안) | GAP-145·195 / IS-112 | QA-103·116 |
-| T-112 | `web --read-only`·`--no-browser` 기본·로컬 토큰 | `rapidtriage/cli/web.py`(`:55-60` 토큰 출처, `:89-96` 토큰 출력, `:115-124` 브라우저), `rapidtriage/cli/parser.py`(web 하위 파서 블록만 — T-111과 블록 분리), `rapidtriage/api/app/readonly_mode.py`(신규: T-032의 미들웨어를 서버 단위로 재사용) | T-007·T-032 | 3 | 허용 목록 밖 비-GET 403, 비터미널·CI에서 브라우저 미실행(D27), 토큰은 터미널일 때만 출력 | GAP-148·178·153 / IS-115 | QA-011·116 |
-| T-113 | OpenAPI 태그·설명 100% 〔2차: 빈 응답 스키마 36개는 T-140으로 분리〕 | `rapidtriage/api/app/routes_*.py`의 데코레이터 인자(`tags=`·`summary=`·`description=`)만(코디네이터가 묶음 끝 단독 수행) | W3·W8 | 4 | 165 + 신규 연산 전부 태그 1개 이상(태그 12종 이하)·한국어 요약, 설명 없는 연산 0, 스냅샷 게이트 | GAP-146 / IS-113 | QA-103 |
-| T-114 | 미호출 라우트 정리 | `docs/api-surface.md`(신규: 자동화용 문서화), 죽은 8개 제거는 **T-113 뒤 단독** | T-113 | 3 | 45개 각각 "자동화용/삭제/콘솔 연결" 판정, 삭제분 스냅샷 반영 | GAP-147 / IS-114 | QA-103 |
-| T-115 | 저장 키 v3 이관·누적 정리 | `frontend/src/state/storageMigration.ts`(신규), `frontend/src/features/review/BaselineHistogram.tsx` | T-061 | 3 | 1회 이관·옛 키 삭제·LRU 20, `authToken` localStorage 미사용 | GAP-153 / IS-120 | QA-104 |
-| T-116 | 코드 분할(전문가 화면 지연 로드) | `frontend/vite.config.ts`, `frontend/src/app/ViewSwitch.tsx`의 import 지점, `frontend/src/app/lazyViews.ts`(신규) | T-089 | 4 | 첫 화면 JS ≤1.0 MB, 번들 예산 게이트 | GAP-064 / IS-080 | QA-101 |
-
-### W9-b 잔여 (6: T-117 단독 선행 → T-118·T-119·T-140·T-141 병렬 → T-142)
-
-| ID | 제목 | 파일 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-117 | 옛 컴포넌트·옛 토큰·임시 파일 삭제, 용어 lint 오류 승격 | 옛 `StatusChip`·`ToneChip`·`Badge`·`GridEmpty`·`ViewState`·`CardEmpty`·`Modal` 등, `frontend/rt-shot*.mjs`, CI 설정 | W4~W8 전부 | 4 | 옛 import 0, lint 위반 0, 600줄 초과 0 | GAP-137·150·130 / IS-107·117·096 | QA-098·104 |
-| T-118 | 콘솔 S3 45건·P 계열 전수 재확인과 잔여 수정 | (Sonnet이 재확인 표 작성 → 잔여만 Opus가 파일별 소과제로) | W7 | 4 | C-xx·P1~P8 각각 "해소/잔여" 표, 잔여 0 | GAP-142·102 / IS-096·100 | QA-091·094·053 |
-| T-119 | 에이전트 안내 문서·known-limitations 정합 | `docs/agent-guide.md`(신규), `docs/rapidtriage-known-limitations.md` | T-111 | 3 | 권장 순서·봉투·오류 코드·용어 대응표, AI 절 drift 3건 수정, 미검증 기능 목록 | GAP-148·119·165·185·187 / IS-115 | — |
-
-| T-140 | 〔2차 신규〕 OpenAPI 빈 200 응답 스키마 36개 | `rapidtriage/api/app/models.py`(응답 모델 추가), `routes_*.py`의 `response_model=` 인자만 | T-113 | 4 | 빈 200 스키마 0, 응답 본문 불변(기존 API 계약 테스트 `tests/test_rapidtriage_api_contract.py` 통과 — 모델은 `extra="allow"`로 필드 누락·추가를 막지 않는다) | GAP-146 / IS-113 | QA-103 |
-| T-141 | 〔2차 신규〕 CLI 예시 100%·`dev`/`qa` 도움말 그룹·쓰기 명령 `--dry-run` | `rapidtriage/cli/parser.py`(epilog·그룹), 쓰기 명령 출력부 | T-111 | 4 | 예시 없는 36명령 0, `--help` 첫 화면에 핵심 20명령 이하(검증·벤치 약 35개는 `dev`·`qa` 그룹), 쓰기 명령(파일을 만드는 명령) 전부 `--dry-run`(쓸 경로만 출력, 파일 0) | GAP-145 / IS-112·098 | QA-103 |
-| T-142 | 〔2차 신규〕 CLI `--lang ko` 도움말 | `rapidtriage/cli/help_ko.py`(신규: 명령·옵션 설명 사전), `rapidtriage/cli/parser.py`(사전 적용 훅 — T-141 뒤) | T-141 | 4 | `--lang ko`(또는 `RAPIDTRIAGE_LANG=ko`)에서 89명령 설명·605옵션 도움말 한국어 100%(사전 누락은 테스트 실패), 기본(영문) 출력 불변, 용어는 부록 C.7 표준 | GAP-145 / IS-098 | QA-103 |
-
-> W9-b는 6개다. T-117이 전역 삭제라 단독으로 먼저, 그 뒤 T-118·T-119·T-140·T-141 병렬, T-142는 T-141 뒤(`parser.py` 공유).
-
-### W10 엔진·수집기 **[승인 필요]** (승인 시점에 삽입)
-
-| ID | 제목 | 파일 | 결정 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-120 | E01 추출 스파이크(처리량·1패스 바이트 측정) | 측정 스크립트만 | D24 | 4 | 바이트·파일 수 기준 처리량 표, 목표(15분/90분) 확정 또는 수정 | GAP-068 / IS-084 | — |
-| T-121 | 2패스 우선순위 추출·목록화 100%·삭제 sweep 상한 분리 | `rapidtriage/core/e01_native.py`, `rapidtriage/core/e01.py` | D6·D7 | 4×3(하위 과제 3개로 분할: 목록화 / 우선순위 / 삭제 상한) | `fls` 대비 누락 ≤0.5%, 사용자 프로필 100%, 원본 불변, 잘림 시 단계 "부분" | GAP-026·028·160 / IS-084·085 | QA-017·001 |
-| T-122 | 시그니처 판정 재사용 + 복구본 제외 | `rapidtriage/artifacts/windows/filesystem.py`, `rapidtriage/core/files.py`(`content_state` 기록) | D6·D33 | 4 | 3,508 s → ≤120 s, 전/후 행 비교(복구본 제외분만 차이), `content_state` 목록 노출 | GAP-040·041·068 / IS-022·023 | QA-025·026 |
-| T-123 | 레지스트리 키 트리 분리 저장 | `rapidtriage/artifacts/windows/registry.py` 출력부 | D10 | 4 | 1,391 s → ≤400 s, 탐색기 동일(e2e) | GAP-068 / IS-084 | QA-052·100 |
-| T-124 | 침묵 실패 점검 전체 대상 | `rapidtriage/core/silent_failure.py` | D6a | 3 | 대상 100%, IMG-B 이벤트 로그 오판 0, 설명 한국어 | GAP-030 / IS-087 | QA-030 |
-| T-125 | 매체 해시 계산·E01 내장 해시 대조 | `rapidtriage/core/e01_hash.py`, `rapidtriage/api/app/case_workspace.py`, `rapidtriage/core/case_db/intake.py`(상태값 추가) | D34 | 4 | 컨테이너/매체 구분, 내장 해시 대조, 거짓 불일치 0 | GAP-007·008·168 / IS-069·003 | QA-007·008 |
-| T-126 | PST/OST 선택 구성 요소·단계 상태 매핑(`failed_isolated`→부분)·타임라인 매핑 | 〔2차: 경로 정정〕 `rapidtriage/artifacts/email_pst.py`·`email_external.py`·`email.py`, `rapidtriage/core/run/steps.py`(`:142` 상태값)·`core/run/progress.py`, `rapidtriage/core/timeline.py` | D8·D6 | 4×3 | 메일 표본 메시지 > 0, 진행 기록에 부분 상태, 미매핑 3,200행 해소 | GAP-157·029·115 / IS-006·086·048 | QA-047·019·070 |
-
-한국 환경 수집기(GAP-159)·카카오톡 메타 조사(GAP-158)는 v1 R8-6의 6-A를 그대로 승계하되 이 계획의 물결 밖(다음 계획)으로 둔다. 이번에는 0건 사유 화면(T-047)과 국내 호스트 분류(T-104의 YAML)만 한다.
-
-### W11 1:1 최종 검증
-
-| ID | 제목 | 담당 | 의존 | h | 수용 검사 | GAP/IS | QA |
-|---|---|---|---|---|---|---|---|
-| T-127 | 전 QA(QA-001~120) 실데이터 일괄 실행과 추적표 채우기 | Sonnet ×6(코퍼스·영역별 분담: ①무결성·방어 001~016·106~109 ②범위·수치 017~032·110 ③브리핑·내비·목록·뷰어 033~056·113 ④검색·검토·시간순·AI 057~074 ⑤보고서·페르소나 075~082·114~119 ⑥오류·접근성·성능·AX 083~105·111·112·120) | W1~W9 | 4×6 | 부록 E 전부 결과 기록(QA마다 증거 폴더 `D:\rapid-qa\derived\r8\w11\QA-xxx\`), coverage-matrix 미확인 칸 수 0(잔여는 E.5·E.7 사유) | GAP-046 / IS-121·123 | QA-001~120 |
-| T-128 | 적대적 최종 리뷰와 불일치 재계획 | Fable | T-127 | 4 | IS 125개 각각 "일치/불일치", 불일치는 새 T-xxx로 등록(마스터 9절 루프), 사람 테스트(QA-034) 결과 반영, R7 이월(단계 4·5) 범위 결정 반영 | GAP-164·166 / IS-121 | QA-034 |
-
-## F.4 과제 수 검산
-
-W0 12 · W1 31 · W2 9 · W3 15(T-056 폐기 번호 제외) · W4 10 · W5 12 · W6 12 · W7 15 · W8 6 · W9 12 · W10 7 · W11 2 = **143개 유효 과제**(번호는 T-001~T-144, T-056 결번). 1차 127개 + 2차 추가 16개(T-129~T-144: 신규 9 — 129·131·132·135·136·137·138·140·142, 과대 과제 분리 7 — 130·133·134·139·141·143·144). T-121·T-126은 착수 때 각 3개 하위 과제로 나눈다(4시간 상한 준수).
-
-## F.5 물결별 검증 강도
-
-| 물결 | Sonnet 검증 | Fable 리뷰 초점 | 실데이터 |
-|---|---|---|---|
-| W0 | 계약 테스트가 현 코드를 정확히 고정하는지(일부러 깨서 실패 확인) | 계약표 누락 | — |
-| W1 | 수정 전/후 스크린샷 쌍, 증거 스냅샷 | S1 GAP 각각 닫혔는지, 새 거짓 표시 없는지 | C1·C2-31·S |
-| W2 | (자체가 검증) | 기준선 해석·재계획 | C1~C5 |
-| W3 | 전/후 행 동일성(색인·필터), 계약 테스트, 지연 측정 | 건수 계약·0건 사유 오판 | C2·C3 |
-| W4 | 대비·타깃·시각 회귀 스크린샷(라이트·다크·6폭) | 컴포넌트 중복 재발 | — |
-| W5~W8 | 과제 e2e(T1~T5) + 분석 담당 모드 회귀 + QA 해당 번호 | 페르소나 시나리오 걷기(마스터 2절) | C1~C4 |
-| W9 | 스냅샷·삭제 영향 | 죽은 코드·계약 | C2 |
-| W10 | `fls-coverage-diff`·`mft-reference-diff`·전/후 행 비교·원본 불변 | 복구 정확도 영향 | C1·C2 + TSK |
-| W11 | 전수 | 1:1 | 전부 |
-
-## F.6 묶음 안 단계표 〔2차 신규〕
-
-같은 묶음의 과제는 파일이 겹치지 않지만, 아래 묶음에는 선후 의존이 있어 **한 번에 6개를 띄우지 않는다**. "선합의"는 카드에 적힌 인터페이스를 고정하고 병렬로 구현해도 된다는 뜻이고, 그 밖은 앞 단계가 통합 브랜치에 들어간 뒤 시작한다. 표에 없는 묶음(W0-a, W1-c, W1-f, W2-b, W4-b, W7-b, W10, W11)은 전부 1단계다.
-
-| 묶음 | 1단계(동시) | 2단계 | 3단계 | 실제 최대 동시 수 · 최소 벽시계(구현만) |
-|---|---|---|---|---|
-| W0-b | T-007·T-008(선합의 D.7)·T-009·T-010·T-011·T-012 | — | — | 6 · 4 h |
-| W1-a | T-013·T-014·T-015·T-016·T-017·T-018(T-017↔T-018 선합의: 204 = 미리보기 불가) | — | — | 6 · 4 h |
-| W1-b | T-019·T-021·T-023 | T-020·T-022·T-024 | — | 3 · 8 h |
-| W1-d | T-031·T-034·T-035·T-036·T-144 | T-032 | — | 5 · 8 h |
-| W1-e | T-033·T-129·T-131·T-132·T-133·T-134 | — | — | 6 · 4 h |
-| W2-a | T-037·T-040(자기 PC, 승인 불필요)·T-038(승인 시) | T-039·T-041 | T-042 | 3 · 무인 처리 시간 지배 |
-| W3-a | T-045·T-049 + T-047·T-048(선합의: 카드 id 12개 = 부록 C.2) | T-046 | T-050 | 4 · 10 h |
-| W3-b | T-051·T-052·T-053·T-054 | T-055 | — | 4 · 8 h |
-| W3-c | T-057·T-058·T-059 | T-060 | — | 3 · 7 h |
-| W4-a | T-061 | T-062·T-063·T-064·T-065·T-066 | — | 5 · 8 h |
-| W5-a | T-071·T-072·T-073·T-074·T-075 | T-076 | — | 5 · 7 h |
-| W5-b | T-078·T-079·T-080·T-081·T-082 + T-077(T-078과 선합의: 노드 id 불변) | — | — | 6 · 4 h |
-| W6-a | T-083·T-084·T-085·T-086·T-088 | T-087 | — | 5 · 8 h |
-| W6-b | T-089·T-090·T-091·T-092·T-139·T-143 | — | — | 6 · 4 h |
-| W7-a | T-093·T-094·T-095·T-098 | T-096 | T-097 | 4 · 12 h |
-| W7-c | T-135·T-137 | T-136 | — | 2 · 7 h |
-| W8 | T-105·T-107·T-108·T-110 | T-106·T-109 | — | 4 · 8 h |
-| W9-a | T-111·T-112·T-115·T-116 | T-113 | T-114 | 4 · 11 h |
-| W9-b | T-117 | T-118·T-119·T-140·T-141 | T-142 | 4 · 12 h |
-
-W3와 W4는 서로 파일이 겹치지 않으므로 동시에 진행할 수 있지만, 동시 6개 상한은 **두 물결의 합**에 적용한다(예: W3-a 1단계 4개 + W4-a 1단계 1개).
-
-## F.7 2차 리뷰가 찾은 묶음 안 파일 충돌과 해소 〔2차 신규〕
-
-| 충돌 | 1차 계획 | 해소 |
+열: ID · 제목 · 배타 파일 · 의존 · 크기(h) · 동작·수용(수치) · 닫는 GAP/IS · QA · 모델 · 검증(과제별 명령 + F.1의 묶음 이름).
+
+### WA-1 — CI 초록·가드레일·계약 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-145 | CI 실패 테스트 4건 수정 〔병합됨: fix/r8-ci-green — 검증 대기〕 | `tests/test_rapidtriage_run.py`, `tests/test_r6_grid_readability.py`, `tests/test_r7s1_rereview_reports.py`, `tests/test_ai_agents_adapters.py` | — | 4 | **동작** 테스트의 플랫폼 가정을 고친다. 제품 코드가 원인이면 원인을 기록하고 과제를 분리한다(특히 `test_run_supports_read_only_extract_safety`는 출력 가드 병합 뒤의 제품 변화일 수 있다)<br>**수용** ubuntu·windows·macOS 3.12에서 `Run tests` 실패 0. 각 테스트 20회 반복 통과 | GAP-209 / IS-167 | QA-152 | 병합됨(bc6c970) → 검증 Sonnet → 리뷰 Fable | `gh run list --workflow "RapidTriage CI" --limit 5`<br>V-PY · V-RD |
+| T-146 | 프런트 CI 단계 독립화 〔병합됨: fix/r8-ci-green — 검증 대기〕 | `.github/workflows/rapidtriage-ci.yml`(`frontend` 작업 블록만) | — | 2 | **동작** lint·typecheck·vitest·build·e2e를 `if: always()`로 서로 독립 단계로<br>**수용** `npm run lint` 오류 0. CI에서 5단계가 각각 결과를 남긴다(한 단계 실패 시 나머지 4개 실행 확인 1회) | GAP-210 / IS-167 | QA-152 | 병합됨(bc6c970) → 검증 Sonnet → 리뷰 Fable | `gh run view <id> --json jobs`<br>V-CI · V-RD |
+| T-147 | e2e 서버 격리: 브라우저 방지·포트 단일 출처·재사용 금지 〔부분 병합: fix/r8-ci-green — 남은 것은 `.claude/launch.json`과 수용 검사〕 | `frontend/e2e/start-server.mjs`, `frontend/e2e/playwright.config.ts`, `.claude/launch.json` | — | 3 | **동작** 병합분(bc6c970): `RAPIDTRIAGE_NO_BROWSER=1`, 포트는 `RAPIDTRIAGE_E2E_PORT`, 재사용은 `RAPIDTRIAGE_E2E_REUSE=1`일 때만. 남은 것: launch 설정에서 8710 제거·Vite 포트 일치, 수용 검사 실행<br>**수용** e2e 실행 중 사용자 브라우저 새 탭 0. `RAPIDTRIAGE_E2E_PORT=8811`로 13스펙 통과. 8791에 다른 서버가 떠 있어도 자기 서버를 띄움(재사용 0). launch 설정에 8710 0회 | GAP-211·212·213 / IS-168 | QA-153 | 병합분 검증 Sonnet + 남은 범위 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && RAPIDTRIAGE_E2E_PORT=8811 npm run e2e`<br>V-E2E · V-RD |
+| T-001 | 사용자 계약 추출기와 계약 테스트 〔v3: testid는 계약에서 제외〕 | `scripts/extract-ui-contract.mjs`, `frontend/src/contracts/uiContract.ts`, `frontend/src/contracts/*.contract.test.ts` | — | 4 | 계약 = 주소 왕복 30종 + `serializeRoute` 단계 단어 5개 불변 + 인용 스냅샷 12종 + `KEY_MAP` 33개 + 저장 키(localStorage·sessionStorage 4키) + 접근성 이름 7·랜드마크 4 + 팝아웃 메시지 종류. 일부러 주소 단어·인용 키·단축키·접근성 이름을 1개씩 바꾸면 각각 실패(4회 시연). testid는 고정하지 않고 추출 목록만 낸다(상수화는 T-157)<br>〔v3〕 testid 동결(v2 부록 D.3)은 D65로 폐기 | GAP-149·172·194·208·351 / IS-116·015 | QA-041·104·111 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-FE · V-RD |
+| T-002 | 토큰 lint·대비 검사 확장 | `frontend/scripts/check-tokens.mjs`(신규), `frontend/scripts/check-contrast.mjs`(기존 확장), `frontend/package.json`(scripts 블록) | — | 3 | 현 위반 수를 기준선 JSON으로 기록(색 0·radius 42·px 124·font-size 9), 새 위반은 실패<br>상세: 부록 H 카드 | GAP-140 / IS-110 | QA-096 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-003 | 증거 스냅샷·로그 스캔·보고서 감사 스크립트 | `scripts/r8-evidence-snapshot.py`, `scripts/r8-log-scan.py`, `scripts/r8-report-audit.py`, `scripts/r8-trace-audit.py`(부록 A·B·E·F에서 추적표 생성·구멍 검사), `tests/test_r8_qa_scripts.py` | — | 4 | 합성 폴더에서 변경 1바이트·신규 파일 검출, 가짜 비밀·경로 검출, 보고서 필드 누락 검출 단위 테스트. `r8-trace-audit.py`는 (a) GAP 없는 IS·과제 없는 GAP·QA 없는 IS, (b) 같은 묶음 안 파일 중복, (c) F.6 단계표와 의존 열의 모순을 실패로 보고<br>〔v3〕 `r8-trace-audit.py`는 v3 추적표 규칙(고아 0)을 물결마다 다시 검사<br>상세: 부록 H 카드 | GAP-204 / IS-067·074·059 | QA-001·013·009·078·104 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+
+### WA-2 — CI 초록·가드레일·계약 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-004 | 합성 풍부 픽스처 생성기(가짜 값) | `scripts/make-r8-fixture.py`, `tests/fixtures/r8_rich/`(생성 스크립트·매니페스트만), `frontend/e2e/r8_fixture.py` | — | 4 | Tier 1 9카드 전부 행 > 0, 가짜 비밀·가짜 개체 포함, 실데이터·PII 0(스캔), 생성 60 s 이하<br>상세: 부록 H 카드 | GAP-057 / IS-121(CI용) | QA-045 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-E2E · V-RD |
+| T-005 | 용어 lint(금지어 8개)와 용어집 R8 개정 〔v3: 범위 축소〕 | `scripts/check-glossary-terms.py`, `docs/console-glossary.md`, `tests/test_glossary_lint.py` | — | 4 | 부록 C.7 표(v3 개정 포함)가 용어집에 반영. lint는 금지어 8개(런(기본 화면)·IOC·web-ui·검사관·리뷰보드·알 수 없음초·Failed to fetch·Request failed)만 오류로, 현재 적중 수를 기준선에 기록하고 새 적중은 실패. 나머지 용어는 실데이터 렌더 검사(QA-035·045)로<br>〔v3〕 소스 7,242 문자열 전체 lint는 과하다(D70 계열) | GAP-130·182 / IS-096 | QA-035 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-DOC · V-RD |
+| T-006 | 병렬 테스트 실행기 〔v3 재정의: 워커당 모듈 묶음. CI 전환은 T-153〕 | `scripts/dev/run-tests.py`, `scripts/dev/test-tiers.json`, `tests/test_dev_run_tests.py` | T-145 | 4 | 16코어·8워커에서 빠른 묶음 5분 이하(워커 8개가 각자 모듈 묶음을 한 프로세스에서). 테스트 수 합 = CI discover의 2,993 ±0. 멈춘 묶음은 제한 시간에 종료되고 이름이 결과 JSON에 남는다. 느린 4모듈은 `test-tiers.json`에<br>〔v3〕 v2의 `scripts/run-tests-parallel.py`는 만들지 않는다 | GAP-152·217·229 / IS-119 | QA-151 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-009 | Python 잠금 파일과 잠금 기준 감사 〔v3: 대상 정정〕 | `pyproject.toml`, `requirements.lock`, `requirements-dev.lock`, `.github/workflows/dependency-monitoring.yml`, `scripts/check-dependencies.py` | — | 4 | 해시 포함 잠금 2종. 잠금 기준 `pip_audit`에서 수정본 있는 권고 0 또는 예외 문서(starlette는 fastapi 상향과 한 묶음, Pillow 포함). 감사 대상 패키지 ≤80(전역 316건과 분리). `requires-python>=3.12`. `python-multipart`는 대상 아님<br>〔v3〕 D25: 상향 근거를 이 과제가 만든다 | GAP-151·315 / IS-118 | QA-104 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-CI · V-RD |
+| T-011 | 과제 측정 하네스(T1~T5 골격·지표 수집) | `frontend/e2e/tasks/`(신규 폴더), `scripts/r8-measure.py` | T-001 | 4 | 현 화면에서 UX 감사 수치(트리 366±10%, 잘림 29~37%, Tab 32)를 재현하는 기준선 JSON<br>상세: 부록 H 카드 | IS-121 | QA-033·044·091 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-E2E · V-RD |
+| T-012 | e2e CSS 클래스 선택자 제거 | `frontend/e2e/*.spec.ts`(기존 13개), 선택자 대체에 필요한 testid 추가는 `frontend/src/features/views/ChatView.tsx`·`frontend/src/features/case/EntityPanel.tsx`·`frontend/src/features/viewer/views/ImageView.tsx`만(그 밖의 클래스 — `.grid-row-stripe`·`.grid-scroll`·`.dash-*`·`.hist-cat-label`·`.flag-popover`·`.thumb-view` — 는 기존 testid·역할로 대체, 컴포넌트 수정 없이) | T-001 | 4 | e2e에서 `locator('.…')` 0(lint), 13스펙 통과 수 변화 없음<br>상세: 부록 H 카드 | GAP-150·223 / IS-117·173 | QA-104·155 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-E2E · V-RD |
+
+### WA-3 — CI 초록·가드레일·계약 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-010 | 비결정·기준 실패 테스트 4건 수정 `[확인: 파생 표 단계의 폴더 이름 충돌만, 수집·복구 불변]` | `rapidtriage/core/derived/stage.py`(`:77-79` `new_run_stage_analysis_id` 충돌만), `tests/`의 해당 3파일, `frontend/src/features/grid/qaRealData.test.tsx`·`frontend/src/features/analysis/qaRealData.test.tsx`·`qaRealData2.test.tsx` | T-145 | 4 | 4건 각각 20회 반복 통과, `test_rapidtriage_email_external…` 원인 기록<br>〔v3〕 CI 실패 4건(T-145)과 겹치지 않는 비결정 3건·기준 실패 1건만<br>상세: 부록 H 카드 | GAP-152 / IS-119 | QA-104·151 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-FE · V-RD |
+| T-148 | Windows discover 멈춤 원인 조사(코드 변경 없음) | `D:\rapid-qa\derived\r8\dx\discover-hang.md`(Git 밖) | — | 3 | **동작** `faulthandler.dump_traceback_later(600)`로 스택을 남기는 실행 1회<br>**수용** 멈춘 테스트·호출 지점 1곳 이상 특정, 또는 "900초 안에 완주" 기록. 재현 명령 포함 | GAP-229 / IS-119 | —(조사 과제: 결과가 T-006의 제한 시간·묶음 설계 입력) | 실행·검증 Sonnet → 묶음 리뷰 Fable | `python -X faulthandler -m unittest discover -s tests`<br>V-RD |
+| T-154 | vitest 안정화 | `frontend/vite.config.ts`(`test` 블록만), `frontend/src/testSetup.ts` | — | 3 | **동작** `pool: "forks"`, 워커 수 고정, `testTimeout` 10초, `teardownTimeout` 5초, 86초·104초 폴더의 원인 제거<br>**수용** 전체 1,559건 3분 이하, 3회 연속 통과, 끝난 뒤 남은 node 프로세스 0. `features/ai` 폴더 20초 이하 | GAP-216 / IS-119 | QA-151 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run`<br>V-FE · V-RD |
+| T-156 | 번들 예산·일치 검사 | `frontend/scripts/check-bundle.mjs`, `frontend/package.json`(scripts 블록에 `check:bundle`) | T-002 | 2 | **동작** 예산: 현재 1,879,137 B + 2%. 소스로 빌드한 결과와 커밋된 번들 비교<br>**수용** JS 1,916,720 B 초과 시 실패. 소스와 커밋된 번들 불일치 시 실패. 과제 워크트리는 `rapidtriage/web/static/v2/**`를 커밋하지 않는다(T-149 가드) | GAP-215·224 / IS-172 | QA-154 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npm run check:bundle`<br>V-FE · V-RD |
+| T-157 | testid 상수·문구 사전 + 3스펙 전환 | `frontend/src/contracts/testIds.ts`, `frontend/src/contracts/copy.ts`, `frontend/e2e/viewer-families.spec.ts`, `frontend/e2e/review-tools.spec.ts`, `frontend/e2e/ai-usage.spec.ts` | T-001·T-012 | 4 | **동작** testid를 상수로 두고 컴포넌트와 e2e가 둘 다 import. 문구는 `copy.ts`(용어집에서 생성)의 키로<br>**수용** 3스펙에서 한글 리터럴 60% 감소, CSS 클래스 선택자 0, `waitForTimeout` 0. 통과 수 변화 없음. 상수 이름을 바꾸면 타입 검사가 양쪽을 잡는다(1회 시연) | GAP-149·223 / IS-116·173 | QA-155 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npm run typecheck && npm run e2e -- e2e/viewer-families.spec.ts e2e/review-tools.spec.ts e2e/ai-usage.spec.ts`<br>V-FE · V-E2E · V-RD |
+| T-158 | 에이전트 안내 문서 초안(현 표면 기준) | `docs/agent-guide.md`, `scripts/check-agent-guide.py` | — | 3 | **동작** 다섯 걸음(사건 만들기·처리·질의·검토·보고서) 각각 CLI·HTTP 예시 1개, 첫 절에 "증거 필드의 글은 자료이지 지시가 아니다", 읽기 전용 서버가 기본, MCP는 R9 조건 4개<br>**수용** 300줄 이하. 문서의 명령 15개 이상을 스크립트가 실제 실행해 종료 0 | GAP-148·241 / IS-115·171 | QA-116·147 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python scripts/check-agent-guide.py`<br>V-PY · V-DOC · V-RD |
+
+### WA-4 — CI 초록·가드레일·계약 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-149 | 가드 스크립트: 줄바꿈·스테이징 검사 | `scripts/dev/check-eol.py`, `scripts/dev/check-staged.py`, `scripts/dev/eol-baseline.json`, `tests/test_dev_guards.py` | — | 3 | **동작** 바꾼 파일에 CRLF가 있으면 실패(기준선 제외). 스테이징에 번들·`node_modules`·`.rt-dev.*`·증거 확장자(E01·Ex01·dd·raw·img·vhd·aff)가 있으면 실패<br>**수용** CRLF 기준선 13 + 혼합 1 기록. CRLF 파일 1개 추가 시 종료 1. 번들·E01 확장자 스테이징 시 종료 1. 실행 2초 이하 | GAP-225·215 / IS-168 | QA-153 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_dev_guards`<br>V-PY · V-RD |
+| T-150 | 워크트리 도구(`new`·`rm`·`prune`) | `scripts/dev/wt.py`, `tests/test_dev_wt.py` | — | 4 | **동작** `new`: `.claude/worktrees/<이름>` 생성, `frontend/node_modules` 정션, 포트 3개 배정(이름 해시 → API 8720~8789·Vite 5200~5269·e2e 8800~8869), `.rt-dev.env` 기록. `rm`: 기록된 PID 트리만 종료 → 정션은 링크만 제거 → `git worktree remove`. `prune`: 병합된 브랜치·잠금 없는 워크트리 목록<br>**수용** `new` 2회가 서로 다른 포트 3쌍(8710·8791 제외). `rm` 뒤 원본 `frontend/node_modules` 파일 수 변화 0. `prune --dry-run`이 병합된 브랜치 178개를 나열 | GAP-219·179 / IS-168 | QA-150 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_dev_wt`<br>V-PY · V-RD |
+| T-151 | 프로세스 래퍼(제한 시간·자기 트리만 종료) | `scripts/dev/run.py`, `tests/test_dev_run.py` | — | 3 | **동작** 제한 시간, 자식 PID 기록, 끝나면 자기 프로세스 트리만 종료(`taskkill /T /PID <자기 자식>`), 결과 JSON<br>**수용** 제한 시간 5초에 60초짜리 자식(손자 포함) 종료, 남은 PID 0. 다른 파이썬 프로세스 생존. 결과 JSON에 초·종료 코드 | GAP-179·216 / IS-168·119 | QA-151 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_dev_run`<br>V-PY · V-RD |
+| T-155 | 구조 래칫: 계층·파일 크기 | `tests/test_architecture.py`, `tests/fixtures/architecture-baseline.json` | — | 3 | **동작** `core`→`api` import 허용 목록 4줄, 파일 줄 수 기준선(신규 파이썬 800·tsx 400, 기존은 +5%에서 실패, 줄면 기준선 내림)<br>**수용** 허용 4줄 고정(5번째에서 실패). 기준선 대비 5% 초과 증가 0. 실행 3초 이하 | GAP-220·228 / IS-172·117 | QA-154 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_architecture`<br>V-PY · V-RD |
+| T-159 | CLI 파서 분할(동작 불변) | `rapidtriage/cli/parser.py` → `rapidtriage/cli/parsers/{run,collect,image,kakao,case,validation,web,meta}.py` | — | 4 | **동작** 한 함수 2,160줄을 명령 묶음별 파일로 나눈다. 명령 이름·인자·도움말 불변<br>**수용** 89명령 `--help` 출력 해시 전후 동일(89/89). `parser.py` 300줄 이하 | GAP-235 / IS-169·117 | QA-148 | 코디네이터 Opus 단독(순차) → 검증 Sonnet → 리뷰 Fable | `python scripts/dev/cli-help-hash.py --check`(이 과제가 만든다)<br>V-PY · V-RD |
+| T-160 | CLI 출력·실패 헬퍼(`_envelope` 한 키) | `rapidtriage/cli/output.py`(신규: `emit`·`fail`·크기 예산), `tests/test_cli_envelope.py` | — | 4 | **동작** `emit(payload)`가 기존 최상위 키를 그대로 두고 `_envelope{schema:"rapidtriage.cli.v1",status,exit_code,tool_version,elapsed_ms,truncated,warnings,errors,command}` 1키만 더한다. `fail(code,…)`은 `--json`이면 표준 출력 JSON 1덩어리 + 표준 오류 1줄. 종료 코드는 이 단계에서 그대로 2(이행은 T-249)<br>**수용** `emit`이 1키만 추가(기존 키 집합 불변 단위 테스트, `doctor`의 `status:"warn"`·`plugins`의 `errors` 보존). `fail`의 표준 오류 ≤200바이트 | GAP-231·234·232 / IS-112 | QA-146·148 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_cli_envelope`<br>V-PY · V-RD |
+
+### WA-5 — CI 초록·가드레일·계약 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-152 | 게이트 한 줄 + AGENTS.md·품질 문서 갱신(D17 번복) | `scripts/dev/gate.py`, `AGENTS.md`(검증 명령 절 + 워크트리 규칙 10줄, 제품 절을 위로), `docs/rapidtriage-quality-checks.md` | T-006·T-149·T-151 | 4 | **동작** `--tier`(static·fast·full): L0 정적(ruff·compileall·tsc·biome·줄바꿈·파일 크기·import 경계·번들 예산) → L1 파이썬·vitest → L2 계약 → L3 e2e 스모크. L0 실패 시 중단. 단계별 종료 코드·초를 JSON으로<br>**수용** `--tier static` 60초 이하, `fast` 9분 이하, `full` 15분 미만(16코어). 출력 JSON에 단계 8개 이상. `AGENTS.md`에 `unittest discover` 0회, RapidForensic Validation Contract 절은 내용 불변 | GAP-218·230 / IS-119·167 | QA-104·151 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python scripts/dev/gate.py --tier full --json`<br>V-PY · V-DOC · V-RD |
+| T-161 | CLI 지연 import + `--version` | `rapidtriage/cli/__init__.py`, `rapidtriage/__main__.py` | T-159 | 3 | **동작** 핸들러 모듈을 명령이 정해진 뒤에 import(`cli/__init__.py:10`의 일괄 import 제거). `--version`은 `rapidtriage.__version__`<br>**수용** `--help`·`--version` 0.5초 이하(5회 중앙값). `-X importtime`에 `cv2`·`numpy` 0회. `--version` 종료 0 | GAP-235·236 / IS-169 | QA-149 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -X importtime -m rapidtriage --help 2>&1`<br>V-PY · V-RD |
+| T-162 | 오류 코드표 단일 출처(서버·CLI 공용) | `rapidtriage/core/error_codes.py`(신규), `docs/api-error-codes.md`(생성물), `tests/test_error_codes.py` | — | 3 | **동작** 코드·한국어 문장·힌트·HTTP 상태·종료 코드를 한 표에. 문서는 표에서 생성. 코드 문자열은 추가만<br>**수용** 코드 ≥30종, 각 코드에 한국어 문장·힌트. 문서 = 표(동기화 테스트). T-007·T-160이 이 표만 읽는다 | GAP-126·231 / IS-091·112 | QA-146 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_error_codes`<br>V-PY · V-DOC · V-RD |
+| T-163 | OpenAPI 품질 래칫 | `tests/test_openapi_quality.py`, `tests/fixtures/openapi-quality-baseline.json` | — | 2 | **동작** 기준선(태그 0/165·설명 59·빈 스키마 29) 기록. 태그·요약 없는 **새** 연산이 생기면 실패<br>**수용** 기준선 기록, 새 무태그 연산 1개를 넣으면 실패. 실행 5초 이하 | GAP-146·242 / IS-172·113 | QA-154 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_openapi_quality`<br>V-PY · V-RD |
+| T-164 | D15 개정 결정 기록(LLM: R8 결정적 보조만, R9 로컬 옵트인 + 게이트) | `docs/decisions/d15-llm-assist.md`(신규) | — | 2 | **동작** 쓰임새별 판단표, R8에 넣지 않는 이유 4, R9 게이트 7(로컬 전용·출력 분리·인용 강제·재현 기록·주입 방어·가림 우선·평가 게이트), 법률 검토 선행 항목, 하지 않는 것(자동 분류·AI 점수·클라우드 기본 제공)<br>**수용** 문서에 게이트 7개와 평가 통과선(질의 변환 ≥90%·근거 없는 문장 ≤1%·인용 정밀도 ≥98%·CPU 30초) 기재 | GAP-334 / IS-166 | QA-169 | Fable | `git diff --check`<br>V-DOC |
+| T-165 | 상한 일람 스크립트 | `scripts/check-collector-caps.py`(신규), `tests/test_collector_caps_inventory.py` | — | 3 | **동작** `artifacts/**`·`core/**`의 상한 상수와 고지 키(`*_truncated`·`*_total`) 유무를 표로<br>**수용** 상한 약 110개 중 고지 없는 것 목록 JSON(GAP-272의 7종 포함 확인). 무고지 수가 기준선보다 늘면 실패 | GAP-286·272 / IS-157 | QA-138 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python scripts/check-collector-caps.py --json`<br>V-PY · V-RD |
+
+### WA-6 — CI 초록·가드레일·계약 (5)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-153 | CI 재편: 매트릭스·트리거·제한 시간·동시 실행 + 야간 〔부분 병합: fix/r8-ci-green — 남은 것은 실행기 연결·20분 제한·느린 묶음 분리〕 | `.github/workflows/rapidtriage-ci.yml`(`test` 작업 블록 + `on:`), `.github/workflows/nightly.yml`(신규) | T-145·T-146·T-006·T-152 | 4 | **동작** 병합분(bc6c970): PR 게이트 = ubuntu + windows 3.12, 전체 매트릭스는 `main` push·야간(cron)·수동, PR은 `concurrency`로 이전 실행 취소, 제한 시간 45분/30분. 남은 것: 병렬 실행기(T-006) 연결, PR 게이트 20분 제한, 느린 4모듈·e2e 전체를 야간으로 분리(같은 워크플로의 야간 분기 또는 `nightly.yml`)<br>**수용** PR 게이트 벽시계 ≤20분. 같은 커밋 실행 1회. 야간 워크플로가 macOS·느린 4모듈·e2e 전체를 돈다. 브랜치 보호(D42)는 소유자 설정 | GAP-214 / IS-167 | QA-152 | 병합분 검증 Sonnet + 남은 범위 코디네이터 Opus 단독(순차) → 검증 Sonnet → 리뷰 Fable | `gh run list --limit 10 --json conclusion,createdAt`<br>V-CI · V-RD |
+| T-007 | 서버 오류 봉투·500 경로 제거·보안 헤더 〔v3: 헤더 추가, 코드표는 T-162〕 | `rapidtriage/api/app/errors.py`(신규: 예외 처리기 + 영문 리터럴 → 한국어 대응표), `rapidtriage/api/app/factory.py`(처리기 등록·500 본문), `docs/api-error-codes.md`, `tests/test_error_envelope.py` | T-162 | 4 | v2 수용 + 500 본문에서 `crash_report` 경로 제거(`crash_id`만) + 모든 응답에 `X-Content-Type-Options: nosniff`·`Referrer-Policy: no-referrer`·`X-Frame-Options: DENY` + 미들웨어 오류 4곳 한국어. `code`는 `core/error_codes.py` 표에서만 온다. 기존 `["detail"]` 단언 190곳 무수정 통과<br>상세: 부록 H 카드 | GAP-126·018·156·193·243·310 / IS-091·074·146 | QA-083·111·183 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-DOC · V-RD |
+| T-166 | 코퍼스 감사 스크립트 | `scripts/r8-corpus-audit.py`(신규), `tests/test_r8_corpus_audit.py` | — | 2 | **동작** `D:\rapid-qa\corpus\` 매니페스트 6종의 필드(출처·라이선스·크기·해시·만든 날·정답표 위치) 검사. 저장소에는 건수 요약만<br>**수용** 합성 매니페스트로 필드 누락 6종 검출. 식별자 패턴이 저장소 요약에 있으면 실패 | GAP-357 / IS-122 | QA-201 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_r8_corpus_audit`<br>V-PY · V-RD |
+| T-167 | 통합 브랜치 `feat/r8` 분기와 PR #18→#19→#20 순서 확정(D13) | 브랜치·PR 설정(파일 없음) | — | 1 | **동작** 소유자에게 병합 순서를 확인하고 `feat/r8`을 `feat/r6-ux`에서 분기. 병합은 소유자 지시 때만<br>**수용** `feat/r8` 존재, 과제 브랜치 이름 규칙 `r8/T-xxx-짧은이름` 공지, 열린 PR 3개의 순서가 문서에 기록 | GAP-204 / IS-167 | —(절차 과제: 기록은 `docs/research/r8-wave-A-results.md`) | 운영자(사람) → 확인 Sonnet | `git branch --list feat/r8 && gh pr list`<br>V-DOC |
+| T-168 | 워크트리·브랜치 정리 실행 | `.claude/worktrees/`(정리 대상), 병합된 로컬 브랜치 | T-150 | 1 | **동작** `wt.py prune --apply`로 잠금 없는 워크트리와 병합된 브랜치 정리(잠금 4개는 보존)<br>**수용** 워크트리 ≤10, 병합된 로컬 브랜치 0, 원본 `node_modules` 파일 수 변화 0 | GAP-219 / IS-168 | QA-150 | 코디네이터 Opus 단독(순차) → 검증 Sonnet → 리뷰 Fable | `git worktree list && git branch --merged`<br>V-RD |
+
+### WA-7 — CI 초록·가드레일·계약 (1)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-008 | 프런트 오류 정규화 | `frontend/src/api/client.ts`, `frontend/src/api/errors.ts`(신규), 해당 테스트 | —(T-007과 인터페이스 선합의: 부록 D.7) | 3 | `ApiError`가 `code`·`message`·`hint`·`status`를 가진다. 서버가 최상위 `message`를 주면 그것을, 없으면 `detail`에서 만든 문장을 쓴다(옛 서버 호환). 네트워크 실패(`TypeError`)→`NETWORK_UNREACHABLE`, 중단→`REQUEST_ABORTED`(화면에 표시 안 함), 시간 초과→`REQUEST_TIMEOUT`. "Failed to fetch"·"Request failed" 문자열 0(grep `frontend/src`, 테스트 제외)<br>상세: 부록 H 카드 | GAP-126·051·193 / IS-091 | QA-083 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+
+### WB-1 — 거짓 표시 제거·보안/무결성 P0 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-025 | 보고서 포함 수 단일 출처 〔병합됨: fix/r8-security — 검증 대기〕 | `rapidtriage/api/app/review_payload.py`(신규 함수 `report_candidate_count(summary, run_id, case_json) -> {count, db, case_json, error}`), `rapidtriage/api/app/routes_case_db.py`(review-counts `:99-163`만), 테스트 | — | 3 | 표시 5건(포함 3: DB 2 + 케이스 JSON 1) 픽스처에서 보고서 본문 항목 수 = `/review-counts.report_candidates` = 3. JSON 측은 `bookmark.review.include_in_report`를 읽는다(`:147-148` 수정). DB·JSON 양쪽에 같은 대상이 있으면 1로 센다(중복 제거 키 = 인용 id). `sqlite3.Error`는 `[]`·0이 아니라 응답의 `error:{code:"CASE_DB_UNREADABLE",message}` + `report_candidates:null`(`review_payload.py:76-77`, `routes_case_db.py:134-137`)<br>〔v3〕 v3 보강(RI-02): 응답에 `truncated`(5,000 초과)·`error`, 보고서 본문에 "표시 n건 중 5,000건만 반영"<br>상세: 부록 H 카드 | GAP-012·167·300 / IS-057·140 | QA-075·176 | 병합됨(bc6c970) → 검증 Sonnet → 리뷰 Fable | V-PY · V-RD |
+| T-030 | GET이 쓰지 않게 〔v3: 7경로〕 〔병합됨: fix/r8-security — 검증 대기〕 | `rapidtriage/api/app/routes_reports.py`(`:83-98`, `:139-145`, `:148-154`, `:192-198`, `:221-229`, `:232-249`), `frontend/src/features/case/exports.ts`, `frontend/src/api/reports.ts` | — | 4 | 여섯 GET은 **쓰지 않는다**: `/submission-manifest`·`/validation-package`(JSON 조회)는 메모리에서 만들어 반환만, `…/file`·`/case-report/file[/{format}]`은 저장된 파일만 반환(없으면 404 `EXPORT_NOT_WRITTEN` + "먼저 내보내기를 실행하세요"). 생성은 POST(매니페스트는 신규 `POST /submission-manifest`, 검증 패키지·보고서는 기존 POST). 프런트 내보내기는 POST → 저장본 GET 순서. OpenAPI의 모든 GET을 한 번씩 부른 뒤 결과 폴더 스냅샷 동일<br>〔v3〕 v3 보강(RI-07): `/reviewer-bundle/file`도 저장본만 반환(없으면 404). 7경로 GET 전후 결과 폴더 스냅샷 동일<br>상세: 부록 H 카드 | GAP-016 / IS-066 | QA-011·108 | 병합됨(bc6c970) → 검증 Sonnet → 리뷰 Fable | V-PY · V-FE · V-RD |
+| T-177 | 다운로드의 자격 증명 차단 〔병합됨: fix/r8-security — 검증 대기〕 | `rapidtriage/api/app/routes_media.py`(`:100-107`만), `tests/test_credential_routes.py` | — | 1 | **동작** `/source-file`도 헥스·SQLite와 같은 거부 호출을 거친다<br>**수용** `.credentials.json`·`Login Data`·`id_rsa` 경로에 403 + 한국어 사유. 일반 파일 200 불변. 9경로 × 20파일 = 180칸 본문 0바이트 | GAP-308 / IS-144 | QA-181 | 병합됨(bc6c970) → 검증 Sonnet → 리뷰 Fable | `python -m unittest tests.test_credential_routes`<br>V-PY · V-RD |
+| T-013 | 검색 옵션 체크박스가 빈 막대로 그려지는 결함 | `frontend/src/app/shell.css`(`.global-search input` 범위를 검색 입력 하나로), `frontend/src/tokens/controls.css` | — | 2 | 체크박스 폭 ≤24px·라벨 우측(boundingBox), 라이트·다크 스크린샷<br>상세: 부록 H 카드 | GAP-105 / IS-034 | QA-060 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-014 | 메뉴 포털·충돌 보정(뷰어 … 메뉴 잘림) | `frontend/src/components/MenuButton.tsx`, `frontend/src/components/popover.css`, `frontend/src/components/Popover.tsx` | — | 4 | 뷰어 최소 폭·880에서 메뉴 사각형이 뷰포트 안, Esc·포커스 복귀 유지<br>상세: 부록 H 카드 | GAP-095 / IS-102 | QA-049 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-015 | 트리 건수 잘림·가로 스크롤·이탤릭·검색 공백 | `frontend/src/features/tree/tree.css`, `frontend/src/features/tree/EvidenceTree.tsx`, `frontend/src/features/case/case.css`(`.case-tree` 블록만) | — | 4 | 스크롤바가 있어도 건수 `scrollWidth==clientWidth`, 가로 스크롤 0, 이탤릭 0("자료 없음" 글자), 검색 결과 사이 공백 ≤행 높이<br>상세: 부록 H 카드 | GAP-082 / IS-012·106 | QA-094 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+
+### WB-2 — 거짓 표시 제거·보안/무결성 P0 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-031 | 가져오기·샘플·찾아보기 경로 범위 〔2차: 모드별 규칙 명세〕 〔병합됨: fix/r8-security — 검증 대기〕 | `rapidtriage/api/app/routes_runs.py`(import `:525-531`만), `rapidtriage/api/app/routes_case_db.py`(sample `:78-95`만), `rapidtriage/api/app/routes_meta.py`(browse `:132-152`), `rapidtriage/core/browse.py`, `rapidtriage/core/sample_case.py`(`:25-28` 삭제 조건) | T-025 | 4 | (1) **샘플**: `output_dir`는 `~/.rapidtriage/` 아래만 허용(밖이면 403 `PATH_OUTSIDE_ALLOWED_ROOT`), 요청 기본 `overwrite=False`, 삭제는 폴더에 샘플 표식 파일 `rapidtriage-sample-expected.json`이 있을 때만(없는 비어 있지 않은 폴더는 409, **삭제 0**). (2) **가져오기**: 결과 폴더가 그 처리의 증거 경로 안/같음이면 가져오되 `readonly_reason:"OUTPUT_INSIDE_EVIDENCE"`를 처리에 기록(T-032가 소비). (3) **찾아보기**: 루프백(로컬) 서버는 현행대로 전체 — 분석 담당이 증거를 골라야 한다. `--remote` 서버는 `--browse-root`(반복 가능, 기본 = 사건 폴더들 + 홈)로 준 루트 안만, 밖은 403. 기존 `scope=analysis-*` 동작 불변<br>〔v3〕 v3 보강(RI-04·05): 샘플 기본 `overwrite=False`·표식 파일이 있을 때만 삭제. 가져오기는 요약의 `output_dir`를 실제 폴더로 보정, `outputs`가 폴더 밖이면 거부, 결과 폴더가 `root` 안이면 `output_inside_evidence=True`<br>상세: 부록 H 카드 | GAP-003·004·005·207·291 / IS-068·073·145 | QA-005·006·107·172 | 병합됨(bc6c970) → 검증 Sonnet → 리뷰 Fable | V-PY · V-RD |
+| T-016 | 추가 분석 카드 글자 겹침·격자 구멍 | `frontend/src/features/stages/stages.css`(`.process-card`·`.analysis-cards` 블록) | — | 2 | 2줄 제목에서 겹침 0(요소 사각형 교차 검사), 880~1920<br>상세: 부록 H 카드 | GAP-078 | QA-094 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-018 | 썸네일 415를 정상 응답(대체 가능 신호)으로 | `rapidtriage/api/app/routes_media.py`(thumbnail 핸들러), `rapidtriage/api/app/thumbnail.py`, 테스트 | — | 3 | 깨진 이미지에 204 또는 `{placeholder:true}` + 서버 로그 1줄(경로 없음), 영문 오류 0<br>상세: 부록 H 카드 | GAP-097 / IS-027·091 | QA-050 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-019 | 목록 응답 부분 결과 계약(서버) | `rapidtriage/api/app/artifact_filter.py`(`filter_artifact_page` `:132-216`, `filter_across_kinds` `:350` 부근), `rapidtriage/api/app/pagination.py`(`paginate_payload`), 테스트 | T-007 | 4 | `budget_stopped`·`truncated`·`scanned`는 **이미 있다**(`:214-215`) → 추가만: `total_lower_bound`(= `offset + returned + (1 if has_more else 0)`, 중단 시 지금까지 일치한 수), `budget_stopped`를 항상 불리언으로, `notice:{code,message}`(`SCAN_BUDGET_STOPPED`·`TOTAL_NOT_COUNTED`). 기존 필드 이름·값 불변(스냅샷)<br>상세: 부록 H 카드 | GAP-031·033 / IS-029·088 | QA-021·022 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-021 | 단계 상태 집계 단일 함수(서버) | `rapidtriage/api/app/run_steps_summary.py`(신규: `summarize_steps(summary) -> {total,completed,partial,failed,skipped,failed_names[]}`), `rapidtriage/api/app/dashboard.py`(`build_run_dashboard` `:327`에 `steps` 키 추가) | — | 3 | 입력은 처리 요약의 `steps[].status`. 대응: `completed`→완료, `failed_isolated`(`core/run/steps.py:142`)→**부분**, `error`·`failed`→실패, `skipped`→건너뜀, `cancelled-partial`→부분. IMG-B 요약(Git 밖)을 줄인 픽스처로 42 / 부분 1 / 실패 1 재현. 수집기 progress(12단계)와 별개 수임을 응답 필드 이름으로 구분(`steps` vs `providers`)<br>상세: 부록 H 카드 | GAP-029 / IS-086 | QA-019 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-023 | 처리 범위 네 축 산출(서버 표시 계층) 〔v3 재정의〕 | `rapidtriage/api/app/run_scope.py`(신규: `build_run_scope(summary, run_dir) -> {partitions:{total,supported,processed}, allocated:{listed_pct,content_pct,basis}, deleted:{records,attempted,attempted_pct,listed_pct}, unallocated:{scanned_pct}, caps:[…], basis}`), `tests/test_r8_run_scope.py` | — | 4 | 추출 통계 + `$MFT` 사본 머리 집계로 네 축을 낸다. 통계가 순회 잘림과 sweep 잘림을 구분하지 못하므로 규칙 "`deleted_files > 0`이면 순회 잘림 0"을 쓰고 `basis:"inferred"`로 표시(통계 분리 T-270 뒤 `measured`). IMG-B: 파티션 1/2 · 할당 목록화 100%(추정 표시) · 삭제 레코드 시도 11%(±1) · 비할당 "측정하지 않음". 한 숫자 범위 필드(`percent`)와 문구 0. 통계 없는 결과(폴더 증거·옛 결과)는 `basis:"unavailable"`. `/dashboard`에 `scope` 추가<br>〔v3〕 v2의 한 숫자 범위 고지는 폐기. `run_problems.py`는 T-184가 소유 | GAP-026·027·249·358 / IS-004·085 | QA-017·018·122 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+
+### WB-3 — 거짓 표시 제거·보안/무결성 P0 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-032 | 읽기 전용 결과 모드 — 관문 〔2차: 재정의. 지점별 차단은 T-133·T-134〕 〔병합됨: fix/r8-security — 검증 대기〕 | `rapidtriage/api/app/readonly_run.py`(신규: `run_readonly_reason(job) -> str\|None`, `may_persist(output_dir) -> bool`, 미들웨어 `reject_writes_for_readonly_run`), `rapidtriage/api/app/index_cache.py`(`index_persist_enabled` `:21-23`가 처리별 판단을 받도록 인자 추가, 환경 변수 동작 불변), `rapidtriage/api/app/thumbnail.py`(`cached_thumbnail` `:87`), `rapidtriage/api/app/dashboard.py`(`write_case_notes` `:71`) | T-031 | 4 | 읽기 전용 처리에 대한 **비-GET 요청은 전부 409 `RUN_READ_ONLY`**(허용 목록: 없음. 삭제 = 목록에서 빼기만 허용)를 미들웨어 한 곳에서 거부. `GET /api/runs/{id}`·`/dashboard`에 `readonly_reason`. 썸네일은 디스크 캐시 없이 메모리 응답, 메모 쓰기는 409. 가드 이전 결과가 아닌 처리의 동작·성능 불변(전/후 타이밍 ±5%)<br>상세: 부록 H 카드 | GAP-003·175·192 / IS-068 | QA-005 | 병합됨(bc6c970) → 검증 Sonnet → 리뷰 Fable | V-PY · V-RD |
+| T-017 | 미디어 길이 문구·썸네일 대체 글리프 | `frontend/src/features/viewer/views/MediaView.tsx`(`:97`), `frontend/src/features/views/ThumbnailView.tsx`, 〔2차: `thumb.css`는 없다〕 `frontend/src/features/views/views.css`(`.thumb*` 블록만) | —(T-018과 인터페이스 선합의: 204 = 미리보기 불가) | 3 | "알 수 없음초" 0, 미리보기 실패 칸에 형식 글리프 + "미리보기 없음", 콘솔 오류 0<br>상세: 부록 H 카드 | GAP-093·097·098 / IS-027 | QA-046·050 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-020 | 부분 결과 띠와 정직한 빈 상태(프런트) 〔2차: 메모리 윈도는 T-143으로 분리〕 | `frontend/src/api/collections.ts`(pagination 형), `frontend/src/features/grid/GridToolbar.tsx`(`:420-425`), `frontend/src/features/grid/DataGrid.tsx`(빈 상태 분기 `:1467-1518`, 바닥 문구 `:1441-1453`만) | T-019 | 4 | `budget_stopped`면 빈 상태 대신 호박 띠 "시간 제한으로 일부만 확인했습니다(n행 확인) — 다시 시도 · 조건 좁히기", "이 노드에는 표시할 행이 없습니다"는 `total===0 && !budget_stopped && !truncated`일 때만. "총 세는 중…"은 실제 요청 중에만, 끝나면 `total` 또는 "n건 이상"(`total_lower_bound`). "전체 건수 미확정"·"전체 미확인" 문자열 0<br>상세: 부록 H 카드 | GAP-031·033 / IS-029·088 | QA-021·022 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-022 | 접수·처리 화면이 같은 집계를 쓰게 | `frontend/src/features/dashboard/model.ts`, `frontend/src/features/dashboard/cards.tsx`, `frontend/src/features/stages/ProcessStage.tsx`(집계 부분만) | T-021 | 3 | 접수·처리·문제 목록 수치 동일, "12/12 완료·오류 0" 재현 불가<br>상세: 부록 H 카드 | GAP-029 / IS-086 | QA-019 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-024 | 사건 화면 범위 띠(임시, 브리핑 v0 전까지) 〔v3 재정의〕 | `frontend/src/features/dashboard/CaseDashboard.tsx`(머리 블록만), `frontend/src/features/dashboard/dashboard.css` | T-023 | 2 | C2 사건 화면 최상단(스크롤 0)에 네 축 한 줄 띠("파티션 1/2 · 할당 파일 목록화 100% · 삭제 레코드 43만 건 내용 미시도 · 비할당 측정하지 않음 — 자세히", 호박, `data-count` 4개). 전 축이 100%·통계 없음이면 띠 없음. 한 숫자 범위 문구 0. 1280·1440 스크린샷 | GAP-027·073 / IS-004 | QA-017 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-028 | 번들·검증 패키지가 케이스 DB 검토 반영 + 감사 입력에 케이스 DB | `rapidtriage/api/app/viewer_core.py`(`build_run_validation_review_status` `:850-880`), `rapidtriage/core/bundle.py`(`:97-102` `run_summary={}`), 〔2차: 경로 정정〕 `rapidtriage/api/app/runops.py`(`:695` 호출부, `:895-949` 감사 3함수의 `input_files`에 케이스 DB 추가) | —(기존 `case_db_mark_bookmarks` `review_payload.py:57` 사용 — T-025와 파일 무충돌) | 3 | DB에만 표시가 있는 처리에서 `bookmark_count`·`report_item_count` = DB 표시 수, "검토 없음"·`case review file has not been created` 0, 번들 보고서에 처리 정보(`run_summary` 전달), limitation 문장 한국어, 감사 기록 `input_files`에 `case-db`(경로·SHA-256)<br>〔v3〕 v3: 번들 보고서에 `run_summary` 전달(공란 0)<br>상세: 부록 H 카드 | GAP-013·014·302 / IS-064·063 | QA-081·010·115 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+
+### WB-4 — 거짓 표시 제거·보안/무결성 P0 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-029 | 내보내기 감사 누적·시간대·도구 버전 〔2차: 동시 쓰기는 T-131, 나머지 시각 34곳은 T-132로 분리. 사이드카 이름 유지〕 | `rapidtriage/core/audit.py`(`audit_path_for` `:24-27`, `write_audit_record` `:112-154`), `rapidtriage/core/case_db/database.py`(`:1145-1146` `tool_version` 값만, 스키마 불변 `[확인]`), 테스트 | — | 3 | v2 수용 + 레코드에 `tool_version`·`host`·`os_user`·`pid`, 각 줄에 `previous_record_sha256`(직전 줄의 SHA-256). 4회 내보내기 뒤 4줄, 가운데 줄을 고치면 검증 함수가 그 줄을 지목<br>상세: 부록 H 카드 | GAP-014·015·177·208·307 / IS-063·071·142 | QA-010·180 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-033 | CLI 단일 파일 출력 기본 위치 가드 〔2차: W1-d에서 이동, 경로 정정〕 | `rapidtriage/cli/helpers.py`(공용 `resolve_output_path(args, evidence_root)`), `rapidtriage/cli/parser.py`(`--output` 기본값 약 60곳을 지연 해석 표식으로), 〔정정〕 `rapidtriage/artifacts/mobile/vendor.py`(`:345` 제안 경로 문자열만 `[확인: 수집 로직 불변, 문자열만]`), `tests/test_cli_output_guard.py` | — | 4 | 증거 폴더(또는 그 하위)가 cwd이고 `--output`이 없으면 종료 코드 2 + `CLI_OUTPUT_INSIDE_EVIDENCE` 문장(기존 `core/output_guard.py` 재사용), 증거 밖 cwd에서는 현행 기본 파일명 그대로(호환). 대표 12명령(QA-004 목록) 단위 테스트 + 전 명령 매개변수화 테스트(파서에서 `--output` 가진 명령 전수)<br>상세: 부록 H 카드 | GAP-002·006 / IS-068 | QA-004 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-034 | 파괴적 동작 표현·기본 포커스 | `frontend/src/features/case/Modal.tsx`, `frontend/src/features/case/CasePicker.tsx`, `frontend/src/features/case/commands.ts` | — | 3 | 삭제 버튼 위험 스타일, 기본 포커스 "취소", 명령명 = 대화상자 제목, 포커스 트랩이 비활성·숨김 제외<br>상세: 부록 H 카드 | GAP-129 / IS-094 | QA-086 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-035 | 한글 모드 단축키·팔레트는 실행 가능한 것만 〔v3: 팔레트 보강〕 | `frontend/src/shortcuts.ts`(`:61-66` 물리 키 폴백, `:84-85`), `frontend/src/shell/CommandPalette.tsx`(`:11-20` 그룹 순서, `:97-103` 정렬), `frontend/src/commands/fuzzy.ts` | — | 3 | v2 수용 + 팔레트 빈 입력에서 비활성 항목 0·항목 60 이하, 범주 이동은 "이동:" 접두 입력 때만. `?`·`/`·`` ` ``가 한글 모드에서 동작, 조합 중 발화 0<br>상세: 부록 H 카드 | GAP-131 / IS-099 | QA-092 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-036 | 표시 해제 = 직전 상태, 실행 취소, 작성자 〔2차: 메모 보호는 T-144로 분리, 경로 정정〕 | `frontend/src/features/grid/reviewActions.ts`(`unmarkActionOf` `:30-34`, 표시 실행부 `:433` 부근), 〔정정〕 `frontend/src/components/ToastRegion.tsx`·`frontend/src/components/toastStore.ts`(동작 버튼 있는 토스트), `frontend/src/features/review/author.ts`(`DEFAULT_REVIEWER` `:10`) | — | 4 | v2 수용 + 판단 키 → 화면 반영 100 ms 이하(낙관적), `P` 보고서 포함·`G` 다음 미검토 추가, `KEY_MAP` 기존 33개 값 불변<br>상세: 부록 H 카드 | GAP-024·025 / IS-042·043 | QA-065·067·195 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-086 | 뷰어 탭은 가능한 것만·보류/이진 사유 〔v3: W6에서 당김〕 | `frontend/src/features/viewer/modes.ts`, `frontend/src/features/viewer/ModeTabs.tsx`, `frontend/src/api/viewer.ts`, `frontend/src/features/viewer/views/SourceView.tsx` | — | 4 | 비활성 탭 0(C2의 txt·pdf·jpg·쿠키·이진 5행). 볼 수 없으면 탭 자리에 사유 한 문장 + 대안 하나. 검토자 기본값 평균 탭 ≤4. 0 채움 복구본 문장은 T-239(T-059 뒤)<br>상세: 부록 H 카드 | GAP-092·093·019·206 / IS-024·053 | QA-046·014 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+
+### WB-5 — 거짓 표시 제거·보안/무결성 P0 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-090 | 행 메뉴 8 + 더 보기 〔v3: W6에서 당김, 범위 = 행 메뉴만〕 | `frontend/src/features/grid/RowMenu.tsx` | T-014 | 3 | 비활성 항목 0, 태그 항목 있음, 720 높이에서 맨 아래 행 메뉴가 화면 밖 0, 항목 8 + 더 보기. 일괄 막대는 T-232, 뷰어 ⋯ 메뉴 구성 일치는 T-067<br>상세: 부록 H 카드 | GAP-095 / IS-026·102 | QA-049 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-112 | `web --read-only`·`--no-browser`·토큰 처리·원격 TLS 〔v3: W9에서 당김, TLS 추가〕 | `rapidtriage/cli/web.py`(`:55-60` 토큰 출처, `:89-96` 토큰 출력, `:115-124` 브라우저), `rapidtriage/cli/parser.py`(web 하위 파서 블록만 — T-111과 블록 분리), `rapidtriage/api/app/readonly_mode.py`(신규: T-032의 미들웨어를 서버 단위로 재사용) | T-007·T-032 | 3 | v2 수용 + `--no-browser` 인자, 토큰을 표준 출력에 찍지 않음(환경 변수 `RAPIDTRIAGE_AUTH_TOKEN`, 옛 이름은 별칭), `--ssl-certfile/--ssl-keyfile` 전달, `--remote`인데 TLS가 없으면 `--allow-plain-http` 없이는 종료 2 + 한국어 안내. 터미널이 아니거나 `CI`면 브라우저 안 엶 | GAP-148·178·153·237·309 / IS-115·146 | QA-011·116·183 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-130 | 〔T-035에서 분리〕 4xx 재시도 금지·유휴 폴링·숨은 탭 | `frontend/src/main.tsx`(`:33-38` retry), `frontend/src/api/runsProgress.ts`(`IDLE_POLL_MS` `:58`), `frontend/src/features/analysis/store.ts`(`:83` `refetchIntervalInBackground`) | T-008 | 2 | 4xx(400~499)는 재시도 0(408·429 제외), 5xx·네트워크만 2회. 유휴 폴링 5 s → 30 s, 문서가 숨겨지면(`visibilitychange`) 0. 유휴 5분 요청 수 ≤ 10, 숨은 탭 5분 0<br>상세: 부록 H 카드 | GAP-066 / IS-082 | QA-101 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-132 | 산출물·감사 시각에 시간대 포함(35곳) `[확인: 시각 문자열 형식만, 로직 불변]` | 신규 `rapidtriage/core/clock.py`(`now_local_iso()` = 오프셋 포함 ISO), `datetime.now().isoformat()` 호출 35곳(`grep -rn "datetime.now()" rapidtriage`로 전수; `core/audit.py`는 T-029 소유라 제외) | T-029 | 3 | `grep -rn "datetime.now()" rapidtriage` 결과 0(전부 `now_local_iso()` 또는 `datetime.now(timezone.utc)`), 산출 JSON의 `generated_at`이 정규식 `[+-]\d\d:\d\d$\|Z$`에 전부 일치, 서버 시간대를 UTC·뉴욕으로 바꿔 만든 보고서의 표시 시각이 같은 순간을 가리킴. 시각을 **읽는** 쪽(오프셋 없는 옛 산출물)은 계속 읽힘(호환 테스트)<br>상세: 부록 H 카드 | GAP-015·177·196 / IS-071·049 | QA-109 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-133 | 읽기 전용 결과: 색인·캐시 지연 쓰기 차단 | `rapidtriage/api/app/timeline_index.py`(`:886,1023`), `geo_index.py`(`:470`), `families.py`(`:592`), `fs_tree.py`, `files_ntfs.py`, `registry_tree.py`, `artifact_sort.py`, `timeline_hist.py`, `files_index.py` | T-032 | 4 | 위 9파일의 디스크 쓰기 지점 전부가 `may_persist(output_dir)`를 거친다(쓰기 호출 직접 사용 0 — 테스트가 AST로 검사). 읽기 전용 처리에서 타임라인·지도·계열·폴더 탐색기·레지스트리 탐색기·정렬을 연 뒤 결과 폴더 스냅샷 동일, 기능은 메모리로 동작<br>〔v3〕 병합분(bc6c970)이 `index_cache.py`·`timeline_index.py`·`geo_index.py`·`families.py`의 지연 쓰기 일부를 이미 막았다. 먼저 병합분과 대조하고 남은 지점만 한다<br>상세: 부록 H 카드 | GAP-192·003·175 / IS-068 | QA-005·108 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-134 | 읽기 전용 결과: 그 밖의 지연 쓰기 차단 | `rapidtriage/api/app/media_similar.py`, `media.py`, `sqlite.py`, `previews.py`(`write_json_file` `:21`), `triage_flags.py`, `row_conditions.py`, `search_index_service.py`(검색 이력·색인 생성 거부) | T-032 | 4 | 위 7파일 동일 규칙. 읽기 전용 처리에서 미디어 유사·SQLite 미리보기(WAL 임시 복사는 OS 임시 폴더)·특이사항·조건·검색을 쓴 뒤 스냅샷 동일. 색인이 없으면 "읽기 전용 결과라 색인을 만들 수 없습니다 — 결과 폴더를 증거 밖으로 옮긴 뒤 다시 가져오세요"<br>〔v3〕 T-133과 같다: 병합분(`core/readonly_runs.py`)과 대조한 뒤 남은 지점만 | GAP-192·003·175 / IS-068 | QA-005·108 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+
+### WB-6 — 거짓 표시 제거·보안/무결성 P0 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-144 | 〔2차 신규: T-036에서 분리〕 메모 보호·태그 관리 작성자 칸 | `frontend/src/features/dashboard/caseCards.tsx`(메모 블록 `:880-990`만), `frontend/src/features/review/TagManagerDialog.tsx`(`:180-187` 자리 표시자) | — | 3 | 메모 삭제는 확인 대화상자(기본 포커스 "취소") 뒤에만, 삭제·저장 실패는 메모 영역 안 오류 문장(영문 원문 0), 편집 중(`dirty` `:888`) 다른 화면으로 가면 "저장하지 않은 내용이 있습니다" 확인, 자리 표시자 `web-ui` → "담당자 이름", 이력 문구 "태그 없음→없음" 0<br>상세: 부록 H 카드 | GAP-025·113 / IS-043 | QA-067·086 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-169 | 브라우저 탭 제목 | `frontend/index.html`, `frontend/src/app/documentTitle.ts`(신규), `frontend/src/app/App.tsx` | — | 2 | **동작** `{화면} · {사건 표시명} — RapidTriage`, 처리 중 `(n%)`, 부분·실패 `(!)`<br>**수용** 11개 화면 × 2사건에서 제목이 전부 다르다. 처리 중 `(n%)`, 실패·부분 `(!)` | GAP-336 / IS-126 | QA-190 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/app`<br>V-FE · V-RD |
+| T-170 | 제품 이름 통일(D66 기본값 RapidTriage) | `frontend/src/shell/BrandMark.tsx` | — | 1 | **동작** 워드마크·접근성 이름을 결정된 이름 하나로<br>**수용** 화면·CLI `--version`·보고서 도구 이름이 같은 문자열. "RapidForensic" 렌더 0(문서의 계약 절 제목은 제외) | GAP-337·091 / IS-127 | QA-190 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/shell`<br>V-FE · V-RD |
+| T-171 | 목록 경로 = 증거 안 경로 | `frontend/src/features/grid/columns/PathCell.tsx`, `frontend/src/utils/pathDisplay.ts`, `frontend/src/components/MiddlePath.tsx` | — | 4 | **동작** 결과 폴더 접두(`…\_e01\fs\`)를 떼고 볼륨 문자 기준 경로로. 폴더만·앞 줄임 한 번. 복구본은 `복구` 표식 + "원래 위치 알 수 없음". 증거 안 경로를 주지 않는 수집기는 목록으로 남긴다<br>**수용** C2 파일 목록 500행에서 결과 폴더 문자열 0. 가운데 줄임 2회 0. 증거 안 경로가 없는 유형 목록 1건(없으면 0건 기록) | GAP-335·089 / IS-128·020 | QA-191 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/grid src/utils`<br>V-FE · V-RD |
+| T-173 | 파일 목록 기본 정렬·사본 시각 표식 | `frontend/src/features/grid/columns/files.ts`, `frontend/src/features/grid/columns/FileCells.tsx` | — | 3 | **동작** 기본 첫 화면에 복구본이 아닌 할당 파일. 사본 시각은 시계 표식 + "증거 시각 아님"(이탤릭 제거)<br>**수용** C2 기본 첫 50행 중 복구본 0. 사본 시각 셀 100%에 표식, `font-style: italic` 0 | GAP-042·117·335 / IS-050·023 | QA-191·070 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/grid`<br>V-FE · V-RD |
+| T-174 | 상태바: 사건·증거 이름, 부분 표시, 실패 수 | `frontend/src/shell/StatusBar.tsx` | T-023 | 2 | **동작** "런 <id>" 대신 사건·증거 표시명. 범위 축 중 100% 미만이 있으면 "부분", 실패 단계가 있으면 그 수. 초록 "완료"는 전 축 100%·실패 0일 때만<br>**수용** C2에서 "부분" + 실패 단계 수 표시, "완료 · 오류 0" 0회. C1(전부 완료)에서 "완료" | GAP-027·029·072 / IS-004·086·097 | QA-017·019 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/shell`<br>V-FE · V-RD |
+
+### WB-7 — 거짓 표시 제거·보안/무결성 P0 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-172 | 뷰어 출처 경로 = 증거 안 경로 | `frontend/src/features/viewer/views/MetaView.tsx`(출처 구역만), `frontend/src/features/viewer/citation.ts`(경로 값만) | T-171 | 3 | **동작** "원본 경로"는 증거 안 경로, 추출 위치는 "기술 정보"에만. 인용 문자열의 경로도 같은 값(키 이름·순서 불변)<br>**수용** C2의 5유형 행에서 출처·인용에 결과 폴더 문자열 0. 인용 스냅샷의 키 순서 불변 | GAP-335 / IS-128 | QA-191 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/viewer`<br>V-FE · V-RD |
+| T-175 | 시각 열 고정 폭 | `frontend/src/features/grid/columns/artifacts.ts`, `frontend/src/features/grid/columns/TimelineCells.tsx` | — | 2 | **동작** 시각 열 176px 고정, 어떤 폭에서도 잘리지 않음<br>**수용** 시각 셀 잘림 0(880·1280·1440, 뷰어 열림 포함) | GAP-089·082 / IS-020 | QA-044 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/grid`<br>V-FE · V-RD |
+| T-176 | 검토 목록 요약·용어 | `frontend/src/features/grid/columns/review.ts`, `frontend/src/features/stages/ReviewReportStage.tsx`(ReviewPanel 라벨만) | — | 2 | **동작** 요약에서 내부 유형 id 접두 제거, "리뷰" → "검토", "보고서 포함"은 판단 칩 자리가 아니라 별도 표식<br>**수용** C2 검토 목록 200행에서 내부 유형 id 접두 0, "리뷰" 표기 0 | GAP-090·130 / IS-021·096 | QA-045·064 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/grid src/features/stages`<br>V-FE · V-RD |
+| T-178 | 매니페스트 항목에 행 정보·상대 경로 | `rapidtriage/core/submission.py`, `tests/test_submission_row_info.py` | — | 3 | **동작** 항목에 `row`(`timestamp`·`preview`·`citation_id`·`collection`·`kind`·`locator`)와 `evidence.relative_path` 추가(기존 키 불변). 건너뜀 사유에 `reason_ko`, `max_items` 초과 수를 `summary.over_limit_count`로<br>**수용** 아티팩트 행 6건 픽스처에서 `row` 6/6. 기존 키 집합 불변(스냅샷). 501건에서 `over_limit_count=1` | GAP-298·299·297·300 / IS-138·128·140 | QA-173·176 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_submission_row_info`<br>V-PY · V-RD |
+| T-179 | 검증 패키지 무결성 값을 새로 계산 | `rapidtriage/api/app/viewer_core.py`(`:782-849`), `tests/test_validation_package_fresh.py` | T-028 | 3 | **동작** 원본 해시는 `compute_hashes_fresh`. E01이면 발견된 세그먼트 전부(이름·크기·SHA-256), `scope: container-segments`. 검토 상태는 T-028과 같은 함수<br>**수용** 크기·mtime을 유지한 1바이트 변조 사본에서 해시가 달라진다. 3세그먼트 픽스처에서 3개 전부 | GAP-290·013 / IS-143·064 | QA-170 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_validation_package_fresh`<br>V-PY · V-RD |
+| T-180 | 검토 감사의 버전·행위자 출처 `[확인: 값만, 스키마 불변]` | `rapidtriage/core/case_db/database.py`(`:1125-1160`만) | — | 2 | **동작** `tool_version = rapidtriage.__version__`, `params_json`에 `actor_source: "client-supplied"`. 빈 `reviewer`는 `local-user` 유지(호환)<br>**수용** 표시 3건 뒤 `audit_event` 3행에 버전 값·`actor_source`. 기존 케이스 DB 테스트 통과 | GAP-015·306 / IS-071·142 | QA-180 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_case_db_audit`<br>V-PY · V-RD |
+
+### WB-8 — 거짓 표시 제거·보안/무결성 P0 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-027 | 사건 보고서 영문 제거·방어 필드·행 정보 〔v3: 아티팩트 행 추가〕 | `rapidtriage/core/case_report.py`(Markdown 생성부 `:40-290`, 제목 `:484,562,797`), 출력 샘플 스냅샷 | T-178 | 4 | v2 수용 + 5절 항목마다 `row.timestamp`(표시 시간대 + UTC)·`row.preview`·증거 안 상대 경로·출처 위치. 처리 범위는 네 축 문장(T-023의 `scope`). 건너뜀 사유 한국어. 표시 12건(파일 6 + 아티팩트 행 6) 픽스처에서 12건 전부 본문에 있음<br>상세: 부록 H 카드 | GAP-011·122·021·298·299 / IS-058·059·138·128 | QA-009·078·173·174·179 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-131 | 케이스 DB 동시 쓰기(두 창) `[확인: PRAGMA·재시도만, 스키마 불변]` | `rapidtriage/core/case_db/database.py`(연결 설정 `:270-282`에 `busy_timeout`, 쓰기 재시도), `frontend/src/features/grid/reviewMap.ts`(다른 창의 변경 감지 시 알림 — T-036 뒤) | T-029·T-036·T-180 | 4 | `PRAGMA busy_timeout=5000`, `database is locked`는 3회 지수 재시도 뒤에만 오류. 창 2개가 같은 100행에 교차 표시(QA-012): 유실 0, 이력 200건, 마지막 쓰기가 현재 값. 다른 창이 바꾼 행은 다음 조회에서 "다른 창에서 변경됨" 토스트 1회(같은 종류 합침)<br>상세: 부록 H 카드 | GAP-017·205 / IS-076 | QA-012 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-FE · V-RD |
+| T-181 | E01에 기록된 취득 해시 읽기·해시 상태 문구 `[확인: 신규 읽기 전용 모듈, D34a]` | `rapidtriage/core/e01_recorded_hash.py`(신규), `rapidtriage/api/app/case_workspace.py`(`_hash_worker`만), `tests/test_e01_recorded_hash.py` | — | 4 | **동작** 세그먼트를 열어 E01에 기록된 MD5·SHA-1을 읽어 반환(없으면 빈 값), 증거에 쓰지 않음. 기대값이 기록된 취득 해시와 같으면 상태 `computed` + "입력값 = 이미지에 기록된 취득 해시(매체 재계산은 하지 않음)", 컨테이너 해시와 같으면 `matched`, 둘 다 아니면 `mismatched`(메시지가 두 종류를 구분)<br>**수용** IMG-A에서 기록된 값 입력 시 빨강 0. 증거 폴더 전후 스냅샷 동일. 내장 해시 없는 이미지에서 빈 값 + 사유 | GAP-248·007·191 / IS-069 | QA-177·106 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_e01_recorded_hash`<br>V-PY · V-RD |
+| T-183 | 해시 전파 가드(크기 0·빈 파일 해시 제외) | `rapidtriage/core/case_db/review_tools.py`(`hash_propagation_targets`만), `tests/test_hash_propagation_guard.py` | — | 2 | **동작** 크기 0 또는 알려진 빈 파일 해시는 전파 대상에서 제외하고 응답에 `skipped_empty`. 0 채움 판정 연결은 T-059 뒤<br>**수용** 0바이트 파일 3개 픽스처에서 전파 0·`skipped_empty=2` | GAP-313 / IS-148 | QA-186 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_hash_propagation_guard`<br>V-PY · V-RD |
+| T-184 | 처리 문제 목록에 엔진·파서 상한 추가 | `rapidtriage/api/app/run_problems.py` | T-023·T-165 | 3 | **동작** E01 잘림(축 구분)·읽기 오류, MFT 5,000·USN 5,000·`$LogFile` 8 MiB 도달, T-165가 찾은 무고지 상한을 한국어 제한 사항으로. 영문 수율 경고 대체. 상한 숫자는 설정값에서<br>**수용** IMG-B 처리 문제에 5건 이상 추가, 전부 한국어, "200,000" 고정 문자열 0(상한 50 테스트) | GAP-271·262·263·264·027 / IS-085·157 | QA-018·138 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_r8_run_problems`<br>V-PY · V-RD |
+| T-185 | `content_state` 판정 순수 함수 `[확인: 신규 순수 함수, 수집 불변]` | `rapidtriage/core/content_state.py`(신규), `tests/test_content_state.py` | — | 3 | **동작** 입력 바이트 머리·길이 → `zero-filled`·`high-entropy`·`signature-valid`·`empty`<br>**수용** IMG-B 삭제 복구본 표본 400개에서 0 채움 61%(±3)·길이 0 4.5%(±1) 재현. 합성 8경우 테스트 | GAP-041·176 / IS-023·152 | QA-026 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_content_state`<br>V-PY · V-RD |
+
+### WB-9 — 거짓 표시 제거·보안/무결성 P0 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-129 | 증거 해시 표시 정직화(승인 전, 표시 계층) `[확인: 메시지 문구만, 상태값·스키마·해시 계산 불변]` | `frontend/src/features/dashboard/caseCards.tsx`(해시 상태 라벨·색 맵 `:55-75`만 — T-144가 끝난 뒤), `frontend/src/features/case/EvidenceFields.tsx`(기대 해시 라벨 `:154`), `rapidtriage/api/app/case_workspace.py`(`_hash_worker` 메시지 `:257-262`만) | T-144·T-181 | 3 | E01·Ex01 증거에서 상태가 `mismatched`일 때 화면은 빨강 "해시 불일치"가 아니라 호박 "컨테이너 해시가 입력값과 다름 — 매체 해시 미대조" + 설명 "E01 파일 자체의 해시입니다. 취득 로그의 매체(디스크) 해시와는 값이 다른 것이 정상입니다". `matched`는 "컨테이너 해시 일치", `computed`는 "컨테이너 해시 계산됨". 입력 라벨: "기대 해시(선택 · E01 **파일 자체**의 MD5/SHA-1/SHA-256 — 취득 로그의 매체 해시 아님)". 단일 파일(dd·raw) 증거는 현행 문구 유지<br>〔v3〕 v3: 세그먼트별 값을 주로 표시, 기록된 취득 해시(T-181)가 있으면 세 번째 줄로<br>상세: 부록 H 카드 | GAP-191·007·008·289 / IS-069·003 | QA-106·177 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-FE · V-RD |
+| T-182 | 보고서 감사 입력·증거 기록 전달 | `rapidtriage/api/app/runops.py`(`:650-683,894-949`) | T-181 | 3 | **동작** 감사 입력에 케이스 DB(경로·SHA-256). 보고서 메타데이터에 `tool_version`, `evidence_records`(사건 증거 행의 해시 결과 — 없으면 빈 목록), `processing_scope`(T-023)<br>**수용** 보고서 메타데이터에 3키 존재. DB에만 검토가 있는 사건에서 감사 입력 목록 ≥1 | GAP-014·294·293 / IS-063·139·059 | QA-010·175 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_report_metadata`<br>V-PY · V-RD |
+| T-186 | 처리 전 디스크 여유 점검 | `rapidtriage/api/app/preflight_space.py`(신규), `tests/test_preflight_space.py` | — | 3 | **동작** 선택 파티션 크기·압축 세그먼트 크기 기반 예상 출력 vs 결과 볼륨 여유. 응답 `{estimated_bytes, free_bytes, ok, message}`<br>**수용** 여유 부족 시 한국어 경고. IMG-B 예상 크기가 실측 71.6 GB의 ±30% | GAP-183·278 / IS-160·008 | QA-133·038 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_preflight_space`<br>V-PY · V-RD |
+| T-187 | known-limitations: E01 절을 현재 엔진 기준으로·상한 표 | `docs/rapidtriage-known-limitations.md`(E01·상한 절) | T-165 | 2 | **동작** "외부 libewf·Sleuth Kit 필요" 문장 정정(기본은 네이티브), 엔진·수집기 상한 표, 네 축 범위 설명, DB 내 감사 사슬 없음 한계<br>**수용** PG-19 문장 0회. 상한 표 행 수 = T-165 일람의 고지 대상 수 | GAP-261·260 / IS-075·157 | QA-180 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `git diff --check`<br>V-DOC · V-RD |
+| T-188 | 0건 사유 입력 신호 명세(31종 × 6신호) | `docs/zero-reason-signals.md`(신규) | — | 3 | **동작** 수집기별로 `scope_truncated`·`cap_reached`·`tool_missing`·`mode_excluded`·`decrypt_unavailable`·`parser_failed`의 출처 필드(요약 JSON 키)를 표로. 구현은 T-047<br>**수용** 31종 × 6신호 표의 빈 칸 0(해당 없음은 "—"와 이유) | GAP-356 / IS-006 | QA-023 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `git diff --check`<br>V-DOC · V-RD |
+| T-189 | AI 보고서 절 정직화 | `rapidtriage/core/ai_report.py`, `tests/test_ai_report_honesty.py` | — | 3 | **동작** 브라우저 `browser-ai-usage` 행을 "챗봇" 로컬 증거로 반영. 읽기 예산 미수집 파일 수·메시지 상한·절단 수를 "수집 한계" 줄로. 기간에 시간대. "메타만" 문구는 실제 수집 범위(명령·제목·지침 머리 포함 여부)를 그대로 적는다<br>**수용** 브라우저 방문만 있는 런에서 "챗봇: 있음(방문 기록)". 예산 소진 픽스처에서 미수집 수 = 사이드카 수. `ai_bodies=false` 런의 보고서에 "본문 제외(명령·제목·지침 머리는 수집됨)" | GAP-329·319 / IS-164·161 | QA-167·160 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_ai_report_honesty`<br>V-PY · V-RD |
+
+### WB-10 — 거짓 표시 제거·보안/무결성 P0 (5)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-026 | 감정서 정정 〔v3 재정의: 표 둘·인수 시각·단정 문구〕 | `rapidtriage/core/korean_report.py`, `tests/`의 감정서 테스트, 출력 샘플 스냅샷 | T-182 | 3 | ① 표를 둘로: "감정 대상 증거"(`metadata.evidence_records`가 오면 이름·크기·세그먼트별 SHA-256·기록된 취득 해시, 없으면 "원본 증거 해시 미기록 — 사건 화면에서 해시 계산 후 다시 내보내기" 한 줄)와 "제출 항목"(`item.evidence.relative_path`·`hashes.sha256`) ② "인계 인수 시각"은 `metadata.received_at`이 있을 때만, 없으면 "미기재". 매니페스트 시각은 "해시 산출 시각" ③ 도구 버전 기재 ④ "검토 완료" = 상태가 미검토가 아닌 수 ⑤ "읽기 전용으로 처리하였으며" → "분석은 추출 사본에 대해 수행하였다. 처리 전후 원본 상태 기록: (값 / 미기록)" ⑥ `output=`·영문 토큰 0. 값 있는 칸의 "미기재"·"-" 0 | GAP-009·010·294·295·296·297 / IS-060·139 | QA-009·115·175 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-190 | 대화 보기 세션 필터 정확 일치 | `frontend/src/features/ai/aiChat.ts`, `frontend/src/features/ai/aiChat.test.ts` | — | 2 | **동작** 세션 필터를 정확 일치 + 도구 조건으로(서버에 정확 일치 연산이 없으면 불러온 뒤 정확 비교). 하위 에이전트는 `parent_session_id`로만 포함<br>**수용** `sess-1`이 `sess-10`을 포함하지 않는 테스트, 두 도구의 같은 ID 분리 테스트 통과 | GAP-325 / IS-055 | QA-072 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/ai`<br>V-FE · V-RD |
+| T-191 | 처리 대화상자 AI 입력 3칸·죽은 옵션 정리 | `frontend/src/features/ai/AiProcessSection.tsx`, `frontend/src/features/case/runForm.ts` | — | 3 | **동작** 조직 이메일 도메인·사건 증거 폴더·AI 읽기 예산 입력. 어디서도 읽지 않는 `ai_hash_dbs` 체크박스는 T-320 전까지 숨긴다<br>**수용** 입력 시 요청 본문 `collector_options["ai-agent"]`에 3키. 잘못된 도메인은 서버 오류 문장 표시. 죽은 옵션 체크박스 0 | GAP-321·318 / IS-162 | QA-164 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/ai src/features/case`<br>V-FE · V-RD |
+| T-192 | known-limitations AI 절 drift 7건 정정 | `docs/rapidtriage-known-limitations.md`(AI 절 `:606-668`) | T-187 | 2 | **동작** 낡은 문장 7줄(`:608·624·633·634·660·664·665·666`)을 코드와 맞춘다<br>**수용** 7줄 모두 코드와 일치(각 줄에 file:line 근거) | GAP-119 / IS-054 | QA-073 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `git diff --check`<br>V-DOC · V-RD |
+| T-193 | 처리 화면 단계명·소요 열 | `frontend/src/features/stages/stepLabels.ts` | — | 2 | **동작** "아티팩트 수집: ai-agent" 같은 원시 단계명을 한국어로, 소요 열에 값(없으면 "측정 안 됨")<br>**수용** C2 처리 화면에서 영문 단계명 0, 소요 "—" 0 | GAP-349·078 / IS-009·021 | QA-199 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/stages`<br>V-FE · V-RD |
+
+### WC-1 — 실데이터 코퍼스·기준선(C1~C6) (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-037 | C1 재처리와 수정분 브라우저 재확인(AD1·2·4·5, 출력 가드, 가져오기) | 스크린샷·events.jsonl·요약 md | WB | 4 | QA-002·003·037·086 통과 기록, 증거 전/후 동일<br>〔v3〕 v3: 재처리 뒤 기존 표시가 같은 대상에 붙는지 확인(QA-187)<br>상세: 부록 H 카드 | GAP-001·052·179·314 / IS-125·123 | QA-001·002·003·037·086·087·187 | 실행·검증 Sonnet → 묶음 리뷰 Fable | V-RD |
+| T-040 | C4 AI 스캔 런과 콘솔 확인(앱 종료 뒤 전/후 해시) | 건수표·스크린샷 | — | 4 | 13노드 순회, CLI 건수 = 콘솔 건수, 원본 불변 확정<br>〔v3〕 v3: 어댑터별 시간·최대 메모리·행 수 측정 포함("약 45분"은 근거 없음)<br>상세: 부록 H 카드 | GAP-048·022·324 / IS-055 | QA-015·072·165 | 실행·검증 Sonnet → 묶음 리뷰 Fable | V-RD |
+| T-138 | 〔2차 신규〕 C3-0: 기존 R8 기준선 산출물을 콘솔에 가져오기(재처리 없음, 승인 불필요) | 가져오기 기록·건수표·스크린샷 | T-031·T-032(결과 폴더가 증거 안이면 읽기 전용으로 열림) | 3 | 기준선 결과 폴더를 QA 서버에 가져오기 → 대화 보기 메시지 수 = CLI 산출 1,044, 장치 5대, 계정·클라우드 행 > 0. 처리 중 쓰기가 필요한 화면(색인 생성 등)은 "읽기 전용" 사유 표시. 복구 모드라 브라우저·실행 흔적 0 → 0건 사유 `not_collected_mode` 화면의 실데이터 표본으로 쓴다<br>상세: 부록 H 카드 | GAP-049·202·203 / IS-122·123 | QA-112·047 | 실행·검증 Sonnet → 묶음 리뷰 Fable | V-RD |
+| T-194 | Sleuth Kit·Tesseract(한국어) 설치와 `doctor` 확인 **[D24]** | QA 환경(저장소 밖) | — | 1 | **동작** `fls`·`ils`·`icat`·`istat`·`mmls`·`tesseract`(kor) 설치. 저장소에 넣지 않는다(QA 대조 도구)<br>**수용** `doctor`가 6개 도구의 버전을 보인다. 버전을 `docs/research/r8-w2-baseline.md`에 기록 | GAP-056·287 / IS-122·158 | QA-088·122 | 운영자(사람) → 확인 Sonnet | `python -m rapidtriage doctor --json`<br>V-RD |
+| T-195 | MFT 진실표 스크립트 | `scripts/mft-coverage-truth.py`(신규), `tests/test_mft_coverage_truth.py` | — | 3 | **동작** `$MFT` 사본 + 추출 통계 → 사용 중/삭제, resident/non-resident, ADS, 하드링크, 추출 대비 표<br>**수용** IMG-B에서 수치 재현(사용 중 파일 108,731·삭제 파일 475,905·삭제 디렉터리 273,406·사본 145,307). 합성 MFT 6레코드 테스트 | GAP-358·026 / IS-004·158 | QA-122 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_mft_coverage_truth`<br>V-PY · V-RD |
+| T-197 | 수집기 프로파일(상위 12종) | `scripts/collector-profile.py`(신규) | — | 4 | **동작** 상위 12개 수집기를 IMG-B 추출 트리(읽기 전용)에서 따로 돌려 순회·읽기·파싱 시간 분해<br>**수용** 수집기별 표. 느린 6종(GAP-275)의 원인을 "전체 순회 / 대용량 훑기 / 파싱 / 기타"로 분류. 브라우저 수집기의 격리 실패 1건(GAP-285) 원인 특정 | GAP-275·274·285 / IS-084·086 | —(측정 과제: T-291~296의 수용 기준 입력) | 실행·검증 Sonnet → 묶음 리뷰 Fable | `python scripts/collector-profile.py --json`<br>V-PY |
+
+### WC-2 — 실데이터 코퍼스·기준선(C1~C6) (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-038 | C2 범위 진실 확정: Sleuth Kit 기준 출력과 대조 **[D24]** 〔v3 재정의 — 상한 해제 재처리는 하지 않는다〕 | `D:\rapid-qa\corpus\C2\tsk\`(`fls -rp`·`ils -e`·`istat` 표본 200·`icat` 표본 해시; Git 밖), 대조 보고서 2종 | T-194·T-195 | 3 | `scripts/fls-coverage-diff.py`·`mft-reference-diff.py` 보고서 생성. GAP-026의 진단(할당 파일 잘림 0·잘린 430,052건은 삭제 레코드)을 **확정 또는 반박**하고, 네 축 수치를 `docs/research/r8-w2-baseline.md`에 건수로 기록. 반박되면 T-023·QA-017 수치를 고치는 재계획 입력<br>〔v3〕 재처리는 엔진 물결 끝(T-342)에서 한 번 | GAP-046·026·202·358 / IS-122·004 | QA-001·017·122 | 실행·검증 Sonnet → 묶음 리뷰 Fable | V-RD |
+| T-120 | E01 처리량·병렬 스파이크 〔v3: W10에서 당김·확대〕 | `scripts/ewf-throughput-spike.py`(신규) | T-194 | 4 | IMG-A·IMG-B 표: 순차 디코드 MB/s(프로세스 1·2·4·8), 임의 읽기, MFT 순 vs 경로 순 추출 1만 파일. 권장 워커 수와 IS-084 목표(T0~T3) 확정 또는 수정 제안 | GAP-068·251·288 / IS-084 | QA-129 | 실행·검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-196 | 취득 해시 스파이크 | `scripts/ewf-embedded-hash-spike.py`(신규) | T-194 | 3 | **동작** EWF 내장 해시·머리 값 존재 여부(불리언·알고리즘명만), 디코드 스트림 MD5/SHA-1 계산 시간, 청크 오류 수<br>**수용** IMG-A·IMG-B에서 "내장 = 계산" 여부와 소요 시간 표. 해시 값 자체는 저장소에 적지 않는다 | GAP-248·288 / IS-069 | —(측정 과제: T-125의 시간 목표 입력) | 실행·검증 Sonnet → 묶음 리뷰 Fable | `python scripts/ewf-embedded-hash-spike.py --json`<br>V-PY |
+| T-198 | 코퍼스 폴더·매니페스트 양식·공개 세트 내려받기 목록 **[D43]** | `D:\rapid-qa\corpus\`(Git 밖), `docs/research/r8-corpus-plan.md`(건수·출처 종류만) | T-166 | 2 | **동작** C1~C6 폴더와 매니페스트 양식. 공개 세트(삭제 복구·카빙 시험 세트, 반출 시나리오 이미지, 공격 이벤트 로그 표본, 공개 메일함)의 출처·라이선스·크기 목록과 승인 요청<br>**수용** 매니페스트 6건(없는 코퍼스는 "미확보 — 사유"). T-166 감사 통과 | GAP-357·056 / IS-122 | QA-201 | 운영자(사람) → 확인 Sonnet | `python scripts/r8-corpus-audit.py`<br>V-DOC · V-RD |
+| T-202 | AI 규칙 실측(C4) | 정밀도 표(Git 밖, 수치만 저장소) | T-040 | 4 | **동작** C4 런에 `ai.*` 8개 실행 → 규칙별 적중 수. 규칙당 무작위 50건을 운영자가 로컬에서 참/거짓 표시(표시 결과만 반출)<br>**수용** 규칙 8개 각각의 적중 수·정밀도 수치. `ai.yaml` 검증 메타 갱신 입력 | GAP-326 / IS-164 | QA-162 | 실행·검증 Sonnet → 묶음 리뷰 Fable | —(운영자 수동 표시 + 건수 집계)<br>V-RD |
+| T-203 | 상호작용 측정 하네스 | `frontend/e2e/perf/interaction.spec.ts`(신규), `frontend/e2e/perf/README.md` | T-011 | 4 | **동작** 예산표(IS-134)의 항목을 5회 측정해 p75를 JSON으로: `J`/`K`, 뷰어 골격·본문, 판단 반영, 범주 첫 행, 검색, 스크롤 프레임 누락<br>**수용** 미측정 칸 0. C2 기준선 JSON 1건 | GAP-342 / IS-134 | QA-195 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npm run e2e -- e2e/perf/interaction.spec.ts`<br>V-E2E · V-RD |
+
+### WC-3 — 실데이터 코퍼스·기준선(C1~C6) (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-039 | C2 전수 순회 재실행(건수 계약·타이밍·원시값) | `tree-sweep.json`·`timing.json`·`cells.json` | T-038 | 4 | 부록 E의 QA-020·021·044·045·100을 현 화면 기준선으로 기록(실패 목록이 W3~W7의 입력)<br>상세: 부록 H 카드 | GAP-032·059·089·090·053·054·055·180·181 | QA-020·021·044·045·100·054·055 | 실행·검증 Sonnet → 묶음 리뷰 Fable | V-RD |
+| T-041 | C3 골든 VM KR 대본·정답표 작성(한국어 Windows 일회용 VM, 60행위) **[D32]** | 구축 절차 md(식별자 없음), 대본·정답표, 이미지(Git 밖 `D:\rapid-qa\corpus\C3\`) | T-198 | 4 | 대본 60행위(문서 열람·USB 복사·웹 방문·다운로드·압축·삭제·휴지통 비우기·프로그램 실행·로그온·카카오톡·협업 도구·한컴·테스트 인증서·클라우드 동기화·메일) 각각에 시각이 적힌 정답표(기대 행 유형·건수). 이 과제는 대본·정답표 작성까지다(실행·E01 취득은 T-343)<br>〔v3〕 D32 미승인이면 C3-0(T-138)로 진행 | GAP-049·056·050·357 / IS-122 | QA-047·043·201 | 운영자(사람) → 확인 Sonnet | V-RD |
+| T-199 | C5 확보: 공개 정답 세트 내려받기 + 비정상 이미지 생성 **[D43]** | `D:\rapid-qa\corpus\C5\`(Git 밖) | T-198 | 4 | **동작** 공개 세트 내려받기(승인분만) + 잘린 세그먼트·세그먼트 누락·1바이트 변조 사본(C1 사본으로)·exFAT·다중 파티션·4Kn·BitLocker 볼륨 생성<br>**수용** 매니페스트에 세트별 해시·정답표 위치. 원본 C1·C2는 건드리지 않는다(스냅샷 동일) | GAP-357·044 / IS-122·124 | QA-201·032 | 운영자(사람) → 확인 Sonnet | `python scripts/r8-corpus-audit.py`<br>V-RD |
+| T-200 | C6 AI 사용 known-answer VM 제작 → 홈 폴더 사본 + E01 **[D32]** | `D:\rapid-qa\corpus\C6\`(Git 밖), 정답표 `C6-truth.json`(건수 요약만 저장소) | T-198 | 4 | **동작** 일회용 Windows VM·새 로컬 사용자 2명·개인/업무 계정 미사용. 카나리아 `CANARY-AI-NNNN`을 프롬프트·붙여넣기(20 KB 초과 포함)·파일에. 각본 10단계를 도구 11종에. 취득 후 VM 폐기<br>**수용** 정답표(도구별 세션·메시지·도구 호출·파일 접촉 수, 카나리아 ↔ 기대 행 유형, 삭제한 대화, 기대 규칙 적중) 완성, 이미지 해시 기록, 도구 버전 기록 | GAP-357·316 / IS-165·122 | QA-201·157 | 운영자(사람) → 확인 Sonnet | `python scripts/r8-corpus-audit.py`<br>V-RD |
+| T-204 | 대조 스크립트: 삭제 목록·내용 상태 | `scripts/deleted-reference-diff.py`(신규), `tests/test_deleted_reference_diff.py` | — | 3 | **동작** `fls -rd`·정답표 CSV와 우리 삭제 목록 비교(목록 재현율, `recoverable` 해시 일치)<br>**수용** 합성 입력 테스트. 출력 JSON에 재현율·불일치 목록 | GAP-287 / IS-158 | QA-124·136 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_deleted_reference_diff`<br>V-PY · V-RD |
+| T-205 | 대조 스크립트: USN | `scripts/usn-reference-diff.py`(없으면 신규, 있으면 확장), `tests/test_usn_reference_diff.py` | — | 3 | **동작** USN 전용 파서 CSV와 비교(레코드 재현율, 삭제·이름 변경 시각)<br>**수용** 합성 입력 테스트. 출력 JSON | GAP-287 / IS-158 | QA-136 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_usn_reference_diff`<br>V-PY · V-RD |
+
+### WC-4 — 실데이터 코퍼스·기준선(C1~C6) (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-042 | 미실행 분석 실행: OCR·VSS·NTFS 메타(TSK 설치)·교차 사건·메모리 | 분석별 결과·오류 | T-194·T-041 | 4 | 각 분석 "성공/부분/실패+사유" 기록, 실패는 GAP 추가. 증거 추가·재처리 뒤 파생 결과가 오래됐음을 화면이 말하는지 기록(GAP-199)<br>상세: 부록 H 카드 | GAP-047·199 / IS-123 | QA-024·088 | 실행·검증 Sonnet → 묶음 리뷰 Fable | V-RD |
+| T-043 | C5 A등급 양성 데이터 **[D32]** | 규칙별 양성 표 | T-199 | 4 | 7규칙 중 양성 확보 수, 미확보는 "검증 전" 대상<br>〔v3〕 C5의 공개 공격 이벤트 로그 표본 사용<br>상세: 부록 H 카드 | GAP-044 / IS-124 | QA-032 | 실행·검증 Sonnet → 묶음 리뷰 Fable | V-RD |
+| T-201 | C6 E01을 일반 런으로 처리 → 폴더 입력과 건수 비교 | 비교표(Git 밖) | T-200 | 3 | **동작** E01과 홈 폴더 사본을 각각 처리해 `ai-agent` 유형별 건수 비교. 다르면 빠진 경로 목록<br>**수용** E01 건수 = 폴더 건수, 또는 빠진 경로 목록이 T-336의 입력으로 발행 | GAP-316 / IS-165 | QA-156 | 실행·검증 Sonnet → 묶음 리뷰 Fable | `python -m rapidtriage run --help`(절차는 QA-156)<br>V-RD |
+| T-206 | 대조 스크립트: ShimCache | `scripts/shimcache-reference-diff.py`(신규), `tests/test_shimcache_reference_diff.py` | — | 3 | **동작** 전용 파서 출력과 키·값 비교<br>**수용** 합성 입력 테스트. 출력 JSON | GAP-287 / IS-158 | QA-136 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_shimcache_reference_diff`<br>V-PY · V-RD |
+| T-207 | 대조 스크립트: UserAssist | `scripts/userassist-reference-diff.py`(신규), `tests/test_userassist_reference_diff.py` | — | 3 | **동작** 전용 파서 출력과 실행 횟수·시각 비교<br>**수용** 합성 입력 테스트. 출력 JSON | GAP-287 / IS-158 | QA-136 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_userassist_reference_diff`<br>V-PY · V-RD |
+| T-208 | 대조 스크립트: USB | `scripts/usb-reference-diff.py`(신규), `tests/test_usb_reference_diff.py` | — | 3 | **동작** 레지스트리 전용 파서 출력과 장치·최초/최종 연결 비교<br>**수용** 합성 입력 테스트. 대본의 USB 3대 = 3줄 형식 확인 | GAP-287 / IS-158 | QA-136 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_usb_reference_diff`<br>V-PY · V-RD |
+
+### WC-5 — 실데이터 코퍼스·기준선(C1~C6) (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-209 | 대조 스크립트: ShellBags | `scripts/shellbags-reference-diff.py`(신규), `tests/test_shellbags_reference_diff.py` | — | 3 | **동작** 전용 파서 출력과 폴더 경로·시각 비교<br>**수용** 합성 입력 테스트. 출력 JSON | GAP-287 / IS-158 | QA-136 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_shellbags_reference_diff`<br>V-PY · V-RD |
+| T-210 | 대조 스크립트: SRUM·Windows Search | `scripts/srum-reference-diff.py`(신규), `tests/test_srum_reference_diff.py` | — | 3 | **동작** ESE 전용 파서 출력과 표별 행 수 비교<br>**수용** 합성 입력 테스트. 출력 JSON | GAP-287·284 / IS-158 | QA-136 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_srum_reference_diff`<br>V-PY · V-RD |
+| T-211 | 대조 스크립트: 브라우저·휴지통 | `scripts/browser-reference-diff.py`(신규), `scripts/recyclebin-reference-diff.py`(신규), `tests/test_browser_reference_diff.py` | — | 4 | **동작** SQLite 직접 질의 결과와 방문·다운로드 비교, `$I` 직접 해석과 휴지통 비교<br>**수용** 합성 입력 테스트 2종. 출력 JSON | GAP-287 / IS-158 | QA-136 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_browser_reference_diff`<br>V-PY · V-RD |
+| T-212 | 대조 스크립트: 메일·매체 해시 | `scripts/mail-reference-diff.py`(신규), `scripts/media-hash-check.py`(신규), `tests/test_mail_media_checks.py` | — | 4 | **동작** 메일함 도구 내보내기 건수와 메시지·첨부 수 비교. 취득 로그·`ewfverify` 출력과 매체 해시 비교<br>**수용** 합성 입력 테스트. 손상 세트 입력에서 불일치 + 오류 청크 수 출력 | GAP-287 / IS-158·069 | QA-127·136 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_mail_media_checks`<br>V-PY · V-RD |
+| T-214 | 성능 회귀 게이트 | `scripts/perf-processing-gate.py`(신규), `tests/test_perf_processing_gate.py` | — | 3 | **동작** 단계별 시간·출력 크기를 기준선 JSON과 비교(20% 악화 시 실패)<br>**수용** IMG-B 현재 값(prepare 3,719 s·수집 3,511 s·출력 71.6 GB)을 기준선으로 기록. 20% 악화 합성 입력에서 종료 1 | GAP-288 / IS-084 | QA-129 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_perf_processing_gate`<br>V-PY · V-RD |
+| T-343 | C3 골든 VM KR 실행·E01 취득 **[D32]** | `D:\rapid-qa\corpus\C3\`(이미지·취득 로그·매니페스트; Git 밖) | T-041 | 4 | **동작** 대본 60행위를 VM에서 실행(실행 시각 기록) → VM 종료 → E01 취득 + 취득 로그 → VM 폐기<br>**수용** 취득 해시 기록, 정답표의 실행 시각 60/60 기입, 매니페스트 1건(T-166 감사 통과) | GAP-357·049·056 / IS-122 | QA-201·047 | 운영자(사람) → 확인 Sonnet | `python scripts/r8-corpus-audit.py`<br>V-RD |
+
+### WC-6 — 실데이터 코퍼스·기준선(C1~C6) (1)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-213 | 검증표 실행기 | `scripts/collector-validation-matrix.py`(신규), `tests/test_collector_validation_matrix.py` | T-204·T-205·T-206·T-207·T-208·T-209·T-210·T-211·T-212 | 4 | **동작** "수집기 × 코퍼스 × 통과선" 표를 한 명령으로 돌려 보고서(JSON + md). 기준 출력이 없는 칸은 "미측정"<br>**수용** 통과선 표 20행 전부 실행 또는 "미측정 — 사유". 합성 입력으로 통과·미달·미측정 3경우 테스트 | GAP-287·284 / IS-158 | QA-136 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python scripts/collector-validation-matrix.py --json`<br>V-PY · V-RD |
+
+### WC-7 — 실데이터 코퍼스·기준선(C1~C6) (1)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-215 | Tier 1 known-answer 1차 실행(기존 대조 스크립트 9종 + 신규) | 검증표(Git 밖), 건수 요약 `docs/research/r8-w2-baseline.md` | T-213·T-038·T-343 | 4 | **동작** C2·C3에서 검증표 실행기를 돌려 수집기별 재현율을 처음 잰다<br>**수용** 수집기 20행 각각 "통과 / 미달(수치) / 미측정(사유)". 미달은 GAP으로 등록 | GAP-287·284·181 / IS-158·123 | QA-136 | 실행·검증 Sonnet → 묶음 리뷰 Fable | `python scripts/collector-validation-matrix.py --corpus C2,C3`<br>V-DOC · V-RD |
+
+### WC-8 — 실데이터 코퍼스·기준선(C1~C6) (1)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-044 | 기준선 종합과 재계획 입력(Fable) `RV` | `docs/research/r8-w2-baseline.md`(건수만) | T-037·T-038·T-039·T-040·T-042·T-043·T-138·T-215 | 3 | coverage-matrix 갱신, 새 결함을 **GAP-209 이후**로 등록(191~208은 2차 리뷰가 사용), W3~W8 과제 조정안, 부록 E.7의 "미검증으로 남는 QA" 목록 확정<br>상세: 부록 H 카드 | GAP-058·162·173·203 / IS-121·123 | QA-105·201 | Fable | V-DOC |
+
+### WD-1 — 백엔드 지원 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-045 | 카탈로그 분류 키와 검증기 | `rapidtriage/core/triage_rules/catalog/*.yaml`(키 추가만), `catalog/type_defaults.yaml`(신규), `rapidtriage/core/triage_rules/catalog.py`, 검증 테스트 | — | 4 | 131계열 + IMG-B·기준선 유형 전부 `tier`·`card`·`section` 해석, 누락은 오류, 기존 화면 동작 변화 0<br>상세: 부록 H 카드 | GAP-087 / IS-019 | QA-020 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-049 | `/summary`·`/runs/{id}` 다이어트, 압축·ETag | `rapidtriage/api/app/routes_runs.py`(summary·run 상세만), `rapidtriage/api/app/factory.py`(gzip) | T-007 | 4 | `?fields=`·ETag·304, 1 KB 초과 응답 gzip, 런 상세 ≤100 KB, 스냅샷 호환<br>상세: 부록 H 카드 | GAP-062·063 / IS-079 | QA-101 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-051 | 유형 색인(artifact_type → 오프셋)과 캐시 | `rapidtriage/api/app/artifact_type_index.py`(신규), `rapidtriage/api/app/artifact_filter.py`(색인 사용 분기) | T-019 | 4 | 레지스트리 유형 필터 ≤1 s(IMG-B), total 확정, 색인은 결과 폴더(읽기 전용이면 메모리), 결과 행 동일(전/후 비교)<br>상세: 부록 H 카드 | GAP-059·061 / IS-078 | QA-100 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-053 | 파일 목록 서버 필터(확장자 등)·정렬 키 검증 | `rapidtriage/api/app/files_index.py`, `frontend/src/features/filters/filterModel.ts` | — | 4 | `ext=` 서버 처리, 건수 = 전수 집계, 무효 `sort` 422(봉투), "불러온 행에서만" 경로 제거<br>상세: 부록 H 카드 | GAP-043 / IS-028 | QA-027 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-FE · V-RD |
+| T-054 | 백그라운드 작업 틀(202·진행·취소) | `rapidtriage/api/app/bg_jobs.py`(신규), `rapidtriage/api/app/routes_bg_jobs.py`(신규), 테스트 | — | 4 | 등록·진행률·취소·직전 결과 반환 계약, 프로세스 재시작 시 "중단됨"<br>상세: 부록 H 카드 | GAP-065·070 / IS-081 | QA-102 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-216 | `-lang:ko` 지연 원인 확정(프로파일) → 예산이 듣게 | `rapidtriage/core/search_index/engine.py`(예산 점검 지점만), `scripts/search-budget-bench.py`(신규) | — | 4 | **동작** 먼저 IMG-B 색인에서 단계별 시간(준비·정규식·빠른 쪽·구체화·후처리)을 기록해 예산이 듣지 않는 구간을 특정한 뒤 그 구간에 예산 점검을 넣는다<br>**수용** 단계별 시간표 1건. 부정 단독 질의 6종이 18초 안에 응답하고 초과 시 `budget_stopped` + 고지 | GAP-060 / IS-032 | QA-184·058 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python scripts/search-budget-bench.py --json`<br>V-PY · V-RD |
+
+### WD-2 — 백엔드 지원 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-047 | 0건 사유 판정기 〔v3: 10코드〕 | `rapidtriage/api/app/zero_reason.py`(신규), 테스트 | T-045·T-188 | 4 | 단위 테스트 30종(코드 10 × 3경우). 입력 신호는 T-188 명세 표에서만 읽는다. `none_found`는 "완료 + 대상 읽음" 증거가 있을 때만<br>상세: 부록 H 카드 | GAP-038·169·037·158·356 / IS-006·089 | QA-023·142 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-048 | 사용 기간·주요 프로그램·다음 할 일 산정 | `rapidtriage/api/app/brief_insights.py`(신규), 테스트 | T-045 | 4 | Tier 1 사용자 행위만으로 기간 산정, 폴더 증거는 `unavailable`, 프로그램 상위 3은 OS 구성 요소 제외, `next_action` 규칙 5종<br>상세: 부록 H 카드 | GAP-171 / IS-001 | QA-033 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-052 | 검색 `lang:`·`list:`·부정 조건 구동·예산 고지 | `rapidtriage/core/search_index/engine.py`, `rapidtriage/api/app/routes_search_index.py`, 테스트 | T-216 | 4 | `-lang:ko 계약`·`list:execution` ≤3 s(IMG-B), 후처리도 예산 안, 초과 시 `notice`<br>〔v3〕 원인 확정(T-216) 뒤 수정<br>상세: 부록 H 카드 | GAP-060·108·163 / IS-032 | QA-058·059 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-055 | 계열·중복·예외·케이스 DB 준비·추출 zip을 작업으로 | `rapidtriage/api/app/routes_families.py`(`:218-245` dedup·irregular summary, `:113`·`:184` 계열), `rapidtriage/api/app/routes_case_db.py`(ensure만), `rapidtriage/api/app/routes_runs.py`(extract만) | T-054 | 4 | 요청 응답 ≤1 s, 직전 결과 + "다시 계산 중"<br>상세: 부록 H 카드 | GAP-065 / IS-081 | QA-102 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-058 | 사람·장치 롤업 파생 표 | `rapidtriage/core/derived/tables_people_devices.py`(신규), `rapidtriage/core/derived/engine.py`(등록만) `[확인: 파생 표는 수집기 불변]` | T-045 | 4 | 계정 묶음(시스템 숨김 규칙)·장치 병합(시리얼 키) 표, 기준선에서 장치 5대 = 5줄<br>상세: 부록 H 카드 | GAP-088·161 / IS-030 | QA-043 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-059 | 확장자 위장 잡음 분리(표시 계층)·복구본 내용 상태(미리보기) | `rapidtriage/api/app/tree.py`(예외·불일치 집계), `rapidtriage/api/app/previews.py`, `rapidtriage/api/app/irregular_view.py`(신규) | T-045·T-185 | 4 | `_deleted_mft` 유래·0 채움·고엔트로피를 "내용 복구 불가"로 분리 집계, 미리보기 응답에 `content_state`, 수집기 출력 불변(D33 기본값)<br>〔v3〕 판정은 `core/content_state.py`(T-185) 사용<br>상세: 부록 H 카드 | GAP-040·041·176·313 / IS-022·023·148 | QA-025·026·186 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+
+### WD-3 — 백엔드 지원 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-046 | `/brief` 엔드포인트(골격·건수·통합) | `rapidtriage/api/app/brief.py`(신규), `rapidtriage/api/app/routes_brief.py`(신규), 라우터 등록은 코디네이터(F.1 화면 장착 규칙), `tests/test_brief_count_contract.py` | T-021·T-023·T-025·T-045·T-047·T-048 | 4 | v2 수용 + 모든 `link` 옆에 `api`(같은 내용을 여는 API 경로), `limits[].code`는 오류 코드표에서, `scope`는 네 축(T-023), 원문 개인정보 0(가림값만)<br>상세: 부록 H 카드 | GAP-071·144·034·241 / IS-001·005·111·171 | QA-033·103·029·147 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-057 | 문서 단위 검색 응답 | `rapidtriage/api/app/search_documents.py`(신규), `rapidtriage/api/app/routes_search_index.py`(등록·호출) | T-052 | 4 | 한 파일 = 한 그룹(적중 수·위치·관련 행), 스니펫 ≥40자·가림, 숨긴 Tier 3 적중 수<br>〔v3〕 v3: 응답에 `partial`(예산 중단 여부)을 실어 묶음·보고서가 기록<br>상세: 부록 H 카드 | GAP-103·106·312 / IS-031·033·035·149 | QA-057·031·185 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-217 | AI 규칙 정비 `[확인: 규칙 등급·묶음, 수집 불변]` | `rapidtriage/core/triage_rules/ai.py`, `rapidtriage/core/triage_rules/catalog/ai.yaml` | T-202 | 4 | **동작** 자격 증명은 도구·계정당 1건. 파괴적 명령은 도구 기록 B / 패턴 추정 C + 빌드·캐시 폴더(`node_modules`·`dist`·`build`·`.venv`·`__pycache__`·`target`·임시) 제외. OneDrive 기본 이름 일치는 C. 검증 메타에 T-202 수치<br>**수용** 합성 86행 → 도구 수만큼. `rm -rf node_modules` 미적중, 사건 폴더 `Remove-Item` 적중. 카탈로그 검사 통과. 정밀도 수치 없는 규칙은 `provisional` 유지 | GAP-327·326 / IS-164 | QA-162 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python scripts/check-ai-catalog.py && python -m unittest tests.test_ai_rules`<br>V-PY · V-RD |
+| T-218 | AI 통합 표 이중 집계 제거·표시 시간대 날짜 `[확인: 파생 표]` | `rapidtriage/core/derived/tables_ai.py` | — | 3 | **동작** `linked_session_id`의 대상 세션이 같은 런에 있으면 Claude 데스크톱 Code 탭 세션은 집계에서 빼고 수만 표기. 날짜는 표시 시간대 기준<br>**수용** 합성 연결 세션 1쌍에서 세션 수 1. 한국 시간 08시 세션이 당일로 | GAP-323 / IS-052·049 | QA-072·071 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_derived_tables_ai`<br>V-PY · V-RD |
+| T-219 | 처리 요청 멱등 키 `[확인: API 동작 추가]` | `rapidtriage/core/jobs.py`(제출 경로만), `tests/test_run_idempotency.py` | — | 4 | **동작** `POST /api/runs`·`/cases/{id}/runs`·`/analyses`·내보내기가 `Idempotency-Key` 헤더를 받는다. 같은 키의 두 번째 요청은 같은 작업을 돌려준다. 키 없는 요청은 현행과 동일. 라우트 쪽 헤더 전달은 코디네이터가 묶음 끝에 장착<br>**수용** 같은 키로 3회 요청 → 작업 1개, 응답의 작업 ID 3회 동일 | GAP-238 / IS-170 | QA-145 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_run_idempotency`<br>V-PY · V-RD |
+| T-220 | 진행 대기: 긴 폴링 + CLI 대기 `[확인: API 추가]` | `rapidtriage/api/app/routes_run_progress.py`(신규, 등록은 코디네이터), `rapidtriage/cli/run_wait.py`(신규), `tests/test_run_wait.py` | T-054·T-159 | 4 | **동작** `GET /api/runs/{id}/progress?since=<seq>&wait=25` — 변화가 있으면 즉시, 없으면 대기 뒤 응답. 이벤트 `{seq, at, step, status, done, total}`. CLI `run-control wait <run> --timeout --json`. SSE는 만들지 않는다<br>**수용** 변화 없을 때 `wait=5` 응답이 5±0.5초, 변화 시 0.3초 이하. `run-control wait`가 완료 0·부분 3·시간 초과 1 | GAP-239·238 / IS-170 | QA-145 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_run_wait`<br>V-PY · V-RD |
+
+### WD-4 — 백엔드 지원 (2)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-050 | `CLI brief --json` | `rapidtriage/cli/brief.py`(신규), `rapidtriage/cli/parser.py`(등록 블록만) | T-046·T-159 | 2 | 봉투·종료 코드, `/brief`와 같은 값<br>〔v3〕 파서 분할(T-159) 뒤 `cli/parsers/run.py`에 등록<br>상세: 부록 H 카드 | GAP-144 / IS-111 | QA-103 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-060 | 개체 요약 작업화·검색 색인 분석 건수 | `rapidtriage/api/app/entity_summary.py`(신규), `rapidtriage/api/app/analysis_kinds.py`(`run_search_index` `:2458-2494`의 건수 기록만), `rapidtriage/api/app/routes_search_index.py`(`POST …/search/entities` 처리기만 — T-057이 끝난 뒤, F.6: W3-c 2단계) | T-054·T-057 | 3 | 개체 요약 202+진행, IMG-B에서 성공, 색인 분석이 문서 수를 건수로 표시<br>상세: 부록 H 카드 | GAP-051·035 / IS-037·089 | QA-061 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+
+### WE-1 — 디자인 기반·브리핑 v0 (WD와 병행) (3)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-061 | 토큰 v3 〔v3: 역할 이름·읽기 단·판단 계열〕 | `frontend/src/tokens/tokens.css`, `frontend/src/state/slices/prefs.ts`(`systemTheme` `:48-60,92`), 〔2차: `themeBoot.ts`는 없다〕 `frontend/index.html`(`:14` 부근 인라인 테마 부트 스크립트), `frontend/src/app/themeBoot.test.ts`(부트 스크립트를 읽는 기존 테스트 — 기대값 갱신) | T-002 | 4 | 글자 7단 + `--text-read` 15/26, 간격에 48 추가, 모서리 4·6·8, 색 역할 4계열을 역할 이름(`--state-*`·`--forensic-*`·`--grade-*`·`--judgment-*`)으로. `--r8-*` 이름 0. 기본 테마 OS 따름(다크 고정 제거). 두 테마 대비 통과<br>〔v3〕 릴리스 이름 토큰 금지(D70)<br>상세: 부록 H 카드 | GAP-135·136·138 / IS-105·106·108 | QA-093·097 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-224 | 옛 대시보드를 처리 › 처리 요약 탭으로 | `frontend/src/features/stages/ProcessStage.tsx`(머리 탭만) | — | 2 | **동작** 카드 9종을 지우지 않고 처리 화면의 "처리 요약" 탭으로 옮긴다<br>**수용** 카드 9종이 처리 요약 탭에서 그대로 동작. 기존 대시보드 테스트 통과(삭제·skip 0) | GAP-071·201 / IS-001·017 | QA-199 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/dashboard src/features/stages`<br>V-FE · V-RD |
+| T-225 | 표시 이름 규칙(사건명 › 증거 표시명 › "이름 없는 증거 n") | `frontend/src/app/collections.ts`, `frontend/src/features/case/CasePicker.tsx` | — | 2 | **동작** 제목·선택기·최근 목록에서 폴더 약칭 대신 표시 이름. 중복 로직 1곳으로<br>**수용** C2·C1 두 런에서 제목·선택기·최근 목록에 폴더 약칭(`fs`) 0 | GAP-072 / IS-002·097 | QA-190·035 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/app src/features/case`<br>V-FE · V-RD |
+
+### WE-2 — 디자인 기반·브리핑 v0 (WD와 병행) (5)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-063 | `EmptyState`·`InlineAlert`·`Skeleton`·`PartialBanner`·`HiddenBanner` | `frontend/src/components/ui/feedback/*`(신규) | T-061 | 4 | 빈 상태 5유형·알림 4종, 오류 틀(무슨 일/영향/할 일/기술 정보), 카드·패널 단위 오류 경계 `SectionBoundary`<br>상세: 부록 H 카드 | GAP-127·128 / IS-092 | QA-084·085 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-066 | `TimeText`·`HashValue`·`PathText`·`CopyButton` | `frontend/src/components/ui/values/*`(신규), `frontend/src/utils/time.ts`(단일 포맷터 정리) | T-061 | 4 | 표시 시간대 한 형식 + UTC title + 사본 시각 표식, 중복 `formatDuration` 제거<br>상세: 부록 H 카드 | GAP-116 / IS-049 | QA-071 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-069 | 전역 링크·입력·포커스 스타일 | `frontend/src/tokens/controls.css`, `frontend/src/tokens/base.css`(신규; `frontend/src/main.tsx`의 import 1줄 포함) | T-061 | 3 | 방문 색 없음, 라이트 입력 회색 채움 0, 포커스 링 통일<br>상세: 부록 H 카드 | GAP-133·134·099 / IS-101 | QA-093 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-070 | 인쇄 스타일·화면 복사용 보기 | `frontend/src/tokens/print.css`(신규) | T-061 | 2 | 인쇄 시 패널·도구 막대 숨김, 본문 전폭<br>상세: 부록 H 카드 | GAP-124·189·346 / IS-108·133 | QA-082·117·194 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-221 | 판단 색 계열(보라 한 계열) | `frontend/src/components/StatusChip.tsx`, `frontend/src/tokens/judgment.css`(신규; `tokens.css`는 T-061이 import 1줄 추가) | T-061 | 3 | **동작** 관련 있음 = 채운 깃발, 재검토 = 테두리 물음표 깃발, 보고서 포함 = 문서 표식, 제외 = 회색 빗금 + 행 글자 60%<br>**수용** 판단 4종이 보라 계열 + 모양 + 글자. 회색조 스크린샷에서 4종 구분. 두 테마 대비 통과(본문 4.5:1·아이콘 3:1) | GAP-110·353 / IS-039·105 | QA-095·064 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npm run check:contrast && npx vitest run src/components`<br>V-FE · V-RD |
+
+### WE-3 — 디자인 기반·브리핑 v0 (WD와 병행) (1)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-068 | `PageHeader`·`StatRow`·`ZeroReason`·`Disclosure`·`EvidenceStrip` | `frontend/src/components/ui/page/*`(신규) | T-063 | 4 | 숫자=링크+`data-count`, 무결성 4상태 표현<br>〔v3〕 화면(브리핑 v0)이 끌어내는 첫 묶음<br>상세: 부록 H 카드 | IS-003·005·017 | QA-033 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+
+### WE-4 — 디자인 기반·브리핑 v0 (WD와 병행) (2)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-222 | 사건 브리핑 v0(기존 API만) | `frontend/src/features/brief/BriefPage.tsx`(신규), `frontend/src/features/brief/briefModel.ts`(신규), `frontend/src/features/brief/brief.css`(신규) | T-068·T-023·T-021 | 4 | **동작** `/dashboard`·`/summary`·`/review-counts`만으로 브리핑을 낸다. 구역 순서: 처리 범위·무결성 → 대상 PC → 무엇이 나왔나 → 규칙이 표시한 것(자동 · 검증 전) → 검토 → 기술 정보. 없는 값은 "아직 계산하지 않았습니다". `intake` 주소의 slot 장착은 코디네이터<br>**수용** 1280×720 스크롤 0(높이 합 ≤596). 숫자 = 링크 = 목록 건수(C2 전수). 규칙 구역이 사실 구역 아래. 건수 줄임 표기 0 | GAP-071·352·355·074 / IS-001·005 | QA-033 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/brief`<br>V-FE · V-RD |
+| T-223 | 브리핑의 범위·무결성 구역 | `frontend/src/features/brief/ScopeIntegrity.tsx`(신규) | T-068·T-023 | 3 | **동작** 범위는 네 축 각각 한 값(모르면 "측정하지 않음"), 100% 미만 축은 호박 △. 무결성은 컨테이너/취득/매체를 구분해 말하고 "해시 검증"·"검증됨" 문구 금지(매체 재계산 전)<br>**수용** C2: 네 축 표시·한 숫자 범위 문구 0. 무결성 줄에 "컨테이너 해시 계산됨 · 매체 해시 미대조"(취득 해시가 읽히면 세 번째 값) | GAP-027·008·191 / IS-004·003·069 | QA-017·106 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/brief`<br>V-FE · V-RD |
+
+### WF-1 — 화면: 셸·브리핑·내비·목록·뷰어·검색·검토·시간순·AI (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-071 | 하위 주소 추가(단계 단어 불변) 〔v3 재정의〕 | `frontend/src/router.ts` | T-001 | 3 | 신규는 하위 주소 6개(`explore/day`·`explore/people`·`explore/ai`·`review/set/{id}`·`review/one/{setId}/{n}`·`report/preview`)와 `intake`의 쿼리 `?share=1`뿐. `canonicalizeHash`·`serializeRoute`의 단계 단어 출력 불변, 쿼리 키 30여 개 불변. 구 주소 30종 + 인용 12종 왕복 통과<br>〔v3〕 v2의 `home`·`tools/*` 정본화는 폐기(D60) | GAP-172·351 / IS-015·011 | QA-041 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-072 | 레일 라벨·역할별 가시성(주소·키 불변) 〔v3 재정의〕 | `frontend/src/features/stages/stages.ts`, `frontend/src/features/stages/StageRail.tsx` | T-061 | 3 | 라벨 5개(사건·처리·살펴보기·검토·보고서). `Alt+1~5` 목적지 불변. 검토자 기본값에서 "처리" 숨김, 주소·키로 열면 "분석 담당 화면입니다" 한 줄. ⚙에는 설정·환경 점검만<br>〔v3〕 역할 스위치는 T-226 | GAP-080·086·072·170·351 / IS-011·018·097 | QA-040·035·089 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-073 | 사건 브리핑: 데이터 출처를 `/brief`로 〔v3: 화면은 T-222(v0)에서 먼저 나온다〕 | `frontend/src/features/brief/*`(신규), `frontend/src/api/brief.ts`(신규), `frontend/src/app/IntakePane.tsx`(홈 분기 — 이 묶음에서 이 파일의 유일한 주인) | T-046·T-222 | 4 | v0(T-222)의 `briefModel`을 `/brief` 응답으로 교체. 1280×720 스크롤 0, 숫자 = 링크 = 목록 건수(전수), 0건은 사유 10코드, "아직 계산하지 않았습니다" 칸 0(사용 기간·주요 프로그램 채워짐), 규칙 구역은 사실 구역 아래 "자동 · 검증 전"<br>상세: 부록 H 카드 | GAP-071·074·352·355 / IS-001~006 | QA-033·017·023·117 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-074 | 랜딩·토큰 화면 | `frontend/src/features/case/Landing.tsx`, `frontend/src/app/TokenGate.tsx` | — | 3 | 주 동작 2 + 최근 사건 + 준비물, 토큰 안내 문장<br>상세: 부록 H 카드 | GAP-075·186 / IS-007 | QA-037·118 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-075 | 처리 진행 띠·처리 중 409 제거 | `frontend/src/shell/ProgressStrip.tsx`(신규), `frontend/src/api/runPlan.ts`, `frontend/src/shell/Layout.tsx`(띠 삽입만) | T-022 | 4 | 한국어 단계·n/m·경과, 409 0, 중지는 실행 중만<br>상세: 부록 H 카드 | GAP-077·066·184·341 / IS-009·132 | QA-039·090 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-078 | 분류 사본 제거(`categories.ts` 폐기, `domains.ts` 생성화) | `frontend/src/features/tree/domains.ts`, 〔2차: 경로 정정〕 `frontend/src/features/tree/categories.ts`, `scripts/gen-domains.py`(신규), `rapidtriage/core/artifact_domains.py`(생성물 `[확인: 표시용 분류표, 수집 불변]`) | T-045 | 4 | 생성 스크립트 + 동기화 테스트, 노드 id 불변(계약)<br>상세: 부록 H 카드 | GAP-087 / IS-019 | QA-041 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-FE · V-RD |
+
+### WF-2 — 화면: 셸·브리핑·내비·목록·뷰어·검색·검토·시간순·AI (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-076 | 다중 증거·케이스 미연결 홈 | `frontend/src/features/brief/EvidenceSwitcher.tsx`·`AllEvidenceTable.tsx`(신규, T-073 폴더와 파일 분리) | T-073(인터페이스 합의) | 3 | 증거 전환·비교 표·"사건에 연결" 머리줄<br>상세: 부록 H 카드 | GAP-079 / IS-010 | QA-036 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-077 | 살펴보기 범주 내비(트리 위 구역) 〔v3: 모드 아님〕 | `frontend/src/features/nav/CategoryNav.tsx`(신규), `frontend/src/features/tree/useTreeModel.ts`(카탈로그 분류 사용) | T-045·T-072 | 4 | 12개 이하, 건수 줄임 없음·잘림 0(고정폭 7자리), 건수 = 목록 건수(전수). "규칙이 표시한 것"은 범주 목록 아래. 분석 담당 기본값에서는 아래에 기존 트리가 "전문가 항목"으로 이어짐(노드 id·순서 불변)<br>상세: 부록 H 카드 | GAP-080·081·083·084·353 / IS-012·013·014 | QA-040·020·042 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-079 | 새 사건 2단계·경로 사전 검사·폴더 선택기·여유 공간 | `frontend/src/features/case/CaseWizard.tsx`, 〔2차: 새 `PathPicker`를 만들지 않는다〕 기존 `frontend/src/features/case/BrowsePanel.tsx`·`EvidenceFields.tsx`(선택기를 필드 옆 "고르기" 버튼으로 승격, 결과 폴더에도 적용), `rapidtriage/api/app/routes_cases.py`(output-check 응답에 `free_bytes`·`estimated_bytes` 추가) | — | 4 | 입력 ≤5, 고아 0, 필드 옆 오류, 모달 위치 고정<br>〔v3〕 디스크 여유 점검은 T-186의 응답 사용<br>상세: 부록 H 카드 | GAP-076·183·141·278 / IS-008·095·160 | QA-037·038·133 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-FE · V-RD |
+| T-080 | 새 처리 대화상자(입력 5 + 세부 설정) | `frontend/src/features/case/RunDialog.tsx`, `frontend/src/features/case/RunPlanGroupsField.tsx` | T-191 | 4 | 처리 깊이 3·프리셋·세부 설정 접힘, `ai_read_mb`·`org_email_domain` 입력, 프로필 한국어명<br>〔v3〕 AI 입력 3칸(T-191)이 "세부 설정" 안에 들어온다<br>상세: 부록 H 카드 | GAP-076·190 / IS-008 | QA-037 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-081 | 처리 화면 탭 4개(처리 이력·처리 요약·더 분석하기·산출물)·작업 센터 〔v3: 레일에 남는다〕 | `frontend/src/features/stages/ProcessStage.tsx`, `frontend/src/features/stages/RunPlanTable.tsx`, `frontend/src/features/jobs/JobCenter.tsx`(신규), `frontend/src/shell/TopBar.tsx`(작업 센터 아이콘 1개 — T-072 뒤) | T-054·T-072·T-224 | 4 | v2 수용 + 탭 4개, 단계 상태 6종(글자 + 모양), 사건 화면과 같은 집계 함수, 소요 열에 값<br>상세: 부록 H 카드 | GAP-077·078·036·020·199·201·349 / IS-070·081·089 | QA-016·024·102·199 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-082 | ⚙ 설정 팝오버 〔v3 재정의: 화면 아님〕 | `frontend/src/features/settings/SettingsPopover.tsx`(신규) | T-061 | 3 | 항목 6개(테마 시스템/라이트/다크 · 글자 3단 · 밀도 3단 · 시간대 · 담당자 이름 · 판단 뒤 자동 이동). 화면 신설은 설정이 15개를 넘을 때 | GAP-155 / IS-108 | QA-097 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+
+### WF-3 — 화면: 셸·브리핑·내비·목록·뷰어·검색·검토·시간순·AI (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-083 | DataGrid 분해(동작 불변) | `frontend/src/features/grid/DataGrid.tsx` → `GridBody`·`GridHeader`·`GridFooter`·`useGridKeyboard` | T-020 | 4 | 기존 grid vitest 341건·e2e 통과, 파일 ≤600줄<br>상세: 부록 H 카드 | GAP-150·143·132 / IS-117 | QA-104·099 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-084 | 카드별 열 정의(6열)·그리드 값 라벨 단일 출처 〔2차: 나머지 라벨 맵 4곳은 T-139로 분리 — 4 h 초과〕 | 카탈로그 `card_columns`·`value_labels`(YAML 블록), `frontend/src/features/grid/columns/*`(생성물 사용), `frontend/src/features/grid/valueLabels.ts`(생성물), `scripts/gen-labels.py`(신규) | T-045 | 4 | 하위 탭마다 ≤6열, 그리드 값 라벨이 생성물(손 편집 금지 머리말 + 동기화 테스트), 원시 슬러그 요약 0(`artifactSummary.ts:123-124` 포함)<br>상세: 부록 H 카드 | GAP-089·090 / IS-020·021 | QA-044·045 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-FE · V-RD |
+| T-085 | 뷰어 머리·판단 버튼 줄·메모 영역 | `frontend/src/features/viewer/ViewerToolbar.tsx`, `frontend/src/features/viewer/viewer.css` | — | 4 | 판단 버튼 3 + 보고서 포함 토글(P), 메모가 머리를 밀지 않음, 반영 ≤200 ms(낙관적)<br>상세: 부록 H 카드 | GAP-096·069 / IS-039·046 | QA-064 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-091 | 조건 띠(칩 5)·날짜 입력 | `frontend/src/features/filters/FilterBar.tsx` → `ChipFilterBar`·`ConditionDrawer` | — | 4 | 그리드를 덮지 않음, 칩 5 + 더 보기, 파일 ≤600줄<br>상세: 부록 H 카드 | GAP-100 / IS-034 | QA-044 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-093 | 문서 단위 검색 화면 | `frontend/src/features/search/*`(신규), `frontend/src/api/search.ts` | T-057·T-063 | 4 | 한 파일 한 행·펼침, 전부 색인 경로, "전문가 항목에 n건"<br>〔v3〕 결과에서 뷰어를 열면 첫 적중 위치로 스크롤(T-228의 적중 이동 사용)<br>상세: 부록 H 카드 | GAP-103·104 / IS-031·032·035 | QA-057·058 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-094 | 검색 옵션·도움말 예시 | `frontend/src/features/case/SearchOptionsPopover.tsx`, `frontend/src/shell/SearchHelp.tsx`(신규) | — | 3 | 범위 칩 3 + 접힘, 예시 5<br>상세: 부록 H 카드 | GAP-105·106 / IS-034·036 | QA-060·063 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+
+### WF-4 — 화면: 셸·브리핑·내비·목록·뷰어·검색·검토·시간순·AI (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-087 | 메타 12필드·출처 구역 | `frontend/src/features/viewer/views/MetaView.tsx` → `MetaSummary`·`MetaTech`·`ProvenancePanel` | T-066·T-084·T-172 | 4 | 첫 화면 ≤12, 출처 고정, 영문 키 0<br>〔v3〕 출처 구역은 T-172가 먼저 고친다(같은 파일)<br>상세: 부록 H 카드 | GAP-094 / IS-025 | QA-048 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-089 | 목록 머리(제목·설명·건수 1회)·숨김 띠·보기 메뉴 | `frontend/src/features/grid/GridToolbar.tsx`, `frontend/src/app/ViewSwitch.tsx` | T-063·T-083 | 4 | h1 + 건수 한 번, "n건 숨김", `보기: 표 ▾`<br>상세: 부록 H 카드 | GAP-085·045·097 / IS-017·027·072 | QA-031·051·054 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-092 | 복구본 표식·기본 정렬·폴더 트리 가상 위치 | `frontend/src/features/grid/columns/files.ts`, `frontend/src/features/explorers/FsExplorer.tsx` | T-059·T-173 | 3 | 복구본 칩, 기본 정렬 첫 화면 복구본 0, "복구된 항목(가상)"<br>상세: 부록 H 카드 | GAP-042·335 / IS-023·128 | QA-026 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-095 | 개체 패널 | `frontend/src/features/case/EntityPanel.tsx`, `frontend/src/api/searchEntities.ts` | T-060·T-063 | 3 | 진행률·성공, 오류 봉투<br>상세: 부록 H 카드 | GAP-051 / IS-037 | QA-061 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-096 | 검토 묶음(스냅샷) `[확인: 저장 위치]` 〔v3 재정의〕 | `frontend/src/features/review/sets/*`(신규), `frontend/src/api/caseDb.ts` | T-093 | 4 | 묶음은 만든 순간의 항목 키 목록 스냅샷(출처 질의는 기록만). 표시를 해도 분모 불변, 진행률·다음 미검토, "새로 맞는 항목 n건 — 묶음에 추가". 스키마 변경 없이 저장 검색 payload에 항목 키 목록을 실을 수 있는지 먼저 확인하고(120건·5,000건), 불가하면 소유자 승인 요청 뒤 진행<br>〔v3〕 v2의 저장 검색 기반(살아 있는 질의)은 폐기(D64) | GAP-111·354 / IS-040 | QA-066 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-098 | 검토 색·라벨 정본·토스트 | `frontend/src/features/viewer/citation.ts`(정본 export), `frontend/src/features/grid/reviewActions.ts`(import로 교체 — T-036 뒤), `frontend/src/features/stages/ReviewReportStage.tsx` | T-036·T-221 | 3 | 라벨 정의 1곳, 색 역할표 적용(D35), 토스트 ≤2·성공 초록<br>〔v3〕 판단 색은 보라 계열(T-221)<br>상세: 부록 H 카드 | GAP-109·110·353 / IS-039·105 | QA-064·095 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+
+### WF-5 — 화면: 셸·브리핑·내비·목록·뷰어·검색·검토·시간순·AI (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-097 | 한 건 보기 | `frontend/src/features/review/one/*`(신규) | T-085·T-096 | 4 | 50건 키보드만·건당 ≤2조작, 모순 경고<br>〔v3〕 v3: 1440 미만에서 판단은 아래 고정 막대(56px), 판단 직후 다음 미검토로 자동 이동(설정에서 끔)<br>상세: 부록 H 카드 | GAP-111·112 / IS-041·045 | QA-066·068·119 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-099 | 하루 보기 | `frontend/src/features/timeline/DayView.tsx`(신규), `frontend/src/features/views/HistogramView.tsx` | T-066 | 4 | 막대+목록 한 화면, 합계 = 목록, 축·값<br>〔v3〕 v3: 날짜 없이 열면 기록이 있는 마지막 날<br>상세: 부록 H 카드 | GAP-114·039·348 / IS-047·051 | QA-069·028·200 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-100 | 타임라인 기본 "사용자 행위만"·사본 시각 표식 | `rapidtriage/api/app/timeline_view.py`(신규: Tier 필터, 수집 불변), `frontend/src/features/grid/columns/timeline.ts` | T-045 | 4 | 기본 필터 Tier 1, 유형 한국어, 사본 시각 아이콘·필터 사유<br>상세: 부록 H 카드 | GAP-115·117 / IS-048·050 | QA-070 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-FE · V-RD |
+| T-101 | 대화 보기 시각·서브에이전트 관계 | `frontend/src/features/views/ChatView.tsx`, `frontend/src/features/views/chat.ts` | T-066 | 3 | ISO Z 0, 표시 시간대 일치<br>상세: 부록 H 카드 | GAP-116·118 / IS-049 | QA-071 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-102 | AI 사용 개요(질문 축 네 칸) 〔v3: 축 변경〕 | `frontend/src/features/ai/AiOverview.tsx`(신규), `frontend/src/api/aiUsage.ts`, 픽스처 `aiSampleRows.ts`를 `frontend/tests/fixtures/`로 이동 | T-077 | 4 | T4 ≤2조작·20초. 네 칸(AI로 나간 것 / 계정 / AI가 한 일 / 남지 않은 것) 각각 건수 = 목록 건수, 0건 문구. 픽스처 `aiSampleRows.ts`는 `src` 밖으로<br>상세: 부록 H 카드 | GAP-118·119·150·331 / IS-052·054 | QA-072·073·166 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-103 | 사람·장치 화면 | `frontend/src/features/people/*`(신규) | T-058·T-077 | 4 | 계정 묶음·장치 표·숨김 수·필터 카드<br>상세: 부록 H 카드 | GAP-088 / IS-030 | QA-043 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+
+### WF-6 — 화면: 셸·브리핑·내비·목록·뷰어·검색·검토·시간순·AI (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-104 | 한국어 기본 키워드·사건 키워드·팩 적중 | `rapidtriage/core/run/profiles.py`(키워드 추가만), `rapidtriage/api/app/brief.py`(keywords — T-046 뒤 단독), 키워드 팩 YAML | T-046 | 4 | 프리셋 6종 한국어 키워드(초안 표시, D4), 브리핑 적중 = 검색 결과<br>상세: 부록 H 카드 | GAP-107·159 / IS-038 | QA-062 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-135 | "검증 전" 규칙 표시(팝오버 밖) | `frontend/src/features/flags/FlagCell.tsx`(칩), `frontend/src/features/flags/flags.ts`·`catalog.ts`(규칙 상태 조회), `rapidtriage/core/case_report.py`는 건드리지 않는다(보고서 표기는 T-109) | T-077 | 3 | `status: provisional` 규칙(현재 55) 또는 실데이터 참양성 기록이 없는 A등급 규칙(T-043 결과표 기준)의 칩 옆에 `검증 전` 보조 글자(색·점선 없음), 내비 "먼저 확인할 것" 건수는 `검증됨 n · 검증 전 m`으로 나눠 표기, 브리핑은 `findings.top[].validated=false` 항목에 같은 글자. A등급 "즉시 확인" 문구는 검증된 규칙에만<br>상세: 부록 H 카드 | GAP-197·044 / IS-124 | QA-110·032 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-FE · V-RD |
+| T-137 | 단축키 끄기 스위치·범례 | `frontend/src/shortcuts.ts`(전역 가드 1곳 — T-035 뒤), `frontend/src/shell/HelpOverlay.tsx`(범례 인쇄 보기), `frontend/src/features/settings/ShortcutsSection.tsx`(신규) | T-035·T-082 | 2 | 설정 "글자 키 단축키 사용" 끄면 R·I·X·B·P·J·K·1~9 발화 0(`Ctrl+K`·`Esc`·`/`는 유지), 기본값 켬, 값은 `rapidtriage.v3.shortcuts`. 도움말에 "인쇄" → 한 쪽 범례 | GAP-200 / IS-099 | QA-120 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-139 | 〔2차 신규〕 라벨 맵 단일 출처 — 나머지 4곳(`metaLabels`·`stepLabels`·`fieldSheets`·유형 라벨) | `frontend/src/features/viewer/metaLabels.ts`, `frontend/src/features/stages/stepLabels.ts`, `frontend/src/features/grid/columns/fieldSheets.ts`, 유형 라벨 맵(착수 때 `grep -rl typeLabels frontend/src`로 위치 확정), `scripts/gen-labels.py`(T-084 뒤 확장) | T-084·T-193 | 4 | 네 맵이 카탈로그 생성물(동기화 테스트 4개), 기존 라벨 문자열 diff 0(생성 전/후 스냅샷 동일 — 문구 변경은 이 과제에서 하지 않는다), 영문 원어 잔존 목록(GAP-091)만 한국어 병기로 교체<br>상세: 부록 H 카드 | GAP-154·091 / IS-021·096 | QA-045 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-FE · V-RD |
+| T-143 | 〔2차 신규〕 그리드 페이지 윈도 상한(메모리 고정) | `frontend/src/features/grid/useCollectionQuery.ts`(`:428-432` 페이지 집합이 늘기만 함) | T-083 | 3 | 보이는 범위 ± 4페이지만 유지(나머지 페이지는 해제 후 재요청), 54만 행 끝까지 스크롤에서 JS 힙 ≤ 1.5 GB·스크롤 p95 ≤ 100 ms, 선택·검토 표시 상태는 페이지 해제와 무관하게 유지 | GAP-067 / IS-083 | QA-056 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-226 | 역할 기본값 추론·상단 스위치(묻지 않는다) | `frontend/src/state/slices/role.ts`(신규), `frontend/src/shell/TopBar.tsx` | T-072 | 3 | **동작** 사건을 만든 브라우저 = 분석 담당, `#token=` 링크로 처음 들어온 브라우저 = 검토자. 상단 스위치로 전환, 브라우저별 기억(`rapidtriage.v3.role`). 바뀌는 것은 레일의 "처리"·전문가 항목 펼침·밀도 32/28·헥스/SQLite 탭 노출뿐<br>**수용** 토큰 링크 첫 진입 = 검토자(질문 대화상자 0). 스위치 전환 뒤 주소 불변, 새로 고침 뒤 유지 | GAP-086·170 / IS-018 | QA-040 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/state src/shell`<br>V-FE · V-RD |
+
+### WF-7 — 화면: 셸·브리핑·내비·목록·뷰어·검색·검토·시간순·AI (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-136 | 질문형 진입점 8개(D41) | `rapidtriage/core/triage_rules/catalog/questions.yaml`(신규: 질문 → 범주·조건·열, 이 묶음에서 카탈로그의 유일한 주인), `frontend/src/features/nav/QuestionEntry.tsx`(신규), `rapidtriage/api/app/brief.py`(`questions[]` 추가 — T-104 뒤) | T-077·T-104 | 4 | v1 4.5의 8문항(예: "무엇을 가지고 나갔나"·"무엇을 지웠나"·"누구와 연락했나"·"어떤 문서를 열었나"·"어떤 프로그램을 썼나"·"언제 PC를 썼나"·"어디에 접속했나"·"AI 도구를 썼나") 각각이 조건이 걸린 목록 주소를 연다(주소 공유 가능, 쿼리 키는 부록 D.1 기존 키만). 0건이면 0건 사유. 살펴보기 내비 상단 "질문으로 찾기 ▾" 메뉴(브리핑 본문에는 넣지 않는다 — 스크롤 0 유지) | GAP-198 / IS-012·013 | QA-113 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-FE · V-RD |
+| T-227 | 처리 종료 알림·화면 공유용 보기 | `frontend/src/app/runNotifier.ts`(신규), `frontend/src/features/brief/ShareView.tsx`(신규) | T-222·T-070·T-169 | 4 | **동작** 처리 종료 시 탭 제목 변경 + 브리핑 상단 한 줄. OS 알림은 설정에서 켠 경우만. `?share=1`: 경로·계정명·호스트명을 `○○`로 가리고 레일·상태바 숨김, 인쇄 A4 1쪽<br>**수용** 처리 종료 뒤 5초 안에 탭 제목 변경. 공유용 보기에 경로·계정명·호스트명 0(정규식), 인쇄 1쪽 | GAP-341·346 / IS-132·133 | QA-194·178 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/app src/features/brief`<br>V-FE · V-RD |
+| T-228 | 읽기 표면(미리보기·문서·원본) | `frontend/src/features/viewer/views/DocumentView.tsx`, `frontend/src/features/viewer/views/SourceView.tsx`, `frontend/src/features/viewer/reading.css`(신규) | T-061 | 4 | **동작** 본문 15px/행간 1.7·최대 72자(넓은 뷰어에서 가운데 정렬), 적중어 배경 + 밑줄, 현재 적중 테두리, `n`/`Shift+n` 이동과 `n/N`(뷰어에 포커스가 있을 때만)<br>**수용** C2 txt·pdf·docx에서 계산된 스타일 15px·1.7·≤72자. 적중 이동 동작. 200% 확대에서 가로 스크롤 0 | GAP-338 / IS-129 | QA-192 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/viewer`<br>V-FE · V-RD |
+| T-229 | 읽음 표시 | `frontend/src/features/review/seenStore.ts`(신규), `frontend/src/features/grid/gridRowState.ts`(신규) | T-083 | 3 | **동작** 한 번 연 항목은 주 열 굵기 500 → 400. 브라우저 저장소에 처리별로 기억(최대 5만 키, 넘으면 오래된 것부터 버림)<br>**수용** 연 항목 굵기 변화, 새로 고침 뒤 유지, 서버 쓰기 0·케이스 DB 변화 0 | GAP-339 / IS-130 | QA-193 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/review src/features/grid`<br>V-FE · V-RD |
+| T-231 | 뷰어를 열어도 내비 유지(1280~1599)·880 버튼 겹침 | `frontend/src/shell/Layout.tsx` | T-075 | 3 | **동작** 1600 미만에서 뷰어를 열 때 내비를 접지 않고 목록을 3열(판단·주 열·시각)로. 880의 "뷰어 열기" 버튼이 마지막 행을 가리지 않게<br>**수용** 1280·1440에서 뷰어 열림 + 내비 보임 + 목록 3열. 880에서 버튼과 마지막 행 겹침 0. 기존 `viewerPane`·`treePane` 테스트 갱신(삭제 0) | GAP-084·350 / IS-016·103 | QA-042·094 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/shell`<br>V-FE · V-RD |
+| T-232 | 일괄 막대 정리 | `frontend/src/features/grid/BatchBar.tsx` | T-221 | 2 | **동작** 판단 4 + 태그 + 메모 + 해제. 그리드 바닥에 붙어 행을 가리지 않음. 100건 초과만 사전 확인<br>**수용** 동작 7개, 마지막 행 가림 0, 101건 선택 시 확인 1회·100건은 0회 | GAP-101·113 / IS-044 | QA-064 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/grid`<br>V-FE · V-RD |
+
+### WF-8 — 화면: 셸·브리핑·내비·목록·뷰어·검색·검토·시간순·AI (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-230 | 구절 인용 복사 | `frontend/src/features/viewer/passageCitation.ts`(신규), `frontend/src/features/viewer/commands.ts` | T-172·T-228 | 3 | **동작** 본문 선택 → "인용 복사": 기존 인용 문자열 + 끝에 `구절="…"`(200자 넘으면 앞뒤 100자). `citation.ts`의 기존 함수는 호출만<br>**수용** 기존 인용 스냅샷 12종 불변. 선택 구절이 끝에 `구절="…"`로 붙는다 | GAP-340 / IS-131·015 | QA-192·041 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/viewer src/contracts`<br>V-FE · V-RD |
+| T-233 | 다른 사람의 표시 알림 | `frontend/src/features/review/remoteChanges.ts`(신규), `frontend/src/features/review/RemoteChangeNotice.tsx`(신규) | T-131 | 3 | **동작** 30초마다 검토 건수만 비교(가벼운 GET). 다르면 목록 위 "다른 사람이 n건을 표시했습니다 — 새로 고침". 자동 갱신 없음, 숨은 탭에서는 멈춤<br>**수용** 다른 브라우저의 표시 3건 뒤 30초 안에 한 줄. 화면 자동 변경 0. 유휴 요청 ≤2회/분 | GAP-345 / IS-137·082 | QA-197·101 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/review`<br>V-FE · V-RD |
+| T-234 | 타임라인 열 정리·기본 최근순 | `frontend/src/features/grid/columns/timeline.ts` | T-100 | 2 | **동작** "요약" 중복 열 제거, "SI/FN" 풀이(예: "생성(파일 이름 속성)"), 기본 정렬 최근순<br>**수용** 전체 타임라인 첫 행이 가장 최근. 내용이 같은 열 0, "SI"·"FN" 약어 0 | GAP-348·115 / IS-047·048·020 | QA-200·070 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/grid`<br>V-FE · V-RD |
+| T-235 | "AI로 나간 것" 보기 | `frontend/src/features/ai/AiOutbound.tsx`(신규), `frontend/src/features/ai/aiOutboundModel.ts`(신규) | T-102 | 4 | **동작** 사용자 메시지 + 붙여넣기 + 읽기·첨부 파일 접촉 + 업로드 후보를 시간순 한 목록으로, 추정 행에 "추정" 칩<br>**수용** C6 카나리아 전부가 이 목록에 보인다(T-200 뒤; 그 전에는 C4 건수 일치). 추정 행 구분. 목록 건수 = 개요 첫 칸 건수 | GAP-331 / IS-052·163 | QA-166 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/ai`<br>V-FE · V-RD |
+| T-236 | 세션 요약 카드(LLM 없음) | `frontend/src/features/ai/AiSessionSummary.tsx`(신규) | T-102 | 3 | **동작** 첫 사용자 요청, 기간, 메시지·도구 호출 수, 도구 호출 상위 5, 건드린 파일 상위 10, 파괴적 호출, 절단·상한 표시. 문장은 틀 고정(생성 없음)<br>**수용** 수치가 세션 행 카운터와 일치. 같은 입력 2회 렌더 = 같은 글자. 네트워크 요청 0 | GAP-334·118 / IS-166 | QA-169 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/ai`<br>V-FE · V-RD |
+| T-237 | AI 수집 범위·한계 패널 + 서비스 내보내기 요청 안내 | `frontend/src/features/ai/AiCoverage.tsx`(신규) | T-102 | 3 | **동작** 어댑터별 깊이·검증 상태, 예산 미수집, 본문 수집 여부, 서버 측 증거 안내, 제공자·회사 관리자에게 무엇을 요청할지(법령 조항은 쓰지 않는다)<br>**수용** 수치 = 갭 엔드포인트·사이드카. 0건 런에서도 표시. `schema-not-validated`가 화면에 그대로 | GAP-333·119 / IS-054·164 | QA-163·166·073 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/ai`<br>V-FE · V-RD |
+
+### WF-9 — 화면: 셸·브리핑·내비·목록·뷰어·검색·검토·시간순·AI (3)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-238 | 질의 도우미(결정적): 한국어 조건 칩 → 검색 문법 | `frontend/src/features/search/QueryHelper.tsx`(신규), `frontend/src/features/search/queryHelperModel.ts`(신규) | T-093 | 3 | **동작** 칩(기간·종류·언어·제외어·개체)을 고르면 검색 문법을 만들고 **만든 질의를 그대로 보여 준다**. 생성 모델 없음<br>**수용** 칩 조합 10종 → 문법 문자열 스냅샷 10. 만든 질의가 입력창에 보이고 고칠 수 있다 | GAP-106·334 / IS-036·166 | QA-063·169 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/search`<br>V-FE · V-RD |
+| T-239 | 복구본 내용 상태 문장(뷰어) | `frontend/src/features/viewer/RecoveredNotice.tsx`(신규) | T-059·T-086 | 2 | **동작** `content_state`가 `zero-filled`·`empty`면 탭 자리에 "내용을 복구하지 못했습니다(0으로 채워짐)" + 대안 하나, `high-entropy`면 "다른 데이터로 덮였을 수 있습니다"<br>**수용** C2 삭제 복구본 400개 표본에서 NUL 글리프 화면 0, 상태 문장 표시 = `content_state` 분포 | GAP-041 / IS-023·024 | QA-026·046 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/viewer`<br>V-FE · V-RD |
+| T-346 | 사람 테스트 1차(T1 중심): 분석 담당 3·변호사 2 **[D2]** | 관찰 기록(Git 밖), 건수 요약 `docs/research/r8-wave-F-results.md` | T-073·T-077 | 4 | **동작** 브리핑(공유용 보기 포함)을 60초 본 뒤 6문항, 과제 T1의 조작 수·시간·막힌 곳 발화 기록. 사람을 못 구하면 "사용자 미검증"으로 기록하고 IS-001은 "미검증"으로 둔다<br>**수용** 5명 중 4명이 6문항에 답한다. 미달이면 GAP 등록 후 재계획 | GAP-166·071 / IS-001·121 | QA-034 | 운영자(사람) → 확인 Sonnet | —(사람 관찰: 기록 양식은 부록 E.9)<br>V-DOC · V-RD |
+
+### WG-1 — 보고서 (5)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-105 | 보고서 미리보기 API(절 구조 JSON) | `rapidtriage/api/app/report_preview.py`(신규), `rapidtriage/api/app/routes_reports.py`(등록만) | T-027·T-030 | 4 | 미리보기 구조 = 내보낸 파일 제목 구조(테스트), 절 선택·순서·의견·범위<br>상세: 부록 H 카드 | GAP-120·124 / IS-056 | QA-076 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-107 | 제출 전 점검 계산 | `rapidtriage/api/app/report_checks.py`(신규) | T-025·T-023 | 3 | 7항목(무결성·사건 번호·담당자·메모 없음·모순·제한·가림 수)<br>〔v3〕 v3: 점검에 "원값 열람 n건"·"검색이 일부 결과였음"<br>상세: 부록 H 카드 | GAP-123·112·174·311 / IS-062·045 | QA-080·068·182 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-108 | PDF 한글 글꼴 포함·줄바꿈·실제 표·A4 〔v3: 판형〕 | `rapidtriage/core/report_pdf.py`(신규: `case_report.py:640-700` PDF 부분 분리 — 이 묶음에서 `case_report.py`의 1단계 주인), 글꼴 자산(Pretendard 서브셋, 라이선스 OFL 고지 포함) | T-027 | 4 | v2 수용 + MediaBox A4(595×842), 여백 위 30·아래 25·좌우 25 mm<br>상세: 부록 H 카드 | GAP-023·122·303 / IS-061·136 | QA-079·198 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-110 | 내보내기 이력·파일 해시·알림 한 줄 | `frontend/src/features/case/ReportDialog.tsx`, `frontend/src/features/case/WriteConfirm.tsx` | T-029 | 3 | 이력에 해시 앞 8자·복사, 알림 한 줄 + 폴더 열기, "확인 중" 고착 0 | GAP-123·125·188 / IS-063·065 | QA-082·077 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-240 | 보고서 판 보존(`exports/<시각>/`) | `rapidtriage/api/app/report_exports.py`(신규), `tests/test_report_exports.py` | T-029·T-030 | 3 | **동작** 내보낼 때마다 `exports/<오프셋 포함 시각>/`에 사본, 감사에 파일 SHA-256. 고정 경로는 "최신"으로 유지. 호출은 코디네이터가 `routes_reports.py`에 장착<br>**수용** 3회 내보내기 → 폴더 3개·감사 3건(파일 해시 포함)·고정 경로 = 최신 | GAP-301·188 / IS-141·063 | QA-188 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_report_exports`<br>V-PY · V-RD |
+
+### WG-2 — 보고서 (4)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-106 | 보고서 화면(구성·종이·점검) | `frontend/src/features/report/*`(신규), `frontend/src/api/reports.ts` | T-105·T-068 | 4 | 부록 C (8), 0건 빈 상태, 주 버튼 1<br>〔v3〕 v3: 1280에서 점검은 종이 위 접이식 띠<br>상세: 부록 H 카드 | GAP-120·121·123 / IS-056·057·062 | QA-075·077·080·119 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-109 | 보고서 프로파일·머리글/바닥글·AI 절 전 템플릿·DOCX 실제 표 | `rapidtriage/core/report_profiles.py`(신규), `rapidtriage/core/case_report.py`(템플릿 데이터 `:279-283`·DOCX 생성부 — T-108이 끝난 뒤, F.6: W8 2단계) | T-027·T-108 | 4 | 3프로파일, 기밀 문구 반복, `korean-expert`·`hash-only`에 AI 절<br>〔v3〕 v3: AI 절에 검사관이 태그한 AI 증거 인용 포함 | GAP-124·304·330 / IS-056·058·136·138 | QA-074·078·114·168 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-241 | 내보내기 이력을 감사 이력에서 읽기 | `frontend/src/features/case/exports.ts`, `frontend/src/features/stages/ReviewReportStage.tsx`(ReportPage 이력 블록만) | T-240·T-110 | 3 | **동작** 세션 상태가 아니라 케이스 DB·누적 감사에서 이력을 읽는다<br>**수용** 새 세션에서 과거 내보내기 3건이 보인다. "이 세션에서 내보낸 파일이 없습니다" 0회 | GAP-347 / IS-141 | QA-188 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/case src/features/stages`<br>V-FE · V-RD |
+| T-245 | 부분 검색에서 만든 묶음·보고서에 한계 기록 `[확인: 저장 위치 — T-096과 같은 결정]` | `frontend/src/features/review/sets/partialNote.ts`(신규), `rapidtriage/api/app/report_scope_notes.py`(신규) | T-096·T-057·T-107 | 3 | **동작** 묶음을 만들 때 검색 응답의 `partial`을 묶음 메타에 저장. 묶음 머리와 보고서 "처리 범위와 한계"에 "검색이 일부 결과였음"<br>**수용** 부분 결과 검색으로 만든 묶음 머리와 보고서 1절에 문장 1개씩. 완전 결과면 0 | GAP-312 / IS-149 | QA-185 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_report_scope_notes`<br>V-PY · V-FE · V-RD |
+
+### WG-3 — 보고서 (3)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-242 | 산출물을 처리 › 산출물 탭으로 | `frontend/src/features/grid/columns/outputs.tsx`, `frontend/src/features/stages/RunPlanTable.tsx` | T-081·T-106 | 2 | **동작** JSON 52건 목록은 `report/outputs` 주소에 그대로 두고 처리 화면 "산출물" 탭에서 연다. 보고서 화면 본문에는 두지 않는다<br>**수용** `report/outputs` 주소가 산출물 탭을 연다(딥링크 불변). 보고서 본문에 JSON 목록 0 | GAP-120 / IS-056·015 | QA-199·041 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/stages src/features/grid`<br>V-FE · V-RD |
+| T-243 | 보고서 문서 규격(표지·목차·번호·별지·머리/바닥) | `rapidtriage/core/report_layout.py`(신규), `tests/test_report_layout.py` | T-109·T-108 | 4 | **동작** 표지 → 목차 → 1. 처리 범위와 한계 → 2. 대상 → 3. 확인된 사항(`확인 n`) → 4. 검토 의견 → 별지(`별지 n`: 증거 목록·해시, 처리 이력, 용어). 머리: 사건 번호·문서 등급. 바닥: `n / N쪽`·생성 시각(오프셋)·도구 버전. Word는 맑은 고딕 지정<br>**수용** 구성 요소 7개 전부 존재(텍스트 추출 검사). 미리보기 번호 = 파일 번호. 영문 절 제목 0, 세로선 문자 표 0 | GAP-344·124 / IS-136·056 | QA-198·076 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_report_layout`<br>V-PY · V-RD |
+| T-244 | 보고서·번들 가림과 프로파일별 경로 표기 | `rapidtriage/core/report_redaction.py`(신규), `tests/test_report_redaction.py` | T-109 | 4 | **동작** 제출용 프로파일: 증거 안 상대 경로만·메모와 스니펫의 비밀값·개체 원값 가림 + 말미 고지. 내부용: 경로 둘 다. 가림은 `[가림:종류]` 표식<br>**수용** 제출용 산출물에서 분석 PC 절대 경로·계정명 0, 가짜 비밀 20개 원문 0. 내부용은 둘 다 표시 | GAP-304·299 / IS-053·128·136 | QA-178·014 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_report_redaction`<br>V-PY · V-RD |
+
+### WH-1 — AX 완성·수렴·정리 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-062 | `Chip`·`CountBadge` | `frontend/src/components/ui/Chip.tsx`·`CountBadge.tsx`·css·테스트(신규 폴더) | T-061 | 4 | 6종 kind, 색+모양+글자, 줄임 규칙·접근성 이름<br>〔v3〕 수렴은 마지막 물결(D70)<br>상세: 부록 H 카드 | GAP-137 / IS-107 | QA-095·098 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-064 | `Dialog`(포커스 규칙·위험·폭 3종) | `frontend/src/components/ui/Dialog.tsx`(신규)·테스트 | T-061 | 4 | 트랩·기본 포커스·복귀, 단계 전환에도 위치 고정<br>상세: 부록 H 카드 | GAP-137·129 / IS-094·107 | QA-086 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-065 | `Button`·`Checkbox`·`Radio`·`Switch`·`Tabs` | `frontend/src/components/ui/controls/*`(신규) | T-061 | 4 | 4변형, 점선 0, 타깃 ≥28, 부모 선택자에 덮이지 않음<br>상세: 부록 H 카드 | GAP-137·133·139 / IS-107·109 | QA-093·095 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-067 | `Menu` 단일화(행·뷰어·카드) | `frontend/src/components/ui/Menu.tsx`(신규), `frontend/src/components/MenuButton.tsx`(위임) | T-014·T-090 | 4 | 세 메뉴가 한 구현, 타입어헤드, 항목 ≥24px<br>상세: 부록 H 카드 | GAP-137 / IS-107 | QA-049 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-088 | 트리 단일 구현 | `frontend/src/components/ui/Tree.tsx`(신규), `frontend/src/features/explorers/ExplorerTree.tsx`(위임) | T-015 | 4 | 탐색기 트리가 공용 구현 사용, 동작 불변<br>상세: 부록 H 카드 | GAP-137 / IS-107 | QA-052 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-111 | 핵심 6명령 봉투·`--json`(case·run·run-control·search·timeline·files) 〔v3 재정의: `_envelope`〕 | `rapidtriage/cli/runops.py`, `rapidtriage/cli/analyze.py`, `rapidtriage/cli/parsers/run.py` | T-159·T-160 | 4 | 6명령 `--json` 동작, 표준 출력 JSON 파싱 6/6, 기존 최상위 키 집합 불변 + `_envelope` 1키. 없는 처리 경로 → `_envelope.errors[0].code="RUN_NOT_FOUND"`, 표준 오류 ≤200바이트. `evidence <없는 경로>` 종료 ≠0<br>〔v3〕 89명령 한 과제는 불가능 → T-246·247·249로 분리<br>상세: 부록 H 카드 | GAP-145·195·231·232·233 / IS-112 | QA-103·116·146 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+
+### WH-2 — AX 완성·수렴·정리 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-113 | OpenAPI 본작업 1/6: runs 라우터 〔v3: 라우터 파일별 6과제〕 | `rapidtriage/api/app/routes_runs.py`의 데코레이터 인자만 | T-163 | 4 | runs 라우터 연산 전부 태그·한국어 `summary`·`description`·`operation_id`(사람이 정한 이름)·2xx 응답 모델·공통 오류 모델 선언. T-163 기준선 갱신<br>〔v3〕 나머지 5개는 T-250~254 | GAP-146·242 / IS-113 | QA-103 | 코디네이터 Opus 단독(순차) → 검증 Sonnet → 리뷰 Fable | V-PY · V-RD |
+| T-115 | 저장 키 정리 〔v3 축소: 일괄 이관 안 함〕 | `frontend/src/state/storageMigration.ts`(신규), `frontend/src/features/review/BaselineHistogram.tsx` | — | 2 | `histBaseline.<runId>` 누적 정리(가장 최근 20개만). 새 키만 `rapidtriage.v3.*`. 옛 키는 읽기만(그 기능을 고칠 때 옮김). `localStorage` 토큰 폴백 제거 확인 | GAP-153 / IS-120 | QA-104 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-116 | 코드 분할(전문가 화면 지연 로드) | `frontend/vite.config.ts`, `frontend/src/app/ViewSwitch.tsx`의 import 지점, `frontend/src/app/lazyViews.ts`(신규) | T-089 | 4 | 첫 화면 JS ≤1.0 MB, 번들 예산 게이트<br>〔v3〕 v3: 번들 예산을 1.0 MB로 내린다(T-156 기준선 갱신) | GAP-064·224 / IS-080·172 | QA-101·154 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-FE · V-RD |
+| T-117 | 옛 컴포넌트·옛 토큰·임시 파일 삭제, 용어 lint 오류 승격 | 옛 `StatusChip`·`ToneChip`·`Badge`·`GridEmpty`·`ViewState`·`CardEmpty`·`Modal` 등, `frontend/rt-shot*.mjs`, CI 설정 | WE~WG 전부 | 4 | v2 수용에서 "용어 lint 오류 승격"은 금지어 8개만. 옛 컴포넌트는 새 화면이 대체하고 실데이터 QA가 닫힌 것만 삭제 | GAP-137·150·130 / IS-107·117·096 | QA-098·104 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-RD |
+| T-118 | 콘솔 S3 45건·P 계열 전수 재확인과 잔여 수정 | (Sonnet이 재확인 표 작성 → 잔여만 Opus가 파일별 소과제로) | WF | 4 | C-xx·P1~P8 각각 "해소/잔여" 표, 잔여 0 | GAP-142·102 / IS-096·100 | QA-091·094·053 | 실행·검증 Sonnet → 묶음 리뷰 Fable | V-RD |
+| T-119 | 에이전트 안내 문서 확정·known-limitations 정합 〔v3: 초안은 T-158〕 | `docs/agent-guide.md`(신규), `docs/rapidtriage-known-limitations.md` | T-111·T-158 | 3 | T-158 초안을 `_envelope`·`commands --json`·오류 코드표 기준으로 갱신. 문서의 명령 15개 이상을 실제 실행해 종료 0(스크립트). known-limitations에 남는 위험(다중 사용자 인증·케이스 DB 암호화·DB 내 감사 사슬·MCP 미제공) 기재 | GAP-148·119·165·185·187·241 / IS-115·171 | QA-116·147 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-DOC · V-RD |
+
+### WH-3 — AX 완성·수렴·정리 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-246 | 수집·이미지·케이스 묶음 봉투 | `rapidtriage/cli/collect.py`, `rapidtriage/cli/scan.py`, `rapidtriage/cli/case.py` | T-160 | 4 | **동작** 해당 명령 전부 `emit`·`fail` 경유<br>**수용** 세 파일에서 `print(json.dumps(` 0. 기존 최상위 키 집합 불변(스냅샷) | GAP-234·145 / IS-112 | QA-148·103 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_cli_snapshot`<br>V-PY · V-RD |
+| T-247 | 나머지 묶음 봉투 + 출력 예산 | `rapidtriage/cli/kakao.py`, `rapidtriage/cli/readiness.py`, `rapidtriage/cli/validation.py`, `rapidtriage/cli/benchmark.py` | T-160 | 4 | **동작** `emit` 경유 + 기본 출력 32 KB 초과 시 목록을 자르고 `_envelope.truncated=true`와 전체 파일 경로. `--full`은 이전 동작<br>**수용** 저장소 전체 `print(json.dumps(` 0. 기본 출력 32 KB 초과 0(`keyword-packs`·`enterprise-policy` 포함), `--full`은 이전과 바이트 동일 | GAP-234·240 / IS-112·169 | QA-149·148 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_cli_snapshot`<br>V-PY · V-RD |
+| T-248 | `commands --json` | `rapidtriage/cli/commands.py`(신규), `rapidtriage/cli/parsers/meta.py` | T-159 | 3 | **동작** argparse에서 생성: 명령마다 이름·묶음·한국어 요약·읽기/쓰기 구분·`--json` 여부·인자 수<br>**수용** 89 + 신규 명령 전부 나열. 20 KB 이하 | GAP-148·240 / IS-169 | QA-149·148 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m rapidtriage commands --json`<br>V-PY · V-RD |
+| T-250 | OpenAPI 본작업 2/6: cases·case_db | `rapidtriage/api/app/routes_cases.py`·`routes_case_db.py`의 데코레이터 인자만 | T-113 | 4 | **동작** 태그·한국어 `summary`·`description`·`operation_id`·2xx 응답 모델·공통 오류 모델<br>**수용** 두 라우터 연산 100%. T-163 기준선 갱신 | GAP-146·242 / IS-113 | QA-103 | 코디네이터 Opus 단독(순차) → 검증 Sonnet → 리뷰 Fable | `python -m unittest tests.test_openapi_quality`<br>V-PY · V-RD |
+| T-255 | 환경 변수 등록표 + 검사 + 문서 | `rapidtriage/core/settings.py`(신규), `tests/test_env_registry.py`, `docs/env-vars.md` | — | 4 | **동작** 등록표(이름·형·기본값·한국어 설명·범위). "등록 안 된 `RAPIDTRIAGE_*`를 읽으면 실패" 검사. 토큰 변수 2개는 하나를 별칭으로. 읽는 코드 45파일은 한 번에 옮기지 않는다<br>**수용** 59개 전부 등록. 미등록 이름을 읽는 코드 추가 시 실패. 문서 미설명 19 → 0 | GAP-222 / IS-172 | QA-154 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_env_registry`<br>V-PY · V-DOC · V-RD |
+| T-256 | `ops` 테스트 분할(내용 불변) | `tests/test_rapidtriage_ops.py` → 4파일 | — | 3 | **동작** 한 클래스 8,369줄을 4파일로<br>**수용** 테스트 88건 그대로. 가장 느린 파일 120초 이하 | GAP-217 / IS-119 | QA-151 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python scripts/dev/run-tests.py --tier slow`<br>V-PY · V-RD |
+
+### WH-4 — AX 완성·수렴·정리 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-141 | 〔2차 신규〕 CLI 예시 100%·`dev`/`qa` 도움말 그룹·쓰기 명령 `--dry-run` | `rapidtriage/cli/parser.py`(epilog·그룹), 쓰기 명령 출력부 | T-247 | 4 | 예시 없는 36명령 0, `--help` 첫 화면에 핵심 20명령 이하(검증·벤치 약 35개는 `dev`·`qa` 그룹), 쓰기 명령(파일을 만드는 명령) 전부 `--dry-run`(쓸 경로만 출력, 파일 0) | GAP-145 / IS-112·098 | QA-103 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-249 | 종료 코드 이행(2 → 1·4) | `rapidtriage/cli/output.py`(종료 코드 표), 해당 테스트 | T-111·T-246·T-247 | 4 | **동작** `SystemExit(2)`를 단언하는 테스트 수를 먼저 세고, 표와 다른 곳만 고친다. 0 성공 / 1 실패 / 2 사용법 / 3 부분 성공 / 4 대상 없음<br>**수용** 종료 코드 표 5행 × 대표 명령 3개 = 15칸 일치. 사용법 전문은 진짜 사용법 오류(종료 2)일 때만 | GAP-232·233 / IS-112 | QA-146 | 코디네이터 Opus 단독(순차) → 검증 Sonnet → 리뷰 Fable | `python -m unittest tests.test_cli_exit_codes`<br>V-PY · V-RD |
+| T-251 | OpenAPI 본작업 3/6: reports·review_tools | `rapidtriage/api/app/routes_reports.py`·`routes_review_tools.py`의 데코레이터 인자만 | T-250 | 4 | **동작** 같음<br>**수용** 두 라우터 연산 100% | GAP-146·242 / IS-113 | QA-103 | 코디네이터 Opus 단독(순차) → 검증 Sonnet → 리뷰 Fable | `python -m unittest tests.test_openapi_quality`<br>V-PY · V-RD |
+| T-258 | 읽기 조회를 GET으로(저장 검색 목록) `[확인: API 추가]` | `frontend/src/api/caseDb.ts`(`:42-44`), `rapidtriage/api/app/routes_case_db.py`(GET 별칭 추가만) | T-250 | 2 | **동작** `POST /api/case-db/saved-searches/list`와 같은 내용을 GET으로도 제공하고 프런트는 GET을 쓴다. POST는 유지(호환)<br>**수용** 화면 로드 중 비-GET 요청 0(읽기 전용 순회 QA-011) | GAP-244 / IS-066 | QA-011·108 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_rapidtriage_api`<br>V-PY · V-FE · V-RD |
+| T-259 | 조작 대상 24px | `frontend/src/features/grid/grid.css`, `frontend/src/features/tree/tree.css` | T-015 | 3 | **동작** 체크박스·행 메뉴·트리 토글의 조작 영역을 24×24 이상으로(주요 조작 28)<br>**수용** 전 화면 DOM 측정에서 24 미만 0. 보고 화면 73% → 0% | GAP-132·343 / IS-101·135 | QA-196·093 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npm run e2e -- e2e/r8/target-size.spec.ts`<br>V-FE · V-RD |
+| T-260 | 고대비·동작 줄이기·확대 | `frontend/src/tokens/a11y.css`(신규; import는 코디네이터) | T-061 | 3 | **동작** `forced-colors: active`에서 포커스·선택·판단 표식, `prefers-reduced-motion`에서 회전·전환 정지(실행 중은 글자로)<br>**수용** 고대비 스크린샷에서 3요소 식별. 동작 줄이기에서 애니메이션 0. 200%·배율 150%에서 가로 스크롤 0·겹침 0 | GAP-343 / IS-135 | QA-196 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npm run e2e -- e2e/r8/a11y-modes.spec.ts`<br>V-FE · V-RD |
+
+### WH-5 — AX 완성·수렴·정리 (5)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-142 | CLI 한국어 도움말: 핵심 12명령 〔v3 축소〕 | `rapidtriage/cli/help_ko.py`(신규: 명령·옵션 설명 사전), `rapidtriage/cli/parser.py`(사전 적용 훅 — T-141 뒤) | T-141 | 4 | 최상위 `--help`가 핵심 12개를 한국어 한 줄 + 영문 병기로 보이고 나머지는 `help --all`의 6묶음. 핵심 12명령의 인자 약 120개 설명 한국어. 명령 이름·인자 불변(89명령 `--help` 종료 0)<br>〔v3〕 인자 654개 전부 번역은 하지 않는다 | GAP-145·235 / IS-098 | QA-103 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-252 | OpenAPI 본작업 4/6: search·search_index | `rapidtriage/api/app/routes_search.py`·`routes_search_index.py`의 데코레이터 인자만 | T-251 | 3 | **동작** 같음<br>**수용** 두 라우터 연산 100% | GAP-146·242 / IS-113 | QA-103 | 코디네이터 Opus 단독(순차) → 검증 Sonnet → 리뷰 Fable | `python -m unittest tests.test_openapi_quality`<br>V-PY · V-RD |
+| T-261 | 그리드 Tab 정지·가상 그리드 알림 | `frontend/src/features/grid/useGridKeyboard.ts`, `frontend/src/features/grid/gridA11y.ts`(신규) | T-083 | 3 | **동작** 그리드는 한 번의 Tab 정지. 건너뛰기 링크 "목록으로"·"뷰어로". `aria-rowcount`·`aria-rowindex`, 건수 변화는 `aria-live=polite`로 한 번<br>**수용** 첫 행까지 Tab ≤12(전 화면). `aria-rowcount` = 총건수(미확정 -1) | GAP-132·143·343 / IS-100·104·135 | QA-196·091·099 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/grid`<br>V-FE · V-RD |
+| T-262 | 옛 트리를 범주 내비 컴포넌트로 흡수 | `frontend/src/features/tree/EvidenceTree.tsx`, `frontend/src/features/nav/ExpertItems.tsx`(신규) | T-077·T-088 | 4 | **동작** "전문가 항목"이 범주 내비와 같은 컴포넌트로 그려진다(기한: R9 말 — 이번에는 흡수 1단계)<br>**수용** 노드 id·순서·딥링크 불변(377노드 순회 전후 동일). 트리 구현 수 3 → 2 | GAP-137·080 / IS-107·012 | QA-020·052 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npx vitest run src/features/tree src/features/nav`<br>V-FE · V-RD |
+| T-263 | e2e 문구 사전 전환(나머지 10스펙) | `frontend/e2e/*.spec.ts` 중 T-157의 3개를 뺀 10개 | T-157·T-117 | 4 | **동작** 한글 리터럴을 `copy.ts` 키로, 접근성 이름 계약분만 남긴다<br>**수용** e2e 한글 리터럴 185 → 40 이하, CSS 클래스 선택자 0, `waitForTimeout` 0. 통과 수 변화 없음 | GAP-223 / IS-173 | QA-155 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `cd frontend && npm run e2e`<br>V-E2E · V-RD |
+
+### WH-6 — AX 완성·수렴·정리 (1)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-253 | OpenAPI 본작업 5/6: media·explorers·families | `rapidtriage/api/app/routes_media.py`·`routes_explorers.py`·`routes_families.py`의 데코레이터 인자만 | T-252 | 4 | **동작** 같음<br>**수용** 세 라우터 연산 100% | GAP-146·242 / IS-113 | QA-103 | 코디네이터 Opus 단독(순차) → 검증 Sonnet → 리뷰 Fable | `python -m unittest tests.test_openapi_quality`<br>V-PY · V-RD |
+
+### WH-7 — AX 완성·수렴·정리 (1)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-254 | OpenAPI 본작업 6/6: meta·ioc·flags·derived·analyses + 버전 문자열 | `rapidtriage/api/app/routes_meta.py`·`routes_ioc.py`·`routes_flags.py`·`routes_derived.py`·`routes_analyses.py`의 데코레이터 인자만, `rapidtriage/api/app/factory.py`(버전 `:110`만) | T-253 | 4 | **동작** 같음 + 버전은 `rapidtriage.__version__`에서<br>**수용** 전체 태그 165/165·설명 165/165, 태그 12종 이하 | GAP-146·242 / IS-113 | QA-103 | 코디네이터 Opus 단독(순차) → 검증 Sonnet → 리뷰 Fable | `python -m unittest tests.test_openapi_quality`<br>V-PY · V-RD |
+
+### WH-8 — AX 완성·수렴·정리 (3)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-114 | 미호출 라우트 정리 | `docs/api-surface.md`(신규: 자동화용 문서화), 죽은 8개 제거는 **T-113 뒤 단독** | T-254 | 3 | 45개 각각 "자동화용/삭제/콘솔 연결" 판정, 삭제분 스냅샷 반영 | GAP-147 / IS-114 | QA-103 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-DOC · V-RD |
+| T-140 | 〔2차 신규〕 OpenAPI 빈 200 응답 스키마 36개 | `rapidtriage/api/app/models.py`(응답 모델 추가), `routes_*.py`의 `response_model=` 인자만 | T-254 | 4 | 빈 200 스키마 0, 응답 본문 불변(기존 API 계약 테스트 `tests/test_rapidtriage_api_contract.py` 통과 — 모델은 `extra="allow"`로 필드 누락·추가를 막지 않는다) | GAP-146 / IS-113 | QA-103 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-257 | ASGI 진입점 분리(import 부작용 제거) `[확인]` | `rapidtriage/api/app/asgi.py`(신규), `rapidtriage/api/app/factory.py`(`:253` 모듈 수준 `app` 제거) | T-254 | 2 | **동작** `app = create_app()`를 `asgi.py`로 옮겨 서버로 띄울 때만 실행<br>**수용** `import rapidtriage.api.app.factory`만으로 토큰 파일·저장소 생성 0. uvicorn 기동 정상 | GAP-221 / IS-172 | QA-154 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -c "import rapidtriage.api.app.factory"`<br>V-PY · V-RD |
+
+### WH-9 — AX 완성·수렴·정리 (1)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-264 | v1 콘솔 삭제·루트 정리 **[D58]** | `rapidtriage/web/static/*.js`(v1 40파일), `rapidtriage/api/app/factory.py`(`/legacy` 마운트 `:231-240`), 루트의 무관 스크립트 6개, `frontend/rt-shot*.mjs`, `pyproject.toml`(키워드) | T-257·T-117 | 3 | **동작** `/legacy` 제공 중단과 파일 삭제, CI의 v1 문법 검사 단계 제거, 루트 잡동사니 이동·삭제<br>**수용** `/legacy` 404. 추적 파일 40개 감소. 패키지 키워드가 제품과 일치 | GAP-226·227 / IS-120 | QA-104 | 코디네이터 Opus 단독(순차) → 검증 Sonnet → 리뷰 Fable | `git ls-files rapidtriage/web/static`<br>V-PY · V-RD |
+
+### WP1-1 — 엔진 1차: 목록·시각·삭제·무결성 [승인] (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-125 | 매체 해시 재계산·취득 해시 대조 **[승인 D34b]** 〔v3: 기록된 해시 읽기는 T-181로 분리〕 | `rapidtriage/core/e01_hash.py`, `rapidtriage/api/app/case_workspace.py`, `rapidtriage/core/case_db/intake.py`(상태값 추가) | T-181 | 4 | 디코드 스트림 해시(별도 핸들), 청크 체크섬 오류 수, 상태값 `verified`/`mismatch`/`no-embedded-hash`. C1·C2에서 일치, 변조 세트에서 불일치 + 오류 수, 세그먼트 누락은 사유. 첫 브리핑을 늦추지 않는다(병행) | GAP-007·008·168·248 / IS-069·003 | QA-007·008·127 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-265 | inventory 1: `$MFT` → 레코드 표 **[승인 D6·D44]** | `rapidtriage/core/ntfs_inventory.py`(신규), `tests/test_ntfs_inventory.py` | T-038 | 4 | **동작** 레코드 번호·순번·부모·이름들·플래그·크기·resident·시각 8종, 수정 배열 적용, attribute list 따라가기<br>**수용** IMG-B 953,344 레코드 ≤120 s, `ils` 대비 ≥99.5%, 합성 테스트 | GAP-262·246 / IS-154·151·084 | QA-125·122 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_ntfs_inventory`<br>V-PY · V-RD |
+| T-268 | 메타파일 덤프(`$LogFile`·`$UsnJrnl:$J`·`$Boot`·`$Bitmap`·`$Secure:$SDS`) **[승인]** | `rapidtriage/core/e01_native_system.py`(신규), `tests/test_e01_native_system.py` | T-038 | 4 | **동작** `$J`는 앞쪽 희소 구간을 건너뛴다. 추출 트리에 이중 복사하지 않는다<br>**수용** IMG-B에서 5종 크기·해시 기록, `icat` 대비 해시 일치 | GAP-256·263·280 / IS-154 | QA-136 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_e01_native_system`<br>V-PY · V-RD |
+| T-270 | 추출 통계 분리·읽기 실패 목록 **[승인]** | `rapidtriage/core/e01_native.py`(통계·오류 기록부) | T-038 | 3 | **동작** 순회 잘림/삭제 잘림/하드링크 건너뜀을 따로 센다. 읽기 실패 목록 사이드카(경로·레코드·사유)<br>**수용** IMG-B 재현 시 `walk_truncated=0`, 실패 2,175건 사유 분류. T-023의 `basis`가 `measured`로 | GAP-026·027·254 / IS-085·157 | QA-018·138 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_e01_native_stats`<br>V-PY · V-RD |
+| T-276 | 처리 전/후 증거 상태 기록 **[승인]** | `rapidtriage/core/evidence_state.py`(신규), `rapidtriage/core/run/hooks_evidence.py`(신규; `run/__init__.py`의 시작·종료 훅 호출 2줄은 코디네이터) | — | 4 | **동작** 처리 시작·종료 때 증거 파일 목록·크기·mtime_ns를 결과 폴더에 기록, 요약에 `evidence_state: unchanged/changed`. 해시는 사건 화면의 해시 결과를 참조<br>**수용** 처리 중 증거 파일 mtime을 바꾸면 `changed` + 처리 문제에 표시. 정상 처리는 `unchanged` | GAP-292 / IS-150·067 | QA-171·121 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_evidence_state`<br>V-PY · V-RD |
+| T-277 | 처리 요약에 버전·환경 **[승인]** | `rapidtriage/core/run/summary.py` | — | 2 | **동작** `tool`: 버전·빌드 식별자(가능하면 커밋)·카탈로그/규칙 버전·Python·OS·호스트·계정·시간대. 기존 키 불변<br>**수용** 요약에 `tool` 9필드. 기존 스키마 테스트 통과(추가만) | GAP-293 / IS-150·059 | QA-009·115 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_rapidtriage_schemas`<br>V-PY · V-RD |
+
+### WP1-2 — 엔진 1차: 목록·시각·삭제·무결성 [승인] (4)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-266 | inventory 2: 전체 경로 복원·하드링크 묶음·ADS **[승인]** | `rapidtriage/core/ntfs_inventory_paths.py`(신규), `tests/test_ntfs_inventory_paths.py` | T-265 | 4 | **동작** 부모 참조를 따라 경로 복원(부모 재사용 판정 → "경로 불확실"), 하드링크 묶음, ADS 이름과 resident ADS 내용(Zone.Identifier), 삭제 디렉터리 포함<br>**수용** `fls -rp` 대비 경로 일치 ≥99.5%, ADS 65개 전부, 삭제 디렉터리 273,406 목록화 | GAP-245·247·252·160·266 / IS-152·153 | QA-124·126 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_ntfs_inventory_paths`<br>V-PY · V-RD |
+| T-267 | inventory 저장소·질의 **[승인: 스키마]** | `rapidtriage/core/inventory_store.py`(신규), `tests/test_inventory_store.py` | T-265 | 4 | **동작** SQLite, 패턴 조회, 스키마 버전. 파일 목록·삭제 목록·침묵 실패 대상·범위(네 축)의 단일 진실<br>**수용** 100만 행 적재 ≤60 s, 패턴 조회 ≤50 ms | GAP-280·245 / IS-084·152 | QA-122 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_inventory_store`<br>V-PY · V-RD |
+| T-269 | 삭제 내용 판정(`$Bitmap` + `content_state`) **[승인 D45]** | `rapidtriage/core/ntfs_deleted.py`(신규, `ntfs_unalloc.py` 재사용), `tests/test_ntfs_deleted.py` | T-185·T-268 | 4 | **동작** 클러스터 상태 판정 → 비할당이면 읽고 0 채움·엔트로피·서명 검사 → `recoverable`/`zero-filled`/`overwritten-likely`/`partially`, resident는 `resident-intact`<br>**수용** C5 삭제 복구 세트 정답과 일치, IMG-B 표본 판정표 | GAP-245·041 / IS-152 | QA-124 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_ntfs_deleted`<br>V-PY · V-RD |
+| T-278 | 인수 기록 5칸(백엔드) **[승인 D29]** | `rapidtriage/core/case_db/intake.py`, `rapidtriage/api/app/routes_cases.py`(증거 행 필드만) | — | 4 | **동작** 증거 행에 인수 일시·인계자·인수자·매체 식별(일련번호/봉인)·취득 도구. 기존 `custody.py`·`acquisition.py`의 함수를 연결(새 스키마는 최소)<br>**수용** 5필드 저장·조회 왕복. 빈 값 허용. 보고서 메타데이터 `received_at` 등으로 전달 | GAP-305 / IS-147 | QA-189 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_case_intake_custody`<br>V-PY · V-RD |
+
+### WP1-3 — 엔진 1차: 목록·시각·삭제·무결성 [승인] (2)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-271 | 삭제 처리 전환(목록 100%·내용은 판정 뒤) **[승인 D45]** | `rapidtriage/core/e01_native.py`(삭제 sweep) | T-270·T-269·T-266 | 4 | **동작** 내용 덤프 기본 끔. resident는 MFT에서, non-resident는 판정이 `recoverable`일 때만(별도 상한)<br>**수용** 삭제 목록 100%, 0 채움 복구본 0, 삭제가 할당 상한을 공유하지 않음 | GAP-245·028 / IS-152·085 | QA-124·123 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_e01_native_deleted`<br>V-PY · V-RD |
+| T-279 | 인수 기록 5칸(증거 폼·감정서) **[승인 D29]** | `frontend/src/features/case/EvidenceCustodyFields.tsx`(신규), `rapidtriage/core/korean_report.py`(2장 인수 줄만) | T-278·T-026 | 4 | **동작** 증거 추가·편집 폼에 5칸(선택 입력). 감정서 2장에 출력, 비면 "미기재"<br>**수용** 입력 5칸 → 감정서 2장에 5줄. 비운 사건은 "미기재" 5줄 | GAP-305·295 / IS-147·139 | QA-189·175 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_korean_report && cd frontend && npx vitest run src/features/case`<br>V-PY · V-FE · V-RD |
+
+### WP1-4 — 엔진 1차: 목록·시각·삭제·무결성 [승인] (1)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-272 | 하드링크 한 번만 쓰기·못 쓰는 이름 처리 **[승인]** | `rapidtriage/core/e01_native.py`(쓰기 경로) | T-271 | 4 | **동작** 전역 레코드 집합 + 별칭 사이드카. 예약 장치명·대소문자 충돌·긴 경로 처리<br>**수용** 사본 수 = 사용 중 파일 수 ±1%. 가짜 레코드 테스트(CON·`a`/`A`·300자)에서 덮어쓰기·장치 쓰기 0 | GAP-252·253 / IS-153 | QA-126 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_e01_native_names`<br>V-PY · V-RD |
+
+### WP1-5 — 엔진 1차: 목록·시각·삭제·무결성 [승인] (1)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-273 | 진행률·취소·크기 상한 정책·쓰면서 해시 **[승인]** | `rapidtriage/core/e01_native.py`(추출 루프) | T-272 | 4 | **동작** 진행률 콜백·취소 지점, 크기 상한 정책(페이지 파일 등은 목록만), 쓰면서 MD5·SHA-256·앞 64바이트 기록<br>**수용** 진행률 1% 단위, 취소 5초 안, 해시가 `icat` 표본 100개와 일치 | GAP-258·255·267 / IS-156·154 | QA-132·143 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_e01_native_progress`<br>V-PY · V-RD |
+
+### WP1-6 — 엔진 1차: 목록·시각·삭제·무결성 [승인] (1)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-274 | 네이티브 결과 배선: 시각·다중 파티션·사유 문구 **[승인]** | `rapidtriage/core/e01.py`(네이티브 결과 처리부) | T-273·T-266 | 4 | **동작** 목록 사이드카를 파일 단계가 읽게(`files.py:2435` 경로 재사용), 다중 파티션 순회 또는 "n개 중 m개" 기록, BitLocker·비NTFS 한국어 사유, 설명·경고문 정정(하드코딩 200,000·`tsk_recover` 문서 복사)<br>**수용** 파일 목록 시각 = `istat` 표본 200. C5 비정상 세트에서 사유 문구 4종. 영문 경고 0 | GAP-246·249·250·260 / IS-151·156 | QA-125·128 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_e01_native_wiring`<br>V-PY · V-RD |
+
+### WP1-7 — 엔진 1차: 목록·시각·삭제·무결성 [승인] (1)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-275 | 네이티브 이어서 실행 **[승인]** | `rapidtriage/core/e01.py`(체크포인트) | T-274 | 4 | **동작** 체크포인트 판정 수정, 5,000파일 재해시 대신 통계 지문, 중단 지점부터 재개. `resume_ready`는 실제로 될 때만 참<br>**수용** 추출 중 강제 종료 → 재실행 시 이미 쓴 파일 재복사 0 | GAP-257·259 / IS-156 | QA-131 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_e01_native_resume`<br>V-PY · V-RD |
+
+### WP2-1 — 엔진 2차: 선별 추출·우선순위·병렬 [승인] (2)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-280 | 추출 정책 표(YAML) + 평가기 | `rapidtriage/core/extract_policy.py`(신규), `rapidtriage/core/extract_policy.yaml`(신규), `tests/test_extract_policy.py` | T-267 | 4 | **동작** 경로 계열 → 패스(P2/P3/P4)·내용(복사/해시만/목록만). 페이지 파일·최대 절전 파일은 목록 + 크기만<br>**수용** IMG-B inventory 모의 실행: P2 ≤6 GB. 수집기 31종의 대상 패턴 전부 P2·P3에 포함(테스트) | GAP-255·277 / IS-084 | QA-129 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_extract_policy`<br>V-PY · V-RD |
+| T-282 | 필요 시 꺼내기(inventory 레코드 → 바이트 스트림) | `rapidtriage/core/evidence_reader.py`(신규), `tests/test_evidence_reader.py` | T-267 | 4 | **동작** 복사하지 않은 파일을 레코드 번호로 이미지에서 바로 읽는다. 증거 연결이 없으면 "원본 연결 필요" 상태<br>**수용** 복사 안 한 파일 100개의 해시 = `icat` | GAP-278 / IS-084 | QA-139 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_evidence_reader`<br>V-PY · V-RD |
+
+### WP2-2 — 엔진 2차: 선별 추출·우선순위·병렬 [승인] (3)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-281 | 정책에 따른 추출(레코드 순 정렬) | `rapidtriage/core/e01_native.py`(추출 대상 선택부) | T-273·T-280 | 4 | **동작** 정책 표가 고른 것만 레코드 순으로 추출<br>**수용** IMG-B: P2 ≤600 s, 출력 ≤12 GB, 수집기 행 수 전/후 동일(시스템 영역 서명 제외) | GAP-251·277·278 / IS-084 | QA-129 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_e01_native_policy`<br>V-PY · V-RD |
+| T-283 | 뷰어·미리보기 배선 **[승인: API 동작]** | `rapidtriage/api/app/previews.py` | T-282·T-059 | 3 | **동작** 복사 안 한 파일의 원본·헥스 탭이 `evidence_reader`로 동작. 증거 없으면 "원본 연결 필요"<br>**수용** 복사 안 한 파일 20개의 원본·헥스 탭 동작. 증거 분리 시 상태 문장 | GAP-278 / IS-084·024 | QA-139 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_previews_on_demand`<br>V-PY · V-RD |
+| T-287 | `run cleanup`(캐시 정리) | `rapidtriage/cli/run_cleanup.py`(신규) | T-282·T-159 | 3 | **동작** 추출 캐시 정리. 증거 경로와 겹치면 거부. `--dry-run`<br>**수용** 정리 후 출력 ≤10 GB, 뷰어는 T-282로 동작. 증거 경로 지정 시 종료 ≠0 | GAP-278 / IS-160 | QA-133·139 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_run_cleanup`<br>V-PY · V-RD |
+
+### WP2-3 — 엔진 2차: 선별 추출·우선순위·병렬 [승인] (2)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-284 | 병렬 추출 워커(프로세스별 핸들) — T-120 결과가 2배 이상일 때만 | `rapidtriage/core/e01_parallel.py`(신규), `tests/test_e01_parallel.py` | T-281·T-120 | 4 | **동작** 워커 프로세스마다 pyewf 핸들, MFT 레코드 순으로 작업 분할<br>**수용** 처리량 ≥60 MB/s(목표 150), 결과 해시 동일. T-120이 2배 미만이면 "미착수 — 사유" 기록으로 닫는다 | GAP-251 / IS-084 | QA-129 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_e01_parallel`<br>V-PY · V-RD |
+| T-285 | 단계 순서: Tier 1 수집기 그룹을 우선 추출 직후에 | `rapidtriage/core/run/plan.py` | T-281 | 4 | **동작** Tier 1 그룹 → 브리핑 가능 표시 → 나머지<br>**수용** IMG-B 첫 브리핑 ≤15분 | GAP-277 / IS-084·009 | QA-129 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_run_plan_priority`<br>V-PY · V-RD |
+
+### WP2-4 — 엔진 2차: 선별 추출·우선순위·병렬 [승인] (1)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-286 | 2차 그룹·백그라운드 연결 | `rapidtriage/core/run/stage_groups.py`(신규; `run/__init__.py` 호출은 코디네이터) | T-285 | 4 | **동작** 나머지 수집기·색인을 브리핑 뒤에 이어서. 중간 열람 중 오류 0<br>**수용** 전체 ≤120분, 중간 열람 중 콘솔 오류 0 | GAP-277 / IS-084 | QA-129 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_run_stage_groups`<br>V-PY · V-RD |
+
+### WP3-1 — 수집기 품질 [승인] (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-122 | 서명 불일치: 추출 때 기록한 서명 재사용·복구본 제외·정렬 제거 **[승인 D6·D33]** | `rapidtriage/artifacts/windows/filesystem.py`, `rapidtriage/core/files.py`(`content_state` 기록) | T-273 | 4 | 3,508 s → ≤120 s, 삭제 복구본·`content_state` 불량 잡음 0, 실제 위장 표본 10건 검출 10/10. 전체 경로 정렬(`filesystem.py:823`) 제거 | GAP-040·041·068 / IS-022·023·084 | QA-025·026·140 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-123 | 레지스트리 키 트리 분리 저장 | `rapidtriage/artifacts/windows/registry.py` 출력부 | D10 | 4 | 1,391 s → ≤400 s, 탐색기 동작 동일(QA-052) | GAP-068 / IS-084 | QA-052·100 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-124 | 침묵 실패 재작성 **[승인 D6a]** 〔v3: 범위 확대〕 | `rapidtriage/core/silent_failure.py` | T-267 | 4 | 대상은 inventory 질의, 수집기 31종, 유형별 기대(대상 → 유형), 정확한 경로 규칙, 한국어. IMG-B: 대상 수 = inventory 질의, 브라우저(방문 6)·카카오톡(메시지 0)·메일(메시지 0)의 부분 실패 검출, 정상 런 거짓 경보 0 | GAP-030·269·270·273 / IS-087 | QA-030·134 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-126 | PST/OST 프로세스 내 읽기 1/3: 선택 구성 요소·없음 사유 **[승인 D8]** | `rapidtriage/artifacts/email_external.py` | — | 4 | 구성 요소가 없으면 0건 사유 `tool_missing`, 있으면 프로세스 내 읽기 경로로. 외부 프로그램 호출 0<br>〔v3〕 2/3·3/3은 T-309·310. 단계 상태 매핑(`failed_isolated`→부분)은 T-021이 표시 계층에서 이미 처리 | GAP-157 / IS-006 | QA-047·019·070 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | V-PY · V-RD |
+| T-288 | MFT 행을 inventory에서(상한 폐지) | `rapidtriage/artifacts/windows/filesystem_meta.py`(신규) | T-267 | 4 | **동작** `mft-record` 행을 inventory에서 만든다. `$LogFile`은 "부분" 표시 유지<br>**수용** MFT 100%(5,012 → 953,344 기준 표본 대조) | GAP-262·264 / IS-154 | QA-136 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_filesystem_meta`<br>V-PY · V-RD |
+| T-291 | 느린 수집기 수정: email | `rapidtriage/artifacts/email.py` | T-197 | 3 | **동작** T-197 프로파일 결과대로 전체 순회·대용량 훑기를 줄인다<br>**수용** ≤60 s, 행 전/후 동일 | GAP-275 / IS-084 | QA-129 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_rapidtriage_email`<br>V-PY · V-RD |
+
+### WP3-2 — 수집기 품질 [승인] (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-289 | USN 전량 스트리밍 → 타임라인 | `rapidtriage/artifacts/windows/usn_stream.py`(신규), `rapidtriage/core/timeline.py`(매핑 추가만) | T-268·T-288 | 4 | **동작** `$J` 전량 스트리밍(상한 폐지), 삭제·이름 변경을 타임라인에<br>**수용** USN ≥99%(대조 스크립트), 대본 삭제·이름 변경 60건의 시각 일치 | GAP-263·115 / IS-154·048 | QA-124·136 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_usn_stream`<br>V-PY · V-RD |
+| T-290 | 파일 해시 전수·0 채움 그룹 분리 | `rapidtriage/core/files.py`(해시·중복 구간) | T-273 | 4 | **동작** 추출 시 계산한 해시 사용, 0 채움 그룹은 중복 통계에서 분리<br>**수용** 해시 있는 목록 행 ≥99%. 해시 집합 대조가 전 파일 대상. 0 채움 그룹 분리 | GAP-267·176 / IS-154·148 | QA-143·186 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_rapidtriage_files`<br>V-PY · V-RD |
+| T-292 | 느린 수집기 수정: kakaotalk_windows | `rapidtriage/artifacts/kakaotalk_windows.py` | T-197 | 3 | **동작** 같음(256 MiB 훑기 원인 확인)<br>**수용** ≤60 s, 행 전/후 동일 | GAP-275 / IS-084 | QA-129 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_kakaotalk_windows`<br>V-PY · V-RD |
+| T-293 | 느린 수집기 수정: shellbags | `rapidtriage/artifacts/windows/shellbags.py` | T-197 | 3 | **동작** 같음<br>**수용** ≤60 s, 행 전/후 동일 | GAP-275 / IS-084 | QA-129 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_windows_shellbags`<br>V-PY · V-RD |
+| T-294 | 느린 수집기 수정: os_account | `rapidtriage/artifacts/windows/os_account.py` | T-197 | 3 | **동작** 같음<br>**수용** ≤60 s, 행 전/후 동일 | GAP-275 / IS-084 | QA-129 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_windows_os_account`<br>V-PY · V-RD |
+| T-295 | 느린 수집기 수정: memory | `rapidtriage/artifacts/memory.py` | T-197 | 3 | **동작** 같음<br>**수용** ≤60 s, 행 전/후 동일 | GAP-275 / IS-084 | QA-129 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_memory`<br>V-PY · V-RD |
+
+### WP3-3 — 수집기 품질 [승인] (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-296 | 느린 수집기 수정: cloud | `rapidtriage/artifacts/cloud.py` | T-197 | 3 | **동작** 같음<br>**수용** ≤60 s, 행 전/후 동일 | GAP-275 / IS-084 | QA-129 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_cloud`<br>V-PY · V-RD |
+| T-297 | 미디어: 읽기 실패 조기 판정·예외 추적 요약 | `rapidtriage/artifacts/media.py`, `rapidtriage/artifacts/synthetic_media.py` | — | 4 | **동작** 머리 바이트로 읽기 실패를 먼저 판정, 예외 추적을 건수 요약으로<br>**수용** 1,192 s → ≤400 s, stderr ≤50 KB, 로그에 추출 경로 전체 0 | GAP-276 / IS-084·074 | QA-129·013 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_media`<br>V-PY · V-RD |
+| T-298 | CPU 무거운 수집기 프로세스 실행 스파이크 | `scripts/collector-process-spike.py`(신규) | T-122·T-123 | 4 | **동작** 레지스트리·이벤트 로그·미디어·서명을 프로세스 워커로 돌렸을 때의 벽시계(격리 모듈 재사용)<br>**수용** 스레드 대비 배수 표. 1.5배 미만이면 T-299는 "미착수 — 사유" | GAP-274 / IS-084 | —(측정 과제: T-299 착수 판단) | 실행·검증 Sonnet → 묶음 리뷰 Fable | `python scripts/collector-process-spike.py --json`<br>V-PY |
+| T-300 | 실행 모드가 Tier 1을 빼지 않게 **[승인 D46]** | `rapidtriage/core/run/profiles.py`(모드별 수집기 목록) | — | 2 | **동작** 복구 모드 수집기 목록 = 전체. 모드는 키워드·우선순위·프리셋만 바꾼다<br>**수용** 복구 모드에서 브라우저·실행·시스템 행 > 0. 4개 모드의 Tier 1 유형 행 수 동일 | GAP-279·037 / IS-155 | QA-135 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_run_profiles`<br>V-PY · V-RD |
+| T-301 | 상한 고지: 카카오톡 공유 사진 | `rapidtriage/artifacts/kakaotalk_messages.py`(상한 기록부) | T-165 | 2 | **동작** 상한 도달 시 `*_truncated`·`*_total` 기록<br>**수용** 상한을 넘기는 픽스처에서 두 키 기록 + 처리 문제 한국어 줄 | GAP-272 / IS-157 | QA-138 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python scripts/check-collector-caps.py --json`<br>V-PY · V-RD |
+| T-302 | 상한 고지: 카카오톡 앱 DB | `rapidtriage/artifacts/kakaotalk_windows.py`(상한 기록부) | T-165·T-292 | 2 | **동작** 같음<br>**수용** 같음 | GAP-272 / IS-157 | QA-138 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python scripts/check-collector-caps.py --json`<br>V-PY · V-RD |
+
+### WP3-4 — 수집기 품질 [승인] (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-299 | CPU 무거운 수집기 프로세스 실행 적용 | `rapidtriage/core/run/scheduler.py`(신규 또는 기존) | T-298 | 4 | **동작** 스파이크가 통과한 수집기만 프로세스 워커로<br>**수용** 수집 구간 벽시계 ≤900 s(T-122·123 뒤), 행 전/후 동일 | GAP-274 / IS-084 | QA-129 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_run_scheduler`<br>V-PY · V-RD |
+| T-303 | 상한 고지: 메일 컨테이너 | `rapidtriage/artifacts/email.py`(상한 기록부) | T-165·T-291 | 2 | **동작** 같음<br>**수용** 같음 | GAP-272 / IS-157 | QA-138 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python scripts/check-collector-caps.py --json`<br>V-PY · V-RD |
+| T-304 | 상한 고지: 클라우드 아카이브·mbox | `rapidtriage/artifacts/cloud.py`(상한 기록부) | T-165·T-296 | 2 | **동작** 같음<br>**수용** 같음 | GAP-272 / IS-157 | QA-138 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python scripts/check-collector-caps.py --json`<br>V-PY · V-RD |
+| T-305 | 상한 고지: ShimCache | `rapidtriage/artifacts/windows/execution.py`(상한 기록부) | T-165 | 2 | **동작** 같음<br>**수용** 같음 | GAP-272 / IS-157 | QA-138 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python scripts/check-collector-caps.py --json`<br>V-PY · V-RD |
+| T-306 | 상한 고지: ETL | `rapidtriage/artifacts/windows/eventlog.py`(상한 기록부) | T-165 | 2 | **동작** 같음<br>**수용** 같음 | GAP-272 / IS-157 | QA-138 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python scripts/check-collector-caps.py --json`<br>V-PY · V-RD |
+| T-307 | 상한 고지: 메모리 덤프 | `rapidtriage/artifacts/memory.py`(상한 기록부) | T-165·T-295 | 2 | **동작** 같음<br>**수용** 같음. 이 과제 뒤 무고지 상한 0 | GAP-272·286 / IS-157 | QA-138 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python scripts/check-collector-caps.py --json`<br>V-PY · V-RD |
+
+### WP3-5 — 수집기 품질 [승인] (5)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-308 | 비할당 영역 파일 카빙·훑은 % 기록 | `rapidtriage/core/carving.py` | T-268 | 4 | **동작** `ntfs_unalloc`의 비할당 run 위에서 카빙, 훑은 바이트 % 기록(범위의 넷째 축)<br>**수용** C5 카빙 세트 재현율 표, IMG-B 훑은 바이트 %가 `scope.unallocated`에 | GAP-265 / IS-152·004 | QA-144 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python scripts/carve-known-answer.py --output-dir <dir> --extract --json`<br>V-PY · V-RD |
+| T-309 | PST/OST 프로세스 내 읽기 2/3: 메시지·첨부 **[승인 D8]** | `rapidtriage/artifacts/email_pst.py` | T-126 | 4 | **동작** 프로세스 내 라이브러리로 메시지·첨부 메타<br>**수용** C5 공개 메일함에서 메시지·첨부 수 ≥99% | GAP-157 / IS-006 | QA-047·136 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_email_pst`<br>V-PY · V-RD |
+| T-311 | OCR 제공자 추상화(Tesseract 한국어 / Windows 내장) | `rapidtriage/core/ocr_queue.py` | T-194 | 4 | **동작** 제공자 인터페이스 뒤에 두 구현. 없으면 0건 사유 `tool_missing`<br>**수용** 대본 이미지 10장 중 8장의 한국어 문장 검색. 도구 없음 상태에서 사유 | GAP-283 / IS-089·006 | QA-142·088 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_ocr_queue`<br>V-PY · V-RD |
+| T-312 | 볼륨 섀도 네이티브 열거(수·시각만) | `rapidtriage/core/vsc.py` | — | 4 | **동작** 스냅샷 수·시각 열거. 내용 비교는 다음 계획<br>**수용** 골든 VM 스냅샷 2개 = 2줄. 0개면 사유 | GAP-268 / IS-123 | QA-024 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_vsc`<br>V-PY · V-RD |
+| T-342 | 엔진 물결 뒤 C2 재처리·성능·범위 재측정 | 처리 로그·시간표·대조 보고서(Git 밖), 건수 요약 `docs/research/r8-engine-results.md` | T-275·T-286·T-290·T-124 | 4 | **동작** C2를 새 엔진으로 한 번 재처리하고 T0~T3·메모리·출력 크기·네 축 범위·`fls`/`ils` 대조·수집기 행 전/후 비교<br>**수용** QA-129의 통과선(또는 T-120 확정값) 판정, 할당 목록 누락 ≤0.5%, 삭제 목록 ≥99%, 증거 전/후 스냅샷 동일 | GAP-068·288 / IS-084 | QA-129·121·122 | 실행·검증 Sonnet → 묶음 리뷰 Fable | `python scripts/perf-processing-gate.py && python scripts/fls-coverage-diff.py`<br>V-DOC · V-RD |
+
+### WP3-6 — 수집기 품질 [승인] (2)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-310 | PST/OST 프로세스 내 읽기 3/3: 타임라인·이메일 탭 연결 **[승인 D8]** | `rapidtriage/artifacts/email_pst_rows.py`(신규) | T-309 | 4 | **동작** 메시지 행을 타임라인·뷰어 이메일 탭에 연결<br>**수용** 뷰어 이메일 탭(머리글·본문·첨부)이 C5·C3에서 열린다 | GAP-157·049 / IS-006·024 | QA-047 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_email_pst_rows`<br>V-PY · V-RD |
+| T-344 | 손상 입력·비정상 이미지·도구 없음 처리 확인(C5) | 처리 로그·요약(Git 밖), 건수 요약 `docs/research/r8-engine-results.md` | T-274·T-311·T-199 | 4 | **동작** C5의 깨진 하이브·evtx·SQLite·PST·zip 폭탄과 BitLocker·exFAT·다중 파티션·4Kn 이미지를 처리하고, Tesseract·메일 구성 요소를 뺀 환경에서도 처리<br>**수용** 프로세스 생존, 해당 수집기만 "부분", 한국어 사유 4종, `tool_missing` 사유, 다른 단계 영향 0 | GAP-250·283 / IS-156·157·093 | QA-128·141·142 | 실행·검증 Sonnet → 묶음 리뷰 Fable | `python -m rapidtriage run --help`(절차는 QA-128·141·142)<br>V-DOC · V-RD |
+
+### WP3-7 — 수집기 품질 [승인] (1)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-345 | 규모 측정: R8 기준선(120만 파일)·1 TB 합성 볼륨 | 시간표(Git 밖), 건수 요약 `docs/research/r8-engine-results.md` | T-342 | 4 | **동작** 새 엔진으로 R8 기준선 일반 처리와 1 TB 합성 볼륨 처리(야간 무인)<br>**수용** 할당 목록 100%, 잘림이 있으면 "부분" + 축별 건수. T1 ≤25분·T3 ≤12시간·메모리 ≤12 GB(또는 T-120 확정값) | GAP-288·026 / IS-084·085 | QA-123·130 | 실행·검증 Sonnet → 묶음 리뷰 Fable | `python scripts/perf-processing-gate.py --corpus R8`<br>V-DOC · V-RD |
+
+### WP4-1 — 한국 인벤토리 수집기 [승인] (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-313 | 카카오톡 PC 메타(대화방 DB 목록·받은 파일·사유 코드) | `rapidtriage/artifacts/kakaotalk_meta.py`(신규), `tests/test_kakaotalk_meta.py` | T-343 | 4 | **동작** 사용자 폴더별 대화방 DB 파일 수·크기·마지막 수정, 받은 파일 폴더의 파일명 시각 패턴, 로그인 계정 후보, 복호 불가 사유 코드. 복호 시도 없음<br>**수용** 정답표의 대화방 수·마지막 시각 일치. 메시지 복호 시도 0(테스트로 보장) | GAP-281·158 / IS-159·006 | QA-137 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_kakaotalk_meta`<br>V-PY · V-RD |
+| T-314 | 공동인증서 인벤토리(주체 정보 기본 가림, 개인키 미독) | `rapidtriage/artifacts/korea/npki.py`(신규), `tests/test_korea_npki.py` | T-343 | 4 | **동작** 사용자 프로필·프로그램 폴더·이동식 매체 루트의 인증서 폴더: 주체·발급 기관·유효 기간·일련번호. 개인키 파일은 존재·크기·시각만. 이동식 경로면 USB 범주에 연결<br>**수용** 테스트 인증서 2개 = 2행. 개인키 파일 내용 읽기 0(`open()` 감시 테스트). 주체 정보는 화면 기본 가림 | GAP-159 / IS-159 | QA-137 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_korea_npki`<br>V-PY · V-RD |
+| T-315 | 한컴 최근 문서·자동 저장·HWP 플래그 | `rapidtriage/artifacts/korea/hancom.py`(신규), `tests/test_korea_hancom.py` | T-343 | 4 | **동작** 레지스트리 최근 문서 목록(버전별 키), 자동 저장·임시 파일 위치, HWP 머리의 암호·배포용·DRM 플래그. 경로·형식은 VM 실측 뒤 구현<br>**수용** 대본 문서 5개 = 5행. 암호·배포용 표본 식별 | GAP-159 / IS-159 | QA-137 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_korea_hancom`<br>V-PY · V-RD |
+| T-316 | 협업 도구 6종 인벤토리 | `rapidtriage/artifacts/korea/collab_inventory.py`(신규), `tests/test_korea_collab.py` | T-343 | 4 | **동작** 설치 여부, 사용자 데이터 폴더, 캐시·DB 파일 수와 크기, 마지막 사용 시각, 로그인 계정 후보. 대화 파싱은 하지 않는다<br>**수용** 설치한 앱 수 = 행 수. 미설치는 0건 사유 | GAP-159 / IS-159 | QA-137 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_korea_collab`<br>V-PY · V-RD |
+| T-317 | 압축 도구 최근 목록 | `rapidtriage/artifacts/korea/archivers.py`(신규), `tests/test_korea_archivers.py` | T-343 | 3 | **동작** 압축 도구의 최근 파일 목록(레지스트리·설정 파일) → "반출 전 압축" 정황<br>**수용** 대본의 압축 3건 = 3행 | GAP-159 / IS-159 | QA-137 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_korea_archivers`<br>V-PY · V-RD |
+| T-318 | 보안 제품 존재 인벤토리(DRM·DLP·백신) | `rapidtriage/artifacts/korea/security_agents.py`(신규), `tests/test_korea_security_agents.py` | T-343 | 4 | **동작** 문서 암호화·반출 통제·백신 에이전트 설치·로그 폴더 존재. "문서가 암호화돼 본문을 읽지 못함" 사유의 근거<br>**수용** 대본에 설치한 제품 수 = 행 수. 암호화 문서 0건 카드에 사유 연결 | GAP-282 / IS-159·006 | QA-137·023 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_korea_security_agents`<br>V-PY · V-RD |
+
+### WP4-2 — 한국 인벤토리 수집기 [승인] (1)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-319 | 한국 수집기 등록·카탈로그·0건 사유 연결 | `rapidtriage/artifacts/__init__.py`, 카탈로그 YAML(분류 키) | T-313·T-314·T-315·T-316·T-317·T-318·T-045 | 3 | **동작** 6종을 등록하고 범주(메신저·반출 경로·문서·계정)에 분류. 0건 사유 신호 연결<br>**수용** 범주 내비에 표시, 미분류 0(검증기), 0건 사유 6종 동작 | GAP-159 / IS-159·019 | QA-137·020 | 코디네이터 Opus 단독(순차) → 검증 Sonnet → 리뷰 Fable | `python scripts/check-ai-catalog.py && python -m unittest tests.test_artifact_registry`<br>V-PY · V-RD |
+
+### WP5-1 — AI 수집 깊이 [승인] (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-320 | AI 출처 파일 원장 | `rapidtriage/artifacts/ai_agents/source_ledger.py`(신규), `tests/test_ai_source_ledger.py` | — | 4 | **동작** 행이 가리키는 출처 파일마다 크기·mtime·sha256을 `rapidtriage-ai-agent-sources.json`에. 1 GB 초과 DB는 `ai_hash_dbs`일 때만(죽은 옵션을 살린다). 자격 증명 파일은 원장 제외. `__init__.py` 호출 1줄은 코디네이터<br>**수용** 합성 런에서 세션 행의 `source_path` 100%가 원장에 있음. 원본 mtime 불변. 옵션 끔/켬 차이 테스트 | GAP-318 / IS-161 | QA-159 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_ai_source_ledger`<br>V-PY · V-RD |
+| T-321 | AI 본문 게이트와 원문 해시 | `rapidtriage/artifacts/ai_agents/adapters/_common.py` | — | 4 | **동작** `ai_bodies=false`면 `command`·제목·미리보기·`head_text`·첫 메시지도 비운다(길이만). 메시지·명령에 `text_sha256`(절단 전 원문)·`text_bytes`·레코드 위치<br>**수용** 메타만 런 출력 전체에서 픽스처 본문 문자열 grep 0. 절단 행에 해시. 기존 known-answer 건수 불변 | GAP-317·319 / IS-161 | QA-159·160 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_ai_agents_adapters`<br>V-PY · V-RD |
+| T-322 | AI 간접 행 후처리 등록부 | `rapidtriage/artifacts/ai_agents/run_indirect.py` | — | 3 | **동작** 등록된 후처리 함수를 순서대로 호출(실행 대조·git 트레일러를 등록부로)<br>**수용** 기존 간접 행 건수 불변. `--resume` 중복 0 | GAP-322 / IS-163 | QA-161 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_ai_run_indirect`<br>V-PY · V-RD |
+| T-330 | 어댑터: VS Code Copilot Chat | `rapidtriage/artifacts/ai_agents/adapters/copilot_chat.py`(신규) | T-200 | 4 | **동작** `workspaceStorage/*/chatSessions`·빈 창 세션. C6에 도구가 있어야 `local-verified`<br>**수용** C6 카나리아 프롬프트 회수. 스텁과 중복 행 0 | GAP-332 / IS-163·165 | QA-157 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_ai_adapter_copilot_chat`<br>V-PY · V-RD |
+| T-331 | 어댑터: ChatGPT 데스크톱 | `rapidtriage/artifacts/ai_agents/adapters/chatgpt_desktop.py`(신규) | T-200 | 4 | **동작** 패키지·데이터 폴더, 읽을 수 있는 대화 캐시만. 암호화 저장은 "읽을 수 없음" 사유<br>**수용** C6에서 세션 메타 또는 명시적 사유 행. 추정 파싱 0 | GAP-332 / IS-163 | QA-157 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_ai_adapter_chatgpt_desktop`<br>V-PY · V-RD |
+| T-332 | 어댑터: Cursor 첨부 컨텍스트 | `rapidtriage/artifacts/ai_agents/adapters/cursor.py` | T-200 | 4 | **동작** 첨부 컨텍스트 → 파일 접촉 `op=attached`, 도구 입력 키 보강<br>**수용** C6에서 첨부 카나리아 파일 회수. 도구 호출 대비 파일 접촉 비율 보고 | GAP-322 / IS-163 | QA-157·161 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_ai_adapter_cursor`<br>V-PY · V-RD |
+
+### WP5-2 — AI 수집 깊이 [승인] (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-323 | AI 계정 식별자 보존 **[승인 D48]** | `rapidtriage/artifacts/ai_agents/redact.py`, `rapidtriage/artifacts/ai_agents/adapters/claude_code.py`(계정 행만), `adapters/gemini_cli.py`, `adapters/claude_swap.py` | T-321 | 4 | **동작** 계정 행에 `account_email`(민감 필드 표시) 추가, 도메인·해시는 유지. API 키·토큰은 계속 비가역<br>**수용** 계정 행에 필드 존재. 경로·로그 줄은 계속 가림. 값 0 정책 테스트 통과 | GAP-320·321 / IS-162 | QA-164 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_ai_redact`<br>V-PY · V-RD |
+| T-325 | AI 파일 접촉 ↔ 증거 파일 | `rapidtriage/artifacts/ai_agents/file_join.py`(신규), `tests/test_ai_file_join.py` | T-322 | 4 | **동작** 원래 PC 경로를 증거 경로로 정규화(드라이브 문자·프로필 루트) → `exists_in_evidence`·`file_locator`·삭제 여부. 추정 경로는 `op_source` 유지<br>**수용** C6에서 카나리아 파일 접촉의 ≥95%가 파일 행으로 연결. 없는 파일은 "증거에 없음" | GAP-322 / IS-163 | QA-161 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_ai_file_join`<br>V-PY · V-RD |
+| T-326 | 웹 AI 대화 목록 | `rapidtriage/artifacts/ai_agents/web_conversations.py`(신규), `rapidtriage/core/ai_catalog/data/chatbots.json`·`docs/ai-tool-catalog/chatbots.json`(URL 틀) | T-322 | 4 | **동작** 브라우저 방문 행의 URL 틀에서 대화 ID·제목(페이지 제목)·첫/마지막 방문·방문 수·프로필 → `ai-web-conversation` 행, `coverage_status=inferred`<br>**수용** 합성 방문 12건 → 대화 5건. 대화 경로가 아닌 방문은 미생성. C6 웹 대화 수 일치 | GAP-332 / IS-163 | QA-161 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_ai_web_conversations`<br>V-PY · V-DOC · V-RD |
+| T-327 | 웹 업로드 후보(추정) | `rapidtriage/artifacts/ai_agents/web_upload_candidates.py`(신규), `tests/test_ai_web_upload.py` | T-322 | 4 | **동작** 브라우저 실행 파일의 열기 대화상자 MRU와 AI 도메인 방문을 시간 창으로 상관 → `ai-web-upload-candidate`(추정, C 상한), 근거 행 2개 인용<br>**수용** C6에서 업로드한 카나리아 파일이 후보로. 업로드 안 한 파일 0 | GAP-332·328 / IS-163 | QA-161 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_ai_web_upload`<br>V-PY · V-RD |
+| T-328 | 브라우저 계정 → AI 계정 | `rapidtriage/artifacts/ai_agents/web_accounts.py`(신규), `tests/test_ai_web_accounts.py` | T-322 | 3 | **동작** `browser-login`(사용자 이름만)·`browser-profile-account` 중 AI 도메인 것을 `ai-account(source=browser)`로<br>**수용** 합성 로그인 2건 → 계정 2건. 비밀번호 필드 0(값 0 테스트). 조직 도메인 규칙 적중 | GAP-321 / IS-162 | QA-164 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_ai_web_accounts`<br>V-PY · V-RD |
+| T-333 | 어댑터: Codex 계정(ID 토큰 클레임 3개만) **[승인 D50]** | `rapidtriage/artifacts/ai_agents/adapters/codex.py` | T-200 | 3 | **동작** 신원 클레임(이메일·플랜·조직)만 읽고 토큰은 저장·해시하지 않는다<br>**수용** 계정 행 1. 출력 전체에 토큰 조각 0(값 0 테스트에 "클레임 3개 외 0" 추가) | GAP-321 / IS-162 | QA-164·158 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_ai_adapter_codex`<br>V-PY · V-RD |
+
+### WP5-3 — AI 수집 깊이 [승인] (5)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-324 | AI 민감 필드 표시 가림 + 해제 감사 | `rapidtriage/api/app/ai_sensitive.py`(신규), `rapidtriage/api/app/entity_reveal.py`(재사용 훅만) | T-323 | 4 | **동작** `sensitive_fields`에 든 값은 목록·검색·보고서에서 가림, 해제는 기존 개체 해제 흐름 재사용<br>**수용** 기본 응답·보고서에 이메일 원문 0. 해제 1건 → 감사 1건. 케이스 DB 없으면 해제 차단 | GAP-320 / IS-162·053 | QA-164·014 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_ai_sensitive`<br>V-PY · V-RD |
+| T-329 | 새 행 유형 3개·유출 규칙 5개 등록 | `rapidtriage/artifacts/ai_agents/base.py`(유형 추가만), `rapidtriage/core/triage_rules/ai.py`, `rapidtriage/core/triage_rules/catalog/ai.yaml`, `rapidtriage/core/artifact_taxonomy.py` | T-325·T-326·T-327·T-328·T-217 | 4 | **동작** 유형 3개 등록. 유출 규칙 5개(문서류 읽기/첨부, 프로젝트 밖 대량 읽기, 큰 붙여넣기, 웹 업로드 후보, 실행 흔적 대비 세션 부재) 전부 `provisional`<br>**수용** 합성 적중/미적중 쌍 5. C6 실측 수치 기재. 추정 근거 규칙은 C 상한 | GAP-328·333 / IS-164·163 | QA-162 | 코디네이터 Opus 단독(순차) → 검증 Sonnet → 리뷰 Fable | `python scripts/check-ai-catalog.py`<br>V-PY · V-RD |
+| T-334 | 어댑터: 로컬 LLM 대화 | `rapidtriage/artifacts/ai_agents/adapters/local_llm_chats.py`(신규) | T-200 | 4 | **동작** 로컬 실행기 기록·대화 JSON·웹 UI DB·스레드. 검증 못 한 것은 `schema-not-validated`<br>**수용** C6 로컬 LLM 2종 카나리아 회수 | GAP-332 / IS-163 | QA-157 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_ai_adapter_local_llm`<br>V-PY · V-RD |
+| T-335 | 어댑터: Claude Code 보강 | `rapidtriage/artifacts/ai_agents/adapters/claude_code.py`(메시지·파일 접촉부) | T-323 | 4 | **동작** 레코드 위치(줄 번호), `Read` 접촉에 "내용이 제공자에게 전달됨" 표시 필드, `file-history` 스냅샷 수<br>**수용** 메시지 행 → 원본 줄 왕복 테스트. C6 건수 일치 | GAP-317·322 / IS-161·163 | QA-159·157 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_ai_adapter_claude_code`<br>V-PY · V-RD |
+| T-336 | E01 처리에서 AI 홈 폴더 경로가 추출 대상에 들게 **[승인]** | `rapidtriage/core/extract_policy.yaml`(AI 경로 계열; T-280 뒤) 또는 현행 추출 대상 목록 | T-201 | 3 | **동작** T-201이 낸 "빠진 경로 목록"을 추출 대상에 넣는다<br>**수용** C6 E01 건수 = 폴더 건수(유형별 차이 0) | GAP-316 / IS-165 | QA-156 | 구현 Opus → 검증 Sonnet → 묶음 리뷰 Fable | `python -m unittest tests.test_extract_policy`<br>V-PY · V-RD |
+
+### WZ-1 — 1:1 최종 검증 (6)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-127 | 전 QA 실데이터 일괄 실행 1/6: 무결성·방어(QA-001~016·106~109·170~189) 〔v3: 6과제로 분리〕 | Sonnet ×6(코퍼스·영역별 분담: ①무결성·방어 001~016·106~109 ②범위·수치 017~032·110 ③브리핑·내비·목록·뷰어 033~056·113 ④검색·검토·시간순·AI 057~074 ⑤보고서·페르소나 075~082·114~119 ⑥오류·접근성·성능·AX 083~105·111·112·120) | — | 4 | 해당 QA 전부에 `result.json`(판정·수치·코퍼스·커밋·시각 + 오프셋)과 증거. `gate.py`의 JSON을 추적표 판정 열에 그대로 넣는다<br>〔v3〕 나머지는 T-337~341 | GAP-046 / IS-121·123 | QA-001~016·106~109·170~189 | 실행·검증 Sonnet → 묶음 리뷰 Fable | V-RD |
+| T-337 | 전 QA 일괄 실행 2/6: 범위·수치·처리(QA-017~032·110·121~144) | `D:\rapid-qa\derived\r8\wz\`(Git 밖) | — | 4 | **동작** 해당 QA 전부 실데이터 실행<br>**수용** 전부 `result.json`과 증거. 승인이 없어 못 한 것은 "미검증 — 사유" | GAP-046 / IS-121·123 | QA-017~032·110·121~144 | 실행·검증 Sonnet → 묶음 리뷰 Fable | `python scripts/r8-trace-audit.py --verdicts`<br>V-RD |
+| T-338 | 전 QA 일괄 실행 3/6: 브리핑·내비·목록·뷰어(QA-033~056·113·190~194) | `D:\rapid-qa\derived\r8\wz\`(Git 밖) | — | 4 | **동작** 같음<br>**수용** 같음 | GAP-046 / IS-121·123 | QA-033~056·113·190~194 | 실행·검증 Sonnet → 묶음 리뷰 Fable | `python scripts/r8-trace-audit.py --verdicts`<br>V-RD |
+| T-339 | 전 QA 일괄 실행 4/6: 검색·검토·시간순·AI(QA-057~074·119·156~169·184~187·197·200) | `D:\rapid-qa\derived\r8\wz\`(Git 밖) | — | 4 | **동작** 같음<br>**수용** 같음 | GAP-046 / IS-121·123 | QA-057~074·119·156~169·184~187·197·200 | 실행·검증 Sonnet → 묶음 리뷰 Fable | `python scripts/r8-trace-audit.py --verdicts`<br>V-RD |
+| T-340 | 전 QA 일괄 실행 5/6: 보고서·오류·빈 상태(QA-075~090·114·115·198·199) | `D:\rapid-qa\derived\r8\wz\`(Git 밖) | — | 4 | **동작** 같음<br>**수용** 같음 | GAP-046 / IS-121·123 | QA-075~090·114·115·198·199 | 실행·검증 Sonnet → 묶음 리뷰 Fable | `python scripts/r8-trace-audit.py --verdicts`<br>V-RD |
+| T-341 | 전 QA 일괄 실행 6/6: 접근성·성능·AX·DX·코퍼스(QA-091~105·111·112·116~118·120·145~155·195·196·201) | `D:\rapid-qa\derived\r8\wz\`(Git 밖) | — | 4 | **동작** 같음<br>**수용** 같음 | GAP-046 / IS-121·123 | QA-091~105·111·112·116~118·120·145~155·195·196·201 | 실행·검증 Sonnet → 묶음 리뷰 Fable | `python scripts/r8-trace-audit.py --verdicts`<br>V-RD |
+
+### WZ-2 — 1:1 최종 검증 (1)
+
+| ID | 제목 | 파일 | 의존 | h | 동작·수용 | GAP/IS | QA | 모델 | 검증 |
+|---|---|---|---|---|---|---|---|---|---|
+| T-128 | 적대적 최종 리뷰와 불일치 재계획 | Fable | T-127 | 4 | IS 125개 각각 "일치/불일치", 불일치는 새 T-xxx로 등록(마스터 9절 루프), 사람 테스트(QA-034) 결과 반영, R7 이월(단계 4·5) 범위 결정 반영 | GAP-164·166 / IS-121 | QA-034 | Fable | V-DOC |
+
+## F.4 폐기·대체한 과제
+
+| ID | v2 제목 | 사유·대체 |
 |---|---|---|
-| `rapidtriage/api/app/runops.py` — T-028(검증 상태)·T-029(감사 입력) | 같은 묶음 W1-c, T-029 파일 목록에 누락 | 감사 입력(케이스 DB 추가)을 T-028로 옮김. T-029는 `core/audit.py`만 |
-| `core/case_db/database.py` — T-029(`tool_version`)·동시성 | T-029 한 과제에 두 일 | 동시성은 T-131(W1-e)로 분리 |
-| `frontend/src/features/dashboard/caseCards.tsx` — T-036(메모)·해시 라벨 | 해시 표시 과제 자체가 없었음 | T-144(W1-d, 메모 블록) → T-129(W1-e, 해시 라벨 맵). 묶음이 달라 직렬 |
-| `rapidtriage/api/app/factory.py` — T-046(라우터 등록)·T-049(gzip) | 같은 묶음 W3-a | 라우터 등록은 코디네이터(F.1 화면 장착 규칙), T-049만 직접 수정 |
-| `rapidtriage/api/app/routes_search_index.py` — T-057·T-060 | T-060 파일 목록에 누락(개체 요약 처리기가 이 파일에 있음) | T-060을 W3-c 2단계로 |
-| `rapidtriage/core/case_report.py` — T-108(PDF 분리)·T-109(템플릿 데이터) | 같은 묶음 W8 | T-109를 2단계로, 이 파일을 금지 구역에 추가 |
-| `rapidtriage/cli/*` — T-111(전체)·T-112(`web.py`) | 같은 묶음 W9-a | T-111에서 `web.py` 제외, `parser.py`는 하위 파서 블록 단위로 분리(금지 구역 추가) |
-| `frontend/src/app/registerSlots.tsx`·`ViewSwitch.tsx`·`IntakePane.tsx` — 새 화면 장착(T-073·076·077·081·082·093·097·099·102·103·106) | 어느 과제의 파일에도 없음 | 금지 구역에 추가 + 코디네이터 장착(F.1). T-073만 `IntakePane.tsx` 직접 |
-| `frontend/src/shell/TopBar.tsx` — T-072(W5-a)·T-081(작업 센터 아이콘, W5-b) | T-081 파일 목록에 누락 | 묶음이 달라 충돌 없음. T-081 카드에 `TopBar.tsx`(아이콘 1개) 추가 |
-| 없는 파일 9개(`cli/vendor.py`, `cli/runops.py`(감사·검증), `app/themeBoot.ts`, `shell/StageRail.tsx`, `shell/ToastRegion.tsx`, `src/stages.ts`, `dashboard/categories.ts`, `views/thumb.css`, `artifacts/email/*`) | 하위 보고서의 경로를 다시 열지 않음 | 실제 경로로 정정(각 행의 〔2차〕) |
+| T-056 | 개체 요약 상한·진행·오류 | v2에서 T-060으로 이동(충돌 해소) |
+| T-121 | 2패스 우선순위 추출·목록화 100%·삭제 sweep 상한 분리 | 과소 추정·누락. T-265~275(목록·시각·삭제)와 T-280~287(선별 추출)로 재분해 |
+
+재정의(번호 유지, 내용 변경)한 v2 과제: T-006, T-023, T-024, T-026, T-032, T-038, T-071, T-072, T-082, T-096, T-111. 물결만 옮긴 과제는 F.6.
+
+## F.5 과제 수 검산·물결별 검증 강도
+
+- 유효 과제 344 = v2 유지·재정의 142 + v3 신규 202. 폐기 2(T-056·121). 번호는 T-001~346.
+- 종류: 구현(Opus) 295 · QA·측정(Sonnet) 25 · 리뷰·결정(Fable) 3 · 운영자 8 · 코디네이터 13.
+- 병합됨·검증 대기(bc6c970): T-025(fix/r8-security), T-030(fix/r8-security), T-031(fix/r8-security), T-032(fix/r8-security), T-145(fix/r8-ci-green), T-146(fix/r8-ci-green), T-177(fix/r8-security). 부분 병합: T-147, T-153.
+- 크기 합계: 1173시간(4시간 초과 과제 0). 묶음당 6개 이하·묶음 안 파일 충돌 0·뒤 물결 의존 0은 생성 스크립트의 검사 결과다(부록 G.4).
+
+| 물결 | 검증자가 남기는 것 | Fable 리뷰가 보는 것 | 코퍼스 |
+|---|---|---|---|
+| WA | 게이트 JSON 3회, CI 실행 기록, 가드 시연 로그 | 테스트 수가 줄지 않았는가, 계약 테스트가 정말 깨지는가 | —(SYN) |
+| WB | 수정 전/후 스크린샷 쌍, 증거 스냅샷, 보고서 파일 | S1 GAP이 각각 닫혔는가, **새 거짓 표시가 생기지 않았는가**(특히 범위 문구) | C1·C2·S |
+| WC | 매니페스트, 대조 보고서, 기준선 건수표 | 진단이 확정됐는가, 새 결함을 GAP으로 옮겼는가, 뒤 물결 재계획 | C1~C6 |
+| WD·WE | API 응답 JSON, 건수 계약 전수표, 브리핑 v0 스크린샷(1280×720) | 숫자 = 링크 = 목록 건수, 0건 사유가 맞는가 | C2·C3-0 |
+| WF | 과제 T1~T4 측정, 화면별 체크리스트, 사람 테스트 기록 | 마스터 2절 시나리오 S-1~S-7을 직접 걷는다 | C2·C3·C4 |
+| WG | 산출 파일·뷰어 3종 스크린샷·감사 파일 | 상대방 감정인 체크리스트(QA-115) | C3(없으면 C2) |
+| WH | 계약 스냅샷 diff, 번들·게이트 수치 | 삭제가 회귀를 만들지 않았는가 | C2 |
+| WP | 전/후 행 비교, 기준 도구 대조, 단계별 시간, 증거 스냅샷 | 복구 정확도가 흔들리지 않았는가(엔지니어링 기준선과 릴리스 증거 분리) | C2·C3·C5·C6·R8 |
+| WZ | 전 QA `result.json`, 추적표 판정 열 | IS 문장과 화면의 1:1 | 전 코퍼스 |
+
+## F.6 v2 물결 → v3 물결 대응
+
+| v2 | v3 | 달라진 것 |
+|---|---|---|
+| W0 계약·측정·기반 | **WA** | CI 초록(T-145·146·153)·가드레일(T-147~152·168)·CLI/오류 기반(T-159~163)을 더했다. T-006은 실행기만 |
+| W1 깨진 것·거짓 표시 | **WB** | 한 숫자 범위 고지를 네 축으로(T-023·024). 보안·무결성 P0(T-177~183)와 UI의 신뢰 결함(T-169~176)을 더했다. T-086·T-090·T-112를 뒤 물결에서 당겼다 |
+| W2 실데이터 기준선 | **WC** | C2 재처리 폐기 → TSK 대조(T-038). C5·C6·골든 VM, 대조 스크립트 9개, 측정 스파이크(T-120을 W10에서 당김) |
+| W3 백엔드 | **WD** | 검색 원인 확정(T-216), 멱등·대기(T-219·220), AI 규칙·표(T-217·218) |
+| W4 디자인 시스템 | **WE**(기반) + **WH**(수렴) | 컴포넌트는 화면이 끌어낸다. Chip·Dialog·Button·Menu·Tree 수렴(T-062·064·065·067·088)은 WH로. 브리핑 v0(T-222~225)을 WE에 |
+| W5~W7 화면 | **WF** | 주소·키 불변(T-071·072 재정의), 역할 기본값(T-226), 읽기 표면·읽음 표시·구절 인용(T-228~230), 묶음 스냅샷(T-096) |
+| W8 보고서 | **WG** | 판 보존·이력·문서 규격·가림(T-240~245) |
+| W9 AX·정리 | **WH** | T-111을 4과제로, OpenAPI를 라우터별 6과제로, 구조 래칫·환경 변수·v1 콘솔 삭제 |
+| W10 엔진·수집기 | **WP1~WP5** | "승인 시점에 삽입"이 아니라 승인 즉시 병행. T-121 폐기 → 20과제로 재분해. 한국 인벤토리(WP4)·AI 깊이(WP5) 신설 |
+| W11 최종 검증 | **WZ** | T-127을 6과제로 |
+
+물결을 옮긴 v2 과제: T-086·T-090·T-112(→ WB), T-120(→ WC), T-062·064·065·067·088(→ WH), T-122~126(→ WP1·WP3).
