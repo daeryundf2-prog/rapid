@@ -147,10 +147,13 @@ class ReadOnlyMiscScreenTests(Base):
         return f"/api/runs/{run_id}/{rest}"
 
     def import_read_only(self, folder: Path) -> str:
-        response = self.import_folder(folder)
-        self.assertEqual(response.status_code, 201, response.text)
-        self.assertEqual(response.json()["readonly_reason"], "OUTPUT_INSIDE_EVIDENCE")
-        return response.json()["run_id"]
+        # In-process import: this module tests the lazy-write guard, not T-350's root verification
+        # (an API import of a copied run cannot prove its evidence root, so source reads would 403).
+        run_id = self.store.import_completed_run(folder).run_id
+        detail = self.client.get(f"/api/runs/{run_id}")
+        self.assertEqual(detail.status_code, 200, detail.text)
+        self.assertEqual(detail.json()["readonly_reason"], "OUTPUT_INSIDE_EVIDENCE")
+        return run_id
 
     def wait(self, run_id: str, analysis_id: str) -> dict:
         deadline = time.monotonic() + 300
