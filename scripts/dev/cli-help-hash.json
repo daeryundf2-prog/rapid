@@ -1,11 +1,11 @@
 {
   "python": "3.12",
   "columns": 100,
-  "command_count": 89,
+  "command_count": 90,
   "commands": {
     "(top-level)": {
-      "help": "d63779e29cd1919824527851225a4684d2008c7184c0f73adc075c8adc55fe91",
-      "struct": "22c58bdbb4bcc749afc72c16ab416cc06a3616c85dd3bc5f24d1bac09b93ecaa"
+      "help": "d018c64fb567e98a4ef4ad0f15cdf018e71e733f5e331bdc8cd286dd9ece0d63",
+      "struct": "682b45bc688be18fb9189a098d7455a28a16d13ef93d64662408299d6213eea7"
     },
     "docs": {
       "help": "8b6916451ca353fa3cd6412f34899b9af1bf8ef33afacd3930101dc928ea5ab7",
@@ -138,6 +138,10 @@
     "doctor": {
       "help": "eddadad3eba3a21022f0fdb8b4e425819a72d84629bbbe48917c85efb848a4a4",
       "struct": "844147c8b8befe8024f2e53a4d792eac96d61c9422955c302eead3e3258971d3"
+    },
+    "audit-verify": {
+      "help": "23bcd2f5da528c8e071339e0f7a28511f536eaaf71e41844c28ca559d1161c52",
+      "struct": "3bfddcebd49515c733a93ff0e140360b22b396aa03e3f22118a9f001e9167649"
     },
     "enterprise-policy": {
       "help": "692d4dbc994ee2421e4f3cdae41db1eb5383e24219382baa2d05742b662186a7",

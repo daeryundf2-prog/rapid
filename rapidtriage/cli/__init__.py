@@ -24,6 +24,7 @@ _COMMAND_MODULES: dict[str, tuple[str, ...]] = {
         "evidence", "indicators", "ocr-queue", "search", "search-index",
         "source-read", "source-search", "timeline", "timeline-export",
     ),
+    "audit_verify": ("audit-verify",),
     "benchmark": (
         "benchmark", "browser-stress", "columnar-benchmark", "columnar-convert",
         "e01-hash", "e01-known-answer", "e01-smoke", "large-case-readiness",

@@ -25,6 +25,15 @@ EXPORT_AUDIT_LOG_NAME = "rapidtriage-export-audit.jsonl"
 CHAIN_FIELD = "previous_record_sha256"
 # SHA-256 of the line's own canonical JSON without this field, so an edited line names itself.
 RECORD_HASH_FIELD = "record_sha256"
+# T-359: how to verify, carried at the head of every export record (at most 5 lines).
+VERIFICATION_METHOD_FIELD = "verification_method"
+VERIFICATION_METHOD_LINES: tuple[str, ...] = (
+    f"대상: 같은 폴더의 {EXPORT_AUDIT_LOG_NAME} (한 줄 = 내보내기 1건, 덧붙이기만 함)",
+    f"줄 해시: {RECORD_HASH_FIELD} = 이 필드를 뺀 줄을 키 정렬·공백 없는 UTF-8 JSON으로 만든 SHA-256",
+    f"사슬: {CHAIN_FIELD} = 직전 줄 원문(UTF-8, 줄바꿈 제외)의 SHA-256, 첫 줄은 빈 값",
+    "순서: 첫 줄부터 차례로 확인, 사슬 필드가 없는 옛 줄은 '사슬 이전'으로 셈(깨짐 아님)",
+    f"명령: rapidtriage audit-verify {EXPORT_AUDIT_LOG_NAME} --json (온전 종료 0 · 깨짐 종료 3)",
+)
 
 
 def compute_sha256(path: Path) -> str:
@@ -140,6 +149,7 @@ def write_audit_record(
     export, only ever appended. Sidecar: ``audit_path`` (name unchanged) holds the latest record.
     """
     payload: dict[str, object] = {
+        VERIFICATION_METHOD_FIELD: list(VERIFICATION_METHOD_LINES),
         "command": command,
         **audit_timestamps(),
         **audit_environment(),
