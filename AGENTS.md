@@ -3,6 +3,66 @@
 You are running with oh-my-codex (OMX), a multi-agent orchestration layer for Codex CLI.
 Your role is to coordinate specialized agents, tools, and skills so work is completed accurately and efficiently.
 
+## RapidTriage verification gate
+
+One line runs the local gate (ordered steps, pass/FAIL/skip per step, total seconds; an L0 static failure stops the run):
+
+```bash
+python scripts/dev/gate.py --tier fast             # every task, before handing back (default tier)
+python scripts/dev/gate.py --tier static           # L0 only: EOL, staged files, ruff, vulture 80, compileall, exec bits, import boundaries
+python scripts/dev/gate.py --tier full --json      # coordinator, end of a batch: adds slow tests, frontend checks, e2e smoke
+python scripts/dev/gate.py --fast --changed        # unit tests only for modules touched vs feat/r6-ux
+python scripts/dev/run-tests.py --tier fast        # parallel unit tests alone (--tier full, --changed, --only <glob>)
+```
+
+Frontend typecheck, lint, vitest and `npm run check:bundle` run inside the gate when `frontend/` changed. Step details: `docs/rapidtriage-quality-checks.md`.
+
+## Worktree rules
+
+- Create and remove worktrees with `python scripts/dev/wt.py new|rm` (links `frontend/node_modules`, assigns ports in `.rt-dev.env`).
+- LF line endings only; `python scripts/dev/check-eol.py` must pass.
+- Stage files by name; never `git add -A` or `git add .`. `python scripts/dev/check-staged.py` before committing.
+- New shebang files under rapidtriage/, tests/, scripts/ are committed executable (`git update-index --chmod=+x <file>`).
+- Never bind, kill or test against port 8710 (the operator's server); use the ports from `.rt-dev.env`.
+- Set `RAPIDTRIAGE_NO_BROWSER=1`; wrap long or server commands with `python scripts/dev/run.py --timeout <s> -- <cmd>` (kills only its own tree).
+- Never `taskkill /IM` or kill processes by name.
+- Lanes are merged only by the coordinator with `python scripts/dev/merge-lane.py <branch>`; lanes do not push or merge.
+
+## RapidForensic Validation Contract
+
+- Keep recovery engine, parser implementation, core forensic logic, API behavior, Web UI, and DB schema untouched during validation-plumbing work unless the user explicitly authorizes that scope.
+- Do not add real E01, Ex01, dd, raw, img, VHD/VHDX, AFF, split-image, recovered evidence, customer data, PII, malware, secrets, or tokens to Git.
+- Treat Tier 0 fixtures as engineering checks only. They are not release evidence and do not prove recovery accuracy.
+- Use these commands for local validation after touching validation tooling:
+
+```bash
+python scripts/dev/run-tests.py --tier full
+python -m ruff check rapidtriage tests scripts
+python -m vulture rapidtriage tests scripts --min-confidence 80
+python -m compileall -q rapidtriage tests scripts
+python scripts/known-answer-qc.py --manifest tests/fixtures/known_answer/tier0-basic/manifest.json --check-files --fixture-root tests/fixtures/known_answer/tier0-basic/files --json
+python scripts/trusted-diff.py --manifest tests/fixtures/known_answer/tier0-basic/manifest.json --rapid-results tests/fixtures/known_answer/tier0-basic/rapid-results.json --trusted-results tests/fixtures/known_answer/tier0-basic/trusted-results.json --json
+python scripts/normalize-trusted-export.py --tool synthetic-tsv --input tests/fixtures/known_answer/tier0-basic/synthetic-trusted-export.tsv --json
+python scripts/build-evidence-bundle.py --root tests/fixtures/known_answer/tier0-basic --json
+python -m pip_audit -r requirements.lock -r requirements-dev.lock --require-hashes --disable-pip
+git diff --check
+git status --short
+```
+
+Real-evidence engineering measurements (require real image + Sleuth Kit outputs outside Git):
+
+```bash
+python scripts/mft-reference-diff.py --mft <MFT.bin> --ils <ils -e out> --fls <fls -rp out> --output <report.json>
+python scripts/fls-coverage-diff.py --files-json <rapidtriage-files.json> --fls <fls -rp out> --strip-prefix <run-prefix> --output <report.json>
+python scripts/carve-known-answer.py --output-dir <dir> --extract --json
+```
+
+For Windows T1 work, use `docs/validation/windows-t1-execution-runbook.md`, `docs/validation/windows-t1-operator-inputs.md`, and `docs/validation/windows-t1-command-template.ps1.md`. These are preparation documents only; actual E01/Ex01 acquisition, trusted/reference export, and RapidForensic recovery execution require operator approval and external storage outside Git.
+
+Report Engineering Baseline and Release Evidence separately. Release Evidence remains blocked until real external E01/Ex01, Windows, trusted/reference tool, scale, and review records exist.
+
+---
+
 <guidance_schema_contract>
 Canonical guidance schema for this template is defined in `docs/guidance-schema.md`.
 
@@ -222,39 +282,6 @@ Product Discovery:
 UX Audit:
   ux-researcher + information-architect + designer + product-analyst
 </team_compositions>
-
-## RapidForensic Validation Contract
-
-- Keep recovery engine, parser implementation, core forensic logic, API behavior, Web UI, and DB schema untouched during validation-plumbing work unless the user explicitly authorizes that scope.
-- Do not add real E01, Ex01, dd, raw, img, VHD/VHDX, AFF, split-image, recovered evidence, customer data, PII, malware, secrets, or tokens to Git.
-- Treat Tier 0 fixtures as engineering checks only. They are not release evidence and do not prove recovery accuracy.
-- Use these commands for local validation after touching validation tooling:
-
-```bash
-python -m unittest discover -s tests
-python -m ruff check rapidtriage tests scripts
-python -m vulture rapidtriage tests scripts --min-confidence 80
-python -m compileall -q rapidtriage tests scripts
-python scripts/known-answer-qc.py --manifest tests/fixtures/known_answer/tier0-basic/manifest.json --check-files --fixture-root tests/fixtures/known_answer/tier0-basic/files --json
-python scripts/trusted-diff.py --manifest tests/fixtures/known_answer/tier0-basic/manifest.json --rapid-results tests/fixtures/known_answer/tier0-basic/rapid-results.json --trusted-results tests/fixtures/known_answer/tier0-basic/trusted-results.json --json
-python scripts/normalize-trusted-export.py --tool synthetic-tsv --input tests/fixtures/known_answer/tier0-basic/synthetic-trusted-export.tsv --json
-python scripts/build-evidence-bundle.py --root tests/fixtures/known_answer/tier0-basic --json
-python -m pip_audit --format=json
-git diff --check
-git status --short
-```
-
-Real-evidence engineering measurements (require real image + Sleuth Kit outputs outside Git):
-
-```bash
-python scripts/mft-reference-diff.py --mft <MFT.bin> --ils <ils -e out> --fls <fls -rp out> --output <report.json>
-python scripts/fls-coverage-diff.py --files-json <rapidtriage-files.json> --fls <fls -rp out> --strip-prefix <run-prefix> --output <report.json>
-python scripts/carve-known-answer.py --output-dir <dir> --extract --json
-```
-
-For Windows T1 work, use `docs/validation/windows-t1-execution-runbook.md`, `docs/validation/windows-t1-operator-inputs.md`, and `docs/validation/windows-t1-command-template.ps1.md`. These are preparation documents only; actual E01/Ex01 acquisition, trusted/reference export, and RapidForensic recovery execution require operator approval and external storage outside Git.
-
-Report Engineering Baseline and Release Evidence separately. Release Evidence remains blocked until real external E01/Ex01, Windows, trusted/reference tool, scale, and review records exist.
 
 ---
 
