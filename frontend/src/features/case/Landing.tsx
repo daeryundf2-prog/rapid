@@ -132,7 +132,7 @@ export function Landing({
           <BrandMark size={40} />
           <div>
             <h1 id="landing-title" className="landing-title">
-              RapidForensic
+              RapidTriage
             </h1>
             <p className="landing-sub">디지털 증거 선별·분석 콘솔</p>
           </div>

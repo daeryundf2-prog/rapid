@@ -1949,7 +1949,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(report_package["manifest"]["item_number"], 22)
             self.assertEqual(len(report_package["manifest"]["manifest_hash"]), 64)
             self.assertEqual(len(report_package["hash_bundle_sha256"]), 64)
-            self.assertIn("# RapidForensic Case DB Report Export", report_package["markdown_document"])
+            self.assertIn("# RapidTriage Case DB Report Export", report_package["markdown_document"])
             self.assertIn("Report Candidates", report_package["markdown_document"])
             self.assertEqual(report_package["manifest"]["hash_bundle_sha256"], report_package["hash_bundle_sha256"])
             self.assertEqual(export["summary"]["report_generation_manifest_hash"], report_package["manifest"]["manifest_hash"])

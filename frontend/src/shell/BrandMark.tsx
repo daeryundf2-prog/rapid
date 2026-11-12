@@ -23,13 +23,13 @@ export function BrandMark({ size = 22 }: { size?: number }) {
   );
 }
 
-/** Mark + "RapidForensic" wordmark. */
+/** Mark + "RapidTriage" wordmark (its text reads PRODUCT_NAME). */
 export function Brand({ size = 22 }: { size?: number }) {
   return (
     <span className="brand">
       <BrandMark size={size} />
       <span className="brand-word">
-        Rapid<span className="brand-word-strong">Forensic</span>
+        Rapid<span className="brand-word-strong">Triage</span>
       </span>
     </span>
   );

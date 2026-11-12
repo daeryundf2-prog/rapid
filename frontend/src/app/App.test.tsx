@@ -114,7 +114,7 @@ describe("App shell", () => {
     act(() => useAppStore.getState().navigate({ runId: "run-aaaaaaaa", collection: "files" }));
     const topbar = screen.getByTestId("topbar");
     expect(topbar.querySelector(".brand .brand-mark")).toBeTruthy();
-    expect(topbar.textContent).toContain("RapidForensic");
+    expect(topbar.textContent).toContain("RapidTriage");
     // Search options are folded into the search field.
     const search = topbar.querySelector(".global-search") as HTMLElement;
     expect(search.querySelector('[aria-label="검색 옵션"]')).toBeTruthy();
@@ -135,7 +135,7 @@ describe("App shell", () => {
     expect(screen.getByRole("main").contains(landing)).toBe(true);
     expect(screen.queryByRole("navigation", { name: "탐색 트리" })).toBeNull();
     expect(screen.queryByRole("complementary", { name: "뷰어 패널" })).toBeNull();
-    expect(screen.getByRole("heading", { level: 1, name: "RapidForensic" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "RapidTriage" })).toBeTruthy();
     for (const name of ["케이스 만들기", "케이스 열기", "케이스 없이 빠른 런", "샘플"])
       expect(screen.getByRole("button", { name })).toBeTruthy();
     const recent = await screen.findByRole("link", { name: /case1\.E01/ });

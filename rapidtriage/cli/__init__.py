@@ -13,7 +13,7 @@ import importlib
 import sys
 from types import ModuleType
 
-from .. import __version__
+from .. import PRODUCT_NAME, __version__
 
 # Command group module (``rapidtriage.cli.<module>``) -> commands it handles.
 # Each module's ``HANDLERS`` dict is the authority; this table only decides
@@ -152,7 +152,7 @@ def main(argv=None) -> int:
     if _wants_version(sys.argv[1:] if argv is None else list(argv)):
         # Answer before building the parser: the parser modules import engine
         # constants and are not cheap to load.
-        print(f"rapidtriage {__version__}")
+        print(f"{PRODUCT_NAME} {__version__}")
         return 0
     from .parser import build_parser
 
@@ -160,7 +160,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"rapidtriage {__version__}",
+        version=f"{PRODUCT_NAME} {__version__}",
         help="show the rapidtriage version and exit",
     )
     args = parser.parse_args(argv)

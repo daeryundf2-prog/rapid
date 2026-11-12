@@ -18,7 +18,7 @@ describe("landing card (visual-polish S10)", () => {
   it("without a token the card asks for it (the token field lives inside the card)", () => {
     const onSaved = vi.fn();
     render(<TokenGate onSaved={onSaved} />);
-    const card = screen.getByRole("region", { name: "RapidForensic" });
+    const card = screen.getByRole("region", { name: "RapidTriage" });
     const field = screen.getByLabelText("API 토큰");
     expect(card.contains(field)).toBe(true);
     expect(screen.getByRole("main").contains(card)).toBe(true);

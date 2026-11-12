@@ -1,7 +1,8 @@
 import { QueryClientContext, useQuery } from "@tanstack/react-query";
-import { useContext, useEffect, useRef, useState } from "react";
+import { type ReactElement, useContext, useEffect, useRef, useState } from "react";
 import { announce } from "../a11y";
-import { listCases } from "../api/cases";
+import { type CaseDetail, listCases } from "../api/cases";
+import { getRunDashboard, type RunScope, type StepsSummary } from "../api/dashboard";
 import {
   normalizeRunStatus,
   RETRYABLE_RUN_STATUSES,
@@ -13,6 +14,7 @@ import type { RunWithProgress } from "../api/runsProgress";
 import { runDisplayName } from "../app/collections";
 import { CommandButton } from "../commands/CommandButton";
 import { StatusBadge, statusLabel } from "../components/Badge";
+import { ToneChip } from "../components/ToneChip";
 import "../components/status.css";
 import { serializeRoute } from "../router";
 import { useRuns, useTimezone } from "../state/hooks";
@@ -123,7 +125,107 @@ function useNow(active: boolean): number {
   return now;
 }
 
-function RunProgress({ run }: { run: RunWithProgress }) {
+const pct = (value: number) => `${value.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%`;
+
+/**
+ * Outcome of a finished run for the status bar (T-174): "부분" when any measured scope axis is under
+ * 100 % (partitions · allocated listing/content · deleted attempts · unallocated), a cap was reached,
+ * the server flags the scope partial, or a step ended partial/incomplete; "완료" only when none of
+ * that holds and no step failed. Axes the server did not measure (null) are not counted either way.
+ * `unknown` = neither scope nor steps were sent (older server): the bar then shows the run status.
+ */
+export interface RunOutcome {
+  kind: "complete" | "partial" | "unknown";
+  failed: number;
+  failedNames: string[];
+  /** Why the run reads 부분 (the chip's tooltip). */
+  reasons: string[];
+}
+
+export function runOutcome(
+  scope: RunScope | null | undefined,
+  steps: StepsSummary | null | undefined,
+): RunOutcome {
+  const scoped = scope && scope.basis !== "unavailable" ? scope : null;
+  const failed = steps?.failed ?? 0;
+  const failedNames = steps?.failed_names ?? [];
+  if (!scoped && !steps) return { kind: "unknown", failed, failedNames, reasons: [] };
+  const reasons: string[] = [];
+  if (scoped) {
+    const { partitions, allocated, deleted, unallocated } = scoped;
+    if (
+      typeof partitions.supported === "number" &&
+      typeof partitions.processed === "number" &&
+      partitions.processed < partitions.supported
+    )
+      reasons.push(`파티션 ${n(partitions.processed)}/${n(partitions.supported)}`);
+    const axes: Array<[string, number | null | undefined]> = [
+      ["할당 목록", allocated.listed_pct],
+      ["할당 내용", allocated.content_pct],
+      ["삭제 시도", deleted.attempted_pct],
+      ["비할당", unallocated.scanned_pct],
+    ];
+    for (const [label, value] of axes)
+      if (typeof value === "number" && value < 100) reasons.push(`${label} ${pct(value)}`);
+    if (scoped.caps.some((cap) => cap.reached !== false)) reasons.push("처리 상한 도달");
+    if (scoped.partial === true && reasons.length === 0) reasons.push("처리 범위 일부");
+  }
+  if (steps) {
+    if (steps.partial > 0) reasons.push(`일부 완료 단계 ${n(steps.partial)}`);
+    if (steps.incomplete > 0) reasons.push(`미완료 단계 ${n(steps.incomplete)}`);
+  }
+  const kind = reasons.length > 0 || failed > 0 ? "partial" : "complete";
+  return { kind, failed, failedNames, reasons };
+}
+
+/**
+ * Case · evidence display names of a run (T-174) instead of "런 <id>": "2026-1 사건 · 노트북 E01"
+ * from the case list (the evidence the run belongs to), else the evidence folder/file name.
+ */
+export function runIdentityText(run: RunWithProgress, cases?: readonly CaseDetail[] | null): string {
+  for (const item of cases ?? []) {
+    const evidence = item.evidence.find((ev) => ev.runs.some((brief) => brief.run_id === run.run_id));
+    if (!evidence) continue;
+    const caseName = item.name || item.case_number;
+    const evidenceName = evidence.display_name || evidence.evidence_number || runDisplayName(run);
+    return caseName ? `${caseName} · ${evidenceName}` : evidenceName;
+  }
+  return runDisplayName(run);
+}
+
+/** The run line with its case/evidence names and (finished runs) the scope/steps outcome. */
+function RunProgressQueried({ run }: { run: RunWithProgress }) {
+  const active = isRunActive(run);
+  const cases = useQuery({ queryKey: ["cases"], queryFn: listCases, retry: false });
+  // Same key as the 접수 dashboard / tree: scope (T-023) and steps (T-021) of a finished run.
+  const dashboard = useQuery({
+    queryKey: ["run-dashboard", run.run_id],
+    queryFn: () => getRunDashboard(run.run_id),
+    enabled: !active,
+    retry: false,
+  });
+  const outcome = dashboard.data ? runOutcome(dashboard.data.scope, dashboard.data.steps) : null;
+  return (
+    <RunProgress
+      run={run}
+      identity={runIdentityText(run, cases.data)}
+      outcome={outcome}
+      outcomePending={!active && dashboard.isPending}
+    />
+  );
+}
+
+function RunProgress({
+  run,
+  identity,
+  outcome = null,
+  outcomePending = false,
+}: {
+  run: RunWithProgress;
+  identity?: string;
+  outcome?: RunOutcome | null;
+  outcomePending?: boolean;
+}) {
   const active = isRunActive(run);
   const now = useNow(active);
   const started = Date.parse(runStartedAt(run) ?? "");
@@ -144,7 +246,7 @@ function RunProgress({ run }: { run: RunWithProgress }) {
   // Announce stage / status transitions only (not every poll).
   const stage = run.progress?.stage ?? "";
   const status = normalizeRunStatus(run.status);
-  const name = runDisplayName(run);
+  const name = identity || runDisplayName(run);
   const retryable = RETRYABLE_RUN_STATUSES.has(status);
   const announced = useRef<string | null>(null);
   useEffect(() => {
@@ -154,15 +256,55 @@ function RunProgress({ run }: { run: RunWithProgress }) {
     announced.current = sentence;
   }, [status, stage, name]);
 
-  // "런 682636ce… · 완료 · 오류 0", then the run actions as their own group (visual-polish §0).
+  // A finished run's chip comes from its scope and steps (T-174): green 완료 only with every
+  // measured axis at 100 % and no failed step; never 완료 · 오류 0 while the run is partial.
+  const finishedOk = status === "completed";
+  const known = outcome && outcome.kind !== "unknown" ? outcome : null;
+  let chip: ReactElement;
+  if (finishedOk && known?.kind === "complete") {
+    chip = (
+      <ToneChip tone="ok" testId="status-outcome">
+        완료
+      </ToneChip>
+    );
+  } else if (finishedOk && known?.kind === "partial") {
+    chip = (
+      <ToneChip tone="warn" testId="status-outcome" title={known.reasons.join(" · ") || undefined}>
+        부분
+      </ToneChip>
+    );
+  } else if (finishedOk && outcomePending) {
+    chip = (
+      <ToneChip tone="" testId="status-outcome">
+        범위 확인 중
+      </ToneChip>
+    );
+  } else {
+    chip = <StatusBadge status={String(run.status)} />;
+  }
+  const failedSteps = known?.failed ?? 0;
+
+  // "사건 · 증거 · 완료" / "… · 부분 · 실패 단계 2", then the run actions as their own group (visual-polish §0).
   return (
     <div className="status-run" data-testid="status-run">
       <span className="status-group">
-        <span className="mono" title={run.run_id}>
-          런 {run.run_id.slice(0, 8)}…
+        <span data-testid="status-run-name" title={`런 ID ${run.run_id}`}>
+          {name}
         </span>
         <StatusSep />
-        <StatusBadge status={String(run.status)} />
+        {chip}
+        {failedSteps > 0 ? (
+          <>
+            <StatusSep />
+            <span
+              className="status-errors"
+              data-testid="status-failed-steps"
+              title={known?.failedNames.join(", ") || undefined}
+            >
+              실패 단계 {n(failedSteps)}
+            </span>
+          </>
+        ) : null}
         {text ? (
           <>
             <StatusSep />
@@ -197,8 +339,13 @@ function RunProgress({ run }: { run: RunWithProgress }) {
             <span>{formatElapsed(now - started)} 경과</span>
           </>
         ) : null}
-        <StatusSep />
-        <span className={errors > 0 ? "status-errors" : undefined}>오류 {errors}</span>
+        {/* Once the outcome is known, "오류 0" is dropped (the chip and the failed-step count say it). */}
+        {!known || errors > 0 ? (
+          <>
+            <StatusSep />
+            <span className={errors > 0 ? "status-errors" : undefined}>오류 {errors}</span>
+          </>
+        ) : null}
       </span>
       {/* Run actions only when they apply (review #8): 취소 while running, 재시도 after a failure;
           an interrupted or cancelled run resumes (R4 V1). */}
@@ -306,7 +453,11 @@ export function StatusBar() {
   return (
     <footer className="statusbar" data-testid="statusbar">
       {currentRun ? (
-        <RunProgress run={currentRun} />
+        queryClient ? (
+          <RunProgressQueried run={currentRun} />
+        ) : (
+          <RunProgress run={currentRun} />
+        )
       ) : queryClient ? (
         <RunCaseCount runCount={runs.length} />
       ) : (
