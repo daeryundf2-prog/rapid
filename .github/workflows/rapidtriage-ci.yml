@@ -1,19 +1,20 @@
 name: RapidTriage CI
 
-# Trigger/matrix policy (R8 CI-green decision default; owner can revert):
-# - Pull requests are the gate: ubuntu + windows on Python 3.12, plus frontend/contract/Rust jobs.
-#   Feature-branch pushes no longer start a second, identical run next to the PR run.
-# - The full matrix (ubuntu/windows/macos on Python 3.12) runs on push to main, nightly, and on
-#   manual dispatch (`gh workflow run "RapidTriage CI" --ref <branch>`), so macOS
-#   coverage is kept but no longer blocks every PR behind the macOS runner queue.
-# - A newer push to the same PR cancels the superseded PR run; main/nightly runs are never cancelled.
+# Trigger/matrix policy (R8 CI-green decision default + T-153; owner can revert):
+# - Pull requests are the gate: ubuntu + windows on Python 3.12, fast unit tier
+#   (scripts/dev/run-tests.py --tier fast, slow modules excluded), e2e smoke only,
+#   20-minute job limit. Feature-branch pushes do not start a second run next to the PR run.
+# - Push to main and manual dispatch run the full matrix (ubuntu/windows/macos, Python 3.12)
+#   with the full unit tier (`gh workflow run "RapidTriage CI" --ref <branch>`).
+# - The nightly schedule lives in nightly.yml (full tier incl. the slow modules, macOS, full
+#   Playwright e2e), so this workflow no longer has a `schedule:` trigger and a commit is not
+#   tested twice by the same workflow.
+# - A newer push to the same PR cancels the superseded PR run; main runs are never cancelled.
 on:
   push:
     branches:
       - main
   pull_request:
-  schedule:
-    - cron: "23 18 * * *"
   workflow_dispatch:
 
 permissions:
@@ -27,13 +28,18 @@ jobs:
   test:
     name: Python test and release checks
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    # PR gate wall clock <= 20 minutes (T-153); full tier on main/dispatch gets 45.
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 20 || 45 }}
     strategy:
       fail-fast: false
       matrix:
         os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest", "windows-latest"]' || '["ubuntu-latest", "windows-latest", "macos-latest"]') }}
         # requires-python >= 3.12 (T-009): 3.11 left the matrix with the lock files.
         python-version: ["3.12"]
+    env:
+      # fast = everything except the slow modules in scripts/dev/test-tiers.json.
+      TEST_TIER: ${{ github.event_name == 'pull_request' && 'fast' || 'full' }}
+      PYTHONUTF8: "1"
 
     steps:
       - name: Checkout
@@ -44,21 +50,42 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install package
+      - name: Install hashed lock files
+        # Same install path as dependency-monitoring.yml: the hashed dev lock carries the
+        # runtime + test extra (ruff, vulture, build, pip-audit included); the package
+        # itself goes in editable without re-resolving dependencies.
         run: |
-          python -m pip install -U pip build
-          python -m pip install -e ".[web,test]"
-
-      - name: Run tests
-        run: python -m unittest discover -s tests
-
-      - name: Compile package
-        run: python -m compileall -q rapidtriage tests scripts
+          python -m pip install -U pip
+          python -m pip install --require-hashes -r requirements-dev.lock
+          python -m pip install --no-deps -e .
 
       - name: Static analysis
         run: |
           python -m ruff check rapidtriage tests scripts
           python -m vulture rapidtriage tests scripts --min-confidence 80
+
+      - name: Compile package
+        run: python -m compileall -q rapidtriage tests scripts
+
+      - name: Repository guards (exec bits, architecture)
+        # Cheap structural checks first so they fail in seconds, not after the unit tier.
+        run: python -m unittest tests.test_script_exec_bits tests.test_architecture
+
+      - name: Run tests
+        # Parallel runner (T-006): module batches per worker, per-module limit
+        # max(300 s, 3 x recorded duration); a hung module is killed and named in the JSON.
+        run: python scripts/dev/run-tests.py --tier ${{ env.TEST_TIER }} --workers 4 --timeout-floor 300 --timeout-factor 3 --state-dir run-tests-state --json-out run-tests-${{ env.TEST_TIER }}.json
+
+      - name: Upload test summary
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-tests-${{ env.TEST_TIER }}-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: |
+            run-tests-${{ env.TEST_TIER }}.json
+            run-tests-state/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Audit Python dependencies
         # Non-blocking visibility step: pip-audit (from the test extra)
@@ -163,13 +190,16 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: E2E tests
+        # PRs run the intake smoke spec (same as gate.py L3); main/dispatch and nightly.yml
+        # run every spec (T-153: full e2e moves off the PR gate).
         if: ${{ !cancelled() && steps.playwright.outcome == 'success' }}
         working-directory: frontend
-        run: npm run e2e
+        run: npm run e2e -- ${{ github.event_name == 'pull_request' && 'case-intake.spec.ts' || '' }}
 
   contract-drift:
     name: Vendored contract drift check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -187,6 +217,7 @@ jobs:
   rust-worker:
     name: Rust worker checks
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
