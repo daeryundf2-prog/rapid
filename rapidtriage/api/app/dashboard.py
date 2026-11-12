@@ -33,6 +33,7 @@ from .helpers import (
     get_output_path,
     job_output_dir,
 )
+from .run_steps_summary import summarize_steps
 
 CASE_NOTES_FILE_NAME = "rapidtriage-case-notes.json"
 CASE_NOTES_PROFILE = "rapidtriage-case-notes-v1"
@@ -340,4 +341,6 @@ def build_run_dashboard(store: RunJobStore, run_id: str, job: RunJob) -> dict[st
         },
         "evidence_source": build_evidence_source(store, run_id, job),
         "exports": build_export_history(store, run_id, job),
+        # summary.steps by class (T-021); not the collector progress ("providers"). None until the run ends.
+        "steps": summarize_steps(job.summary) if job.summary is not None else None,
     }
