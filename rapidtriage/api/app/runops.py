@@ -33,6 +33,7 @@ from ...core.credential_files import (
 from ...core.docs import SUPPORTED_DOC_EXTS, TEXT_EXTS, extract_text
 from ...core.hash_cache import hash_cache_assessment
 from ...core.jobs import (
+    RunJob,
     RunJobStore,
     is_relative_to,
     run_output_dir,
@@ -83,6 +84,7 @@ from .helpers import (
     get_job,
     is_probably_binary,
     is_sqlite_candidate,
+    job_output_dir,
     model_to_dict,
     optional_int_for_api,
     run_not_finished_message,
@@ -109,6 +111,8 @@ from .previews import (
     write_json_file,
 )
 from .run_review import canonical_run_case
+from .run_scope import build_run_scope
+from .run_steps_summary import summarize_steps
 from .search import (
     snippet_around,
     source_search_citation,
@@ -717,7 +721,14 @@ def build_run_case_report(
         case_payload=case_payload,
         submission_manifest=manifest,
         metadata=metadata,
+        report_context=run_report_context(job),
     )
+
+
+def run_report_context(job: RunJob) -> dict[str, object]:
+    """Four-axis processing scope (T-023) and step counts (T-021) for the case report (T-027);
+    computed here because the core report builder does not import the API layer."""
+    return {"scope": build_run_scope(job.summary, job_output_dir(job)), "steps": summarize_steps(job.summary)}
 
 
 def build_run_validation_package(store: RunJobStore, run_id: str, *, compute_source_hashes: bool = True) -> dict[str, object]:

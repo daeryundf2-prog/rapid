@@ -11,6 +11,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
 
 from .. import PRODUCT_NAME
+from . import case_report_items as report_items
 from .ai_report import AI_SECTION_ID, ai_usage_section_lines, ai_usage_summary
 from .korean_report import TEMPLATE_ID as KOREAN_EXPERT_TEMPLATE_ID
 from .korean_report import build_korean_expert_report
@@ -31,9 +32,13 @@ def build_case_report_markdown(
     case_payload: Mapping[str, object],
     submission_manifest: Mapping[str, object],
     metadata: Mapping[str, object] | None = None,
+    report_context: Mapping[str, object] | None = None,
 ) -> str:
+    """``report_context``: ``{"scope": build_run_scope(...), "steps": summarize_steps(...)}`` from
+    the API layer (the core layer does not import it); absent values are reported as "기록 없음"."""
     metadata = metadata or {}
-    case_title = str(metadata.get("title") or case_payload.get("title") or f"{PRODUCT_NAME} case report")
+    report_context = report_context or {}
+    case_title = str(metadata.get("title") or case_payload.get("title") or f"{PRODUCT_NAME} 사건 보고서")
     case_id = str(metadata.get("case_number") or case_payload.get("case_id") or "")
     template = str(metadata.get("template") or "legal-handoff")
     if template == KOREAN_EXPERT_TEMPLATE_ID:
@@ -43,41 +48,40 @@ def build_case_report_markdown(
             submission_manifest=submission_manifest,
             metadata=metadata,
         )
-    investigator = str(metadata.get("investigator") or "")
+    investigator = report_items.author_label(metadata.get("investigator"))
     organization = str(metadata.get("organization") or "")
     requester = str(metadata.get("requester") or "")
     scope = str(metadata.get("scope") or f"검토 대상으로 지정된 증거 파일과 {PRODUCT_NAME} 분석 산출물을 기준으로 작성함.")
     conclusion = str(metadata.get("conclusion") or "검토 결과 및 증거 해시는 아래 항목과 같음.")
+    offset_minutes, display_label = report_items.display_timezone(run_summary)
+    roots = report_items.roots_for(run_summary)
 
     lines = [
         "# 디지털 포렌식 분석 보고서",
         "",
-        f"> Report template: `{template}`",
-        f"> Noise policy: {template_noise_policy(template)}",
+        f"> 보고서 양식: {report_items.template_label(template)} (`{template}`)",
+        f"> 구성 기준: {report_items.template_policy(template)}",
         "",
         "## 1. 사건 정보",
         "",
         f"- 보고서 제목: {case_title}",
         f"- 사건 번호: {case_id or '미기재'}",
-        f"- 분석자: {investigator or '미기재'}",
+        f"- 분석자: {investigator}",
         f"- 소속/기관: {organization or '미기재'}",
         f"- 의뢰자/의뢰기관: {requester or '미기재'}",
-        f"- 생성 시각: `{submission_manifest.get('generated_at', '')}`",
+        f"- 생성 시각: {report_items.format_evidence_time(submission_manifest.get('generated_at'), offset_minutes)}",
         "",
     ]
 
     if template == "hash-only":
-        return build_hash_only_report(
-            lines=lines,
-            submission_manifest=submission_manifest,
-        )
+        return build_hash_only_report(lines=lines, submission_manifest=submission_manifest, roots=roots)
 
     if template == "executive-summary":
         lines.extend(
             [
-                "## Executive summary",
+                "## 요약",
                 "",
-                "This report highlights reviewed evidence selected for decision-makers. Technical hash details remain attached to each evidence item.",
+                "이 보고서는 의사결정자를 위해 검토된 증거를 추린 것임. 해시 등 기술 정보는 각 증거 항목에 함께 적음.",
                 "",
             ]
         )
@@ -90,6 +94,8 @@ def build_case_report_markdown(
             f"- 원본/분석 루트: `{run_summary.get('root', '')}`",
             f"- 분석 범위 루트: `{run_summary.get('scan_scope_root', '')}`",
             f"- 산출물 디렉터리: `{run_summary.get('output_dir', '')}`",
+            *report_items.reproducibility_lines(run_summary, report_context, display_label=display_label),
+            report_items.conditions_line(submission_manifest),
             "",
             scope,
             "",
@@ -99,61 +105,31 @@ def build_case_report_markdown(
     )
 
     if template == "executive-summary":
-        lines.append("- 상세 parser/output 경로는 executive summary에서 생략함. 필요 시 technical appendix 템플릿을 생성해 검증한다.")
+        lines.append("- 의사결정자 요약에서는 분석기 경로와 단계별 산출물을 생략함. 필요하면 기술 부록 양식으로 다시 생성해 확인함.")
     else:
-        for step in run_summary.get("steps", []):
-            if not isinstance(step, Mapping):
-                continue
-            lines.append(
-                f"- `{step.get('name')}`: {step.get('status')} "
-                f"(output=`{step.get('output', '')}`)"
-            )
-        if not any(line.startswith("- `") for line in lines[-20:]):
-            lines.append("- 절차 정보 없음")
-
-    lines.extend(
-        [
-            "",
-            "## 4. 주요 검토 결과",
-            "",
+        step_lines = [
+            f"- `{step.get('name')}`: {report_items.step_status_label(step.get('status'))}"
+            + (f" (산출물 `{step.get('output')}`)" if step.get("output") else "")
+            for step in run_summary.get("steps", [])
+            if isinstance(step, Mapping)
         ]
-    )
+        lines.extend(step_lines or ["- 절차 정보 없음"])
+
+    lines.extend(["", "## 4. 주요 검토 결과", ""])
     case_summary = case_payload.get("summary") if isinstance(case_payload.get("summary"), Mapping) else {}
+    manifest_summary = submission_manifest.get("summary") if isinstance(submission_manifest.get("summary"), Mapping) else {}
     lines.extend(
         [
             f"- 검토 항목 수: {case_summary.get('bookmark_count', 0)}",
             f"- 보고서 포함 후보 수: {case_summary.get('report_item_count', 0)}",
-            f"- 해시 산출 항목 수: {submission_manifest.get('summary', {}).get('hashed_item_count', 0)}",
-            f"- 해시 산출 제외 항목 수: {submission_manifest.get('summary', {}).get('skipped_count', 0)}",
+            f"- 해시 산출 항목 수: {manifest_summary.get('hashed_item_count', 0)}",
+            f"- 해시 산출 제외 항목 수: {manifest_summary.get('skipped_count', 0)}",
             *report_scope_notes(case_payload, submission_manifest),
             "",
         ]
     )
-    indicator_rows = build_case_indicator_rows(case_payload)
-    lines.extend(["### IOC/Indicator review pivots", ""])
-    if indicator_rows:
-        for item in indicator_rows:
-            lines.append(
-                f"- `{item.get('summary')}` status=`{item.get('status')}`"
-                f" report={item.get('include_in_report')} tags={item.get('tags') or '없음'}"
-                f" note={item.get('note') or '없음'}"
-            )
-    else:
-        lines.append("- 저장된 indicator 리뷰 항목 없음.")
-    lines.append("")
-
-    compare_rows = build_case_compare_rows(case_payload)
-    lines.extend(["### A/B compare review pivots", ""])
-    if compare_rows:
-        for item in compare_rows:
-            lines.append(
-                f"- `{item.get('summary')}` status=`{item.get('status')}`"
-                f" report={item.get('include_in_report')} tags={item.get('tags') or '없음'}"
-                f" note={item.get('note') or '없음'}"
-            )
-    else:
-        lines.append("- 저장된 compare 리뷰 항목 없음.")
-    lines.append("")
+    lines.extend(report_items.review_table("### 침해 지표 검토 항목", build_case_indicator_rows(case_payload), "- 저장된 지표 검토 항목 없음."))
+    lines.extend(report_items.review_table("### A/B 비교 검토 항목", build_case_compare_rows(case_payload), "- 저장된 비교 검토 항목 없음."))
 
     # R7 AI 갈래 C: "AI 사용" section with the server-side evidence gap table (report option
     # ``sections``: absent = default on, ``["ai-usage"]`` on, ``[]`` off; a run without the
@@ -161,68 +137,25 @@ def build_case_report_markdown(
     if report_section_enabled(metadata, AI_SECTION_ID) and run_summary:
         lines.extend(ai_usage_section_lines(ai_usage_summary(run_summary.get("output_dir")), metadata=metadata))
 
-    lines.extend(["## 5. 제출 증거 및 해시값", ""])
-    items = submission_manifest.get("items")
-    if isinstance(items, list) and items:
-        for index, item in enumerate(items, start=1):
-            if not isinstance(item, Mapping):
-                continue
-            evidence = item.get("evidence") if isinstance(item.get("evidence"), Mapping) else {}
-            hashes = evidence.get("hashes") if isinstance(evidence.get("hashes"), Mapping) else {}
-            review = item.get("review") if isinstance(item.get("review"), Mapping) else {}
-            source_hits = extract_source_hit_notes(str(item.get("note") or ""))
-            lines.extend(
-                [
-                    f"### 5.{index}. {item.get('summary') or evidence.get('name') or 'Evidence'}",
-                    "",
-                    f"- 북마크 ID: `{item.get('bookmark_id', '')}`",
-                    f"- 파일명: `{evidence.get('name', '')}`",
-                    f"- 경로: `{evidence.get('path', '')}`",
-                    f"- 크기: {evidence.get('size', 0)} bytes",
-                    f"- 수정 시각: `{evidence.get('modified_at', '')}`",
-                    f"- 검토 상태: `{review.get('status', '')}`",
-                    f"- 태그: {', '.join(str(tag) for tag in item.get('tags', [])) or '없음'}",
-                    f"- 분석자 메모: {item.get('note') or '없음'}",
-                ]
+    # R8 T-027: every report candidate -- files and artifact rows -- with its row info.
+    lines.extend(["## 5. 보고서 포함 항목 및 증거 해시", ""])
+    entries = report_items.report_entries(case_payload, submission_manifest)
+    for index, entry in enumerate(entries, start=1):
+        bookmark = entry["bookmark"] if isinstance(entry.get("bookmark"), Mapping) else {}
+        lines.extend(
+            report_items.entry_lines(
+                index,
+                entry,
+                roots=roots,
+                offset_minutes=offset_minutes,
+                source_hits=extract_source_hit_notes(str(bookmark.get("note") or "")),
+                show_copy_path=template == "technical-appendix",
             )
-            if source_hits:
-                lines.append("- Source-search cited hits:")
-                for hit in source_hits:
-                    lines.append(f"  - Citation: {hit.get('citation', '')}")
-                    if hit.get("source_type"):
-                        lines.append(f"    - Source type: `{hit.get('source_type')}`")
-                    if hit.get("structured_citation"):
-                        lines.append(f"    - Structured citation: {hit.get('structured_citation')}")
-                    if hit.get("source_locator"):
-                        lines.append(f"    - Source locator: `{hit.get('source_locator')}`")
-                    if hit.get("matched_terms"):
-                        lines.append(f"    - Matched terms: {hit.get('matched_terms')}")
-                    if hit.get("result_hash"):
-                        lines.append(f"    - Result hash: `{hit.get('result_hash')}`")
-                    if hit.get("snippet"):
-                        lines.append(f"    - Snippet: {hit.get('snippet')}")
-                    if hit.get("review_hint"):
-                        lines.append(f"    - Review hint: {hit.get('review_hint')}")
-            lines.extend(
-                [
-                    f"- MD5: `{hashes.get('md5', '')}`",
-                    f"- SHA1: `{hashes.get('sha1', '')}`",
-                    f"- SHA256: `{hashes.get('sha256', '')}`",
-                    "",
-                ]
-            )
-    else:
-        lines.append("- 제출 후보로 지정되어 해시 산출된 증거가 없음.")
-        lines.append("")
+        )
+    if not entries:
+        lines.extend(["- 보고서 포함으로 표시한 항목이 없음.", ""])
 
-    skipped = submission_manifest.get("skipped")
-    lines.extend(["## 6. 해시 산출 제외 항목", ""])
-    if isinstance(skipped, list) and skipped:
-        for item in skipped:
-            if isinstance(item, Mapping):
-                lines.append(f"- `{item.get('path', '')}`: {item.get('reason', '')}")
-    else:
-        lines.append("- 없음")
+    lines.extend(["## 6. 해시 산출 제외 항목", "", *report_items.skipped_lines(submission_manifest, roots)])
 
     lines.extend(
         [
@@ -241,31 +174,7 @@ def build_case_report_markdown(
         ]
     )
     if template == "technical-appendix":
-        processing = run_summary.get("processing") if isinstance(run_summary.get("processing"), Mapping) else {}
-        source = run_summary.get("source") if isinstance(run_summary.get("source"), Mapping) else {}
-        warnings = processing.get("warnings") if isinstance(processing.get("warnings"), list) else []
-        caps = processing.get("caps") if isinstance(processing.get("caps"), Mapping) else {}
-        lines.extend(
-            [
-                "## 9. Technical appendix",
-                "",
-                f"- Processing profile: `{processing.get('profile_label', '')}`",
-                f"- Processing warning count: {processing.get('warning_count', 0)}",
-                f"- Highest warning level: `{processing.get('highest_warning_level', 'none')}`",
-                f"- Max extract bytes: `{caps.get('max_extract_size_bytes', 0)}`",
-                f"- Max extract files: `{caps.get('max_file_count', 0)}`",
-                f"- Source kind: `{source.get('kind', '')}`",
-                f"- Source path: `{source.get('source_path', '')}`",
-                f"- Scan scope root: `{run_summary.get('scan_scope_root', '')}`",
-                "",
-            ]
-        )
-        if warnings:
-            lines.extend(["### 9.1 Processing warnings", ""])
-            for item in warnings[:20]:
-                if isinstance(item, Mapping):
-                    lines.append(f"- `{item.get('step', '')}` [{item.get('level', '')}]: {item.get('message', '')}")
-            lines.append("")
+        lines.extend(report_items.technical_appendix_lines(run_summary))
     return "\n".join(lines)
 
 
@@ -278,14 +187,7 @@ def report_section_enabled(metadata: Mapping[str, object], section_id: str) -> b
 
 
 def template_noise_policy(template: str) -> str:
-    policies = {
-        "executive-summary": "decision-maker view; parser paths and low-level step output are intentionally summarized.",
-        "legal-handoff": "balanced handoff; includes procedure and evidence hashes while avoiding raw JSON dumps.",
-        "technical-appendix": "fuller technical appendix; includes processing caps, warnings, source path, and parser context.",
-        "hash-only": "hash appendix only; omits narrative analysis and most metadata.",
-        "korean-expert": "court-submission draft; 감정서 structure with CoC, tool validation, legal checklist, and limitations.",
-    }
-    return policies.get(template, policies["legal-handoff"])
+    return report_items.template_policy(template)
 
 
 def extract_source_hit_notes(note: str) -> list[dict[str, str]]:
@@ -392,38 +294,9 @@ def build_hash_only_report(
     *,
     lines: list[str],
     submission_manifest: Mapping[str, object],
+    roots: list[Path] | None = None,
 ) -> str:
-    lines.extend(["## 2. 제출 증거 해시 목록", ""])
-    items = submission_manifest.get("items")
-    if isinstance(items, list) and items:
-        for index, item in enumerate(items, start=1):
-            if not isinstance(item, Mapping):
-                continue
-            evidence = item.get("evidence") if isinstance(item.get("evidence"), Mapping) else {}
-            hashes = evidence.get("hashes") if isinstance(evidence.get("hashes"), Mapping) else {}
-            lines.extend(
-                [
-                    f"### 2.{index}. {item.get('summary') or evidence.get('name') or 'Evidence'}",
-                    "",
-                    f"- 경로: `{evidence.get('path', '')}`",
-                    f"- MD5: `{hashes.get('md5', '')}`",
-                    f"- SHA1: `{hashes.get('sha1', '')}`",
-                    f"- SHA256: `{hashes.get('sha256', '')}`",
-                    "",
-                ]
-            )
-    else:
-        lines.append("- 해시 산출된 제출 증거가 없음.")
-        lines.append("")
-    skipped = submission_manifest.get("skipped")
-    lines.extend(["## 3. 해시 산출 제외 항목", ""])
-    if isinstance(skipped, list) and skipped:
-        for item in skipped:
-            if isinstance(item, Mapping):
-                lines.append(f"- `{item.get('path', '')}`: {item.get('reason', '')}")
-    else:
-        lines.append("- 없음")
-    lines.append("")
+    lines.extend(report_items.hash_only_lines(submission_manifest, roots or []))
     return "\n".join(lines)
 
 
@@ -484,7 +357,7 @@ def hash_path(path: Path) -> str:
 
 
 def render_case_report_html(markdown: str) -> str:
-    title = f"{PRODUCT_NAME} Case Report"
+    title = f"{PRODUCT_NAME} 사건 보고서"
     body: list[str] = []
     in_list = False
     in_code = False
@@ -562,7 +435,7 @@ def render_case_report_html(markdown: str) -> str:
             "</style>",
             "</head>",
             "<body><main>",
-            f'<p class="meta">Generated by {PRODUCT_NAME}. Verify source evidence and hashes before legal submission.</p>',
+            f'<p class="meta">{PRODUCT_NAME}로 생성함. 법적 제출 전에 원본 증거와 해시값을 확인할 것.</p>',
             *body,
             "</main></body></html>",
             "",
@@ -797,9 +670,9 @@ def docx_core_properties() -> str:
         'xmlns:dcterms="http://purl.org/dc/terms/" '
         'xmlns:dcmitype="http://purl.org/dc/dcmitype/" '
         'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
-        "<dc:title>RapidTriage Case Report</dc:title>"
-        "<dc:creator>RapidTriage</dc:creator>"
-        "<cp:lastModifiedBy>RapidTriage</cp:lastModifiedBy>"
+        f"<dc:title>{xml_escape(PRODUCT_NAME)} 사건 보고서</dc:title>"
+        f"<dc:creator>{xml_escape(PRODUCT_NAME)}</dc:creator>"
+        f"<cp:lastModifiedBy>{xml_escape(PRODUCT_NAME)}</cp:lastModifiedBy>"
         "</cp:coreProperties>"
     )
 

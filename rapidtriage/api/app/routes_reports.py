@@ -46,6 +46,7 @@ from .runops import (
     build_run_case_report,
     build_run_submission_manifest,
     build_run_validation_package,
+    run_report_context,
     write_case_report_audit,
     write_run_validation_package_audit,
     write_submission_audit,
@@ -275,6 +276,7 @@ def build_reports_router(
                 max_items=request.max_items,
                 title=request.title,
                 run_summary=job.summary,
+                report_context=run_report_context(job),
             )
         except (BundleError, CaseBookmarkError, OSError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
