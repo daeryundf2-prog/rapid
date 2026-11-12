@@ -24,7 +24,7 @@ import {
 import { announce } from "../../a11y";
 import { DisabledReason } from "../../a11y/primitives";
 import { ApiError, downloadFile } from "../../api/client";
-import { DOCS_MATCHED, locateTimelineRow } from "../../api/collections";
+import { DOCS_MATCHED, locateTimelineRow, SCAN_BUDGET_STOPPED } from "../../api/collections";
 import type { RunExtractResult } from "../../api/extract";
 import { getRunTree } from "../../api/runs";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
@@ -1437,8 +1437,12 @@ export function DataGrid(props: DataGridProps = {}) {
   const allLoaded = cq.serverTotal !== null && cq.loadedCount >= cq.serverTotal;
   const clientScoped = clientSorting || needle !== "" || cq.clientColumnFilters || cq.clientFiltering;
   const scopeBanner = pagedGrid && clientScoped && !allLoaded && !cq.isLoading;
-  // A listing whose size the server has not counted yet (cross-kind pages) says so, never a guess.
-  const totalText = cq.serverTotal !== null ? formatCount(cq.serverTotal) : "미확인";
+  // A listing whose size the server has not counted yet (cross-kind pages) shows its lower
+  // bound ("n건 이상", T-020), never a guess.
+  const totalText =
+    cq.serverTotal !== null
+      ? formatCount(cq.serverTotal)
+      : `${formatCount(cq.totalLowerBound ?? cq.loadedCount)}건 이상`;
   const scopeBadge =
     pagedGrid && runId && !cq.isLoading ? (
       <span
@@ -1466,6 +1470,26 @@ export function DataGrid(props: DataGridProps = {}) {
   const timeBasis = filesGrid ? timeBasisOf(cq.pageMeta) : null;
   const timeBanner = timeBasisBanner(timeBasis);
   const timeEmptyText = timeConditionOn ? timeBasisEmptyText(timeBasis) : null;
+  const serverFiltering =
+    cq.serverColumnFilters ||
+    storeTypes.length > 0 ||
+    Boolean(storePath) ||
+    Boolean(serverPathFilter(q)) ||
+    serverQuery !== "";
+  // T-020 honest empty states: a scan the time budget stopped, or one that ended at its cap /
+  // with more to page, is never drawn as "no rows" — only a counted 0 (전체 확인) is.
+  const scannedText = cq.scanned ? `(${formatCount(cq.scanned)}행 확인)` : "";
+  const partialEmpty: GridEmptyState | null = cq.budgetStopped
+    ? {
+        icon: "clock",
+        text: `시간 제한으로 일부만 확인했습니다${scannedText}. 확인한 범위에는 맞는 행이 없지만 나머지에 있을 수 있습니다 — 다시 시도하거나 조건을 좁히세요.`,
+      }
+    : cq.truncated || (cq.serverTotal === null && cq.canLoadMore)
+      ? {
+          icon: "filter",
+          text: `일부만 확인했습니다${scannedText}. 확인한 범위에는 맞는 행이 없지만 나머지에 있을 수 있습니다 — 조건을 좁혀 다시 찾으세요.`,
+        }
+      : null;
   const emptyState: GridEmptyState = !runId
     ? {
         icon: "folder",
@@ -1484,45 +1508,73 @@ export function DataGrid(props: DataGridProps = {}) {
             }
           : sortBuilding
             ? { icon: "clock", text: "전체 정렬 인덱스를 만드는 중입니다. 끝나면 정렬된 순서로 표시합니다." }
-            : serverQuery
-              ? {
-                  icon: "search",
-                  text: `'${serverQuery}'에 맞는 이벤트가 없습니다. (서버 검색: 전체 이벤트)`,
-                }
-              : timeEmptyText
-                ? { icon: "clock", text: timeEmptyText }
-                : fsEmptyText
-                  ? { icon: "folder", text: fsEmptyText }
-                  : filesGrid && q.trim()
-                    ? {
-                        icon: "search",
-                        // Files filter name/path on the server (plan r7 §3.2 L2); the text names the query (L3).
-                        text: `'${q.trim()}'에 맞는 파일이 없습니다. (서버 검색: 전체 파일의 이름·경로)`,
-                      }
-                    : compactMode && needle
+            : partialEmpty
+              ? partialEmpty
+              : serverQuery
+                ? {
+                    icon: "search",
+                    text: `'${serverQuery}'에 맞는 이벤트가 없습니다. (서버 검색: 전체 이벤트)`,
+                  }
+                : timeEmptyText
+                  ? { icon: "clock", text: timeEmptyText }
+                  : fsEmptyText
+                    ? { icon: "folder", text: fsEmptyText }
+                    : filesGrid && q.trim()
                       ? {
-                          icon: "filter",
-                          text: `'${needle}'에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다.`,
+                          icon: "search",
+                          // Files filter name/path on the server (plan r7 §3.2 L2); the text names the query (L3).
+                          text: `'${q.trim()}'에 맞는 파일이 없습니다. (서버 검색: 전체 파일의 이름·경로)`,
                         }
-                      : isAnalysis && ref.kind
+                      : compactMode && needle
                         ? {
-                            icon: "inbox",
-                            text: "이 노드에는 결과가 없습니다.",
-                            action: { command: runCommandId(ref.kind), label: "분석 실행" },
+                            icon: "filter",
+                            text: `'${needle}'에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다.`,
                           }
-                        : compactMode
+                        : isAnalysis && ref.kind
                           ? {
-                              icon: "filter",
-                              text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다.",
+                              icon: "inbox",
+                              text: "이 노드에는 결과가 없습니다.",
+                              action: { command: runCommandId(ref.kind), label: "분석 실행" },
                             }
-                          : { icon: "inbox", text: "이 노드에는 표시할 행이 없습니다." };
+                          : compactMode
+                            ? {
+                                icon: "filter",
+                                text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다.",
+                              }
+                            : serverFiltering
+                              ? { icon: "filter", text: "조건에 맞는 행이 없습니다. (전체 확인)" }
+                              : { icon: "inbox", text: "이 노드에는 표시할 행이 없습니다." };
 
-  const serverFiltering =
-    cq.serverColumnFilters ||
-    storeTypes.length > 0 ||
-    Boolean(storePath) ||
-    Boolean(serverPathFilter(q)) ||
-    serverQuery !== "";
+  // T-020 temporary band (T-089 replaces it with PartialBanner): a budget-stopped scan says so.
+  const partialBanner =
+    runId && cq.budgetStopped ? (
+      <p
+        className="grid-scope-banner grid-partial-banner"
+        role="status"
+        data-testid="r8-partial-banner"
+        data-code={cq.notice?.code ?? SCAN_BUDGET_STOPPED}
+      >
+        <strong>시간 제한으로 일부만 확인했습니다{scannedText}</strong>
+        {cq.notice?.message ? <span>{cq.notice.message}</span> : null}
+        <button
+          type="button"
+          className="grid-btn grid-btn-quiet"
+          data-testid="r8-partial-retry"
+          disabled={cq.isFetching}
+          onClick={cq.refetch}
+        >
+          다시 시도
+        </button>
+        <button
+          type="button"
+          className="grid-btn grid-btn-quiet"
+          data-testid="r8-partial-narrow"
+          onClick={() => setFilterRowOpen(true)}
+        >
+          조건 좁히기
+        </button>
+      </p>
+    ) : null;
   const loadingMessage = serverFiltering
     ? "서버에서 조건에 맞는 행을 찾는 중입니다 … (큰 유형은 수 초 걸릴 수 있습니다)"
     : "목록을 불러오는 중입니다 …";
@@ -1702,6 +1754,7 @@ export function DataGrid(props: DataGridProps = {}) {
         </p>
       ) : null}
 
+      {partialBanner}
       {scopeBanner ? (
         <p className="grid-scope-banner" role="note" data-testid="grid-scope-banner">
           <strong>{CLIENT_SCOPE_BANNER}</strong> — 불러온 {formatCount(cq.loadedCount)}행
@@ -1972,6 +2025,7 @@ export function DataGrid(props: DataGridProps = {}) {
         page={currentPage}
         pageCount={cq.pageCount}
         total={cq.total}
+        totalLowerBound={cq.totalLowerBound}
         shown={displayCount}
         backend={cq.backend}
         elapsedMs={cq.elapsedMs}
