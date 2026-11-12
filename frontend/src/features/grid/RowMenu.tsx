@@ -1,13 +1,34 @@
-import { Fragment, useEffect, useRef } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useEscape } from "../../a11y/focus";
-import { type CommandContext, KEY_MAP } from "../../contracts/command";
+import { placePopover } from "../../components/Popover";
+import { type Command, type CommandContext, KEY_MAP } from "../../contracts/command";
 import { Icon, isIconName } from "../../icons";
 import { keyLabel } from "../../shortcuts";
 import { getRegisteredCommand } from "./adapter";
 
-/** Row-menu entries in order; each is a registered `grid.*` Command. */
-export const ROW_MENU_COMMAND_IDS = [
+/**
+ * The row menu's first level (plan r8 T-090, IS-026): eight entries — 열기 · 관련 있음 · 재검토 ·
+ * 제외 · 태그 · 보고서 포함 · 전후 시각 · 같은 파일 — then "더 보기". Entries that cannot run on
+ * the focused row are not listed (no disabled noise); each is a registered `grid.*` Command.
+ */
+export const ROW_MENU_PRIMARY_IDS = [
   "grid.openSource",
+  "grid.row.relevant",
+  "grid.row.needs-review",
+  "grid.row.excluded",
+  "grid.row.tag",
+  "grid.row.include-in-report",
+  "grid.pivot.timeline-window",
+  "grid.pivot.same-source",
+] as const;
+
+/** Entries that only apply to some rows: cross-case rows → "다른 케이스에서 열기". */
+export const ROW_MENU_CONTEXTUAL_IDS = ["grid.openOtherCase"] as const;
+
+/** "더 보기": every other row command, in this order, listed only when it can run. */
+export const ROW_MENU_MORE_IDS = [
+  ...ROW_MENU_CONTEXTUAL_IDS,
   "grid.openHex",
   "grid.copyPath",
   "grid.copyCitation",
@@ -18,35 +39,19 @@ export const ROW_MENU_COMMAND_IDS = [
   "grid.family.parent",
   "grid.family.expandSelection",
   "grid.ocrSelected",
-] as const;
-
-/**
- * Row-specific entries listed only when they apply to the focused row (no permanently
- * disabled noise on every other row): cross-case rows → "다른 케이스에서 열기".
- */
-export const ROW_MENU_CONTEXTUAL_IDS = ["grid.openOtherCase"] as const;
-
-/** Record pivots (viewer redesign §5), listed after a separator; disabled with a reason when absent. */
-export const ROW_MENU_PIVOT_IDS = [
+  // Record pivots (viewer redesign §5) not on the first level.
   "grid.pivot.same-user",
   "grid.pivot.same-logon",
   "grid.pivot.same-hash",
   "grid.pivot.same-target",
   "grid.pivot.same-key",
-  "grid.pivot.same-source",
-  "grid.pivot.timeline-window",
   "grid.pivot.matched-event",
   "grid.pivot.source-artifact",
-] as const;
-
-/** Review items, always listed after a separator (disabled with a reason when they cannot run). */
-export const ROW_MENU_REVIEW_IDS = [
-  "grid.row.relevant",
-  "grid.row.needs-review",
-  "grid.row.excluded",
-  "grid.row.include-in-report",
   "grid.row.bookmark",
 ] as const;
+
+/** Label of the entry that reveals ROW_MENU_MORE_IDS. */
+export const ROW_MENU_MORE_LABEL = "더 보기";
 
 /** Keys a row-menu entry mirrors (review #13): Enter opens, R / X / I / B mark the row. */
 const ROW_MENU_KEYS: Record<string, { command?: string; fallback: string }> = {
@@ -68,24 +73,74 @@ export function rowMenuShortcut(id: string, ownShortcut?: string): string | unde
   return (entry.command ? getRegisteredCommand(entry.command)?.shortcut : undefined) ?? entry.fallback;
 }
 
+/** The registered, currently runnable commands of `ids` (an entry that cannot run is not listed). */
+export function runnableRowCommands(ids: readonly string[], context: CommandContext): Command[] {
+  return ids
+    .map((id) => getRegisteredCommand(id))
+    .filter((command): command is Command => !!command && !command.disabledReason?.(context));
+}
+
 export interface RowMenuProps {
   /** Element id, referenced by the trigger's aria-controls. */
   id?: string;
-  /** Viewport coordinates; null = closed. */
-  anchor: { x: number; y: number } | null;
+  /**
+   * Viewport coordinates; null = closed. x/y is the point the menu hangs from (below a trigger,
+   * or the pointer); `top` is the trigger's top edge, used when the menu flips above it.
+   */
+  anchor: { x: number; y: number; top?: number } | null;
   context: CommandContext;
   onClose: () => void;
-  /** Called with the reason when a disabled item is activated (never a silent no-op). */
+  /** Called with the reason when an entry stopped being runnable while the menu was open. */
   onDisabled: (reason: string) => void;
 }
 
-export function RowMenu({ id, anchor, context, onClose, onDisabled }: RowMenuProps) {
+export function RowMenu(props: RowMenuProps) {
+  // Remount per opening so "더 보기" starts collapsed every time.
+  if (!props.anchor) return null;
+  return <RowMenuPanel key={`${props.anchor.x},${props.anchor.y}`} {...props} anchor={props.anchor} />;
+}
+
+function RowMenuPanel({
+  id,
+  anchor,
+  context,
+  onClose,
+  onDisabled,
+}: RowMenuProps & { anchor: NonNullable<RowMenuProps["anchor"]> }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
   // Esc closes the menu wherever focus went (shared Esc stack), not only from inside it.
-  useEscape(onClose, anchor !== null);
+  useEscape(onClose, true);
+
+  // Portalled and placed before paint: below the point, flipped above the trigger when there is
+  // more room there, shifted into the viewport and capped (scrolls) — never off screen (IS-102).
+  useLayoutEffect(() => {
+    const place = () => {
+      const menu = ref.current;
+      if (!menu) return;
+      const next = placePopover(
+        { top: anchor.top ?? anchor.y, bottom: anchor.y, left: anchor.x, right: anchor.x },
+        { width: menu.offsetWidth, height: menu.scrollHeight },
+        { width: window.innerWidth, height: window.innerHeight },
+        "start",
+      );
+      menu.style.top = `${next.top}px`;
+      menu.style.left = `${next.left}px`;
+      menu.style.maxHeight = `${next.maxHeight}px`;
+      menu.dataset.placement = next.above ? "above" : "below";
+    };
+    place();
+    window.addEventListener("resize", place);
+    // "더 보기" grows the menu: re-place (flip / cap) when its size changes.
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(place);
+    if (observer && ref.current) observer.observe(ref.current);
+    return () => {
+      window.removeEventListener("resize", place);
+      observer?.disconnect();
+    };
+  }, [anchor]);
 
   useEffect(() => {
-    if (!anchor) return;
     ref.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
     const onDown = (event: MouseEvent) => {
       const target = event.target as Element | null;
@@ -95,20 +150,15 @@ export function RowMenu({ id, anchor, context, onClose, onDisabled }: RowMenuPro
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [anchor, onClose, id]);
+  }, [onClose, id]);
 
-  if (!anchor) return null;
+  // After "더 보기", focus the first revealed entry.
+  useEffect(() => {
+    if (expanded) ref.current?.querySelector<HTMLElement>("[data-more-first]")?.focus();
+  }, [expanded]);
 
-  const registered = (ids: readonly string[]) =>
-    ids
-      .map((id) => getRegisteredCommand(id))
-      .filter((command): command is NonNullable<typeof command> => !!command);
-  const items = [
-    ...registered(ROW_MENU_CONTEXTUAL_IDS).filter((command) => !command.disabledReason?.(context)),
-    ...registered(ROW_MENU_COMMAND_IDS),
-  ];
-  const pivotItems = registered(ROW_MENU_PIVOT_IDS);
-  const reviewItems = registered(ROW_MENU_REVIEW_IDS);
+  const primary = runnableRowCommands(ROW_MENU_PRIMARY_IDS, context);
+  const more = runnableRowCommands(ROW_MENU_MORE_IDS, context);
 
   const move = (delta: number, from: HTMLElement) => {
     const nodes = Array.from(ref.current?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? []);
@@ -116,7 +166,45 @@ export function RowMenu({ id, anchor, context, onClose, onDisabled }: RowMenuPro
     nodes[(index + delta + nodes.length) % nodes.length]?.focus();
   };
 
-  return (
+  const item = (command: Command, first = false) => {
+    const shortcut = rowMenuShortcut(command.id, command.shortcut);
+    return (
+      <button
+        key={command.id}
+        type="button"
+        role="menuitem"
+        className="grid-menu-item menu-item"
+        aria-keyshortcuts={shortcut}
+        data-command={command.id}
+        data-more-first={first || undefined}
+        onClick={() => {
+          // State can change while the menu is open: never run a command that cannot run.
+          const reason = command.disabledReason?.(context);
+          if (reason) {
+            onDisabled(reason);
+            return;
+          }
+          onClose();
+          void command.run(context);
+        }}
+      >
+        {/* 16px lead slot (icon or empty), label, right-aligned key. */}
+        <span className="menu-item-lead" aria-hidden="true">
+          {isIconName(command.icon) ? <Icon name={command.icon} /> : null}
+        </span>
+        <span className="menu-item-text">
+          <span className="menu-item-label">{command.label}</span>
+        </span>
+        {shortcut ? (
+          <span className="menu-item-kbd" aria-hidden="true">
+            {keyLabel(shortcut)}
+          </span>
+        ) : null}
+      </button>
+    );
+  };
+
+  const panel = (
     <div
       ref={ref}
       id={id}
@@ -138,57 +226,44 @@ export function RowMenu({ id, anchor, context, onClose, onDisabled }: RowMenuPro
           move(-1, target);
         } else if (event.key === "Home") {
           event.preventDefault();
-          move(-1000, target);
+          ref.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+        } else if (event.key === "End") {
+          event.preventDefault();
+          const nodes = ref.current?.querySelectorAll<HTMLElement>("[role=menuitem]");
+          nodes?.[nodes.length - 1]?.focus();
+        } else if (event.key === "ArrowRight" && target.dataset.more !== undefined) {
+          event.preventDefault();
+          setExpanded(true);
         }
       }}
     >
-      {[...items, ...pivotItems, ...reviewItems].map((command, index) => {
-        const reason = command.disabledReason?.(context);
-        const shortcut = rowMenuShortcut(command.id, command.shortcut);
-        return (
-          <Fragment key={command.id}>
-            {(index === items.length || index === items.length + pivotItems.length) && index > 0 ? (
-              <hr className="grid-menu-sep" />
-            ) : null}
-            <button
-              type="button"
-              role="menuitem"
-              className="grid-menu-item menu-item"
-              aria-disabled={reason ? true : undefined}
-              aria-keyshortcuts={shortcut}
-              title={reason}
-              data-disabled-reason={reason || undefined}
-              data-command={command.id}
-              onClick={() => {
-                if (reason) {
-                  onDisabled(reason);
-                  return;
-                }
-                onClose();
-                void command.run(context);
-              }}
-            >
-              {/* 16px lead slot (icon or empty), label + 11px reason line, right-aligned key. */}
-              <span className="menu-item-lead" aria-hidden="true">
-                {isIconName(command.icon) ? <Icon name={command.icon} /> : null}
-              </span>
-              <span className="menu-item-text">
-                <span className="menu-item-label">{command.label}</span>
-                {reason ? (
-                  <span className="menu-item-reason" aria-hidden="true">
-                    {reason}
-                  </span>
-                ) : null}
-              </span>
-              {shortcut ? (
-                <span className="menu-item-kbd" aria-hidden="true">
-                  {keyLabel(shortcut)}
-                </span>
-              ) : null}
-            </button>
-          </Fragment>
-        );
-      })}
+      {primary.map((command) => item(command))}
+      {more.length > 0 && !expanded ? (
+        <button
+          type="button"
+          role="menuitem"
+          className="grid-menu-item menu-item"
+          aria-haspopup="menu"
+          aria-expanded={false}
+          data-more=""
+          onClick={() => setExpanded(true)}
+        >
+          <span className="menu-item-lead" aria-hidden="true">
+            <Icon name="more" />
+          </span>
+          <span className="menu-item-text">
+            <span className="menu-item-label">{ROW_MENU_MORE_LABEL}</span>
+          </span>
+        </button>
+      ) : null}
+      {expanded && more.length > 0 ? (
+        <Fragment>
+          {primary.length > 0 ? <hr className="grid-menu-sep" /> : null}
+          {more.map((command, index) => item(command, index === 0))}
+        </Fragment>
+      ) : null}
     </div>
   );
+
+  return typeof document !== "undefined" ? createPortal(panel, document.body) : panel;
 }
