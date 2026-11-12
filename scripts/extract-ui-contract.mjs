@@ -15,15 +15,26 @@
  *   node scripts/extract-ui-contract.mjs            # JSON report on stdout
  *   node scripts/extract-ui-contract.mjs --write    # regenerate the generated block of uiContract.ts
  *   node scripts/extract-ui-contract.mjs --check    # exit 1 when uiContract.ts is stale (QA-111 ②)
+ *   node scripts/extract-ui-contract.mjs --root <checkout>   # scan another checkout (comparisons)
  *
- * No dependencies: plain regex over the source text.
+ * vitest files: plain regex over the source text. e2e specs (T-157): parsed with the TypeScript
+ * compiler API (frontend/node_modules/typescript), and every name argument is evaluated statically —
+ * string/regex literals, file-level `const` bindings, and `COPY.*` / `TEST_IDS.*` / `copyPattern` /
+ * `escapeRegExp` / `testIdSelector` imported from src/contracts/{copy,testIds}.ts, whose values come
+ * from those files' own source. The evaluator is a small interpreter over a whitelist of pure
+ * constructs (literals, templates, object/array literals, arrow functions, `?:`, `===`, `typeof`, a few
+ * string/number methods, `new RegExp`); nothing is eval'd or imported, and anything else (a function
+ * parameter, a loop variable, a runtime value) leaves the name dynamic, i.e. not in the table.
  */
 
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const SCRIPT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const rootArg = process.argv.indexOf("--root");
+const ROOT = rootArg > 0 ? resolve(process.argv[rootArg + 1]) : SCRIPT_ROOT;
 const FRONTEND = join(ROOT, "frontend");
 const SRC = join(FRONTEND, "src");
 const E2E = join(FRONTEND, "e2e");
@@ -84,6 +95,415 @@ function namesIn(text) {
   return out;
 }
 
+// ---------------------------------------------------------------------------------------------------
+// Static evaluation of e2e name arguments (T-157)
+// ---------------------------------------------------------------------------------------------------
+
+let tsModule;
+/** The TypeScript compiler from the frontend's node_modules (this script's checkout, not --root). */
+function typescript() {
+  if (tsModule) return tsModule;
+  try {
+    tsModule = createRequire(join(SCRIPT_ROOT, "frontend", "package.json"))("typescript");
+  } catch {
+    console.error("extract-ui-contract: frontend/node_modules/typescript not found — run npm ci in frontend");
+    process.exit(2);
+  }
+  return tsModule;
+}
+
+/** Thrown when an expression is not statically resolvable; the caller treats the name as dynamic. */
+class Unresolved extends Error {}
+const unresolved = (why) => {
+  throw new Unresolved(why);
+};
+
+/** A function the interpreter can call: its own params/body, closed over a scope. */
+class StaticFn {
+  constructor(node, scope) {
+    this.node = node;
+    this.scope = scope;
+  }
+  call(args) {
+    const ts = typescript();
+    const locals = new Map();
+    const scope = { lookup: (name) => (locals.has(name) ? locals.get(name) : this.scope.lookup(name)) };
+    this.node.parameters.forEach((param, index) => {
+      if (!ts.isIdentifier(param.name) || param.dotDotDotToken) unresolved("parameter shape");
+      let value = args[index];
+      if (value === undefined && param.initializer) value = evaluate(param.initializer, scope);
+      locals.set(param.name.text, value);
+    });
+    const body = this.node.body;
+    if (!body) unresolved("no body");
+    if (!ts.isBlock(body)) return evaluate(body, scope);
+    // A block: `const` declarations, then one `return`.
+    for (const statement of body.statements) {
+      if (ts.isReturnStatement(statement)) {
+        if (!statement.expression) unresolved("bare return");
+        return evaluate(statement.expression, scope);
+      }
+      if (!ts.isVariableStatement(statement) || !(statement.declarationList.flags & ts.NodeFlags.Const)) {
+        unresolved("statement");
+      }
+      for (const decl of statement.declarationList.declarations) {
+        if (!ts.isIdentifier(decl.name) || !decl.initializer) unresolved("declaration");
+        locals.set(decl.name.text, evaluate(decl.initializer, scope));
+      }
+    }
+    return unresolved("no return");
+  }
+}
+
+const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value) && !(value instanceof RegExp);
+const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+
+/** Pure methods on primitive values the interpreter may call (all deterministic, none run code). */
+function callMethod(target, method, args) {
+  if (typeof target === "number" && method === "toLocaleString") {
+    if (!args.every((arg) => typeof arg === "string")) unresolved("toLocaleString args");
+    return target.toLocaleString(...args);
+  }
+  if (typeof target === "number" && method === "toString" && args.length === 0) return String(target);
+  if (typeof target === "string") {
+    if (method === "replace" || method === "replaceAll") {
+      const [pattern, replacement] = args;
+      if (!(typeof pattern === "string" || pattern instanceof RegExp) || typeof replacement !== "string") {
+        unresolved("replace args");
+      }
+      return target[method](pattern, replacement);
+    }
+    if (method === "slice" && args.every((arg) => typeof arg === "number")) return target.slice(...args);
+    if (["trim", "toLowerCase", "toUpperCase"].includes(method) && args.length === 0) return target[method]();
+  }
+  return unresolved(`method ${method}`);
+}
+
+function regexFromLiteral(text) {
+  const slash = text.lastIndexOf("/");
+  return new RegExp(text.slice(1, slash), text.slice(slash + 1));
+}
+
+/** Evaluate `node` in `scope` ({ lookup(name) }), or throw Unresolved. */
+function evaluate(node, scope) {
+  const ts = typescript();
+  const K = ts.SyntaxKind;
+  switch (node.kind) {
+    case K.StringLiteral:
+    case K.NoSubstitutionTemplateLiteral:
+      return node.text;
+    case K.NumericLiteral:
+      return Number(node.text);
+    case K.TrueKeyword:
+      return true;
+    case K.FalseKeyword:
+      return false;
+    case K.RegularExpressionLiteral:
+      return regexFromLiteral(node.text);
+    case K.TemplateExpression: {
+      let out = node.head.text;
+      for (const span of node.templateSpans) {
+        const value = evaluate(span.expression, scope);
+        if (typeof value !== "string" && typeof value !== "number") unresolved("template slot");
+        out += String(value) + span.literal.text;
+      }
+      return out;
+    }
+    case K.ParenthesizedExpression:
+    case K.AsExpression:
+    case K.SatisfiesExpression:
+    case K.NonNullExpression:
+    case K.TypeAssertionExpression:
+      return evaluate(node.expression, scope);
+    case K.Identifier:
+      return scope.lookup(node.text);
+    case K.PropertyAccessExpression: {
+      if (node.questionDotToken) unresolved("optional chain");
+      const target = evaluate(node.expression, scope);
+      const key = node.name.text;
+      if (Array.isArray(target) && key === "length") return target.length;
+      if (!isRecord(target) || !has(target, key)) unresolved(`property ${key}`);
+      return target[key];
+    }
+    case K.ElementAccessExpression: {
+      const target = evaluate(node.expression, scope);
+      const key = evaluate(node.argumentExpression, scope);
+      if (Array.isArray(target) && Number.isInteger(key) && key >= 0 && key < target.length) return target[key];
+      if (isRecord(target) && typeof key === "string" && has(target, key)) return target[key];
+      return unresolved("element access");
+    }
+    case K.CallExpression: {
+      if (node.questionDotToken) unresolved("optional call");
+      const args = node.arguments.map((arg) => evaluate(arg, scope));
+      const callee = node.expression;
+      if (ts.isPropertyAccessExpression(callee)) {
+        const target = evaluate(callee.expression, scope);
+        if (typeof target === "string" || typeof target === "number") {
+          return callMethod(target, callee.name.text, args);
+        }
+      }
+      const fn = evaluate(callee, scope);
+      if (!(fn instanceof StaticFn)) unresolved("callee");
+      return fn.call(args);
+    }
+    case K.NewExpression: {
+      if (!ts.isIdentifier(node.expression) || node.expression.text !== "RegExp") unresolved("new");
+      if (scope.declares?.("RegExp")) unresolved("shadowed RegExp");
+      const args = (node.arguments ?? []).map((arg) => evaluate(arg, scope));
+      if (!args.every((arg) => typeof arg === "string") || args.length < 1 || args.length > 2) {
+        unresolved("RegExp args");
+      }
+      return new RegExp(...args);
+    }
+    case K.ArrowFunction:
+    case K.FunctionExpression:
+      return new StaticFn(node, scope);
+    case K.ConditionalExpression: {
+      const condition = evaluate(node.condition, scope);
+      if (typeof condition !== "boolean") unresolved("condition");
+      return evaluate(condition ? node.whenTrue : node.whenFalse, scope);
+    }
+    case K.TypeOfExpression: {
+      const value = evaluate(node.expression, scope);
+      if (!["string", "number", "boolean", "undefined"].includes(typeof value)) unresolved("typeof");
+      return typeof value;
+    }
+    case K.PrefixUnaryExpression: {
+      const value = evaluate(node.operand, scope);
+      if (node.operator === K.MinusToken && typeof value === "number") return -value;
+      if (node.operator === K.ExclamationToken && typeof value === "boolean") return !value;
+      return unresolved("prefix");
+    }
+    case K.BinaryExpression: {
+      const op = node.operatorToken.kind;
+      const left = evaluate(node.left, scope);
+      const right = evaluate(node.right, scope);
+      const primitive = (value) => ["string", "number", "boolean"].includes(typeof value);
+      if (!primitive(left) || !primitive(right)) unresolved("binary operand");
+      if (op === K.EqualsEqualsEqualsToken) return left === right;
+      if (op === K.ExclamationEqualsEqualsToken) return left !== right;
+      if (op === K.PlusToken && (typeof left === "string" || typeof right === "string")) return `${left}${right}`;
+      if (op === K.PlusToken && typeof left === "number" && typeof right === "number") return left + right;
+      return unresolved("binary operator");
+    }
+    case K.ArrayLiteralExpression:
+      return Object.freeze(
+        node.elements.map((element) => {
+          if (ts.isSpreadElement(element)) unresolved("spread");
+          return evaluate(element, scope);
+        }),
+      );
+    case K.ObjectLiteralExpression: {
+      const out = {};
+      for (const prop of node.properties) {
+        let key;
+        let value;
+        if (ts.isPropertyAssignment(prop)) {
+          if (ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name) || ts.isNumericLiteral(prop.name)) {
+            key = prop.name.text;
+          } else unresolved("computed key");
+          value = prop.initializer;
+        } else if (ts.isShorthandPropertyAssignment(prop)) {
+          key = prop.name.text;
+          value = prop.name;
+        } else unresolved("object member");
+        // Lazy: one unresolvable entry does not hide its siblings.
+        Object.defineProperty(out, key, { enumerable: true, get: () => evaluate(value, scope) });
+      }
+      return Object.freeze(out);
+    }
+    default:
+      return unresolved(`syntax ${ts.SyntaxKind[node.kind]}`);
+  }
+}
+
+/**
+ * Every identifier a file declares, with its declarations. A name resolves at file level only when it
+ * is declared exactly once, as `const name = <init>` — any other declaration of the same name (a
+ * parameter, a loop variable, a destructured binding) could shadow it, so the name stays dynamic.
+ */
+function declarationsIn(sourceFile) {
+  const ts = typescript();
+  const decls = new Map();
+  const note = (name, node) => {
+    if (!name || !ts.isIdentifier(name)) return;
+    decls.set(name.text, [...(decls.get(name.text) ?? []), node]);
+  };
+  const visit = (node) => {
+    if (
+      ts.isVariableDeclaration(node) ||
+      ts.isParameter(node) ||
+      ts.isBindingElement(node) ||
+      ts.isFunctionDeclaration(node) ||
+      ts.isClassDeclaration(node) ||
+      ts.isImportSpecifier(node) ||
+      ts.isImportClause(node) ||
+      ts.isNamespaceImport(node) ||
+      ts.isImportEqualsDeclaration(node)
+    ) {
+      note(node.name, node);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return decls;
+}
+
+const parsed = new Map();
+function parse(path) {
+  if (!parsed.has(path)) {
+    const ts = typescript();
+    parsed.set(path, ts.createSourceFile(path, read(path), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS));
+  }
+  return parsed.get(path);
+}
+
+/** The contract modules a spec may import values from (T-157); their exports are evaluated from source. */
+const CONTRACT_MODULES = () => [join(SRC, "contracts", "copy.ts"), join(SRC, "contracts", "testIds.ts")];
+
+/** File scope: `lookup(name)` for single `const` bindings, exported functions and contract imports. */
+function fileScope(path) {
+  const ts = typescript();
+  const sourceFile = parse(path);
+  const decls = declarationsIn(sourceFile);
+  const cache = new Map();
+  const scope = {
+    declares: (name) => decls.has(name),
+    lookup(name) {
+      if (cache.has(name)) {
+        const hit = cache.get(name);
+        if (hit === RESOLVING) unresolved(`cycle ${name}`);
+        return hit;
+      }
+      const found = decls.get(name);
+      if (!found || found.length !== 1) return unresolved(`binding ${name}`);
+      cache.set(name, RESOLVING);
+      try {
+        const value = bind(found[0]);
+        cache.set(name, value);
+        return value;
+      } catch (error) {
+        cache.delete(name);
+        throw error;
+      }
+    },
+  };
+  const bind = (decl) => {
+    if (ts.isVariableDeclaration(decl)) {
+      const list = decl.parent;
+      if (!ts.isVariableDeclarationList(list) || !(list.flags & ts.NodeFlags.Const) || !decl.initializer) {
+        unresolved("not const");
+      }
+      return evaluate(decl.initializer, scope);
+    }
+    if (ts.isFunctionDeclaration(decl)) return new StaticFn(decl, scope);
+    if (ts.isImportSpecifier(decl)) {
+      const from = decl.parent.parent.parent.moduleSpecifier.text;
+      if (!from.startsWith(".")) unresolved("package import");
+      const target = resolve(dirname(path), from);
+      const module = CONTRACT_MODULES().find((file) => file === target || file === `${target}.ts`);
+      if (!module || !existsSync(module)) unresolved("not a contract module");
+      return moduleExport(module, (decl.propertyName ?? decl.name).text);
+    }
+    return unresolved("declaration kind");
+  };
+  return scope;
+}
+const RESOLVING = Symbol("resolving");
+
+const scopes = new Map();
+function scopeOf(path) {
+  if (!scopes.has(path)) scopes.set(path, fileScope(path));
+  return scopes.get(path);
+}
+
+/** An `export const` / `export function` of a contract module. */
+function moduleExport(path, name) {
+  const ts = typescript();
+  const exported = parse(path).statements.some(
+    (statement) =>
+      (ts.isVariableStatement(statement) || ts.isFunctionDeclaration(statement)) &&
+      statement.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) &&
+      (ts.isFunctionDeclaration(statement)
+        ? statement.name?.text === name
+        : statement.declarationList.declarations.some((d) => ts.isIdentifier(d.name) && d.name.text === name)),
+  );
+  if (!exported) unresolved(`export ${name}`);
+  return scopeOf(path).lookup(name);
+}
+
+const callName = (ts, node) =>
+  ts.isPropertyAccessExpression(node.expression)
+    ? node.expression.name.text
+    : ts.isIdentifier(node.expression)
+      ? node.expression.text
+      : "";
+const ROLE_METHOD = /^(?:get|getAll|query|queryAll|find|findAll)ByRole$/;
+const LABEL_METHOD = /^(?:getByLabel|(?:get|getAll|query|queryAll|find|findAll)ByLabelText)$/;
+
+/** A resolved name value → `{ name, pattern }` in the table's notation (regex as `/source/flags`). */
+function nameEntry(ts, node, value) {
+  if (typeof value === "string") return { name: value, pattern: false };
+  if (value instanceof RegExp) {
+    return { name: ts.isRegularExpressionLiteral(node) ? node.text : String(value), pattern: true };
+  }
+  return null;
+}
+
+/** Accessible names and testids an e2e spec uses, evaluated statically (dynamic ones are skipped). */
+function specUses(path) {
+  const ts = typescript();
+  const scope = scopeOf(path);
+  const names = [];
+  const testIds = [];
+  const tryEval = (node) => {
+    try {
+      return evaluate(node, scope);
+    } catch (error) {
+      if (error instanceof Unresolved) return undefined;
+      throw error;
+    }
+  };
+  const visit = (node) => {
+    if (ts.isCallExpression(node)) {
+      const method = callName(ts, node);
+      const [first, second] = node.arguments;
+      if (ROLE_METHOD.test(method) && first && second && ts.isObjectLiteralExpression(second)) {
+        const role = tryEval(first);
+        const option = second.properties.find(
+          (prop) => ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name) && prop.name.text === "name",
+        );
+        const entry = option && nameEntry(ts, option.initializer, tryEval(option.initializer));
+        if (typeof role === "string" && /^[\w-]+$/.test(role) && entry) names.push({ role, ...entry });
+      } else if (LABEL_METHOD.test(method) && first) {
+        const entry = nameEntry(ts, first, tryEval(first));
+        if (entry) names.push({ role: "(label)", ...entry });
+      } else if (method === "getByTestId" && first) {
+        const id = tryEval(first);
+        if (typeof id === "string") testIds.push(id);
+      } else if (method === "testIdSelector" && first) {
+        const id = tryEval(first);
+        if (typeof id === "string") testIds.push(id);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parse(path));
+  return { names, testIds };
+}
+
+/** TEST_IDS from contracts/testIds.ts (evaluated from source), or null when absent/unresolvable. */
+function contractTestIds() {
+  const path = join(SRC, "contracts", "testIds.ts");
+  if (!existsSync(path)) return null;
+  try {
+    return moduleExport(path, "TEST_IDS");
+  } catch (error) {
+    if (error instanceof Unresolved) return null;
+    throw error;
+  }
+}
+
 function extract() {
   // uiContract.ts itself is not "source": its tables would make every name look present.
   const sourceFiles = walk(SRC, (name) => isTs(name) && !isTest(name)).filter(
@@ -102,7 +522,12 @@ function extract() {
     row[from] += 1;
     table.set(key, row);
   };
-  for (const path of e2eFiles) for (const entry of namesIn(read(path))) add(entry, "e2e");
+  const e2eTestIds = new Set();
+  for (const path of e2eFiles) {
+    const uses = specUses(path);
+    for (const entry of uses.names) add(entry, "e2e");
+    for (const id of uses.testIds) e2eTestIds.add(id);
+  }
   for (const path of testFiles) for (const entry of namesIn(read(path))) add(entry, "vitest");
   const a11yNames = [...table.values()]
     .map((row) => ({
@@ -149,6 +574,11 @@ function extract() {
     for (const match of text.matchAll(/data-testid=(?:"([^"]+)"|\{\s*["`]([^"`]+)["`]\s*\})/g)) {
       testIds.add((match[1] ?? match[2]).replace(/\$\{[^}]*\}/g, "<…>"));
     }
+    // `data-testid={TEST_IDS.key}` (T-157 constants; components move onto them in T-263).
+    for (const match of text.matchAll(/data-testid=\{\s*TEST_IDS\.(\w+)\s*\}/g)) {
+      const ids = contractTestIds();
+      if (typeof ids?.[match[1]] === "string") testIds.add(ids[match[1]]);
+    }
   }
 
   return {
@@ -158,6 +588,7 @@ function extract() {
     keyMap,
     popout,
     testIds: [...testIds].sort(cmp),
+    e2eTestIds: [...e2eTestIds].sort(cmp),
   };
 }
 
