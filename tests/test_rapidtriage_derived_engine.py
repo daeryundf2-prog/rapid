@@ -581,6 +581,23 @@ class StageTests(unittest.TestCase):
             self.assertRegex(analysis_id, rf"^{RUN_STAGE_ANALYSIS_PREFIX}-20261027T010203456789-[0-9a-f]{{8}}$")
             self.assertLessEqual(len(analysis_id), 64)
 
+    def test_taken_generation_name_gets_a_fresh_suffix(self) -> None:
+        # mkdir(exist_ok=False) on a taken name retries with a new id instead of failing the step.
+        taken = f"{RUN_STAGE_ANALYSIS_PREFIX}-20261027T010203456789-aaaaaaaa"
+        fresh = f"{RUN_STAGE_ANALYSIS_PREFIX}-20261027T010203456789-bbbbbbbb"
+        with tempfile.TemporaryDirectory() as temp, patch(
+            "rapidtriage.core.derived.stage.new_run_stage_analysis_id", side_effect=[taken, fresh]
+        ):
+            run_dir = Path(temp)
+            (run_dir / "analyses" / taken).mkdir(parents=True)
+            (run_dir / "analyses" / taken / "marker.txt").write_text("x", encoding="utf-8")
+            step = run_derived_stage(run_dir, artifact_outputs={})
+            self.assertEqual(step["status"], "completed", step)
+            self.assertEqual(step["analysis_id"], fresh)
+            self.assertEqual(step["output"], str(run_dir / "analyses" / fresh))
+            self.assertTrue((run_dir / "analyses" / fresh / "analysis.json").is_file())
+            self.assertFalse((run_dir / "analyses" / taken / "analysis.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

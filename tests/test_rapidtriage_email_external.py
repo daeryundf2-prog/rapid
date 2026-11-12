@@ -4,7 +4,6 @@ import contextlib
 import io
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 import unittest
@@ -203,12 +202,22 @@ class RapidTriageEmailExternalParserTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn(payload["status"], {"blocked", "failed", "complete"})
 
-    @unittest.skipIf(shutil.which("false") is None, "needs a POSIX `false` on PATH (absent from a plain Windows PowerShell PATH)")
     def test_email_external_cli_returns_nonzero_when_selected_tool_fails(self) -> None:
+        # The tool used to be the bare name `false`, resolved from PATH: a plain Windows
+        # PowerShell PATH has no `false`, so the CLI reported the tool missing instead of
+        # failed (exit code / status mismatch). A self-made always-failing tool keeps the
+        # test independent of the host PATH.
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             source = root / "mailbox.pst"
             source.write_bytes(b"pst fixture")
+            if os.name == "nt":
+                tool = root / "failing-tool.cmd"
+                tool.write_text("@exit /b 1\n", encoding="ascii")
+            else:
+                tool = root / "failing-tool"
+                tool.write_text("#!/bin/sh\nexit 1\n", encoding="ascii")
+                tool.chmod(0o755)
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
                 exit_code = main(
@@ -218,7 +227,7 @@ class RapidTriageEmailExternalParserTests(unittest.TestCase):
                         "--output-dir",
                         str(root / "out"),
                         "--preferred-tool",
-                        "false",
+                        str(tool),
                         "--json",
                     ]
                 )
