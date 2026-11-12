@@ -1157,6 +1157,9 @@ class CaseDatabase:
                             "due_at": effective_due_at,
                             "source_citation_package_hash": source_citation_package_hash(effective_source_citation_package),
                             "source_citation_package_attached": bool(effective_source_citation_package),
+                            # R8 T-180: the actor is the reviewer name the client sent (not an
+                            # authenticated identity); an empty one falls back to "local-user".
+                            "actor_source": "client-supplied" if effective_reviewer else "local-default",
                         },
                         ensure_ascii=False,
                         sort_keys=True,
