@@ -369,6 +369,7 @@ export const A11Y_NAME_TABLE: readonly A11yNameRow[] = [
   ["(label)", "/메시지 본문 포함/", "alias", "pattern"],
   ["(label)", "/보고서 제목/", "alias", "pattern"],
   ["(label)", "/오프셋으로 이동/", "alias", "pattern"],
+  ["(label)", "/이미지에 기록된 취득 해시와 대조/", "alias", "pattern"],
   ["(label)", "/증거 경로/", "alias", "pattern"],
   ["(label)", "/출력 폴더/", "alias", "pattern"],
   ["(label)", "API 토큰", "alias", "source"],
