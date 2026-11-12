@@ -20,16 +20,12 @@ baseline does not depend on the machine.
 
 from __future__ import annotations
 
+import argparse
+import hashlib
+import json
 import os
-
-os.environ["COLUMNS"] = "100"
-os.environ["LINES"] = "50"
-
-import argparse  # noqa: E402
-import hashlib  # noqa: E402
-import json  # noqa: E402
-import sys  # noqa: E402
-from pathlib import Path, PurePath  # noqa: E402
+import sys
+from pathlib import Path, PurePath
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_BASELINE = Path(__file__).resolve().with_name("cli-help-hash.json")
@@ -115,6 +111,9 @@ def _walk(parser: argparse.ArgumentParser, name: str, out: dict[str, dict]) -> N
 
 
 def collect() -> dict[str, dict]:
+    # argparse wraps help text at shutil.get_terminal_size(), which reads these first.
+    os.environ["COLUMNS"] = "100"
+    os.environ["LINES"] = "50"
     sys.path.insert(0, str(REPO))
     from rapidtriage.cli.parser import build_parser
 
