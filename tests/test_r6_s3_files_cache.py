@@ -397,6 +397,11 @@ class FilesIndexEquivalenceTests(unittest.TestCase):
             actual = filter_files_by_category(
                 payload, wanted, offset=offset, limit=limit, collection=collection, rows=rows, positions=positions
             )
+            # T-019 only adds the partial-result fields; every pre-existing field stays identical.
+            actual.pop("notice", None)
+            actual_pagination = actual["pagination"]
+            self.assertEqual(actual_pagination.pop("total_lower_bound"), actual_pagination["total"])
+            self.assertIs(actual_pagination.pop("budget_stopped"), False)
             self.assertEqual(actual, expected, (round_number, collection, sorted(wanted), conditions and conditions.describe()))
 
     def test_flag_and_restrict_pages_match_the_old_scan(self) -> None:
