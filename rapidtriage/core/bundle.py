@@ -9,6 +9,7 @@ import zipfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from .. import PRODUCT_NAME
 from .case import load_case_payload
 from .case_report import (
     build_case_report_markdown,
@@ -74,8 +75,10 @@ def build_submission_bundle(
     max_items: int = 500,
     title: str | None = None,
     run_summary: Mapping[str, object] | None = None,
+    report_context: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """``run_summary`` (the run's summary, when the bundle is built for a run) fills the
+    """``report_context``: processing scope and step counts for the report (R8 T-027).
+    ``run_summary`` (the run's summary, when the bundle is built for a run) fills the
     report's processing section; without it that section stays empty (R8 T-028)."""
     case_json = case_json.expanduser().resolve()
     output_dir = output_dir.expanduser().resolve()
@@ -106,7 +109,8 @@ def build_submission_bundle(
         run_summary=run_summary or {},
         case_payload=case_payload,
         submission_manifest=manifest,
-        metadata={"title": title or case_payload.get("title") or "RapidTriage submission bundle"},
+        metadata={"title": title or case_payload.get("title") or f"{PRODUCT_NAME} 제출 묶음"},
+        report_context=report_context,
     )
     report_exports = write_case_report_exports(report_markdown, report_path)
     reviewer_path.write_text(render_reviewer_html(manifest, selected, report_markdown), encoding="utf-8")
