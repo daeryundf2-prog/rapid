@@ -10,6 +10,7 @@ from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
+from ... import __version__
 from ..artifact_profiles import iter_artifact_output_row_views
 from ..artifact_store import read_jsonl_artifacts, validate_artifact_record
 from ..json_stream import JsonStreamError, iter_array_items
@@ -1144,7 +1145,7 @@ class CaseDatabase:
                     target_id,
                     timestamp,
                     "rapidtriage",
-                    "",
+                    __version__,
                     json.dumps(
                         {
                             "status": effective_status,

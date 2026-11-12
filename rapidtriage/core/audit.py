@@ -1,16 +1,30 @@
 from __future__ import annotations
 
 import datetime as dt
+import getpass
 import hashlib
 import json
+import os
+import socket
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
+from .. import __version__
 from .input_root import InputRoot, resolve_input_root
 from .json_safe import json_default
 
 DEFAULT_AUDIT_ROOT_FILE_LIMIT = 5_000
 DEFAULT_AUDIT_ROOT_DIR_LIMIT = 2_000
+
+TOOL_NAME = "rapidtriage"
+# Export audit history: one JSON record per line, appended next to the sidecar, never rewritten.
+# The sidecar (``audit_path_for``) keeps its name and holds the latest record only.
+EXPORT_AUDIT_LOG_NAME = "rapidtriage-export-audit.jsonl"
+# Chain rule (same as scripts/r8-upgrade-check.py): each line carries the SHA-256 of the previous
+# line's UTF-8 text (without its line ending); the first line carries "".
+CHAIN_FIELD = "previous_record_sha256"
+# SHA-256 of the line's own canonical JSON without this field, so an edited line names itself.
+RECORD_HASH_FIELD = "record_sha256"
 
 
 def compute_sha256(path: Path) -> str:
@@ -120,9 +134,16 @@ def write_audit_record(
     input_root_inventory_max_files: int | None = DEFAULT_AUDIT_ROOT_FILE_LIMIT,
     input_root_inventory_max_dirs: int | None = DEFAULT_AUDIT_ROOT_DIR_LIMIT,
 ) -> dict[str, object]:
-    payload = {
+    """Append the export record to the folder's history, then refresh the sidecar with it.
+
+    History: ``rapidtriage-export-audit.jsonl`` next to the sidecar, one chained JSON line per
+    export, only ever appended. Sidecar: ``audit_path`` (name unchanged) holds the latest record.
+    """
+    payload: dict[str, object] = {
         "command": command,
-        "generated_at": dt.datetime.now().isoformat(),
+        **audit_timestamps(),
+        **audit_environment(),
+        "audit_sidecar": audit_path.name,
         "provenance": {
             "options": dict(options or {}),
             "input_root": (
@@ -150,8 +171,153 @@ def write_audit_record(
         },
     }
     audit_path.parent.mkdir(parents=True, exist_ok=True)
-    audit_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=json_default) + "\n", encoding="utf-8")
-    return payload
+    record = append_audit_line(export_audit_log_path(audit_path), payload)
+    with audit_path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False, indent=2) + "\n")
+    return record
+
+
+def export_audit_log_path(audit_path: Path) -> Path:
+    """The append-only export audit history next to a sidecar (same folder)."""
+    return audit_path.with_name(EXPORT_AUDIT_LOG_NAME)
+
+
+def audit_timestamps(now: dt.datetime | None = None) -> dict[str, str]:
+    """One instant as local time with its UTC offset, as UTC, and the offset itself."""
+    instant = (now or dt.datetime.now(dt.timezone.utc)).astimezone(dt.timezone.utc)
+    local = instant.astimezone()
+    offset = local.strftime("%z") or "+0000"
+    return {
+        "generated_at": local.isoformat(),
+        "generated_at_utc": instant.isoformat(),
+        "utc_offset": f"{offset[:3]}:{offset[3:5]}",
+    }
+
+
+def audit_environment() -> dict[str, object]:
+    """Tool name and version, and where the record was written (host, OS user, process id)."""
+    try:
+        os_user = getpass.getuser()
+    except (ImportError, KeyError, OSError):  # no user name in the environment or password database
+        os_user = ""
+    return {
+        "tool_name": TOOL_NAME,
+        "tool_version": __version__,
+        "host": socket.gethostname(),
+        "os_user": os_user,
+        "pid": os.getpid(),
+    }
+
+
+def _canonical_line(record: Mapping[str, object]) -> str:
+    return json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=json_default)
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _record_self_hash(record: Mapping[str, object]) -> str:
+    return _sha256_text(_canonical_line({key: value for key, value in record.items() if key != RECORD_HASH_FIELD}))
+
+
+def append_audit_line(log_path: Path, record: Mapping[str, object]) -> dict[str, object]:
+    """Append ``record`` as one chained JSON line (LF, flushed, fsynced). Earlier lines are never rewritten."""
+    try:
+        existing = log_path.read_bytes()
+    except FileNotFoundError:
+        existing = b""
+    previous = next(
+        (line for line in reversed(existing.decode("utf-8", errors="replace").splitlines()) if line.strip()),
+        None,
+    )
+    # Round-trip through JSON so the stored values are JSON-native and a re-read hashes the same.
+    normalized: dict[str, object] = json.loads(_canonical_line(record))
+    normalized.pop(RECORD_HASH_FIELD, None)
+    normalized[CHAIN_FIELD] = _sha256_text(previous) if previous is not None else ""
+    normalized[RECORD_HASH_FIELD] = _record_self_hash(normalized)
+    data = _canonical_line(normalized).encode("utf-8") + b"\n"
+    if existing and not existing.endswith((b"\n", b"\r")):
+        data = b"\n" + data
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("ab") as handle:
+        handle.write(data)
+        handle.flush()
+        os.fsync(handle.fileno())
+    return normalized
+
+
+def verify_audit_chain(path: Path) -> dict[str, object]:
+    """Check an export audit file and name broken lines by 1-based number.
+
+    A line without ``previous_record_sha256`` before any chained line is "사슬 이전" (pre-chain:
+    counted, not broken); an R7 sidecar (one indented JSON object) is one pre-chain record. A
+    chained line must carry the SHA-256 of the previous line. A line that cannot be read, or
+    whose content no longer matches its own ``record_sha256``, is named itself; when only the
+    link to the next line breaks, the previous line is named (it changed, or a line after it
+    was removed).
+    """
+    text = path.read_text(encoding="utf-8", errors="replace")
+    totals = {"records": 0, "pre_chain": 0, "chained": 0, "unreadable": 0}
+    broken: dict[int, str] = {}
+    try:
+        whole = json.loads(text)
+    except json.JSONDecodeError:
+        whole = None
+    if isinstance(whole, dict):
+        totals["records"] = 1
+        totals["chained" if CHAIN_FIELD in whole else "pre_chain"] = 1
+        return _chain_report(path, "sidecar", totals, broken)
+
+    previous: tuple[int, str] | None = None
+    chain_started = False
+    for number, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            record = None
+        if not isinstance(record, dict):
+            totals["unreadable"] += 1
+            broken.setdefault(number, "JSON 한 줄로 읽을 수 없음")
+        elif CHAIN_FIELD not in record:
+            totals["records"] += 1
+            if chain_started:
+                broken.setdefault(number, "사슬이 시작된 뒤에 사슬 필드가 없는 줄")
+            else:
+                totals["pre_chain"] += 1
+        else:
+            totals["records"] += 1
+            totals["chained"] += 1
+            chain_started = True
+            own = record.get(RECORD_HASH_FIELD)
+            if own is not None and str(own) != _record_self_hash(record):
+                broken.setdefault(number, "줄 내용이 이 줄의 해시와 다름(이 줄이 바뀜)")
+            wanted = _sha256_text(previous[1]) if previous is not None else ""
+            if str(record.get(CHAIN_FIELD) or "") != wanted:
+                if previous is not None and number not in broken:
+                    broken.setdefault(
+                        previous[0], f"{number}번째 줄이 기록한 직전 줄 해시와 다름(이 줄이 바뀌었거나 뒤 줄이 빠짐)"
+                    )
+                else:
+                    broken.setdefault(number, "직전 줄 해시 불일치")
+        previous = (number, line)
+    return _chain_report(path, "lines", totals, broken)
+
+
+def _chain_report(path: Path, layout: str, totals: Mapping[str, int], broken: Mapping[int, str]) -> dict[str, object]:
+    broken_lines = [{"line": number, "reason": broken[number]} for number in sorted(broken)]
+    return {
+        "path": str(path),
+        "layout": layout,
+        **totals,
+        "pre_chain_lines": totals["pre_chain"],
+        "pre_chain_label": f"사슬 이전 {totals['pre_chain']}줄",
+        "ok": not broken_lines,
+        "first_broken_line": broken_lines[0]["line"] if broken_lines else None,
+        "broken_lines": broken_lines,
+    }
 
 
 def dedupe_records(records: Sequence[tuple[str, Path]]) -> list[tuple[str, Path]]:
