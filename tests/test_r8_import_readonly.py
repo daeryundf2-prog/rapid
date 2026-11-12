@@ -56,10 +56,12 @@ class Fixture:
     def build(cls) -> tuple[Path, Path]:
         if cls._base is None:
             cls._base = tempfile.TemporaryDirectory()
-            base = Path(cls._base.name)
+            base = Path(cls._base.name).resolve()
             build_sample_evidence(base / "evidence")
             run_triage_mode(base / "evidence", mode="fraud", output_dir=base / "out", read_only=True)
-        base = Path(cls._base.name)
+        # resolve(): on Windows the temp dir may be an 8.3 short path (RUNNER~1) while the run
+        # summary records the long, resolved form; compare like with like.
+        base = Path(cls._base.name).resolve()
         return base / "evidence", base / "out"
 
 
