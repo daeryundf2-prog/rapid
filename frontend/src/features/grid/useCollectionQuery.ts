@@ -1,7 +1,7 @@
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError } from "../../api/client";
-import type { RawPage } from "../../api/collections";
+import { type ListNotice, type RawPage, SCAN_BUDGET_STOPPED } from "../../api/collections";
 import type { TreeNode } from "../../api/runs";
 import {
   type CollectionQuery,
@@ -134,6 +134,15 @@ export interface CollectionQueryResult {
   serverMatched: number | null | undefined;
   /** The search collection's request was cancelled with Esc (nothing is requested until resubmitted). */
   searchCancelled: boolean;
+  /**
+   * Rows the server certainly holds (T-020): `serverTotal` when counted, else the largest
+   * `total_lower_bound` of the loaded pages (never below the loaded rows). The UI reads "n건 이상".
+   */
+  totalLowerBound: number | null;
+  /** A loaded page's filter scan was stopped by the server's time budget (`budget_stopped`). */
+  budgetStopped: boolean;
+  /** The server's `notice` of the loaded pages (a budget stop first); null when every page is complete. */
+  notice: ListNotice | null;
 }
 
 /** Grid column by id for column filters: the collection's columns, else a promoted `f:<key>` column. */
@@ -565,6 +574,22 @@ export function useCollectionQuery(
 
   const firstError = results.find((r) => r.error)?.error ?? null;
 
+  // T-020 partial results: a budget stop (any loaded page) and the server's lower bound.
+  const budgetStopped = pageData.some((d) => d?.budgetStopped === true);
+  const notice =
+    pageData.find((d) => d?.notice?.code === SCAN_BUDGET_STOPPED)?.notice ??
+    pageData.find((d) => d?.notice)?.notice ??
+    null;
+  const totalLowerBound =
+    serverTotal !== null
+      ? serverTotal
+      : firstData
+        ? Math.max(
+            unfilteredRows.length + (canLoadMore ? 1 : 0),
+            ...pageData.map((d) => d?.totalLowerBound ?? 0),
+          )
+        : null;
+
   return {
     def,
     query,
@@ -601,5 +626,8 @@ export function useCollectionQuery(
     serverColumnFilters: plan.serverColumns.length > 0,
     serverMatched,
     searchCancelled,
+    totalLowerBound,
+    budgetStopped,
+    notice,
   };
 }

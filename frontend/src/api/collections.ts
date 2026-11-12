@@ -47,6 +47,48 @@ export interface RawPage {
   sort?: ServerSortState;
   /** Page-level facts beyond paging (files: `ntfs_join`, plan analysis-workbench-p1 §3.3). */
   meta?: Record<string, unknown>;
+  /**
+   * Rows the list certainly has (T-019 `pagination.total_lower_bound`): equals `total` when
+   * counted; otherwise the matches seen so far (+1 lookahead). The UI reads "n건 이상" from it.
+   */
+  totalLowerBound?: number;
+  /** The server's wall-clock scan budget ended the filter scan (`pagination.budget_stopped`). */
+  budgetStopped?: boolean;
+  /** Top-level `notice` of a partial / uncounted page (Korean `message`). */
+  notice?: ListNotice;
+}
+
+/** `notice.code` of a list page (r8-contracts D.7, T-019). */
+export const SCAN_BUDGET_STOPPED = "SCAN_BUDGET_STOPPED";
+export const TOTAL_NOT_COUNTED = "TOTAL_NOT_COUNTED";
+
+/** Top-level `notice` of a partial (`SCAN_BUDGET_STOPPED`) or uncounted (`TOTAL_NOT_COUNTED`) list page. */
+export interface ListNotice {
+  code: string;
+  message: string;
+}
+
+function asNotice(value: unknown): ListNotice | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const { code, message } = value as Record<string, unknown>;
+  return typeof code === "string" && code
+    ? { code, message: typeof message === "string" ? message : "" }
+    : undefined;
+}
+
+/** T-019 partial-result fields of one list page (`pagination` / `cross_kind` block + top-level `notice`). */
+function partialFields(
+  block: Record<string, unknown> | undefined,
+  notice: unknown,
+): Pick<RawPage, "totalLowerBound" | "budgetStopped" | "notice"> {
+  const lower = asNumber(block?.total_lower_bound);
+  const parsed = asNotice(notice);
+  const stopped = block?.budget_stopped === true || parsed?.code === SCAN_BUDGET_STOPPED;
+  return {
+    ...(lower !== null ? { totalLowerBound: lower } : {}),
+    ...(stopped ? { budgetStopped: true } : {}),
+    ...(parsed ? { notice: parsed } : {}),
+  };
 }
 
 const enc = encodeURIComponent;
@@ -211,6 +253,7 @@ async function jsonPaged(
       truncated,
       hasMore: pagination.has_more === true || payload.has_more === true,
       ...(scanned !== null ? { scanned } : {}),
+      ...partialFields(pagination, payload.notice),
     };
   }
   // paginate_payload (api/app/pagination.py) puts the collection size in `pagination.total`;
@@ -224,9 +267,15 @@ async function jsonPaged(
   if (total === null) {
     // No count at all (very old server): page on while full pages keep coming.
     const more = hasMore || rows.length >= limit;
-    return { ...base, total: more ? null : offset + rows.length, truncated: false, hasMore: more };
+    return {
+      ...base,
+      total: more ? null : offset + rows.length,
+      truncated: false,
+      hasMore: more,
+      ...partialFields(pagination, payload.notice),
+    };
   }
-  return { ...base, total, truncated: false, hasMore };
+  return { ...base, total, truncated: false, hasMore, ...partialFields(pagination, payload.notice) };
 }
 
 /** 파일 시스템 탐색기 filter of `GET /files`: one fs-tree folder (`path_prefix=`) or special node. */
@@ -443,6 +492,7 @@ export async function fetchDocsPage(
     truncated: pagination.truncated === true,
     hasMore,
     meta: { docs_rows: key },
+    ...partialFields(pagination, payload.notice),
   };
 }
 /**
@@ -509,7 +559,11 @@ interface ArtifactKindPage {
     truncated?: unknown;
     filtered?: unknown;
     matched?: unknown;
+    total_lower_bound?: unknown;
+    budget_stopped?: unknown;
   };
+  /** T-019: set on a partial / uncounted filtered kind page. */
+  notice?: unknown;
   sort?: unknown;
   sort_supported?: unknown;
   /** Filtered count of the kind (null while the filter scan stopped early). */
@@ -527,6 +581,8 @@ interface CrossKindBlock {
   next_after?: unknown;
   scanned?: unknown;
   truncated?: unknown;
+  total_lower_bound?: unknown;
+  budget_stopped?: unknown;
   /**
    * `geo=` listings (r6 §3.3 갈래 C): `true` = paged from the run's located-row index; otherwise
    * why not (`building` / `truncated` / `unavailable`: the rows come from a capped scan).
@@ -545,7 +601,7 @@ async function crossKindRequest(
   runId: string,
   query: ArtifactsQuery & { after?: string },
   signal?: AbortSignal,
-): Promise<{ artifacts?: Record<string, ArtifactKindPage>; cross_kind?: CrossKindBlock }> {
+): Promise<{ artifacts?: Record<string, ArtifactKindPage>; cross_kind?: CrossKindBlock; notice?: unknown }> {
   const params = new URLSearchParams(
     artifactsQueryString({
       ...query,
@@ -603,6 +659,7 @@ async function fetchCrossKindPage(
       offset,
       backend: "file",
       ...pageFlags([page]),
+      ...kindPartial(page),
       elapsedMs: Math.round(now() - started),
       kinds,
     };
@@ -624,6 +681,8 @@ async function fetchCrossKindPage(
   let exhausted = false;
   let matched: number | null = null;
   let geoIndex: string | undefined;
+  let budgetStopped = false;
+  let notice: ListNotice | undefined;
   for (let request = 0; request < CROSS_KIND_MAX_REQUESTS; request += 1) {
     const want = Math.min(CROSS_KIND_MAX_LIMIT, Math.max(1, offset - pos + (limit - rows.length)));
     const payload = await crossKindRequest(
@@ -658,6 +717,14 @@ async function fetchCrossKindPage(
     if (nextAfter) cursors.set(nextPos, nextAfter);
     pos = nextPos;
     after = nextAfter ?? undefined;
+    notice = asNotice(payload.notice) ?? notice;
+    if (cross.budget_stopped === true) {
+      // T-019/T-020: the scan budget ended this window — the matches so far are a lower bound,
+      // never "scan exhausted" (an empty stop is not an empty result). Stop here: the grid's
+      // band offers "다시 시도" instead of chaining more budget-limited requests.
+      budgetStopped = true;
+      break;
+    }
     if (!nextAfter) {
       exhausted = true;
       matched = asNumber(cross.matched) ?? pos;
@@ -665,14 +732,21 @@ async function fetchCrossKindPage(
     }
     if (rows.length >= limit) break;
   }
+  // Matches certainly there: the count when exhausted, else those consumed (+1: a full page's lookahead).
+  const totalLowerBound = exhausted
+    ? (matched ?? pos)
+    : Math.max(pos, offset + rows.length) + (!budgetStopped && rows.length >= limit ? 1 : 0);
   return {
     rows,
     // The filtered count once the scan reached the end; otherwise unknown (paging continues).
     total: exhausted ? matched : null,
     offset,
     backend: "file",
-    hasMore: !exhausted,
-    truncated: !exhausted && rows.length < limit,
+    hasMore: !exhausted && !budgetStopped,
+    truncated: !exhausted && !budgetStopped && rows.length < limit,
+    totalLowerBound,
+    ...(budgetStopped ? { budgetStopped: true } : {}),
+    ...(notice && (budgetStopped || !exhausted) ? { notice } : {}),
     scanned: scanned || undefined,
     elapsedMs: Math.round(now() - started),
     meta: {
@@ -796,6 +870,11 @@ function pageFlags(pages: ArtifactKindPage[]) {
   };
 }
 
+/** Partial-result fields of one kind page (its `pagination` + `notice`). */
+function kindPartial(page: ArtifactKindPage) {
+  return partialFields(page.pagination as Record<string, unknown> | undefined, page.notice);
+}
+
 /**
  * Sorted position (0-based) of one record (`record_index`) of a server-sorted kind:
  * `GET /artifacts?kind=&sort=&order=&locate=` → `sort.position`. Null while the index
@@ -904,6 +983,7 @@ export async function fetchArtifactsPage(
       offset,
       backend: "file",
       ...pageFlags([page]),
+      ...kindPartial(page),
       elapsedMs: Math.round(now() - started),
       ...(sortState ? { sort: sortState } : {}),
     };

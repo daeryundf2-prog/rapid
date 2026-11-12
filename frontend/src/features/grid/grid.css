@@ -918,3 +918,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* T-020 temporary partial-result band (T-089 replaces it with PartialBanner): amber, not an error. */
+.grid-partial-banner {
+  border-left-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, var(--surface-1));
+}

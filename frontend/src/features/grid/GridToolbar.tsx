@@ -328,6 +328,8 @@ export interface GridFooterProps {
   page: number;
   pageCount: number | null;
   total: number | null;
+  /** Rows the server certainly holds while `total` is uncounted (T-020): "총 n건 이상". */
+  totalLowerBound?: number | null;
   shown: number;
   backend: string;
   elapsedMs: number;
@@ -403,6 +405,12 @@ export function searchLoadedText(loaded: number, total: number | null, hasMore: 
     : `불러온 ${formatCount(loaded)}건`;
 }
 
+/** Footer count (T-020): exact `총 n건`, `총 세는 중…` only while fetching, else `총 n건 이상`. */
+export function footerTotalText(total: number | null, loading: boolean, lowerBound: number): string {
+  if (total !== null) return `총 ${formatCount(total)}건`;
+  return loading ? "총 세는 중…" : `총 ${formatCount(lowerBound)}건 이상`;
+}
+
 export function GridFooter(props: GridFooterProps) {
   const seconds =
     props.elapsedMs >= 1000 ? `${(props.elapsedMs / 1000).toFixed(1)}s` : `${Math.round(props.elapsedMs)}ms`;
@@ -417,12 +425,8 @@ export function GridFooter(props: GridFooterProps) {
         // The search engine and its time are diagnostics, not a finding: tooltip only (R7 L3, C-D16).
         title={props.backend ? `${backendLabel(props.backend) || "조회"} · ${seconds}` : undefined}
       >
-        {/* R-10: an uncounted total reads "전체 건수 미확정", never "총 알 수 없음". */}
-        {props.total !== null
-          ? `총 ${formatCount(props.total)}건`
-          : props.loading
-            ? "총 세는 중…"
-            : "전체 건수 미확정"}
+        {/* T-020: "세는 중" only while a request runs; an uncounted total is a lower bound ("n건 이상"). */}
+        {footerTotalText(props.total, props.loading, props.totalLowerBound ?? props.loadedCount)}
       </span>
       {props.loadedSummary ? <span data-testid="grid-footer-loaded">{props.loadedSummary}</span> : null}
       {props.indexHint ? (

@@ -61,9 +61,9 @@ describe("R-10: grid footer total", () => {
     onLoadMore: () => {},
     loading: false,
   };
-  it("an uncounted total reads 전체 건수 미확정, never 총 알 수 없음", () => {
-    render(<GridFooter {...props} />);
-    expect(screen.getByTestId("grid-footer-total").textContent).toBe("전체 건수 미확정");
+  it("an uncounted total reads its lower bound (T-020), never 총 알 수 없음", () => {
+    render(<GridFooter {...props} loadedCount={250} totalLowerBound={251} />);
+    expect(screen.getByTestId("grid-footer-total").textContent).toBe("총 251건 이상");
   });
   it("a counted total still reads 총 N건", () => {
     render(<GridFooter {...props} total={4770} />);
