@@ -147,6 +147,7 @@ def build_steps(tier: str, changed: bool, base: str | None, fe_changed: bool) ->
         Step("compileall", "L0", [py, "-m", "compileall", "-q", *lint_scope], 300),
         Step("exec-bits", "L0", [py, "-m", "unittest", "tests.test_script_exec_bits"], 120),
         Step("architecture", "L0", [py, "-m", "unittest", "tests.test_architecture"], 180),
+        Step("agents-md", "L0", [py, "scripts/check-agents-md.py"], 300),
         Step("fe-typecheck", "L0", ["npm", "run", "typecheck"], 300, cwd=FRONTEND,
              skip_reason=fe_skip, needs_node_modules=True),
         Step("fe-lint", "L0", ["npm", "run", "lint"], 300, cwd=FRONTEND,
