@@ -1,0 +1,19 @@
+{
+  "_comment": "CRLF files tracked when T-149 landed (2026-11-12): 13 crlf + 1 mixed. Ratchet: entries may only be removed. Convert a file to LF, then delete its entry; never add one.",
+  "files": [
+    {"path": "docs/ai-tool-catalog/chatbots.json", "eol": "crlf"},
+    {"path": "docs/ai-tool-catalog/cli_agents.json", "eol": "crlf"},
+    {"path": "docs/ai-tool-catalog/cloud_agents.json", "eol": "crlf"},
+    {"path": "docs/ai-tool-catalog/harnesses.json", "eol": "crlf"},
+    {"path": "docs/ai-tool-catalog/ide_agents.json", "eol": "crlf"},
+    {"path": "docs/ai-tool-catalog/infrastructure.json", "eol": "crlf"},
+    {"path": "docs/ai-tool-catalog/local_llm.json", "eol": "crlf"},
+    {"path": "docs/plans/r7-ai-usage-2026-10-27.md", "eol": "mixed"},
+    {"path": "rapidtriage/core/triage_rules/documents.py", "eol": "crlf"},
+    {"path": "rapidtriage/core/triage_rules/lnk.py", "eol": "crlf"},
+    {"path": "rapidtriage/core/triage_rules/registry.py", "eol": "crlf"},
+    {"path": "rapidtriage/core/triage_rules/usb.py", "eol": "crlf"},
+    {"path": "tests/triage_cases/registry.py", "eol": "crlf"},
+    {"path": "tests/triage_cases/usb.py", "eol": "crlf"}
+  ]
+}
