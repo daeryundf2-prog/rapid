@@ -28,8 +28,6 @@ import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .e01 import discover_e01_segments
-
 EWF1_SIGNATURE = b"EVF\x09\x0d\x0a\xff\x00"
 EWF2_SIGNATURE = b"EVF2\r\n\x81\x00"
 EWF1_FILE_HEADER_SIZE = 13
@@ -112,23 +110,91 @@ def parse_xhash_section(data: bytes) -> dict[str, str]:
 
 
 SECTION_PARSERS = {"hash": parse_hash_section, "digest": parse_digest_section, "xhash": parse_xhash_section}
+#: Bytes of section data covered by the trailing Adler-32 (``hash``: MD5 + unknown; ``digest``:
+#: MD5 + SHA-1 + padding). ``xhash`` is a zlib stream with its own checksum.
+SECTION_CHECKSUM_SPAN = {"hash": 32, "digest": 76}
+INCOMPLETE_SEGMENT_SET_REASON = "세그먼트 집합이 불완전함(마지막 세그먼트 없음)"
+
+_SEGMENT_SUFFIX = re.compile(r"^\.(?:E(?P<en>\d{2})|(?P<x>Ex)(?P<xn>\d{2}))$", re.IGNORECASE)
+_SEGMENT_LETTER_SUFFIX = re.compile(r"^\.[E-Z](?P<x>x?)[A-Z]{2}$", re.IGNORECASE)
+#: E01..E99 (99), then EAA..ZZZ (``[E-Z]`` x 26 x 26) -- libewf's naming after ``.E99``.
+MAX_SEGMENT_INDEX = 99 + 22 * 26 * 26
 
 
-def walk_ewf1_segment(handle, file_size: int) -> tuple[list[tuple[str, dict[str, str]]], bool]:
+def ewf_segment_suffix(index: int, ex_family: bool) -> str:
+    """Segment file suffix for 1-based ``index``: ``.E01``..``.E99``, ``.EAA``..``.ZZZ``
+    (``.Ex01``..``.Ex99``, ``.ExAA``..``.ZxZZ`` for Ex01)."""
+    if index < 100:
+        return f".Ex{index:02d}" if ex_family else f".E{index:02d}"
+    k = index - 100
+    first = chr(ord("E") + k // 676)
+    tail = chr(ord("A") + (k // 26) % 26) + chr(ord("A") + k % 26)
+    return f".{first}x{tail}" if ex_family else f".{first}{tail}"
+
+
+def discover_recorded_hash_segments(path: Path) -> list[Path]:
+    """Read-only segment discovery for the recorded-hash reader (T-181, P1-2).
+
+    Continues past ``.E99`` into ``.EAA``.. (and ``.Ex99`` into ``.ExAA``..), which the engine's
+    :func:`rapidtriage.core.e01.discover_e01_segments` does not (that gap is the container hash's
+    own task). Walks the sequence from segment 1 and stops at the first missing name, so a gap
+    or a missing last segment leaves the chain short; the section walker then sees no ``done``.
+    Only lists the folder; never opens or writes a file.
+    """
+    suffix = path.suffix
+    match = _SEGMENT_SUFFIX.match(suffix)
+    letter = _SEGMENT_LETTER_SUFFIX.match(suffix) if match is None else None
+    if match is None and letter is None:
+        return [path]
+    ex_family = bool((match or letter).group("x"))
+    names = {child.name.lower(): child for child in path.parent.iterdir()}
+    segments: list[Path] = []
+    for index in range(1, MAX_SEGMENT_INDEX + 1):
+        candidate = names.get((path.stem + ewf_segment_suffix(index, ex_family)).lower())
+        if candidate is None:
+            break
+        segments.append(candidate)
+    return segments or [path]
+
+
+def _checksum_ok(section_type: str, descriptor: bytes, data: bytes) -> bool:
+    """Adler-32 of the section descriptor and, for ``hash`` / ``digest``, of the section data."""
+    if struct.unpack_from("<I", descriptor, 72)[0] != zlib.adler32(descriptor[:72]):
+        return False
+    span = SECTION_CHECKSUM_SPAN.get(section_type)
+    if span is None:
+        return True
+    if len(data) < span + 4:
+        return False
+    return struct.unpack_from("<I", data, span)[0] == zlib.adler32(data[:span])
+
+
+@dataclass
+class SegmentWalk:
+    """Hash-bearing sections of one EWF1 segment and how its chain ended."""
+
+    sections: list[tuple[str, dict[str, str]]] = field(default_factory=list)
+    truncated: bool = False
+    terminal: str = ""  # "done" | "next" | "" (chain ended without either)
+    checksum_failures: list[str] = field(default_factory=list)
+
+
+def walk_ewf1_segment(handle, file_size: int) -> SegmentWalk:
     """Walk one EWF1 segment's section chain from an open binary handle (read only).
 
-    Returns ``([(section_type, digests), ...], truncated)`` for the hash-bearing sections.
-    Stops at ``done`` / ``next``, at a chain that does not move forward, or past the file end.
+    Collects the hash-bearing sections whose Adler-32 checksums verify (failures are listed in
+    ``checksum_failures`` and their values dropped). Stops at ``done`` / ``next`` (recorded in
+    ``terminal``), at a chain that does not move forward, or past the file end.
     """
-    found: list[tuple[str, dict[str, str]]] = []
+    walk = SegmentWalk()
     offset = EWF1_FILE_HEADER_SIZE
     for _ in range(MAX_SECTIONS_PER_SEGMENT):
         if offset + EWF1_SECTION_DESCRIPTOR_SIZE > file_size:
-            return found, False
+            return walk
         handle.seek(offset)
         descriptor = handle.read(EWF1_SECTION_DESCRIPTOR_SIZE)
         if len(descriptor) < EWF1_SECTION_DESCRIPTOR_SIZE:
-            return found, False
+            return walk
         section_type = descriptor[:16].split(b"\x00", 1)[0].decode("ascii", errors="replace").strip().lower()
         next_offset, section_size = struct.unpack_from("<QQ", descriptor, 16)
         parser = SECTION_PARSERS.get(section_type)
@@ -137,31 +203,58 @@ def walk_ewf1_segment(handle, file_size: int) -> tuple[list[tuple[str, dict[str,
             if section_type != "xhash":
                 data_size = min(data_size, 80)
             data = handle.read(min(data_size, XHASH_INFLATE_LIMIT))
-            digests = parser(data)
-            if digests:
-                found.append((section_type, digests))
-        if section_type in ("done", "next") or next_offset <= offset:
-            return found, False
+            if _checksum_ok(section_type, descriptor, data):
+                digests = parser(data)
+                if digests:
+                    walk.sections.append((section_type, digests))
+            else:
+                walk.checksum_failures.append(section_type)
+        if section_type in ("done", "next"):
+            walk.terminal = section_type
+            return walk
+        if next_offset <= offset:
+            return walk
         offset = next_offset
-    return found, True
+    walk.truncated = True
+    return walk
 
 
-def _read_ewf1_sections(segments: list[Path]) -> RecordedHash:
+def _read_ewf1_sections(segments: list[Path]) -> tuple[RecordedHash, bool, list[str]]:
+    """``(result, complete, notes)``: ``complete`` is True when the last segment ends in ``done``.
+
+    A value is used only when every hash-bearing section that records that algorithm agrees;
+    disagreeing sections are listed in ``notes`` and leave the value empty (no first-wins).
+    """
     result = RecordedHash()
+    values: dict[str, dict[str, list[str]]] = {"md5": {}, "sha1": {}}
+    checksum_failures: list[str] = []
+    terminal = ""
     for segment in segments:
         with segment.open("rb") as handle:
             if handle.read(len(EWF1_SIGNATURE)) != EWF1_SIGNATURE:
+                terminal = ""
                 continue
-            sections, truncated = walk_ewf1_segment(handle, segment.stat().st_size)
-        result.sections_truncated = result.sections_truncated or truncated
-        for section_type, digests in sections:
-            result.md5 = result.md5 or digests.get("md5", "")
-            result.sha1 = result.sha1 or digests.get("sha1", "")
+            walk = walk_ewf1_segment(handle, segment.stat().st_size)
+        terminal = walk.terminal
+        result.sections_truncated = result.sections_truncated or walk.truncated
+        checksum_failures += [f"{segment.name} {name}" for name in walk.checksum_failures]
+        for section_type, digests in walk.sections:
+            for algorithm, value in digests.items():
+                values[algorithm].setdefault(value, []).append(section_type)
             if section_type not in result.sections:
                 result.sections.append(section_type)
+    notes: list[str] = []
+    if checksum_failures:
+        notes.append(f"Adler-32 검사합이 맞지 않는 해시 섹션({', '.join(checksum_failures)})의 값은 쓰지 않았습니다")
+    for algorithm, by_value in values.items():
+        if len(by_value) == 1:
+            setattr(result, algorithm, next(iter(by_value)))
+        elif len(by_value) > 1:
+            listed = " / ".join(f"{'·'.join(dict.fromkeys(kinds))} {value}" for value, kinds in by_value.items())
+            notes.append(f"섹션마다 기록된 {algorithm.upper()} 값이 서로 다름({listed}) — 어느 값도 기록값으로 쓰지 않음")
     if result.md5 or result.sha1:
         result.source = "ewf1-sections"
-    return result
+    return result, terminal == "done", notes
 
 
 def _read_libewf(segments: list[Path]) -> RecordedHash:
@@ -189,18 +282,23 @@ def read_recorded_acquisition_hash(path: Path) -> RecordedHash:
     """Recorded acquisition MD5 / SHA-1 of the EWF image at ``path`` (any segment of the set).
 
     Never raises for an unreadable or non-EWF file: the empty result carries the ``reason``.
+    An EWF1 set whose last walked segment does not end in ``done`` is reported as incomplete,
+    never as "no recorded hash" (the hash sections live in the last segment).
     """
     path = Path(path)
     try:
-        segments = discover_e01_segments(path)
+        segments = discover_recorded_hash_segments(path)
         with segments[0].open("rb") as handle:
             signature = handle.read(len(EWF1_SIGNATURE))
     except OSError as exc:
         return RecordedHash(reason=f"이미지 세그먼트를 읽지 못했습니다: {exc}")
+    notes: list[str] = []
     try:
         if signature == EWF1_SIGNATURE:
-            result = _read_ewf1_sections(segments)
-            if not (result.md5 or result.sha1):
+            result, complete, notes = _read_ewf1_sections(segments)
+            if not complete:
+                notes.insert(0, INCOMPLETE_SEGMENT_SET_REASON)
+            elif not (result.md5 or result.sha1) and not notes:
                 fallback = _read_libewf(segments)
                 if fallback.md5 or fallback.sha1:
                     fallback.sections_truncated = result.sections_truncated
@@ -211,12 +309,13 @@ def read_recorded_acquisition_hash(path: Path) -> RecordedHash:
             return RecordedHash(reason="EWF(E01/Ex01) 서명이 없어 기록된 취득 해시를 읽지 않았습니다")
     except Exception as exc:  # corrupt image / pyewf C errors: report, never raise into the caller
         return RecordedHash(reason=f"기록된 취득 해시를 읽는 중 오류: {exc}")
-    if not (result.md5 or result.sha1) and not result.reason:
-        result.reason = "이미지에 기록된 취득 해시가 없습니다 (hash·digest·xhash 섹션 없음)"
+    if result.reason:
+        notes.insert(0, result.reason)
+    if not (result.md5 or result.sha1) and not notes:
+        notes.append("이미지에 기록된 취득 해시가 없습니다 (hash·digest·xhash 섹션 없음)")
     if result.sections_truncated:
-        result.reason = (
-            result.reason + " · " if result.reason else ""
-        ) + f"세그먼트당 섹션 상한 {MAX_SECTIONS_PER_SEGMENT}개에 도달해 나머지 섹션은 읽지 않았습니다(잘림)"
+        notes.append(f"세그먼트당 섹션 상한 {MAX_SECTIONS_PER_SEGMENT}개에 도달해 나머지 섹션은 읽지 않았습니다(잘림)")
+    result.reason = " · ".join(notes)
     return result
 
 

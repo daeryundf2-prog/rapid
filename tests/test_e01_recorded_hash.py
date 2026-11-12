@@ -121,6 +121,65 @@ class ReadRecordedHashTests(unittest.TestCase):
         result = read_recorded_acquisition_hash(first)
         self.assertEqual((result.md5, result.sha1, result.sections), (MD5.hex(), SHA1.hex(), ["xhash"]))
 
+    def test_segment_suffix_sequence_continues_past_99(self) -> None:
+        suffix = recorded_hash.ewf_segment_suffix
+        self.assertEqual([suffix(i, False) for i in (1, 99, 100, 101, 126, 775, 776)],
+                         [".E01", ".E99", ".EAA", ".EAB", ".EBA", ".EZZ", ".FAA"])
+        self.assertEqual([suffix(i, True) for i in (1, 99, 100, 776)], [".Ex01", ".Ex99", ".ExAA", ".FxAA"])
+        self.assertEqual(suffix(recorded_hash.MAX_SEGMENT_INDEX, False), ".ZZZ")
+
+    def test_hash_in_eaa_segment_after_e99_is_read(self) -> None:
+        first = self.write("big.E01", build_ewf1_segment([("header", b"h"), ("next", b"")]))
+        for number in range(2, 100):
+            self.write(f"big.E{number:02d}", build_ewf1_segment([("next", b"")], segment_number=number))
+        self.write("big.EAA", build_ewf1_segment([("digest", digest_data()), ("done", b"")], segment_number=100))
+        self.assertEqual(len(recorded_hash.discover_recorded_hash_segments(first)), 100)
+        result = read_recorded_acquisition_hash(self.root / "big.E50")
+        self.assertEqual((result.md5, result.sha1, result.reason), (MD5.hex(), SHA1.hex(), ""))
+
+    def test_missing_last_segment_is_incomplete_not_absent(self) -> None:
+        first = self.write("cut.E01", build_ewf1_segment([("header", b"h"), ("next", b"")]))
+        self.write("cut.E02", build_ewf1_segment([("next", b"")], segment_number=2))
+        with mock.patch.object(recorded_hash, "_read_libewf") as libewf:
+            result = read_recorded_acquisition_hash(first)
+        libewf.assert_not_called()
+        self.assertEqual((result.md5, result.sha1), ("", ""))
+        self.assertEqual(result.reason, "세그먼트 집합이 불완전함(마지막 세그먼트 없음)")
+        self.assertNotIn("없습니다", result.reason)
+        # a gap (E03 present, E02 missing) also ends the chain without ``done``
+        gap = self.write("gap.E01", build_ewf1_segment([("header", b"h"), ("next", b"")]))
+        self.write("gap.E03", build_ewf1_segment([("hash", hash_data()), ("done", b"")], segment_number=3))
+        self.assertEqual(read_recorded_acquisition_hash(gap).reason, "세그먼트 집합이 불완전함(마지막 세그먼트 없음)")
+
+    def test_checksum_failure_drops_the_value_and_is_reported(self) -> None:
+        bad_digest = bytearray(digest_data())
+        bad_digest[3] ^= 0xFF  # flipped digest byte, stored Adler-32 unchanged
+        image = self.write("flip.E01", build_ewf1_segment([("digest", bytes(bad_digest)), ("done", b"")]))
+        with mock.patch.object(recorded_hash, "_read_libewf") as libewf:
+            result = read_recorded_acquisition_hash(image)
+        libewf.assert_not_called()
+        self.assertEqual((result.md5, result.sha1), ("", ""))
+        self.assertIn("Adler-32 검사합이 맞지 않는 해시 섹션(flip.E01 digest)", result.reason)
+        # a good ``hash`` section next to the bad ``digest`` still supplies MD5, with the note
+        both = self.write(
+            "both.E01", build_ewf1_segment([("hash", hash_data()), ("digest", bytes(bad_digest)), ("done", b"")])
+        )
+        result = read_recorded_acquisition_hash(both)
+        self.assertEqual((result.md5, result.sha1), (MD5.hex(), ""))
+        self.assertIn("both.E01 digest", result.reason)
+
+    def test_disagreeing_hash_and_digest_are_a_conflict_not_first_wins(self) -> None:
+        other = bytes(range(31, 47))
+        image = self.write(
+            "conflict.E01",
+            build_ewf1_segment([("hash", hash_data(other)), ("digest", digest_data()), ("done", b"")]),
+        )
+        result = read_recorded_acquisition_hash(image)
+        self.assertEqual((result.md5, result.sha1), ("", SHA1.hex()))
+        self.assertIn(f"섹션마다 기록된 MD5 값이 서로 다름(hash {other.hex()} / digest {MD5.hex()})", result.reason)
+        status, _ = evidence_hash_verdict(other.hex(), {"md5": "c" * 32}, result)
+        self.assertNotEqual(status, "computed")
+
     def test_no_hash_sections_gives_empty_values_with_reason(self) -> None:
         image = self.write("bare.E01", build_ewf1_segment([("header", b"h"), ("done", b"")]))
         with mock.patch.object(recorded_hash, "_read_libewf", return_value=RecordedHash()) as libewf:
