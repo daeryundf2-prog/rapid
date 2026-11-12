@@ -131,7 +131,10 @@ describe("409 stale sort index", () => {
     await vi.advanceTimersByTimeAsync(500);
     const error = await pending;
     expect(error).toBeInstanceOf(ApiError);
-    expect((error as ApiError).message).toBe("file changed");
+    // T-008: the English detail stays in `detail`; the message is the Korean 409 sentence.
+    expect((error as ApiError).detail).toBe("file changed");
+    expect((error as ApiError).code).toBe("CONFLICT");
+    expect((error as ApiError).message).toMatch(/[가-힣]/);
     vi.useRealTimers();
   });
 });

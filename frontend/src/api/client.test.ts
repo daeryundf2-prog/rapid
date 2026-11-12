@@ -52,20 +52,23 @@ describe("api", () => {
     expect(headers["X-RapidTriage-Token"]).toBe("abc123");
   });
 
-  it("throws ApiError with status and detail on failure", async () => {
+  it("throws ApiError with status and detail on failure (old body: English detail → Korean message)", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        new Response('{"detail": "missing or invalid RapidTriage auth token"}', {
-          status: 401,
-          headers: { "content-type": "application/json" },
-        }),
+      vi.fn(
+        async () =>
+          new Response('{"detail": "missing or invalid RapidTriage auth token"}', {
+            status: 401,
+            headers: { "content-type": "application/json" },
+          }),
       ),
     );
     await expect(api("/api/runs")).rejects.toMatchObject({
       name: "ApiError",
       status: 401,
-      message: "missing or invalid RapidTriage auth token",
+      code: "UNAUTHORIZED",
+      message: "인증 토큰이 없거나 맞지 않습니다",
+      detail: "missing or invalid RapidTriage auth token",
     });
     await expect(api("/api/runs")).rejects.toBeInstanceOf(ApiError);
   });

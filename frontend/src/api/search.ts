@@ -1,5 +1,6 @@
 import { ApiError, api } from "./client";
 import type { RawPage, RawRow } from "./collections";
+import { isGenericMessage } from "./errors";
 
 /**
  * Console global search over the run's v2 search index (R7 P2): `POST /search/query` with the
@@ -126,8 +127,9 @@ export const SEARCH_REQUEST_REJECTED =
  */
 export function koreanSearchError(error: unknown): unknown {
   if (!(error instanceof ApiError) || (error.status !== 400 && error.status !== 422)) return error;
-  if (/[가-힣]/.test(error.message)) return error;
-  return new ApiError(SEARCH_REQUEST_REJECTED, error.status, error.detail);
+  // T-008: the generic VALIDATION_FAILED / BAD_REQUEST sentence is Korean but says less than ours.
+  if (/[가-힣]/.test(error.message) && !isGenericMessage(error)) return error;
+  return new ApiError(SEARCH_REQUEST_REJECTED, error.status, error.detail, { code: error.code });
 }
 
 /** next offset → cursor (null: the result ended there), per (run, keywords). */

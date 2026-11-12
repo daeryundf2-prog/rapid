@@ -583,7 +583,7 @@ describe("DataGrid batch commands", () => {
     installFetch({
       "/files": filesHandler(50),
       "/case-db/ensure": () => jsonResponse({ database: "D:/out/rapidtriage-case.db", case_id: "run-out" }),
-      "/review-batch": () => jsonResponse({ detail: "case locked" }, 500),
+      "/review-batch": () => jsonResponse({ detail: "케이스가 잠겨 있습니다" }, 500),
     });
     renderWithClient(<DataGrid />);
     await waitFor(() => expect(rows().length).toBeGreaterThan(0));
@@ -595,7 +595,7 @@ describe("DataGrid batch commands", () => {
     // Grid feedback goes to the shell toast stack (U-V7).
     await waitFor(() =>
       expect(
-        useToastStore.getState().toasts.some((t) => /제외 처리에 실패했습니다\. case locked/.test(t.text)),
+        useToastStore.getState().toasts.some((t) => /제외 처리에 실패했습니다\. 케이스가 잠겨 있습니다/.test(t.text)),
       ).toBe(true),
     );
     expect(useGridLocalStore.getState().toasts.some((t) => t.tone === "error")).toBe(true);

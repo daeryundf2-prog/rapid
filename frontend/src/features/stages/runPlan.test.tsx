@@ -502,14 +502,14 @@ describe("처리 page with a plan", () => {
   it("says when the plan cannot be loaded (not a 404) instead of falling back silently", async () => {
     setRun({ status: "completed", request: { root: "C:/ev/case1", mode: "fraud" } });
     installFetch({
-      "/plan": () => jsonResponse({ detail: "plan file is corrupt" }, 500),
+      "/plan": () => jsonResponse({ detail: "처리 계획 파일이 손상되었습니다" }, 500),
       "/summary": () => jsonResponse({ steps: [{ step: "files", status: "completed", record_count: 3 }] }),
       "/analyses": () => jsonResponse({ analyses: [] }),
     });
     renderWithClient(<ProcessPage />);
     const note = await screen.findByTestId("run-plan-error");
     expect(note.textContent).toContain("처리 계획을 불러오지 못했습니다");
-    expect(note.textContent).toContain("plan file is corrupt");
+    expect(note.textContent).toContain("처리 계획 파일이 손상되었습니다");
   });
 
   it("keeps the summary step list for an older run without a plan", async () => {

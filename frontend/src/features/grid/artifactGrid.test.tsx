@@ -459,12 +459,12 @@ describe("artifact-columns review fixes", () => {
       route: { ...s.route, sort: { key: "details.run_count", order: "asc" } },
     }));
     const calls = installFetch({
-      "/artifacts": () => jsonResponse({ detail: "artifact file changed; sort index rebuilt" }, 409),
+      "/artifacts": () => jsonResponse({ detail: "아티팩트 파일이 바뀌어 정렬 인덱스를 다시 만들었습니다" }, 409),
     });
     renderWithClient(<DataGrid />);
     await waitFor(() =>
       expect(status().textContent).toBe(
-        "정렬 인덱스를 다시 만들어야 합니다: artifact file changed; sort index rebuilt",
+        "정렬 인덱스를 다시 만들어야 합니다: 아티팩트 파일이 바뀌어 정렬 인덱스를 다시 만들었습니다",
       ),
     );
     expect(calls.filter((c) => c.url.includes("sort=")).length).toBe(2);

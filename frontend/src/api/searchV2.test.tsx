@@ -130,7 +130,10 @@ describe("console search over the v2 index (R7 P2)", () => {
       "/search/index": () => jsonResponse({ status: "ready" }),
       "/search/query": () => Promise.reject(new DOMException("aborted", "AbortError")),
     });
-    await expect(fetchSearchRows("run-f", { search: spec }, SEARCH_PAGE_SIZE)).rejects.toThrow("aborted");
+    await expect(fetchSearchRows("run-f", { search: spec }, SEARCH_PAGE_SIZE)).rejects.toMatchObject({
+      code: "REQUEST_ABORTED",
+      isAbort: true,
+    });
   });
 });
 
