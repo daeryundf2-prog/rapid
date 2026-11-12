@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
 import type { RunExtractResult } from "../../api/extract";
+import type { ToastOptions } from "../../components/toastStore";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
-import type { Command, CommandContext } from "../../contracts/command";
+import { type Command, type CommandContext, KEY_MAP } from "../../contracts/command";
 import type { ViewerMode, ViewerTarget } from "../../contracts/viewer";
 import { useAppStore } from "../../state/store";
 import { runDisabledReason } from "../analysis/commands";
@@ -20,12 +21,14 @@ import {
   applyReviewAction,
   type BatchAction,
   EXTRACT_LIMIT,
+  isUndoableAction,
   MARK_LABELS,
   optimisticPatch,
   partitionReviewRows,
   reviewTargetOf,
   skippedNotice,
   storeNotice,
+  undoToastAction,
 } from "./reviewActions";
 import type { ColumnSpec } from "./types";
 
@@ -40,7 +43,8 @@ export interface GridCommandHost {
   setFilter: (q: string) => void;
   navigate: (collection: CollectionRef, q?: string) => void;
   patchRows: (keys: string[], patch: (row: GridRow) => GridRow) => () => void;
-  toast: (message: string, tone?: "error" | "info") => void;
+  /** `options` carries a toast button (실행 취소 after a judgement, r8 T-036). */
+  toast: (message: string, tone?: "error" | "info", options?: ToastOptions) => void;
   refetch: () => void;
   /** Show the extract manifest summary + download button. */
   showExtract: (result: RunExtractResult) => void;
@@ -52,7 +56,15 @@ export interface GridCommandHost {
   getExportColumns?: () => ColumnSpec[];
   /** Selected keys, loaded or not (getSelectedRows only returns loaded rows). */
   getSelectedCount?: () => number;
+  /**
+   * Move the focus to the next loaded row below it without a judgement (G, r8 T-036); false when
+   * there is none among the loaded rows.
+   */
+  focusNextUnreviewed?: () => boolean;
 }
+
+export const NEXT_UNREVIEWED_COMMAND = "grid.nextUnreviewed";
+export const NO_NEXT_UNREVIEWED = "아래에 미검토 행이 없습니다(불러온 행 기준).";
 
 export function buildViewerTarget(runId: string, row: GridRow, mode?: ViewerMode): ViewerTarget {
   const highlight = row.fields.highlight as ViewerTarget["highlight"] | undefined;
@@ -285,6 +297,18 @@ export function buildGridCommands(hostRef: { current: GridCommandHost }): Comman
         if (first) useAppStore.getState().navigate(caseRoute(details, first));
       },
     },
+    {
+      // G (r8 T-036): judge, then jump to the next row still to judge.
+      id: NEXT_UNREVIEWED_COMMAND,
+      label: "다음 미검토 행으로",
+      group: "grid",
+      shortcut: KEY_MAP.nextUnreviewed,
+      icon: "chevron-down",
+      disabledReason: () => (host().focusNextUnreviewed ? undefined : "목록이 없습니다."),
+      run: () => {
+        if (!host().focusNextUnreviewed?.()) host().toast(NO_NEXT_UNREVIEWED, "info");
+      },
+    },
   ];
 
   const ocrRows = (): GridRow[] => {
@@ -500,11 +524,15 @@ async function runMark(
   try {
     const result = await applyReviewAction(host.runId, rows, action, { tag });
     if (result.extract) host.showExtract(result.extract);
-    else
+    else {
+      // A judgement (n rows = one unit) can be taken back from its toast (r8 T-036).
+      const undo = isUndoableAction(action) ? undoToastAction(host.runId) : undefined;
       host.toast(
         `${MARK_LABELS[action]}: ${result.applied}건 처리했습니다.${storeNotice(result)}${skippedNotice(result.skipped ?? [])}`,
         "info",
+        undo ? { action: undo } : undefined,
       );
+    }
     return true;
   } catch (error) {
     rollback();

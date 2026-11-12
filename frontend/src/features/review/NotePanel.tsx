@@ -16,7 +16,7 @@ import { Modal } from "../case/Modal";
 import { ReasonButton } from "../case/ReasonButton";
 import { applyNote, reviewLocatorTarget, storeNotice } from "../grid/reviewActions";
 import { noteKey, setSessionNote } from "../grid/sessionNotes";
-import { currentReviewer, DEFAULT_REVIEWER, setReviewer } from "./author";
+import { currentReviewer, reviewerPlaceholder, setReviewer, typedReviewer } from "./author";
 import type { NotePanelTarget } from "./uiStore";
 import "./review.css";
 
@@ -101,9 +101,7 @@ export function NotePanel({ target, onClose }: { target: NotePanelTarget; onClos
   const lastNote = entries.find((entry) => entry.changed_fields.includes("note"));
   const current = typeof row.fields.note === "string" ? row.fields.note : (lastNote?.note_after ?? "");
   const [text, setText] = useState(current);
-  const [author, setAuthor] = useState(() =>
-    currentReviewer() === DEFAULT_REVIEWER ? "" : currentReviewer(),
-  );
+  const [author, setAuthor] = useState(typedReviewer);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const noteId = useId();
@@ -116,7 +114,8 @@ export function NotePanel({ target, onClose }: { target: NotePanelTarget; onClos
     try {
       const result = await applyNote(runId, [row], text);
       setSessionNote(noteKey(runId, row.ref), text.trim());
-      announce(`메모를 저장했습니다 (작성자 ${currentReviewer()}).${storeNotice(result)}`);
+      const signer = currentReviewer(runId);
+      announce(`메모를 저장했습니다${signer ? ` (작성자 ${signer})` : ""}.${storeNotice(result)}`);
       await queryClient.invalidateQueries({ queryKey: ["review-history", runId, row.rowKey] });
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
@@ -167,7 +166,7 @@ export function NotePanel({ target, onClose }: { target: NotePanelTarget; onClos
               id={authorId}
               type="text"
               value={author}
-              placeholder={DEFAULT_REVIEWER}
+              placeholder={reviewerPlaceholder(runId)}
               maxLength={60}
               onChange={(event) => setAuthor(event.target.value)}
             />

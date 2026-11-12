@@ -425,7 +425,7 @@ describe("Viewer — toolbar actions", () => {
       case_id: "run-out",
       run_id: "run-1",
       targets: [{ collection: "files", locator: "/candidates/7" }],
-      reviewer: "web-ui",
+      reviewer: "",
       status: "relevant",
     });
     fireEvent.click(tool("viewer.mark.include-in-report"));
@@ -473,7 +473,7 @@ describe("Viewer — toolbar actions", () => {
       case_id: "run-run-1",
       run_id: "run-1",
       targets: [{ target_type: "artifact", target_id: "42" }],
-      reviewer: "web-ui",
+      reviewer: "",
       status: "excluded",
       include_in_report: false,
     });

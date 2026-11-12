@@ -80,6 +80,32 @@ describe("dispatchShortcut", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  it("Ctrl+Z undoes the last mark, but a text field keeps it for its own typing (r8 T-036)", () => {
+    const undo = vi.fn();
+    registerCommand({
+      id: "t.undo",
+      label: "실행 취소",
+      group: "review",
+      shortcut: KEY_MAP.undoReview,
+      run: undo,
+    });
+    const input = document.createElement("textarea");
+    document.body.append(input);
+    expect(dispatchShortcut(keydown({ key: "z", ctrlKey: true }, input))).toBe(false);
+    expect(dispatchShortcut(keydown({ key: "z", ctrlKey: true }))).toBe(true);
+    expect(undo).toHaveBeenCalledTimes(1);
+  });
+
+  it("P and G are review keys of their own (r8 T-036)", () => {
+    expect([KEY_MAP.markIncludeInReport, KEY_MAP.nextUnreviewed, KEY_MAP.undoReview]).toEqual([
+      "P",
+      "G",
+      "Ctrl+Z",
+    ]);
+    const names = keyBindingRows().map((row) => row.name);
+    expect(names).toEqual(expect.arrayContaining(["markIncludeInReport", "nextUnreviewed", "undoReview"]));
+  });
+
   it("ignores events a widget already handled", () => {
     const run = vi.fn();
     registerCommand({ id: "t.j", label: "다음", group: "grid", shortcut: "J", run });

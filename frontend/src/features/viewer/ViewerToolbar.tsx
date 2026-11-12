@@ -15,6 +15,7 @@ import { getCommand, runCommand } from "../../commands/registry";
 import { MenuButton, type MenuItem } from "../../components/MenuButton";
 import { STATUS_META } from "../../components/StatusChip";
 import "../../components/status.css";
+import { pushToast } from "../../components/toastStore";
 import type { GridRow } from "../../contracts/collection";
 import type { Command, CommandContext } from "../../contracts/command";
 import { Icon, isIconName } from "../../icons";
@@ -24,6 +25,7 @@ import {
   applyReviewAction,
   MARK_LABELS,
   storeNotice,
+  undoToastAction,
   unmarkActionOf,
 } from "../grid/reviewActions";
 import { noteKey, setSessionNote } from "../grid/sessionNotes";
@@ -179,22 +181,40 @@ export function ViewerToolbar({
     return row.reviewStatus === action;
   };
 
-  /** A pressed review toggle un-presses: status back to `unreviewed` / out of the report. */
+  /**
+   * A pressed review toggle un-presses: the status goes back to the row's previous state (r8
+   * T-036; `unreviewed` when none is known) / out of the report. Undoable like any judgement.
+   */
   const unmark = async (action: string) => {
     const undo = unmarkActionOf(action);
     if (!target || !undo) return;
     try {
-      const result = await applyReviewAction(target.runId, [targetAsGridRow(target)], undo);
+      // The grid's row carries the stored judgement; the pressed status is the current one (the
+      // state 실행 취소 goes back to), even when the row has not caught up with it yet.
+      const base = row ?? targetAsGridRow(target);
+      const current: GridRow =
+        undo === "clear-review" ? { ...base, reviewStatus: action as GridRow["reviewStatus"] } : base;
+      const result = await applyReviewAction(target.runId, [current], undo);
+      const restored = result.restored?.status;
       setApplied((prev) => {
         const base = prev.key === key ? prev : { actions: [], cleared: [] };
         const clears = undo === "clear-review" ? EXCLUSIVE : [action];
+        const back: string[] = restored && restored !== "unreviewed" ? [restored] : [];
         return {
           key,
-          actions: base.actions.filter((a) => !clears.includes(a)),
-          cleared: [...base.cleared.filter((a) => !clears.includes(a)), ...clears],
+          actions: [...base.actions.filter((a) => !clears.includes(a)), ...back],
+          cleared: [
+            ...base.cleared.filter((a) => !clears.includes(a)),
+            ...clears.filter((a) => !back.includes(a)),
+          ],
         };
       });
-      announce(`표시 해제됨: ${MARK_LABELS[undo]}${storeNotice(result)}`);
+      const text = `표시 해제됨: ${MARK_LABELS[undo]}${
+        restored && restored !== "unreviewed" ? ` (이전 상태: ${STATUS_META[restored].label})` : ""
+      }${storeNotice(result)}`;
+      announce(text);
+      const undoButton = undoToastAction(target.runId);
+      pushToast(text, "info", undoButton ? { action: undoButton } : undefined);
     } catch (error) {
       announce(`표시 해제 실패: ${error instanceof Error ? error.message : String(error)}`);
     }

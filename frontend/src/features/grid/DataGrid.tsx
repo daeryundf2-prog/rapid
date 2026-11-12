@@ -1256,6 +1256,18 @@ export function DataGrid(props: DataGridProps = {}) {
     runIsActive: false,
     getExportColumns: () => specs,
     getSelectedCount: () => selectedKeys.size,
+    // G (r8 T-036): the next loaded row below the focus with no judgement (rows not loaded yet are
+    // skipped — the scan never fetches pages).
+    focusNextUnreviewed: () => {
+      for (let index = Math.max(clampedFocus, -1) + 1; index < displayCount; index += 1) {
+        const row = getDisplayRow(index);
+        if (row && !row.reviewStatus) {
+          moveFocus(index, false);
+          return true;
+        }
+      }
+      return false;
+    },
   };
   useGridCommands(host);
 

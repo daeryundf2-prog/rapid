@@ -163,7 +163,7 @@ describe("tag manager dialog", () => {
       name: "DLP 유출 후보",
       color_token: "tag-7",
       shortcut: 7,
-      created_by: "web-ui",
+      created_by: "",
     });
     await waitFor(() => expect(announceMock).toHaveBeenCalledWith("태그 'DLP 유출 후보'을(를) 만들었습니다"));
 
