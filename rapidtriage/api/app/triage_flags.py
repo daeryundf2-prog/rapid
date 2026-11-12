@@ -452,6 +452,11 @@ def mark_flag_page(
             pagination["filtered"] = False
             if record_count is not None:
                 pagination["total"] = record_count
+                # Partial-result contract (T-019): the total is now known.
+                pagination["total_lower_bound"] = record_count
+                notice = page.get("notice")
+                if isinstance(notice, dict) and notice.get("code") == "TOTAL_NOT_COUNTED":
+                    page.pop("notice", None)
     if query.sort:
         page["sort"] = {**FLAGS_SORT_DESCRIPTOR, "order": "desc" if query.descending else "asc", "applied": True}
     return page

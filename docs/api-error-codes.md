@@ -10,7 +10,7 @@
 - **노출**: `http` 오류 응답 · `body` 응답 본문 필드 · `notice` 목록 부분 결과 · `readonly_reason` 읽기 전용 사유 · `cli` CLI 전용 · `frontend` 프런트 전용.
 - **종료 코드**(CLI): 0 성공 / 1 실패 / 2 사용법 / 3 부분 성공 / 4 대상 없음. T-249 전까지 CLI는 대부분 2로 끝나며, 표의 값은 목표값입니다.
 
-코드 41종 (active 31 · reserved 10).
+코드 41종 (active 33 · reserved 8).
 
 ## 출력 위치 보호 (`output`)
 
@@ -72,8 +72,8 @@
 
 | 코드 | HTTP | 종료 | 노출 | 상태 | 문장 | 힌트 | English |
 |---|---|---|---|---|---|---|---|
-| `SCAN_BUDGET_STOPPED` | — | 3 | notice | reserved (T-007) | 확인 한도에 도달해 목록 일부만 확인했습니다 | 필터를 좁히거나 검색 색인을 만든 뒤 다시 조회하세요 | Scan budget reached |
-| `TOTAL_NOT_COUNTED` | — | 3 | notice | reserved (T-007) | 전체 건수를 세지 않았습니다(표시한 수는 최소값입니다) | 정확한 건수가 필요하면 필터를 좁혀 다시 조회하세요 | Total was not counted |
+| `SCAN_BUDGET_STOPPED` | — | 3 | notice | active (T-019) | 확인 한도에 도달해 목록 일부만 확인했습니다 | 필터를 좁히거나 검색 색인을 만든 뒤 다시 조회하세요 | Scan budget reached |
+| `TOTAL_NOT_COUNTED` | — | 3 | notice | active (T-019) | 전체 건수를 세지 않았습니다(표시한 수는 최소값입니다) | 정확한 건수가 필요하면 필터를 좁혀 다시 조회하세요 | Total was not counted |
 
 ## 요청 공통(상태 코드 기본값) (`request`)
 

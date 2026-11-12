@@ -144,12 +144,12 @@ _ROWS: tuple[ErrorCode, ...] = (
        "다른 검토자가 먼저 같은 항목의 검토 표시를 바꿨습니다",
        "목록을 새로 고친 뒤 다시 표시하세요", "Review mark changed concurrently", "T-007"),
     # -- list partial results (notice) ------------------------------------------------------------
-    _e("SCAN_BUDGET_STOPPED", None, 3, "list", "notice", "reserved",
+    _e("SCAN_BUDGET_STOPPED", None, 3, "list", "notice", "active",
        "확인 한도에 도달해 목록 일부만 확인했습니다",
-       "필터를 좁히거나 검색 색인을 만든 뒤 다시 조회하세요", "Scan budget reached", "T-007"),
-    _e("TOTAL_NOT_COUNTED", None, 3, "list", "notice", "reserved",
+       "필터를 좁히거나 검색 색인을 만든 뒤 다시 조회하세요", "Scan budget reached", "T-019"),
+    _e("TOTAL_NOT_COUNTED", None, 3, "list", "notice", "active",
        "전체 건수를 세지 않았습니다(표시한 수는 최소값입니다)",
-       "정확한 건수가 필요하면 필터를 좁혀 다시 조회하세요", "Total was not counted", "T-007"),
+       "정확한 건수가 필요하면 필터를 좁혀 다시 조회하세요", "Total was not counted", "T-019"),
     # -- request defaults by HTTP status (T-007 decision step 3) ----------------------------------
     _e("BAD_REQUEST", 400, 2, "request", "http", "active",
        "요청 내용이 올바르지 않습니다", "입력값을 확인한 뒤 다시 시도하세요", "Bad request", "T-007"),
