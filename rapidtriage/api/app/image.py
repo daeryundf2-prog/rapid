@@ -7,6 +7,7 @@ from urllib.parse import quote
 
 from fastapi import HTTPException
 
+from ...core.credential_files import credential_file_reason
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.ocr_queue import (
     OcrQueueError,
@@ -669,7 +670,12 @@ def build_image_gallery_page(
     similarity_bucket: str | None,
 ) -> dict[str, object]:
     candidates = sorted(
-        [path for path in anchor_path.parent.iterdir() if path.is_file() and is_image_preview_candidate(path)],
+        [
+            path
+            for path in anchor_path.parent.iterdir()
+            # Credential / secret files (core/credential_files.py) never appear with thumbnail hashes.
+            if path.is_file() and is_image_preview_candidate(path) and not credential_file_reason(path, sniff=False)
+        ],
         key=lambda item: item.name.lower(),
     )
     items = []
