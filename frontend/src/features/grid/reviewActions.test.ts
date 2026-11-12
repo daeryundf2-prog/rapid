@@ -226,7 +226,10 @@ describe("applyReviewAction", () => {
   });
 
   it("propagates API failures so the caller can roll back", async () => {
-    installFetch({ "/case-db/ensure": ENSURE, "/review-batch": () => jsonResponse({ detail: "검토 표시 거부됨" }, 400) });
+    installFetch({
+      "/case-db/ensure": ENSURE,
+      "/review-batch": () => jsonResponse({ detail: "검토 표시 거부됨" }, 400),
+    });
     await expect(applyReviewAction("r1", [fileRow(1)], "relevant")).rejects.toThrow("검토 표시 거부됨");
   });
 

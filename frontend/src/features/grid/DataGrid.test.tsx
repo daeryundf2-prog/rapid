@@ -595,7 +595,9 @@ describe("DataGrid batch commands", () => {
     // Grid feedback goes to the shell toast stack (U-V7).
     await waitFor(() =>
       expect(
-        useToastStore.getState().toasts.some((t) => /제외 처리에 실패했습니다\. 케이스가 잠겨 있습니다/.test(t.text)),
+        useToastStore
+          .getState()
+          .toasts.some((t) => /제외 처리에 실패했습니다\. 케이스가 잠겨 있습니다/.test(t.text)),
       ).toBe(true),
     );
     expect(useGridLocalStore.getState().toasts.some((t) => t.tone === "error")).toBe(true);

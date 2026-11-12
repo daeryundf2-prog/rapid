@@ -278,7 +278,8 @@ describe("useCollectionQuery paging", () => {
   it("reports an error and retries via refetch", async () => {
     let fail = true;
     installFetch({
-      "/files": (url, init) => (fail ? jsonResponse({ detail: "파일 목록 서버 오류" }, 500) : filesHandler(5)(url, init)),
+      "/files": (url, init) =>
+        fail ? jsonResponse({ detail: "파일 목록 서버 오류" }, 500) : filesHandler(5)(url, init),
     });
     const { wrapper } = queryWrapper();
     const { result } = renderHook(() => useCollectionQuery(filesQuery, { runId: "run-1" }), { wrapper });

@@ -295,6 +295,7 @@ def gate_commands(
         ("contract", ["node", CONTRACT_SCRIPT, "--check"], repo),
     ]
     if frontend_changed:
+        gates.append(("fe-lint", [npm(), "run", "lint"], repo / "frontend"))
         gates.append(("bundle", [npm(), "run", "check:bundle"], repo / "frontend"))
     gates.append(
         (
