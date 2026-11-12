@@ -195,11 +195,11 @@ class CaseIntakeApiTests(unittest.TestCase):
         export = self.temp / "export.zip"
         export.write_bytes(b"PK export bytes")
         md5 = hashlib.md5(export.read_bytes()).hexdigest()
-        # E01: container bytes are not the acquisition (media) hash -> no expected-hash comparison.
+        # E01 (T-181): an expected hash is accepted; the worker compares it with the recorded
+        # acquisition hash and the container bytes (tests/test_e01_recorded_hash.py covers the verdicts).
         e01_expected = self.client.post(url, json={"evidence_number": "E-09", "source_type": "e01",
                                                    "path": str(self.image), "verify_hash": True, "expected_hash": "0" * 32})
-        self.assertEqual(e01_expected.status_code, 422)
-        self.assertIn("획득(매체) 해시", e01_expected.json()["detail"])
+        self.assertEqual(e01_expected.status_code, 201, e01_expected.text)
         match = self.client.post(url, json={"evidence_number": "E-01", "source_type": "export", "path": str(export),
                                             "verify_hash": True, "expected_hash": md5.upper()})
         self.assertEqual(match.status_code, 201, match.text)

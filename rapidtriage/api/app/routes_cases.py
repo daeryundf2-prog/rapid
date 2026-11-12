@@ -234,11 +234,9 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
             except OutputInsideEvidenceError as exc:
                 raise output_guard_http_error(exc) from exc
         algorithm = expected_hash_algorithm(request.expected_hash) if request.verify_hash else None
-        if request.expected_hash.strip() and request.source_type == "e01":
-            raise HTTPException(
-                status_code=422,
-                detail="E01은 컨테이너 바이트만 해시하므로 획득(매체) 해시와 비교할 수 없습니다. 기대 해시 없이 계산만 하세요",
-            )
+        # E01 expected hash (R8 T-181, D34a): the hash worker compares it with the acquisition hash
+        # recorded in the image (``computed``) and with the container bytes (``matched``), and its
+        # message says which; the media itself is never re-hashed.
         if request.expected_hash.strip() and not request.verify_hash:
             raise HTTPException(status_code=422, detail="기대 해시는 해시 검증을 켠 경우에만 지정할 수 있습니다")
         hashable = path.is_file()
