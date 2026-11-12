@@ -271,6 +271,7 @@ def build_reports_router(
                 include_all=request.include_all,
                 max_items=request.max_items,
                 title=request.title,
+                run_summary=job.summary,
             )
         except (BundleError, CaseBookmarkError, OSError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))

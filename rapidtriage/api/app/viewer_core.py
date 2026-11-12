@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 from ...core.case import (
     CaseBookmarkError,
+    build_case_summary,
     load_case_payload,
 )
 from ...core.commercial_readiness import (
@@ -847,7 +848,67 @@ def build_run_validation_output_hashes(summary: Mapping[str, object], *, output_
     }
 
 
-def build_run_validation_review_status(case_path: Path) -> dict[str, object]:
+CASE_DB_BOOKMARK_ID_PREFIX = "case-db:"
+
+
+def build_run_validation_review_status(
+    case_path: Path,
+    review_payload: Mapping[str, object] | None = None,
+    *,
+    case_db_path: Path | None = None,
+    review_error: str | None = None,
+) -> dict[str, object]:
+    """Review status of the run validation package (R8 T-028).
+
+    ``review_payload`` is the merged review payload the case report, the submission manifest and
+    the reviewer bundle read (bookmark JSON + case DB marks, ``review_payload.load_run_review_payload``);
+    counts come from it with the one report-candidate rule, so ``report_item_count`` equals
+    ``GET /review-counts``. Without it only the bookmark JSON is read (legacy callers)."""
+    if review_payload is None:
+        return _case_json_review_status(case_path)
+    raw_bookmarks = review_payload.get("bookmarks")
+    bookmarks = [dict(item) for item in raw_bookmarks if isinstance(item, Mapping)] if isinstance(raw_bookmarks, list) else []
+    summary = build_case_summary(bookmarks)
+    from_db = sum(1 for item in bookmarks if str(item.get("bookmark_id") or "").startswith(CASE_DB_BOOKMARK_ID_PREFIX))
+    case_db_exists = bool(case_db_path and case_db_path.is_file())
+    limitations: list[str] = []
+    if review_error:
+        limitations.append(f"검토 목록 파일(rapidtriage-case.json)을 읽지 못해 케이스 DB 표시만 반영했습니다: {review_error}")
+    scope = review_payload.get("review_scope")
+    if isinstance(scope, Mapping):
+        if scope.get("case_db_marks_truncated"):
+            limitations.append(
+                f"케이스 DB 표시 {scope.get('case_db_marks_total')}건 중 최근 {scope.get('case_db_mark_limit')}건만 반영했습니다(상한)."
+            )
+        if scope.get("case_db_error"):
+            limitations.append(f"케이스 DB를 읽지 못해 콘솔 표시가 반영되지 않았습니다: {scope.get('case_db_error')}")
+    if not bookmarks and not limitations:
+        limitations.append("이 처리에는 아직 검토 표시가 없습니다(검토 목록 파일·케이스 DB 모두).")
+    result: dict[str, object] = {
+        "exists": bool(bookmarks) or case_path.is_file() or case_db_exists,
+        "case_path": str(case_path),
+        "case_json_exists": case_path.is_file(),
+        "case_db_path": str(case_db_path) if case_db_path else "",
+        "case_db_exists": case_db_exists,
+        "case_id": review_payload.get("case_id"),
+        "title": review_payload.get("title"),
+        "bookmark_count": len(bookmarks),
+        "report_item_count": int(summary.get("report_item_count") or 0),
+        "review_revision_count": int(summary.get("review_revision_count") or 0),
+        "review_status_counts": summary.get("review_status_counts") or {},
+        "source_command_counts": summary.get("source_command_counts") or {},
+        "store_counts": {"case_json": len(bookmarks) - from_db, "case_db": from_db},
+        "bookmark_ids": [str(item.get("bookmark_id") or item.get("id") or "") for item in bookmarks][:100],
+        "limitations": limitations,
+    }
+    if isinstance(scope, Mapping):
+        result["review_scope"] = dict(scope)
+    if review_error:
+        result["error"] = review_error
+    return result
+
+
+def _case_json_review_status(case_path: Path) -> dict[str, object]:
     if not case_path.is_file():
         return {
             "exists": False,
@@ -855,7 +916,7 @@ def build_run_validation_review_status(case_path: Path) -> dict[str, object]:
             "bookmark_count": 0,
             "report_item_count": 0,
             "review_status_counts": {},
-            "limitations": ["case review file has not been created for this run"],
+            "limitations": ["이 처리의 검토 목록 파일(rapidtriage-case.json)이 아직 없습니다."],
         }
     try:
         case_payload = load_case_payload(case_path)
@@ -864,7 +925,7 @@ def build_run_validation_review_status(case_path: Path) -> dict[str, object]:
             "exists": False,
             "case_path": str(case_path),
             "error": str(exc),
-            "limitations": ["case review file could not be loaded"],
+            "limitations": ["검토 목록 파일(rapidtriage-case.json)을 읽지 못했습니다."],
         }
     summary = case_payload.get("summary") if isinstance(case_payload.get("summary"), Mapping) else {}
     bookmarks = case_payload.get("bookmarks") if isinstance(case_payload.get("bookmarks"), list) else []
@@ -878,7 +939,9 @@ def build_run_validation_review_status(case_path: Path) -> dict[str, object]:
         "review_revision_count": int(summary.get("review_revision_count") or 0),
         "review_status_counts": summary.get("review_status_counts") if isinstance(summary.get("review_status_counts"), Mapping) else {},
         "source_command_counts": summary.get("source_command_counts") if isinstance(summary.get("source_command_counts"), Mapping) else {},
-        "bookmark_ids": [str(item.get("id") or "") for item in bookmarks if isinstance(item, Mapping)][:100],
+        "bookmark_ids": [
+            str(item.get("bookmark_id") or item.get("id") or "") for item in bookmarks if isinstance(item, Mapping)
+        ][:100],
     }
 
 

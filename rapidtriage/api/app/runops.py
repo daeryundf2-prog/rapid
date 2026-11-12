@@ -104,6 +104,7 @@ from .previews import (
     build_xml_preview,
     write_json_file,
 )
+from .run_review import canonical_run_case
 from .search import (
     snippet_around,
     source_search_citation,
@@ -625,6 +626,38 @@ def _run_review_payload(store: RunJobStore, run_id: str) -> dict[str, object]:
     return load_run_review_payload(store, run_id)
 
 
+def _validation_review_payload(
+    store: RunJobStore, run_id: str, summary: Mapping[str, object]
+) -> tuple[dict[str, object], str | None]:
+    """The merged review payload for the validation package (R8 T-028), and the case-JSON read
+    error when the bookmark JSON cannot be loaded (then the case DB marks alone are used)."""
+    try:
+        return _run_review_payload(store, run_id), None
+    except HTTPException as exc:
+        from .review_payload import read_case_db_marks, review_scope
+
+        marks = read_case_db_marks(summary, run_id)
+        payload: dict[str, object] = {"bookmarks": marks.bookmarks}
+        scope = review_scope(marks)
+        if scope is not None:
+            payload["review_scope"] = scope
+        return payload, str(exc.detail)
+
+
+def run_case_db_path(summary: Mapping[str, object] | None, run_id: str) -> Path | None:
+    """The run's canonical case DB (where console review marks live), or ``None`` without a summary."""
+    if not summary:
+        return None
+    database_path, _case_id = canonical_run_case(summary, run_id)
+    return database_path
+
+
+def _case_db_audit_input(store: RunJobStore, run_id: str) -> list[tuple[str, Path]]:
+    """``("case-db", path)`` for audit ``input_files`` (path + SHA-256 recorded when the file exists)."""
+    database_path = run_case_db_path(get_job(store, run_id).summary, run_id)
+    return [("case-db", database_path)] if database_path is not None else []
+
+
 def build_run_submission_manifest(
     store: RunJobStore,
     run_id: str,
@@ -692,7 +725,13 @@ def build_run_validation_package(store: RunJobStore, run_id: str) -> dict[str, o
     generated_at = dt.datetime.now(dt.timezone.utc).isoformat()
     source_integrity = build_run_validation_source_integrity(summary)
     output_hashes = build_run_validation_output_hashes(summary, output_dir=output_dir)
-    review_status = build_run_validation_review_status(case_path)
+    review_payload, review_error = _validation_review_payload(store, run_id, summary)
+    review_status = build_run_validation_review_status(
+        case_path,
+        review_payload,
+        case_db_path=run_case_db_path(summary, run_id),
+        review_error=review_error,
+    )
     warning_inventory = build_run_validation_warning_inventory(summary)
     diff_inventory = build_run_validation_diff_inventory(summary)
     diff_attached = bool(diff_inventory.get("attached"))
@@ -904,7 +943,7 @@ def write_submission_audit(
         audit_path_for(manifest_path),
         command="submission-manifest",
         options={"include_all": include_all, "max_items": max_items},
-        input_files=[("case-json", case_path)],
+        input_files=[("case-json", case_path), *_case_db_audit_input(store, run_id)],
         output_files=[("submission-manifest", manifest_path)],
     )
 
@@ -915,6 +954,7 @@ def write_run_validation_package_audit(store: RunJobStore, run_id: str, package_
     case_path = default_case_path(store, run_id)
     if case_path.is_file():
         input_files.append(("case-json", case_path))
+    input_files.extend(_case_db_audit_input(store, run_id))
     write_audit_record(
         audit_path_for(package_path),
         command="run-validation-package",
@@ -937,7 +977,7 @@ def write_case_report_audit(
         audit_path_for(report_path),
         command="case-report",
         options=model_to_dict(request),
-        input_files=[("case-json", case_path), ("submission-manifest", manifest_path)],
+        input_files=[("case-json", case_path), *_case_db_audit_input(store, run_id), ("submission-manifest", manifest_path)],
         output_files=[
             ("case-report", exports["md"]),
             ("case-report-html", exports["html"]),
