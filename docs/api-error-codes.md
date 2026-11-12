@@ -10,7 +10,7 @@
 - **노출**: `http` 오류 응답 · `body` 응답 본문 필드 · `notice` 목록 부분 결과 · `readonly_reason` 읽기 전용 사유 · `cli` CLI 전용 · `frontend` 프런트 전용.
 - **종료 코드**(CLI): 0 성공 / 1 실패 / 2 사용법 / 3 부분 성공 / 4 대상 없음. T-249 전까지 CLI는 대부분 2로 끝나며, 표의 값은 목표값입니다.
 
-코드 42종 (active 34 · reserved 8).
+코드 42종 (active 35 · reserved 7).
 
 ## 출력 위치 보호 (`output`)
 
@@ -27,7 +27,7 @@
 |---|---|---|---|---|---|---|---|
 | `PATH_OUTSIDE_ALLOWED_ROOT` | 403 | 1 | http | active | 요청한 경로가 서버가 허용한 위치 밖입니다 | 허용된 위치(서버 설정) 아래의 경로를 지정하세요 | Path is outside the allowed root |
 | `CREDENTIAL_FILE_WITHHELD` | 403 | 1 | http | active | 자격 증명·비밀 파일이라 원본 내려받기·미리보기를 제공하지 않습니다 | 파일 메타데이터와 보고서의 가린 값만 확인하세요 | Credential file content is withheld |
-| `SERVER_READ_ONLY` | — | — | readonly_reason | reserved (T-007) | 서버가 읽기 전용으로 실행 중이라 이 결과에 쓰지 않습니다 | 쓰기가 필요하면 읽기 전용 설정 없이 서버를 다시 시작하세요 | Server is read-only |
+| `SERVER_READ_ONLY` | — | — | readonly_reason | active (T-112) | 서버가 읽기 전용으로 실행 중이라 이 결과에 쓰지 않습니다 | 쓰기가 필요하면 읽기 전용 설정 없이 서버를 다시 시작하세요 | Server is read-only |
 
 ## 연습 샘플 (`sample`)
 

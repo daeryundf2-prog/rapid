@@ -184,7 +184,7 @@ class BrowseRootCliTests(unittest.TestCase):
             with patch.dict(sys.modules, {"uvicorn": types.SimpleNamespace(run=fake_run)}):
                 with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
                     result = run_web_server(
-                        "0.0.0.0", 8899, remote=True, auth_token="t", browse_roots=[str(self.root)]
+                        "0.0.0.0", 8899, remote=True, auth_token="t", browse_roots=[str(self.root)], allow_plain_http=True
                     )
             self.assertEqual(result, 0)
             self.assertEqual(seen, {"remote": "1", "roots": str(self.root)})

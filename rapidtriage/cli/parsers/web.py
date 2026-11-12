@@ -22,7 +22,8 @@ def register(sub: argparse._SubParsersAction) -> None:
             Examples:
               rapidtriage web
               rapidtriage web --host 127.0.0.1 --port 8765
-              rapidtriage web --remote --host 0.0.0.0 --token <token>
+              rapidtriage web --read-only --no-browser
+              rapidtriage web --remote --host 0.0.0.0 --ssl-certfile cert.pem --ssl-keyfile key.pem
             """
         ),
     )

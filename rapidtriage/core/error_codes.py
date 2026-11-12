@@ -96,9 +96,9 @@ _ROWS: tuple[ErrorCode, ...] = (
     _e("CREDENTIAL_FILE_WITHHELD", 403, 1, "path", "http", "active",
        "자격 증명·비밀 파일이라 원본 내려받기·미리보기를 제공하지 않습니다",
        "파일 메타데이터와 보고서의 가린 값만 확인하세요", "Credential file content is withheld"),
-    _e("SERVER_READ_ONLY", None, None, "path", "readonly_reason", "reserved",
+    _e("SERVER_READ_ONLY", None, None, "path", "readonly_reason", "active",
        "서버가 읽기 전용으로 실행 중이라 이 결과에 쓰지 않습니다",
-       "쓰기가 필요하면 읽기 전용 설정 없이 서버를 다시 시작하세요", "Server is read-only", "T-007"),
+       "쓰기가 필요하면 읽기 전용 설정 없이 서버를 다시 시작하세요", "Server is read-only", "T-112"),
     # -- practice sample (core/sample_case.py) ----------------------------------------------------
     _e("SAMPLE_DIR_NOT_EMPTY", 409, 1, "sample", "http", "active",
        "샘플 폴더가 이미 있고 비어 있지 않습니다(덮어쓰기 꺼짐)",

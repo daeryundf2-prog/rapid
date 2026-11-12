@@ -39,6 +39,13 @@ from .helpers import (
     resolve_case_db_path,
     truthy_env,
 )
+from .readonly_mode import (
+    SERVER_READ_ONLY,
+    ServerReadOnlyHolds,
+    server_read_only_detail,
+    server_read_only_enabled,
+    server_read_only_refusal,
+)
 from .routes_analyses import build_analyses_router, korean_body_errors
 from .routes_case_db import build_case_db_router
 from .routes_cases import CASE_FIELD_LABELS, build_cases_router
@@ -165,8 +172,13 @@ def create_app(
     cases_db_path: str | Path | None = None,
     browse_remote: bool | None = None,
     browse_roots: Iterable[str | Path] | None = None,
+    read_only: bool | None = None,
 ) -> FastAPI:
     store = job_store or default_job_store
+    # T-112: ``rapidtriage web --read-only`` (``RAPIDTRIAGE_READ_ONLY``) — the whole server refuses
+    # writes and holds every run folder it knows read-only.
+    server_read_only = server_read_only_enabled(read_only)
+    read_only_holds = ServerReadOnlyHolds(store) if server_read_only else None
     # D37: nothing is ever written into a read-only run folder, whichever writer tries.
     install_write_guard()
     # Workspace case DB (cases, evidence, notes, processing snapshots); opened on first use.
@@ -179,12 +191,16 @@ def create_app(
         yield
         # Shutdown: cancel this app's running analyses at their next unit, drop its queued ones.
         ANALYSIS_RUNNER.shutdown(owner=analysis_owner)
+        if read_only_holds is not None:
+            read_only_holds.release()
         # D37: release the read-only folders the store holds (the registry is process-wide).
         store.close()
 
     api = FastAPI(title="rapidtriage local API", version="0.2.0", lifespan=lifespan)
     api.state.analysis_owner = analysis_owner
     api.state.case_workspace = case_workspace
+    api.state.server_read_only = server_read_only
+    api.state.server_read_only_holds = read_only_holds
     if auto_search_index:
         # Search index (plan search §0 결정 1): full build when a run completes, incremental
         # update when another analysis completes. The served app (module-level ``app``)
@@ -197,6 +213,8 @@ def create_app(
 
     @api.exception_handler(ReadOnlyRunWriteError)
     async def read_only_run_write(_request: Request, exc: ReadOnlyRunWriteError):
+        if exc.reason == SERVER_READ_ONLY:
+            return error_response(409, server_read_only_detail())
         return error_response(409, exc.to_detail())
 
     @api.exception_handler(sqlite3.OperationalError)
@@ -209,8 +227,12 @@ def create_app(
         if str(exc) == SQLITE_READONLY_MESSAGE:
             match = RUN_SCOPED_PATH.fullmatch(request.url.path)
             reason = _readonly_run_reason(store, match.group("run_id") if match else request.query_params.get("run_id"))
+            if reason is None and server_read_only:
+                reason = SERVER_READ_ONLY
         if reason is None:
             raise exc
+        if reason == SERVER_READ_ONLY:
+            return error_response(409, server_read_only_detail())
         return error_response(409, {"code": RUN_READ_ONLY, "message": RUN_READ_ONLY_MESSAGE, "readonly_reason": reason})
 
     @api.exception_handler(RequestValidationError)
@@ -249,6 +271,9 @@ def create_app(
             # initializes the schema). The ``/api/case-db/*`` routes name it in the body, so the
             # path gate in ``read_only_run_refusal`` cannot see it.
             raise ReadOnlyRunWriteError(str(database_path), reason)
+        if server_read_only and not Path(database_path).is_file():
+            # T-112: a read-only server never creates a case DB (opening one initializes it).
+            raise ReadOnlyRunWriteError(str(database_path), SERVER_READ_ONLY)
         return open_case_database(database_path)
 
     def resolve_request_catalog_path(raw_path: str | Path) -> Path:
@@ -273,6 +298,13 @@ def create_app(
                 supplied = request.headers.get("X-RapidTriage-Token")
                 if supplied is None or not secrets.compare_digest(supplied, expected_token):
                     return error_response(401, "missing or invalid RapidTriage auth token")
+            if read_only_holds is not None and request.url.path.startswith("/api"):
+                refusal = server_read_only_refusal(
+                    request.method.upper(), request.url.path, READ_ONLY_RUN_QUERY_POSTS
+                )
+                if refusal is not None:
+                    return refusal
+                read_only_holds.sync()
             refusal = read_only_run_refusal(
                 store, request.method.upper(), request.url.path, request.query_params.get("run_id")
             )
