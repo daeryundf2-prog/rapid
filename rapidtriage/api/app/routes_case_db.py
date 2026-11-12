@@ -60,7 +60,7 @@ from .models import (
     RunCaseDbEnsureRequest,
     SampleCaseRunRequest,
 )
-from .review_payload import report_candidate_count
+from .review_payload import CASE_DB_UNREADABLE, report_candidate_count
 from .routes_review_tools import apply_review_tag_batch
 from .run_review import (
     ACTIVE_MARK_SQL,
@@ -166,6 +166,7 @@ def build_case_db_router(
         by_status: dict[str, int] = {}
         db_include = 0
         cleared = 0
+        db_error: str | None = None
         db_exists = database_path.is_file()
         if db_exists:
             try:
@@ -186,10 +187,9 @@ def build_case_db_router(
                             db_include += int(count)
                 finally:
                     connection.close()
-            except sqlite3.Error:
-                by_status = {}
-                db_include = 0
-                cleared = 0
+            except sqlite3.Error as exc:
+                # R8 T-025: an unreadable case DB is ``null`` + ``error``, never a silent 0.
+                db_error = str(exc)
         bookmarks = 0
         case_json = output_dir / "rapidtriage-case.json"
         if case_json.is_file():
@@ -202,15 +202,21 @@ def build_case_db_router(
                 pass
         # R8 RI-02: the one count the case report, manifest and reviewer bundle use.
         candidates = report_candidate_count(store, run_id)
+        if db_error is not None and candidates["error"] is None:
+            candidates = {
+                **candidates,
+                "count": None,
+                "error": {"code": CASE_DB_UNREADABLE, "message": f"케이스 DB를 읽지 못했습니다: {db_error}"},
+            }
         return {
             "command": "case-db.review-counts",
             "run_id": run_id,
             "database": str(database_path),
             "case_id": case_id,
             "exists": db_exists,
-            "by_status": by_status,
-            "cleared": cleared,
-            "include_in_report": db_include,
+            "by_status": None if db_error is not None else by_status,
+            "cleared": None if db_error is not None else cleared,
+            "include_in_report": None if db_error is not None else db_include,
             "case_json": {"bookmarks": bookmarks, "include_in_report": candidates["case_json"]},
             # ``null`` with ``error`` when a review store cannot be read (never a silent 0).
             "report_candidates": candidates["count"],

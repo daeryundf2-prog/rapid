@@ -53,7 +53,8 @@ class ReportWritesTests(unittest.TestCase):
             path.unlink(missing_ok=True)
         missing = self.client.get(f"/api/runs/{self.run_id}/submission-manifest/saved")
         self.assertEqual(missing.status_code, 404)
-        self.assertIn("저장된 제출 매니페스트", missing.json()["detail"])
+        self.assertEqual(missing.json()["detail"]["code"], "EXPORT_NOT_WRITTEN")
+        self.assertIn("저장된 제출 매니페스트", missing.json()["detail"]["message"])
 
         written = self.client.post(f"/api/runs/{self.run_id}/submission-manifest", params={"max_items": 100})
         self.assertEqual(written.status_code, 200, written.text)

@@ -137,9 +137,7 @@ def build_reports_router(
     @router.get("/api/runs/{run_id}/submission-manifest/saved")
     def open_saved_submission_manifest(run_id: str) -> FileResponse:
         """The manifest the last export wrote, read-only (404 until one was written)."""
-        manifest_path = default_submission_manifest_path(store, run_id)
-        if not manifest_path.is_file():
-            raise HTTPException(status_code=404, detail="저장된 제출 매니페스트가 없습니다. 먼저 내보내기를 실행하세요")
+        manifest_path = saved_export(default_submission_manifest_path(store, run_id), "제출 매니페스트")
         return FileResponse(manifest_path, filename=manifest_path.name, media_type="application/json")
 
 
@@ -183,9 +181,7 @@ def build_reports_router(
     @router.get("/api/runs/{run_id}/validation-package/saved")
     def open_saved_run_validation_package(run_id: str) -> FileResponse:
         """The package the last export wrote, read-only (404 until one was written)."""
-        package_path = default_run_validation_package_path(store, run_id)
-        if not package_path.is_file():
-            raise HTTPException(status_code=404, detail="저장된 검증 패키지가 없습니다. 먼저 내보내기를 실행하세요")
+        package_path = saved_export(default_run_validation_package_path(store, run_id), "검증 패키지")
         return FileResponse(package_path, filename=package_path.name, media_type="application/json")
 
 

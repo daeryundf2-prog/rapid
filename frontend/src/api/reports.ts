@@ -1,6 +1,17 @@
-import { api, downloadFile } from "./client";
+import { ApiError, api, downloadFile } from "./client";
 
 const run = (runId: string) => `/api/runs/${encodeURIComponent(runId)}`;
+
+/**
+ * `detail.code` of a saved-export GET (`/file`, `/saved`) before any export POST wrote the file
+ * (server `routes_reports.EXPORT_NOT_WRITTEN`, R8 T-030): GETs never build or write an export.
+ */
+export const EXPORT_NOT_WRITTEN = "EXPORT_NOT_WRITTEN";
+
+/** True when a saved-export download failed only because nothing has been exported yet. */
+export function isExportNotWritten(error: unknown): boolean {
+  return error instanceof ApiError && error.code === EXPORT_NOT_WRITTEN;
+}
 
 /** `POST /api/runs/{id}/case-report` — `CaseReportCreateRequest`. */
 export interface CaseReportBody {

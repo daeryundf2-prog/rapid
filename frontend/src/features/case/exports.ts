@@ -1,9 +1,11 @@
 import { create } from "zustand";
+import { ApiError } from "../../api/client";
 import {
   caseReportFile,
   createCaseReport,
   createReviewerBundle,
   downloadFile,
+  isExportNotWritten,
   reviewerBundleFile,
   savedSubmissionManifestFile,
   savedValidationPackageFile,
@@ -11,6 +13,7 @@ import {
   writeValidationPackage,
 } from "../../api/reports";
 import { NO_RUN_REASON } from "../../commands/reasons";
+import { pushToast } from "../../components/toastStore";
 import { joinRunPath } from "./WriteConfirm";
 
 export type ExportKind = "case-report" | "reviewer-bundle" | "submission-manifest" | "validation-package";
@@ -185,6 +188,65 @@ export function writtenDetail(written: string[]): string | null {
   return `${folder ? `${folder} — ` : ""}${written.length}개 파일: ${names}`;
 }
 
+/**
+ * The one state of a saved-export download whose file no export POST has written yet (server 404
+ * `EXPORT_NOT_WRITTEN`, R8 T-030): GETs never build an export, so the analyst exports first.
+ */
+export const NOT_EXPORTED_MESSAGE = "아직 내보내지 않았습니다 — 내보내기";
+
+/**
+ * Download a saved export (`/file`, `/saved`). A missing file rejects with an `ApiError` whose
+ * message is {@link NOT_EXPORTED_MESSAGE} (code kept), never the raw 404 sentence.
+ */
+export async function downloadSavedExport(path: string, fallbackName: string): Promise<string> {
+  try {
+    return await downloadFile(path, fallbackName);
+  } catch (error) {
+    if (!isExportNotWritten(error)) throw error;
+    const missing = error as ApiError;
+    throw new ApiError(NOT_EXPORTED_MESSAGE, missing.status, missing.detail, {
+      code: missing.code,
+      hint: "먼저 내보내기를 실행하세요",
+      cause: error,
+    });
+  }
+}
+
+const errorText = (error: unknown) => (error instanceof Error ? error.message : "내보내지 못했습니다.");
+
+/**
+ * Re-open a saved export from a toast ("열기"). Never rejects: a file not exported yet shows the
+ * "아직 내보내지 않았습니다 — 내보내기" state with a 내보내기 action (POST, then download), any other
+ * failure an error toast.
+ */
+export async function openSavedExport(
+  kind: ExportKind,
+  runId: string,
+  path: string,
+  fallbackName: string,
+): Promise<string | undefined> {
+  const label = EXPORT_ACTIONS.find((action) => action.kind === kind)?.label ?? kind;
+  try {
+    return await downloadSavedExport(path, fallbackName);
+  } catch (error) {
+    if (!isExportNotWritten(error)) {
+      pushToast(`${label}: ${errorText(error)}`, "error");
+      return undefined;
+    }
+    pushToast(`${label}: ${NOT_EXPORTED_MESSAGE}`, "warn", {
+      action: {
+        label: "내보내기",
+        run: () =>
+          void performExport(kind, runId).then(
+            (result) => pushToast(`${label}: ${result.fileName}을(를) 저장했습니다.`, "ok"),
+            (failure: unknown) => pushToast(`${label}: ${errorText(failure)}`, "error"),
+          ),
+      },
+    });
+    return undefined;
+  }
+}
+
 /** Run one export (after the dialog confirmed it); resolves with what was saved (recorded in the history). */
 export async function performExport(
   kind: ExportKind,
@@ -217,7 +279,7 @@ async function runExport(
         max_items: 500,
         ...(meta.sections ? { sections: [...meta.sections] } : {}),
       });
-      const fileName = await downloadFile(caseReportFile(runId, format), `case-report.${format}`);
+      const fileName = await downloadSavedExport(caseReportFile(runId, format), `case-report.${format}`);
       const reported = caseReportWritten(created as unknown as Record<string, unknown>);
       const folder = created.report_path ? folderOf(created.report_path) || null : null;
       const written =
@@ -226,7 +288,7 @@ async function runExport(
     }
     case "reviewer-bundle": {
       const created = await createReviewerBundle(runId, { include_all: false, max_items: 500 });
-      const fileName = await downloadFile(reviewerBundleFile(runId), "reviewer-bundle.zip");
+      const fileName = await downloadSavedExport(reviewerBundleFile(runId), "reviewer-bundle.zip");
       return { fileName, path: typeof created.archive === "string" ? created.archive : null };
     }
     case "submission-manifest": {
@@ -234,7 +296,10 @@ async function runExport(
       // so exporting never writes the manifest or its audit record twice.
       const written = await writeSubmissionManifest(runId, false, 500);
       const files = stringsOf(written.written);
-      const fileName = await downloadFile(savedSubmissionManifestFile(runId), "submission-manifest.json");
+      const fileName = await downloadSavedExport(
+        savedSubmissionManifestFile(runId),
+        "submission-manifest.json",
+      );
       return { fileName, path: files[0] ?? null, ...(files.length ? { written: files } : {}) };
     }
     case "validation-package": {
@@ -244,7 +309,7 @@ async function runExport(
       return {
         fileName,
         path: written.package_path,
-        open: () => downloadFile(savedValidationPackageFile(runId), fileName),
+        open: () => openSavedExport("validation-package", runId, savedValidationPackageFile(runId), fileName),
       };
     }
   }
