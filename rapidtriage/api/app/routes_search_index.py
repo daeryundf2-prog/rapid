@@ -87,7 +87,6 @@ from .analyses import ANALYSIS_RUNNER, public_state
 from .entity_reveal import reveal_value
 from .search_index_service import (
     CORRUPT_INDEX,
-    NO_INDEX,
     QUERY_LIMITER,
     SEARCH_HISTORY,
     QuerySlot,
@@ -99,6 +98,7 @@ from .search_index_service import (
     get_saved,
     index_status,
     list_saved,
+    no_index_message,
     record_saved_count,
     search_history,
     submit_build,
@@ -320,7 +320,7 @@ def load_meta(index_path: Path) -> dict[str, object]:
     if meta is None:
         if unreadable is not None:
             raise HTTPException(status_code=409, detail=CORRUPT_INDEX.format(reason=unreadable))
-        raise HTTPException(status_code=404, detail=NO_INDEX)
+        raise HTTPException(status_code=404, detail=no_index_message(index_path.parent))
     return meta
 
 

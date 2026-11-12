@@ -32,7 +32,7 @@ from fastapi import HTTPException
 from ...core.case_db.base import now_iso
 from ...core.case_db.database import CaseDatabase, next_citation_id_for_connection
 from ...core.jobs import RunJob, RunJobStore, run_output_dir
-from ...core.readonly_runs import may_persist
+from ...core.readonly_runs import RUN_READ_ONLY, may_persist, readonly_reason_for
 from ...core.search_hits import base_locator
 from ...core.search_index.build import (
     SEARCH_INDEX_KIND,
@@ -58,6 +58,8 @@ CORRUPT_INDEX = "검색 색인을 읽을 수 없습니다({reason}). 처리 단�
 NOT_COMPLETED = "완료된 런이 아닙니다"
 NO_INDEX = "검색 색인이 없습니다. 처리 단계에서 색인을 만드세요"
 INDEX_BUSY = "이미 색인을 만드는 중입니다"
+# D37 / T-134: a read-only run folder gets no index file (build refused, missing index explained).
+READ_ONLY_INDEX = "읽기 전용 결과라 색인을 만들 수 없습니다 — 결과 폴더를 증거 밖으로 옮긴 뒤 다시 가져오세요"
 TOO_MANY = "검색이 너무 많이 실행 중입니다"
 NO_CASE_DB = "케이스 DB가 없습니다. 먼저 케이스 DB를 만드세요(POST /api/runs/{run}/case-db/ensure)"
 DUPLICATE_SAVED = "같은 이름의 저장 검색이 있습니다"
@@ -96,6 +98,19 @@ def search_index_available(job: RunJob) -> bool:
     """One ``stat`` (``GET /api/runs`` rows)."""
     path = index_path_of(job)
     return bool(path is not None and path.is_file())
+
+
+def read_only_index_refusal(output_dir: Path | None) -> dict[str, str] | None:
+    """409 detail refusing an index build into a read-only run folder (D37), else ``None``."""
+    reason = readonly_reason_for(output_dir)
+    if reason is None:
+        return None
+    return {"code": RUN_READ_ONLY, "message": READ_ONLY_INDEX, "readonly_reason": reason}
+
+
+def no_index_message(output_dir: Path | None) -> str:
+    """404 text for a run without an index: a read-only run cannot get one (T-134)."""
+    return NO_INDEX if may_persist(output_dir) else READ_ONLY_INDEX
 
 
 def latest_build(output_dir: Path) -> dict[str, object] | None:
@@ -188,6 +203,9 @@ def _failed_swap(latest: Mapping[str, object] | None, meta: Mapping[str, object]
 
 def submit_build(store: RunJobStore, run_id: str, options: Mapping[str, object], *, owner: object | None) -> dict[str, object]:
     scope = run_scope(store, run_id)  # 409 unless completed/failed
+    refusal = read_only_index_refusal(scope.output_dir)
+    if refusal is not None:
+        raise HTTPException(status_code=409, detail=refusal)
     latest = latest_build(scope.output_dir)
     if latest is not None and latest.get("status") in ACTIVE_STATUSES:
         raise HTTPException(status_code=409, detail=INDEX_BUSY)
@@ -217,7 +235,7 @@ def auto_incremental_after_analysis(context: Any) -> None:
     if not auto_index_enabled() or spec is None or spec.kind == SEARCH_INDEX_KIND:
         return
     scope = context.scope
-    if not (scope.output_dir / INDEX_FILE_NAME).is_file():
+    if not may_persist(scope.output_dir) or not (scope.output_dir / INDEX_FILE_NAME).is_file():
         return
     latest = latest_build(scope.output_dir)
     if latest is not None and latest.get("status") in ACTIVE_STATUSES:
@@ -484,6 +502,8 @@ class SearchHistory:
             self._write(output_dir, entries)
 
     def _write(self, output_dir: Path, entries: list[tuple[str, str, str, str]]) -> None:
+        if not may_persist(output_dir):
+            return  # D37: also checked here, not only by ``record`` (a folder can turn read-only meanwhile)
         path = self.path_for(output_dir)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)

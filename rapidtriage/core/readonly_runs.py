@@ -31,7 +31,7 @@ import sqlite3
 import sys
 import threading
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from .output_guard import canonical_path
 
@@ -193,6 +193,41 @@ def _audit_sqlite_connect(args: tuple[object, ...]) -> None:
         _refuse(path)
 
 
+def _opened_read_only(text: str, uri: bool) -> bool:
+    """A ``file:`` URI opened with ``mode=ro``: SQLite cannot write that file through the connection."""
+    if not uri or not text.startswith("file:"):
+        return False
+    return parse_qs(urlsplit(text).query).get("mode", [""])[-1] == "ro"
+
+
+# Authorizer actions that change a database (``CREATE TEMP …`` reports the ``temp`` database).
+_SQLITE_WRITE_ACTIONS = frozenset(
+    getattr(sqlite3, name)
+    for name in (
+        "SQLITE_INSERT", "SQLITE_UPDATE", "SQLITE_DELETE", "SQLITE_CREATE_INDEX", "SQLITE_CREATE_TABLE",
+        "SQLITE_CREATE_TRIGGER", "SQLITE_CREATE_VIEW", "SQLITE_DROP_INDEX", "SQLITE_DROP_TABLE",
+        "SQLITE_DROP_TRIGGER", "SQLITE_DROP_VIEW", "SQLITE_ALTER_TABLE", "SQLITE_REINDEX", "SQLITE_ANALYZE",
+        "SQLITE_CREATE_VTABLE", "SQLITE_DROP_VTABLE",
+    )
+    if hasattr(sqlite3, name)
+)
+
+
+def _temp_only_writes(action: int, arg1: str | None, _arg2: str | None, database: str | None, _trigger: str | None) -> int:
+    """Authorizer of a ``mode=ro`` connection to a read-only folder: writes only into ``temp``.
+
+    ``mode=ro`` does not reach an ``ATTACH``ed file (it opens read-write), so a change to any
+    database but ``temp`` is refused, and so is attaching a file of a read-only folder by a literal
+    path that is not ``mode=ro`` (a bound filename is not visible to the authorizer)."""
+    if action in _SQLITE_WRITE_ACTIONS:
+        return sqlite3.SQLITE_OK if database == "temp" else sqlite3.SQLITE_DENY
+    if action == sqlite3.SQLITE_ATTACH and arg1:
+        path = _sqlite_file(arg1)
+        if path and not _opened_read_only(arg1, True) and readonly_reason_for(path) is not None:
+            return sqlite3.SQLITE_DENY
+    return sqlite3.SQLITE_OK
+
+
 def _guarded_sqlite_connect(database, *args, **kwargs):  # type: ignore[no-untyped-def]
     """``sqlite3.connect`` that turns on ``PRAGMA query_only`` for a database under a read-only folder.
 
@@ -200,13 +235,20 @@ def _guarded_sqlite_connect(database, *args, **kwargs):  # type: ignore[no-untyp
     yet inside the ``sqlite3.connect/handle`` audit event, so the switch is made right after connecting:
     reads keep working, every statement that would change the database fails
     ("attempt to write a readonly database").
+
+    A ``file:…?mode=ro`` connection (the search index reader) is left without ``query_only``: SQLite
+    already opened the file read-only, and the switch would also refuse the ``TEMP`` tables a query
+    builds (T-134: searching a read-only run). Its authorizer allows changes to ``temp`` only.
     """
     connection = _ORIGINAL_SQLITE_CONNECT(database, *args, **kwargs)
     if _PREFIXES:
         text = _path_text(database)
         path = _sqlite_file(text) if text else None
         if path and readonly_reason_for(path) is not None:
-            connection.execute("PRAGMA query_only = ON")
+            if text and _opened_read_only(text, bool(kwargs.get("uri"))):  # positional ``uri``: strict path
+                connection.set_authorizer(_temp_only_writes)
+            else:
+                connection.execute("PRAGMA query_only = ON")
     return connection
 
 

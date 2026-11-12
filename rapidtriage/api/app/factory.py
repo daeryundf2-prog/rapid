@@ -61,6 +61,7 @@ from .routes_runs import build_runs_router
 from .routes_search import build_search_router
 from .routes_search_index import build_search_index_router
 from .search_index_service import (
+    READ_ONLY_INDEX,
     auto_build_on_completion,
     auto_incremental_after_analysis,
 )
@@ -95,6 +96,8 @@ RUN_SCOPED_PATH = re.compile(r"/api/runs/(?P<run_id>[^/]+)(?P<rest>/.*)?")
 # Queries sent as POST bodies (they write nothing; the write guard refuses any lazy write they
 # would make) and removing the run from the list (``DELETE /api/runs/{run_id}``; the folder stays).
 READ_ONLY_RUN_QUERY_POSTS = frozenset({"/search/count", "/search/query", "/search/entities", "/search/hashes"})
+# Refusals with their own sentence (T-134): asking a read-only run for a search index.
+READ_ONLY_RUN_MESSAGES = {"/search/index/build": READ_ONLY_INDEX}
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 # ``sqlite3.OperationalError`` text for a write on a ``PRAGMA query_only`` connection.
 SQLITE_READONLY_MESSAGE = "attempt to write a readonly database"
@@ -134,7 +137,8 @@ def read_only_run_refusal(
             return None
     else:
         return None
-    return error_response(409, {"code": RUN_READ_ONLY, "message": RUN_READ_ONLY_MESSAGE, "readonly_reason": reason})
+    message = READ_ONLY_RUN_MESSAGES.get(match.group("rest") or "", RUN_READ_ONLY_MESSAGE) if match else RUN_READ_ONLY_MESSAGE
+    return error_response(409, {"code": RUN_READ_ONLY, "message": message, "readonly_reason": reason})
 
 
 # Case intake routes (AXIOM adoption E1): every validation error in Korean.
