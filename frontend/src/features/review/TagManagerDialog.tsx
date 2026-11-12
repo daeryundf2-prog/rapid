@@ -233,18 +233,21 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
                 <td className="tag-desc">{tag.description || "—"}</td>
                 <td>{tag.created_by && tag.created_by !== "web-ui" ? tag.created_by : "—"}</td>
                 <td className="tag-actions">
-                  <button
-                    type="button"
+                  {/* T-348: read-only rows say why on hover / focus (quiet: the band says it once). */}
+                  <ReasonButton
                     className="button ghost"
                     aria-label={`${tag.name} 태그 편집`}
+                    reason={writeBlock}
+                    quietReason
                     onClick={() => startEdit(tag)}
                   >
                     편집
-                  </button>
+                  </ReasonButton>
                   <ReasonButton
                     className="button ghost"
                     aria-label={`${tag.name} 태그 삭제`}
-                    reason={tag.kind === "system" ? SYSTEM_TAG_REASON : writeBlock}
+                    reason={writeBlock ?? (tag.kind === "system" ? SYSTEM_TAG_REASON : undefined)}
+                    quietReason={Boolean(writeBlock)}
                     onClick={() => {
                       remember();
                       setDraft(null);
@@ -377,15 +380,15 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
           </form>
         ) : (
           <div className="case-actions">
-            <button
+            <ReasonButton
               ref={newButtonRef}
-              type="button"
               className="button primary"
+              reason={writeBlock}
               onClick={() => startEdit(null)}
               data-testid="tag-new"
             >
               새 태그
-            </button>
+            </ReasonButton>
           </div>
         )}
       </div>

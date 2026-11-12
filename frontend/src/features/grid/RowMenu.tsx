@@ -4,6 +4,7 @@ import { useEscape } from "../../a11y/focus";
 import { placePopover } from "../../components/Popover";
 import { type Command, type CommandContext, KEY_MAP } from "../../contracts/command";
 import { Icon, isIconName } from "../../icons";
+import { commandReadOnlyReason } from "../../shell/readOnly";
 import { keyLabel } from "../../shortcuts";
 import { getRegisteredCommand } from "./adapter";
 
@@ -11,6 +12,8 @@ import { getRegisteredCommand } from "./adapter";
  * The row menu's first level (plan r8 T-090, IS-026): eight entries — 열기 · 관련 있음 · 재검토 ·
  * 제외 · 태그 · 보고서 포함 · 전후 시각 · 같은 파일 — then "더 보기". Entries that cannot run on
  * the focused row are not listed (no disabled noise); each is a registered `grid.*` Command.
+ * Exception (T-348): a write entry blocked only because the result / server is read-only stays
+ * listed, disabled with the read-only sentence, so the examiner sees why marking is off.
  */
 export const ROW_MENU_PRIMARY_IDS = [
   "grid.openSource",
@@ -73,11 +76,28 @@ export function rowMenuShortcut(id: string, ownShortcut?: string): string | unde
   return (entry.command ? getRegisteredCommand(entry.command)?.shortcut : undefined) ?? entry.fallback;
 }
 
-/** The registered, currently runnable commands of `ids` (an entry that cannot run is not listed). */
-export function runnableRowCommands(ids: readonly string[], context: CommandContext): Command[] {
-  return ids
-    .map((id) => getRegisteredCommand(id))
-    .filter((command): command is Command => !!command && !command.disabledReason?.(context));
+/** A row-menu entry: a runnable command, or a write command disabled by the read-only sentence. */
+export interface RowMenuEntry {
+  command: Command;
+  /** The read-only sentence (T-348); undefined = runnable. */
+  reason?: string;
+}
+
+/**
+ * The registered, currently runnable commands of `ids` (an entry that cannot run is not listed),
+ * plus the write commands whose only block is read-only (T-348): those stay listed with the
+ * sentence instead of disappearing.
+ */
+export function rowMenuEntries(ids: readonly string[], context: CommandContext): RowMenuEntry[] {
+  const entries: RowMenuEntry[] = [];
+  for (const id of ids) {
+    const command = getRegisteredCommand(id);
+    if (!command) continue;
+    const reason = command.disabledReason?.(context);
+    if (!reason) entries.push({ command });
+    else if (reason === commandReadOnlyReason(id)) entries.push({ command, reason });
+  }
+  return entries;
 }
 
 export interface RowMenuProps {
@@ -157,8 +177,8 @@ function RowMenuPanel({
     if (expanded) ref.current?.querySelector<HTMLElement>("[data-more-first]")?.focus();
   }, [expanded]);
 
-  const primary = runnableRowCommands(ROW_MENU_PRIMARY_IDS, context);
-  const more = runnableRowCommands(ROW_MENU_MORE_IDS, context);
+  const primary = rowMenuEntries(ROW_MENU_PRIMARY_IDS, context);
+  const more = rowMenuEntries(ROW_MENU_MORE_IDS, context);
 
   const move = (delta: number, from: HTMLElement) => {
     const nodes = Array.from(ref.current?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? []);
@@ -166,8 +186,9 @@ function RowMenuPanel({
     nodes[(index + delta + nodes.length) % nodes.length]?.focus();
   };
 
-  const item = (command: Command, first = false) => {
+  const item = ({ command, reason: blocked }: RowMenuEntry, first = false) => {
     const shortcut = rowMenuShortcut(command.id, command.shortcut);
+    const reasonId = `${id ?? "row-menu"}-${command.id}-reason`;
     return (
       <button
         key={command.id}
@@ -175,6 +196,9 @@ function RowMenuPanel({
         role="menuitem"
         className="grid-menu-item menu-item"
         aria-keyshortcuts={shortcut}
+        aria-disabled={blocked ? true : undefined}
+        aria-describedby={blocked ? reasonId : undefined}
+        data-disabled-reason={blocked}
         data-command={command.id}
         data-more-first={first || undefined}
         onClick={() => {
@@ -194,6 +218,16 @@ function RowMenuPanel({
         </span>
         <span className="menu-item-text">
           <span className="menu-item-label">{command.label}</span>
+          {blocked ? (
+            <span className="menu-item-reason" aria-hidden="true">
+              {blocked}
+            </span>
+          ) : null}
+          {blocked ? (
+            <span id={reasonId} hidden>
+              {blocked}
+            </span>
+          ) : null}
         </span>
         {shortcut ? (
           <span className="menu-item-kbd" aria-hidden="true">
@@ -237,7 +271,7 @@ function RowMenuPanel({
         }
       }}
     >
-      {primary.map((command) => item(command))}
+      {primary.map((entry) => item(entry))}
       {more.length > 0 && !expanded ? (
         <button
           type="button"
@@ -259,7 +293,7 @@ function RowMenuPanel({
       {expanded && more.length > 0 ? (
         <Fragment>
           {primary.length > 0 ? <hr className="grid-menu-sep" /> : null}
-          {more.map((command, index) => item(command, index === 0))}
+          {more.map((entry, index) => item(entry, index === 0))}
         </Fragment>
       ) : null}
     </div>

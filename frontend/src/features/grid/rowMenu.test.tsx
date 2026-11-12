@@ -1,6 +1,7 @@
 // biome-ignore-all lint/a11y: tests drive a virtualized ARIA grid through its DOM roles
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readOnlySentence, SERVER_READ_ONLY, useReadOnlyStore } from "../../shell/readOnly";
 import { DataGrid } from "./DataGrid";
 import {
   filesHandler,
@@ -24,6 +25,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  useReadOnlyStore.setState({ runId: null, runReason: null, serverReadOnly: false });
   restoreLayout();
   vi.unstubAllGlobals();
 });
@@ -104,6 +106,30 @@ describe("row menu (T-090)", () => {
     expect(menu.querySelector("[aria-disabled]")).toBeNull();
     fireEvent.keyDown(menu, { key: "Escape" });
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("read-only: mark entries stay listed, disabled with the read-only sentence (T-348)", async () => {
+    const { calls } = await renderFiles();
+    useReadOnlyStore.setState({ serverReadOnly: true });
+    rowAt(0).focus();
+    fireEvent.keyDown(rowAt(0), { key: "F10", shiftKey: true });
+    const menu = await screen.findByRole("menu", { name: "행 메뉴" });
+    const sentence = readOnlySentence(SERVER_READ_ONLY);
+    for (const name of ["관련 있음 표시", "재검토 표시", "제외 표시", "태그…", "보고서 포함 표시"]) {
+      const entry = within(menu).getByRole("menuitem", { name });
+      expect(entry.getAttribute("aria-disabled")).toBe("true");
+      expect(entry.dataset.disabledReason).toBe(sentence);
+      const described = document.getElementById(entry.getAttribute("aria-describedby") ?? "");
+      expect(described?.textContent).toBe(sentence);
+    }
+    // Reading entries stay runnable.
+    expect(within(menu).getByRole("menuitem", { name: "원본 보기" }).hasAttribute("aria-disabled")).toBe(
+      false,
+    );
+    const before = calls.length;
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "관련 있음 표시" }));
+    expect(screen.getByRole("menu", { name: "행 메뉴" })).toBeTruthy();
+    expect(calls.slice(before).filter((c) => c.method !== "GET")).toEqual([]);
   });
 
   it("row-menu 태그… tags the menu row through the tag prompt (T-090, U-05)", async () => {
