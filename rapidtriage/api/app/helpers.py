@@ -18,6 +18,13 @@ from ...core.case import (
 )
 from ...core.evidence import identify_evidence
 from ...core.forensic_accuracy import build_accuracy_gate
+from ...core.import_roots import (
+    IMPORT_ROOT_UNVERIFIED_MESSAGE,
+    IMPORT_SOURCE_ROOT_UNVERIFIED,
+    imported_run_roots,
+    is_imported_summary,
+)
+from ...core.import_roots import refusal_text as import_root_refusal_text
 from ...core.jobs import (
     RunJob,
     RunJobStore,
@@ -265,6 +272,9 @@ def resolve_allowed_source_file(
             store, run_id, raw_path, analysis_id=analysis_id, locator=locator or "", allow_directory=allow_directory
         )
     diagnostics = source_path_resolution_diagnostics(raw_path, allowed_roots)
+    unverified = unverified_import_root_error(job.summary, raw_path, diagnostics)
+    if unverified is not None:
+        raise unverified
     if scoped_candidates:
         raise HTTPException(
             status_code=404,
@@ -283,6 +293,38 @@ def resolve_allowed_source_file(
     )
 
 
+def unverified_import_root_error(
+    summary: Mapping[str, object], raw_path: str, diagnostics: object = None
+) -> HTTPException | None:
+    """403 ``IMPORT_SOURCE_ROOT_UNVERIFIED`` when ``raw_path`` lies under an imported run's claimed
+    evidence root that was not accepted (T-350); ``None`` otherwise."""
+    if not is_imported_summary(summary):
+        return None
+    refused = imported_run_roots(summary).refused
+    if not refused:
+        return None
+    try:
+        requested = Path(raw_path).expanduser()
+        requested = requested.resolve() if requested.is_absolute() else None
+    except (OSError, RuntimeError, ValueError):
+        requested = None
+    hit = next(
+        ((root, reason) for root, reason in refused if requested is None or is_relative_to(requested, root)),
+        None,
+    )
+    if hit is None:
+        return None
+    root, reason = hit
+    detail: dict[str, object] = {
+        "code": IMPORT_SOURCE_ROOT_UNVERIFIED,
+        "message": f"{IMPORT_ROOT_UNVERIFIED_MESSAGE}: 가져온 결과의 증거 경로 {root} — {import_root_refusal_text(reason)}",
+        "import_root_reason": reason,
+    }
+    if diagnostics is not None:
+        detail["source_path_resolution"] = diagnostics
+    return HTTPException(status_code=403, detail=detail)
+
+
 def parse_source_preview_archive_request(raw_path: str) -> dict[str, str] | None:
     try:
         return parse_archived_source_request(raw_path)
@@ -291,6 +333,12 @@ def parse_source_preview_archive_request(raw_path: str) -> dict[str, str] | None
 
 
 def allowed_source_roots(summary: dict[str, object]) -> list[Path]:
+    """Folders the source routes may read for a run.
+
+    An imported run (T-350) never takes its roots from the summary text: only the result folder
+    and the evidence root its own input fingerprint verifies (``core/import_roots.py``)."""
+    if is_imported_summary(summary):
+        return imported_run_roots(summary).allowed
     roots: list[Path] = []
     for key in ("root", "scan_scope_root", "output_dir"):
         value = summary.get(key)

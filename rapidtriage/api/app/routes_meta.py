@@ -23,6 +23,7 @@ from ...core.crash import (
     list_crash_reports,
     read_crash_report,
 )
+from ...core.credential_stores import is_credential_store_path
 from ...core.doctor import run_doctor
 from ...core.enterprise import build_enterprise_policy
 from ...core.evidence import identify_evidence, supported_evidence_formats
@@ -99,6 +100,13 @@ def _display_roots(roots: Sequence[Path]) -> list[str]:
     return shown
 
 
+#: Korean note of a remote listing: credential stores are never listed (T-350 follow-up).
+CREDENTIAL_STORE_NOTE = (
+    "원격 찾아보기에서는 자격 증명 저장소(.ssh·.gnupg·.aws·.azure·.kube·.config/gcloud, "
+    "브라우저 로그인 데이터, Windows 자격 증명·DPAPI 폴더)를 숨김 파일 표시와 관계없이 보여 주지 않습니다."
+)
+
+
 def _outside_browse_roots(message: object) -> HTTPException:
     return HTTPException(status_code=403, detail={"code": PATH_OUTSIDE_ALLOWED_ROOT, "message": str(message)})
 
@@ -130,8 +138,10 @@ def browse_remote(
     directory = resolved.parent if resolved.is_file() else resolved
     if not _under_any(directory, roots):
         raise _outside_browse_roots(f"찾아보기 경로가 허용 범위({BROWSE_REMOTE_SCOPE}) 밖에 있습니다: {directory}")
+    if is_credential_store_path(directory):
+        raise _outside_browse_roots(f"{CREDENTIAL_STORE_NOTE} 이 폴더는 열 수 없습니다")
     try:
-        listing = browse_directory(directory, show_hidden=show_hidden)
+        listing = browse_directory(directory, show_hidden=show_hidden, hide_credential_stores=True)
     except BrowseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     root_keys = {os.path.normcase(str(root)) for root in roots}
@@ -144,6 +154,7 @@ def browse_remote(
         "home": home if _under_any(Path(home), roots) else (shown[0] if shown else ""),
         "roots": shown,
         "browse_mode": "remote",
+        "credential_note": CREDENTIAL_STORE_NOTE,
     }
 
 

@@ -10,7 +10,7 @@
 - **노출**: `http` 오류 응답 · `body` 응답 본문 필드 · `notice` 목록 부분 결과 · `readonly_reason` 읽기 전용 사유 · `cli` CLI 전용 · `frontend` 프런트 전용.
 - **종료 코드**(CLI): 0 성공 / 1 실패 / 2 사용법 / 3 부분 성공 / 4 대상 없음. T-249 전까지 CLI는 대부분 2로 끝나며, 표의 값은 목표값입니다.
 
-코드 41종 (active 31 · reserved 10).
+코드 42종 (active 32 · reserved 10).
 
 ## 출력 위치 보호 (`output`)
 
@@ -44,6 +44,7 @@
 |---|---|---|---|---|---|---|---|
 | `IMPORT_SUMMARY_INVALID` | 400 | 1 | http | active | 가져올 결과 폴더의 실행 요약 JSON이 올바르지 않습니다 | RapidTriage가 만든 결과 폴더인지 확인하세요 | Run summary is invalid |
 | `IMPORT_OUTPUT_OUTSIDE_FOLDER` | 400 | 1 | http | active | 실행 요약의 산출물 경로가 가져오는 결과 폴더 밖을 가리킵니다 | 결과 폴더를 통째로 옮긴 원본인지 확인하세요 | Run output path escapes the folder |
+| `IMPORT_SOURCE_ROOT_UNVERIFIED` | 403 | 1 | http | active | 원본 위치를 확인할 수 없습니다. 가져온 결과의 증거 경로가 결과에 기록된 입력과 맞지 않거나 허용하지 않는 위치라 원본을 읽지 않습니다 | 증거를 결과에 기록된 그대로(같은 파일·크기) 두고 그 경로로 다시 가져오세요. 홈·드라이브 최상위·자격 증명 폴더는 증거 루트로 받지 않습니다 | Imported run evidence root is unverified |
 
 ## 런 상태 (`run`)
 
