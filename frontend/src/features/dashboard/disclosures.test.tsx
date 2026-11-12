@@ -117,7 +117,7 @@ describe("처리 제한 사항 (run summary disclosures + warnings)", () => {
     expect(text).toContain("'취득 사본 시각' 필드로만");
     expect(text).toContain("선택 안 된 범주 3");
     expect(text).toContain("클라우드 내보내기 수집 메모");
-    expect(text).toContain("아티팩트 수집: Prefetch");
+    expect(text).toContain("아티팩트 수집: 프리페치(Prefetch)");
   });
 });
 

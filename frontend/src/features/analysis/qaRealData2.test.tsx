@@ -110,7 +110,7 @@ describe("BLOCKER: 실행 of kinds without a snapshot field after a completed di
 describe("2. processing plan steps in Korean", () => {
   it("maps step ids and warning levels; unknown ones still read as Korean", async () => {
     expect(stepNameLabel("silent-failure-detector")).toBe("누락 위험 점검");
-    expect(stepNameLabel("artifacts-browser")).toBe("아티팩트 수집: browser");
+    expect(stepNameLabel("artifacts-browser")).toBe("아티팩트 수집: 브라우저");
     expect(stepStatusLabel("warning")).toBe("경고");
     expect(stepStatusLabel("failed_isolated")).toBe("일부 실패(격리됨)");
     expect(stepStatusLabel("weird-warn-level")).toBe("경고");

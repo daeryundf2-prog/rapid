@@ -56,7 +56,7 @@ import { disclosureDigest, disclosureItems, runWarnings, stepLabelKo } from "../
 import { stepCountsText } from "../dashboard/model";
 import { formatCount } from "../grid/gridUtils";
 import { isLegacyPlan, planSummaryText, RunPlanTable } from "./RunPlanTable";
-import { stepStatusLabel, stepWarningLabel } from "./stepLabels";
+import { missingDurationText, stepStatusLabel, stepWarningLabel } from "./stepLabels";
 import { useNow } from "./useNow";
 import "../analysis/analysis.css";
 import "../dashboard/dashboard.css";
@@ -484,7 +484,11 @@ function StepList({
                     <td className="process-plan-note" title={messages.join("\n") || undefined}>
                       {stepNoteText(step) || "—"}
                     </td>
-                    {timed ? <td className="is-right">{stepElapsedText(step) || "—"}</td> : null}
+                    {timed ? (
+                      <td className="is-right">
+                        {stepElapsedText(step) || missingDurationText(text(step.status))}
+                      </td>
+                    ) : null}
                   </tr>
                 );
               })}

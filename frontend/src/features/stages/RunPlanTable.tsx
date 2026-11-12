@@ -35,6 +35,7 @@ import { useAppStore } from "../../state/store";
 import { formatTimestamp } from "../../utils/time";
 import { confirmWrite, joinRunPath, runOutputDir } from "../case/WriteConfirm";
 import { formatCount } from "../grid/gridUtils";
+import { missingDurationText } from "./stepLabels";
 import { useNow } from "./useNow";
 
 /** A required group / task (준비 · 지문 · 보고서): never skipped or cancelled alone. */
@@ -481,7 +482,11 @@ export function RunPlanTable({
                         ? `${formatCount(group.artifact_count)}건`
                         : "—"}
                     </td>
-                    {timed ? <td className="is-right">{durationText(group.duration_ms) || "—"}</td> : null}
+                    {timed ? (
+                      <td className="is-right">
+                        {durationText(group.duration_ms) || missingDurationText(String(group.status))}
+                      </td>
+                    ) : null}
                     <td className="process-plan-note">
                       {group.counts.skipped ? `건너뜀 ${group.counts.skipped}` : ""}
                       {group.counts.cancelled
@@ -529,7 +534,7 @@ export function RunPlanTable({
               const duration =
                 running && Number.isFinite(taskStart)
                   ? `${formatElapsed(now - taskStart)} 경과`
-                  : durationText(task.duration_ms) || "—";
+                  : durationText(task.duration_ms) || missingDurationText(task.status);
               const why =
                 task.status === "partial" || task.status === "cancelled" || task.status === "skipped"
                   ? taskReasonText(task)

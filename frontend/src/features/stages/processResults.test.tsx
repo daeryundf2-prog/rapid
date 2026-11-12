@@ -324,4 +324,28 @@ describe("R-5: 처리 단계 names and the 소요 column", () => {
     expect(table.querySelector("tbody tr:nth-child(2) td")?.getAttribute("title")).toBe("artifacts-browser");
     expect([...table.querySelectorAll("th")].map((th) => th.textContent)).not.toContain("소요");
   });
+
+  it("T-193: ai-agent reads Korean; an untimed step in a timed table says 측정 안 됨, never —", async () => {
+    setRun({ status: "completed" } as Partial<RunWithProgress>);
+    installFetch({
+      "/plan": () => jsonResponse(legacyPlan()),
+      "/summary": () =>
+        jsonResponse({
+          steps: [
+            { name: "manifest", status: "completed", elapsed_seconds: 3 },
+            { name: "artifacts-ai-agent", status: "completed" },
+          ],
+        }),
+      "/processing-snapshot": () => jsonResponse(SNAPSHOT),
+      "/analyses": () => jsonResponse({ analyses: [] }),
+    });
+    renderPage();
+    const table = await screen.findByRole("table", { name: "처리 단계" });
+    await waitFor(() => expect(table.querySelectorAll("tbody tr")).toHaveLength(2));
+    const rows = [...table.querySelectorAll("tbody tr")];
+    expect(rows[1]?.querySelector("td")?.textContent).toBe("아티팩트 수집: AI 사용 기록");
+    expect(table.textContent).not.toContain("ai-agent");
+    const lastCells = rows.map((row) => row.querySelector("td:last-child")?.textContent);
+    expect(lastCells).toEqual(["00:03", "측정 안 됨"]);
+  });
 });
