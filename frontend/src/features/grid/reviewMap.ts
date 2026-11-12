@@ -11,6 +11,7 @@ import { useEffect } from "react";
 import { announce } from "../../a11y/announcer";
 import { getReviewMap, type ReviewMapMark } from "../../api/caseDb";
 import type { ReviewMarkBody } from "../../api/collections";
+import { onWindowReturn, REFETCH_ON_RETURN } from "../../api/queryPolicy";
 import { pushToast } from "../../components/toastStore";
 import type { GridRow } from "../../contracts/collection";
 import { toReviewStatus } from "./columns/common";
@@ -253,7 +254,21 @@ export function useReviewMap(runId: string | null, enabled = true): ReviewMap | 
     enabled: enabled && runId !== null,
     staleTime: 30_000,
     retry: false,
+    // T-131 (verify): back in this tab or window, ask again so the 다른 창 toast shows then.
+    ...REFETCH_ON_RETURN,
   });
+  const queryClient = useQueryClient();
+  const active = enabled && runId !== null;
+  useEffect(() => {
+    if (!active) return;
+    return onWindowReturn(() => {
+      // cancelRefetch false: a fetch the visibility change already started is reused, not restarted.
+      void queryClient.refetchQueries(
+        { queryKey: reviewMapKey(runId), exact: true },
+        { cancelRefetch: false },
+      );
+    });
+  }, [active, queryClient, runId]);
   return query.data;
 }
 
