@@ -40,6 +40,8 @@ SHIPPED = frozenset({
     "TOO_MANY_REQUESTS", "SERVICE_UNAVAILABLE",
     # T-131 review: a case-DB write refused by another window's lock
     "CASE_DB_LOCKED",
+    # T-186: disk free-space check before a run
+    "DISK_SPACE_INSUFFICIENT", "DISK_SPACE_LOW",
 })
 
 

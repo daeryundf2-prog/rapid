@@ -143,6 +143,7 @@ from .pagination import (
     paginate_payload,
     with_record_index,
 )
+from .preflight_space import DISK_SPACE_INSUFFICIENT, check_output_space
 from .row_conditions import (
     MATCH_CACHE,
     RowConditions,
@@ -537,13 +538,25 @@ def build_runs_router(
             is_file = Path(request.root).expanduser().is_file()
             message = FILE_EVIDENCE_NEEDS_OUTPUT if is_file else FOLDER_EVIDENCE_NEEDS_OUTPUT
             raise HTTPException(status_code=422, detail={"code": OUTPUT_DIR_REQUIRED, "message": message})
+        space: dict[str, Any] | None = None
+        if not request.dry_run:
+            # T-186: estimated output vs free space of the output volume, before anything is written.
+            space = check_output_space(request.root, request.output_dir or "", partition_start_sector=request.e01_partition_start_sector)
+            if space["level"] == "block" and not request.allow_low_disk_space:
+                raise HTTPException(
+                    status_code=507,
+                    detail={"code": DISK_SPACE_INSUFFICIENT, "message": space["message"], "preflight_space": space},
+                )
         try:
             job = store.run_sync(run_request) if request.wait else store.submit(run_request)
         except RunOutputDirBusy as exc:
             raise HTTPException(status_code=409, detail=str(exc))
         except OutputInsideEvidenceError as exc:
             raise output_guard_http_error(exc) from exc
-        return job.to_dict(include_summary=request.wait)
+        response = job.to_dict(include_summary=request.wait)
+        if space is not None:
+            response["preflight_space"] = space
+        return response
 
 
     @router.post("/api/runs/import", status_code=201)

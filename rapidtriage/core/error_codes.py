@@ -89,6 +89,14 @@ _ROWS: tuple[ErrorCode, ...] = (
        "같은 출력 폴더를 쓰는 런이 대기·실행 중입니다",
        "그 런이 끝나기를 기다리거나 다른 출력 폴더를 지정하세요", "Output folder is in use by another run",
        "T-007"),
+    # -- disk free-space check before a run (api/app/preflight_space.py, T-186) -------------------
+    _e("DISK_SPACE_INSUFFICIENT", 507, 1, "output", "http", "active",
+       "출력 위치의 여유 공간이 예상 출력 크기보다 작아 런을 시작하지 않았습니다",
+       "여유 공간이 넉넉한 출력 위치를 지정하거나, 위험을 감수하고 시작하려면 allow_low_disk_space를 켜세요",
+       "Not enough free disk space for the run output", "T-186"),
+    _e("DISK_SPACE_LOW", None, None, "output", "body", "active",
+       "출력 위치의 여유 공간이 빠듯합니다(예상 출력 크기의 오차 범위 안)",
+       "가능하면 여유 공간이 더 큰 출력 위치를 지정하세요", "Free disk space is tight for the run output", "T-186"),
     # -- path / access ----------------------------------------------------------------------------
     _e("PATH_OUTSIDE_ALLOWED_ROOT", 403, 1, "path", "http", "active",
        "요청한 경로가 서버가 허용한 위치 밖입니다",
