@@ -27,8 +27,17 @@ CASE_DB_LOCKED_MESSAGE = (
 )
 
 
+#: Error code of a case-DB write refused by another writer's lock (HTTP 409, ``core/error_codes.py``).
+CASE_DB_LOCKED = "CASE_DB_LOCKED"
+
+
 class CaseDatabaseLockedError(CaseDatabaseError):
     """A write still refused by SQLite's lock after every retry (Korean message)."""
+
+
+def case_db_locked_detail() -> dict[str, str]:
+    """HTTP 409 ``detail`` for a locked case DB: nothing of the refused request was written."""
+    return {"code": CASE_DB_LOCKED, "message": CASE_DB_LOCKED_MESSAGE}
 
 
 def is_lock_error(exc: BaseException) -> bool:

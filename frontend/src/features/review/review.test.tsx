@@ -415,6 +415,22 @@ describe("같은 해시 행에 태그 전파", () => {
     const row = makeRow(makeRef("files", "/candidates/4"), { title: "a.jpg", tags: ["같은 사진"] });
     await expect(propagateTagsByHash("r1", [row])).rejects.toThrow("전파 상한 10,000건");
   });
+
+  it("says how many empty same-hash rows were left out (T-183 skipped_empty)", async () => {
+    mockFetch(
+      caseRoutes([...SYSTEM, tag({ id: 40, name: "같은 사진" })], {
+        "POST /api/case-db/review-batch": {
+          ...PROPAGATED,
+          propagation: { ...PROPAGATED.propagation, hashless_targets: 2, skipped_empty: 1234 },
+        },
+      }),
+    );
+    const row = makeRow(makeRef("files", "/candidates/4"), { title: "a.jpg", tags: ["같은 사진"] });
+    await expect(propagateTagsByHash("r1", [row])).resolves.toBe(
+      "같은 해시 행 23건에 태그 '같은 사진'을(를) 전파했습니다" +
+        " (해시가 없는 행 2건은 그 행에만 적용 · 빈 파일(0바이트) 1,234건은 전파하지 않음)",
+    );
+  });
 });
 
 describe("digit tag keys: no race, palette labels", () => {

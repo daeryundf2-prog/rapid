@@ -188,34 +188,57 @@ def ntfs_limit_items(
     step = "artifacts-windows-filesystem"
     items: list[dict[str, Any]] = []
 
+    window_text = size_text(NATIVE_SCAN_LIMIT)
     mft_rows = _int(counts.get("mft-record"))
     mft_size = _size(_system_file(roots, "$MFT"))
     scope_mft = build_run_scope(summary, run_dir).get("mft") if mft_rows else None
     mft_total = _int(scope_mft.get("records")) if isinstance(scope_mft, Mapping) else 0
-    if mft_rows and (mft_rows >= MFT_RECORD_SCAN_LIMIT or mft_size > NATIVE_SCAN_LIMIT):
+    if mft_rows >= MFT_RECORD_SCAN_LIMIT:
         total = f"전체 {count_text(mft_total)}건 중 " if mft_total else ""
-        window = f", 파일 앞 {size_text(NATIVE_SCAN_LIMIT)}만 읽음" if mft_size > NATIVE_SCAN_LIMIT else ""
+        window = f", 파일 앞 {window_text}만 읽음" if mft_size > NATIVE_SCAN_LIMIT else ""
         items.append(_item(
             "ntfs-parse-cap", step, "warning",
             f"$MFT 레코드 분석 상한({count_text(MFT_RECORD_SCAN_LIMIT)}건)에 닿아 {total}{count_text(mft_rows)}건만 "
             f"타임라인·파일 이력에 반영했습니다{window}. 나머지 레코드의 생성·삭제 이력은 없습니다.",
         ))
+    elif mft_rows and mft_size > NATIVE_SCAN_LIMIT:
+        # Only the read window applies: the record cap was not reached (review P2-16).
+        items.append(_item(
+            "ntfs-parse-cap", step, "warning",
+            f"$MFT {size_text(mft_size)} 중 앞 {window_text}만 읽어 {count_text(mft_rows)}건을 타임라인·파일 이력에 "
+            f"반영했습니다(레코드 상한 {count_text(MFT_RECORD_SCAN_LIMIT)}건에는 닿지 않음). "
+            "뒤 구간 레코드의 생성·삭제 이력은 없습니다.",
+        ))
 
     usn_rows = _int(counts.get("usn-record"))
     usn_size = _size(_system_file(roots, "$Extend/$UsnJrnl", "$Extend/$J", "$UsnJrnl", "$J"))
-    if usn_rows >= USN_RECORD_SCAN_LIMIT or (usn_rows and usn_size > NATIVE_SCAN_LIMIT):
-        window = f", 파일 앞 {size_text(NATIVE_SCAN_LIMIT)}만 읽음" if usn_size > NATIVE_SCAN_LIMIT else ""
+    if usn_rows >= USN_RECORD_SCAN_LIMIT:
+        window = f", 파일 앞 {window_text}만 읽음" if usn_size > NATIVE_SCAN_LIMIT else ""
         items.append(_item(
             "ntfs-parse-cap", step, "warning",
             f"USN 저널 레코드 분석 상한({count_text(USN_RECORD_SCAN_LIMIT)}건)에 닿아 {count_text(usn_rows)}건만 "
             f"반영했습니다{window}. 이후 이름 변경·삭제 기록은 없습니다.",
         ))
-
-    logfile_size = _size(_system_file(roots, "$LogFile"))
-    if _int(counts.get("ntfs-logfile-transaction-candidate")) and logfile_size > NTFS_LOGFILE_SCAN_LIMIT:
+    elif usn_size > NATIVE_SCAN_LIMIT:
+        found = (
+            f"{count_text(usn_rows)}건을 반영했습니다(레코드 상한 {count_text(USN_RECORD_SCAN_LIMIT)}건에는 닿지 않음)"
+            if usn_rows
+            else "반영한 레코드가 0건입니다(저널 앞부분은 비어 있는 경우가 많음)"
+        )
         items.append(_item(
             "ntfs-parse-cap", step, "warning",
-            f"$LogFile {size_text(logfile_size)} 중 앞 {size_text(NTFS_LOGFILE_SCAN_LIMIT)}만 훑었습니다(부분). "
+            f"USN 저널 {size_text(usn_size)} 중 앞 {window_text}만 읽어 {found}. "
+            "뒤 구간의 이름 변경·삭제 기록은 확인하지 않았습니다(기록이 없다는 뜻이 아님).",
+        ))
+
+    logfile_size = _size(_system_file(roots, "$LogFile"))
+    if logfile_size > NTFS_LOGFILE_SCAN_LIMIT:
+        found = (
+            "" if _int(counts.get("ntfs-logfile-transaction-candidate")) else " 그 구간에서 찾은 트랜잭션 후보는 0건입니다."
+        )
+        items.append(_item(
+            "ntfs-parse-cap", step, "warning",
+            f"$LogFile {size_text(logfile_size)} 중 앞 {size_text(NTFS_LOGFILE_SCAN_LIMIT)}만 훑었습니다(부분).{found} "
             "이후 구간의 트랜잭션 후보는 찾지 않았습니다.",
         ))
     return items

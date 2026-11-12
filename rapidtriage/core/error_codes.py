@@ -147,6 +147,9 @@ _ROWS: tuple[ErrorCode, ...] = (
     _e("REVIEW_CONFLICT", 409, 1, "case", "http", "reserved",
        "다른 검토자가 먼저 같은 항목의 검토 표시를 바꿨습니다",
        "목록을 새로 고친 뒤 다시 표시하세요", "Review mark changed concurrently", "T-007"),
+    _e("CASE_DB_LOCKED", 409, 1, "case", "http", "active",
+       "케이스 DB가 다른 창(또는 다른 프로그램)의 쓰기로 잠겨 있어 저장하지 못했습니다(이 요청의 변경은 하나도 쓰이지 않음)",
+       "잠시 뒤 다시 시도하세요. 다른 창의 저장이 끝나면 풀립니다", "Case DB is locked by another writer", "T-131"),
     # -- list partial results (notice) ------------------------------------------------------------
     _e("SCAN_BUDGET_STOPPED", None, 3, "list", "notice", "active",
        "확인 한도에 도달해 목록 일부만 확인했습니다",

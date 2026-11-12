@@ -10,7 +10,7 @@
 - **노출**: `http` 오류 응답 · `body` 응답 본문 필드 · `notice` 목록 부분 결과 · `readonly_reason` 읽기 전용 사유 · `cli` CLI 전용 · `frontend` 프런트 전용.
 - **종료 코드**(CLI): 0 성공 / 1 실패 / 2 사용법 / 3 부분 성공 / 4 대상 없음. T-249 전까지 CLI는 대부분 2로 끝나며, 표의 값은 목표값입니다.
 
-코드 42종 (active 35 · reserved 7).
+코드 43종 (active 36 · reserved 7).
 
 ## 출력 위치 보호 (`output`)
 
@@ -68,6 +68,7 @@
 | `CASE_JSON_UNREADABLE` | — | 1 | body | active | 검토 목록 파일(rapidtriage-case.json)을 읽지 못했습니다 | 파일이 손상되지 않았는지 확인하세요 | Case review JSON is unreadable |
 | `CASE_NOT_FOUND` | 404 | 4 | http | reserved (T-007·T-160) | 해당 케이스를 찾지 못했습니다 | 케이스 목록에서 케이스 ID를 확인하세요 | Case not found |
 | `REVIEW_CONFLICT` | 409 | 1 | http | reserved (T-007) | 다른 검토자가 먼저 같은 항목의 검토 표시를 바꿨습니다 | 목록을 새로 고친 뒤 다시 표시하세요 | Review mark changed concurrently |
+| `CASE_DB_LOCKED` | 409 | 1 | http | active (T-131) | 케이스 DB가 다른 창(또는 다른 프로그램)의 쓰기로 잠겨 있어 저장하지 못했습니다(이 요청의 변경은 하나도 쓰이지 않음) | 잠시 뒤 다시 시도하세요. 다른 창의 저장이 끝나면 풀립니다 | Case DB is locked by another writer |
 
 ## 목록 부분 결과 (`list`)
 

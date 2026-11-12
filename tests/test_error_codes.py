@@ -38,6 +38,8 @@ SHIPPED = frozenset({
     # T-007: status defaults for the other statuses the server answers with
     "METHOD_NOT_ALLOWED", "TIME_BUDGET_EXCEEDED", "PAYLOAD_TOO_LARGE", "RANGE_NOT_SATISFIABLE",
     "TOO_MANY_REQUESTS", "SERVICE_UNAVAILABLE",
+    # T-131 review: a case-DB write refused by another window's lock
+    "CASE_DB_LOCKED",
 })
 
 

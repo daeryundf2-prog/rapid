@@ -115,6 +115,35 @@ describe("detectRemoteChanges", () => {
     ).toBe(1);
   });
 
+  it("inside the quiet window a change the tag tool cannot explain is still reported (review P2-7)", () => {
+    detectRemoteChanges("r1", map(mark(1), mark(2), mark(3)), 0);
+    recordOwnReviewWrite({ runId: "r1", rows: null, mark: null }, 10);
+    // Row 1: tags only (this tab's tag tool) → quiet. Row 2: another window set a status → reported.
+    const fetched = map(later(1, { tags: ["외부 반출"] }), later(2, { status: "excluded" }), mark(3));
+    expect(detectRemoteChanges("r1", fetched, 20)).toBe(1);
+    // Row 1 changes again inside the window: the tag tool was already seen there → reported.
+    const again = map(
+      later(1, { tags: ["외부 반출", "북마크"], updated_at: "2026-11-13T00:00:08Z" }),
+      later(2, { status: "excluded" }),
+      mark(3),
+    );
+    expect(detectRemoteChanges("r1", again, 30)).toBe(1);
+  });
+
+  it("an unkeyed status write (검토 목록 rows) explains only rows that show its status", () => {
+    detectRemoteChanges("r1", map(mark(1), mark(2)), 0);
+    recordOwnReviewWrite({ runId: "r1", rows: null, mark: { status: "excluded" } }, 10);
+    const fetched = map(later(1, { status: "excluded" }), later(2, { status: "needs-review" }));
+    expect(detectRemoteChanges("r1", fetched, 20)).toBe(1);
+  });
+
+  it("an empty map after a non-empty one is a failed read: no report, the baseline stays (review P2-6)", () => {
+    detectRemoteChanges("r1", map(mark(1), mark(2)), 0);
+    expect(detectRemoteChanges("r1", map(), 10)).toBe(0);
+    expect(detectRemoteChanges("r1", map(mark(1), mark(2)), 20)).toBe(0);
+    expect(detectRemoteChanges("r1", map(later(1, { status: "excluded" }), mark(2)), 30)).toBe(1);
+  });
+
   it("runs are tracked separately", () => {
     detectRemoteChanges("r1", map(mark(1)), 0);
     expect(detectRemoteChanges("r2", map(later(1, { status: "excluded" })), 1)).toBe(0);
@@ -147,6 +176,22 @@ describe("useReviewMap remote-change toast", () => {
     await waitFor(() => expect(result.current?.get("files||/candidates/3")?.status).toBe("excluded"));
     expect(useToastStore.getState().toasts.filter((t) => t.text === REMOTE_CHANGE_NOTICE)).toHaveLength(1);
     expect(useToastStore.getState().toasts.at(-1)?.detail).toBe(remoteChangeDetail(1));
+  });
+
+  it("a 200 with `error` and no marks keeps the last map and raises no toast (review P2-6)", async () => {
+    let payload: Record<string, unknown> = { marks: [mark(1), mark(2)], truncated: false };
+    installFetch({ "/review-map": () => jsonResponse(payload) });
+    const { client, wrapper } = queryWrapper();
+    const { result } = renderHook(() => useReviewMap("r1"), { wrapper });
+    await waitFor(() => expect(result.current?.size).toBe(2));
+
+    payload = { marks: [], truncated: false, error: "database disk image is malformed" };
+    await act(() => invalidateReviewQueries(client, "r1"));
+    expect(result.current?.size).toBe(2);
+    payload = { marks: [mark(1), mark(2)], truncated: false };
+    await act(() => invalidateReviewQueries(client, "r1"));
+    await waitFor(() => expect(result.current?.size).toBe(2));
+    expect(useToastStore.getState().toasts.some((t) => t.text === REMOTE_CHANGE_NOTICE)).toBe(false);
   });
 
   it("this tab's own marks (applyReviewAction) and tag tools never raise the toast", async () => {

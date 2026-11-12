@@ -20,6 +20,7 @@ from ...core.case_db import (
 )
 from ...core.case_db.base import normalize_identifier
 from ...core.case_db.review import saved_search_to_dict
+from ...core.case_db.write_lock import CaseDatabaseLockedError, case_db_locked_detail
 from ...core.jobs import (
     RunJobStore,
     run_output_dir,
@@ -438,37 +439,29 @@ def build_case_db_router(
         request: CaseDbReviewBatchRequest,
         targets: list[dict[str, str]],
     ) -> dict[str, object]:
-        """Console marks: omitted ``tags`` keep the row's tags; ``add_tags`` merges."""
+        """Console marks: omitted ``tags`` keep the row's tags; ``add_tags`` merges.
+
+        The merge with the row's current tags happens inside the case DB's write transaction
+        (``add_tags`` of :meth:`CaseDatabase.mark_reviews_batch`), so a tag added by another window
+        between our read and our write is never lost (R8 T-131 review P1-7); the batch is all or nothing.
+        """
         reviewer, actor_source = resolve_request_actor(request.reviewer)
-        marks: list[dict[str, object]] = []
-        for target in targets:
-            tags: list[str] | None = list(request.tags) if request.tags is not None else None
-            if request.add_tags:
-                try:
-                    existing = database.get_review_mark(
-                        request.case_id, target_type=target["target_type"], target_id=target["target_id"]
-                    ).get("tags", [])
-                except CaseDatabaseError:
-                    existing = []
-                merged = [str(tag) for tag in (tags if tags is not None else existing or [])]
-                tags = merged + [tag for tag in request.add_tags if tag not in merged]
-            marks.append(
-                database.mark_review(
-                    case_id=request.case_id,
-                    target_type=target["target_type"],
-                    target_id=target["target_id"],
-                    status=request.status,
-                    verification_status=request.verification_status,
-                    tags=tags,
-                    note=request.note,
-                    reviewer=reviewer,
-                    actor_source=actor_source,
-                    assignee=request.assignee,
-                    priority=request.priority,
-                    due_at=request.due_at,
-                    include_in_report=request.include_in_report,
-                )
-            )
+        marks = database.mark_reviews_batch(
+            case_id=request.case_id,
+            targets=targets,
+            status=request.status,
+            verification_status=request.verification_status,
+            tags=request.tags,
+            add_tags=request.add_tags,
+            keep_omitted_tags=True,
+            note=request.note,
+            reviewer=reviewer,
+            actor_source=actor_source,
+            assignee=request.assignee,
+            priority=request.priority,
+            due_at=request.due_at,
+            include_in_report=request.include_in_report,
+        )["marks"]
         return {
             "command": "case-review-batch",
             "database": str(database.path),
@@ -506,6 +499,8 @@ def build_case_db_router(
                 due_at=request.due_at,
                 include_in_report=request.include_in_report,
             )
+        except CaseDatabaseLockedError as exc:
+            raise HTTPException(status_code=409, detail=case_db_locked_detail()) from exc
         except CaseDatabaseError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 

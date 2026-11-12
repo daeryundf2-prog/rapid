@@ -47,6 +47,11 @@ from ...core.case_db import (
 )
 from ...core.case_db.helpers import normalize_path_for_db
 from ...core.case_db.review_schema import COLOR_TOKEN_LABELS, COLOR_TOKENS
+from ...core.case_db.write_lock import (
+    CaseDatabaseLockedError,
+    case_db_locked_detail,
+    retry_when_locked,
+)
 from ...core.jobs import RunJobStore, run_output_dir
 from .helpers import (
     get_job,
@@ -87,6 +92,8 @@ class HistogramBaselineCreateRequest(BaseModel):
 
 
 def review_tool_http_error(exc: CaseDatabaseError) -> HTTPException:
+    if isinstance(exc, CaseDatabaseLockedError):
+        return HTTPException(status_code=409, detail=case_db_locked_detail())
     status = exc.status if isinstance(exc, ReviewToolError) else 400
     message = str(exc)
     if message.startswith("case not found:"):
@@ -117,8 +124,11 @@ def apply_review_tag_batch(database: CaseDatabase, request: Any, targets: list[d
     if not add_ids and not remove_ids:
         raise HTTPException(status_code=422, detail="적용할 태그(tag_ids 또는 remove_tag_ids)가 없습니다")
     case_id = request.case_id
-    try:
-        with database.connect() as connection:
+
+    def write() -> dict[str, Any]:
+        # BEGIN IMMEDIATE: the whole batch waits for another window's write instead of failing on
+        # a stale read; a lasting lock is retried, then 409 CASE_DB_LOCKED with nothing applied.
+        with database.connect(write=True) as connection:
             apply_schema(connection)
             if connection.execute("SELECT 1 FROM case_record WHERE case_id = ?", (case_id,)).fetchone() is None:
                 raise HTTPException(status_code=404, detail=f"케이스를 찾을 수 없습니다: {case_id}")
@@ -128,7 +138,7 @@ def apply_review_tag_batch(database: CaseDatabase, request: Any, targets: list[d
                     "SELECT id FROM evidence_source WHERE case_id = ? ORDER BY id DESC LIMIT 1", (case_id,)
                 ).fetchone()
                 evidence_source_id = int(row[0]) if row is not None else None
-            result = apply_tag_ids(
+            return apply_tag_ids(
                 connection,
                 case_id,
                 targets,
@@ -141,6 +151,9 @@ def apply_review_tag_batch(database: CaseDatabase, request: Any, targets: list[d
                 priority=getattr(request, "priority", None),
                 due_at=getattr(request, "due_at", None),
             )
+
+    try:
+        result = retry_when_locked(write)
     except CaseDatabaseError as exc:
         raise review_tool_http_error(exc) from exc
     result.update(database=str(database.path), run_id=request.run_id, updated_count=result["applied_count"])
@@ -227,9 +240,11 @@ def build_review_tools_router(
         return None
 
     @contextmanager
-    def _connection(database: CaseDatabase, case_id: str) -> Iterator[sqlite3.Connection]:
+    def _connection(database: CaseDatabase, case_id: str, *, write: bool = False) -> Iterator[sqlite3.Connection]:
+        """``write=True`` (tag edits) takes the write lock up front (``BEGIN IMMEDIATE``): it waits for
+        another window's save instead of failing on a stale read; a lasting lock is 409 ``CASE_DB_LOCKED``."""
         try:
-            with database.connect() as connection:
+            with database.connect(write=write) as connection:
                 apply_schema(connection)
                 if connection.execute("SELECT 1 FROM case_record WHERE case_id = ?", (case_id,)).fetchone() is None:
                     raise HTTPException(status_code=404, detail=f"케이스를 찾을 수 없습니다: {case_id}")
@@ -292,7 +307,7 @@ def build_review_tools_router(
     ) -> dict[str, object]:
         opened = _case_database(case_id, run_id, database)
         assert opened is not None
-        with _connection(opened, case_id) as connection:
+        with _connection(opened, case_id, write=True) as connection:
             try:
                 tag = create_case_tag(
                     connection,
@@ -320,7 +335,7 @@ def build_review_tools_router(
         fields = {key: getattr(request, key) for key in ("name", "color_token", "shortcut", "description") if key in request.model_fields_set}
         if not fields:
             raise HTTPException(status_code=422, detail="바꿀 항목(name, color_token, shortcut, description)이 없습니다")
-        with _connection(opened, case_id) as connection:
+        with _connection(opened, case_id, write=True) as connection:
             try:
                 tag = update_case_tag(
                     connection, case_id, tag_id, actor=resolve_request_reviewer(request.actor) or "local-user", **fields
@@ -340,7 +355,7 @@ def build_review_tools_router(
         """Soft delete: the tag keeps its row (``deleted_at``), leaves every mark and frees its key."""
         opened = _case_database(case_id, run_id, database)
         assert opened is not None
-        with _connection(opened, case_id) as connection:
+        with _connection(opened, case_id, write=True) as connection:
             try:
                 tag = delete_case_tag(connection, case_id, tag_id, actor=resolve_request_reviewer(actor) or "local-user")
             except CaseDatabaseError as exc:
@@ -379,7 +394,7 @@ def build_review_tools_router(
         opened = _case_database(case_id, run_id or (None if database else source_run), database)
         assert opened is not None
         counts = _run_histogram(source_run)
-        with _connection(opened, case_id) as connection:
+        with _connection(opened, case_id, write=True) as connection:
             try:
                 baseline = create_histogram_baseline(
                     connection,
