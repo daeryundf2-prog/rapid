@@ -1,5 +1,5 @@
 /**
- * 접수 노트·메모 block (split out of caseCards.tsx): one 검사관 field, 케이스 메모 (작성자 · 시각 ·
+ * 접수 노트·메모 block (split out of caseCards.tsx): one examiner field, 케이스 메모 (작성자 · 시각 ·
  * 이력, case DB) with inline delete confirmation, the collapsed 요약 노트, the Korean failure text
  * of memo requests (T-144) and the unsaved-input leave guard.
  */
@@ -41,7 +41,7 @@ function leavesDashboard(prev: Route, next: Route): boolean {
 }
 
 /**
- * 노트·메모: one 검사관 field drives both the memo author and the run's 요약 노트 examiner. 케이스 메모
+ * 노트·메모: one examiner field drives both the memo author and the run's 요약 노트 examiner. 케이스 메모
  * (작성자 · 시각 · 이력, case DB) is on top; the 요약 노트 (PUT /case-notes, fills the report's 분석자 ·
  * 분석 범위) is collapsed below.
  */
@@ -72,7 +72,7 @@ export function NotesCard({
   const examiner = examinerEdit ?? (runNotes?.examiner || caseExaminer);
   const summary = summaryEdit ?? runNotes?.summary ?? "";
   const dirty = examinerEdit !== null || summaryEdit !== null;
-  // Unsaved input of the block: the 검사관·요약 edits and a typed but not yet added memo.
+  // Unsaved input of the block: the examiner and 요약 edits and a typed but not yet added memo.
   const unsaved = dirty || text.trim() !== "";
   useEffect(() => {
     if (!unsaved) return;

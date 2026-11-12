@@ -9,7 +9,7 @@ export function tag(partial: Partial<CaseTag> & { id: number; name: string }): C
     color_token: "tag-5",
     shortcut: null,
     description: "",
-    created_by: "검사관 A",
+    created_by: "분석 담당 A",
     created_at: "2026-10-17T00:00:00+00:00",
     updated_at: "2026-10-17T00:00:00+00:00",
     deleted_at: null,
