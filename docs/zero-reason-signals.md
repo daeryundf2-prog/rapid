@@ -1,6 +1,6 @@
 # 0건 사유 입력 신호 명세 (R8 T-188)
 
-수집기 하나가 0행을 냈을 때 0건 사유 판정기(T-047, `rapidtriage/api/app/zero_reason.py` 예정)가 읽을 **입력 신호 6종**이 수집기마다 어느 파일·어느 키에 기록되는지(또는 아직 기록되지 않는지)를 적는다. 판정기는 이 표에 적힌 출처만 읽는다. 표에 "기록 안 됨"인 칸은 판정기가 그 신호를 추측하지 말고 "모름"으로 다뤄야 한다는 뜻이다. 근거: IS-006, GAP-356, `docs/plans/r8/r8-tasks.md` T-188·T-047.
+수집기 하나가 0행을 냈을 때 0건 사유 판정기(T-047, rapidtriage/api/app/zero_reason.py 예정 — 아직 없음)가 읽을 **입력 신호 6종**이 수집기마다 어느 파일·어느 키에 기록되는지(또는 아직 기록되지 않는지)를 적는다. 판정기는 이 표에 적힌 출처만 읽는다. 표에 "기록 안 됨"인 칸은 판정기가 그 신호를 추측하지 말고 "모름"으로 다뤄야 한다는 뜻이다. 근거: IS-006, GAP-356, `docs/plans/r8/r8-tasks.md` T-188·T-047.
 
 이 문서는 2026-11-13 코드 기준이다. 모든 위치는 `rapidtriage/` 아래 경로와 줄 번호다. 코드가 바뀌면 이 표를 같이 고친다.
 
@@ -45,7 +45,7 @@
   - 세지 않는 것: `*_limit_reached`(예: `record_limit_reached`·`message_limit_reached`·`string_limit_reached`) 행 키, `*_may_be_truncated`, 표시용 미리보기 잘림(`event_message_truncated` 등, `core/timeline.py:493-496`, 경고 아님).
 - **CR-PAY**: 종류 출력의 행 밖(최대 4단계) `truncated`·`*_truncated`·`limit_reached`가 참이거나 `collection_status: partial`이면 단계 행 `cap_disclosures`에 점 경로로 남는다(`collect_cap_disclosures`, `core/run/steps.py:342-363`).
 - **CR-UND**: 상한 도달 여부를 결과에 남기지 않는 상한 8개는 처리 문제 `undisclosed-cap` 안내로만 나온다(`UNDISCLOSED_CAPS`, `api/app/run_problem_limits.py:56-65`). 이 안내는 "도달했다"가 아니라 "도달했는지 알 수 없다"이다. 판정기는 이것을 `cap_reached` 참으로 쓰면 안 되고, `none_found`를 막는 근거로만 쓴다.
-- **일람**: 수집기별 상한과 고지 여부의 정적 일람은 `python scripts/check-collector-caps.py --json`(T-165). 표의 "무고지 상한 n개"는 그 일람의 `undisclosed_per_file` 값이다(2026-11-13 기준선 `tests/test_collector_caps_inventory.py:66-`).
+- **일람**: 수집기별 상한과 고지 여부의 정적 일람은 `python scripts/check-collector-caps.py --json`(T-165). 표의 "무고지 상한 n개"는 그 일람의 `undisclosed_per_file` 값이다(2026-11-13 기준선 `tests/test_collector_caps_inventory.py:66` 이후).
 
 ### 3.3 `tool_missing` 공통 출처 (TM)
 

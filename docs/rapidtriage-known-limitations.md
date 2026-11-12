@@ -71,7 +71,7 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 
 - `e01-extract-cap`: 파일 수 상한 도달. 삭제 훑기가 시도했으면 "삭제 영역 축", 아니면 두 축 모두 잘렸을 수 있다고 쓴다(`run_problem_limits.py:115-129`).
 - `e01-read-error`: 할당 영역 오류(`errors - deleted_read_errors`)와 삭제 레코드 오류를 따로 쓴다(`run_problem_limits.py:130-141`).
-- `e01-depth-cap`: 깊이 64단계로 건너뛴 폴더 수. 64는 엔진에 숫자로 박혀 있어 `E01_WALK_MAX_DEPTH`(`run_problem_limits.py:43`)로 따라 적고, 테스트가 둘이 같은지 확인한다(`tests/test_r8_run_problems.py:224-235`).
+- `e01-depth-cap`: 깊이 64단계로 건너뛴 폴더 수. 64는 엔진에 숫자로 박혀 있어 `E01_WALK_MAX_DEPTH`(`run_problem_limits.py:43`)로 따라 적고, 테스트가 둘이 같은지 확인한다(`tests/test_r8_run_problems.py:224`(~235)).
 - 엔진 실행 결과(`rapidtriage-e01.json`의 `warnings`)에도 영문 경고가 남지만, 그 문장의 상한 숫자는 `200,000`으로 고정돼 있다(`core/e01.py:2275`). 환경 변수로 상한을 바꾼 실행에서는 이 영문 경고의 숫자가 틀리므로 처리 문제 목록의 숫자(실제 `file_limit`)를 본다.
 - 주의: 결과의 `recovery_scope`는 외부 도구의 범위 기록(`build_tsk_recover_recovery_scope`, `core/e01.py:197-215`)을 바탕으로 `tool`·`note`만 바꿔 쓴다(`core/e01.py:2134-2146`). 그래서 네이티브 실행에도 `flags: ["-e"]`·`unallocated_files: true`·`scope: "all-files-allocated-and-unallocated"`가 남는다. 네이티브는 비할당 영역을 훑지 않으므로 네이티브 실행에서는 이 세 키를 읽지 않는다(GAP-260, 엔진 수정은 별도 과제).
 
@@ -95,7 +95,7 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 
 ## 엔진·수집기 상한 표 (R8 T-187)
 
-T-165 상한 일람(`python scripts/check-collector-caps.py --json`)이 이름으로 고정한 상한 18개다: 계획에 이름이 오른 10개(`KNOWN_CAPS`)와 고지 누락으로 지목된 8개(GAP-272, `GAP_272_CAPS`, 모두 `tests/test_collector_caps_inventory.py:39-63`). 행 수 18 = 10 + 8. 일람 전체(약 750개, 그중 결과에 상한 도달이 온전히 기록되지 않는 것 약 650개)는 위 명령으로 본다. 위 E01 절의 숫자(깊이 64, 연속 미읽기 100,000, 사전 점검 해시 128 MiB 등)는 엔진에 숫자로 박혀 있거나 이 고정 목록 밖이라 표에 넣지 않았다.
+T-165 상한 일람(`python scripts/check-collector-caps.py --json`)이 이름으로 고정한 상한 18개다: 계획에 이름이 오른 10개(`KNOWN_CAPS`)와 고지 누락으로 지목된 8개(GAP-272, `GAP_272_CAPS`, 모두 `tests/test_collector_caps_inventory.py:39`(~63)). 행 수 18 = 10 + 8. 일람 전체(약 750개, 그중 결과에 상한 도달이 온전히 기록되지 않는 것 약 650개)는 위 명령으로 본다. 위 E01 절의 숫자(깊이 64, 연속 미읽기 100,000, 사전 점검 해시 128 MiB 등)는 엔진에 숫자로 박혀 있거나 이 고정 목록 밖이라 표에 넣지 않았다.
 
 열 설명:
 
