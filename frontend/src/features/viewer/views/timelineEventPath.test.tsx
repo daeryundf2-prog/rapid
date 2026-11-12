@@ -30,7 +30,11 @@ function timelineRow(): GridRow {
       details: {},
       groupSources: [
         { artifactType: "lnk-file", path: STAGE, recordIndex: 0 },
-        { artifactType: "jumplist-entry", path: "D:\\out\\run1\\_e01\\fs\\$OrphanFiles\\x.lnk", recordIndex: null },
+        {
+          artifactType: "jumplist-entry",
+          path: "D:\\out\\run1\\_e01\\fs\\$OrphanFiles\\x.lnk",
+          recordIndex: null,
+        },
       ],
     },
   } as GridRow;
