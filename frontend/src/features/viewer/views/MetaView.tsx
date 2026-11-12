@@ -33,7 +33,7 @@ import { typeDisplayLabel, valueLabel } from "../../grid/valueLabels";
 import { dispatchCommand, setViewerTarget, useCommandContext, useViewerRouteMode } from "../adapter";
 import { recordBanners } from "../banners";
 import { bytesOfHex, filterUtf16Strings, hexDump, utf16Strings } from "../binaryValue";
-import { locatorText } from "../citation";
+import { evidenceSourceText, locatorText, SOURCE_LOCATION_UNKNOWN } from "../citation";
 import { ROWS_FOR_SOURCE_COMMAND, writeClipboard } from "../commands";
 import { evidenceInfo, isSourceMissing, RECOVERY_LABELS } from "../evidenceInfo";
 import { displayEvidenceTime } from "../evidenceTimeDisplay";
@@ -1121,6 +1121,9 @@ export function MetaView({
     layout.core.length + layout.provenance.length + layout.other.length + layout.extra.length > 0 ||
     layout.table !== null;
   const isArtifact = row?.ref.collection === "artifacts";
+  // T-172: 원본 경로 is the path inside the evidence; the result-folder path shows only under 기술 정보.
+  const sourceText = sourcePathText(target.sourcePath);
+  const extracted = target.sourcePath && target.sourcePath !== sourceText ? target.sourcePath : null;
   return (
     <div className="meta-view">
       <RecordBanners row={row} />
@@ -1153,6 +1156,10 @@ export function MetaView({
         <dl className="viewer-dl">
           <dt>런</dt>
           <dd className="mono">{target.runId}</dd>
+          <dt>원본 경로</dt>
+          <dd className="mono viewer-break" data-testid="meta-source-path">
+            {sourceText}
+          </dd>
           <dt>위치</dt>
           <dd className="mono viewer-break">{locatorText(target)}</dd>
           {target.ref.caseDbId !== undefined ? (
@@ -1191,12 +1198,19 @@ export function MetaView({
             />
           </p>
         ) : null}
+        {extracted ? (
+          <details className="viewer-details" data-testid="meta-tech-info">
+            <summary>기술 정보</summary>
+            <dl className="viewer-dl">
+              <dt>추출 위치</dt>
+              <dd className="mono viewer-break">{extracted}</dd>
+            </dl>
+          </details>
+        ) : null}
       </section>
       <section aria-label="파일 정보">
         <h3 className="viewer-subtitle">파일</h3>
         <dl className="viewer-dl">
-          <dt>경로</dt>
-          <dd className="mono viewer-break">{target.sourcePath ?? "원본 경로 없음(파생 항목)"}</dd>
           {preview?.container_path ? (
             <>
               <dt>컨테이너</dt>
@@ -1334,6 +1348,12 @@ function useRunEvidence(runId: string): RunDashboard["evidence_source"] | null {
   return data?.evidence_source ?? null;
 }
 
+/** 원본 경로 (T-172): the in-evidence path, "원래 위치 알 수 없음" for a recovery pseudo folder. */
+export function sourcePathText(sourcePath: string | null | undefined): string {
+  if (!sourcePath) return "원본 경로 없음(파생 항목)";
+  return evidenceSourceText(sourcePath) ?? SOURCE_LOCATION_UNKNOWN;
+}
+
 /** Why a tail fact is absent (U-F8: never a bare dash). */
 export const TAIL_REASONS = {
   source: "없음 — 원본 파일이 없는 파생 항목입니다",
@@ -1406,7 +1426,7 @@ export function EvidenceTail({
               title="이 원본에서 나온 행을 그리드에 표시합니다."
               onClick={() => void dispatchCommand(ROWS_FOR_SOURCE_COMMAND, ctx)}
             >
-              {target.sourcePath}
+              {sourcePathText(target.sourcePath)}
             </button>
           ) : (
             TAIL_REASONS.source

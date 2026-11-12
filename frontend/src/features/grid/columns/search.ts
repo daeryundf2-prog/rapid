@@ -201,6 +201,7 @@ export const searchCollection: CollectionDef = {
       ...col.path(360, ["analysis", "source"]),
       // Under the acquisition root (same as the timeline 출처 행); the full path on hover.
       value: (r) => fieldStr(r, "displayPath") || r.sourcePath,
+      format: (r) => fieldStr(r, "displayPath") || r.sourcePath || "",
       tooltip: (r) => r.sourcePath ?? "",
       render: (r) => searchPathCell(fieldStr(r, "displayPath"), r.sourcePath),
     },
