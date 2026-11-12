@@ -536,7 +536,49 @@ class RunJobStore:
         self._state_path = state_path.expanduser().resolve() if state_path is not None else None
         # name -> hook(store, job) called after a run is written ``completed`` (best effort).
         self._completion_hooks: dict[str, Callable[[RunJobStore, RunJob], None]] = {}
+        # D37: run_id -> canonical read-only folder this store holds in ``core.readonly_runs``,
+        # released when the run leaves the list or the store is closed.
+        self._readonly_token = object()
+        self._readonly_holds: dict[str, str] = {}
+        self._readonly_lock = threading.Lock()
         self._load_state()
+
+    def close(self) -> None:
+        """Release every read-only folder this store holds (the app's shutdown calls it).
+
+        The runs stay listed; a folder another store still holds stays read-only."""
+        with self._readonly_lock:
+            holds, self._readonly_holds = self._readonly_holds, {}
+        for run_id, folder in holds.items():
+            unregister_readonly_folder(folder, owner=(self._readonly_token, run_id))
+
+    def __enter__(self) -> RunJobStore:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def _sync_readonly(self, job: RunJob) -> None:
+        """Hold ``job``'s output folder read-only when it has a D37 reason, else release its hold."""
+        owner = (self._readonly_token, job.run_id)
+        output_dir = job.output_dir()
+        with self._readonly_lock:
+            previous = self._readonly_holds.get(job.run_id)
+            current = None
+            if job.readonly_reason and output_dir is not None:
+                # Register first: the folder is never unguarded between the old and the new hold.
+                current = register_readonly_folder(output_dir, job.readonly_reason, owner=owner)
+                self._readonly_holds[job.run_id] = current
+            else:
+                self._readonly_holds.pop(job.run_id, None)
+            if previous is not None and previous != current:
+                unregister_readonly_folder(previous, owner=owner)
+
+    def _release_readonly(self, run_id: str) -> None:
+        with self._readonly_lock:
+            folder = self._readonly_holds.pop(run_id, None)
+            if folder is not None:
+                unregister_readonly_folder(folder, owner=(self._readonly_token, run_id))
 
     @property
     def state_path(self) -> Path | None:
@@ -815,7 +857,7 @@ class RunJobStore:
                 job.completed_at = existing.completed_at
             self._jobs[run_id] = job
             self._write_state_locked()
-        sync_readonly_registration(job)
+        self._sync_readonly(job)
         _invalidate_summary_outputs(summary)
         return job
 
@@ -826,8 +868,7 @@ class RunJobStore:
             job = self._jobs.pop(run_id)
             self._futures.pop(run_id, None)
             self._write_state_locked()
-        if job.readonly_reason and job.output_dir() is not None:
-            unregister_readonly_folder(job.output_dir())
+        self._release_readonly(run_id)
         _invalidate_summary_outputs(job.summary)
 
     def cancel(self, run_id: str, *, actor: str = "web") -> RunJob:
@@ -1090,7 +1131,7 @@ class RunJobStore:
                 # D37: a finished run kept from before the output guard, written inside its evidence.
                 job.readonly_reason = legacy_readonly_reason(job)
                 changed = changed or job.readonly_reason is not None
-            sync_readonly_registration(job)
+            self._sync_readonly(job)
             if job.status in ACTIVE_JOB_STATUSES:
                 # Plan P2 §3.2: a run the server was executing when it stopped
                 # is "중단됨"; "이어서 실행" (retry resume) reuses its completed tasks.
@@ -2467,13 +2508,6 @@ def output_inside_evidence_reason(output_dir: Path | str | None, root: str | Non
 def legacy_readonly_reason(job: RunJob) -> str | None:
     """D37 reason of a kept run written inside its evidence before the output guard."""
     return output_inside_evidence_reason(job.output_dir(), job.request.root if job.request is not None else "")
-
-
-def sync_readonly_registration(job: RunJob) -> None:
-    """Register a read-only run's output folder with ``core.readonly_runs`` (D37)."""
-    output_dir = job.output_dir()
-    if job.readonly_reason and output_dir is not None:
-        register_readonly_folder(output_dir, job.readonly_reason)
 
 
 def resolve_run_summary_path(output_dir_or_summary: Path) -> Path:

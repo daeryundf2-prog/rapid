@@ -179,6 +179,8 @@ def create_app(
         yield
         # Shutdown: cancel this app's running analyses at their next unit, drop its queued ones.
         ANALYSIS_RUNNER.shutdown(owner=analysis_owner)
+        # D37: release the read-only folders the store holds (the registry is process-wide).
+        store.close()
 
     api = FastAPI(title="rapidtriage local API", version="0.2.0", lifespan=lifespan)
     api.state.analysis_owner = analysis_owner
