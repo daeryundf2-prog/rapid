@@ -195,7 +195,7 @@ v2의 "최상위에 `status`·`warnings`·`errors` 세 키 추가"는 폐기한�
 
 | 표면 | 고정하는 것 | 과제 |
 |---|---|---|
-| 제출 매니페스트 항목 | 기존 키 불변. 추가: `row{timestamp, preview, citation_id, collection, kind, locator}`, `evidence.relative_path`, 건너뜀 `reason_ko`, `summary.over_limit_count` | T-178 |
+| 제출 매니페스트 항목 | 기존 키 불변. 추가: `row{timestamp, preview, citation_id, collection, kind, locator}`, `evidence.relative_path`, 건너뜀 `reason_ko`, `summary.max_items_skipped_count`(병합분 키 재사용) | T-178 |
 | 보고서 메타데이터 | 추가: `tool_version`, `evidence_records[]`(이름·크기·세그먼트별 SHA-256·기록된 취득 해시), `processing_scope`(네 축), `received_at`(인수 기록이 있을 때) | T-182·278 |
 | 내보내기 감사(누적) | 한 줄 한 레코드, 오프셋 포함 시각, `tool_version`·`host`·`os_user`·`pid`·입력 해시(케이스 DB 포함)·파일 해시·`previous_record_sha256`. 덮어쓰지 않는다 | T-029·240 |
 | 보고서 판 | `exports/<오프셋 포함 시각>/`에 사본, 고정 경로는 "최신" | T-240 |
