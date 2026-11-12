@@ -172,6 +172,17 @@ def add_web_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Hardened remote mode: allow non-loopback binding only with a token; keeps auth and Host/Origin gates on",
     )
+    parser.add_argument(
+        "--browse-root",
+        dest="browse_roots",
+        action="append",
+        default=None,
+        metavar="DIR",
+        help=(
+            "Remote/non-loopback server only (repeatable): the evidence picker (/api/browse) lists only inside "
+            "these folders (default: the server's run folders + home). A loopback server lists the whole disk"
+        ),
+    )
     parser.add_argument("--allow-remote-without-auth", action="store_true", help="Allow non-localhost binding without auth token")
     parser.add_argument("--reload", action="store_true", help="Enable uvicorn reload for UI/API development")
     parser.add_argument("--crash-log-dir", help="Local-only directory for web/API crash reports")

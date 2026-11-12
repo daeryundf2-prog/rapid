@@ -47,7 +47,12 @@ from .routes_families import build_families_router
 from .routes_flags import build_flags_router
 from .routes_ioc import build_ioc_router
 from .routes_media import build_media_router
-from .routes_meta import build_meta_router
+from .routes_meta import (
+    BROWSE_REMOTE_ENV,
+    BROWSE_ROOTS_ENV,
+    build_meta_router,
+    configured_browse_roots,
+)
 from .routes_reports import build_reports_router
 from .routes_review_tools import build_review_tools_router
 from .routes_run_plan import build_run_plan_router
@@ -133,6 +138,8 @@ def create_app(
     case_db_roots: Iterable[str | Path] | None = None,
     auto_search_index: bool = False,
     cases_db_path: str | Path | None = None,
+    browse_remote: bool | None = None,
+    browse_roots: Iterable[str | Path] | None = None,
 ) -> FastAPI:
     store = job_store or default_job_store
     # D37: nothing is ever written into a read-only run folder, whichever writer tries.
@@ -237,7 +244,18 @@ def create_app(
     # every response. Added after ``require_auth_token`` so both layers wrap its answers too.
     install_error_envelope(api)
 
-    api.include_router(build_meta_router(store))
+    # T-031: a remote server (`rapidtriage web --remote` / non-loopback) browses only inside the
+    # `--browse-root` set (default: the run folders it knows + home); loopback lists the whole disk.
+    remote_browse = truthy_env(BROWSE_REMOTE_ENV) if browse_remote is None else browse_remote
+    configured_browse = (
+        configured_browse_roots(browse_roots)
+        if browse_roots is not None or os.environ.get(BROWSE_ROOTS_ENV) is not None
+        else None
+    )
+    api.state.browse_remote = remote_browse
+    api.include_router(
+        build_meta_router(store, browse_remote_mode=remote_browse, browse_roots=configured_browse)
+    )
     api.include_router(build_case_db_router(store, open_request_case_database, resolve_request_catalog_path))
     api.include_router(build_runs_router(store))
     api.include_router(build_run_plan_router(store))

@@ -37,8 +37,22 @@ def run_web_server(
     allow_remote_without_auth: bool = False,
     crash_log_dir: str | None = None,
     remote: bool = False,
+    browse_roots: list[str] | None = None,
 ) -> int:
     loopback_hosts = {"127.0.0.1", "localhost", "::1"}
+    # T-031: a remote (or non-loopback) server's /api/browse lists only inside the browse roots.
+    remote_browse = remote or host not in loopback_hosts
+    if browse_roots and not remote_browse:
+        raise RuntimeError(
+            "--browse-root applies only to a --remote or non-loopback server; "
+            "a loopback server's picker lists the whole disk."
+        )
+    resolved_browse_roots: list[str] = []
+    for raw_root in browse_roots or ():
+        root = Path(raw_root).expanduser().resolve()
+        if not root.is_dir():
+            raise RuntimeError(f"--browse-root is not an existing folder: {raw_root}")
+        resolved_browse_roots.append(str(root))
     if remote and allow_remote_without_auth:
         raise RuntimeError("--remote and --allow-remote-without-auth are mutually exclusive: --remote keeps API auth on.")
     disable_auth = os.environ.get("RAPIDTRIAGE_DISABLE_AUTH", "").strip().lower() in {"1", "true", "yes", "on"}
@@ -112,6 +126,13 @@ def run_web_server(
         os.environ["RAPIDTRIAGE_AUTH_TOKEN"] = auth_token
     if crash_log_dir:
         os.environ["RAPIDTRIAGE_CRASH_LOG_DIR"] = str(Path(crash_log_dir).expanduser().resolve())
+    # Same channel as auth: uvicorn re-imports `rapidtriage.api.app:app`, so the browse scope
+    # reaches create_app only through the environment (restored once the server stops).
+    browse_env = {"RAPIDTRIAGE_REMOTE": "1"} if remote_browse else {}
+    if resolved_browse_roots:
+        browse_env["RAPIDTRIAGE_BROWSE_ROOTS"] = os.pathsep.join(resolved_browse_roots)
+    saved_browse_env = {key: os.environ.get(key) for key in browse_env}
+    os.environ.update(browse_env)
     no_browser = os.environ.get("RAPIDTRIAGE_NO_BROWSER", "").strip().lower() in {"1", "true", "yes", "on"}
     if host in loopback_hosts and not reload and not no_browser:
         # First-run friction: open the console automatically. The #token=
@@ -122,7 +143,14 @@ def run_web_server(
 
         fragment = f"/#token={auth_token}" if auth_token else ""
         threading.Timer(1.2, lambda: webbrowser.open(f"http://{host}:{port}{fragment}")).start()
-    uvicorn.run("rapidtriage.api.app:app", host=host, port=port, reload=reload)
+    try:
+        uvicorn.run("rapidtriage.api.app:app", host=host, port=port, reload=reload)
+    finally:
+        for key, value in saved_browse_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
     return 0
 
 
@@ -138,6 +166,7 @@ def web_main(argv=None) -> int:
             args.allow_remote_without_auth,
             args.crash_log_dir,
             remote=args.remote,
+            browse_roots=args.browse_roots,
         )
     except RuntimeError as exc:
         parser.error(str(exc))
