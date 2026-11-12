@@ -37,6 +37,7 @@ from typing import NamedTuple
 from ..artifacts.url_redaction import redact_secret_text
 from .artifact_profiles import iter_payload_records
 from .artifacts import SUPPORTED_ARTIFACT_KINDS, run_artifact_collection
+from .clock import now_local_iso
 from .docs import scan_document_candidates
 from .files import run_files_scan
 from .filetime import MIN_PLAUSIBLE, parse_iso_utc
@@ -717,7 +718,7 @@ def run_timeline(
 
     payload = {
         "command": "timeline",
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "root": str(input_root.root_path),
         "inputs": {
             "files": [str(path) for path in normalized_files],

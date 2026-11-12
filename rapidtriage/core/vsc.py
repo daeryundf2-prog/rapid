@@ -9,6 +9,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from .clock import now_local_iso
 from .link_safe_walk import WalkStats, iter_files_no_links, lstat_is_link
 
 # Optional cancellation hook of API callers: called every CANCEL_CHECK_EVERY
@@ -463,7 +464,7 @@ def compare_vsc_snapshots(
         exclude_dirs=exclude_dirs,
     )
     return {
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "tool": "rapidtriage-vsc-compare",
         "current_root": str(current),
         "snapshot_roots": [str(snapshot) for snapshot in snapshots],
@@ -599,7 +600,7 @@ def extract_vsc_changes(
                 }
             )
     manifest = {
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "tool": "rapidtriage-vsc-extract",
         "current_root": comparison["current_root"],
         "snapshot_roots": comparison["snapshot_roots"],

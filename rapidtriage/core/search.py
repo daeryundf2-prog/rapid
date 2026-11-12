@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextvars
-import datetime as dt
 import hashlib
 import json
 import re
@@ -12,6 +11,7 @@ from typing import Any
 
 from .analysis import build_search_analysis
 from .artifact_profiles import iter_artifact_output_rows
+from .clock import now_local_iso
 from .credential_files import credential_file_reason
 from .docs import build_preview, extract_text
 from .files import CATEGORY_RULES
@@ -345,7 +345,7 @@ def run_unified_search(
                 match["metadata"] = compact_search_metadata(match["metadata"])
     payload: dict[str, object] = {
         "command": "search",
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "run_summary": str(summary.get("outputs", {}).get("summary", "")),
         "keywords": normalized,
         "root": scan_root,

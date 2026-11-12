@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import hashlib
 import json
 import os
@@ -12,6 +11,7 @@ from collections.abc import (
 )
 from pathlib import Path
 
+from ..clock import now_local_iso
 from ..files import iter_evidence_paths
 from ..forensic_accuracy import build_accuracy_gate
 from ..incremental import fingerprint_file_index
@@ -210,7 +210,7 @@ def build_run_input_fingerprint(
     fingerprint_value = hasher.hexdigest()
     payload: dict[str, object] = {
         "command": "run-fingerprint",
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "root": str(root),
         "fingerprint": fingerprint_value,
         "summary": {
