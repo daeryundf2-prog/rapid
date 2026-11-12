@@ -237,7 +237,7 @@ class GateCommandTests(unittest.TestCase):
         names = [
             name for name, _args, _cwd in ml.gate_commands(ROOT, frontend_changed=True)
         ]
-        self.assertEqual(names, ["ruff", "contract", "bundle", "exec-bits"])
+        self.assertEqual(names, ["ruff", "contract", "fe-lint", "bundle", "exec-bits"])
 
 
 if __name__ == "__main__":
