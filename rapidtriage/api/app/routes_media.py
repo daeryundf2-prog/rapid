@@ -17,6 +17,7 @@ from ...core.credential_files import (
     credential_withheld_reason_text,
 )
 from ...core.jobs import RunJobStore
+from ...core.readonly_runs import may_persist
 from ...core.sqlite_wal import SqliteWalPreviewError, build_sqlite_wal_preview
 from .analyses import AnalysisRowRef, analysis_row_ref
 from .constants import (
@@ -140,6 +141,8 @@ def build_media_router(
         summary = get_job(store, run_id).summary or {}
         output_value = summary.get("output_dir")
         output_dir = Path(output_value) if isinstance(output_value, str) and output_value else None
+        if not may_persist(output_dir):
+            output_dir = None  # D37 read-only run folder: the thumbnail is answered from memory
         cache_path, data = cached_thumbnail(source_path, size, output_dir)
         headers = {"Cache-Control": THUMBNAIL_CACHE_CONTROL}
         if cache_path is not None:

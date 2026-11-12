@@ -17,6 +17,12 @@ from fastapi.staticfiles import StaticFiles
 from ...core.case_db import open_case_database
 from ...core.crash import write_crash_report
 from ...core.jobs import RunJobStore, default_job_store
+from ...core.readonly_runs import (
+    RUN_READ_ONLY,
+    RUN_READ_ONLY_MESSAGE,
+    ReadOnlyRunWriteError,
+    install_write_guard,
+)
 from .analyses import ANALYSIS_RUNNER, COMPLETION_HOOKS
 from .case_workspace import CaseWorkspace
 from .constants import MUTATING_METHODS
@@ -72,6 +78,35 @@ REVIEW_BATCH_FIELD_LABELS = {
     "shortcut": "단축키(shortcut)",
     "description": "설명(description)",
 }
+# ``/api/runs/{run_id}/…`` — the run a request acts on (D37 read-only gate).
+RUN_SCOPED_PATH = re.compile(r"/api/runs/(?P<run_id>[^/]+)(?P<rest>/.*)?")
+# State-changing methods a read-only run still answers: queries sent as POST bodies (no write; the
+# write guard refuses any lazy write they would make) and removing the run from the list.
+READ_ONLY_RUN_QUERY_POSTS = frozenset({"/search/count", "/search/query", "/search/entities", "/search/hashes"})
+
+
+def read_only_run_refusal(store: RunJobStore, method: str, path: str) -> JSONResponse | None:
+    """409 ``RUN_READ_ONLY`` for a state-changing request on a read-only run (D37), else ``None``."""
+    if method in {"GET", "HEAD", "OPTIONS"}:
+        return None
+    match = RUN_SCOPED_PATH.fullmatch(path)
+    if match is None:
+        return None
+    try:
+        job = store.get(match.group("run_id"))
+    except KeyError:
+        return None
+    if not job.readonly_reason:
+        return None
+    rest = match.group("rest") or ""
+    if (method == "DELETE" and rest in {"", "/"}) or (method == "POST" and rest in READ_ONLY_RUN_QUERY_POSTS):
+        return None
+    return JSONResponse(
+        status_code=409,
+        content={"detail": {"code": RUN_READ_ONLY, "message": RUN_READ_ONLY_MESSAGE, "readonly_reason": job.readonly_reason}},
+    )
+
+
 # Case intake routes (AXIOM adoption E1): every validation error in Korean.
 CASE_INTAKE_PATH = re.compile(r"/api/cases(/.*)?|/api/runs/[^/]+/(problems|processing-snapshot)")
 
@@ -96,6 +131,8 @@ def create_app(
     cases_db_path: str | Path | None = None,
 ) -> FastAPI:
     store = job_store or default_job_store
+    # D37: nothing is ever written into a read-only run folder, whichever writer tries.
+    install_write_guard()
     # Workspace case DB (cases, evidence, notes, processing snapshots); opened on first use.
     case_workspace = CaseWorkspace(store, Path(cases_db_path) if cases_db_path else None)
     # Identifies this app's analyses in the process-wide runner.
@@ -119,6 +156,10 @@ def create_app(
         )
         if auto_incremental_after_analysis not in COMPLETION_HOOKS:
             COMPLETION_HOOKS.append(auto_incremental_after_analysis)
+
+    @api.exception_handler(ReadOnlyRunWriteError)
+    async def read_only_run_write(_request: Request, exc: ReadOnlyRunWriteError):
+        return JSONResponse(status_code=409, content={"detail": exc.to_detail()})
 
     @api.exception_handler(RequestValidationError)
     async def korean_analysis_body_errors(request: Request, exc: RequestValidationError):
@@ -179,6 +220,9 @@ def create_app(
                 supplied = request.headers.get("X-RapidTriage-Token")
                 if supplied is None or not secrets.compare_digest(supplied, expected_token):
                     return JSONResponse(status_code=401, content={"detail": "missing or invalid RapidTriage auth token"})
+            refusal = read_only_run_refusal(store, request.method.upper(), request.url.path)
+            if refusal is not None:
+                return refusal
             return await call_next(request)
         except Exception as exc:
             report = write_crash_report(

@@ -4072,12 +4072,11 @@ class RapidTriageApiTests(unittest.TestCase):
             )
 
             client = api_test_client(RunJobStore())
+            # R8 RI-05: refused when imported (it used to import and answer 403 on access).
             import_response = client.post("/api/runs/import", json={"output_dir": str(output_dir)})
-            self.assertEqual(import_response.status_code, 201, import_response.text)
-            run_id = import_response.json()["run_id"]
-
-            report_response = client.get(f"/api/runs/{run_id}/outputs/report/file")
-            self.assertEqual(report_response.status_code, 403)
+            self.assertEqual(import_response.status_code, 400, import_response.text)
+            self.assertEqual(import_response.json()["detail"]["code"], "IMPORT_OUTPUT_OUTSIDE_FOLDER")
+            self.assertEqual(client.get("/api/runs").json()["runs"], [])
 
     def test_e01_smoke_stage_status_output_is_served_through_run_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

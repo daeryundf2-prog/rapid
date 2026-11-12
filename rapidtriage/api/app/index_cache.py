@@ -10,6 +10,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Generic, TypeVar
 
+from ...core.readonly_runs import may_persist
+
 IndexT = TypeVar("IndexT")
 
 # ``0`` / ``false`` / ``no`` / ``off``: the API keeps every index it builds on demand (timeline
@@ -18,9 +20,14 @@ IndexT = TypeVar("IndexT")
 INDEX_PERSIST_ENV = "RAPIDTRIAGE_INDEX_PERSIST"
 
 
-def index_persist_enabled() -> bool:
-    """Whether on-demand index builds may write their file next to the run outputs (default yes)."""
-    return os.environ.get(INDEX_PERSIST_ENV, "").strip().lower() not in {"0", "false", "no", "off"}
+def index_persist_enabled(path: Path | str | None = None) -> bool:
+    """Whether on-demand index builds may write their file next to the run outputs (default yes).
+
+    ``path`` (the run output folder or the indexed file) inside a read-only run folder
+    (``core/readonly_runs``, D37) answers ``False``: the index stays in memory."""
+    if os.environ.get(INDEX_PERSIST_ENV, "").strip().lower() in {"0", "false", "no", "off"}:
+        return False
+    return may_persist(path)
 
 
 # Bytes hashed at each end of a file by :func:`head_tail_digest`.

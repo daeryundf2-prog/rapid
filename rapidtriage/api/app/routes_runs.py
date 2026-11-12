@@ -33,6 +33,7 @@ from ...core.indicators import (
 )
 from ...core.jobs import (
     RunControlConflict,
+    RunImportError,
     RunJobStore,
     RunOutputDirBusy,
     RunRequest,
@@ -526,6 +527,8 @@ def build_runs_router(
     def import_run(request: RunImportRequest) -> dict[str, Any]:
         try:
             job = store.import_completed_run(request.output_dir)
+        except RunImportError as exc:
+            raise HTTPException(status_code=400, detail=exc.to_detail()) from exc
         except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         return job.to_dict(include_summary=True)
