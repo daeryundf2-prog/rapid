@@ -70,12 +70,26 @@
           "note": { "type": "string" },
           "review": { "type": "object", "additionalProperties": true },
           "reference": { "type": "object", "additionalProperties": true },
+          "row": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["timestamp", "preview", "citation_id", "collection", "kind", "locator"],
+            "properties": {
+              "timestamp": { "type": "string" },
+              "preview": { "type": "string" },
+              "citation_id": { "type": "string" },
+              "collection": { "type": "string" },
+              "kind": { "type": "string" },
+              "locator": { "type": "string" }
+            }
+          },
           "evidence": {
             "type": "object",
             "additionalProperties": false,
             "required": ["path", "name", "size", "modified_at", "hashes", "hash_source"],
             "properties": {
               "path": { "type": "string" },
+              "relative_path": { "type": "string" },
               "name": { "type": "string" },
               "size": { "type": "integer" },
               "modified_at": { "type": "string", "format": "date-time" },
@@ -105,7 +119,8 @@
           "bookmark_id": { "type": "string" },
           "summary": { "type": "string" },
           "path": { "type": "string" },
-          "reason": { "type": "string" }
+          "reason": { "type": "string" },
+          "reason_ko": { "type": "string" }
         }
       }
     }

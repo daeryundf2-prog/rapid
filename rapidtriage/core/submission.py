@@ -8,6 +8,15 @@ from .hash_cache import compute_hashes_cached, compute_hashes_fresh
 from .report_candidates import is_report_candidate
 
 HASH_ALGORITHMS = ("md5", "sha1", "sha256")
+PREVIEW_MAX_CHARS = 200
+
+# Korean reason shown next to each ``skipped`` entry (R8 T-178); ``reason`` stays the stable code.
+SKIP_REASON_KO = {
+    "max-items": "최대 항목 수(max_items)를 넘어 해시하지 않았습니다",
+    "no-source-path": "원본 파일 경로가 없어 해시할 수 없습니다",
+    "outside-allowed-roots": "허용된 원본 폴더 밖의 경로라 해시하지 않았습니다",
+    "missing-or-not-file": "원본 파일이 없거나 파일이 아닙니다",
+}
 
 
 def build_submission_manifest(
@@ -44,7 +53,8 @@ def build_submission_manifest(
             continue
 
         source_path = Path(raw_path).expanduser().resolve()
-        if not any(is_relative_to(source_path, root) for root in allowed):
+        containing_root = next((root for root in allowed if is_relative_to(source_path, root)), None)
+        if containing_root is None:
             skipped.append(build_skip(bookmark, path=source_path, reason="outside-allowed-roots"))
             continue
         if not source_path.is_file():
@@ -62,8 +72,10 @@ def build_submission_manifest(
                 "note": str(bookmark.get("note") or ""),
                 "review": review_payload,
                 "reference": dict(reference) if isinstance(reference, Mapping) else {},
+                "row": build_row_info(bookmark),
                 "evidence": {
                     "path": str(source_path),
+                    "relative_path": source_path.relative_to(containing_root).as_posix(),
                     "name": source_path.name,
                     "size": stat_result.st_size,
                     "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, tz=dt.timezone.utc).isoformat(),
@@ -120,6 +132,36 @@ def compute_hashes(path: Path, *, chunk_size: int = 8 * 1024 * 1024) -> dict[str
     return compute_hashes_cached(path, chunk_size=chunk_size)
 
 
+def _first_text(*values: object) -> str:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def build_row_info(bookmark: Mapping[str, object]) -> dict[str, str]:
+    """The artifact row a manifest item cites (R8 T-178): time, preview and where it came from.
+
+    Case DB marks carry ``reference.citation_id/collection/kind/locator`` and ``snapshot.timestamp``;
+    bookmark-JSON items fall back to their own reference fields (``command`` / ``artifact_key`` /
+    ``pointer``). Missing values are empty strings, never dropped keys."""
+    reference = bookmark.get("reference")
+    ref = reference if isinstance(reference, Mapping) else {}
+    snapshot = bookmark.get("snapshot")
+    snap = snapshot if isinstance(snapshot, Mapping) else {}
+    preview = _first_text(snap.get("summary"), bookmark.get("summary"), bookmark.get("note"))
+    if len(preview) > PREVIEW_MAX_CHARS:
+        preview = preview[: PREVIEW_MAX_CHARS - 1] + "…"
+    return {
+        "timestamp": _first_text(snap.get("timestamp"), ref.get("timestamp")),
+        "preview": preview,
+        "citation_id": _first_text(ref.get("citation_id")),
+        "collection": _first_text(ref.get("collection"), ref.get("source_command"), ref.get("command")),
+        "kind": _first_text(ref.get("kind"), snap.get("artifact_key"), ref.get("target_type")),
+        "locator": _first_text(ref.get("locator"), ref.get("pointer"), ref.get("stable_key")),
+    }
+
+
 def build_skip(bookmark: Mapping[str, object], *, reason: str, path: Path | None = None) -> dict[str, object]:
     snapshot = bookmark.get("snapshot")
     snapshot_payload = snapshot if isinstance(snapshot, Mapping) else {}
@@ -129,6 +171,7 @@ def build_skip(bookmark: Mapping[str, object], *, reason: str, path: Path | None
         "summary": str(bookmark.get("summary") or ""),
         "path": raw_path,
         "reason": reason,
+        "reason_ko": SKIP_REASON_KO.get(reason, reason),
     }
 
 
