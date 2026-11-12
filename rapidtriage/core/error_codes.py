@@ -98,6 +98,11 @@ _ROWS: tuple[ErrorCode, ...] = (
     _e("DISK_SPACE_LOW", None, None, "output", "body", "active",
        "출력 위치의 여유 공간이 빠듯합니다(예상 출력 크기의 오차 범위 안)",
        "가능하면 여유 공간이 더 큰 출력 위치를 지정하세요", "Free disk space is tight for the run output", "T-186"),
+    # -- output volume filled up while a step was writing (core/run/steps.py, T-352) ----------------
+    _e("OUTPUT_DISK_FULL", None, 1, "output", "body", "active",
+       "처리 중 결과 폴더의 여유 공간이 부족해 단계가 실패했습니다(반쯤 쓴 파일은 지움)",
+       "결과 폴더의 공간을 비운 뒤 이어서 처리하세요(완료된 산출물은 그대로 씀)",
+       "Output disk filled up during processing", "T-352"),
     # -- path / access ----------------------------------------------------------------------------
     _e("PATH_OUTSIDE_ALLOWED_ROOT", 403, 1, "path", "http", "active",
        "요청한 경로가 서버가 허용한 위치 밖입니다",

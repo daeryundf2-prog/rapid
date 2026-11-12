@@ -34,6 +34,8 @@ from .run_steps_summary import classify_step_status
 from .tree import read_output_key, read_output_summary
 
 PROBLEM_PREVIEW_LIMIT = 20
+#: ``RunJob.error_type`` of a run stopped by a full output volume (core/run/steps.py ``OutputDiskFull``).
+DISK_FULL_ERROR_TYPE = "OutputDiskFull"
 PROBLEM_MAX_LIMIT = 5000
 
 LEVEL_RANK = {"error": 0, "warning": 1, "notice": 2}
@@ -57,6 +59,7 @@ FIXED_REASONS = {
     "step-skipped": "건너뛴 단계",
     "silent-failure": "조용한 실패 위험",
     "run-failed": "런 실패",
+    "output-disk-full": "결과 폴더 여유 부족 (이어서 처리 가능)",
     "run-cancelled": "런 취소됨",
     "other-warning": "기타 경고",
     "other-notice": "기타 알림",
@@ -99,8 +102,10 @@ def collect_problem_items(store: RunJobStore, run_id: str, job: RunJob) -> list[
     if summary is None:
         if job.status in ("failed", "cancelled", "canceled"):
             reason = "run-failed" if job.status == "failed" else "run-cancelled"
+            if job.status == "failed" and job.error_type == DISK_FULL_ERROR_TYPE:
+                reason = "output-disk-full"  # T-352: one line naming the space shortfall
             items.append({"reason_id": reason, "source": "run", "step": "", "level": "error",
-                          "message": job.error or ("런이 실패했습니다" if reason == "run-failed" else "런이 취소되었습니다")})
+                          "message": job.error or ("런이 실패했습니다" if job.status == "failed" else "런이 취소되었습니다")})
         return items
     for warning in _warnings(summary):
         message = str(warning.get("message") or "")

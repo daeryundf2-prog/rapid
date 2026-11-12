@@ -7,8 +7,17 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from ..extract import extract_manifest_disabled
+from .disk_full import (  # R8 T-352: step exception classification (a full output volume)
+    OUTPUT_DISK_FULL,
+    OutputDiskFull,
+    classify_step_exception,
+    is_disk_full_error,
+    remove_partial_outputs,
+)
 
 __all__ = [
+    "OUTPUT_DISK_FULL",
+    "OutputDiskFull",
     "annotate_step",
     "apply_cap_disclosures",
     "apply_row_truncation_warnings",
@@ -16,6 +25,7 @@ __all__ = [
     "build_extract_step",
     "build_silent_failure_step",
     "build_step_rows",
+    "classify_step_exception",
     "collect_cap_disclosures",
     "count_skip_reasons",
     "docs_index_warning_level",
@@ -27,7 +37,9 @@ __all__ = [
     "files_warning_level",
     "files_warning_messages",
     "highest_warning_level",
+    "is_disk_full_error",
     "mark_reused_step",
+    "remove_partial_outputs",
 ]
 
 

@@ -484,6 +484,7 @@ def run_triage_mode(
     the run process started watching (default: when this call started).
     """
     control_since = control_since or utc_now()
+    run_started_epoch = time.time() - 2.0  # mtime granularity margin (T-352 partial-file cleanup)
     normalized_mode = mode.lower()
     if normalized_mode not in SUPPORTED_RUN_MODES:
         supported = ", ".join(SUPPORTED_RUN_MODES)
@@ -645,7 +646,12 @@ def run_triage_mode(
                 disable_evidence_path_cache()
     except BaseException as exc:
         control_watcher.stop()
-        progress.fail(exc)
+        # T-352: a full output volume is its own failure (OUTPUT_DISK_FULL); half-written files go.
+        stage = str(progress.snapshot().get("stage") or "")
+        failure = classify_step_exception(exc, stage=stage, output_dir=output_dir, since_epoch=run_started_epoch)
+        progress.fail(failure)
+        if failure is not exc:
+            raise failure from exc
         raise
     control_watcher.stop()
     # The status follows plan.outcome (a cancel_all after the report stage started is rejected).

@@ -10,7 +10,7 @@
 - **노출**: `http` 오류 응답 · `body` 응답 본문 필드 · `notice` 목록 부분 결과 · `readonly_reason` 읽기 전용 사유 · `cli` CLI 전용 · `frontend` 프런트 전용.
 - **종료 코드**(CLI): 0 성공 / 1 실패 / 2 사용법 / 3 부분 성공 / 4 대상 없음. T-249 전까지 CLI는 대부분 2로 끝나며, 표의 값은 목표값입니다.
 
-코드 45종 (active 38 · reserved 7).
+코드 46종 (active 39 · reserved 7).
 
 ## 출력 위치 보호 (`output`)
 
@@ -22,6 +22,7 @@
 | `OUTPUT_DIR_BUSY` | 409 | 1 | http | reserved (T-007) | 같은 출력 폴더를 쓰는 런이 대기·실행 중입니다 | 그 런이 끝나기를 기다리거나 다른 출력 폴더를 지정하세요 | Output folder is in use by another run |
 | `DISK_SPACE_INSUFFICIENT` | — | — | body | active (T-186) | 출력 위치의 여유 공간이 최대 출력 크기(원시 이미지의 선택 파티션 크기)보다 작습니다(런은 시작됨, 경고만) | 여유 공간이 넉넉한 출력 위치를 지정하세요. 실제 출력은 할당된 데이터만큼이라 더 작을 수 있습니다 | Free disk space is below the upper bound of the run output |
 | `DISK_SPACE_LOW` | — | — | body | active (T-186) | 출력 위치의 여유 공간이 빠듯합니다(예상 출력 크기의 오차 범위 안) | 가능하면 여유 공간이 더 큰 출력 위치를 지정하세요 | Free disk space is tight for the run output |
+| `OUTPUT_DISK_FULL` | — | 1 | body | active (T-352) | 처리 중 결과 폴더의 여유 공간이 부족해 단계가 실패했습니다(반쯤 쓴 파일은 지움) | 결과 폴더의 공간을 비운 뒤 이어서 처리하세요(완료된 산출물은 그대로 씀) | Output disk filled up during processing |
 
 ## 경로·접근 제한 (`path`)
 
