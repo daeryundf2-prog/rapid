@@ -20,6 +20,7 @@ import { StatusBadge } from "../../components/Badge";
 import { ToneChip } from "../../components/ToneChip";
 import type { ReviewStatus } from "../../contracts/collection";
 import { Icon } from "../../icons";
+import { useWriteBlock } from "../../shell/readOnly";
 import { kindLabel } from "../derived/tables";
 import { CardEmpty } from "./Card";
 import { type DisclosureItem, isNotice, problemMessageKo, stepLabelKo } from "./disclosures";
@@ -433,6 +434,7 @@ export function ReviewCard({
 }
 
 export function ExportsCard({ entries }: { entries: ExportEntry[] }) {
+  const writeBlock = useWriteBlock("run"); // T-348: a missing zip would be written first
   return (
     <section className="dash-section" aria-label="내보내기 이력">
       <h3 className="dash-subhead">
@@ -458,7 +460,10 @@ export function ExportsCard({ entries }: { entries: ExportEntry[] }) {
                 type="button"
                 className="button ghost icon-only"
                 aria-label={`${entry.name} 내려받기`}
+                aria-disabled={entry.build_url && writeBlock ? true : undefined}
+                title={entry.build_url ? writeBlock : undefined}
                 onClick={() => {
+                  if (entry.build_url && writeBlock) return announce(writeBlock);
                   // An extract made before its zip existed: write the zip (POST), then download.
                   const ready = entry.build_url ? buildExportFile(entry.build_url) : Promise.resolve();
                   ready

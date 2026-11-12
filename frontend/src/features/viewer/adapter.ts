@@ -40,6 +40,7 @@ import {
   registerCommand as registerShellCommand,
   useCommandContext as useShellCommandContext,
   useCommands as useShellCommands,
+  withReadOnlyGate,
 } from "../../commands/registry";
 import type { GridRow } from "../../contracts/collection";
 import type { Command, CommandContext } from "../../contracts/command";
@@ -187,7 +188,9 @@ const shellOffs = new Map<string, () => void>();
  * key map, help). `viewer.mark.*` stay local: the shell's `review.mark.*`
  * commands (R/X/I/B) cover them with the same shared implementation.
  */
-export function registerCommand(command: Command): () => void {
+export function registerCommand(registered: Command): () => void {
+  // T-348: the toolbar's mark menu (viewer.mark.* stay local) sees the read-only gate too.
+  const command = withReadOnlyGate(registered);
   commands.set(command.id, command);
   let offShell: (() => void) | null = null;
   if (!command.id.startsWith("viewer.mark.")) {

@@ -12,6 +12,7 @@ import { ReasonButton } from "./ReasonButton";
 import { invalidateSavedSearches } from "./savedSearches";
 import { useSearchState } from "./searchState";
 import "./case.css";
+import { useWriteBlock } from "../../shell/readOnly";
 
 function toggle(list: string[], value: string, on: boolean): string[] {
   return on ? [...list.filter((v) => v !== value), value] : list.filter((v) => v !== value);
@@ -147,11 +148,14 @@ export function SearchOptionsPopover({
     },
   });
 
-  const saveReason = !keywords.length
+  // T-348: a read-only result / server says why instead of answering with a 409.
+  const writeBlock = useWriteBlock("run");
+  const saveReasonOwn = !keywords.length
     ? "저장할 검색어가 없습니다. 먼저 검색어를 입력하세요."
     : !saveName.trim()
       ? "검색 이름을 입력하세요."
       : undefined;
+  const saveReason = writeBlock ?? saveReasonOwn;
 
   return (
     <Popover

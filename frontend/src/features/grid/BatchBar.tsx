@@ -4,6 +4,7 @@ import "../../components/status.css";
 import { MenuButton, type MenuItem } from "../../components/MenuButton";
 import type { CommandContext } from "../../contracts/command";
 import { Icon } from "../../icons";
+import { useWriteBlock } from "../../shell/readOnly";
 import { getRegisteredCommand } from "./adapter";
 import { BATCH_ACTIONS, batchCommandId, OCR_SELECTED_COMMAND } from "./gridCommands";
 import { formatCount } from "./gridUtils";
@@ -101,6 +102,8 @@ export function BatchBar({
     if (promptOpen) inputRef.current?.focus();
   }, [promptOpen]);
 
+  // T-348: the bulk memo writes into the result too.
+  const writeBlock = useWriteBlock("run");
   const barRef = useRef<HTMLDivElement>(null);
   const heightRef = useRef(onHeight);
   heightRef.current = onHeight;
@@ -179,7 +182,15 @@ export function BatchBar({
         ]
       : []),
     ...(onNote
-      ? [{ id: "note", label: "메모…", icon: "message" as const, onSelect: () => setNoteOpen(true) }]
+      ? [
+          {
+            id: "note",
+            label: "메모…",
+            icon: "message" as const,
+            disabledReason: writeBlock,
+            onSelect: () => setNoteOpen(true),
+          },
+        ]
       : []),
   ];
 
@@ -209,7 +220,9 @@ export function BatchBar({
               className="button ghost"
               data-command="grid.batch.note"
               aria-expanded={noteOpen}
-              onClick={() => setNoteOpen((open) => !open)}
+              aria-disabled={writeBlock ? true : undefined}
+              title={writeBlock}
+              onClick={() => (writeBlock ? onDisabled(writeBlock) : setNoteOpen((open) => !open))}
             >
               메모
             </button>

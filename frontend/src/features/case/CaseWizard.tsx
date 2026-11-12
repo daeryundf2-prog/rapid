@@ -22,6 +22,7 @@ import {
   listEvidence,
 } from "../../api/cases";
 import { ApiError } from "../../api/client";
+import { useWriteBlock } from "../../shell/readOnly";
 import { navigate } from "../tree/adapter";
 import { AiRunOptionsField } from "./AiRunOptionsField";
 import { ErrorText } from "./ErrorText";
@@ -228,7 +229,9 @@ export function CaseWizard({
   const caseRootFieldProblem = info.caseRoot.trim() ? caseRootProblem : undefined;
   // Several runs into one explicit folder only when it is a per-run folder (a case folder is shared).
   const explicitOutput = info.caseRoot.trim() ? runForm.outputDir : "";
-  const submitReason = busy
+  // T-348: a read-only result / server says why instead of answering with a 409.
+  const writeBlock = useWriteBlock("server");
+  const submitReasonOwn = busy
     ? "처리 중입니다"
     : runIsActive && toRun.length > 0
       ? "실행 중 런이 있습니다"
@@ -241,6 +244,7 @@ export function CaseWizard({
         outputFieldProblem ??
         (caseRootFieldProblem ? `케이스 폴더: ${caseRootFieldProblem}` : undefined) ??
         outputDirReason(explicitOutput, toRun.length));
+  const submitReason = writeBlock ?? submitReasonOwn;
   const caseLocked = Boolean(progress.caseId);
   const previewBody = caseRunBody(plan.runForm, "");
   const plannedRoot = plan.caseInfo.caseRoot.trim();

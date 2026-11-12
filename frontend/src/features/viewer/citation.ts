@@ -4,6 +4,7 @@
 
 import type { GridRow } from "../../contracts/collection";
 import type { MarkAction, ViewerTarget } from "../../contracts/viewer";
+import { writeBlockReason } from "../../shell/readOnly";
 import { evidencePathOf } from "../../utils/pathDisplay";
 import { evidenceTime } from "../../utils/time";
 import { timestampKindLabel } from "../../utils/timeKinds";
@@ -185,6 +186,8 @@ export function caseDbTargetType(target: ViewerTarget): string | null {
 
 export function markDisabledReason(target: ViewerTarget | null, action: MarkAction): string | undefined {
   if (!target) return "뷰어에 표시된 행이 없습니다.";
+  const readOnly = writeBlockReason("run"); // T-348: marks and notes write into the result
+  if (readOnly) return readOnly;
   // Same routing as the write path: a case-db id or a run-output locator the case DB resolves.
   if (reviewTargetOf(targetAsGridRow(target))) return undefined;
   return action === "bookmark"

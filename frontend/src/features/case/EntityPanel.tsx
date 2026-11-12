@@ -13,6 +13,7 @@ import {
   runAdvancedQuery,
   type SearchRow,
 } from "../../api/searchEntities";
+import { useWriteBlock } from "../../shell/readOnly";
 import { useRoute } from "../../state/hooks";
 import { evidencePathOf } from "../../utils/pathDisplay";
 import { ensureRunCaseDb } from "../grid/reviewActions";
@@ -88,6 +89,7 @@ export function EntityPanel({ runId, onClose }: { runId: string; onClose: () => 
   const [revealed, setRevealed] = useState<Record<string, string>>({});
   const [confirming, setConfirming] = useState<RevealTarget | null>(null);
   const [reason, setReason] = useState("");
+  const writeBlock = useWriteBlock("run"); // T-348: a reveal writes an audit record
   const [revealError, setRevealError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { openCollection } = useRoute();
@@ -307,7 +309,8 @@ export function EntityPanel({ runId, onClose }: { runId: string; onClose: () => 
                           <button
                             type="button"
                             className="button link"
-                            disabled={busy}
+                            disabled={busy || Boolean(writeBlock)}
+                            title={writeBlock}
                             onClick={() => askReveal({ row, entity })}
                           >
                             값 보기
@@ -344,7 +347,7 @@ export function EntityPanel({ runId, onClose }: { runId: string; onClose: () => 
               취소
             </button>
             <ReasonButton
-              reason={reason.trim() ? undefined : "공개 사유를 입력하세요."}
+              reason={writeBlock ?? (reason.trim() ? undefined : "공개 사유를 입력하세요.")}
               type="submit"
               className="button primary"
             >

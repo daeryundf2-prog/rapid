@@ -20,6 +20,7 @@ import { noteKey, setSessionNote } from "../grid/sessionNotes";
 import { currentReviewer, reviewerPlaceholder, setReviewer, typedReviewer } from "./author";
 import type { NotePanelTarget } from "./uiStore";
 import "./review.css";
+import { useWriteBlock } from "../../shell/readOnly";
 
 const FIELD_LABELS: Record<string, string> = {
   note: "메모",
@@ -136,7 +137,9 @@ export function NotePanel({ target, onClose }: { target: NotePanelTarget; onClos
     }
   };
 
-  const reason = !locator
+  // T-348: a read-only result / server says why instead of answering with a 409.
+  const writeBlock = useWriteBlock("run");
+  const reasonOwn = !locator
     ? "출처 위치를 알 수 없는 행에는 메모를 남길 수 없습니다"
     : !text.trim()
       ? "메모 내용을 입력하세요"
@@ -145,6 +148,7 @@ export function NotePanel({ target, onClose }: { target: NotePanelTarget; onClos
         : busy
           ? "저장하는 중입니다"
           : undefined;
+  const reason = writeBlock ?? reasonOwn;
 
   return (
     <Modal

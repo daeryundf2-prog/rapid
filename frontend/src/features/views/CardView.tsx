@@ -40,6 +40,7 @@ import { SelectionBar } from "./SelectionBar";
 import { useAutoLoad, useViewRows } from "./useViewRows";
 import { EmptyState, ErrorState, LoadingCard } from "./ViewState";
 import "./cardMap.css";
+import { useWriteBlock } from "../../shell/readOnly";
 
 export const CARD_HEIGHT = 104;
 /** Rows paged in automatically while the list scrolls (then "더 불러오기"). */
@@ -167,6 +168,7 @@ const Card = memo(function Card({
   onOpen,
   onCite,
   onBookmark,
+  bookmarkReason,
 }: {
   row: GridRow;
   model: CardModel;
@@ -181,6 +183,8 @@ const Card = memo(function Card({
   onOpen: (index: number) => void;
   onCite: (row: GridRow) => void;
   onBookmark: (row: GridRow) => void;
+  /** T-348: why the bookmark cannot be written (read-only result). */
+  bookmarkReason?: string;
 }) {
   const actionTab = active ? 0 : -1;
   return (
@@ -259,7 +263,8 @@ const Card = memo(function Card({
             className="card-action"
             tabIndex={actionTab}
             aria-label={`${model.title} 북마크 태그`}
-            title="북마크 태그 (B)"
+            aria-disabled={bookmarkReason ? true : undefined}
+            title={bookmarkReason ?? "북마크 태그 (B)"}
             onClick={() => onBookmark(row)}
           >
             태그
@@ -394,8 +399,13 @@ export function CardView() {
     );
   };
 
+  const writeBlock = useWriteBlock("run"); // T-348
   const onBookmark = (row: GridRow) => {
     if (!runId) return;
+    if (writeBlock) {
+      announce(writeBlock);
+      return;
+    }
     const rollback = cq.patchRows([row.rowKey], optimisticPatch("bookmark"));
     applyReviewAction(runId, [row], "bookmark").then(
       (result) => announce(`북마크: ${result.applied}건 처리했습니다.${storeNotice(result)}`),
@@ -518,6 +528,7 @@ export function CardView() {
                 onOpen={onOpen}
                 onCite={onCite}
                 onBookmark={onBookmark}
+                bookmarkReason={writeBlock}
               />
             );
           })}

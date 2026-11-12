@@ -161,6 +161,8 @@ export interface RunJob extends RunListItem {
   case_db_ready?: boolean;
   /** The handle `/case-db/ensure` would return, when ready. */
   case_db?: { database: string; case_id: string } | null;
+  /** T-348/D37: why nothing is written for this run (see `shell/readOnly.ts`); null when writable. */
+  readonly_reason?: string | null;
   error?: string;
 }
 

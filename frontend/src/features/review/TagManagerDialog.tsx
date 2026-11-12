@@ -16,6 +16,7 @@ import { ReasonButton } from "../case/ReasonButton";
 import { reviewerPlaceholder, setReviewer, typedReviewer } from "./author";
 import { removeTag, saveNewTag, saveTagChanges, sortTags, useCaseTags } from "./tagStore";
 import "./review.css";
+import { useWriteBlock } from "../../shell/readOnly";
 
 const DIGITS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 export const SYSTEM_TAG_REASON = "기본 태그는 이름을 바꾸거나 삭제할 수 없습니다";
@@ -161,9 +162,12 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
     });
   };
 
-  const saveReason = draft
+  // T-348: a read-only result / server says why instead of answering with a 409.
+  const writeBlock = useWriteBlock("run");
+  const saveReasonOwn = draft
     ? (draftReason(draft, tags) ?? (busy ? "저장하는 중입니다" : undefined))
     : undefined;
+  const saveReason = writeBlock ?? saveReasonOwn;
   const takenBy = (digit: number) => tags.find((tag) => tag.shortcut === digit && tag.id !== draft?.id);
 
   return (
@@ -240,7 +244,7 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
                   <ReasonButton
                     className="button ghost"
                     aria-label={`${tag.name} 태그 삭제`}
-                    reason={tag.kind === "system" ? SYSTEM_TAG_REASON : undefined}
+                    reason={tag.kind === "system" ? SYSTEM_TAG_REASON : writeBlock}
                     onClick={() => {
                       remember();
                       setDraft(null);
