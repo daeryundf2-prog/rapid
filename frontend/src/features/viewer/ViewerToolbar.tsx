@@ -24,12 +24,16 @@ import {
   applyNote,
   applyReviewAction,
   MARK_LABELS,
+  optimisticPatch,
+  optimisticRestore,
   storeNotice,
   undoToastAction,
   unmarkActionOf,
 } from "../grid/reviewActions";
 import { noteKey, setSessionNote } from "../grid/sessionNotes";
+import { inReport } from "../grid/columns/review";
 import { NOTE_PANEL_COMMAND, TAG_MANAGER_COMMAND } from "../review/commands";
+import { currentRowSource } from "../review/rowSource";
 import {
   defaultPropagationTags,
   isSystemTagName,
@@ -169,6 +173,11 @@ export function ViewerToolbar({
   // A different row closes the form.
   // biome-ignore lint/correctness/useExhaustiveDependencies: close on target change only
   useEffect(() => setNoteOpen(false), [key]);
+  // The list's row is the truth once it changes (a mark from the grid or a key, a refetch): this
+  // toolbar's own optimistic state must not hide it (T-036: 해제, then R, stayed 미검토).
+  const rowState = row ? `${row.rowKey}|${row.reviewStatus}|${inReport(row)}|${row.tags.join(",")}` : "";
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the row's judgement changes
+  useEffect(() => setApplied({ key: "", actions: [], cleared: [] }), [rowState]);
 
   const isPressed = (action: string): boolean => {
     if (applied.key === key && applied.actions.includes(action)) return true;
@@ -196,6 +205,11 @@ export function ViewerToolbar({
         undo === "clear-review" ? { ...base, reviewStatus: action as GridRow["reviewStatus"] } : base;
       const result = await applyReviewAction(target.runId, [current], undo);
       const restored = result.restored?.status;
+      // The list on screen follows the un-press too (a later mark then patches from there).
+      currentRowSource()?.patchRows?.(
+        [current.rowKey],
+        result.restored ? optimisticRestore(result.restored) : optimisticPatch(undo),
+      );
       setApplied((prev) => {
         const base = prev.key === key ? prev : { actions: [], cleared: [] };
         const clears = undo === "clear-review" ? EXCLUSIVE : [action];
