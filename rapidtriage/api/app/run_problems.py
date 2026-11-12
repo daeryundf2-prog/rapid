@@ -5,6 +5,11 @@ artifacts output's ``parser_errors``, the silent-failure detector's failing
 checks and the failed/skipped ``steps`` and groups them by a stable
 ``reason_id`` with a Korean label, so the 접수 card shows "행 단위 절단 3" instead
 of 19 loose lines.
+
+R8 T-184: the engine's own limits (E01 truncation and read errors per axis, ``$MFT`` / USN record
+caps, the ``$LogFile`` scan window, caps whose hit is never recorded) are added as Korean items
+(``run_problem_limits``), and the silent-failure detector's English yield messages are replaced
+by Korean sentences.
 """
 
 from __future__ import annotations
@@ -12,14 +17,21 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
 
 from ...core.jobs import RunJob, RunJobStore
 from .helpers import get_job, get_output_path
+from .run_problem_limits import (
+    LIMIT_REASONS,
+    engine_limit_items,
+    korean_silent_message,
+    korean_warning_message,
+)
 from .run_steps_summary import classify_step_status
-from .tree import read_output_key
+from .tree import read_output_key, read_output_summary
 
 PROBLEM_PREVIEW_LIMIT = 20
 PROBLEM_MAX_LIMIT = 5000
@@ -49,7 +61,7 @@ FIXED_REASONS = {
     "other-warning": "기타 경고",
     "other-notice": "기타 알림",
 }
-ALL_REASON_LABELS = {**{rid: label for rid, label, _ in WARNING_REASONS}, **FIXED_REASONS}
+ALL_REASON_LABELS = {**{rid: label for rid, label, _ in WARNING_REASONS}, **FIXED_REASONS, **LIMIT_REASONS}
 
 
 def classify_warning(message: str, level: str) -> str:
@@ -67,6 +79,19 @@ def _warnings(summary: Mapping[str, object]) -> list[Mapping[str, object]]:
     return [item for item in warnings or [] if isinstance(item, Mapping)]
 
 
+def _summary_run_dir(summary: Mapping[str, object]) -> Path | None:
+    value = summary.get("output_dir")
+    return Path(value) if isinstance(value, str) and value else None
+
+
+def _output_summary(store: RunJobStore, run_id: str, name: str) -> Mapping[str, Any]:
+    """``summary`` of one run output (bounded head read); empty when it cannot be opened."""
+    try:
+        return read_output_summary(get_output_path(store, run_id, name))
+    except HTTPException:
+        return {}
+
+
 def collect_problem_items(store: RunJobStore, run_id: str, job: RunJob) -> list[dict[str, Any]]:
     """Every problem item ``{reason_id, source, step, level, message}`` in summary order."""
     items: list[dict[str, Any]] = []
@@ -81,7 +106,8 @@ def collect_problem_items(store: RunJobStore, run_id: str, job: RunJob) -> list[
         message = str(warning.get("message") or "")
         level = str(warning.get("level") or "warning")
         items.append({"reason_id": classify_warning(message, level), "source": "warning",
-                      "step": str(warning.get("step") or ""), "level": level, "message": message})
+                      "step": str(warning.get("step") or ""), "level": level,
+                      "message": korean_warning_message(message)})
     # Steps already count each provider's parser errors: outputs with a recorded 0 are not opened
     # (24 artifact JSONs, some tens of MB, on a real run).
     recorded_errors = {
@@ -116,11 +142,10 @@ def collect_problem_items(store: RunJobStore, run_id: str, job: RunJob) -> list[
             level = str(check.get("level") or "")
             if level in ("pass", "") and not check.get("requires_review"):
                 continue
-            detail = str(check.get("detail") or "")
-            message = f"{check.get('id') or ''}: {check.get('message') or ''}" + (f" ({detail})" if detail else "")
             items.append({"reason_id": "silent-failure", "source": "silent_failure",
                           "step": "silent-failure-detector", "level": "error" if level in ("fail", "failed", "error") else "warning",
-                          "message": message})
+                          "message": korean_silent_message(check)})
+    items.extend(engine_limit_items(summary, _summary_run_dir(summary), lambda name: _output_summary(store, run_id, name)))
     steps = summary.get("steps")
     if isinstance(steps, list):
         for step in steps:
