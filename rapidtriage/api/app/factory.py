@@ -354,7 +354,7 @@ def create_app(
     api.include_router(build_media_router(store))
     api.include_router(build_search_router(store))
     api.include_router(build_search_index_router(store, owner=analysis_owner))
-    api.include_router(build_reports_router(store))
+    api.include_router(build_reports_router(store, case_workspace))
     api.include_router(
         build_review_tools_router(
             store,

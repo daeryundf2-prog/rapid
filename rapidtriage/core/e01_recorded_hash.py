@@ -52,6 +52,8 @@ class RecordedHash:
     sections: list[str] = field(default_factory=list)  # e.g. ["hash", "digest"]
     reason: str = ""  # why the values are empty (Korean), "" when a value was read
     sections_truncated: bool = False
+    #: Raw (often English, long) error text behind ``reason``: logged and audited, never shown.
+    detail: str = ""
 
     def get(self, algorithm: str) -> str:
         return {"md5": self.md5, "sha1": self.sha1}.get(algorithm.lower(), "")
@@ -196,7 +198,7 @@ def read_recorded_acquisition_hash(path: Path) -> RecordedHash:
         with segments[0].open("rb") as handle:
             signature = handle.read(len(EWF1_SIGNATURE))
     except OSError as exc:
-        return RecordedHash(reason=f"이미지 세그먼트를 읽지 못했습니다: {exc}")
+        return RecordedHash(reason="이미지 세그먼트를 읽지 못했습니다", detail=_error_detail(exc))
     try:
         if signature == EWF1_SIGNATURE:
             result = _read_ewf1_sections(segments)
@@ -210,7 +212,11 @@ def read_recorded_acquisition_hash(path: Path) -> RecordedHash:
         else:
             return RecordedHash(reason="EWF(E01/Ex01) 서명이 없어 기록된 취득 해시를 읽지 않았습니다")
     except Exception as exc:  # corrupt image / pyewf C errors: report, never raise into the caller
-        return RecordedHash(reason=f"기록된 취득 해시를 읽는 중 오류: {exc}")
+        # libewf's error chain is English and ~700 chars (R8 WB-8 P2-10): short Korean reason only.
+        return RecordedHash(
+            reason="기록된 취득 해시를 읽는 중 오류가 나 읽지 못했습니다 (손상된 이미지 또는 libewf 오류)",
+            detail=_error_detail(exc),
+        )
     if not (result.md5 or result.sha1) and not result.reason:
         result.reason = "이미지에 기록된 취득 해시가 없습니다 (hash·digest·xhash 섹션 없음)"
     if result.sections_truncated:
@@ -218,6 +224,14 @@ def read_recorded_acquisition_hash(path: Path) -> RecordedHash:
             result.reason + " · " if result.reason else ""
         ) + f"세그먼트당 섹션 상한 {MAX_SECTIONS_PER_SEGMENT}개에 도달해 나머지 섹션은 읽지 않았습니다(잘림)"
     return result
+
+
+#: Characters of the raw error kept in ``RecordedHash.detail`` (audit / log only).
+ERROR_DETAIL_LIMIT = 2000
+
+
+def _error_detail(exc: BaseException) -> str:
+    return f"{type(exc).__name__}: {exc}"[:ERROR_DETAIL_LIMIT]
 
 
 HASH_ALGORITHM_BY_LENGTH = {32: "md5", 40: "sha1", 64: "sha256"}
@@ -235,7 +249,11 @@ def evidence_hash_verdict(
     * input equals the recorded acquisition hash -> ``computed`` (the media was not re-hashed,
       so it is not ``matched``);
     * input equals the container / file-byte digest -> ``matched``;
-    * otherwise -> ``mismatched``; for EWF evidence the message names both comparisons.
+    * EWF: a recorded value of the input's algorithm exists and differs (container differs too)
+      -> ``mismatched``, the message names both comparisons;
+    * EWF: no recorded value of that algorithm (SHA-256 input, no hash section, read error)
+      -> ``computed`` with a "대조 불가" message: nothing was compared, so nothing mismatched;
+    * non-EWF: otherwise -> ``mismatched``.
 
     Status strings are the existing ones (``computed`` / ``matched`` / ``mismatched``); for
     non-EWF evidence (``recorded is None``) the messages are the pre-T-181 ones.
@@ -267,12 +285,18 @@ def evidence_hash_verdict(
     if recorded is None:
         return "mismatched", f"파일 바이트 {label} 기대값 {expected} / 계산값 {actual or '없음'}"
     if recorded_value:
-        recorded_part = f"이미지에 기록된 취득 해시({label} {recorded_value})와 다름"
-    elif algorithm in ("md5", "sha1"):
+        return "mismatched", (
+            f"입력값 {label} {expected}: 이미지에 기록된 취득 해시({label} {recorded_value})와 다름 · "
+            f"컨테이너 파일 바이트 계산값({actual or '없음'})과도 다름 — 매체 해시 재계산은 하지 않음"
+        )
+    # Nothing to compare against (R8 WB-8 P1-1): no recorded value of the input's algorithm (E01
+    # records no SHA-256; MD5-only image; no hash section; unreadable image). A media hash never
+    # equals the container digest, so that difference is normal: ``computed``, never ``mismatched``.
+    if algorithm in ("md5", "sha1"):
         recorded_part = f"이미지에 기록된 취득 해시와 대조 불가({recorded_note})"
     else:
         recorded_part = f"이미지에 기록된 취득 해시와 대조 불가(E01은 {label}를 기록하지 않음)"
-    return "mismatched", (
-        f"입력값 {label} {expected}: {recorded_part} · "
-        f"컨테이너 파일 바이트 계산값({actual or '없음'})과도 다름 — 매체 해시 재계산은 하지 않음"
+    return "computed", (
+        f"입력값 {label} {expected}: {recorded_part} · 컨테이너 파일 바이트 계산값 {actual or '없음'}"
+        " (매체 해시는 컨테이너 해시와 다른 것이 정상) — 매체 해시 재계산은 하지 않음"
     )

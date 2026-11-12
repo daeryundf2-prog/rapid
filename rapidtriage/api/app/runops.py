@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 from fastapi import HTTPException
 
+from ... import __version__
 from ...core.audit import audit_path_for, write_audit_record
 from ...core.case import (
     CaseBookmarkError,
@@ -693,6 +694,8 @@ def build_run_case_report(
     store: RunJobStore,
     run_id: str,
     request: CaseReportCreateRequest,
+    *,
+    evidence_records: list[dict[str, object]] | None = None,
 ) -> str:
     job = get_job(store, run_id)
     if job.summary is None:
@@ -716,12 +719,14 @@ def build_run_case_report(
     )
     # 접수 dashboard case notes fill an empty 분석자 / 범위 (explicit request fields win).
     metadata = apply_case_notes_to_report_metadata(dict(model_to_dict(request)), case_path.parent)
+    report_context = run_report_context(job)
+    metadata.update(run_report_metadata(report_context, evidence_records))
     return build_case_report_markdown(
         run_summary=job.summary,
         case_payload=case_payload,
         submission_manifest=manifest,
         metadata=metadata,
-        report_context=run_report_context(job),
+        report_context=report_context,
     )
 
 
@@ -729,6 +734,18 @@ def run_report_context(job: RunJob) -> dict[str, object]:
     """Four-axis processing scope (T-023) and step counts (T-021) for the case report (T-027);
     computed here because the core report builder does not import the API layer."""
     return {"scope": build_run_scope(job.summary, job_output_dir(job)), "steps": summarize_steps(job.summary)}
+
+
+def run_report_metadata(
+    report_context: Mapping[str, object], evidence_records: list[dict[str, object]] | None
+) -> dict[str, object]:
+    """Report metadata keys from the run (R8 T-182): ``tool_version``, ``evidence_records`` (the
+    case evidence rows' hash results, ``[]`` without a case) and ``processing_scope`` (T-023)."""
+    return {
+        "tool_version": __version__,
+        "evidence_records": list(evidence_records or []),
+        "processing_scope": report_context.get("scope"),
+    }
 
 
 def build_run_validation_package(store: RunJobStore, run_id: str, *, compute_source_hashes: bool = True) -> dict[str, object]:

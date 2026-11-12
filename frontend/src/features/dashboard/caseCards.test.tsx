@@ -42,8 +42,10 @@ describe("접수 case cards (Q-X1/Q-X3/Q-X4, r7 merged cards)", () => {
     const numbers = [...evidence.querySelectorAll(".dash-evidence-number")].map((el) => el.textContent);
     // Korean natural order: E-2 before E-10.
     expect(numbers).toEqual(["E-2", "E-10"]);
-    expect(within(evidence).getByText("해시 불일치")).toBeTruthy();
-    expect(within(evidence).getByText("해시 일치")).toBeTruthy();
+    // E01 (T-129): container-byte labels, a mismatch is amber and says the media hash was not compared.
+    expect(within(evidence).getByText("컨테이너 해시가 입력값과 다름 — 매체 해시 미대조")).toBeTruthy();
+    expect(within(evidence).getByText("컨테이너 해시 일치")).toBeTruthy();
+    expect(within(evidence).queryByText("해시 불일치")).toBeNull();
     const link = within(evidence).getByRole("link", { name: "증거 E-2 이 런 열기" });
     expect(link.textContent).toBe("이 런");
     expect(link.getAttribute("title")).toBe("런 ID r1");

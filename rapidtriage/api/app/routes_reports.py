@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import (
@@ -56,7 +57,10 @@ from .search import (
     normalize_bookmark_tags,
 )
 
-REVIEWER_BUNDLE_CASE_SNAPSHOT = "rapidtriage-reviewer-bundle.review-case.json"
+if TYPE_CHECKING:
+    from .case_workspace import CaseWorkspace
+
+REVIEWER_BUNDLE_CASE_SNAPSHOT ="rapidtriage-reviewer-bundle.review-case.json"
 REVIEWER_BUNDLE_EMPTY_MESSAGE = (
     "리뷰어 번들에 넣을 검토 항목이 없습니다. 행에 검토 상태나 태그를 표시한 뒤 다시 내보내세요."
 )
@@ -80,7 +84,10 @@ def saved_export(path: Path, label: str) -> Path:
 
 def build_reports_router(
     store: RunJobStore,
+    case_workspace: CaseWorkspace | None = None,
 ) -> APIRouter:
+    """``case_workspace``: the console's case DB; its evidence rows (hash results) go into the
+    report metadata as ``evidence_records`` (R8 T-182). Without it the list is empty."""
     router = APIRouter()
 
     @router.get("/api/runs/{run_id}/case")
@@ -199,7 +206,8 @@ def build_reports_router(
     @router.post("/api/runs/{run_id}/case-report")
     def create_case_report(run_id: str, request: CaseReportCreateRequest) -> dict[str, object]:
         report_path = default_case_report_path(store, run_id)
-        markdown = build_run_case_report(store, run_id, request)
+        records = case_workspace.run_evidence_records(run_id) if case_workspace is not None else []
+        markdown = build_run_case_report(store, run_id, request, evidence_records=records)
         exports = write_case_report_exports(markdown, report_path)
         write_case_report_audit(store, run_id, report_path, request)
         audit_path = audit_path_for(report_path)

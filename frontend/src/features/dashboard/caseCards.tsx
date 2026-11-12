@@ -40,6 +40,7 @@ import { formatBytes, partitionLabel } from "../tree/model";
 import { CardEmpty } from "./Card";
 import { DisclosureList, WarningList, warningsSummary } from "./cards";
 import { type DisclosureItem, isNotice, problemMessageKo, stepLabelKo } from "./disclosures";
+import { EvidenceHashChip, EvidenceHashValues } from "./evidenceHash";
 import { evidenceItemCount, formatTime } from "./model";
 
 const n = (value: number) => value.toLocaleString("ko-KR");
@@ -49,24 +50,6 @@ const LEVEL_TONE: Record<string, "danger" | "warn" | "info"> = {
   error: "danger",
   warning: "warn",
   notice: "info",
-};
-const HASH_TONE: Record<string, "ok" | "danger" | "warn" | "info" | ""> = {
-  matched: "ok",
-  computed: "ok",
-  mismatched: "danger",
-  failed: "danger",
-  interrupted: "warn",
-  hashing: "info",
-};
-/** Korean hash state of an evidence item (the server's label is the fallback). */
-const HASH_LABEL: Record<string, string> = {
-  "not-requested": "해시 미검증",
-  hashing: "해시 계산 중",
-  matched: "해시 일치",
-  computed: "해시 계산됨",
-  mismatched: "해시 불일치",
-  failed: "해시 계산 실패",
-  interrupted: "해시 계산 중단",
 };
 
 export const caseQueryKey = (caseId: string) => ["case", caseId] as const;
@@ -276,14 +259,13 @@ function CaseEvidenceItem({
         <b className="dash-evidence-number">{item.evidence_number}</b>
         <span>{EVIDENCE_TYPE_LABEL[item.source_type] ?? item.source_type}</span>
         <span className="dash-wrap">{item.display_name}</span>
-        <ToneChip tone={HASH_TONE[item.hash_status] ?? ""} title={item.hash_message || undefined}>
-          {HASH_LABEL[item.hash_status] ?? item.hash_status_label}
-        </ToneChip>
+        <EvidenceHashChip item={item} />
       </p>
       <p className="dash-note mono dash-wrap" title={item.path}>
         {item.path}
         {item.size_bytes !== null ? ` (${formatBytes(item.size_bytes)})` : ""}
       </p>
+      <EvidenceHashValues item={item} />
       {countText ? <p className="dash-note">항목 수 {countText}</p> : null}
       <div className="dash-evidence-runs">
         {item.runs.length === 0 ? (

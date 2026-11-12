@@ -22,6 +22,15 @@ export interface CaseRunBrief {
   captured_at?: string;
 }
 
+export interface EvidenceHashSegment {
+  name: string;
+  segment_number: number | null;
+  size_bytes: number | null;
+  md5: string;
+  sha1: string;
+  sha256: string;
+}
+
 export interface CaseEvidence {
   citation_id: string;
   case_id: string;
@@ -36,6 +45,12 @@ export interface CaseEvidence {
   hash_status_label: string;
   hash_message: string;
   hashes: Partial<Record<"md5" | "sha1" | "sha256", string>>;
+  /** T-129: `ewf-container-segment-bytes` (E01/Ex01) or `file-bytes`; "" until the hash finished. */
+  hash_scope?: string;
+  /** T-129: per-segment digests of the container bytes (one row for a single file). */
+  hash_segments?: EvidenceHashSegment[];
+  /** T-181: acquisition hash recorded in the image (never recomputed); null for non-EWF evidence. */
+  hash_recorded?: { md5: string; sha1: string; reason: string } | null;
   added_at: string | null;
   runs: CaseRunBrief[];
   /** The run gate: folders always run; a file only when an adapter reads it directly (else 등록만). */
