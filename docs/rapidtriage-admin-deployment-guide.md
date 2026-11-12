@@ -34,6 +34,21 @@ RapidTriage is local-first by default. Deploy it as a workstation tool unless a 
 - If remote access is unavoidable, bind only on an approved internal interface, require `--auth-token`, and record the operator, host, port, token owner, and expiry.
 - Do not expose RapidTriage directly to the internet.
 - Treat browser sessions as evidence-adjacent because source previews, reviewer notes, and report drafts may be visible.
+- For a reviewer who must not change anything, start `rapidtriage web --read-only`: every state-changing API request gets 409 `RUN_READ_ONLY` with `readonly_reason: SERVER_READ_ONLY`, and nothing is written into a result folder.
+- The token comes from `--token`/`--auth-token` or `RAPIDTRIAGE_AUTH_TOKEN` (older alias `RAPIDTRIAGE_TOKEN`). A generated token is printed only to an interactive terminal (never to a pipe, log file or `CI` output), so services set `RAPIDTRIAGE_AUTH_TOKEN` themselves. The browser opens only on an interactive loopback start; `--no-browser` or `RAPIDTRIAGE_NO_BROWSER=1` turns it off.
+
+## Remote TLS Certificate
+
+`rapidtriage web --remote` refuses to start (exit 2) without TLS unless `--allow-plain-http` is given (only behind a TLS-terminating reverse proxy).
+
+1. Pick the hostname reviewers will type (for example `rt-review.lab.internal`) and set `RAPIDTRIAGE_ALLOWED_HOSTS` to it.
+2. Ask the organisation's internal CA for a server certificate whose Subject Alternative Name lists that hostname (or IP).
+3. For a short lab test only, create a self-signed pair: `openssl req -x509 -newkey rsa:3072 -nodes -days 30 -subj "/CN=rt-review.lab.internal" -addext "subjectAltName=DNS:rt-review.lab.internal" -keyout rt-key.pem -out rt-cert.pem`.
+4. Store `rt-key.pem` outside evidence and output folders, readable only by the account that runs RapidTriage.
+5. Start: `rapidtriage web --remote --host 0.0.0.0 --ssl-certfile rt-cert.pem --ssl-keyfile rt-key.pem` with `RAPIDTRIAGE_AUTH_TOKEN` set.
+6. Distribute the CA (or self-signed) certificate to reviewers so their browser trusts it; never tell them to click through a warning.
+7. Record the certificate fingerprint, expiry, host, port and token owner in the deployment record.
+8. Renew before expiry and restart the server with the new files; revoke and replace the pair if the key leaks.
 
 ## Backup, Restore, And Logging
 

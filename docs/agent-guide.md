@@ -27,17 +27,16 @@ rapidtriage evidence D:/evidence/case-001 --json
 ## 3. 서버 띄우기 (HTTP를 쓸 때)
 
 ```sh
-export RAPIDTRIAGE_NO_BROWSER=1
 export RAPIDTRIAGE_AUTH_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
-rapidtriage web --host 127.0.0.1 --port 8799
+rapidtriage web --read-only --no-browser --host 127.0.0.1 --port 8799
 ```
 
-- `RAPIDTRIAGE_NO_BROWSER=1`: 브라우저를 열지 않는다. 지금은 `--no-browser` 플래그가 없으므로 환경 변수로만 끈다.
+- `--no-browser`(또는 `RAPIDTRIAGE_NO_BROWSER=1`): 브라우저를 열지 않는다. 터미널이 아니거나 `CI`이거나 `--read-only`면 원래 열지 않는다.
 - 포트는 기본값(8765)이나 다른 빈 포트(예: 8799)를 쓴다. **8710은 쓰지 않는다.**
-- 토큰을 미리 `RAPIDTRIAGE_AUTH_TOKEN`으로 정해 두면 에이전트가 값을 안다. 서버는 그 토큰을 표준 출력에 찍으므로 로그를 공유하지 않는다.
+- 토큰을 미리 `RAPIDTRIAGE_AUTH_TOKEN`(옛 이름 `RAPIDTRIAGE_TOKEN`)으로 정해 두면 에이전트가 값을 안다. 서버가 만든 토큰은 대화형 터미널에만 찍히고 파이프·로그·`CI` 출력에는 찍히지 않는다.
 - 모든 `/api` 요청에 헤더 `X-RapidTriage-Token: <토큰>`을 붙인다. 쿼리 문자열 `?token=`은 401로 거절된다.
 - 서버 생존 확인: `GET /api/health`.
-- 읽기 전용 서버(`web --read-only`)는 아직 없다(T-112). 지금은 쓰기 가능한 서버뿐이므로, 쓰기 요청은 사용자가 지시한 것만 보낸다.
+- `--read-only`: 쓰기 요청은 409 `RUN_READ_ONLY`(`readonly_reason: SERVER_READ_ONLY`)로 거절되고 결과 폴더에 아무것도 쓰지 않는다. 검토 표시 등 쓰기가 필요하면 `--read-only` 없이 띄우고, 쓰기 요청은 사용자가 지시한 것만 보낸다.
 
 curl 예시(이하 HTTP 예시는 같은 헤더를 붙인다고 가정한다):
 
@@ -191,7 +190,7 @@ GET /api/runs/{run_id}/submission-manifest/file
 ## 7. 알려진 제한 (이 초안 기준)
 
 - **증거 안에 쓰기**: 출력 가드(`core/output_guard.py`)가 `run`·`POST /api/runs`·케이스 런·재시도·여러 CLI 도구에서 증거 안 출력과 출력 안 증거를 거절한다. 남은 틈: 단일 파일 `--output`을 쓰는 CLI 명령(`manifest`·`docs`·`files`·`artifacts`·`timeline` 등)은 기본값이 현재 폴더라, 증거 폴더 안에서 실행하면 그 안에 쓴다 — 항상 `--output`에 증거 밖 경로를 준다.
-- 읽기 전용 서버·`--no-browser` 플래그 없음(T-112 예정). 브라우저는 `RAPIDTRIAGE_NO_BROWSER=1`로만 끈다.
+- 읽기 전용 서버(`--read-only`)에서 런 질의 POST(`/search/count`·`/search/query`·`/search/entities`·`/search/hashes`)와 경로 사전 확인 POST만 응답한다. 그 밖의 POST·PATCH·PUT·DELETE는 409다.
 - 멱등 키 없음, 진행 스트림 없음(폴링만), 해시 작업 취소 없음.
 - 일부 GET이 파일을 쓴다(보고서 파일·추출 zip·색인 캐시, T-030 예정).
 - `_envelope`·`commands --json`·오류 코드표 없음(T-111·T-007·T-119 예정). CLI 도움말은 영어.

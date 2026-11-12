@@ -406,6 +406,11 @@ def handle_web(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_s
                 args.crash_log_dir,
                 remote=args.remote,
                 browse_roots=args.browse_roots,
+                read_only=args.read_only,
+                no_browser=args.no_browser,
+                ssl_certfile=args.ssl_certfile,
+                ssl_keyfile=args.ssl_keyfile,
+                allow_plain_http=args.allow_plain_http,
             )
         except RuntimeError as exc:
             parser.error(str(exc))

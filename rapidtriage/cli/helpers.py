@@ -318,7 +318,10 @@ def add_web_arguments(parser: argparse.ArgumentParser) -> None:
         "--auth-token",
         "--token",
         dest="auth_token",
-        help="Require X-RapidTriage-Token for API calls (also read from RAPIDTRIAGE_TOKEN or RAPIDTRIAGE_AUTH_TOKEN)",
+        help=(
+            "Require X-RapidTriage-Token for API calls (default: RAPIDTRIAGE_AUTH_TOKEN, or its older alias "
+            "RAPIDTRIAGE_TOKEN; a loopback server without one generates a token)"
+        ),
     )
     parser.add_argument(
         "--remote",
@@ -339,6 +342,29 @@ def add_web_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--allow-remote-without-auth", action="store_true", help="Allow non-localhost binding without auth token")
     parser.add_argument("--reload", action="store_true", help="Enable uvicorn reload for UI/API development")
     parser.add_argument("--crash-log-dir", help="Local-only directory for web/API crash reports")
+    parser.add_argument(
+        "--read-only",
+        action="store_true",
+        help=(
+            "Serve every run read-only: state-changing API requests get 409 RUN_READ_ONLY "
+            "(readonly_reason SERVER_READ_ONLY) and nothing is written into a result folder; no browser is opened"
+        ),
+    )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help=(
+            "Do not open a browser (also RAPIDTRIAGE_NO_BROWSER=1). A browser opens only for a loopback "
+            "server on an interactive terminal outside CI"
+        ),
+    )
+    parser.add_argument("--ssl-certfile", metavar="PEM", help="TLS certificate file: serve HTTPS (needs --ssl-keyfile)")
+    parser.add_argument("--ssl-keyfile", metavar="PEM", help="TLS private key file for --ssl-certfile")
+    parser.add_argument(
+        "--allow-plain-http",
+        action="store_true",
+        help="Let --remote serve plain HTTP without --ssl-certfile/--ssl-keyfile (e.g. behind a TLS reverse proxy)",
+    )
 
 
 def parse_named_cli_values(
