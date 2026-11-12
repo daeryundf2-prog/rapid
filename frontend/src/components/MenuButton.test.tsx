@@ -1,6 +1,9 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useFocusTrap } from "../a11y/focus";
 import { MenuButton } from "./MenuButton";
+import { placePopover } from "./Popover";
 
 afterEach(cleanup);
 
@@ -93,5 +96,98 @@ describe("MenuButton (visual-polish S5/S6)", () => {
     fireEvent.keyDown(screen.getByRole("menu"), { key: "Tab" });
     expect(screen.queryByRole("menu")).toBeNull();
     expect(document.activeElement).toBe(trigger);
+  });
+});
+
+describe("MenuButton portal + collision correction (plan r8 T-014)", () => {
+  it("renders the menu in document.body, outside any clipping pane, and keeps focus return", () => {
+    const pane = document.createElement("div");
+    pane.style.overflow = "clip";
+    document.body.appendChild(pane);
+    render(
+      <MenuButton
+        label="더보기"
+        testId="viewer-actions-menu"
+        items={[{ id: "a", label: "원본 열기", onSelect: vi.fn() }]}
+      >
+        ⋯
+      </MenuButton>,
+      { container: pane },
+    );
+    const trigger = screen.getByTestId("viewer-actions-menu");
+    fireEvent.click(trigger);
+    const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "") as HTMLElement;
+    expect(menu.getAttribute("aria-label")).toBe("더보기");
+    expect(menu.parentElement).toBe(document.body);
+    expect(pane.contains(menu)).toBe(false);
+    expect(menu.classList.contains("popover-portal")).toBe(true);
+    expect(menu.style.left).not.toBe("");
+    expect(menu.dataset.placement).toBe("below");
+    const item = menu.querySelector<HTMLElement>("[role=menuitem]") as HTMLElement;
+    expect(document.activeElement).toBe(item);
+    // A press on a portalled item counts as inside (the menu does not close under it).
+    fireEvent.pointerDown(item);
+    expect(screen.getByRole("menu")).toBeTruthy();
+    fireEvent.keyDown(menu, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    pane.remove();
+  });
+
+  it("inside a focus trap (the narrow viewer drawer) the portalled menu keeps focus", () => {
+    function Drawer() {
+      const ref = useRef<HTMLElement>(null);
+      useFocusTrap(ref, { active: true, returnFocus: false });
+      return (
+        <aside ref={ref}>
+          <button type="button">닫기</button>
+          <MenuButton label="더보기" testId="trap-menu" items={[{ id: "a", label: "A", onSelect: vi.fn() }]}>
+            ⋯
+          </MenuButton>
+        </aside>
+      );
+    }
+    render(<Drawer />);
+    const trigger = screen.getByTestId("trap-menu");
+    fireEvent.click(trigger);
+    const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "") as HTMLElement;
+    const item = menu.querySelector<HTMLElement>("[role=menuitem]") as HTMLElement;
+    expect(document.activeElement).toBe(item);
+    // An element outside both the drawer and its menu is still pulled back.
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    outside.focus();
+    expect(outside).not.toBe(document.activeElement);
+    outside.remove();
+  });
+
+  // The viewer's ⋯ sits near the viewer pane's left edge; align="end" used to push the list
+  // past that edge (first letters cut off). Placement shifts it back inside the viewport.
+  const trigger = (left: number, top = 60) => ({ top, bottom: top + 28, left, right: left + 28 });
+  const panel = { width: 240, height: 320 };
+  for (const width of [880, 1280, 1920]) {
+    it(`keeps an end-aligned menu inside a ${width}px viewport at either edge`, () => {
+      const viewport = { width, height: 720 };
+      for (const left of [0, 12, width / 2, width - 40]) {
+        const place = placePopover(trigger(left), panel, viewport, "end");
+        expect(place.left).toBeGreaterThanOrEqual(8);
+        expect(place.left + panel.width).toBeLessThanOrEqual(width - 8);
+      }
+      // Room permitting, the end edge still lines up with the trigger.
+      const mid = placePopover(trigger(width / 2), panel, viewport, "end");
+      expect(mid.left).toBe(width / 2 + 28 - 240);
+    });
+  }
+
+  it("flips a below menu above near the viewport bottom, and an above menu below near the top", () => {
+    const viewport = { width: 880, height: 720 };
+    const low = placePopover(trigger(400, 660), panel, viewport, "end");
+    expect(low.above).toBe(true);
+    expect(low.top + panel.height).toBeLessThanOrEqual(660);
+    const high = placePopover(trigger(400, 20), panel, viewport, "end", "above");
+    expect(high.above).toBe(false);
+    expect(high.top).toBe(20 + 28 + 4);
+    const roomy = placePopover(trigger(400, 500), panel, viewport, "end", "above");
+    expect(roomy.above).toBe(true);
   });
 });

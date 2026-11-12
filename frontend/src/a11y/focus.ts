@@ -16,6 +16,20 @@ function resolveInitial(root: HTMLElement, spec: FocusTrapOptions["initialFocus"
   return spec.current;
 }
 
+/**
+ * Inside the trap: in `root`, or in a portalled popover / menu (`.popover-portal`, plan r8 T-014)
+ * whose trigger (`aria-controls`) is in `root` — e.g. the viewer drawer's ⋯ menu.
+ */
+function insideTrap(root: HTMLElement, node: unknown): boolean {
+  if (!(node instanceof Node)) return false;
+  if (root.contains(node)) return true;
+  const portal = node instanceof Element ? node.closest<HTMLElement>(".popover-portal[id]") : null;
+  if (!portal) return false;
+  return Array.from(root.querySelectorAll("[aria-controls]")).some(
+    (el) => el.getAttribute("aria-controls") === portal.id,
+  );
+}
+
 export function useFocusTrap(ref: RefObject<HTMLElement | null>, options: FocusTrapOptions): void {
   const { active, initialFocus, returnFocus = true } = options;
   const initialRef = useRef(initialFocus);
@@ -40,17 +54,17 @@ export function useFocusTrap(ref: RefObject<HTMLElement | null>, options: FocusT
       const firstEl = tabbables[0] as HTMLElement;
       const lastEl = tabbables[tabbables.length - 1] as HTMLElement;
       const current = document.activeElement;
-      if (event.shiftKey && (current === firstEl || current === root || !root.contains(current))) {
+      if (event.shiftKey && (current === firstEl || current === root || !insideTrap(root, current))) {
         event.preventDefault();
         lastEl.focus();
-      } else if (!event.shiftKey && (current === lastEl || !root.contains(current))) {
+      } else if (!event.shiftKey && (current === lastEl || !insideTrap(root, current))) {
         event.preventDefault();
         firstEl.focus();
       }
     };
     // Keep focus inside if something outside steals it (e.g. async re-render).
     const onFocusIn = (event: FocusEvent) => {
-      if (event.target instanceof Node && !root.contains(event.target)) {
+      if (event.target instanceof Node && !insideTrap(root, event.target)) {
         (getTabbables(root)[0] ?? root).focus();
       }
     };
