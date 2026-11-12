@@ -107,6 +107,24 @@ export function filesServerSort(query: CollectionQuery): CollectionQuery["sort"]
   return query.sort && FILES_SERVER_SORT_KEYS.has(query.sort.key) ? query.sort : undefined;
 }
 
+/**
+ * Default order of the files list when the examiner picked none (r8 C.9.1, T-173): 수정 newest
+ * first on the server's evidence-time column. The server's list order is newest HOST mtime
+ * first, where recovered copies written during the run (`_deleted_mft`, carved) can lead; its
+ * `mtime` sort reads the evidence time (filesystem / listing / NTFS $SI) and puts copy times with
+ * no evidence time last, so the first screen is files with evidence times.
+ */
+export const FILES_DEFAULT_SORT: NonNullable<CollectionQuery["sort"]> = { key: "mtime", order: "desc" };
+
+/**
+ * The sort a files page is fetched with: the examiner's server sort, else FILES_DEFAULT_SORT —
+ * also under a client-only key (its loaded rows sort in the browser), so every page of one query
+ * key comes from the same server order.
+ */
+export function filesFetchSort(query: CollectionQuery): NonNullable<CollectionQuery["sort"]> {
+  return filesServerSort(query) ?? FILES_DEFAULT_SORT;
+}
+
 /** Image evidence kinds (core/run/source.py source types) and image file extensions. */
 const IMAGE_SOURCE_TYPES = new Set([
   "e01",
@@ -395,7 +413,8 @@ export const filesCollection: CollectionDef = {
       { ids: query.flags, grade: query.flagGrade, conditions: query.rowConditions },
       { dir: query.ref.dir, recursive: query.ref.recursive, special: query.ref.special },
       // Server sort + name/path text filter over the whole list (plan r7 §3.2 L2, C-D1).
-      { sort: filesServerSort(query), q: query.text?.trim() || undefined },
+      // No sort picked: the default puts live, allocated files first (T-173).
+      { sort: filesFetchSort(query), q: query.text?.trim() || undefined },
     ),
   widthPriority: () => FILES_PRIORITY,
   mapRow: (raw, position, ctx) => {

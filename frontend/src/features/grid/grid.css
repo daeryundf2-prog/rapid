@@ -395,10 +395,17 @@
   text-overflow: ellipsis;
 }
 
-/* Acquisition-copy host time (files 수정): shown, but not as an evidence time. */
+/* Acquisition-copy host time (files 수정): shown, but not as an evidence time — a clock marker
+   named "증거 시각 아님", muted, never italic (r8 C.9.1, T-173). */
 .grid-cell-copytime {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   color: var(--text-muted);
-  font-style: italic;
+}
+
+.grid-copytime-mark {
+  flex: 0 0 auto;
 }
 
 .grid-header .grid-cell-select,

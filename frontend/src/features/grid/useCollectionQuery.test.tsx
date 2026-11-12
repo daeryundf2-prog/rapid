@@ -32,7 +32,10 @@ describe("useCollectionQuery paging", () => {
     const { wrapper } = queryWrapper();
     const { result } = renderHook(() => useCollectionQuery(filesQuery, { runId: "run-1" }), { wrapper });
     await waitFor(() => expect(result.current.total).toBe(600));
-    expect(calls.map((c) => c.url)).toEqual(["/api/runs/run-1/files?offset=0&limit=250"]);
+    // No sort picked: the files list asks for its default 수정 order (T-173).
+    expect(calls.map((c) => c.url)).toEqual([
+      "/api/runs/run-1/files?offset=0&limit=250&sort=mtime&order=desc",
+    ]);
     expect(result.current.pageCount).toBe(3);
     expect(result.current.loadedCount).toBe(250);
     expect(result.current.backend).toBe("file");
@@ -419,7 +422,9 @@ describe("useCollectionQuery server sort (artifact-columns §4.1)", () => {
     const q: CollectionQuery = { ...filesQuery, sort: { key: "timestamp", order: "asc" } };
     const { result } = renderHook(() => useCollectionQuery(q, { runId: "run-1" }), { wrapper });
     await waitFor(() => expect(result.current.total).toBe(10));
-    expect(calls[0]?.url).not.toContain("sort=");
+    // A client-only key never reaches the server; the files list keeps its default order (T-173).
+    expect(calls[0]?.url).not.toContain("sort=timestamp");
+    expect(calls[0]?.url).toContain("sort=mtime&order=desc");
     expect(result.current.sortState).toBeNull();
   });
 });

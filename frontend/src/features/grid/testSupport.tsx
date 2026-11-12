@@ -117,13 +117,20 @@ export function mockLayout(width = 1000, height = 600): () => void {
 }
 
 /** Raw `files` API candidates `from..to-1`. */
+/** 수정 time of fixture file `index`: one second older per index, so the files list's default
+ * `mtime desc` order (T-173) is the list order. Noon UTC keeps every fixture on 2026-01-01. */
+const FILE_FIXTURE_EPOCH_MS = Date.UTC(2026, 0, 1, 12);
+export function fileFixtureTime(index: number): string {
+  return new Date(FILE_FIXTURE_EPOCH_MS - index * 1000).toISOString().replace(/\.000Z$/, "Z");
+}
+
 export function fileCandidates(from: number, to: number) {
   return Array.from({ length: Math.max(0, to - from) }, (_, i) => ({
     path: `C:/evidence/dir${(from + i) % 7}/file-${from + i}.txt`,
     name: `file-${from + i}.txt`,
     extension: ".txt",
     size: 1000 + (from + i),
-    modified_at: `2026-01-01T00:00:${String((from + i) % 60).padStart(2, "0")}Z`,
+    modified_at: fileFixtureTime(from + i),
     categories: ["document"],
   }));
 }
