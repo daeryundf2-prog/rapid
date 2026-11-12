@@ -37,6 +37,10 @@ def register_system(sub: argparse._SubParsersAction) -> None:
     )
     audit_verify.add_argument("audit_file", help="Export audit file to verify")
     audit_verify.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    audit_verify.add_argument(
+        "--expect-last",
+        help="Last record_sha256 kept elsewhere; a different last record (tail removed, file rewritten) is broken",
+    )
 
     enterprise_policy = sub.add_parser(
         "enterprise-policy",

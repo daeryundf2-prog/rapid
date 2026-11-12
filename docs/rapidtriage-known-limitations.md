@@ -88,7 +88,8 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 ### 감사 기록: DB 안에는 해시 사슬이 없다
 
 - 케이스 DB의 `audit_event` 표(`core/case_db/constants.py:782-797`)에는 앞 행의 해시를 담는 열이 없다. 추가 전용은 SQLite 트리거 두 개(`audit_event_no_update`·`audit_event_no_delete`, `:799-809`)로만 지킨다. DB 파일에 쓸 수 있는 사람이 트리거를 지우거나 파일을 직접 고치면 RapidTriage는 그것을 알아채지 못한다.
-- 해시 사슬은 내보내기 감사 이력 파일 `rapidtriage-export-audit.jsonl`에만 있다. 각 줄이 앞 줄의 SHA-256(`previous_record_sha256`)을 담고(`EXPORT_AUDIT_LOG_NAME`·`CHAIN_FIELD`, `core/audit.py:22,25`), `verify_audit_chain`(`core/audit.py:250`)이 사슬 깨짐을 찾는다. 이 검증 함수를 부르는 CLI 명령은 아직 없다(T-359에서 `rapidtriage audit-verify` 예정). 사슬 머리를 외부에서 서명·공증하는 기능도 없다.
+- 해시 사슬은 내보내기 감사 이력 파일 `rapidtriage-export-audit.jsonl`에만 있다. 각 줄이 앞 줄의 SHA-256(`previous_record_sha256`)을 담고(`EXPORT_AUDIT_LOG_NAME`·`CHAIN_FIELD`, `core/audit.py:22,25`), `verify_audit_chain`(`core/audit.py:265`)이 사슬 깨짐을 찾고 `rapidtriage audit-verify`가 이를 부른다. 사슬 줄마다 자기 해시(`record_sha256`)가 있어야 하고(없으면 깨짐), `.audit` 사본도 다시 계산해 같은 폴더 이력에 있는지 본다. 기록 0줄이면 "확인 불가"(종료 3).
+- **사슬만으로 알 수 없는 것**: 끝 줄을 지우거나 파일 전체를 다시 계산해 바꿔 쓰면 사슬은 그대로 온전하다. 마지막 줄의 `record_sha256`을 따로 보관했다가 `--expect-last`로 비교해야 잡힌다. 출력의 `not_proven`이 이를 매번 적는다. 케이스 DB `audit_event`에는 내보내기 감사의 마지막 해시가 기록되지 않아 DB로 대조할 수는 없다. 사슬 머리를 외부에서 서명·공증하는 기능도 없다.
 
 ### 그 밖의 E01 엔진 한계
 

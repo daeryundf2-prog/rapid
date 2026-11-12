@@ -28,11 +28,16 @@ RECORD_HASH_FIELD = "record_sha256"
 # T-359: how to verify, carried at the head of every export record (at most 5 lines).
 VERIFICATION_METHOD_FIELD = "verification_method"
 VERIFICATION_METHOD_LINES: tuple[str, ...] = (
-    f"대상: 같은 폴더의 {EXPORT_AUDIT_LOG_NAME} (한 줄 = 내보내기 1건, 덧붙이기만 함)",
-    f"줄 해시: {RECORD_HASH_FIELD} = 이 필드를 뺀 줄을 키 정렬·공백 없는 UTF-8 JSON으로 만든 SHA-256",
-    f"사슬: {CHAIN_FIELD} = 직전 줄 원문(UTF-8, 줄바꿈 제외)의 SHA-256, 첫 줄은 빈 값",
-    "순서: 첫 줄부터 차례로 확인, 사슬 필드가 없는 옛 줄은 '사슬 이전'으로 셈(깨짐 아님)",
-    f"명령: rapidtriage audit-verify {EXPORT_AUDIT_LOG_NAME} --json (온전 종료 0 · 깨짐 종료 3)",
+    f"대상: 같은 폴더의 {EXPORT_AUDIT_LOG_NAME} (한 줄 = 내보내기 1건, 덧붙이기만 함; .audit 파일은 마지막 1건 사본)",
+    f"줄 해시: {RECORD_HASH_FIELD} = 이 필드를 뺀 기록의 SHA-256, 인코딩은 UTF-8 · 키 사전순 정렬 · 구분자 ',' ':' (공백 없음)"
+    " · 비ASCII 문자 이스케이프 안 함 = Python json.dumps(ensure_ascii=False, sort_keys=True, separators=(',', ':'))",
+    f"사슬: {CHAIN_FIELD} = 직전 줄 원문(UTF-8, 줄바꿈 제외)의 SHA-256, 첫 줄은 빈 값; 사슬 줄에 {RECORD_HASH_FIELD}가 없으면 깨짐",
+    "순서: 첫 줄부터 차례로 확인, 사슬 필드가 없는 옛 줄은 '사슬 이전'으로 셈(깨짐 아님); 끝 줄 삭제는 마지막 줄 해시를 따로 보관해야 알 수 있음",
+    f"명령: rapidtriage audit-verify {EXPORT_AUDIT_LOG_NAME} --json [--expect-last <마지막 {RECORD_HASH_FIELD}>] (온전 종료 0 · 깨짐·기록 0줄 종료 3)",
+)
+# What an unanchored chain check cannot show (printed by audit-verify unless --expect-last matched).
+UNANCHORED_LIMITS: tuple[str, ...] = (
+    "끝 줄 삭제·파일 전체 재작성은 이 검사로 알 수 없음 — 마지막 줄 record_sha256을 따로 보관해 --expect-last로 비교",
 )
 
 
@@ -257,53 +262,77 @@ def append_audit_line(log_path: Path, record: Mapping[str, object]) -> dict[str,
     return normalized
 
 
-def verify_audit_chain(path: Path) -> dict[str, object]:
+def verify_audit_chain(path: Path, *, expected_last_sha256: str | None = None) -> dict[str, object]:
     """Check an export audit file and name broken lines by 1-based number.
 
-    A line without ``previous_record_sha256`` before any chained line is "사슬 이전" (pre-chain:
-    counted, not broken); an R7 sidecar (one indented JSON object) is one pre-chain record. A
-    chained line must carry the SHA-256 of the previous line. A line that cannot be read, or
-    whose content no longer matches its own ``record_sha256``, is named itself; when only the
-    link to the next line breaks, the previous line is named (it changed, or a line after it
-    was removed).
+    Layout is decided by line count (R8 T-359 review P0-1): a file with one non-blank line, or
+    with several lines that are each one JSON value, is the JSONL history (``lines``); only an
+    indented multi-line JSON object is an ``.audit`` sidecar. Both are checked the same way:
+
+    * a line without ``previous_record_sha256`` before any chained line is "사슬 이전" (pre-chain:
+      counted, not broken) when it still looks like an audit record (has ``command``);
+    * a chained record must carry ``record_sha256`` and it must equal the recomputed hash
+      (a missing key is broken, not skipped);
+    * a chained line must carry the SHA-256 of the previous line (when only that link breaks,
+      the previous line is named: it changed, or a line after it was removed);
+    * a sidecar's record must also be one of the history's records when the history is next to it;
+    * zero records is not intact (nothing was checked).
+
+    Without an anchor the check cannot see lines removed from the end or a file rewritten as a
+    whole; ``expected_last_sha256`` (the last ``record_sha256`` kept elsewhere) closes that.
     """
     text = path.read_text(encoding="utf-8", errors="replace")
     totals = {"records": 0, "pre_chain": 0, "chained": 0, "unreadable": 0}
     broken: dict[int, str] = {}
-    try:
-        whole = json.loads(text)
-    except json.JSONDecodeError:
-        whole = None
-    if isinstance(whole, dict):
-        totals["records"] = 1
-        totals["chained" if CHAIN_FIELD in whole else "pre_chain"] = 1
-        return _chain_report(path, "sidecar", totals, broken)
+    content_lines = [(number, line) for number, line in enumerate(text.splitlines(), start=1) if line.strip()]
+    layout = "lines"
+    sidecar_record: dict[str, object] | None = None
+    if len(content_lines) > 1:
+        try:
+            json.loads(content_lines[0][1])
+            first_is_value = True
+        except json.JSONDecodeError:
+            first_is_value = False
+        if not first_is_value:
+            try:
+                whole = json.loads(text)
+            except json.JSONDecodeError:
+                whole = None
+            if isinstance(whole, dict):
+                layout = "sidecar"
+                sidecar_record = whole
+    entries: list[tuple[int, str, object]] = (
+        [(1, "", sidecar_record)] if sidecar_record is not None else [(n, line, _json_or_none(line)) for n, line in content_lines]
+    )
 
     previous: tuple[int, str] | None = None
     chain_started = False
-    for number, line in enumerate(text.splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError:
-            record = None
+    last_hash = ""
+    for number, line, record in entries:
         if not isinstance(record, dict):
             totals["unreadable"] += 1
             broken.setdefault(number, "JSON 한 줄로 읽을 수 없음")
-        elif CHAIN_FIELD not in record:
-            totals["records"] += 1
+            previous = (number, line)
+            continue
+        totals["records"] += 1
+        if CHAIN_FIELD not in record:
             if chain_started:
                 broken.setdefault(number, "사슬이 시작된 뒤에 사슬 필드가 없는 줄")
+            elif "command" not in record:
+                broken.setdefault(number, "감사 기록 형식이 아님(command 없음)")
             else:
                 totals["pre_chain"] += 1
-        else:
-            totals["records"] += 1
-            totals["chained"] += 1
-            chain_started = True
-            own = record.get(RECORD_HASH_FIELD)
-            if own is not None and str(own) != _record_self_hash(record):
-                broken.setdefault(number, "줄 내용이 이 줄의 해시와 다름(이 줄이 바뀜)")
+            previous = (number, line)
+            continue
+        totals["chained"] += 1
+        chain_started = True
+        own = record.get(RECORD_HASH_FIELD)
+        if not own:
+            broken.setdefault(number, f"사슬 줄에 {RECORD_HASH_FIELD}가 없음(줄 해시를 지운 줄)")
+        elif str(own) != _record_self_hash(record):
+            broken.setdefault(number, "줄 내용이 이 줄의 해시와 다름(이 줄이 바뀜)")
+        last_hash = str(own or "")
+        if layout == "lines":
             wanted = _sha256_text(previous[1]) if previous is not None else ""
             if str(record.get(CHAIN_FIELD) or "") != wanted:
                 if previous is not None and number not in broken:
@@ -313,7 +342,43 @@ def verify_audit_chain(path: Path) -> dict[str, object]:
                 else:
                     broken.setdefault(number, "직전 줄 해시 불일치")
         previous = (number, line)
-    return _chain_report(path, "lines", totals, broken)
+
+    history_checked: bool | None = None
+    if layout == "sidecar" and sidecar_record is not None and CHAIN_FIELD in sidecar_record and not broken:
+        history = path.with_name(EXPORT_AUDIT_LOG_NAME)
+        if history.is_file() and history.resolve() != path.resolve():
+            history_hashes = {
+                str(item.get(RECORD_HASH_FIELD) or "")
+                for item in (_json_or_none(line) for line in history.read_text(encoding="utf-8", errors="replace").splitlines())
+                if isinstance(item, dict)
+            }
+            history_checked = last_hash in history_hashes
+            if not history_checked:
+                broken.setdefault(1, f"같은 폴더의 {EXPORT_AUDIT_LOG_NAME}에 이 기록의 해시가 없음")
+    if totals["records"] == 0 and not broken:
+        broken[0] = "감사 기록이 0줄 — 확인할 기록이 없음"
+    anchor: dict[str, object] = {"expected_last_sha256": expected_last_sha256 or None, "matched": None}
+    if expected_last_sha256:
+        matched = last_hash.lower() == expected_last_sha256.strip().lower()
+        anchor["matched"] = matched
+        if not matched:
+            broken.setdefault(
+                previous[0] if previous is not None else 0,
+                "마지막 기록 해시가 따로 보관한 값과 다름(끝 줄 삭제·추가 또는 파일 전체 재작성)",
+            )
+    report = _chain_report(path, layout, totals, broken)
+    report["last_record_sha256"] = last_hash or None
+    report["anchor"] = anchor
+    report["history_contains_sidecar"] = history_checked
+    report["not_proven"] = [] if anchor["matched"] else list(UNANCHORED_LIMITS)
+    return report
+
+
+def _json_or_none(line: str) -> object:
+    try:
+        return json.loads(line)
+    except json.JSONDecodeError:
+        return None
 
 
 def _chain_report(path: Path, layout: str, totals: Mapping[str, int], broken: Mapping[int, str]) -> dict[str, object]:
