@@ -1,4 +1,11 @@
-"""Per-run LRU of explorer indexes, built single-flight per key (fs-tree, registry, media)."""
+"""Per-run LRU of explorer indexes, built single-flight per key (fs-tree, registry, media).
+
+Also the one gate of the on-demand index files written next to a run's outputs (timeline column
+index, geo index, families / dedup / irregular files): every such write is reached only after
+:func:`index_persist_enabled` (``core.readonly_runs.may_persist`` for read-only run folders, D37)
+answered yes, else the index stays in memory. ``tests/test_r8_lazy_write_guard.py`` checks this
+with an AST walk of the explorer / index modules (T-133).
+"""
 
 from __future__ import annotations
 
@@ -18,6 +25,8 @@ IndexT = TypeVar("IndexT")
 # column index, located-row index) in memory only and never writes an index file next to the run
 # outputs (benchmarks over a real run folder, read-only review copies). Saved files are still read.
 INDEX_PERSIST_ENV = "RAPIDTRIAGE_INDEX_PERSIST"
+# Names of the calls that decide whether a lazy writer may write next to a run's outputs.
+PERSIST_GUARD_NAMES = frozenset({"index_persist_enabled", "may_persist"})
 
 
 def index_persist_enabled(path: Path | str | None = None) -> bool:
