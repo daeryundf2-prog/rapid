@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import secrets
+import sqlite3
 from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -95,6 +96,8 @@ RUN_SCOPED_PATH = re.compile(r"/api/runs/(?P<run_id>[^/]+)(?P<rest>/.*)?")
 # would make) and removing the run from the list (``DELETE /api/runs/{run_id}``; the folder stays).
 READ_ONLY_RUN_QUERY_POSTS = frozenset({"/search/count", "/search/query", "/search/entities", "/search/hashes"})
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+# ``sqlite3.OperationalError`` text for a write on a ``PRAGMA query_only`` connection.
+SQLITE_READONLY_MESSAGE = "attempt to write a readonly database"
 
 
 def _readonly_run_reason(store: RunJobStore, run_id: str | None) -> str | None:
@@ -189,6 +192,20 @@ def create_app(
     @api.exception_handler(ReadOnlyRunWriteError)
     async def read_only_run_write(_request: Request, exc: ReadOnlyRunWriteError):
         return error_response(409, exc.to_detail())
+
+    @api.exception_handler(sqlite3.OperationalError)
+    async def read_only_run_sqlite_write(request: Request, exc: sqlite3.OperationalError):
+        """A SQLite write refused by the guard's ``PRAGMA query_only`` (D37) is 409 ``RUN_READ_ONLY``.
+
+        Only for a request about a read-only run; any other SQLite error keeps the crash path.
+        """
+        reason = None
+        if str(exc) == SQLITE_READONLY_MESSAGE:
+            match = RUN_SCOPED_PATH.fullmatch(request.url.path)
+            reason = _readonly_run_reason(store, match.group("run_id") if match else request.query_params.get("run_id"))
+        if reason is None:
+            raise exc
+        return error_response(409, {"code": RUN_READ_ONLY, "message": RUN_READ_ONLY_MESSAGE, "readonly_reason": reason})
 
     @api.exception_handler(RequestValidationError)
     async def korean_analysis_body_errors(request: Request, exc: RequestValidationError):

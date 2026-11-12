@@ -6,14 +6,17 @@
   search-query POSTs and removing the run from the list;
 * a normal run is not affected by the gate;
 * the process write guard also refuses deletes and writes into SQLite databases that already exist
-  under a read-only folder (the two gaps of the merged audit hook).
+  under a read-only folder (the two gaps of the merged audit hook), follows a link / junction that
+  is the last path component, and a SQLite write it refuses answers 409, not 500.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,6 +27,7 @@ from rapidtriage.core.readonly_runs import (
     RUN_READ_ONLY_MESSAGE,
     ReadOnlyRunWriteError,
     install_write_guard,
+    readonly_reason_for,
     register_readonly_folder,
     unregister_readonly_folder,
 )
@@ -150,6 +154,29 @@ class ReadOnlyGateTests(Base):
             self.assert_read_only(response, f"{method.upper()} {path}")
         self.assertEqual(snapshot(self.evidence), before)
 
+    def test_refused_sqlite_write_is_409_not_500(self) -> None:
+        database = self.legacy / "guard-probe.db"
+        unregister_readonly_folder(self.legacy)
+        try:
+            with sqlite3.connect(database) as connection:
+                connection.execute("CREATE TABLE t (a)")
+            connection.close()
+        finally:
+            register_readonly_folder(self.legacy, "OUTPUT_INSIDE_EVIDENCE")
+        before = database.read_bytes()
+
+        @self.client.app.get("/api/runs/{run_id}/_guard-probe")
+        def probe(run_id: str) -> dict[str, str]:  # a GET with a lazy write the gate cannot see
+            connection = sqlite3.connect(database)
+            try:
+                connection.execute("INSERT INTO t VALUES (1)")
+            finally:
+                connection.close()
+            return {"run_id": run_id}
+
+        self.assert_read_only(self.client.get(f"/api/runs/{self.run_id}/_guard-probe"), "sqlite probe")
+        self.assertEqual(database.read_bytes(), before)
+
     def test_normal_run_is_not_gated(self) -> None:
         normal = self.copy_output(self.base / "normal-out")
         response = self.import_folder(normal)
@@ -213,6 +240,38 @@ class WriteGuardGapTests(unittest.TestCase):
             sqlite3.connect(self.folder / "new.db")
         self.assertFalse((self.folder / "new.db").exists())
         self.assertEqual(self.database.read_bytes(), before)
+
+    def test_last_component_link_into_the_folder_is_followed(self) -> None:
+        outside = Path(self._tmp.name).resolve() / "outside"
+        outside.mkdir()
+        junction = outside / "into-run"
+        if os.name == "nt":
+            made = subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(junction), str(self.folder / "sub")], capture_output=True, check=False
+            )
+            if made.returncode != 0:
+                self.skipTest(f"mklink /J failed: {made.stderr!r}")
+        else:
+            junction.symlink_to(self.folder / "sub", target_is_directory=True)
+        self.assertEqual(readonly_reason_for(junction), "OUTPUT_INSIDE_EVIDENCE")  # the leaf is the link
+        with self.assertRaises(ReadOnlyRunWriteError):
+            shutil.copyfile(self.database, junction)  # target is the leaf link itself
+        with self.assertRaises(ReadOnlyRunWriteError):
+            (junction / "x.json").write_text("x", encoding="utf-8")  # parent is the link
+        with self.assertRaises(ReadOnlyRunWriteError):
+            os.mkdir(junction / "made")
+        self.assertEqual(list((self.folder / "sub").iterdir()), [])
+        link = outside / "kept-link.json"
+        unregister_readonly_folder(self.folder)  # the guard also refuses creating a link to it
+        try:
+            link.symlink_to(self.kept)
+        except OSError as exc:
+            self.skipTest(f"file symlinks need privilege here: {exc}")
+        finally:
+            register_readonly_folder(self.folder, "OUTPUT_INSIDE_EVIDENCE")
+        with self.assertRaises(ReadOnlyRunWriteError):
+            link.write_text("changed", encoding="utf-8")  # the leaf itself is the link
+        self.assertEqual(self.kept.read_text(encoding="utf-8"), "{}")
 
     def test_outside_the_folder_is_unaffected(self) -> None:
         beside = Path(self._tmp.name).resolve() / "beside.db"

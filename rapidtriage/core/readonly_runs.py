@@ -98,17 +98,17 @@ def _canonical_dir(directory: str) -> str:
 def _canonical(path: Path | str) -> str:
     """:func:`canonical_path` with the parent folder's resolution cached.
 
-    ``realpath`` (and even ``lstat``) costs about a millisecond on Windows, and the guard asks for
-    every write, delete and SQLite connection while a read-only run is open — mostly for files of a
-    few folders. The parent folder is resolved in full (links, junctions, 8.3 names) and cached until
-    the registry changes; the leaf is resolved in full only when it looks like an 8.3 short name.
-    A link planted as the leaf itself is not followed.
+    ``realpath`` costs about a millisecond on Windows, and the guard asks for every write, delete and
+    SQLite connection while a read-only run is open — mostly for files of a few folders. The parent
+    folder is resolved in full (links, junctions, 8.3 names) and cached until
+    the registry changes; the leaf is then resolved in full too, so a link or junction planted as
+    the last component that points into a read-only folder is still refused (integrity over ~1 ms).
     """
     absolute = os.path.abspath(os.path.expanduser(os.fspath(path)))
     head, tail = os.path.split(absolute)
     if not tail or tail in {".", ".."} or "~" in tail or absolute.startswith("\\\\?\\"):
         return canonical_path(absolute)
-    return os.path.normcase(os.path.join(_canonical_dir(head), tail))
+    return canonical_path(os.path.join(_canonical_dir(head), tail))
 
 
 def register_readonly_folder(folder: Path | str, reason: str) -> None:
