@@ -75,7 +75,7 @@ export function ImageView({ runId, preview, onOpenPath }: ImageViewProps) {
   const blur = useViewPrefs((s) => s.mediaBlur);
 
   return (
-    <div className="image-view" data-media-blur={blur ? "on" : undefined}>
+    <div className="image-view" data-testid="image-view" data-media-blur={blur ? "on" : undefined}>
       <div className="image-main">
         <figure className="image-figure">
           <AuthImage
@@ -164,7 +164,7 @@ export function ImageView({ runId, preview, onOpenPath }: ImageViewProps) {
               같은 폴더 이미지 {galleryOffset + 1}–{galleryOffset + gallery.data.items.length} /{" "}
               {gallery.data.total.toLocaleString("ko-KR")}
             </p>
-            <ul className="image-strip">
+            <ul className="image-strip" data-testid="image-strip">
               {gallery.data.items.map((item) => (
                 <li key={item.path}>
                   <button

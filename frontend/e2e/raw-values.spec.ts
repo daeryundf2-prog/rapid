@@ -154,7 +154,7 @@ async function scan(page: Page, selector: string, allow: readonly string[] = [])
       const allowed = new Set(allow.map((token) => token.toLowerCase()));
       const out: Array<{ token: string; where: string }> = [];
       const SKIP =
-        "[data-raw-ok], a[href], input, textarea, select, code, pre, .mid-path, .hex-view, .text-view, [data-testid='hex-scroll'], .meta-hexdump, .meta-binary-strings, [data-testid='registry-explorer-tree'], .sr-only, script, style, svg";
+        "[data-raw-ok], a[href], input, textarea, select, code, pre, .mid-path, div:has(> [data-testid='hex-scroll']), [data-testid='hex-scroll'], ul[aria-label$='UTF-16 문자열'], [data-testid='registry-explorer-tree'], .sr-only, script, style, svg";
       const isRawToken = (token: string) => {
         if (token.length < 3 || allowed.has(token.toLowerCase())) return false;
         if (/^\d/.test(token)) return false; // numbers, sizes, dates, 0x…
@@ -417,7 +417,7 @@ for (const runId of RUNS) {
     // C-V1: the artifact histogram's bars carry unique labels (a kind split over groups names it).
     await screen(`${tag} histogram labels`, async () => {
       await openHash(page, `case/${runId}/explore/artifacts?view=histogram`);
-      const labels = page.locator(".hist-cat-label");
+      const labels = page.getByRole("group", { name: "범주별 막대" }).locator("button > span:first-child");
       await expect(labels.first()).toBeVisible({ timeout: 120_000 });
       const texts = await labels.allInnerTexts();
       const duplicates = texts.filter((text, index) => texts.indexOf(text) !== index);
@@ -428,7 +428,7 @@ for (const runId of RUNS) {
         `${tag} histogram labels`,
         duplicates.map((token) => ({ token, where: "duplicate histogram label" })),
       );
-      record(`${tag} histogram raw`, await scan(page, ".hist-cats", names));
+      record(`${tag} histogram raw`, await scan(page, "[role='group'][aria-label='범주별 막대']", names));
     });
     await screen(`${tag} registry explorer`, async () => {
       await openHash(page, `case/${runId}/explore/registry`);
@@ -470,11 +470,14 @@ for (const runId of RUNS) {
       await screen(`${tag} popover flags ${node}`, async () => {
         await openHash(page, `case/${runId}/${node}`);
         await settleGrid(page);
-        const cell = page.locator("button.flag-cell").first();
+        const cell = page.locator('[role="gridcell"] button[aria-haspopup="dialog"]').first();
         await expect(cell).toBeVisible({ timeout: 30_000 });
         await cell.click();
-        await expect(page.locator(".flag-popover")).toBeVisible();
-        record(`${tag} popover flags ${node}`, await scan(page, ".flag-popover", names));
+        await expect(page.getByRole("dialog", { name: "특이사항 근거" })).toBeVisible();
+        record(
+          `${tag} popover flags ${node}`,
+          await scan(page, "[role='dialog'][aria-label='특이사항 근거']", names),
+        );
         await page.keyboard.press("Escape");
       });
     }

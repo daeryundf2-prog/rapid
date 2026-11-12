@@ -171,7 +171,7 @@ async function audit(page: Page): Promise<Violation[]> {
     // 10. Images have alt; skip link exists and its target resolves.
     for (const img of document.querySelectorAll("img:not([alt])"))
       out.push({ rule: "img-alt", detail: describe(img) });
-    const skip = document.querySelector("a.skip-link, a[href^='#main']");
+    const skip = document.querySelector("a[href^='#main']");
     if (!skip) out.push({ rule: "skip-link", detail: "missing" });
     else if (!document.getElementById((skip.getAttribute("href") ?? "").replace(/^#/, ""))) {
       out.push({ rule: "skip-link-target", detail: skip.getAttribute("href") ?? "" });
@@ -214,7 +214,7 @@ test("focus is visible after Tab on every route", async ({ page }) => {
 test("first Tab stop is the skip link and it lands focus on main", async ({ page }) => {
   await openRoute(page, "files");
   await page.keyboard.press("Tab");
-  const skip = page.locator("a.skip-link, a[href^='#main']").first();
+  const skip = page.getByRole("link", { name: "본문으로 건너뛰기" });
   await expect(skip).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.locator("#main")).toBeFocused();

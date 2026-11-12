@@ -141,7 +141,13 @@ test("Q-IA-3: carve on the 처리 card → progress → done → 결과 보기 �
   await firstRow.press("Enter");
   const hexTab = page.getByRole("tab", { name: /헥스/ });
   await expect(hexTab).toHaveAttribute("aria-selected", "true", { timeout: 20_000 });
-  await expect(page.locator("#viewer .is-hl").first()).toBeVisible({ timeout: 20_000 });
+  // The hex cursor opens on the hit offset; its row carries the highlighted bytes.
+  const hexCursorRow = page
+    .locator("#viewer")
+    .getByRole("grid", { name: /^헥스 보기/ })
+    .locator('[role="row"][aria-selected="true"]');
+  await expect(hexCursorRow).toBeVisible({ timeout: 20_000 });
+  await expect(hexCursorRow).toHaveClass(/(^|\s)is-hl-row(\s|$)/);
 });
 
 test("Q-IA-1 / review 16–17: Alt+n switches stage with focus on the panel heading; 침해사고 › 웹셸 exists", async ({

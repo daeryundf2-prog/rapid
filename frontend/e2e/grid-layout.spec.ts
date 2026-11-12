@@ -60,7 +60,7 @@ test("1920 · 전체 아티팩트: the grid fits the pane — no sideways scroll
   await guard(page);
   await page.setViewportSize({ width: 1920, height: 1000 });
   await open(page, `#/case/${runId}/explore/artifacts`);
-  const scroll = page.locator(".grid-scroll").first();
+  const scroll = page.getByRole("grid", { name: / 목록$/ }).first();
   await expect
     .poll(async () => scroll.evaluate((el) => el.scrollWidth - el.clientWidth))
     .toBeLessThanOrEqual(1);
@@ -76,7 +76,7 @@ for (const width of [1920, 1600]) {
     await guard(page);
     await page.setViewportSize({ width, height: 1000 });
     await open(page, `#/case/${runId}/explore/artifacts/browser`);
-    const scroll = page.locator(".grid-scroll").first();
+    const scroll = page.getByRole("grid", { name: / 목록$/ }).first();
     // 30 s: under the Vite dev server (playwright.dev.config) the first evaluate can wait out the
     // page's initial render burst; the layout itself is settled on the first sample.
     await expect
@@ -94,7 +94,7 @@ test("1920 · 파일 목록: no sideways scroll; path cells always hold the file
   await guard(page);
   await page.setViewportSize({ width: 1920, height: 1000 });
   await open(page, `#/case/${runId}/explore/files`);
-  const scroll = page.locator(".grid-scroll").first();
+  const scroll = page.getByRole("grid", { name: / 목록$/ }).first();
   await expect
     .poll(async () => scroll.evaluate((el) => el.scrollWidth - el.clientWidth))
     .toBeLessThanOrEqual(1);
@@ -102,7 +102,7 @@ test("1920 · 파일 목록: no sideways scroll; path cells always hold the file
     [...document.querySelectorAll('[role="grid"] [role="row"][data-index]')].slice(0, 40).map((row) => ({
       name: (row.querySelector('[data-col="title"]') as HTMLElement | null)?.innerText ?? "",
       path: (row.querySelector('[data-col="path"]') as HTMLElement | null)?.innerText ?? "",
-      title: (row.querySelector('[data-col="path"] .mid-path') as HTMLElement | null)?.title ?? "",
+      title: (row.querySelector('[data-col="path"] span[title]') as HTMLElement | null)?.title ?? "",
     })),
   );
   expect(pairs.length).toBeGreaterThan(0);
@@ -128,7 +128,8 @@ test("1280 + viewer: 조건 on one line, the popover above the viewer and inside
   const box = await trigger.boundingBox();
   expect(box?.height ?? 99).toBeLessThanOrEqual(30);
   const lines = await trigger.evaluate((el) => {
-    const label = el.querySelector(".filter-btn-label") as HTMLElement | null;
+    const label = ([...el.querySelectorAll("span")].find((span) => span.textContent === "조건") ??
+      null) as HTMLElement | null;
     if (!label) return 1;
     const height = label.getBoundingClientRect().height;
     const line = Number.parseFloat(getComputedStyle(label).lineHeight) || height;
@@ -170,7 +171,10 @@ test("a header click sorts only: the viewer keeps its row (C-D2)", async ({ page
   await open(page, `#/case/${runId}/explore/files`);
   const third = page.locator('[role="grid"] [role="row"][aria-rowindex="4"]').first();
   await third.click();
-  const viewerPath = page.locator('[data-testid="viewer-region"] .viewer-path .mid-path');
+  const viewerPath = page
+    .getByTestId("viewer-region")
+    .getByRole("heading", { level: 2 })
+    .locator("xpath=../p/span[@title]");
   await expect(viewerPath).toBeVisible();
   const before = await viewerPath.getAttribute("title");
   const focusedBefore = await page

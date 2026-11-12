@@ -245,7 +245,9 @@ test("Q-X10: classic split and media blur survive a reload; baseline compare; �
   await expect(toggle).toHaveAttribute("aria-pressed", "true");
   await page.reload();
   await expect(page.getByTestId("media-blur-toggle")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator(".thumb-view")).toHaveAttribute("data-media-blur", "");
+  await expect(
+    page.locator("[data-media-blur]").filter({ has: page.getByRole("grid", { name: /^썸네일 격자/ }) }),
+  ).toHaveAttribute("data-media-blur", "");
   const dupTile = page.getByRole("gridcell", { name: /^dup-1\.png/ });
   await dupTile.click();
   const related = await request.get(
@@ -330,22 +332,20 @@ test("E3 fixes: propagation from the viewer acts on the viewer row; a tag key to
   await dup.click();
   const imageTab = viewer.getByRole("tab", { name: /이미지/ });
   if (await imageTab.count()) await imageTab.first().click();
-  const strip = page.locator(".image-strip");
-  await expect(strip.locator("img.image-thumb-img").first()).toBeVisible({ timeout: 15_000 });
+  const strip = page.getByTestId("image-strip");
+  await expect(strip.locator("button img").first()).toBeVisible({ timeout: 15_000 });
   await page.locator("body").focus();
   await page.keyboard.press("Shift+KeyB");
-  await expect(page.locator(".image-view")).toHaveAttribute("data-media-blur", "on");
+  await expect(page.getByTestId("image-view")).toHaveAttribute("data-media-blur", "on");
   const filters = await strip
-    .locator("img.image-thumb-img")
+    .locator("button img")
     .evaluateAll((imgs) => imgs.map((img) => getComputedStyle(img).filter));
   expect(filters.length).toBeGreaterThan(1);
   for (const filter of filters) expect(filter).toContain("blur");
-  const tile = strip.locator("button.image-thumb:not(.is-current)").first();
+  const tile = strip.locator("button:not([aria-current])").first();
   await tile.focus();
-  await expect
-    .poll(() => tile.locator("img.image-thumb-img").evaluate((img) => getComputedStyle(img).filter))
-    .toBe("none");
+  await expect.poll(() => tile.locator("img").evaluate((img) => getComputedStyle(img).filter)).toBe("none");
   await page.locator("body").focus();
   await page.keyboard.press("Shift+KeyB");
-  await expect(page.locator(".image-view")).not.toHaveAttribute("data-media-blur", "on");
+  await expect(page.getByTestId("image-view")).not.toHaveAttribute("data-media-blur", "on");
 });

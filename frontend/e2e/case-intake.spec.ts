@@ -17,7 +17,7 @@ function evidenceFolder(): string {
 
 async function cardOf(page: Page, title: string) {
   return page
-    .locator("section.dash-card")
+    .locator("section[data-card]")
     .filter({ has: page.getByRole("heading", { name: title, exact: true }) });
 }
 
@@ -144,13 +144,16 @@ test("Q-X1: 케이스 만들기 3단계 → 실행 → 접수 5 cards, kept afte
     await expect(info.getByText("서울중앙지검")).toBeVisible();
     // 증거 목록 + 증거 소스 are one "증거" card now: a list of items, E-01 as the item number.
     const evidence = await cardOf(page, "증거");
-    await expect(
-      evidence.locator("li.dash-evidence-item .dash-evidence-number", { hasText: "E-01" }),
-    ).toBeVisible();
+    await expect(evidence.getByRole("listitem").getByText("E-01", { exact: true })).toBeVisible();
     await expect(evidence.getByText("해당 없음 (폴더)")).toBeVisible();
     // 처리 문제 + 공개 사항 are "처리 경고·제한 사항" now.
     const problems = await cardOf(page, "처리 경고·제한 사항");
-    await expect(problems.locator(".dash-problems, .dash-empty").first()).toBeVisible({ timeout: 30_000 });
+    await expect(
+      problems
+        .getByTestId("problems")
+        .or(problems.getByText(/^(처리 경고·알림 없음|확인 필요 사항 없음)$/))
+        .first(),
+    ).toBeVisible({ timeout: 30_000 });
     // 케이스 메모 + 요약 노트 are "노트·메모" now.
     const memo = await cardOf(page, "노트·메모");
     await expect(memo.getByLabel("새 메모")).toBeVisible();
@@ -180,7 +183,13 @@ test("Q-X1: 케이스 만들기 3단계 → 실행 → 접수 5 cards, kept afte
   await memo.getByLabel("새 메모").fill("압수 목록 확인");
   await memo.getByRole("button", { name: "메모 추가" }).click();
   await expect(memo.getByText("압수 목록 확인").first()).toBeVisible();
-  await expect(memo.locator(".dash-memo-meta").first()).toContainText("홍길동");
+  await expect(
+    memo
+      .getByRole("list", { name: "케이스 메모" })
+      .getByRole("listitem")
+      .first()
+      .locator("p", { has: page.locator("time") }),
+  ).toContainText("홍길동");
   expect(await quickAudit(page)).toEqual([]);
 
   // Reload keeps everything (server state, not browser state).
@@ -231,9 +240,7 @@ test("Q-X1 review: register-only evidence is pre-checked, saved and skipped", as
   await expect(page).toHaveURL(/#\/case\/[0-9a-f]+\/intake/);
   const evidence = await cardOf(page, "증거");
   const evidenceItem = (number: string) =>
-    evidence.locator("li.dash-evidence-item").filter({
-      has: page.locator(".dash-evidence-number", { hasText: number }),
-    });
+    evidence.getByRole("listitem").filter({ has: page.getByText(number, { exact: true }) });
   const zipRow = evidenceItem("E-02");
   await expect(zipRow.getByTestId("evidence-register-only")).toBeVisible();
   await expect(zipRow.getByRole("button", { name: "증거 E-02 런 시작" })).toHaveAttribute(

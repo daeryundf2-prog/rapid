@@ -256,7 +256,7 @@ function MessageList({
   };
 
   return (
-    <section className="chat-thread" aria-label={`${conversation.label} 대화`}>
+    <section className="chat-thread" data-testid="chat-thread" aria-label={`${conversation.label} 대화`}>
       <header className="chat-thread-head">
         <span className="chat-thread-title" data-raw-ok>
           {conversation.label}
@@ -299,6 +299,8 @@ function MessageList({
                 ref={virtualizer.measureElement}
                 data-index={item.index}
                 data-chat-index={item.index}
+                data-testid="chat-message"
+                data-direction={message.outgoing ? "out" : "in"}
                 role="listitem"
                 tabIndex={item.index === activeIndex ? 0 : -1}
                 aria-label={bubbleLabel(message)}
@@ -319,6 +321,7 @@ function MessageList({
                 {showSender ? (
                   <span
                     className="chat-sender"
+                    data-testid="chat-sender"
                     title={
                       isUnresolvedId(message.sender)
                         ? `숫자 ID ${message.sender} — 앱 DB에서 이름을 찾지 못했습니다`
@@ -411,12 +414,12 @@ function AiToolBlock({
         ) : null}
       </button>
       {open && ai.command ? (
-        <pre className="chat-tool-command">
+        <pre className="chat-tool-command" data-testid="ai-tool-command">
           <Highlighted text={ai.command} terms={terms} />
         </pre>
       ) : null}
       {open && ai.targetPath ? (
-        <p className="chat-tool-target">
+        <p className="chat-tool-target" data-testid="ai-tool-target">
           대상 <MiddlePath path={ai.targetPath} />
         </p>
       ) : null}

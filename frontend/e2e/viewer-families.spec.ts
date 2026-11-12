@@ -36,7 +36,7 @@ async function open(page: Page, hash: string) {
 
 test("Q-F1: one 조건 line ≤32px; F opens the panel, Esc closes it and focus returns", async ({ page }) => {
   await open(page, `#/case/${runId}/explore/files`);
-  const line = page.locator(".filter-row").first();
+  const line = page.getByRole("search", { name: "조건" }).locator(":scope > div").first();
   await expect(line).toBeVisible();
   const box = await line.boundingBox();
   expect(box?.height ?? 99).toBeLessThanOrEqual(32);
@@ -230,12 +230,13 @@ test("Q-F13: every artifact = summary columns with label-above-value cells; one 
   await expect(page.locator('[role="grid"] [role="row"][aria-rowindex="2"]').first()).toBeVisible();
   await expect(page.getByRole("columnheader", { name: /주요 세부 정보/ })).toBeVisible();
   await expect(page.getByRole("columnheader", { name: /날짜 및 시각/ })).toBeVisible();
-  const cell = page.locator('[role="grid"] [data-col="sum:time"] .sum-cell').first();
-  await expect(cell.locator(".sum-label")).not.toHaveText("");
-  await expect(cell.locator(".sum-value")).not.toHaveText("");
+  // A two-line summary cell: label span above value span.
+  const cell = page.locator('[role="grid"] [data-col="sum:time"] > span:has(> span + span)').first();
+  await expect(cell.locator(":scope > span").nth(0)).not.toHaveText("");
+  await expect(cell.locator(":scope > span").nth(1)).not.toHaveText("");
   // Every header keeps its full name as the tooltip.
   const titles = await page
-    .locator('[role="columnheader"] .grid-sort')
+    .locator('[role="columnheader"] button:not([data-command])')
     .evaluateAll((els) =>
       els.map(
         (el) =>
@@ -257,13 +258,13 @@ test("Q-F14/Q-F15: R/X/B marks give one stripe each; the meta tail lists seven f
   await row.focus();
   await page.keyboard.press("r");
   await expect(row).toHaveAttribute("data-mark", "relevant");
-  await expect(row.locator(".grid-row-stripe")).toHaveAttribute("data-mark", "relevant");
+  await expect(row.locator('[role="gridcell"] > span[data-mark]')).toHaveAttribute("data-mark", "relevant");
   await expect(row).toHaveAttribute("aria-description", "검토 표시: 관련 있음");
-  const box = await row.locator(".grid-row-stripe").boundingBox();
+  const box = await row.locator('[role="gridcell"] > span[data-mark]').boundingBox();
   expect(Math.round(box?.width ?? 0)).toBe(6);
   await page.keyboard.press("x");
   await expect(row).toHaveAttribute("data-mark", "excluded");
-  await expect(row.locator(".grid-row-stripe")).toHaveCount(1);
+  await expect(row.locator('[role="gridcell"] > span[data-mark]')).toHaveCount(1);
   // Meta tail.
   await page.keyboard.press("Enter");
   const viewer = page.getByRole("region", { name: "원본 뷰어" });
