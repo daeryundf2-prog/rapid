@@ -120,7 +120,11 @@ def _size_text(value: object) -> str:
     return NOT_RECORDED
 
 
-def _review_rows(case_payload: Mapping[str, object], *, limit: int = TABLE_LIMIT) -> list[dict[str, object]]:
+def _review_rows(
+    case_payload: Mapping[str, object], *, limit: int = TABLE_LIMIT
+) -> tuple[list[dict[str, object]], int]:
+    """Up to ``limit`` report-candidate rows and the total count (``review_rows_total``); the table
+    states the cut when ``review_rows_truncated`` (table 상한, rest 잘림)."""
     bookmarks = case_payload.get("bookmarks")
     rows: list[dict[str, object]] = []
     for bookmark in bookmarks if isinstance(bookmarks, list) else []:
@@ -137,9 +141,9 @@ def _review_rows(case_payload: Mapping[str, object], *, limit: int = TABLE_LIMIT
                 "note": str(bookmark.get("note") or ""),
             }
         )
-        if len(rows) >= limit:
-            break
-    return rows
+    review_rows_total = len(rows)
+    review_rows_truncated = review_rows_total > limit
+    return (rows[:limit] if review_rows_truncated else rows), review_rows_total
 
 
 def reviewed_count(case_payload: Mapping[str, object]) -> int:
@@ -259,7 +263,7 @@ def submission_item_lines(submission_manifest: Mapping[str, object]) -> list[str
     for index, item in enumerate(items[:TABLE_LIMIT], start=1):
         lines.append(f"| {index} | {_item_name(item)} | `{md_cell(_item_sha(item))}` |")
     if len(items) > TABLE_LIMIT:
-        lines += ["", f"- 표에는 {TABLE_LIMIT}건만 적음. 전체 {len(items):,}건은 부록에 있음."]
+        lines += ["", f"- 표 상한 {TABLE_LIMIT}건까지만 적음(나머지는 표에서 잘림). 전체 {len(items):,}건은 부록에 있음."]
     return lines
 
 
@@ -332,7 +336,7 @@ def build_korean_expert_report(
     mode = str(run_summary.get("mode") or "")
     manifest_summary = _mapping(submission_manifest.get("summary"))
     case_summary = _mapping(case_payload.get("summary"))
-    review_rows = _review_rows(case_payload)
+    review_rows, review_rows_total = _review_rows(case_payload)
     roots = roots_for(run_summary)
 
     lines: list[str] = [
@@ -405,6 +409,8 @@ def build_korean_expert_report(
                 f"| {md_cell(row['summary'])} | {md_cell(row['source']) or '출처 기록 없음'} | {md_cell(row['status'])} "
                 f"| {md_cell(row['tags']) or '없음'} | {md_cell(row['note']) or '없음'} |"
             )
+        if review_rows_total > len(review_rows):
+            lines += ["", f"- 표 상한 {TABLE_LIMIT}건까지만 적음(전체 {review_rows_total:,}건, 나머지는 표에서 잘림)."]
     else:
         lines.append("- 보고서 포함으로 지정된 심사 항목 없음.")
 
