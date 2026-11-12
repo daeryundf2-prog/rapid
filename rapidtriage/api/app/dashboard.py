@@ -31,6 +31,7 @@ from .helpers import (
     default_reviewer_bundle_dir_path,
     default_run_validation_package_path,
     default_submission_manifest_path,
+    extract_zip_has_policy,
     get_output_path,
     job_output_dir,
 )
@@ -301,6 +302,8 @@ def build_export_history(store: RunJobStore, run_id: str, job: RunJob) -> list[d
             if not folder.is_dir() or not EXTRACT_NAME_PATTERN.fullmatch(folder.name):
                 continue
             archive = extract_root / f"{folder.name}.zip"
+            # A zip written before the credential policy (T-347) is not served: rebuild it first.
+            ready = archive.is_file() and extract_zip_has_policy(archive)
             extracted = None
             try:
                 manifest_payload = json.loads((folder / "rapidtriage-extract-manifest.json").read_text(encoding="utf-8"))
@@ -315,12 +318,12 @@ def build_export_history(store: RunJobStore, run_id: str, job: RunJob) -> list[d
                     "type": "extract",
                     "label": "선택 추출",
                     "created_at": _iso_mtime(folder),
-                    "size": archive.stat().st_size if archive.is_file() else None,
-                    "status": "zip 준비됨" if archive.is_file() else "zip 미생성",
+                    "size": archive.stat().st_size if ready else None,
+                    "status": "zip 준비됨" if ready else ("zip 다시 만들기 필요" if archive.is_file() else "zip 미생성"),
                     "item_count": extracted,
                     "download_url": f"{base}/extract/{folder.name}/file",
                     # POST that writes the missing zip first (the download GET never writes).
-                    "build_url": None if archive.is_file() else f"{base}/extract/{folder.name}/zip",
+                    "build_url": None if ready else f"{base}/extract/{folder.name}/zip",
                 }
             )
     entries.sort(key=lambda entry: entry.get("created_at") or "", reverse=True)

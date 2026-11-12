@@ -102,6 +102,9 @@ def build_ocr_queue(
         path
         for path in sorted(resolved_root.rglob("*"), key=lambda item: str(item).lower())
         if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+        # Credential / secret files (core/credential_files.py) never enter the queue: no hash, no
+        # sidecar text (R8 T-347 — an image-named token file is still a token file).
+        and not credential_file_reason(path, sniff=False)
     ]
     if max_items > 0:
         image_paths = image_paths[:max_items]

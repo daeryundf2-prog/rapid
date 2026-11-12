@@ -5,6 +5,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import zipfile
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
@@ -246,6 +247,20 @@ def get_output_path(store: RunJobStore, run_id: str, output_name: str) -> Path:
         raise HTTPException(status_code=403, detail=str(exc))
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+#: Zip comment of an extract zip written under the credential policy (R8 T-347). A zip without it
+#: was written before credential files were dropped from extract zips and is never served again.
+EXTRACT_ZIP_POLICY_MARKER = b"rapidtriage-credential-policy=r8-ri03-v1"
+
+
+def extract_zip_has_policy(archive: Path) -> bool:
+    """``True`` when ``archive`` is a zip carrying :data:`EXTRACT_ZIP_POLICY_MARKER`."""
+    try:
+        with zipfile.ZipFile(archive) as bundle:
+            return bundle.comment == EXTRACT_ZIP_POLICY_MARKER
+    except (OSError, zipfile.BadZipFile):
+        return False
 
 
 SOURCE_NOT_FOUND_MESSAGE = "허용된 증거 루트에서 원본 파일을 찾을 수 없습니다"
