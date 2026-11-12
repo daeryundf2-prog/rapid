@@ -237,7 +237,11 @@ class DashboardScopeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             run_dir = Path(temp) / "run"
             run_dir.mkdir()
-            summary = {"profile_version": "rapidtriage-run-summary-v1", "mode": "fraud", "root": str(run_dir),
+            # Evidence lives beside the run folder: a run inside its evidence would be opened read-only
+            # (T-032) and the temp-folder cleanup refused.
+            evidence = Path(temp) / "evidence"
+            evidence.mkdir()
+            summary = {"profile_version": "rapidtriage-run-summary-v1", "mode": "fraud", "root": str(evidence),
                        **image_summary(IMG_B_STATS, run_dir)}
             summary_path = run_dir / "rapidtriage-run-summary.json"
             summary["outputs"] = {"summary": str(summary_path)}

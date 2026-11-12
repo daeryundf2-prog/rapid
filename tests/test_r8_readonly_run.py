@@ -252,7 +252,13 @@ class WriteGuardGapTests(unittest.TestCase):
             if made.returncode != 0:
                 self.skipTest(f"mklink /J failed: {made.stderr!r}")
         else:
-            junction.symlink_to(self.folder / "sub", target_is_directory=True)
+            # The guard refuses creating a link that points into a read-only folder, so make it first.
+            reason = readonly_reason_for(self.folder)
+            unregister_readonly_folder(self.folder)
+            try:
+                junction.symlink_to(self.folder / "sub", target_is_directory=True)
+            finally:
+                register_readonly_folder(self.folder, reason or "OUTPUT_INSIDE_EVIDENCE")
         self.assertEqual(readonly_reason_for(junction), "OUTPUT_INSIDE_EVIDENCE")  # the leaf is the link
         with self.assertRaises(ReadOnlyRunWriteError):
             shutil.copyfile(self.database, junction)  # target is the leaf link itself
