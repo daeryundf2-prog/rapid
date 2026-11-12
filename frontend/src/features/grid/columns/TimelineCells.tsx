@@ -1,5 +1,22 @@
 import type { ReactNode } from "react";
 import type { GridRow } from "../../../contracts/collection";
+import { formatTimestamp } from "../../../utils/time";
+
+/**
+ * 시각 열 width (T-175, r8 design system: "시각 열 176px 고정"): the column neither grows nor
+ * shrinks, and its cell text ("YYYY-MM-DD HH:MM:SS") always fits.
+ */
+export const TIME_COLUMN_WIDTH = 176;
+
+/**
+ * A 시각 cell's text: "YYYY-MM-DD HH:MM:SS" in the display zone, without the zone suffix (the zone
+ * stays in the tooltip's full reading), so a fixed 176px cell is never truncated. "" when empty.
+ */
+export function gridTimeText(value: unknown, tz: string): string {
+  if (typeof value !== "string" && typeof value !== "number") return "";
+  if (value === "") return "";
+  return formatTimestamp(value, tz);
+}
 
 /** Separator of `fields.timeKinds` (the Korean time kinds of one event, primary first). */
 export const TIME_KINDS_SEPARATOR = " · ";

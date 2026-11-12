@@ -109,11 +109,11 @@ export function ReviewPanel() {
   return (
     <div className="stage-panel" data-testid="review-panel">
       {counts.data && nothingMarked ? <ReviewEmptyGuide /> : null}
-      <h2 id="review-status-title">리뷰 상태</h2>
+      <h2 id="review-status-title">검토 상태</h2>
       <ul aria-labelledby="review-status-title">
         <li>
           {link(
-            "리뷰보드 전체",
+            "검토 목록 전체",
             serializeRoute({ runId, collection: "review" }),
             onBoard && !route.status && !route.tags?.length && !route.notes,
             total,

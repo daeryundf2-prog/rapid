@@ -5,7 +5,7 @@ import { currentRun } from "../../../state/slices/runs";
 import { useAppStore } from "../../../state/store";
 import { evidenceTimeTooltip, formatGridTime } from "../../../utils/time";
 import type { CellValue, ColumnSpec } from "../types";
-import { pathCell } from "./PathCell";
+import { pathCell, pathCellText, pathCellTooltip } from "./PathCell";
 import { reviewStatusCell } from "./StatusCells";
 
 /** Effective display timezone (URL tz > preference > evidence > local); useCollectionQuery re-renders the grid on change. */
@@ -193,6 +193,9 @@ export const col = {
       minWidth: 200,
       presets,
       value: (r) => r.sourcePath,
+      // Tooltip and copy name the in-evidence path, never the result folder (r8 C.9.1, T-172).
+      format: (r) => pathCellText(r.sourcePath) ?? "",
+      tooltip: (r) => pathCellTooltip(r.sourcePath),
       render: (r) => pathCell(r.sourcePath),
     };
   },

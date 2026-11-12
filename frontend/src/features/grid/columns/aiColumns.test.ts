@@ -1,6 +1,6 @@
 /**
  * R7 AI 사용 (갈래 D) grid columns: every AI 사용 node opens its own column set (Korean headers),
- * enum cells read through the AI value labels (no raw id), time columns are ≥ 180 px, paths are
+ * enum cells read through the AI value labels (no raw id), time columns are 176 px (T-175), paths are
  * drawn tail first, and the 항목 title of every AI type is a sentence, not an id.
  */
 import { isValidElement } from "react";
@@ -42,12 +42,12 @@ describe("AI 사용 columns", () => {
     }
   });
 
-  it("headers are Korean; time columns ≥ 180 px; paths render tail first", () => {
+  it("headers are Korean; time columns 176 px (T-175); paths render tail first", () => {
     for (const node of nodes) {
       const columns = artifactColumnsForKind("ai-agent", node.target.types);
       for (const column of columns.filter((c) => c.id.startsWith("d:"))) {
         expect(column.header, `${node.id} ${column.id}`).toMatch(/[가-힣]|^(MCP|JSONL|SQLite|Git)/);
-        if (column.filterKind === "time") expect(column.width).toBeGreaterThanOrEqual(180);
+        if (column.filterKind === "time") expect(column.width).toBe(176);
       }
     }
     const touch = rowsOf("ai-agent-file-touch")[0] as GridRow;
