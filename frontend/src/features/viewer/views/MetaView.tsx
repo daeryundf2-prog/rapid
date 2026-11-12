@@ -1010,6 +1010,11 @@ function CrossCaseSection({ row, runId }: { row: GridRow | null; runId: string }
   );
 }
 
+/** A timeline value as shown (IS-128): result-folder paths read as their in-evidence path. */
+function shownPath(value: string): string {
+  return String(evidenceDisplayValue(value, SOURCE_LOCATION_UNKNOWN));
+}
+
 /**
  * Timeline event (C10): what the event is about and the core facts of its source artifact row (the
  * family's core columns, read from the event's details), then the sources folded into this row
@@ -1023,7 +1028,7 @@ function TimelineEventSection({ row }: { row: GridRow | null }) {
       : {};
   const sourceType = typeof row.fields.sourceArtifactType === "string" ? row.fields.sourceArtifactType : null;
   const core = familyCoreFacts(sourceType, details);
-  const target = typeof row.fields.targetFull === "string" ? row.fields.targetFull : "";
+  const target = typeof row.fields.targetFull === "string" ? shownPath(row.fields.targetFull) : "";
   const sources = Array.isArray(row.fields.groupSources)
     ? (row.fields.groupSources as Array<{ artifactType: string; path: string; recordIndex: number | null }>)
     : [];
@@ -1040,7 +1045,7 @@ function TimelineEventSection({ row }: { row: GridRow | null }) {
         {(core?.facts ?? []).map((fact) => (
           <Fragment key={fact.label}>
             <dt>{fact.label}</dt>
-            <dd className="viewer-break">{fact.value}</dd>
+            <dd className="viewer-break">{typeof fact.value === "string" ? shownPath(fact.value) : fact.value}</dd>
           </Fragment>
         ))}
       </dl>
@@ -1051,7 +1056,7 @@ function TimelineEventSection({ row }: { row: GridRow | null }) {
             {sources.map((source) => (
               <li key={`${source.artifactType}|${source.path}`}>
                 {timelineAreaLabel(source.artifactType)} —{" "}
-                <span className="mono viewer-break">{source.path}</span>
+                <span className="mono viewer-break">{shownPath(source.path)}</span>
                 {source.recordIndex !== null ? ` (이벤트 #${source.recordIndex + 1})` : ""}
               </li>
             ))}

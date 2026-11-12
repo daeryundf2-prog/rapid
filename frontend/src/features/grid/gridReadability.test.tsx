@@ -565,4 +565,36 @@ describe("C10 timeline viewer", () => {
     expect(screen.queryByText("artifacts")).toBeNull();
     expect(screen.queryByText(/\(artifacts\)/)).toBeNull();
   });
+
+  it("shows result-folder paths in the event section as in-evidence paths (re-verify @91fe6e9)", () => {
+    const base = mapEvent(jumplistEvent);
+    const stage = "D:\\out\\run1\\_e01\\fs\\Users\\u\\Recent\\A.lnk";
+    const row = {
+      ...base,
+      fields: {
+        ...base.fields,
+        targetFull: stage,
+        groupSources: [
+          { artifactType: "lnk-file", path: stage, recordIndex: 0 },
+          { artifactType: "jumplist-entry", path: "D:\\out\\run1\\_e01\\fs\\$OrphanFiles\\x.lnk", recordIndex: null },
+        ],
+      },
+    };
+    render(
+      <MetaView
+        target={target}
+        preview={null}
+        metadata={null}
+        metadataError={null}
+        hashBusy={false}
+        row={row}
+        sessionMarks={[]}
+        onComputeHash={() => {}}
+      />,
+    );
+    const section = screen.getByTestId("timeline-event-section");
+    expect(section.textContent).not.toMatch(/_e01|D:\\out/);
+    expect(section.textContent).toContain("\\Users\\u\\Recent\\A.lnk");
+    expect(section.textContent).toContain("원래 위치 알 수 없음");
+  });
 });

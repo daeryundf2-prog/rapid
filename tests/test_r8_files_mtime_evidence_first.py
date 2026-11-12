@@ -121,6 +121,24 @@ class MtimeEvidenceFirstTests(unittest.TestCase):
         for descending in (True, False):
             self.assertEqual(self.order(rows, descending), [1, 3, 0, 2], descending)
 
+    def test_all_copy_times_list_allocated_before_recovered_in_both_orders(self) -> None:
+        # Re-verify @91fe6e9 (IMG-B shape): no row has an evidence time, and recovered files were
+        # extracted later, so their copy times are newer. Allocated copies still lead.
+        rows: list[dict[str, object]] = []
+        for index in range(120):
+            row = recovered_row(index) if index % 2 else live_row(index, "")
+            row["modified_at"] = f"2026-11-10T09:{index // 60:02d}:{index % 60:02d}Z"
+            if index % 2:
+                row["modified_at"] = f"2026-11-10T10:{index // 60:02d}:{index % 60:02d}Z"
+            rows.append(row)
+        recovered = {position for position, row in enumerate(rows) if row["is_deleted"]}
+        for descending in (True, False):
+            order = self.order(rows, descending)
+            self.assertEqual([p for p in order[:50] if p in recovered], [], descending)
+            self.assertEqual(set(order[: len(rows) - len(recovered)]), set(range(len(rows))) - recovered)
+            live_times = [files_index.files_copy_time_us(rows[p]) for p in order[:60]]
+            self.assertEqual(live_times, sorted(live_times, reverse=descending))
+
     def test_recovered_flag(self) -> None:
         self.assertTrue(files_row_recovered({"is_deleted": True}))
         self.assertTrue(files_row_recovered({"recovery": {"candidate_kind": "orphan"}}))
