@@ -532,12 +532,12 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             store = RunJobStore()
             job = store.import_completed_run(run_dir)
-            client = api_test_client(store)
-
-            response = client.get(
-                f"/api/runs/{job.run_id}/source-sqlite-wal-preview",
-                params={"path": str(db_path), "max_frames": 5},
-            )
+            # The run folder is inside its evidence (D37): the app's shutdown releases it.
+            with api_test_client(store) as client:
+                response = client.get(
+                    f"/api/runs/{job.run_id}/source-sqlite-wal-preview",
+                    params={"path": str(db_path), "max_frames": 5},
+                )
 
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()
@@ -794,10 +794,10 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             store = RunJobStore()
             job = store.import_completed_run(run_dir)
-            client = api_test_client(store)
-
-            static_response = client.get("/api/forensic-capabilities")
-            run_response = client.get(f"/api/runs/{job.run_id}/capabilities")
+            # The run folder is its own evidence root (D37): the app's shutdown releases it.
+            with api_test_client(store) as client:
+                static_response = client.get("/api/forensic-capabilities")
+                run_response = client.get(f"/api/runs/{job.run_id}/capabilities")
 
         self.assertEqual(static_response.status_code, 200, static_response.text)
         static_payload = static_response.json()

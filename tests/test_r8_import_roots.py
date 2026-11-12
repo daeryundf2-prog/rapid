@@ -28,7 +28,6 @@ from rapidtriage.api.app import create_app
 from rapidtriage.core import import_roots
 from rapidtriage.core.credential_stores import is_credential_store_path
 from rapidtriage.core.jobs import RunJob, RunJobStore
-from rapidtriage.core.readonly_runs import unregister_readonly_folder
 from rapidtriage.core.run import run_triage_mode
 from rapidtriage.core.sample_case import build_sample_evidence
 
@@ -84,13 +83,8 @@ class Base(unittest.TestCase):
         self.store = RunJobStore()
         self.client = TestClient(create_app(self.store, auth_token=TOKEN), headers={"X-RapidTriage-Token": TOKEN})
         self.addCleanup(self.client.close)
-        self.addCleanup(self._unregister_all)
+        self.addCleanup(self.store.close)
         import_roots.clear_cache()
-
-    def _unregister_all(self) -> None:
-        for job in self.store.list():
-            if job.output_dir() is not None:
-                unregister_readonly_folder(job.output_dir())
 
     def import_copy(self, name: str, root: Path, *, edit=None) -> str:
         target = self.base / name

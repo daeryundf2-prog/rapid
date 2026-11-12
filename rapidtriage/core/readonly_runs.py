@@ -20,7 +20,9 @@ Three layers keep that promise:
   where the ``open`` audit event never fires).
 
 The registry is process-wide (the API threads, background index builders and the search-history
-writer all see it) and holds canonical folder paths only.
+writer all see it) and holds canonical folder paths only. Registrations are owned: a run store holds
+each read-only run's folder until the run is removed from the list or the store is closed (app
+shutdown), and a folder held by several owners stays read-only until the last one releases it.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ import os
 import sqlite3
 import sys
 import threading
+from collections.abc import Hashable
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -44,6 +47,11 @@ RUN_READ_ONLY_MESSAGE = (
 _LOCK = threading.Lock()
 # canonical folder -> reason code (``OUTPUT_INSIDE_EVIDENCE``)
 _READONLY: dict[str, str] = {}
+# canonical folder -> owners holding it read-only (a run store holds one per run); the folder leaves
+# ``_READONLY`` when its last owner releases it.
+_HOLDERS: dict[str, set[Hashable]] = {}
+# Owner of a registration made without one (direct calls, tests): released by an owner-less unregister.
+_UNOWNED: Hashable = "unowned"
 _PREFIXES: tuple[tuple[str, str], ...] = ()
 _GUARD_INSTALLED = False
 
@@ -111,16 +119,47 @@ def _canonical(path: Path | str) -> str:
     return canonical_path(os.path.join(_canonical_dir(head), tail))
 
 
-def register_readonly_folder(folder: Path | str, reason: str) -> None:
-    with _LOCK:
-        _READONLY[canonical_path(folder)] = reason
-        _rebuild_prefixes_locked()
+def register_readonly_folder(folder: Path | str, reason: str, *, owner: Hashable = _UNOWNED) -> str:
+    """Register ``folder`` read-only on behalf of ``owner``; returns the canonical folder.
 
-
-def unregister_readonly_folder(folder: Path | str) -> None:
+    A folder stays registered while at least one owner holds it (a run store holds one per run,
+    see ``RunJobStore``). Registering again with the same owner is a no-op hold (not counted twice).
+    """
+    canonical = canonical_path(folder)
     with _LOCK:
-        if _READONLY.pop(canonical_path(folder), None) is not None:
+        _HOLDERS.setdefault(canonical, set()).add(owner)
+        if _READONLY.get(canonical) != reason:
+            _READONLY[canonical] = reason
             _rebuild_prefixes_locked()
+    return canonical
+
+
+def unregister_readonly_folder(folder: Path | str, *, owner: Hashable | None = None) -> bool:
+    """Release ``owner``'s hold on ``folder``; the folder is writable again once nobody holds it.
+
+    Without ``owner`` every hold is dropped at once (operator / test clean-up). Returns whether the
+    folder left the registry."""
+    canonical = canonical_path(folder)
+    with _LOCK:
+        holders = _HOLDERS.get(canonical)
+        if holders is None:
+            return False
+        if owner is None:
+            holders.clear()
+        else:
+            holders.discard(owner)
+        if holders:
+            return False
+        del _HOLDERS[canonical]
+        _READONLY.pop(canonical, None)
+        _rebuild_prefixes_locked()
+        return True
+
+
+def readonly_holders(folder: Path | str) -> int:
+    """How many owners hold ``folder`` read-only (0 when it is not registered)."""
+    with _LOCK:
+        return len(_HOLDERS.get(canonical_path(folder), ()))
 
 
 def _match(text: str) -> str | None:

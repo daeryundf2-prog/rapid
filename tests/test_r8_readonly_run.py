@@ -168,6 +168,8 @@ class ReadOnlyGateTests(Base):
             connection.close()
         finally:
             register_readonly_folder(self.legacy, "OUTPUT_INSIDE_EVIDENCE")
+            # Re-registered without the store as owner: the store's close() does not release it.
+            self.addCleanup(unregister_readonly_folder, self.legacy)
         before = database.read_bytes()
 
         @self.client.app.get("/api/runs/{run_id}/_guard-probe")

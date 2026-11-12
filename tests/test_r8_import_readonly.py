@@ -87,12 +87,7 @@ class Base(unittest.TestCase):
         self.client = TestClient(create_app(self.store, auth_token=TOKEN), headers={"X-RapidTriage-Token": TOKEN})
         self.addCleanup(self.client.close)
         # Runs after the folder cleanup is queued, so it runs first: never leave a folder registered.
-        self.addCleanup(self._unregister_all)
-
-    def _unregister_all(self) -> None:
-        for job in self.store.list():
-            if job.output_dir() is not None:
-                unregister_readonly_folder(job.output_dir())
+        self.addCleanup(self.store.close)
 
     def copy_output(self, target: Path, *, edit=None) -> Path:
         shutil.copytree(self.source_out, target)
@@ -232,8 +227,10 @@ class ReadOnlyRunTests(Base):
     def test_restored_state_keeps_the_run_read_only(self) -> None:
         state = self.base / "state.json"
         store = RunJobStore(state_path=state)
+        self.addCleanup(store.close)
         job = store.import_completed_run(self.legacy)
         restored = RunJobStore(state_path=state)
+        self.addCleanup(restored.close)
         self.assertEqual(restored.get(job.run_id).readonly_reason, "OUTPUT_INSIDE_EVIDENCE")
         self.assertFalse(may_persist(self.legacy / "anything.json"))
 
