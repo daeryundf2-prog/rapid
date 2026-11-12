@@ -57,6 +57,8 @@ AI 사용              자료 없음 ⓘ
 전문가 항목 432,118건 숨김 ▸          ← 분석 담당 모드 전환
 ```
 
+〔2차〕 내비 맨 위("먼저 확인할 것" 위)에 **"질문으로 찾기 ▾"** 메뉴를 둔다(T-136, 결정 D41). 8문항 — 무엇을 가지고 나갔나 / 무엇을 지웠나 / 누구와 연락했나 / 어떤 문서를 열었나 / 어떤 프로그램을 썼나 / 언제 PC를 썼나 / 어디에 접속했나 / AI 도구를 썼나 — 각각이 조건이 걸린 목록 주소를 연다(v1 4.5 승계). 브리핑 본문에는 넣지 않는다(스크롤 0 유지). 항목 수 12의 계산에서 이 메뉴는 1개로 센다.
+
 - 묶음 머리 12px/600, 항목 13px/400(부모가 자식보다 약한 현재 위계 역전 해소). 건수는 우측 정렬 고정 폭(`min-width: 7ch`, `flex:none`), 스크롤바 거터 예약 뒤에도 잘리지 않는다. 1만 이상은 `1.2만`으로 **명시적으로** 줄이고 정확한 수는 접근성 이름·툴팁에 둔다.
 - 분석 담당 모드에서는 이 아래에 기존 트리(노드 id·순서 유지)가 그대로 온다. 빈 계열 토글 문구는 "자료 없는 범주 보기 ☐"(상태가 아니라 동작) 하나로.
 - 분류 출처는 카탈로그 `tier`/`card`/`section`(IS-019). 카드 정의·0건 사유·카드별 6열은 v1 4.1~4.4를 그대로 승계한다(변경: 카드 이름 "삭제·은닉" → "삭제·복구"; "확장자 위장" 하위 탭은 GAP-040 정리 뒤 사용자 폴더의 문서·압축·이미지 서명 불일치만).
@@ -106,7 +108,8 @@ AI 사용              자료 없음 ⓘ
 │ ▸ 기술 정보 (단계 42 · 수집기 31 · 흔적 543,243 · 결과 폴더 · 처리 ID 복사)     │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
-- 구성 요소: `PageHeader`, `EvidenceStrip`(무결성 4상태 + 범위 띠), `FindingList`, `StatRow`(숫자+뜻+`>`), `ZeroReason`, `MiniTimeline`, `ReviewProgress`, `NextAction`, `Disclosure`(기술 정보).
+- 무결성 문구(〔2차〕 GAP-191): 승인(D34) 전에는 `컨테이너 해시 계산됨 · 매체 해시 미대조` / `컨테이너 해시 일치(입력값) · 매체 해시 미대조` / `컨테이너 해시가 입력값과 다름 — 매체 해시 미대조`(호박) / `해시 미계산`(호박) 넷만 쓴다. "검증됨"(초록 방패)과 빨강 "불일치"는 매체 해시를 대조한 뒤(T-125)에만 나온다. 단일 파일 증거(dd·raw)는 파일 해시 = 매체 해시이므로 일치/불일치를 그대로 쓴다.
+- 구성 요소: `PageHeader`, `EvidenceStrip`(무결성 5표현 + 범위 띠), `FindingList`, `StatRow`(숫자+뜻+`>`), `ZeroReason`, `MiniTimeline`, `ReviewProgress`, `NextAction`, `Disclosure`(기술 정보).
 - 내용은 `GET /api/runs/{id}/brief`와 1:1(부록 D.6). 색이 있는 곳은 방패·등급 배지·범위 띠뿐.
 - "사용 기간"은 Tier 1 사용자 행위 이벤트의 최소·최대이고 ⓘ에 정의를 적는다. 폴더 증거(취득 사본 시각뿐)에서는 "산정 불가 — 사본 시각만 있음"(GAP-171).
 - 상태: 처리 중(카드별 "처리 중" + 끝난 카드만 숫자), `/brief` 미계산(백그라운드 계산 중 n%), 케이스 미연결(머리줄 "사건 정보 없음 — 사건에 연결"), 다중 증거 "전체"(증거별 한 줄 비교 표: 건수·기간·범위·제한).
@@ -213,6 +216,27 @@ AI 사용 › [개요] 세션 29 · 파일 접촉 311 · 계정 3 · 웹 AI 12  
 
 표시(테마: 시스템/라이트/다크 · 글자 3단 · 밀도 3단 · 시간대) / 검토(담당자 이름·기본 태그) / 처리 기본값 / 보안(가림 기본·해제 기록) / 고급. 
 
+### C.3.13 화면 × 상태 매트릭스 〔2차 신규〕
+
+열두 화면 각각의 다섯 상태를 문구까지 정한다. 구현 과제는 이 표의 문구를 그대로 쓰고(용어 lint 대상), 각 칸은 QA-084(빈 상태)·QA-085(오류 경계)·QA-021·022(부분)·QA-031(숨김)의 판정 대상이다. `—`는 그 화면에 그 상태가 없다는 뜻이다(없다는 것도 결정이다).
+
+| 화면 | 로딩(300 ms 뒤 골격) | 빈 상태(사유 + 행동 1) | 오류(무슨 일 / 영향 / 할 일) | 부분(호박 띠) | 숨김 고지 |
+|---|---|---|---|---|---|
+| (1) 진입·랜딩 | 최근 사건 3줄 골격 | 사건 0건: "아직 사건이 없습니다 — 새 사건 만들기" + 준비물 3줄 | "서버에 연결하지 못했습니다 / 사건 목록을 불러올 수 없습니다 / 서버 창이 켜져 있는지 확인 · 다시 시도" | — | — |
+| (1) 토큰 | — | — | "접속 코드가 맞지 않습니다 / 사건을 열 수 없습니다 / 분석 담당자가 보낸 링크를 다시 열거나 코드를 다시 입력" | — | — |
+| (2) 사건 브리핑 | 증거 띠·좌우 4블록 골격(숫자 자리 회색 막대) | 처리 결과가 비었을 때: 카드마다 `ZeroReason`. 처리 전: "아직 처리하지 않았습니다 — 처리 시작" | 블록 단위 `SectionBoundary`: "이 부분을 표시하지 못했습니다 / 나머지 수치는 정상입니다 / 다시 시도". `/brief` 전체 실패: 화면 가운데 오류 틀 + 접힌 기술 정보 | 처리 중: 상단 진행 띠 + 끝난 카드만 숫자. 범위 < 100%: 증거 띠 "볼륨의 n%만 처리 · 약 m 파일 미처리". 읽기 전용 결과: "읽기 전용으로 열렸습니다 — 결과 폴더가 증거 안에 있습니다" | "전문가 항목 n건 숨김"(검토자 모드, 하단 한 줄) |
+| (3) 살펴보기 목록 | 머리글 + 12행 골격 | 0건: `ZeroReason`(사유 8종). 조건 0건: "조건에 맞는 항목이 없습니다 — 조건 지우기" | "목록을 불러오지 못했습니다 / 이 범주만 영향 / 다시 시도" | "시간 제한으로 일부만 확인했습니다(n행 확인) — 다시 시도 · 조건 좁히기" / "n건 이상(전체 건수는 세지 않았습니다)" | "n건 숨김: 알려진 정상 a · 중복 b · 전문가 항목 c — 모두 보기" |
+| (3) 뷰어 | 탭 자리 유지 + 본문 골격 | 선택 없음: "항목을 선택하면 여기에 내용이 보입니다". 보류: "자격 증명이 들어 있을 수 있어 본문을 표시하지 않습니다 — 정보 탭 보기" | 탭 단위: "이 탭을 표시하지 못했습니다 / 다른 탭은 사용할 수 있습니다 / 다시 시도" | "내용 복구 불가: 삭제된 파일의 자리가 다른 데이터로 덮였습니다(앞 4 KB가 비어 있음)" / "큰 파일의 앞 n KB만 표시" | 가림: "비밀값 n곳을 가렸습니다 — 보기(기록됨)" |
+| (4) 검색 결과 | 결과 6행 골격 + "검색 중… n초" | "'질의'와 일치하는 문서가 없습니다 — 범위 넓히기(전부) · 띄어쓰기 바꿔 보기" | "검색을 끝내지 못했습니다 / 결과가 없을 수 있습니다 / 다시 시도 · 질의 줄이기" (문법 오류는 위치 표시 + 예시) | "15초 안에 끝내지 못해 일부 결과만 표시합니다 — 조건 추가" / "색인 준비 중 n% — 지금은 일부 자료만 검색됩니다" | "전문가 항목에 n건 더 있음 >" |
+| (5) 하루 보기 | 막대 자리 + 8행 골격 | 그날 0건: "이 날에는 기록이 없습니다 — 다음 기록 있는 날 >" | "시간순 자료를 불러오지 못했습니다 / … / 다시 시도" | "취득 사본 시각만 있는 증거입니다 — 증거 시각 기준 보기는 쓸 수 없습니다"(폴더 증거) | "사용자 행위 외 n건 숨김 — 모두 보기" |
+| (6) AI 개요 | 3블록 골격 | "이 PC에서 AI 도구 흔적을 찾지 못했습니다. 웹 서비스 사용 기록은 서비스 제공자 측에 있을 수 있습니다." + 수집 범위 | 블록 단위 오류 틀 | "읽기 예산(n GiB)에 닿아 최신 자료부터 일부만 읽었습니다" | "가린 비밀값 n곳" |
+| (7) 검토 묶음·한 건 보기 | 목록 골격 + 본문 골격 | 묶음 0개: "아직 검토 묶음이 없습니다 — 검색 결과에서 만들기". 묶음 완료: "이 묶음을 모두 검토했습니다 — 보고서로" | "판단을 저장하지 못했습니다 / 방금 표시는 반영되지 않았습니다 / 다시 시도"(낙관적 표시는 되돌림) | "다른 창에서 변경됨 — 새로 고침" | "제외한 n건 숨김 — 보기" |
+| (8) 보고서 | 종이 골격 | "아직 보고서에 넣을 항목이 없습니다 — 검토로 이동"(내보내기 비활성) | "미리보기를 만들지 못했습니다 / 내보내기는 할 수 없습니다 / 다시 시도". 후보 수 조회 실패: "보고서 포함 수를 확인하지 못했습니다 — 다시 시도"("확인 중" 고착 금지) | 점검 패널 경고: "처리 범위 n% — 보고서에 자동 기재됩니다" / "빠른 1차 처리 결과입니다" | "가림 n곳 · 숨긴 전문가 항목 n건"(점검 패널) |
+| (9) 새 사건·새 처리 | 경로 검사 중: 필드 옆 회전 표시 | — | 필드 아래 문장 + 상단 요약: "결과 폴더가 증거 안에 있습니다 — 다른 폴더를 고르세요" / "경로를 찾을 수 없습니다" / "여유 공간이 부족합니다(예상 n GB · 여유 m GB)" | — | "세부 설정 n개는 기본값입니다 ▸" |
+| (10) 처리 이력·더 분석하기·작업 센터 | 단계 표 골격 | 분석 미실행: "아직 실행하지 않았습니다 — 실행"(예상 시간). 작업 0개: "진행 중인 작업이 없습니다" | 단계 실패: "실패 — 사유 한 줄 — 다시 시도". 구성 요소 없음: "구성 요소 없음 — 분석 담당자에게 요청(복사)" | 단계 "부분 △": "n개 중 m개 처리" / 분석 "부분 n%" / "다시 계산 필요" | 건너뛴 단계 n개 접힘 |
+| (11) 사람·장치 | 표 2개 골격 | 계정 0: 사유(`no_input` 등). 장치 0: "외부 저장 장치 연결 기록이 없습니다" + 사유 | 표 단위 오류 틀 | "장치 정보 일부만 확인(범위 n%)" | "시스템·서비스 계정 n개 숨김 — 보기" |
+| (12) 설정 | — | — | "설정을 저장하지 못했습니다 — 다시 시도"(값은 되돌림) | — | — |
+
 ## C.4 상호작용·키보드 규칙
 
 | 규칙 | 내용 |
@@ -258,6 +282,24 @@ AI 사용 › [개요] 세션 29 · 파일 접촉 311 · 계정 3 · 웹 AI 12  
 
 빨강은 **실패·무결성 불일치·A등급**에만 쓴다. "관련 있음"을 빨강에서 남색으로 옮기는 것은 기존 사용자 습관과 닿으므로 결정 D35.
 
+**토큰 표**〔2차 신규〕 — T-061이 `tokens.css`에 넣는 이름과 초기값이다. 값은 시각 감사 5.4의 제안값이고 `scripts/check-contrast.mjs`가 통과하지 못하면 **명도만** 조정한다(색상·역할은 유지). 대비 기준: 글자 1·2와 칩 글자는 배경 0·1·2 위에서 ≥ 4.5:1, 글자 3은 **비활성·자리 표시자 전용**(≥ 3:1)이며 정보를 담은 글자(0건 칩, "자료 없음", 대기 상태)에는 글자 2를 쓴다.
+
+| 토큰 | 다크 | 라이트 | 쓰는 곳 |
+|---|---|---|---|
+| `--bg-0` / `--bg-1` / `--bg-2` | `#0E1116` / `#151A21` / `#1C222B` | `#F6F7F9` / `#FFFFFF` / `#EEF1F4` | 앱 / 패널·카드·입력 / 머리글·호버 |
+| `--border` | `#2A323D`(구분선) · 조작 대상 테두리는 `#68778A`(≥ 3:1) | `#D8DEE5` · 조작 대상 `#8A94A0` | 경계 |
+| `--fg-1` / `--fg-2` / `--fg-3` | `#E6EAF0` / `#A3ADBA` / `#6B7684` | `#16191D` / `#4D5763` / `#8A94A0` | 본문 / 보조 / 비활성 전용 |
+| `--accent` | `#5B9DF5` | `#1F5FBF` | 주 버튼·포커스 링·선택 행(12%)·활성 내비·링크 |
+| `--state-ok` | `#3FB27F` | `#1E7F53` | 완료 ✓, 검증됨 방패 |
+| `--state-warn` | `#E0A23A` | `#9A6400` | 부분 △, 미계산, 재검토 테두리, B등급, 암호화 |
+| `--state-fail` | `#E5605A` | `#B3261E` | 실패 ✕, 매체 해시 불일치, A등급 **만** |
+| `--forensic-recovered` | `#3DB8C4` | `#0F7A85` | 복구·카빙 |
+| `--review-relevant` | `#7C8CF8` | `#3B45C4` | 관련 있음(D35) |
+| `--review-report` | `#B08CF0` | `#6B3FB8` | 보고서 포함 칩 |
+| 칩 배경 | 해당 색 14% 혼합(`color-mix`) | 같은 규칙 | 상태 칩 |
+
+간격 `--sp-1..7` = 4·8·12·16·24·32·48. 모서리 `--r-chip` 4 · `--r-control` 6 · `--r-card` 8. 높이 `--h-row` 32(28·36) · `--h-control` 32 · `--h-control-dialog` 36 · `--h-chip` 20 · `--h-filter-chip` 24. 포커스 `--focus-ring: 2px solid var(--accent)` + `--focus-offset: 2px`. 겹침 순서(현재 17종 → 5단): `--z-sticky` 10 · `--z-drawer` 20 · `--z-popover` 30 · `--z-dialog` 40 · `--z-toast` 50. 움직임 `--motion` 120 ms(`prefers-reduced-motion`이면 0). 옛 토큰(`--fs-*`·`--surface-*`·`--status-*`·`--space-*`·`--radius*`)은 T-117까지 남고, 값이 같은 것만 새 토큰을 가리키게 한다.
+
 **테마**: 기본 = OS 설정(`prefers-color-scheme` + 변경 리스너), 값이 없으면 라이트. 인쇄 = 라이트 + 패널·도구 막대 숨김 + 본문 전폭.
 
 **밀도**: 그리드 32(기본)/28/36, 트리 28, 목록 카드 최소 56, 조작 대상 최소 28(체크박스는 16px 상자 + 28px 타깃).
@@ -282,7 +324,35 @@ AI 사용 › [개요] 세션 29 · 파일 접촉 311 · 계정 3 · 웹 AI 12  
 | `HashValue`·`PathText`·`CopyButton` | MetaView 내부 구현 | 앞 8…뒤 4, 폴더 앞 줄임 |
 | `Tree` | EvidenceTree·ExplorerTree·CasePicker | 한 구현, 가상화 선택 |
 
-분해 대상(600줄 상한): DataGrid(2,052) → `GridBody`·`GridHeader`·`GridFooter`·`useGridKeyboard`·`gridEmptyState`; MetaView(1,461) → `MetaSummary`·`MetaTech`·`ProvenancePanel`; caseCards(1,095)·FilterBar(992)·ProcessStage(811)·CaseWizard(733)는 새 화면으로 대체하면서 삭제.
+### C.6.1 컴포넌트 속성 표 〔2차 신규〕
+
+W4 과제(T-062~T-068)가 만드는 공용 컴포넌트의 속성·접근성·testid를 고정한다. 여기 없는 속성은 넣지 않는다(필요하면 표를 먼저 고친다).
+
+| 컴포넌트 | 속성 | 접근성 | testid·data |
+|---|---|---|---|
+| `Chip` | `kind: "process"\|"forensic"\|"grade"\|"review"\|"filter"\|"count"`, `value`(kind별 열거: process = done·running·waiting·skipped·partial·failed / forensic = verified·computed·uncomputed·mismatch·deleted·recovered·unrecoverable·known-good·duplicate·encrypted·copy-time / grade = A·B·C / review = relevant·needs-review·excluded·report·bookmark), `label?`(기본은 용어표), `count?`, `onClick?`(filter만) | 글자가 항상 있음(아이콘만 금지). filter는 `aria-pressed` | `data-kind`, `data-value` |
+| `CountBadge` | `value: number\|null`, `lowerBound?: boolean`("n건 이상"), `abbreviate?: boolean`(1만 이상 `1.2만`) | `aria-label` = 정확한 수 + "건"(미확정이면 "n건 이상") | `data-count`(정수, 미확정은 `data-count-min`) |
+| `EmptyState` | `type: "none"\|"filtered"\|"error"\|"not-run"\|"partial"`, `title`, `reason`, `action?: {label, onClick\|href}`, `technical?`(접힘) | `role="status"`(error는 `role="alert"`) | `r8-empty`, `data-type` |
+| `ZeroReason` | `code`(8종), `role: "reviewer"\|"examiner"`, `detail?` | `EmptyState`와 같음 | `r8-zero-reason`, `data-code` |
+| `InlineAlert` | `tone: "info"\|"warn"\|"error"\|"success"`, `title`, `children`, `action?`, `technical?` | warn·error는 `role="alert"`, 그 외 `status` | `data-tone` |
+| `PartialBanner` | `code`(`SCAN_BUDGET_STOPPED`·`TOTAL_NOT_COUNTED`·`SCOPE_TRUNCATED`·`READ_ONLY`·`INDEX_BUILDING`), `scanned?`, `onRetry?`, `onNarrow?` | `role="status"` | `r8-partial-banner`, `data-code` |
+| `HiddenBanner` | `items: [{reason, count}]`, `onShowAll` | `role="status"` | `r8-hidden-banner`, `data-count` |
+| `Skeleton` | `rows?`, `variant: "list"\|"card"\|"text"`, `delayMs = 300` | `aria-busy="true"`, 화면 낭독 "불러오는 중"은 750 ms 뒤 1회 | — |
+| `SectionBoundary` | `name`(영역 이름), `onRetry?` | 오류 시 `role="alert"` | `data-boundary` |
+| `Dialog` | `title`, `size: "sm"\|"md"\|"lg"`(480·640·800), `danger?`, `initialFocus?: "first-input"\|"cancel"`, `onClose`, `footer` | `role="dialog"` + `aria-modal` + 제목 연결, Esc 닫기, 닫으면 연 요소로 복귀 | 기존 대화상자의 testid 유지 |
+| `Menu` | `items: [{id, label, icon?, shortcut?, danger?, disabledReason?}]`, `anchor`, `onSelect` | `role="menu"`/`menuitem`, 방향키·Home·End·타입어헤드 | 기존 `viewer-actions-menu` 등 유지 |
+| `Button` | `variant: "primary"\|"secondary"\|"quiet"\|"danger"`, `size: "md"\|"lg"`, `icon?`, `disabledReason?`(있으면 `aria-disabled` + 설명 연결) | 아이콘만이면 `aria-label` 필수 | — |
+| `Checkbox`·`Radio`·`Switch` | `checked`, `onChange`, `label`(필수), `description?` | 네이티브 input + 라벨 연결 | — |
+| `Tabs` | `tabs: [{id, label, count?, hidden?}]`, `value`, `onChange` | `role="tablist"`, 방향키 | — |
+| `PageHeader` | `title`(h1), `description?`, `count?`(`CountBadge` 속성), `primaryAction?` | h1은 화면당 1개 | `stage-heading` id 유지 |
+| `StatRow` | `label`, `value`, `href`, `hint?`, `zeroReason?` | 링크 이름 = "라벨 n건" | `data-count` |
+| `EvidenceStrip` | `evidence`(부록 D.6 `evidence[]` 한 항목) | 무결성 문장을 글자로 | `r8-brief-evidence` |
+| `TimeText` | `value`, `basis?: "evidence"\|"copy"`, `precision?: "minute"\|"second"` | `title`·`aria-label`에 UTC | `data-utc` |
+| `HashValue` | `algorithm`, `value`, `truncate?: boolean` | 복사 버튼 이름 "SHA-256 복사" | — |
+| `PathText` | `path`, `mode: "folder"\|"full"` | 전체 경로를 `title`·접근성 이름에 | — |
+| `Tree` | `nodes`, `selectedId`, `onSelect`, `virtualized?`, `renderBadge?` | `role="tree"`, 방향키·Home·End·타입어헤드 | 기존 트리 testid 유지 |
+
+분해 대상(600줄 상한): DataGrid(2,052) → `GridBody`·`GridHeader`·`GridFooter`·`useGridKeyboard`·`gridEmptyState`; MetaView(1,461) → `MetaSummary`·`MetaTech`·`ProvenancePanel`; caseCards(1,095)·FilterBar(992)·ProcessStage(811)·CaseWizard(762)는 새 화면으로 대체하면서 삭제.
 
 ## C.7 용어표(한 개념 한 용어) — 결정이 필요한 것은 기본값으로 진행
 
