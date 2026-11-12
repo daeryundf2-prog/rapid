@@ -137,6 +137,20 @@ class ReadRecordedHashTests(unittest.TestCase):
         result = read_recorded_acquisition_hash(self.root / "big.E50")
         self.assertEqual((result.md5, result.sha1, result.reason), (MD5.hex(), SHA1.hex(), ""))
 
+    def test_segment_index_and_full_discovery_with_gaps(self) -> None:
+        index = recorded_hash.ewf_segment_index
+        self.assertEqual([index(Path(f"a{s}")) for s in (".E01", ".e99", ".EAA", ".ExAB", ".FAA", ".dd", ".E1")],
+                         [1, 99, 100, 101, 776, None, None])
+        first = self.write("set.E01", b"x")
+        self.write("set.E02", b"x")
+        self.write("set.E04", b"x")  # E03 missing: present segments after the gap still listed
+        self.write("set.E01.txt", b"log")
+        self.write("other.E03", b"x")
+        segments, gaps = recorded_hash.discover_segment_files(first)
+        self.assertEqual([item.name for item in segments], ["set.E01", "set.E02", "set.E04"])
+        self.assertEqual(gaps, [3])
+        self.assertEqual(recorded_hash.discover_segment_files(self.write("plain.dd", b"x")), ([self.root / "plain.dd"], []))
+
     def test_missing_last_segment_is_incomplete_not_absent(self) -> None:
         first = self.write("cut.E01", build_ewf1_segment([("header", b"h"), ("next", b"")]))
         self.write("cut.E02", build_ewf1_segment([("next", b"")], segment_number=2))
@@ -146,6 +160,14 @@ class ReadRecordedHashTests(unittest.TestCase):
         self.assertEqual((result.md5, result.sha1), ("", ""))
         self.assertEqual(result.reason, "세그먼트 집합이 불완전함(마지막 세그먼트 없음)")
         self.assertNotIn("없습니다", result.reason)
+        self.assertTrue(result.incomplete)
+        self.assertTrue(result.to_dict()["incomplete"])
+        # WB-9 P1-3: the verdict never words an incomplete set as "no recorded hash".
+        for expected in ("", MD5.hex()):
+            status, message = evidence_hash_verdict(expected, {"md5": "0" * 32}, result)
+            self.assertEqual(status, "computed")
+            self.assertIn("기록된 취득 해시를 읽지 못함(세그먼트 집합 불완전)", message)
+            self.assertNotIn("기록된 취득 해시 없음", message)
         # a gap (E03 present, E02 missing) also ends the chain without ``done``
         gap = self.write("gap.E01", build_ewf1_segment([("header", b"h"), ("next", b"")]))
         self.write("gap.E03", build_ewf1_segment([("hash", hash_data()), ("done", b"")], segment_number=3))

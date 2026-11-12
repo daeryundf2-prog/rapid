@@ -1,11 +1,18 @@
-// Evidence hash display honesty (R8 T-129): E01 labels name the container bytes, a mismatch is
-// amber, segment values come first and the recorded acquisition hash (T-181) is the third line;
+// Evidence hash display honesty (R8 T-129, WB-9 P1-3/P1-5): E01 labels name the container bytes, a
+// legacy container mismatch is amber, an input that differs from the recorded acquisition hash is
+// red, an incomplete segment set is amber, segment values come first and the recorded acquisition hash (T-181) is the third line;
 // file evidence keeps its wording.
 
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { CaseEvidence } from "../../api/cases";
-import { EvidenceHashValues, EWF_HASH_SCOPE, evidenceHashLabel } from "./evidenceHash";
+import {
+  EvidenceHashValues,
+  EWF_HASH_SCOPE,
+  evidenceHashLabel,
+  INCOMPLETE_SET_LABEL,
+  RECORDED_DIFFERS_LABEL,
+} from "./evidenceHash";
 
 afterEach(cleanup);
 
@@ -64,7 +71,7 @@ describe("evidence hash labels (T-129)", () => {
       evidenceHashLabel(
         evidence({ hash_status: "mismatched", hash_expected: "1".repeat(40), hash_recorded: recorded }),
       ),
-    ).toEqual(["입력값이 기록된 취득 해시와 다름 — 매체 해시 미대조", "warn"]);
+    ).toEqual([RECORDED_DIFFERS_LABEL, "danger"]);
     // WB-8 P1-1: SHA-256 input (E01 records none) or no recorded hash is not-comparable, never red.
     const notComparable = ["입력값 대조 불가 — 이미지에 같은 종류의 기록된 취득 해시 없음", "info"];
     expect(evidenceHashLabel(evidence({ hash_expected: "0".repeat(64), hash_recorded: recorded }))).toEqual(
@@ -75,6 +82,44 @@ describe("evidence hash labels (T-129)", () => {
         evidence({ hash_expected: MD5, hash_recorded: { md5: "", sha1: "", reason: "없음" } }),
       ),
     ).toEqual(notComparable);
+  });
+
+  it("decides a recorded-hash mismatch from the server, red even without the sidecar (P1-5)", () => {
+    const row = evidence({ hash_status: "mismatched", hash_expected: MD5, hash_recorded: null });
+    expect(evidenceHashLabel({ ...row, hash_recorded_compare: "differs" })).toEqual([
+      RECORDED_DIFFERS_LABEL,
+      "danger",
+    ]);
+    // A legacy row (no recorded value anywhere) keeps the amber container wording.
+    expect(evidenceHashLabel(row)).toEqual(["컨테이너 해시가 입력값과 다름 — 매체 해시 미대조", "warn"]);
+    expect(
+      evidenceHashLabel(
+        evidence({ hash_expected: MD5, hash_recorded_compare: "equals", hash_recorded: null }),
+      ),
+    ).toEqual(["입력값 = 기록된 취득 해시 — 매체 재계산 안 함", "info"]);
+  });
+
+  it("shows an incomplete segment set amber, never as a green chip or 'no recorded hash' (P1-3)", () => {
+    const incomplete = {
+      md5: "",
+      sha1: "",
+      reason: "세그먼트 집합이 불완전함(마지막 세그먼트 없음)",
+      incomplete: true,
+    };
+    expect(evidenceHashLabel(evidence({ hash_recorded: incomplete }))).toEqual([
+      INCOMPLETE_SET_LABEL,
+      "warn",
+    ]);
+    expect(evidenceHashLabel(evidence({ hash_expected: MD5, hash_set_incomplete: true }))).toEqual([
+      INCOMPLETE_SET_LABEL,
+      "warn",
+    ]);
+    render(
+      <EvidenceHashValues item={evidence({ hash_recorded: incomplete, hash_segments: [segment(1)] })} />,
+    );
+    const line = screen.getByTestId("evidence-recorded-hash").textContent ?? "";
+    expect(line).toContain("기록된 취득 해시를 읽지 못함 — 세그먼트 집합 불완전");
+    expect(line).not.toContain("기록된 취득 해시 없음");
   });
 
   it("keeps the file-evidence wording (dd, raw, exports)", () => {
@@ -124,6 +169,22 @@ describe("evidence hash values (T-129)", () => {
     expect(screen.getByText("세그먼트 4개 컨테이너 SHA-256")).toBeTruthy();
     expect(screen.getByTestId("evidence-recorded-hash").textContent).toBe(
       "이미지에 기록된 취득 해시 없음 (hash 섹션 없음)",
+    );
+  });
+
+  it("discloses missing segment numbers under the container hash (P1-4)", () => {
+    render(
+      <EvidenceHashValues
+        item={evidence({
+          hash_segments: [segment(1), segment(3)],
+          hash_segment_count: 2,
+          hash_segment_gaps: [2],
+          hash_set_incomplete: true,
+        })}
+      />,
+    );
+    expect(screen.getByTestId("evidence-segment-gaps").textContent).toBe(
+      "빠진 세그먼트 번호 2 — 컨테이너 해시는 있는 세그먼트 2개만",
     );
   });
 

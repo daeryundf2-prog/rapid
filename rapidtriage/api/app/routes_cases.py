@@ -21,6 +21,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from ...core.case_db.base import CaseDatabaseError
 from ...core.case_db.intake import CaseConflictError, CaseNotFoundError
+from ...core.case_db.write_lock import CaseDatabaseLockedError, case_db_locked_detail
 from ...core.jobs import RunJobStore, RunOutputDirBusy
 from ...core.output_guard import (
     OutputInsideEvidenceError,
@@ -57,6 +58,7 @@ from .models import (
     CaseRunCreateRequest,
     CaseRunLinkRequest,
 )
+from .preflight_space import preflight_space_for
 from .routes_runs import output_guard_http_error, run_request_from_body
 from .run_problems import PROBLEM_MAX_LIMIT, PROBLEM_PREVIEW_LIMIT, build_run_problems
 
@@ -98,6 +100,8 @@ CASE_FIELD_LABELS = {
 
 
 def _raise(exc: CaseDatabaseError) -> None:
+    if isinstance(exc, CaseDatabaseLockedError):
+        raise HTTPException(status_code=409, detail=case_db_locked_detail(exc)) from exc
     if isinstance(exc, CaseNotFoundError):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if isinstance(exc, CaseConflictError):
@@ -391,6 +395,8 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
         except OutputInsideEvidenceError as exc:
             raise output_guard_http_error(exc) from exc
         run_request = run_request_from_body(request, root=root, output_dir=output_dir)
+        # WB-9 P1-1: the console's main run path gets the same disk advice as POST /api/runs (never a refusal).
+        space = preflight_space_for(run_request)
         with submit_lock:
             if explicit_output and output_dir:
                 # Two concurrent runs in one folder overwrite each other's summary, case DB and snapshot.
@@ -423,7 +429,8 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
             saved = intake().save_snapshot(
                 run_id=job.run_id, case_id=case_id, evidence_citation_id=str(evidence["citation_id"]),
                 snapshot=snapshot, actor=_actor(request.actor, str(case["examiner"])),
-                audit_params={"snapshot_file": file_path, "snapshot_file_error": file_error},
+                audit_params={"snapshot_file": file_path, "snapshot_file_error": file_error,
+                              "preflight_space_level": (space or {}).get("level", "")},
             )
         except CaseDatabaseError as exc:
             _raise(exc)
@@ -434,6 +441,7 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
             "snapshot": saved,
             "snapshot_file": file_path,
             "snapshot_file_error": file_error,
+            "preflight_space": space,
         }
 
     @router.post("/api/cases/{case_id}/runs/link", status_code=201)

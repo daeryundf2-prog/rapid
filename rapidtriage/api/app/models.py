@@ -36,8 +36,8 @@ class RunCreateRequest(BaseModel):
     #: ``org_email_domain`` (str, activates ``ai.personal_account_on_corporate``), ``evidence_roots``
     #: (list of case evidence folders for ``ai.evidence_path_in_tool_call``). Unknown kinds/keys are a 400.
     collector_options: dict[str, dict[str, Any]] | None = None
-    #: Start even when the disk free-space check (``POST /api/run-plan/space``) says the output
-    #: volume holds less than the estimated output (otherwise 507 ``DISK_SPACE_INSUFFICIENT``).
+    #: Accepted and ignored (WB-9 P1-1): the disk free-space check (``POST /api/run-plan/space``) is advice
+    #: only and never refuses a run until the console can confirm an override (T-079).
     allow_low_disk_space: bool = False
 
 

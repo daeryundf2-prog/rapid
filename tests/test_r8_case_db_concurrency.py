@@ -28,6 +28,8 @@ from rapidtriage.core.case_db.write_lock import (
     BUSY_TIMEOUT_MS,
     CASE_DB_LOCKED_MESSAGE,
     CaseDatabaseLockedError,
+    case_db_locked_detail,
+    raised_in_case_db_code,
     retry_when_locked,
 )
 
@@ -383,6 +385,35 @@ class WriteTransactionScopeTests(unittest.TestCase):
         self.assertEqual(self._count("SELECT COUNT(*) FROM review_mark"), 0)
         self.assertEqual(self._count("SELECT COUNT(*) FROM review_mark_history"), 0)
 
+    def test_a_large_batch_is_split_into_short_transactions(self) -> None:
+        """WB-9 P2-15: a select-all batch never holds the write lock for its whole length."""
+        with patch.object(database_module, "REVIEW_BATCH_CHUNK_ROWS", 10):
+            result = CaseDatabase(self.path).mark_reviews_batch(case_id=CASE, targets=_targets(self.ids[:25]), status="relevant")
+            self.assertEqual((result["updated_count"], result["transactions"]), (25, 3))
+            missing = _targets(self.ids[25:45]) + [{"target_type": "file_record", "target_id": "999999"}]
+            with self.assertRaises(CaseDatabaseError):
+                CaseDatabase(self.path).mark_reviews_batch(case_id=CASE, targets=missing, status="relevant")
+        self.assertEqual(self._count("SELECT COUNT(*) FROM review_mark"), 25)  # the missing target wrote nothing
+
+    def test_a_lock_on_a_later_chunk_reports_the_rows_already_saved(self) -> None:
+        calls: list[int] = []
+
+        def second_chunk_locked(write):
+            calls.append(1)
+            if len(calls) == 2:
+                raise CaseDatabaseLockedError(CASE_DB_LOCKED_MESSAGE)
+            return write()
+
+        with patch.object(database_module, "REVIEW_BATCH_CHUNK_ROWS", 10), \
+                patch.object(database_module, "retry_when_locked", second_chunk_locked), \
+                self.assertRaises(CaseDatabaseLockedError) as caught:
+            CaseDatabase(self.path).mark_reviews_batch(case_id=CASE, targets=_targets(self.ids[:25]), status="relevant")
+        self.assertEqual((caught.exception.applied_rows, caught.exception.total_rows), (10, 25))
+        self.assertEqual(self._count("SELECT COUNT(*) FROM review_mark"), 10)
+        detail = case_db_locked_detail(caught.exception)
+        self.assertEqual((detail["applied_count"], detail["total_count"]), (10, 25))
+        self.assertIn("25행 중 앞의 10행은 이미 저장되었고 나머지는 저장되지 않았습니다", str(detail["message"]))
+
 
 @unittest.skipUnless(HAS_FASTAPI, "fastapi is required for RapidTriage API tests")
 class LockedCaseDbRouteTests(unittest.TestCase):
@@ -460,6 +491,61 @@ class LockedCaseDbRouteTests(unittest.TestCase):
             blocker.rollback()
             blocker.close()
         self.assertEqual(_row_tags(self.path), {})  # nothing of the refused batches was applied
+
+    def test_tag_writers_retry_a_transient_lock(self) -> None:
+        """WB-9 P2-16: tag create / delete and baselines are retried, not left to the app handler."""
+        from rapidtriage.api.app import routes_review_tools
+
+        real = routes_review_tools.create_case_tag
+        attempts: list[int] = []
+
+        def flaky(*args, **kwargs):
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise sqlite3.OperationalError("database is locked")
+            return real(*args, **kwargs)
+
+        with patch.object(routes_review_tools, "create_case_tag", flaky), patch.object(write_lock.time, "sleep"):
+            response = self.client.post(f"/api/cases/{CASE}/tags", params={"database": str(self.path)}, json={"name": "재시도 태그"})
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(len(attempts), 2)
+        tag_id = response.json()["tag"]["id"]
+        blocker = self._locked()
+        try:
+            with patch.object(write_lock, "BUSY_TIMEOUT_MS", 50), patch.object(write_lock.time, "sleep"):
+                self.assert_locked_409(self.client.delete(f"/api/cases/{CASE}/tags/{tag_id}", params={"database": str(self.path)}))
+        finally:
+            blocker.rollback()
+            blocker.close()
+
+    def test_case_db_lock_is_409_on_any_url_prefix(self) -> None:
+        """WB-9 P2-16: decided by where the error came from (case-DB code), not by the URL."""
+        path = self.path
+
+        def probe() -> dict[str, str]:
+            CaseDatabase(path).create_case(case_id="CASE-PROBE", examiner="검사관")
+            return {"ok": "yes"}
+
+        self.client.app.add_api_route("/api/probe/case-db-lock", probe, methods=["POST"])
+        blocker = self._locked()
+        try:
+            with patch.object(write_lock, "BUSY_TIMEOUT_MS", 50), patch.object(write_lock.time, "sleep"):
+                self.assert_locked_409(self.client.post("/api/probe/case-db-lock"))
+        finally:
+            blocker.rollback()
+            blocker.close()
+
+
+class CaseDbOriginTests(unittest.TestCase):
+    def test_lock_origin_is_read_from_the_traceback(self) -> None:
+        try:
+            retry_when_locked(lambda: (_ for _ in ()).throw(sqlite3.OperationalError("database is locked")), retries=0)
+        except CaseDatabaseLockedError as exc:
+            self.assertTrue(raised_in_case_db_code(exc))
+        try:
+            raise sqlite3.OperationalError("database is locked")
+        except sqlite3.OperationalError as exc:
+            self.assertFalse(raised_in_case_db_code(exc))
 
 
 class RetryWhenLockedTests(unittest.TestCase):

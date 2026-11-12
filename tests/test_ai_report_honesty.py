@@ -22,14 +22,24 @@ def _write(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
-def _browser_payload(stamp: str = "2026-03-01T01:02:03Z") -> dict[str, object]:
-    visit = {"ai_service": "ChatGPT", "url": "https://chat.example.test/c/1", "visit_count": 3, "last_visited_at": stamp}
+def _visit(service: str, url: str, *, domain: str | None = None, count: int = 1, stamp: str = "2026-03-01T01:02:03Z") -> dict[str, object]:
+    row: dict[str, object] = {"ai_service": service, "url": url, "visit_count": count, "last_visited_at": stamp}
+    if domain is not None:
+        row["domain"] = domain
+    return row
+
+
+def _browser_payload(stamp: str = "2026-03-01T01:02:03Z", visits: list[dict[str, object]] | None = None) -> dict[str, object]:
+    visits = visits or [
+        _visit("ChatGPT", "https://chatgpt.com/c/1", count=3, stamp=stamp),
+        _visit("Claude", "https://claude.ai/chat/1", stamp=stamp),
+    ]
     return {
         "command": "artifacts",
         "kind": "browser",
         "artifacts": [
             {"artifact_type": "browser-history-downloads", "details": {"history_count": 10}},
-            {"artifact_type": "browser-ai-usage", "details": {"ai_usage_count": 2, "ai_usage": [visit, {**visit, "ai_service": "Claude", "visit_count": 1}]}},
+            {"artifact_type": "browser-ai-usage", "details": {"ai_usage_count": len(visits), "ai_usage": visits}},
         ],
     }
 
@@ -69,6 +79,31 @@ class BrowserVisitTests(unittest.TestCase):
             chatbot = next(row for row in gaps["categories"] if row["category"] == "chatbot")  # type: ignore[union-attr]
             self.assertTrue(chatbot["local_evidence"])
             self.assertEqual(chatbot["evidence"], ["visit"])
+
+    def test_visits_map_to_their_catalog_category_not_all_chatbot(self) -> None:
+        """WB-9 P1-6: an IDE agent's site is IDE-agent visit evidence; Hugging Face / a gateway is unclassified."""
+        visits = [
+            _visit("Bolt", "https://bolt.new/~/project", domain="bolt.new"),
+            _visit("Hugging Face", "https://huggingface.co/models", domain="huggingface.co"),
+            _visit("OpenRouter", "https://openrouter.ai/models", domain="openrouter.ai"),
+            _visit("Devin", "https://app.devin.ai/sessions/1"),  # no domain key: host from the URL
+        ]
+        with tempfile.TemporaryDirectory() as temp:
+            out = Path(temp)
+            _write(out / "artifacts" / "rapidtriage-artifacts-browser.json", _browser_payload(visits=visits))
+            summary = ai_usage_summary(out)
+            text = "\n".join(ai_usage_section_lines(summary))
+            self.assertIn("| 챗봇 | 없음 |", text)
+            self.assertNotIn("챗봇: 있음", text)
+            self.assertIn("| IDE 에이전트 | 있음(방문 기록) | Bolt(브라우저 방문) |", text)
+            self.assertIn("Devin(브라우저 방문)", text)
+            self.assertIn("- AI 관련 사이트 방문(분류 없음): Hugging Face, OpenRouter", text)
+            gaps = ai_usage_gaps(summary)
+            rows = {row["category"]: row for row in gaps["categories"]}  # type: ignore[union-attr]
+            self.assertFalse(rows["chatbot"]["local_evidence"])
+            self.assertEqual((rows["ide_agent"]["evidence"], rows["ide_agent"]["visit_services"]), (["visit"], ["Bolt"]))
+            self.assertEqual(rows["cloud_agent"]["visit_services"], ["Devin"])
+            self.assertEqual(gaps["unclassified_visit_services"], ["Hugging Face", "OpenRouter"])
 
     def test_session_and_visit_evidence_combined(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

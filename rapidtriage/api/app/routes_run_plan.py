@@ -26,7 +26,7 @@ from ...core.run.plan import (
 from ...core.run.profiles import RUN_PROFILES
 from .helpers import get_job, run_progress_payload, validate_run_evidence_source
 from .models import RunCreateRequest, RunPlanControlRequest
-from .preflight_space import check_output_space
+from .preflight_space import preflight_space_for
 
 LIVE_STATUSES = frozenset({"queued", "running"})
 
@@ -134,10 +134,10 @@ def build_run_plan_router(store: RunJobStore) -> APIRouter:
     def preview_run_space(body: RunCreateRequest) -> dict[str, Any]:
         """Disk free-space check of a run body (T-186): ``{estimated_bytes, free_bytes, ok, level, code, message, basis}``.
 
-        Same body as ``POST /api/runs``; nothing is written. ``level`` ``block`` is the case the run start refuses
-        (507 ``DISK_SPACE_INSUFFICIENT``) unless ``allow_low_disk_space`` is set."""
+        Same body as ``POST /api/runs``; nothing is written. Advice only: the run start never refuses on it
+        (WB-9 P1-1); ``block`` means a reliable upper bound (raw partition size) exceeds free space."""
         validate_run_evidence_source(body.root)
-        return check_output_space(body.root, body.output_dir or "", partition_start_sector=body.e01_partition_start_sector)
+        return preflight_space_for(body.model_copy(update={"dry_run": False})) or {}
 
     @router.get("/api/runs/{run_id}/plan")
     def get_run_plan(run_id: str, request: Request) -> Response:

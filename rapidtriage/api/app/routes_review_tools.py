@@ -25,7 +25,7 @@ import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -65,6 +65,7 @@ from .tree import build_run_tree, read_output_key
 # Collections counted as one bar each (artifact kinds get one bar per kind).
 HISTOGRAM_COLLECTIONS = ("files", "docs", "timeline", "indicators")
 RELATED_MEDIA_PATH_LIMIT = 20
+_T = TypeVar("_T")
 
 
 class CaseTagCreateRequest(BaseModel):
@@ -93,7 +94,7 @@ class HistogramBaselineCreateRequest(BaseModel):
 
 def review_tool_http_error(exc: CaseDatabaseError) -> HTTPException:
     if isinstance(exc, CaseDatabaseLockedError):
-        return HTTPException(status_code=409, detail=case_db_locked_detail())
+        return HTTPException(status_code=409, detail=case_db_locked_detail(exc))
     status = exc.status if isinstance(exc, ReviewToolError) else 400
     message = str(exc)
     if message.startswith("case not found:"):
@@ -252,6 +253,19 @@ def build_review_tools_router(
         except CaseDatabaseError as exc:
             raise review_tool_http_error(exc) from exc
 
+    def _locked_write(database: CaseDatabase, case_id: str, write: Callable[[sqlite3.Connection], _T]) -> _T:
+        """One write transaction (``BEGIN IMMEDIATE``) re-run on a lasting lock, then 409 ``CASE_DB_LOCKED``
+        (WB-9 P2-16: the tag and baseline writers no longer rely on the app-level handler)."""
+
+        def attempt() -> _T:
+            with _connection(database, case_id, write=True) as connection:
+                return write(connection)
+
+        try:
+            return retry_when_locked(attempt)
+        except CaseDatabaseError as exc:
+            raise review_tool_http_error(exc) from exc
+
     # --- tags ---------------------------------------------------------------------
 
     @router.get("/api/cases/{case_id}/tags")
@@ -307,19 +321,15 @@ def build_review_tools_router(
     ) -> dict[str, object]:
         opened = _case_database(case_id, run_id, database)
         assert opened is not None
-        with _connection(opened, case_id, write=True) as connection:
-            try:
-                tag = create_case_tag(
-                    connection,
-                    case_id,
-                    name=request.name,
-                    color_token=request.color_token,
-                    shortcut=request.shortcut,
-                    description=request.description,
-                    actor=resolve_request_reviewer(request.created_by) or "local-user",
-                )
-            except CaseDatabaseError as exc:
-                raise review_tool_http_error(exc) from exc
+        tag = _locked_write(opened, case_id, lambda connection: create_case_tag(
+            connection,
+            case_id,
+            name=request.name,
+            color_token=request.color_token,
+            shortcut=request.shortcut,
+            description=request.description,
+            actor=resolve_request_reviewer(request.created_by) or "local-user",
+        ))
         return {"command": "case.tags.create", "tag": tag}
 
     @router.patch("/api/cases/{case_id}/tags/{tag_id}")
@@ -335,13 +345,9 @@ def build_review_tools_router(
         fields = {key: getattr(request, key) for key in ("name", "color_token", "shortcut", "description") if key in request.model_fields_set}
         if not fields:
             raise HTTPException(status_code=422, detail="바꿀 항목(name, color_token, shortcut, description)이 없습니다")
-        with _connection(opened, case_id, write=True) as connection:
-            try:
-                tag = update_case_tag(
-                    connection, case_id, tag_id, actor=resolve_request_reviewer(request.actor) or "local-user", **fields
-                )
-            except CaseDatabaseError as exc:
-                raise review_tool_http_error(exc) from exc
+        tag = _locked_write(opened, case_id, lambda connection: update_case_tag(
+            connection, case_id, tag_id, actor=resolve_request_reviewer(request.actor) or "local-user", **fields
+        ))
         return {"command": "case.tags.update", "tag": tag}
 
     @router.delete("/api/cases/{case_id}/tags/{tag_id}")
@@ -355,11 +361,10 @@ def build_review_tools_router(
         """Soft delete: the tag keeps its row (``deleted_at``), leaves every mark and frees its key."""
         opened = _case_database(case_id, run_id, database)
         assert opened is not None
-        with _connection(opened, case_id, write=True) as connection:
-            try:
-                tag = delete_case_tag(connection, case_id, tag_id, actor=resolve_request_reviewer(actor) or "local-user")
-            except CaseDatabaseError as exc:
-                raise review_tool_http_error(exc) from exc
+        tag = _locked_write(
+            opened, case_id,
+            lambda connection: delete_case_tag(connection, case_id, tag_id, actor=resolve_request_reviewer(actor) or "local-user"),
+        )
         return {"command": "case.tags.delete", "tag": tag, "removed_from_marks": tag.get("removed_from_marks", 0)}
 
     # --- histogram baselines ------------------------------------------------------------
@@ -394,18 +399,14 @@ def build_review_tools_router(
         opened = _case_database(case_id, run_id or (None if database else source_run), database)
         assert opened is not None
         counts = _run_histogram(source_run)
-        with _connection(opened, case_id, write=True) as connection:
-            try:
-                baseline = create_histogram_baseline(
-                    connection,
-                    case_id,
-                    name=request.name,
-                    run_id=source_run,
-                    counts=counts,
-                    actor=resolve_request_reviewer(request.created_by) or "local-user",
-                )
-            except CaseDatabaseError as exc:
-                raise review_tool_http_error(exc) from exc
+        baseline = _locked_write(opened, case_id, lambda connection: create_histogram_baseline(
+            connection,
+            case_id,
+            name=request.name,
+            run_id=source_run,
+            counts=counts,
+            actor=resolve_request_reviewer(request.created_by) or "local-user",
+        ))
         return {"command": "case.histogram-baselines.create", "baseline": baseline}
 
     @router.get("/api/runs/{run_id}/histogram")
