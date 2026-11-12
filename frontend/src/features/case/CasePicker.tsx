@@ -6,9 +6,10 @@ import { MenuButton } from "../../components/MenuButton";
 import { Icon } from "../../icons";
 import { useTimezone } from "../../state/hooks";
 import { navigate } from "../tree/adapter";
-import { useCaseDialogs } from "./dialogs";
+import { DELETE_RUN_LABEL, DELETE_RUN_TITLE, useCaseDialogs } from "./dialogs";
 import { ErrorText } from "./ErrorText";
 import { Modal } from "./Modal";
+import { ReasonButton } from "./ReasonButton";
 import { runChipText, runTimeTooltip } from "./runTime";
 
 const ACTIVE = new Set(["queued", "running"]);
@@ -74,7 +75,7 @@ function RunRow({
         items={[
           {
             id: "delete",
-            label: "런 삭제…",
+            label: DELETE_RUN_LABEL,
             icon: "trash",
             disabledReason: ACTIVE.has(run.status) ? "실행 중인 런은 먼저 취소해야 합니다" : undefined,
             onSelect: () => confirmDelete(run.run_id),
@@ -207,31 +208,55 @@ export function DeleteCaseDialog({
     mutationFn: () => deleteRun(runId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["runs"] });
-      onNotice?.("런을 목록에서 제거했습니다. 출력 폴더는 디스크에 남아 있습니다.");
+      onNotice?.("처리 결과를 목록에서 제거했습니다. 출력 폴더는 디스크에 남아 있습니다.");
       onClose();
       // The deleted run's URL must not stay open: return to the case home.
       if (runId === currentRunId) window.location.hash = "";
     },
   });
+  // Destructive confirm (T-034): starts on 취소, Esc cancels, 삭제 is the danger button and only an
+  // explicit click on it deletes.
   return (
-    <Modal title="런 삭제" onClose={onClose}>
-      <p>
-        이 런을 목록(등록 정보)에서만 제거합니다.{" "}
-        <strong>출력 폴더와 그 안의 결과 파일은 디스크에 그대로 남으며 자동으로 지워지지 않습니다.</strong>{" "}
-        같은 폴더를 불러오기로 다시 열 수 있고, 폴더가 더 이상 필요 없으면 직접 삭제하세요.
-      </p>
-      {mutation.error && (
-        <ErrorText>
-          {mutation.error instanceof Error ? mutation.error.message : "삭제하지 못했습니다."}
-        </ErrorText>
-      )}
-      <div className="case-actions">
-        <button type="button" className="button" onClick={onClose}>
-          취소
-        </button>
-        <button type="button" className="button primary" onClick={() => mutation.mutate()}>
-          삭제
-        </button>
+    <Modal
+      title={DELETE_RUN_TITLE}
+      onClose={onClose}
+      initialFocus="cancel"
+      footer={
+        <>
+          <button
+            type="button"
+            className="button roomy"
+            data-testid="delete-run-cancel"
+            data-dialog-cancel=""
+            onClick={onClose}
+          >
+            취소
+          </button>
+          <ReasonButton
+            className="button danger roomy"
+            data-testid="delete-run-confirm"
+            reason={mutation.isPending ? "삭제하는 중입니다" : undefined}
+            onClick={() => mutation.mutate()}
+          >
+            삭제
+          </ReasonButton>
+        </>
+      }
+    >
+      <div data-testid="delete-run-dialog">
+        <p>
+          이 처리 결과를 목록(등록 정보)에서만 제거합니다.{" "}
+          <strong>출력 폴더와 그 안의 결과 파일은 디스크에 그대로 남으며 자동으로 지워지지 않습니다.</strong>
+        </p>
+        <p className="case-help">
+          원본 증거 파일은 바꾸지 않습니다. 같은 폴더를 불러오기로 다시 열 수 있고, 폴더가 더 이상 필요 없으면
+          직접 삭제하세요.
+        </p>
+        {mutation.error && (
+          <ErrorText>
+            {mutation.error instanceof Error ? mutation.error.message : "삭제하지 못했습니다."}
+          </ErrorText>
+        )}
       </div>
     </Modal>
   );

@@ -8,7 +8,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, Fragment, useId, useState } from "react";
+import { type FormEvent, Fragment, useId, useRef, useState } from "react";
 import { announce } from "../../a11y";
 import {
   addCaseNote,
@@ -35,6 +35,7 @@ import { AI_TOOL_SOURCE_LABELS, type AiToolSource, type AiUsageSummary, aiToolTi
 import { aiRowCount, aiTypeCount, useAiUsageSummary } from "../ai/useAiUsage";
 import { LEVEL_LABEL } from "../case/CaseDialogs";
 import { useCaseDialogs } from "../case/dialogs";
+import { InlineConfirm } from "../case/InlineConfirm";
 import { ReasonButton } from "../case/ReasonButton";
 import { summarizeRunRequest } from "../case/runSummary";
 import { EVIDENCE_TYPE_LABEL } from "../case/wizardModel";
@@ -904,9 +905,18 @@ export function NotesCard({
         politeness: "assertive",
       }),
   });
+  // Memo delete asks first (T-034): 삭제 opens an inline confirmation on that memo.
+  const [confirmNoteId, setConfirmNoteId] = useState<number | null>(null);
+  const deleteButtons = useRef(new Map<number, HTMLButtonElement>());
+  const cancelDelete = () => {
+    const opener = confirmNoteId === null ? undefined : deleteButtons.current.get(confirmNoteId);
+    setConfirmNoteId(null);
+    opener?.focus();
+  };
   const remove = useMutation({
     mutationFn: (noteId: number) => deleteCaseNote(caseId as string, noteId, examiner.trim()),
     onSuccess: () => {
+      setConfirmNoteId(null);
       refreshCase();
       announce("메모를 삭제했습니다 (이력에 남음)");
     },
@@ -974,13 +984,39 @@ export function NotesCard({
                     </p>
                     <p className="dash-memo-text">{note.text}</p>
                     <button
+                      ref={(element) => {
+                        if (element) deleteButtons.current.set(note.id, element);
+                        else deleteButtons.current.delete(note.id);
+                      }}
                       type="button"
                       className="button ghost"
                       aria-label={`${note.author || "검사관 미지정"} 메모 삭제 (${formatTime(note.created_at)})`}
-                      onClick={() => remove.mutate(note.id)}
+                      aria-expanded={confirmNoteId === note.id}
+                      onClick={() => setConfirmNoteId(note.id)}
                     >
                       삭제
                     </button>
+                    {confirmNoteId === note.id ? (
+                      <InlineConfirm
+                        label="메모 삭제 확인"
+                        testId="memo-delete"
+                        className="dash-memo-confirm"
+                        busy={remove.isPending}
+                        onCancel={cancelDelete}
+                        onConfirm={() => remove.mutate(note.id)}
+                      >
+                        <p>
+                          이 메모를 케이스 메모 목록에서 지웁니다. 메모 이력에는 삭제 기록으로 남고, 원본
+                          증거와 처리 결과는 바뀌지 않습니다.
+                        </p>
+                        {remove.error ? (
+                          <p className="error-banner" role="alert">
+                            메모를 삭제하지 못했습니다.{" "}
+                            {String((remove.error as Error).message ?? remove.error)}
+                          </p>
+                        ) : null}
+                      </InlineConfirm>
+                    ) : null}
                   </li>
                 ))}
               </ul>

@@ -673,10 +673,25 @@ textarea.dash-input {
   overflow-wrap: anywhere;
 }
 
-.dash-memo-item .button {
+.dash-memo-item > .button {
   grid-row: 1 / span 2;
   grid-column: 2;
   align-self: start;
+}
+
+/* Memo delete confirmation (T-034): full row width under the memo. */
+.dash-memo-confirm {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.dash-memo-confirm p {
+  margin: 0;
 }
 
 .dash-memo-history {

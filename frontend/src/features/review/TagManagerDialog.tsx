@@ -10,6 +10,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { announce } from "../../a11y";
 import { type CaseTag, TAG_COLOR_LABELS, TAG_COLOR_TOKENS, type TagColorToken } from "../../api/reviewTools";
 import { ErrorText } from "../case/ErrorText";
+import { InlineConfirm } from "../case/InlineConfirm";
 import { Modal } from "../case/Modal";
 import { ReasonButton } from "../case/ReasonButton";
 import { currentReviewer, setReviewer } from "./author";
@@ -252,26 +253,22 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
           </tbody>
         </table>
         {confirmDelete ? (
-          <fieldset className="tag-confirm">
-            <legend className="sr-only">태그 삭제 확인</legend>
+          // Starts on 취소; Esc cancels the confirmation only, not the tag manager (T-034).
+          <InlineConfirm
+            key={confirmDelete.id}
+            label="태그 삭제 확인"
+            testId="tag-delete-confirm"
+            className="tag-confirm"
+            busy={busy}
+            onCancel={closeConfirm}
+            onConfirm={() => remove(confirmDelete)}
+          >
             <p>
               '{confirmDelete.name}' 태그를 삭제할까요? 이 태그가 붙은{" "}
-              {confirmDelete.count.toLocaleString("ko-KR")}개 행에서 빠집니다. 태그 기록은 삭제 표시로
-              남습니다.
+              {confirmDelete.count.toLocaleString("ko-KR")}개 행에서 태그만 빠지고, 행과 원본 증거는 그대로
+              남습니다. 태그 기록은 삭제 표시로 남습니다.
             </p>
-            <div className="case-actions">
-              <button type="button" className="button" onClick={closeConfirm}>
-                취소
-              </button>
-              <ReasonButton
-                className="button primary"
-                reason={busy ? "처리하는 중입니다" : undefined}
-                onClick={() => remove(confirmDelete)}
-              >
-                삭제
-              </ReasonButton>
-            </div>
-          </fieldset>
+          </InlineConfirm>
         ) : null}
         {draft ? (
           <form

@@ -175,6 +175,30 @@ describe("tag manager dialog", () => {
     opener.remove();
   });
 
+  it("tag delete confirms with the danger button, starts on 취소, Esc cancels only the confirmation (T-034)", async () => {
+    const { calls } = mockFetch(caseRoutes([...SYSTEM, tag({ id: 9, name: "하 태그", count: 2 })]));
+    const onClose = vi.fn();
+    renderWithQuery(<TagManagerDialog runId="r1" onClose={onClose} />);
+    const dialog = await screen.findByRole("dialog", { name: "태그 관리" });
+    await waitFor(() => expect(within(dialog).getAllByTestId("tag-row")).toHaveLength(7));
+    const opener = within(dialog).getByRole("button", { name: "하 태그 태그 삭제" });
+    opener.focus();
+    fireEvent.click(opener);
+    const confirm = within(dialog).getByRole("group", { name: "태그 삭제 확인" });
+    // Says exactly what happens: rows lose the tag, rows and evidence stay, the record stays.
+    expect(confirm.textContent).toContain("2개 행에서 태그만 빠지고, 행과 원본 증거는 그대로 남습니다");
+    expect(confirm.textContent).toContain("삭제 표시로 남습니다");
+    expect(document.activeElement).toBe(within(confirm).getByTestId("tag-delete-confirm-cancel"));
+    const ok = within(confirm).getByRole("button", { name: "삭제" });
+    expect(ok.className).toContain("danger");
+    expect(ok.className).not.toContain("primary");
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Escape" });
+    expect(within(dialog).queryByRole("group", { name: "태그 삭제 확인" })).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+    expect(calls.some((call) => call.method === "DELETE")).toBe(false);
+  });
+
   it("draft validation is Korean and case-insensitive", () => {
     const tags = [...SYSTEM, tag({ id: 9, name: "Alpha", shortcut: 8 })];
     const draft = {
