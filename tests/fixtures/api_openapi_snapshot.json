@@ -228,6 +228,9 @@
     "/api/runs/{run_id}/extract/{name}/file": {
       "get": "download_run_extract_api_runs__run_id__extract__name__file_get"
     },
+    "/api/runs/{run_id}/extract/{name}/zip": {
+      "post": "build_run_extract_zip_api_runs__run_id__extract__name__zip_post"
+    },
     "/api/runs/{run_id}/families/{ref}": {
       "get": "get_run_family_api_runs__run_id__families__ref__get"
     },

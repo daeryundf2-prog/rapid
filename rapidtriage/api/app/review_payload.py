@@ -11,22 +11,95 @@ the marks as report candidates.
 the bookmark JSON (when present) plus one bookmark per active case DB mark,
 carrying the mark's status, tags, note and include-in-report flag. Nothing is
 written back to either store.
+
+R8 RI-02: :func:`report_candidate_count` is the one count of report candidates
+(``GET /review-counts``); it applies :func:`~rapidtriage.core.report_candidates.is_report_candidate`
+to exactly the bookmarks :func:`load_run_review_payload` hands the case report, the submission
+manifest and the reviewer bundle (same merge, same 5,000-mark cap, same order), so all of them
+agree. Caps and an unreadable case DB are reported (``review_scope`` / ``truncated`` / ``error``),
+never dropped silently.
 """
 
 from __future__ import annotations
 
 import sqlite3
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
+
+from fastapi import HTTPException
 
 from ...core.case import build_case_summary
 from ...core.jobs import RunJobStore, run_output_dir
+from ...core.report_candidates import is_report_candidate
 from .helpers import default_case_path, get_job
-from .run_review import canonical_run_case, review_map_entries
+from .run_review import (
+    ACTIVE_MARK_ORDER_SQL,
+    ACTIVE_MARK_SQL,
+    canonical_run_case,
+    review_map_entries,
+)
 from .runops import load_case_payload_or_empty
 
 CASE_DB_BOOKMARK_PREFIX = "case-db:"
 MAX_CASE_DB_MARKS = 5000
+CASE_DB_UNREADABLE = "CASE_DB_UNREADABLE"
+CASE_JSON_UNREADABLE = "CASE_JSON_UNREADABLE"
+
+
+@dataclass
+class CaseDbMarks:
+    """Active case DB marks as bookmarks (or bare ids + flags), with the cap and read error."""
+
+    bookmarks: list[dict[str, object]] = field(default_factory=list)
+    truncated: bool = False
+    total: int = 0
+    error: str | None = None
+
+
+def case_db_bookmark_id(citation_id: str, target_type: str, target_id: str) -> str:
+    return f"{CASE_DB_BOOKMARK_PREFIX}{citation_id or f'{target_type}/{target_id}'}"
+
+
+def _open_ro(database_path: Path) -> sqlite3.Connection:
+    connection = sqlite3.connect(f"{database_path.as_uri()}?mode=ro", uri=True)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def _active_mark_total(connection: sqlite3.Connection, case_id: str) -> int:
+    row = connection.execute(f"SELECT COUNT(*) FROM review_mark WHERE case_id = ? AND {ACTIVE_MARK_SQL}", (case_id,)).fetchone()
+    return int(row[0]) if row is not None else 0
+
+
+def case_db_mark_flags(summary: Mapping[str, object], run_id: str) -> CaseDbMarks:
+    """Bookmark id + include flag of the marks :func:`case_db_mark_bookmarks` returns (one query,
+    same filter / order / cap — the cheap form for counting)."""
+    database_path, case_id = canonical_run_case(summary, run_id)
+    if not database_path.is_file():
+        return CaseDbMarks()
+    try:
+        connection = _open_ro(database_path)
+        try:
+            rows = connection.execute(
+                "SELECT citation_id, target_type, target_id, include_in_report FROM review_mark "
+                f"WHERE case_id = ? AND {ACTIVE_MARK_SQL} {ACTIVE_MARK_ORDER_SQL} LIMIT ?",
+                (case_id, MAX_CASE_DB_MARKS + 1),
+            ).fetchall()
+            truncated = len(rows) > MAX_CASE_DB_MARKS
+            total = _active_mark_total(connection, case_id) if truncated else min(len(rows), MAX_CASE_DB_MARKS)
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        return CaseDbMarks(error=str(exc))
+    marks = [
+        {
+            "bookmark_id": case_db_bookmark_id(str(row[0] or ""), str(row[1]), str(row[2])),
+            "review": {"include_in_report": bool(row[3])},
+        }
+        for row in rows[:MAX_CASE_DB_MARKS]
+    ]
+    return CaseDbMarks(bookmarks=marks, truncated=truncated, total=total)
 
 
 def _summary_dir(summary: Mapping[str, object]) -> Path | None:
@@ -56,25 +129,31 @@ def _resolve_mark_path(raw: str, summary: Mapping[str, object]) -> str:
 
 def case_db_mark_bookmarks(summary: Mapping[str, object], run_id: str) -> list[dict[str, object]]:
     """Active case DB review marks of the run, shaped as case-JSON bookmarks."""
+    return read_case_db_marks(summary, run_id).bookmarks
+
+
+def read_case_db_marks(summary: Mapping[str, object], run_id: str) -> CaseDbMarks:
+    """:func:`case_db_mark_bookmarks` with the 5,000-mark cap and a read error kept."""
     database_path, case_id = canonical_run_case(summary, run_id)
     if not database_path.is_file():
-        return []
+        return CaseDbMarks()
     outputs = summary.get("outputs")
+    total = 0
     try:
-        connection = sqlite3.connect(f"{database_path.as_uri()}?mode=ro", uri=True)
-        connection.row_factory = sqlite3.Row
+        connection = _open_ro(database_path)
         try:
-            entries, _truncated = review_map_entries(
+            entries, truncated = review_map_entries(
                 connection,
                 case_id,
                 outputs if isinstance(outputs, Mapping) else {},
                 limit=MAX_CASE_DB_MARKS,
                 output_dir=_summary_dir(summary),
             )
+            total = _active_mark_total(connection, case_id) if truncated else len(entries)
         finally:
             connection.close()
-    except sqlite3.Error:
-        return []
+    except sqlite3.Error as exc:
+        return CaseDbMarks(error=str(exc))
     bookmarks: list[dict[str, object]] = []
     for entry in entries:
         citation_id = str(entry.get("citation_id") or "")
@@ -85,7 +164,7 @@ def case_db_mark_bookmarks(summary: Mapping[str, object], run_id: str) -> list[d
         updated_at = str(entry.get("updated_at") or "")
         bookmarks.append(
             {
-                "bookmark_id": f"{CASE_DB_BOOKMARK_PREFIX}{citation_id or f'{target_type}/{target_id}'}",
+                "bookmark_id": case_db_bookmark_id(citation_id, target_type, target_id),
                 "created_at": updated_at,
                 "updated_at": updated_at,
                 "summary": title,
@@ -114,7 +193,32 @@ def case_db_mark_bookmarks(summary: Mapping[str, object], run_id: str) -> list[d
                 },
             }
         )
-    return bookmarks
+    return CaseDbMarks(bookmarks=bookmarks, truncated=truncated, total=total)
+
+
+def _json_bookmarks(payload: Mapping[str, object]) -> list[Mapping[str, object]]:
+    existing = payload.get("bookmarks")
+    return [item for item in existing if isinstance(item, Mapping)] if isinstance(existing, list) else []
+
+
+def merge_review_bookmarks(
+    json_bookmarks: list[Mapping[str, object]], marks: list[dict[str, object]]
+) -> list[Mapping[str, object]]:
+    """Bookmark JSON first, then every case DB mark whose bookmark id the JSON does not hold."""
+    known = {str(item.get("bookmark_id") or "") for item in json_bookmarks}
+    return [*json_bookmarks, *(item for item in marks if item["bookmark_id"] not in known)]
+
+
+def review_scope(marks: CaseDbMarks) -> dict[str, object] | None:
+    """``review_scope`` of the merged payload: the mark cap / read error that limited it."""
+    if not marks.truncated and marks.error is None:
+        return None
+    return {
+        "case_db_marks_truncated": marks.truncated,
+        "case_db_marks_total": marks.total,
+        "case_db_mark_limit": MAX_CASE_DB_MARKS,
+        "case_db_error": marks.error,
+    }
 
 
 def load_run_review_payload(store: RunJobStore, run_id: str) -> dict[str, object]:
@@ -122,13 +226,47 @@ def load_run_review_payload(store: RunJobStore, run_id: str) -> dict[str, object
     job = get_job(store, run_id)
     summary = job.summary or {}
     payload = load_case_payload_or_empty(default_case_path(store, run_id))
-    existing = payload.get("bookmarks")
-    bookmarks = [item for item in existing if isinstance(item, Mapping)] if isinstance(existing, list) else []
-    known = {str(item.get("bookmark_id") or "") for item in bookmarks}
-    added = [item for item in case_db_mark_bookmarks(summary, run_id) if item["bookmark_id"] not in known]
-    if not added:
+    bookmarks = _json_bookmarks(payload)
+    marks = read_case_db_marks(summary, run_id)
+    merged_bookmarks = merge_review_bookmarks(bookmarks, marks.bookmarks)
+    scope = review_scope(marks)
+    if len(merged_bookmarks) == len(bookmarks) and scope is None:
         return payload
     merged = dict(payload)
-    merged["bookmarks"] = [*bookmarks, *added]
+    merged["bookmarks"] = merged_bookmarks
     merged["summary"] = build_case_summary(merged["bookmarks"])
+    if scope is not None:
+        merged["review_scope"] = scope
     return merged
+
+
+def report_candidate_count(store: RunJobStore, run_id: str) -> dict[str, object]:
+    """The report-candidate count every surface shows (R8 RI-02).
+
+    ``count`` = bookmarks of :func:`load_run_review_payload` that pass ``is_report_candidate``
+    (computed from the same merge without building the full mark payload). ``case_db`` /
+    ``case_json`` split it by store; ``truncated`` says the 5,000-mark cap left marks out
+    (``case_db_marks_total`` = every active mark); ``error`` (``count`` = ``None``) when a review
+    store cannot be read."""
+    job = get_job(store, run_id)
+    summary = job.summary or {}
+    error: dict[str, str] | None = None
+    try:
+        bookmarks = _json_bookmarks(load_case_payload_or_empty(default_case_path(store, run_id)))
+    except HTTPException as exc:
+        bookmarks = []
+        error = {"code": CASE_JSON_UNREADABLE, "message": f"검토 목록 파일(rapidtriage-case.json)을 읽지 못했습니다: {exc.detail}"}
+    marks = case_db_mark_flags(summary, run_id)
+    if marks.error is not None:
+        error = {"code": CASE_DB_UNREADABLE, "message": f"케이스 DB를 읽지 못했습니다: {marks.error}"}
+    candidates = [item for item in merge_review_bookmarks(bookmarks, marks.bookmarks) if is_report_candidate(item)]
+    from_db = sum(1 for item in candidates if str(item.get("bookmark_id") or "").startswith(CASE_DB_BOOKMARK_PREFIX))
+    return {
+        "count": None if error else len(candidates),
+        "case_db": from_db,
+        "case_json": len(candidates) - from_db,
+        "truncated": marks.truncated,
+        "case_db_marks_total": marks.total,
+        "case_db_mark_limit": MAX_CASE_DB_MARKS,
+        "error": error,
+    }

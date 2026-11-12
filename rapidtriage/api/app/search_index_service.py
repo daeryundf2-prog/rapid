@@ -32,6 +32,7 @@ from fastapi import HTTPException
 from ...core.case_db.base import now_iso
 from ...core.case_db.database import CaseDatabase, next_citation_id_for_connection
 from ...core.jobs import RunJob, RunJobStore, run_output_dir
+from ...core.readonly_runs import may_persist
 from ...core.search_hits import base_locator
 from ...core.search_index.build import (
     SEARCH_INDEX_KIND,
@@ -453,6 +454,8 @@ class SearchHistory:
         return self._executor.submit(guarded)
 
     def record(self, output_dir: Path, params: Mapping[str, object], *, truncated: bool) -> None:
+        if not may_persist(output_dir):
+            return  # D37 read-only run folder: no history file
         entry = (
             now_iso(),
             str(params.get("q") or ""),
@@ -726,6 +729,8 @@ def delete_saved(job: RunJob, run_id: str, saved_id: int) -> None:
 
 def record_saved_count(job: RunJob, run_id: str, saved_id: int, total: int, exact: bool) -> None:
     """After a query run from a saved search: remember its count (tree badge)."""
+    if not may_persist(job.output_dir()):
+        return  # D37 read-only run folder: the case DB is not updated
     try:
         current = get_saved(job, run_id, saved_id)
     except HTTPException:

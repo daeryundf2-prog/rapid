@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
-import { getReviewCounts } from "../../api/caseDb";
+import { getReviewCounts, reportCandidatesText } from "../../api/caseDb";
 import { getRunTree } from "../../api/runs";
 import { aiRowCount } from "../ai/useAiUsage";
 import { caseLinkOf } from "./caseLink";
@@ -105,7 +105,7 @@ export function ReportDialog({
     exportDisabledReason(action, {
       runId,
       runIsActive,
-      reportCandidates: counts.data?.report_candidates,
+      reportCandidates: counts.data?.report_candidates ?? undefined,
     });
   const chosen = EXPORT_ACTIONS.find((action) => action.kind === kind) ?? EXPORT_ACTIONS[0];
   const reason =
@@ -132,9 +132,7 @@ export function ReportDialog({
         </>
       }
     >
-      <p className="case-help">
-        보고 후보 {counts.data ? `${counts.data.report_candidates.toLocaleString("ko-KR")}건` : "확인 중"}
-      </p>
+      <p className="case-help">보고 후보 {counts.data ? reportCandidatesText(counts.data) : "확인 중"}</p>
       <fieldset className="case-field case-choices">
         <legend id={groupId} className="case-label">
           내보낼 항목

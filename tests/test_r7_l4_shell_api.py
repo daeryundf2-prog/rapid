@@ -5,10 +5,12 @@ detection by magic bytes with a browser-row ``viewer_hint`` and rowid jump (C-W1
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from rapidtriage.api.app.helpers import is_sqlite_candidate, sqlite_detection
 from rapidtriage.api.app.viewer_hint import sqlite_viewer_hint
@@ -123,6 +125,7 @@ class L4ApiTests(unittest.TestCase):
 
     def test_validation_package_post_writes_and_names_paths_saved_get_is_read_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
+            self.enterContext(patch.dict(os.environ, {"RAPIDTRIAGE_SAMPLE_ROOT": tmp_dir}))
             client = api_test_client(RunJobStore())
             response = client.post(
                 "/api/sample-case/run",
@@ -158,6 +161,7 @@ class L4ApiTests(unittest.TestCase):
 
     def test_run_reports_case_db_ready_only_after_import(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
+            self.enterContext(patch.dict(os.environ, {"RAPIDTRIAGE_SAMPLE_ROOT": tmp_dir}))
             client = api_test_client(RunJobStore())
             response = client.post(
                 "/api/sample-case/run",

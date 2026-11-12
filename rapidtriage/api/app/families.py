@@ -589,7 +589,7 @@ def load_or_build(sources: DerivedSources, output_dir: Path | None) -> RunDerive
         if stored is not None:
             return stored
     derived = derive(sources, stamp=stamp)
-    if output_dir is None or not index_persist_enabled() or sources_stamp(sources) != stamp:
+    if output_dir is None or not index_persist_enabled(output_dir) or sources_stamp(sources) != stamp:
         derived.source = "memory"
         return derived
     try:

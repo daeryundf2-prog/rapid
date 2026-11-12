@@ -2,6 +2,12 @@
 
 export interface Case {
 command: "case"
+review_scope?: {
+case_db_marks_truncated?: boolean
+case_db_marks_total?: number
+case_db_mark_limit?: number
+case_db_error?: (string | null)
+}
 generated_at: string
 updated_at: string
 case_id: string

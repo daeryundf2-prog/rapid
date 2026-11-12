@@ -8,7 +8,7 @@ import { useQueries } from "@tanstack/react-query";
 import { type ReactNode, useEffect } from "react";
 import { announce } from "../../a11y";
 import { downloadFile } from "../../api/client";
-import { type ExportEntry, getKeywordHitCount } from "../../api/dashboard";
+import { buildExportFile, type ExportEntry, getKeywordHitCount } from "../../api/dashboard";
 import type { CanonicalCounts, ItemRow, RunWarning } from "../../api/runs";
 import { RUN_MODE_LABEL, runDisplayName } from "../../app/collections";
 import { StatusBadge } from "../../components/Badge";
@@ -442,9 +442,13 @@ export function ExportsCard({ entries }: { entries: ExportEntry[] }) {
                 className="button ghost icon-only"
                 aria-label={`${entry.name} 내려받기`}
                 onClick={() => {
-                  downloadFile(entry.download_url, entry.name).catch((error: unknown) =>
-                    announce(`내려받기 실패: ${error instanceof Error ? error.message : String(error)}`),
-                  );
+                  // An extract made before its zip existed: write the zip (POST), then download.
+                  const ready = entry.build_url ? buildExportFile(entry.build_url) : Promise.resolve();
+                  ready
+                    .then(() => downloadFile(entry.download_url, entry.name))
+                    .catch((error: unknown) =>
+                      announce(`내려받기 실패: ${error instanceof Error ? error.message : String(error)}`),
+                    );
                 }}
               >
                 <Icon name="download" />

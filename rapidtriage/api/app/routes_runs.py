@@ -25,6 +25,7 @@ from ...artifacts.ai_agents.run_indirect import normalize_run_collector_options
 from ...core.ai_report import ai_usage_gaps, ai_usage_summary
 from ...core.artifact_profiles import payload_record_count
 from ...core.columnar_store import query_columnar_artifact_records
+from ...core.credential_files import credential_file_reason
 from ...core.eventlog_channels import ChannelFilter
 from ...core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, run_extract
 from ...core.indicators import (
@@ -33,6 +34,7 @@ from ...core.indicators import (
 )
 from ...core.jobs import (
     RunControlConflict,
+    RunImportError,
     RunJobStore,
     RunOutputDirBusy,
     RunRequest,
@@ -184,6 +186,28 @@ CURRENT_TASKS_MAX = 3
 FILTER_LIMIT_MESSAGE = "필터는 limit>0에서만 지원합니다"
 EXTRACT_ZIP_MAX_BYTES = 2 * 1024 * 1024 * 1024
 EXTRACT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+def write_extract_zip(base: Path, name: str) -> dict[str, object]:
+    """Write ``<base>/<name>.zip`` from the extract folder (once; an existing zip is kept).
+
+    Links are skipped, and so is any file :func:`credential_file_reason` flags (R8 RI-03: an
+    extract folder copied before the credential policy never ships a credential body)."""
+    folder = base / name
+    archive = base / f"{name}.zip"
+    if archive.is_file():
+        return {"status": "exists", "path": str(archive), "size": archive.stat().st_size, "skipped_credential_files": 0}
+    files = [path for path in sorted(folder.rglob("*")) if path.is_file() and not path.is_symlink()]
+    withheld = {path for path in files if credential_file_reason(path)}
+    files = [path for path in files if path not in withheld]
+    if sum(path.stat().st_size for path in files) > EXTRACT_ZIP_MAX_BYTES:
+        return {"status": "too-large", "path": None, "size": None, "skipped_credential_files": len(withheld)}
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+        for path in files:
+            bundle.write(path, path.relative_to(folder).as_posix())
+    return {"status": "written", "path": str(archive), "size": archive.stat().st_size, "skipped_credential_files": len(withheld)}
+
+
 _TRUE_FLAGS = frozenset({"1", "true", "yes", "on"})
 _FALSE_FLAGS = frozenset({"", "0", "false", "no", "off"})
 
@@ -526,6 +550,8 @@ def build_runs_router(
     def import_run(request: RunImportRequest) -> dict[str, Any]:
         try:
             job = store.import_completed_run(request.output_dir)
+        except RunImportError as exc:
+            raise HTTPException(status_code=400, detail=exc.to_detail()) from exc
         except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         return job.to_dict(include_summary=True)
@@ -1650,8 +1676,27 @@ def build_runs_router(
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         manifest["name"] = name
+        # The zip is written here, with the extract (R8: the download GET never writes).
+        manifest["zip"] = write_extract_zip(output_dir / "extract", name)
         manifest["download_url"] = f"/api/runs/{run_id}/extract/{name}/file"
         return manifest
+
+
+    @router.post("/api/runs/{run_id}/extract/{name}/zip")
+    def build_run_extract_zip(run_id: str, name: str) -> dict[str, object]:
+        """Write the zip of an extract folder that has none yet (an extract made before R8)."""
+        job = get_job(store, run_id)
+        if job.summary is None:
+            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
+        if not EXTRACT_NAME_PATTERN.fullmatch(name):
+            raise HTTPException(status_code=400, detail="invalid extract name")
+        base = run_output_dir(job.summary) / "extract"
+        if not (base / name).is_dir():
+            raise HTTPException(status_code=404, detail="extract not found")
+        result = write_extract_zip(base, name)
+        if result["status"] == "too-large":
+            raise HTTPException(status_code=413, detail="extract is larger than the 2 GB zip limit")
+        return {**result, "download_url": f"/api/runs/{run_id}/extract/{name}/file"}
 
 
     @router.get("/api/runs/{run_id}/extract/{name}/file")
@@ -1665,14 +1710,15 @@ def build_runs_router(
         folder = base / name
         if not folder.is_dir():
             raise HTTPException(status_code=404, detail="extract not found")
-        files = [p for p in sorted(folder.rglob("*")) if p.is_file() and not p.is_symlink()]
-        if sum(p.stat().st_size for p in files) > EXTRACT_ZIP_MAX_BYTES:
-            raise HTTPException(status_code=413, detail="extract is larger than the 2 GB zip limit")
         archive = base / f"{name}.zip"
         if not archive.is_file():
-            with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
-                for path in files:
-                    bundle.write(path, path.relative_to(folder).as_posix())
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "EXPORT_NOT_WRITTEN",
+                    "message": "추출 zip이 아직 없습니다. 추출 이력에서 zip 만들기를 먼저 실행하세요",
+                },
+            )
         return FileResponse(archive, filename=archive.name, media_type="application/zip")
 
 

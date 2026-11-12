@@ -13,6 +13,7 @@ from xml.sax.saxutils import escape as xml_escape
 from .ai_report import AI_SECTION_ID, ai_usage_section_lines, ai_usage_summary
 from .korean_report import TEMPLATE_ID as KOREAN_EXPERT_TEMPLATE_ID
 from .korean_report import build_korean_expert_report
+from .report_candidates import report_scope_notes
 
 CASE_REPORT_EXPORTS = {
     "md": "rapidtriage-case-report.md",
@@ -123,6 +124,7 @@ def build_case_report_markdown(
             f"- 보고서 포함 후보 수: {case_summary.get('report_item_count', 0)}",
             f"- 해시 산출 항목 수: {submission_manifest.get('summary', {}).get('hashed_item_count', 0)}",
             f"- 해시 산출 제외 항목 수: {submission_manifest.get('summary', {}).get('skipped_count', 0)}",
+            *report_scope_notes(case_payload, submission_manifest),
             "",
         ]
     )

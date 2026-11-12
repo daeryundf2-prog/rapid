@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import os
 import shutil
 import sqlite3
 import zipfile
@@ -14,18 +15,82 @@ DEFAULT_SAMPLE_DIR = "rapidtriage-sample"
 DEFAULT_SAMPLE_MODE = "fraud"
 
 
+#: The marker every sample folder carries; ``overwrite`` clears a folder only when it is present.
+SAMPLE_MARKER_NAME = "rapidtriage-sample-expected.json"
+SAMPLE_TRAINING_LAB_NAME = "rapidtriage-training-lab-manifest.json"
+#: The only entries a sample folder holds (all written by this module); ``overwrite`` removes these
+#: and nothing else.
+SAMPLE_ENTRY_NAMES = frozenset({"evidence", "run-output", SAMPLE_MARKER_NAME, SAMPLE_TRAINING_LAB_NAME})
+
+SAMPLE_DIR_NOT_EMPTY = "SAMPLE_DIR_NOT_EMPTY"
+SAMPLE_DIR_NOT_SAMPLE = "SAMPLE_DIR_NOT_SAMPLE"
+SAMPLE_DIR_HAS_OTHER_FILES = "SAMPLE_DIR_HAS_OTHER_FILES"
+
+
+#: ``RAPIDTRIAGE_SAMPLE_ROOT`` overrides the server's sample root (default ``~/.rapidtriage``).
+SAMPLE_ROOT_ENV = "RAPIDTRIAGE_SAMPLE_ROOT"
+
+
+def sample_case_root() -> Path:
+    """The only folder the web API may create practice samples under (R8 RI-04)."""
+    configured = os.environ.get(SAMPLE_ROOT_ENV, "").strip()
+    base = Path(configured) if configured else Path.home() / ".rapidtriage"
+    return base.expanduser().resolve()
+
+
 class SampleCaseError(ValueError):
-    """Raised when the synthetic sample case cannot be created or run."""
+    """Raised when the synthetic sample case cannot be created or run (``code`` is stable)."""
+
+    def __init__(self, message: str, *, code: str = "SAMPLE_CASE_FAILED") -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _is_link(path: Path) -> bool:
+    return path.is_symlink() or bool(getattr(path, "is_junction", lambda: False)())
+
+
+def clear_sample_folder(root: Path) -> None:
+    """Remove a previous sample from ``root`` — never anything that is not a sample.
+
+    Only a folder carrying :data:`SAMPLE_MARKER_NAME` is cleared, and only the entries this module
+    writes (:data:`SAMPLE_ENTRY_NAMES`) are removed. Any other entry, or a link among the sample
+    entries, refuses the whole operation before anything is deleted (R8 RI-04).
+    """
+    if _is_link(root):
+        raise SampleCaseError(
+            f"샘플 폴더가 링크(심볼릭 링크·정션)입니다. 지우지 않았습니다: {root}", code=SAMPLE_DIR_NOT_SAMPLE
+        )
+    if not (root / SAMPLE_MARKER_NAME).is_file():
+        raise SampleCaseError(
+            f"샘플 폴더가 아닙니다({SAMPLE_MARKER_NAME} 없음). 비어 있지 않은 폴더는 지우지 않습니다: {root}",
+            code=SAMPLE_DIR_NOT_SAMPLE,
+        )
+    entries = list(root.iterdir())
+    others = sorted(entry.name for entry in entries if entry.name not in SAMPLE_ENTRY_NAMES or _is_link(entry))
+    if others:
+        listed = ", ".join(others[:5]) + (" …" if len(others) > 5 else "")
+        raise SampleCaseError(
+            f"샘플 폴더에 샘플이 만들지 않은 항목이 있어 지우지 않았습니다({listed}): {root}",
+            code=SAMPLE_DIR_HAS_OTHER_FILES,
+        )
+    for entry in entries:
+        if entry.is_dir():
+            shutil.rmtree(entry)
+        else:
+            entry.unlink()
 
 
 def create_sample_case(output_dir: Path, *, overwrite: bool = False) -> dict[str, object]:
     root = output_dir.expanduser().resolve()
     evidence_root = root / "evidence"
-    expected_path = root / "rapidtriage-sample-expected.json"
+    expected_path = root / SAMPLE_MARKER_NAME
     if root.exists() and any(root.iterdir()):
         if not overwrite:
-            raise SampleCaseError(f"sample output already exists and is not empty: {root}")
-        shutil.rmtree(root)
+            raise SampleCaseError(
+                f"샘플 폴더가 이미 있고 비어 있지 않습니다(덮어쓰기 꺼짐): {root}", code=SAMPLE_DIR_NOT_EMPTY
+            )
+        clear_sample_folder(root)
     root.mkdir(parents=True, exist_ok=True)
 
     build_sample_evidence(evidence_root)
@@ -64,7 +129,7 @@ def run_sample_workflow(
         overwrite=True,
     )
     training_lab_manifest = build_training_lab_manifest(sample_payload, run_payload, mode=mode, read_only=read_only)
-    training_lab_path = sample_root / "rapidtriage-training-lab-manifest.json"
+    training_lab_path = sample_root / SAMPLE_TRAINING_LAB_NAME
     training_lab_path.write_text(json.dumps(training_lab_manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {
         **sample_payload,

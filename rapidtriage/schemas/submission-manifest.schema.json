@@ -49,8 +49,11 @@
       "required": ["case_bookmark_count", "hashed_item_count", "skipped_count", "total_size"],
       "properties": {
         "case_bookmark_count": { "type": "integer" },
+        "report_candidate_count": { "type": "integer" },
         "hashed_item_count": { "type": "integer" },
         "skipped_count": { "type": "integer" },
+        "max_items_skipped_count": { "type": "integer" },
+        "truncated": { "type": "boolean" },
         "total_size": { "type": "integer" }
       }
     },

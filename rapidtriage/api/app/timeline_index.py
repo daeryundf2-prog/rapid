@@ -883,7 +883,7 @@ class TimelineIndex:
         """All columns, then the index file when the timeline is still the indexed revision."""
         self.ensure(events, COLUMNS, pause)
         with self._lock:
-            if self.saved or self.timeline_path is None or self.stamp is None or not index_persist_enabled():
+            if self.saved or self.timeline_path is None or self.stamp is None or not index_persist_enabled(self.timeline_path):
                 return
             if _file_stamp(self.timeline_path) != self.stamp:
                 return
@@ -1020,7 +1020,7 @@ def open_index(timeline_path: Path, count: int, stamp: tuple[int, int] | None = 
     found = load_index(index_path_for(timeline_path), stamp, count, head_tail_digest(timeline_path))
     if found is not None:
         return found
-    return TimelineIndex(count, stamp=stamp, timeline_path=timeline_path if index_persist_enabled() else None)
+    return TimelineIndex(count, stamp=stamp, timeline_path=timeline_path if index_persist_enabled(timeline_path) else None)
 
 
 # --- evaluation ----------------------------------------------------------------------------------

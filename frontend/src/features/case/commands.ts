@@ -36,7 +36,8 @@ export async function runSampleWithConfirm(): Promise<string | null> {
   });
   if (!ok) return null;
   try {
-    const payload = await runSampleCase({});
+    // Replaces only a previous sample (the server clears a folder carrying its sample marker).
+    const payload = await runSampleCase({ overwrite: true });
     const runId = payload.run.run_id;
     const folder = payload.run.summary?.output_dir ?? null;
     notifyWritten("샘플 케이스를 만들고 열었습니다.", folder);

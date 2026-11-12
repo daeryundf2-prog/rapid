@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import struct
 import tempfile
@@ -1305,6 +1306,7 @@ class RapidTriageApiTests(unittest.TestCase):
 
     def test_sample_case_api_creates_and_imports_practice_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
+            self.enterContext(patch.dict(os.environ, {"RAPIDTRIAGE_SAMPLE_ROOT": tmp_dir}))
             client = api_test_client(RunJobStore())
             response = client.post(
                 "/api/sample-case/run",
@@ -1325,6 +1327,7 @@ class RapidTriageApiTests(unittest.TestCase):
 
     def test_run_validation_package_exports_hashes_review_status_and_blockers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
+            self.enterContext(patch.dict(os.environ, {"RAPIDTRIAGE_SAMPLE_ROOT": tmp_dir}))
             client = api_test_client(RunJobStore())
             response = client.post(
                 "/api/sample-case/run",
@@ -1353,7 +1356,10 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             self.assertEqual(bookmark_response.status_code, 200, bookmark_response.text)
 
+            # R8: the GET builds in memory; the POST writes the package and its audit record.
             package_response = client.get(f"/api/runs/{run_id}/validation-package")
+            self.assertFalse((output_dir / "rapidforensic-run-validation-package.json").exists())
+            self.assertEqual(client.post(f"/api/runs/{run_id}/validation-package").status_code, 200)
 
             self.assertEqual(package_response.status_code, 200, package_response.text)
             package = package_response.json()
@@ -3463,7 +3469,10 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(payload["case"]["bookmarks"][0]["review"]["include_in_report"], True)
             self.assertEqual(payload["case"]["bookmarks"][0]["review_history"][0]["action"], "created")
 
+            # R8: the GET builds in memory; the POST writes the manifest and its audit record.
             manifest_response = client.get(f"/api/runs/{run_id}/submission-manifest")
+            self.assertFalse((output_dir / "rapidtriage-submission-manifest.json").exists())
+            self.assertEqual(client.post(f"/api/runs/{run_id}/submission-manifest").status_code, 200)
             self.assertEqual(manifest_response.status_code, 200, manifest_response.text)
             manifest = manifest_response.json()
             self.assertEqual(manifest["command"], "submission-manifest")
@@ -4069,12 +4078,11 @@ class RapidTriageApiTests(unittest.TestCase):
             )
 
             client = api_test_client(RunJobStore())
+            # R8 RI-05: refused when imported (it used to import and answer 403 on access).
             import_response = client.post("/api/runs/import", json={"output_dir": str(output_dir)})
-            self.assertEqual(import_response.status_code, 201, import_response.text)
-            run_id = import_response.json()["run_id"]
-
-            report_response = client.get(f"/api/runs/{run_id}/outputs/report/file")
-            self.assertEqual(report_response.status_code, 403)
+            self.assertEqual(import_response.status_code, 400, import_response.text)
+            self.assertEqual(import_response.json()["detail"]["code"], "IMPORT_OUTPUT_OUTSIDE_FOLDER")
+            self.assertEqual(client.get("/api/runs").json()["runs"], [])
 
     def test_e01_smoke_stage_status_output_is_served_through_run_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
