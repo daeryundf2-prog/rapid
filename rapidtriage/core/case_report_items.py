@@ -14,6 +14,7 @@ does not import the API package, so the caller passes the computed scope and ste
 from __future__ import annotations
 
 import datetime as dt
+import re
 from collections import deque
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -92,6 +93,43 @@ def _mapping(value: object) -> Mapping[str, object]:
     return value if isinstance(value, Mapping) else {}
 
 
+# --- Markdown safety ------------------------------------------------------------------------
+#
+# Titles, previews, tags and source hits come from evidence content; notes are typed by the
+# examiner. Every such value is written through one of these helpers so a newline cannot start a
+# heading or a look-alike field (``- SHA-256: ...``) and a backtick cannot close a code span. The
+# HTML / DOCX / PDF exports are rendered from the same lines (and escape HTML / XML themselves).
+
+#: C0 controls (except tab/newline/CR, handled as whitespace) and DEL: invalid in DOCX XML.
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+#: Shown instead of a backtick inside report text (a backtick would open/close a code span).
+BACKTICK_STAND_IN = "｀"
+
+
+def md_inline(value: object) -> str:
+    """One-line report text: control characters dropped, every run of whitespace (newlines too)
+    collapsed to one space, backticks replaced so they cannot open a code span."""
+    text = _CONTROL_CHARS.sub("", str(value if value is not None else ""))
+    return re.sub(r"\s+", " ", text).strip().replace("`", BACKTICK_STAND_IN)
+
+
+def md_code(value: object) -> str:
+    """``md_inline`` wrapped as an inline code span."""
+    return f"`{md_inline(value)}`"
+
+
+def md_cell(value: object) -> str:
+    """``md_inline`` for a table cell (``|`` escaped)."""
+    return md_inline(value).replace("|", "\\|")
+
+
+def md_block_lines(value: object, *, indent: str = "  ") -> list[str]:
+    """Multi-line text (an examiner's note) as quoted lines under a list item: each non-empty line
+    becomes ``{indent}> line`` so it can never be read as a heading, item or report field."""
+    text = _CONTROL_CHARS.sub("", str(value if value is not None else ""))
+    return [f"{indent}> {md_inline(line)}" for line in text.splitlines() if line.strip()]
+
+
 def template_label(template: str) -> str:
     return TEMPLATE_LABEL_KO.get(template, template)
 
@@ -126,22 +164,29 @@ def _offset_text(minutes: int) -> str:
 
 def display_timezone(run_summary: Mapping[str, object]) -> tuple[int, str]:
     """``(offset minutes, Korean label)``: the evidence system's zone when the run read it from the
-    registry (offset = -Bias), else Korea Standard Time, said so."""
+    registry (offset = -Bias), else Korea Standard Time, said so.
+
+    The run records the registry ``Bias`` (standard time) only -- not ``DaylightBias`` or the
+    daylight-saving transition dates -- so one fixed offset is used for every date and the label
+    says so (in a zone with daylight saving the local column is an hour off for part of the year)."""
     timezone = _mapping(_mapping(run_summary.get("disclosures")).get("timezone"))
     evidence = _mapping(timezone.get("evidence_timezone"))
     bias = evidence.get("bias_minutes")
     if isinstance(bias, int) and not isinstance(bias, bool) and abs(bias) <= 14 * 60:
-        name = str(evidence.get("label") or evidence.get("name") or "").strip()
+        name = md_inline(evidence.get("label") or evidence.get("name") or "")
         offset = -bias
         suffix = f", {name}" if name else ""
-        return offset, f"{_offset_text(offset)} (증거 시스템 시간대{suffix})"
+        return offset, (
+            f"{_offset_text(offset)} (증거 시스템 시간대{suffix}) — 레지스트리 표준시(Bias) 기준 고정 오프셋, "
+            "일광 절약 시간(서머타임)은 반영하지 않음"
+        )
     offset = DEFAULT_DISPLAY_OFFSET_MINUTES
     return offset, f"{_offset_text(offset)} (한국 표준시 — 증거 시스템 시간대가 기록되지 않아 기본값 사용)"
 
 
 def format_evidence_time(value: object, offset_minutes: int) -> str:
     """``2025-05-29 23:25:26 (UTC+09:00) · UTC 2025-05-29 14:25:26``; unparsable values as recorded."""
-    text = str(value or "").strip()
+    text = md_inline(value)
     if not text:
         return NOT_RECORDED
     try:
@@ -152,8 +197,12 @@ def format_evidence_time(value: object, offset_minutes: int) -> str:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=dt.timezone.utc)
         note = " (시간대 표기 없음 — UTC로 간주)"
-    utc = parsed.astimezone(dt.timezone.utc)
-    local = utc.astimezone(dt.timezone(dt.timedelta(minutes=offset_minutes)))
+    try:
+        utc = parsed.astimezone(dt.timezone.utc)
+        local = utc.astimezone(dt.timezone(dt.timedelta(minutes=offset_minutes)))
+    except (OverflowError, ValueError):
+        # Year 1 / 9999 with an offset that leaves the datetime range: one row must not fail the report.
+        return f"{text} (표시 범위를 벗어난 시각이라 기록값 그대로 표시)"
     return (
         f"{local:%Y-%m-%d %H:%M:%S} ({_offset_text(offset_minutes)}) · UTC {utc:%Y-%m-%d %H:%M:%S}{note}"
     )
@@ -209,7 +258,7 @@ def catalog_versions(run_summary: Mapping[str, object]) -> list[str]:
     found: list[str] = []
     for step in run_summary.get("steps") or []:
         if isinstance(step, Mapping) and step.get("catalog_version") not in (None, ""):
-            text = f"{step.get('name')}: {step.get('catalog_version')}"
+            text = md_inline(f"{step.get('name')}: {step.get('catalog_version')}")
             if text not in found:
                 found.append(text)
     return found
@@ -229,8 +278,8 @@ def reproducibility_lines(
         f"- 표시 시간대: {display_label}. 모든 시각은 UTC 값을 함께 적음.",
     ]
     if steps:
-        failed = ", ".join(str(name) for name in steps.get("failed_names") or []) or "없음"
-        partial = ", ".join(str(name) for name in steps.get("partial_names") or []) or "없음"
+        failed = ", ".join(md_inline(name) for name in steps.get("failed_names") or []) or "없음"
+        partial = ", ".join(md_inline(name) for name in steps.get("partial_names") or []) or "없음"
         lines.append(
             f"- 처리 단계: 전체 {steps.get('total', 0)} · 완료 {steps.get('completed', 0)} · "
             f"부분 {steps.get('partial', 0)} · 실패 {steps.get('failed', 0)} · 건너뜀 {steps.get('skipped', 0)}"
@@ -316,7 +365,7 @@ def skip_reason_label(skip: Mapping[str, object]) -> str:
 def _source_location(row: Mapping[str, object]) -> str:
     parts = []
     for key, label in (("collection", "수집 원천"), ("kind", "유형"), ("locator", "위치"), ("citation_id", "인용 ID")):
-        value = str(row.get(key) or "").strip()
+        value = md_inline(row.get(key) or "")
         if value:
             parts.append(f"{label} `{value}`")
     return " · ".join(parts) or NOT_RECORDED
@@ -327,16 +376,18 @@ def source_hit_lines(hits: Sequence[Mapping[str, str]]) -> list[str]:
         return []
     lines = ["- 출처 검색 인용:"]
     for hit in hits:
-        lines.append(f"  - 인용: {hit.get('citation', '')}")
+        lines.append(f"  - 인용: {md_inline(hit.get('citation', ''))}")
         for key, label in SOURCE_HIT_LABELS:
             value = hit.get(key)
             if not value:
                 continue
             if key == "source_type":
-                value = f"{SOURCE_TYPE_KO.get(value, value)} (`{value}`)"
+                text = f"{md_inline(SOURCE_TYPE_KO.get(value, value))} ({md_code(value)})"
             elif key in ("source_locator", "result_hash"):
-                value = f"`{value}`"
-            lines.append(f"    - {label}: {value}")
+                text = md_code(value)
+            else:
+                text = md_inline(value)
+            lines.append(f"    - {label}: {text}")
     return lines
 
 
@@ -378,14 +429,16 @@ def entry_lines(
     raw_path = evidence.get("path") or snapshot.get("path") or skip.get("path")
     relative = str(evidence.get("relative_path") or "") or evidence_relative_path(raw_path, roots)
     is_file = is_file_entry(bookmark, evidence)
-    title = (
+    title = md_inline(
         bookmark.get("summary") or item.get("summary") or skip.get("summary") or evidence.get("name")
-        or row.get("preview") or "제목 없는 항목"
-    )
+        or row.get("preview") or ""
+    ) or "제목 없는 항목"
     tags = bookmark.get("tags") if isinstance(bookmark.get("tags"), list) else item.get("tags")
+    tag_text = ", ".join(text for text in (md_inline(tag) for tag in tags or []) if text)
     note = str(bookmark.get("note") or item.get("note") or "")
+    preview = md_inline(row.get("preview") or "")
     if relative:
-        location = f"`{relative}`"
+        location = md_code(relative)
     elif raw_path:
         location = "원래 위치 알 수 없음(복구·추출 사본 또는 증거 루트 밖)"
     else:
@@ -393,10 +446,10 @@ def entry_lines(
     lines = [
         f"### 5.{index}. {title}",
         "",
-        f"- 항목 ID: `{bookmark.get('bookmark_id') or item.get('bookmark_id') or ''}`",
+        f"- 항목 ID: {md_code(bookmark.get('bookmark_id') or item.get('bookmark_id') or '')}",
         f"- 구분: {'파일' if is_file else '아티팩트 행'}",
         f"- 증거 시각: {format_evidence_time(row.get('timestamp'), offset_minutes)}",
-        f"- 내용 미리보기: {row.get('preview') or NOT_RECORDED}"
+        f"- 내용 미리보기: {preview or NOT_RECORDED}"
         + (f" (전체 {row.get('preview_total')}자 중 앞부분)" if row.get("preview_truncated") else ""),
         f"- 증거 안 경로: {location}",
         f"- 출처 위치: {_source_location(row)}",
@@ -404,28 +457,37 @@ def entry_lines(
     if evidence:
         lines.extend(
             [
-                f"- 파일명: `{evidence.get('name', '')}`",
+                f"- 파일명: {md_code(evidence.get('name', ''))}",
                 f"- 크기: {int(evidence.get('size') or 0):,}바이트",
-                f"- 수정 시각: {format_evidence_time(evidence.get('modified_at'), offset_minutes)}",
             ]
         )
         if show_copy_path:
-            lines.append(f"- 분석 사본 위치(기술 정보): `{evidence.get('path', '')}`")
+            # ``modified_at`` is the mtime of the file that was hashed -- the analysis copy (an
+            # extracted E01 copy carries the run date), not a time read from the evidence.
+            lines.append(
+                f"- 분석 사본 수정 시각(증거 시각 아님): {format_evidence_time(evidence.get('modified_at'), offset_minutes)}"
+            )
+            lines.append(f"- 분석 사본 위치(기술 정보): {md_code(evidence.get('path', ''))}")
+    note_lines = [line for line in note.splitlines() if line.strip()]
     lines.extend(
         [
             f"- 판단: {review_status_label(review.get('status'))}",
-            f"- 검토자: {author_label(review.get('reviewer') or review.get('reviewed_by') or bookmark.get('created_by'))}",
-            f"- 태그: {', '.join(str(tag) for tag in tags or []) or '없음'}",
-            f"- 분석자 메모: {note or '없음'}",
+            f"- 검토자: {author_label(md_inline(review.get('reviewer') or review.get('reviewed_by') or bookmark.get('created_by')))}",
+            f"- 태그: {tag_text or '없음'}",
+            *(
+                [f"- 분석자 메모: {md_inline(note)}"]
+                if len(note_lines) == 1
+                else (["- 분석자 메모:", *md_block_lines(note)] if note_lines else ["- 분석자 메모: 없음"])
+            ),
             *source_hit_lines(source_hits),
         ]
     )
     if evidence:
         lines.extend(
             [
-                f"- MD5: `{hashes.get('md5', '')}`",
-                f"- SHA-1: `{hashes.get('sha1', '')}`",
-                f"- SHA-256: `{hashes.get('sha256', '')}`",
+                f"- MD5: {md_code(hashes.get('md5', ''))}",
+                f"- SHA-1: {md_code(hashes.get('sha1', ''))}",
+                f"- SHA-256: {md_code(hashes.get('sha256', ''))}",
             ]
         )
     elif skip:
@@ -443,26 +505,112 @@ def skipped_lines(submission_manifest: Mapping[str, object], roots: Sequence[Pat
         if not isinstance(skip, Mapping):
             continue
         relative = evidence_relative_path(skip.get("path"), roots)
-        label = str(skip.get("summary") or "") or (f"`{relative}`" if relative else "제목 없는 항목")
-        where = f" (증거 안 경로 `{relative}`)" if relative and skip.get("summary") else ""
-        lines.append(f"- {label}{where}: {skip_reason_label(skip)}")
+        summary = md_inline(skip.get("summary") or "")
+        label = summary or (md_code(relative) if relative else "제목 없는 항목")
+        where = f" (증거 안 경로 {md_code(relative)})" if relative and summary else ""
+        lines.append(f"- {label}{where}: {md_inline(skip_reason_label(skip))}")
     return lines or ["- 없음"]
+
+
+#: Absolute path in either convention (``C:\``, ``C:/``, ``\\server``, ``/``) -- run summaries
+#: written on Windows are read on any host, so ``Path.is_absolute`` alone is not enough.
+_ABSOLUTE_PATH = re.compile(r"^(?:[A-Za-z]:[\\/]|[\\/])")
+
+
+def _slashed(value: object) -> str:
+    return str(value or "").strip().replace("\\", "/")
+
+
+def path_name(value: object) -> str:
+    """Last component of a path in either convention (``""`` for an empty value)."""
+    parts = [part for part in _slashed(value).split("/") if part]
+    return parts[-1] if parts else ""
+
+
+def output_relative_name(value: object, output_dir: object) -> str:
+    """A step output as the reader may see it: relative to the run's output folder, or just its file
+    name -- never the analysis PC's absolute path (IS-128)."""
+    text = _slashed(value)
+    if not text:
+        return ""
+    if not _ABSOLUTE_PATH.match(text):
+        return text
+    base = _slashed(output_dir).rstrip("/")
+    if base and text.lower().startswith(base.lower() + "/"):
+        return text[len(base) + 1 :]
+    return path_name(text)
+
+
+def subject_lines(run_summary: Mapping[str, object], *, technical: bool) -> list[str]:
+    """Section 2 "what was analysed". The technical appendix keeps the analysis PC's absolute paths;
+    every other template names the evidence only (result folders are often named after the matter,
+    the client or the examiner's Windows account)."""
+    root = run_summary.get("root", "")
+    scope_root = run_summary.get("scan_scope_root", "")
+    if technical:
+        return [
+            f"- 원본/분석 루트: {md_code(root)}",
+            f"- 분석 범위 루트: {md_code(scope_root)}",
+            f"- 산출물 디렉터리: {md_code(run_summary.get('output_dir', ''))}",
+        ]
+    source = _mapping(run_summary.get("source"))
+    subject = path_name(source.get("source_path")) or path_name(root)
+    root_text, scope_text = _slashed(root).rstrip("/"), _slashed(scope_root).rstrip("/")
+    if not scope_text or scope_text.lower() == root_text.lower():
+        scope_line = "분석 대상 전체"
+    elif root_text and scope_text.lower().startswith(root_text.lower() + "/"):
+        scope_line = f"분석 대상 안 {md_code(scope_text[len(root_text) + 1 :])}"
+    else:
+        scope_line = md_code(path_name(scope_text))
+    return [
+        f"- 분석 대상(증거 이름): {md_code(subject) if subject else NOT_RECORDED}",
+        f"- 분석 범위: {scope_line}",
+        "- 분석 PC의 폴더 경로(원본·산출물 위치)는 기술 부록 포함 양식에만 적음.",
+    ]
+
+
+def step_lines(run_summary: Mapping[str, object], *, technical: bool) -> list[str]:
+    """Section 3 step list; outputs relative to the result folder unless technical."""
+    lines: list[str] = []
+    output_dir = run_summary.get("output_dir", "")
+    for step in run_summary.get("steps") or []:
+        if not isinstance(step, Mapping):
+            continue
+        output = step.get("output")
+        shown = md_inline(output) if technical else output_relative_name(output, output_dir)
+        lines.append(
+            f"- {md_code(step.get('name'))}: {step_status_label(step.get('status'))}"
+            + (f" (산출물 `{md_inline(shown)}`)" if shown else "")
+        )
+    return lines
 
 
 def roots_for(run_summary: Mapping[str, object]) -> list[Path]:
     return evidence_relative_roots(run_summary) if run_summary else []
 
 
-def conditions_line(submission_manifest: Mapping[str, object]) -> str:
+def conditions_line(submission_manifest: Mapping[str, object], case_payload: Mapping[str, object] | None = None) -> str:
+    """Selection conditions. "숨긴 항목 없음" only when no cap or read error left marks out of the
+    review payload (``review_scope``, the 5,000-mark cap of the case DB read)."""
     options = _mapping(submission_manifest.get("options"))
     include_all = " (표시한 항목 전부 포함 옵션 사용)" if options.get("include_all") else ""
     max_items = options.get("max_items")
     cap = f"{max_items:,}건" if isinstance(max_items, int) and max_items > 0 else "제한 없음"
-    return f"- 적용 조건: 보고서 포함으로 표시한 항목{include_all}, 해시 산출 최대 {cap}. 숨긴 항목 없음."
+    scope = _mapping(_mapping(case_payload).get("review_scope"))
+    if scope.get("case_db_marks_truncated"):
+        total, limit = scope.get("case_db_marks_total"), scope.get("case_db_mark_limit")
+        total_text = f"{total:,}" if isinstance(total, int) else "확인 불가"
+        limit_text = f"{limit:,}" if isinstance(limit, int) else "확인 불가"
+        hidden = f"케이스 DB 표시 {total_text}건 중 {limit_text}건만 읽음(상한) — 나머지 표시는 이 보고서에 없음."
+    elif scope.get("case_db_error"):
+        hidden = "케이스 DB를 읽지 못해 콘솔 표시가 빠졌을 수 있음."
+    else:
+        hidden = "숨긴 항목 없음."
+    return f"- 적용 조건: 보고서 포함으로 표시한 항목{include_all}, 해시 산출 최대 {cap}. {hidden}"
 
 
 def _cell(value: object) -> str:
-    return str(value).replace("|", "\\|").replace("\n", " ")
+    return md_cell(value)
 
 
 def review_table(heading: str, rows: Sequence[Mapping[str, object]], empty: str) -> list[str]:
@@ -472,13 +620,13 @@ def review_table(heading: str, rows: Sequence[Mapping[str, object]], empty: str)
     lines = [heading, "", "| 항목 | 판단 | 보고서 포함 | 태그 | 메모 |", "|---|---|---|---|---|"]
     for row in rows:
         cells = (
-            f"`{row.get('summary')}`",
-            review_status_label(row.get("status")),
+            f"`{_cell(row.get('summary'))}`",
+            _cell(review_status_label(row.get("status"))),
             "포함" if row.get("include_in_report") else "제외",
-            row.get("tags") or "없음",
-            row.get("note") or "없음",
+            _cell(row.get("tags") or "") or "없음",
+            _cell(row.get("note") or "") or "없음",
         )
-        lines.append("| " + " | ".join(_cell(cell) for cell in cells) + " |")
+        lines.append("| " + " | ".join(cells) + " |")
     return [*lines, ""]
 
 
@@ -495,16 +643,18 @@ def technical_appendix_lines(run_summary: Mapping[str, object]) -> list[str]:
         f"- 가장 높은 경고 수준: `{processing.get('highest_warning_level', 'none')}`",
         f"- 추출 최대 바이트: {int(caps.get('max_extract_size_bytes') or 0):,}",
         f"- 추출 최대 파일 수: {int(caps.get('max_file_count') or 0):,}",
-        f"- 원본 종류: `{source.get('kind', '')}`",
-        f"- 원본 경로: `{source.get('source_path', '')}`",
-        f"- 분석 범위 루트: `{run_summary.get('scan_scope_root', '')}`",
+        f"- 원본 종류: {md_code(source.get('kind', ''))}",
+        f"- 원본 경로: {md_code(source.get('source_path', ''))}",
+        f"- 분석 범위 루트: {md_code(run_summary.get('scan_scope_root', ''))}",
         "",
     ]
     if warnings:
         lines.extend(["### 9.1 처리 경고", ""])
         for item in warnings[:20]:
             if isinstance(item, Mapping):
-                lines.append(f"- `{item.get('step', '')}` [{item.get('level', '')}]: {item.get('message', '')}")
+                lines.append(
+                    f"- {md_code(item.get('step', ''))} [{md_inline(item.get('level', ''))}]: {md_inline(item.get('message', ''))}"
+                )
         lines.append("")
     return lines
 
@@ -517,15 +667,16 @@ def hash_only_lines(submission_manifest: Mapping[str, object], roots: Sequence[P
         evidence = _mapping(item.get("evidence"))
         hashes = _mapping(evidence.get("hashes"))
         relative = str(evidence.get("relative_path") or "") or evidence_relative_path(evidence.get("path"), roots)
-        where = f"`{relative}`" if relative else "원래 위치 알 수 없음(복구·추출 사본 또는 증거 루트 밖)"
+        where = md_code(relative) if relative else "원래 위치 알 수 없음(복구·추출 사본 또는 증거 루트 밖)"
+        title = md_inline(item.get("summary") or evidence.get("name") or "") or "제목 없는 항목"
         lines.extend(
             [
-                f"### 2.{index}. {item.get('summary') or evidence.get('name') or '제목 없는 항목'}",
+                f"### 2.{index}. {title}",
                 "",
                 f"- 증거 안 경로: {where}",
-                f"- MD5: `{hashes.get('md5', '')}`",
-                f"- SHA-1: `{hashes.get('sha1', '')}`",
-                f"- SHA-256: `{hashes.get('sha256', '')}`",
+                f"- MD5: {md_code(hashes.get('md5', ''))}",
+                f"- SHA-1: {md_code(hashes.get('sha1', ''))}",
+                f"- SHA-256: {md_code(hashes.get('sha256', ''))}",
                 "",
             ]
         )

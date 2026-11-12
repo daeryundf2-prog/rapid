@@ -178,7 +178,12 @@ def build_row_info(bookmark: Mapping[str, object]) -> dict[str, object]:
     ref = reference if isinstance(reference, Mapping) else {}
     snapshot = bookmark.get("snapshot")
     snap = snapshot if isinstance(snapshot, Mapping) else {}
-    preview = _first_text(snap.get("summary"), bookmark.get("summary"), bookmark.get("note"))
+    if "preview" in snap:
+        # Case DB marks carry the cited row's own preview (R8 T-027 P1-3); when it is empty there is
+        # no preview -- falling back to the summary would repeat the item title.
+        preview = _first_text(snap.get("preview"))
+    else:
+        preview = _first_text(snap.get("summary"), bookmark.get("summary"), bookmark.get("note"))
     preview_total = len(preview)
     preview_truncated = preview_total > PREVIEW_MAX_CHARS
     if preview_truncated:

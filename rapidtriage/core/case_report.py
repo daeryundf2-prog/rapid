@@ -48,9 +48,12 @@ def build_case_report_markdown(
             submission_manifest=submission_manifest,
             metadata=metadata,
         )
-    investigator = report_items.author_label(metadata.get("investigator"))
-    organization = str(metadata.get("organization") or "")
-    requester = str(metadata.get("requester") or "")
+    technical = template == "technical-appendix"
+    case_title = report_items.md_inline(case_title)
+    case_id = report_items.md_inline(case_id)
+    investigator = report_items.author_label(report_items.md_inline(metadata.get("investigator")))
+    organization = report_items.md_inline(metadata.get("organization") or "")
+    requester = report_items.md_inline(metadata.get("requester") or "")
     scope = str(metadata.get("scope") or f"검토 대상으로 지정된 증거 파일과 {PRODUCT_NAME} 분석 산출물을 기준으로 작성함.")
     conclusion = str(metadata.get("conclusion") or "검토 결과 및 증거 해시는 아래 항목과 같음.")
     offset_minutes, display_label = report_items.display_timezone(run_summary)
@@ -59,7 +62,7 @@ def build_case_report_markdown(
     lines = [
         "# 디지털 포렌식 분석 보고서",
         "",
-        f"> 보고서 양식: {report_items.template_label(template)} (`{template}`)",
+        f"> 보고서 양식: {report_items.md_inline(report_items.template_label(template))} ({report_items.md_code(template)})",
         f"> 구성 기준: {report_items.template_policy(template)}",
         "",
         "## 1. 사건 정보",
@@ -90,12 +93,10 @@ def build_case_report_markdown(
         [
             "## 2. 분석 대상 및 범위",
             "",
-            f"- 분석 모드: `{run_summary.get('mode', '')}`",
-            f"- 원본/분석 루트: `{run_summary.get('root', '')}`",
-            f"- 분석 범위 루트: `{run_summary.get('scan_scope_root', '')}`",
-            f"- 산출물 디렉터리: `{run_summary.get('output_dir', '')}`",
+            f"- 분석 모드: {report_items.md_code(run_summary.get('mode', ''))}",
+            *report_items.subject_lines(run_summary, technical=technical),
             *report_items.reproducibility_lines(run_summary, report_context, display_label=display_label),
-            report_items.conditions_line(submission_manifest),
+            report_items.conditions_line(submission_manifest, case_payload),
             "",
             scope,
             "",
@@ -107,13 +108,7 @@ def build_case_report_markdown(
     if template == "executive-summary":
         lines.append("- 의사결정자 요약에서는 분석기 경로와 단계별 산출물을 생략함. 필요하면 기술 부록 양식으로 다시 생성해 확인함.")
     else:
-        step_lines = [
-            f"- `{step.get('name')}`: {report_items.step_status_label(step.get('status'))}"
-            + (f" (산출물 `{step.get('output')}`)" if step.get("output") else "")
-            for step in run_summary.get("steps", [])
-            if isinstance(step, Mapping)
-        ]
-        lines.extend(step_lines or ["- 절차 정보 없음"])
+        lines.extend(report_items.step_lines(run_summary, technical=technical) or ["- 절차 정보 없음"])
 
     lines.extend(["", "## 4. 주요 검토 결과", ""])
     case_summary = case_payload.get("summary") if isinstance(case_payload.get("summary"), Mapping) else {}
@@ -149,7 +144,7 @@ def build_case_report_markdown(
                 roots=roots,
                 offset_minutes=offset_minutes,
                 source_hits=extract_source_hit_notes(str(bookmark.get("note") or "")),
-                show_copy_path=template == "technical-appendix",
+                show_copy_path=technical,
             )
         )
     if not entries:
@@ -173,7 +168,7 @@ def build_case_report_markdown(
             "",
         ]
     )
-    if template == "technical-appendix":
+    if technical:
         lines.extend(report_items.technical_appendix_lines(run_summary))
     return "\n".join(lines)
 
