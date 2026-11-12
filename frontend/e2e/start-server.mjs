@@ -30,6 +30,8 @@ const child = spawn(
       ...process.env,
       RAPIDTRIAGE_AUTH_TOKEN: "e2e-token",
       RAPIDTRIAGE_STATE_PATH: join(stateDir, "runs.json"),
+      // Never open the user's browser (web.py would open a #token= URL on loopback hosts).
+      RAPIDTRIAGE_NO_BROWSER: "1",
     },
   },
 );
