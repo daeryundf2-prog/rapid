@@ -405,6 +405,7 @@ def handle_web(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_s
                 args.allow_remote_without_auth,
                 args.crash_log_dir,
                 remote=args.remote,
+                browse_roots=args.browse_roots,
             )
         except RuntimeError as exc:
             parser.error(str(exc))
