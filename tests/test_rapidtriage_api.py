@@ -4565,7 +4565,9 @@ class RapidTriageApiTests(unittest.TestCase):
             broken = root / "broken.png"
             broken.write_bytes(b"not really a png")
             undecodable = client.get(f"/api/runs/{run_id}/source-thumbnail", params={"path": str(broken)})
-            self.assertEqual(undecodable.status_code, 415)
+            # T-018: an image-typed file that does not decode is "no preview", not an error.
+            self.assertEqual(undecodable.status_code, 204)
+            self.assertEqual(undecodable.headers["x-rapidtriage-thumbnail"], "unavailable")
 
             too_big = client.get(f"/api/runs/{run_id}/source-thumbnail", params={"path": str(photo), "size": 513})
             self.assertEqual(too_big.status_code, 422)
