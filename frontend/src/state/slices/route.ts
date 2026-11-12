@@ -120,9 +120,10 @@ export const createRouteSlice: StateCreator<AppState, [], [], RouteSlice> = (set
   syncRouteFromLocation: (route) => {
     const prev = get().route;
     // Back/forward or a hand-edited hash: when the analyst keeps the unsaved input, put the
-    // address back on the screen still shown (T-144).
+    // address back on the screen still shown (T-144). As a new entry: replacing would overwrite
+    // the entry the browser moved to, and that page would be gone from the history.
     if (!routesEqual(prev, route) && !allowLeave(prev, route)) {
-      writeHash(prev, true);
+      writeHash(prev, false);
       return;
     }
     applyRoute(get, set, route);

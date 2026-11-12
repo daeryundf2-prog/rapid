@@ -1,10 +1,13 @@
 // Browser tab title (r8 T-169): `{화면} · {사건 표시명} — RapidTriage`, `(n%)` while processing,
 // `(!)` for failed / partial runs; titles differ across screens × cases.
 
-import { cleanup, renderHook } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RunWithProgress } from "../api/runsProgress";
 import { useCaseLinks } from "../features/case/caseLink";
+import { quickJsonResponse } from "../features/grid/testSupport";
 import type { Route } from "../router";
 import { documentTitle, runPercent, screenName, statusPrefix, useDocumentTitle } from "./documentTitle";
 
@@ -38,8 +41,14 @@ const SCREENS: Array<Omit<Route, "runId">> = [
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   useCaseLinks.setState({ byRun: {}, loading: {} });
 });
+
+function wrapper({ children }: { children: ReactNode }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return createElement(QueryClientProvider, { client }, children);
+}
 
 describe("documentTitle (T-169)", () => {
   it("is {화면} · {사건 표시명} — RapidTriage and differs across every screen × 2 cases", () => {
@@ -55,7 +64,10 @@ describe("documentTitle (T-169)", () => {
   });
 
   it("names each stage and explore view in Korean", () => {
-    expect(screenName({ runId: "r", collection: "files" })).toBe("파일/미디어");
+    // 파일 / 미디어 갤러리 / a file category are three tabs, three titles (verify-wb5-7).
+    expect(screenName({ runId: "r", collection: "files" })).toBe("파일");
+    expect(screenName({ runId: "r", collection: "files", view: "thumbnails" })).toBe("미디어 갤러리");
+    expect(screenName({ runId: "r", collection: "files", category: "images" })).toBe("파일 · 이미지");
     expect(screenName({ runId: "r", collection: "review" })).toBe("검토");
     expect(screenName({ runId: "r", collection: "artifacts", inReview: true })).toBe("특이사항");
     expect(screenName({ runId: "r", collection: "outputs" })).toBe("보고");
@@ -86,6 +98,10 @@ describe("documentTitle (T-169)", () => {
       statusPrefix({ ...runA, status: "completed", progress: { plan_counts: { tasks: 4, partial: 1 } } }),
     ).toBe("(!)");
     expect(statusPrefix(runA)).toBe("");
+    // A finished run the status bar shows as 부분 (scope / steps) is (!) even with clean counts.
+    const partial = { kind: "partial" as const, failed: 1, failedNames: ["srum"], reasons: [] };
+    expect(statusPrefix(runA, partial)).toBe("(!)");
+    expect(statusPrefix(runA, { ...partial, kind: "complete", failed: 0, failedNames: [] })).toBe("");
     expect(
       documentTitle({
         route: { runId: runA.run_id, collection: "intake" },
@@ -94,10 +110,43 @@ describe("documentTitle (T-169)", () => {
     ).toBe("(!) 접수 · laptop.E01 — RapidTriage");
   });
 
+  it("the hook marks a run the status bar reads as 부분 with (!)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        quickJsonResponse({
+          run_id: runA.run_id,
+          completed: true,
+          scope: null,
+          steps: {
+            total: 3,
+            completed: 2,
+            partial: 0,
+            failed: 1,
+            skipped: 0,
+            incomplete: 0,
+            failed_names: ["srum"],
+            partial_names: [],
+            skipped_names: [],
+            incomplete_names: [],
+            by_status: {},
+          },
+        }),
+      ),
+    );
+    renderHook(() => useDocumentTitle({ runId: runA.run_id, collection: "intake" }, [runA]), { wrapper });
+    await waitFor(() => expect(document.title).toBe("(!) 접수 · laptop.E01 — RapidTriage"));
+  });
+
   it("the hook writes document.title and follows the case link", () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => quickJsonResponse({ detail: "not mocked" }, 404)),
+    );
     const route: Route = { runId: runA.run_id, collection: "timeline" };
     const { rerender } = renderHook(({ r }) => useDocumentTitle(r, [runA, runB]), {
       initialProps: { r: route },
+      wrapper,
     });
     expect(document.title).toBe("타임라인 · laptop.E01 — RapidTriage");
     useCaseLinks.getState().setLink(runA.run_id, {

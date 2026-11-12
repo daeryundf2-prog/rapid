@@ -103,7 +103,8 @@ const pct = (value: number) => `${value.toLocaleString("ko-KR", { maximumFractio
  * 100 % (partitions · allocated listing/content · deleted attempts · unallocated), a cap was reached,
  * the server flags the scope partial, or a step ended partial/incomplete; "완료" only when none of
  * that holds and no step failed. Axes the server did not measure (null) are not counted either way.
- * `unknown` = neither scope nor steps were sent (older server): the bar then shows the run status.
+ * `unknown` = neither scope nor steps were sent (older server): the bar then shows the neutral
+ * OUTCOME_UNKNOWN chip, as it does when the dashboard request fails.
  */
 export interface RunOutcome {
   kind: "complete" | "partial" | "unknown";
@@ -112,6 +113,9 @@ export interface RunOutcome {
   /** Why the run reads 부분 (the chip's tooltip). */
   reasons: string[];
 }
+
+/** Neutral chip of a finished run whose outcome could not be read (dashboard failed, older server). */
+export const OUTCOME_UNKNOWN = "범위 확인 불가";
 
 export function runOutcome(
   scope: RunScope | null | undefined,

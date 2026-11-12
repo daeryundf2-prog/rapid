@@ -23,7 +23,9 @@ import { useRoute } from "../../state/hooks";
 import {
   applyNote,
   applyReviewAction,
+  judgementKey,
   MARK_LABELS,
+  patchListAfterUnpress,
   storeNotice,
   undoToastAction,
   unmarkActionOf,
@@ -38,6 +40,7 @@ import {
   runPropagation,
 } from "../review/gridTools";
 import { useViewerRowContext, useViewerTarget } from "./adapter";
+import { appliedAfterUnpress } from "./appliedMarks";
 import { markDisabledReason, targetAsGridRow } from "./citation";
 import { writeClipboard } from "./commands";
 import { layoutFields } from "./fieldSheets";
@@ -169,6 +172,9 @@ export function ViewerToolbar({
   // A different row closes the form.
   // biome-ignore lint/correctness/useExhaustiveDependencies: close on target change only
   useEffect(() => setNoteOpen(false), [key]);
+  // A changed list row wins over this toolbar's optimistic state (T-036: 해제, then R).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the row's judgement changes
+  useEffect(() => setApplied({ key: "", actions: [], cleared: [] }), [judgementKey(row)]);
 
   const isPressed = (action: string): boolean => {
     if (applied.key === key && applied.actions.includes(action)) return true;
@@ -196,19 +202,9 @@ export function ViewerToolbar({
         undo === "clear-review" ? { ...base, reviewStatus: action as GridRow["reviewStatus"] } : base;
       const result = await applyReviewAction(target.runId, [current], undo);
       const restored = result.restored?.status;
-      setApplied((prev) => {
-        const base = prev.key === key ? prev : { actions: [], cleared: [] };
-        const clears = undo === "clear-review" ? EXCLUSIVE : [action];
-        const back: string[] = restored && restored !== "unreviewed" ? [restored] : [];
-        return {
-          key,
-          actions: [...base.actions.filter((a) => !clears.includes(a)), ...back],
-          cleared: [
-            ...base.cleared.filter((a) => !clears.includes(a)),
-            ...clears.filter((a) => !back.includes(a)),
-          ],
-        };
-      });
+      patchListAfterUnpress(current.rowKey, undo, result);
+      const clears = undo === "clear-review" ? EXCLUSIVE : [action];
+      setApplied((prev) => appliedAfterUnpress(prev, key, clears, restored));
       const text = `표시 해제됨: ${MARK_LABELS[undo]}${
         restored && restored !== "unreviewed" ? ` (이전 상태: ${STATUS_META[restored].label})` : ""
       }${storeNotice(result)}`;

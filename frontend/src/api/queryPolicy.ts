@@ -3,10 +3,11 @@
 // A 4xx is the server's answer, not a hiccup: asking again returns the same 400/404/409, so only
 // 408 (request timeout) and 429 (too many requests) are retried among them. 5xx and fetch
 // failures (`ApiError.status === 0`: network, timeout) get two more tries.
-// Polls stop while the document is hidden (`visibilitychange`); react-query refetches stale
-// queries when the tab becomes visible again (`refetchOnWindowFocus`), which re-arms the poll.
-
-import { focusManager } from "@tanstack/react-query";
+// Polls send nothing while the document is hidden: react-query's interval timer keeps running but
+// skips the fetch unless `refetchIntervalInBackground` is true (query-core queryObserver), and a
+// stale query refetches when the tab is visible again (`refetchOnWindowFocus`). The interval is
+// never switched off for a hidden tab: a fetch that lands while hidden would clear the timer and
+// leave the poll off after a short hide (adversarial review WB-5..7, T-130).
 
 /** Retries after the first failure, for 5xx / network failures and 408 / 429. */
 export const MAX_QUERY_RETRIES = 2;
@@ -29,12 +30,5 @@ export function shouldRetryQuery(failureCount: number, error: unknown): boolean 
   return failureCount < MAX_QUERY_RETRIES;
 }
 
-/** True while the document is visible (react-query's own focus/visibility state). */
-export function isDocumentVisible(): boolean {
-  return focusManager.isFocused();
-}
-
-/** `ms` while the document is visible, `false` (no poll) while it is hidden. */
-export function pollWhenVisible(ms: number | false): number | false {
-  return ms !== false && isDocumentVisible() ? ms : false;
-}
+/** Poll options of a query: interval fetches only while the document is visible (T-130). */
+export const VISIBLE_ONLY_POLL = { refetchIntervalInBackground: false } as const;
