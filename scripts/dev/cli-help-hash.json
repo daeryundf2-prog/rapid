@@ -1,0 +1,367 @@
+{
+  "python": "3.12",
+  "columns": 100,
+  "command_count": 89,
+  "commands": {
+    "(top-level)": {
+      "help": "d63779e29cd1919824527851225a4684d2008c7184c0f73adc075c8adc55fe91",
+      "struct": "22c58bdbb4bcc749afc72c16ab416cc06a3616c85dd3bc5f24d1bac09b93ecaa"
+    },
+    "docs": {
+      "help": "8b6916451ca353fa3cd6412f34899b9af1bf8ef33afacd3930101dc928ea5ab7",
+      "struct": "ea967ce138e115944f5036ab412a24f51900995c44cdc19488eddaf5682e33d2"
+    },
+    "docs-index-search": {
+      "help": "8c782056fd1a3e7b9d759765000754a6ab643ecc560ea8686fe52f767a04afe9",
+      "struct": "b297ddd6c19eb6f1e7fbd935440136171106232887dddfa30b08117310289248"
+    },
+    "manifest": {
+      "help": "52e696625aed2df108a0928531579b04dc56299af908228bda6b59c020a2c477",
+      "struct": "179ea2664689689847357551a8af7a6cc282d509152161c21e52f52ad96e2134"
+    },
+    "artifacts": {
+      "help": "e619435eff37d86f06c64a22ce2ee3248a224d911bf7fd6ed9b78b39001e6f99",
+      "struct": "e5c4b04ef2efb905c48562738c4f4726e2f826a31bf9eeb574deaaf831de8295"
+    },
+    "email-external-parse": {
+      "help": "9695d416d827ddcf0d3ee582667557c478aef4fbe51f0b79917993216e1b77f4",
+      "struct": "c0e53074ac6cb00c625537359a5de24858816b7527ebdf3bbf3ba8d6a3f97e22"
+    },
+    "taxonomy-audit": {
+      "help": "87c26e6068f848554aa2e4e3da27bf4fc2169bd8ff608c78b7bf36bb7694ac88",
+      "struct": "93725056c66d83be3e8415e222fba19180a01d7896c7321406b30f68a71d5ac8"
+    },
+    "kakaotalk-decrypt": {
+      "help": "e0aa8a8e2e7c99dc62f2856df4a74cd47411a84fcdd51d694737aa69dd7ae17f",
+      "struct": "e4fb85119f71e7653d5ffc251e9a26727a48247a63a85bf0b86c3548b641946e"
+    },
+    "kakaotalk-macos-report": {
+      "help": "9fb16c7a36091fe42c5456cc056d6553159ac91dfec51d6a9534fe49941500b6",
+      "struct": "e7fec20fb0e2fba0d29bd2e3de15ab3009ec3722267e979a4beb80f21fd5bf1f"
+    },
+    "kakaotalk-collect-windows": {
+      "help": "7a1351e4d7feec3040b92bb9ec739888fab666c7ea4792fd83e1e0a8f53231c7",
+      "struct": "24825e7a1fe0b7a6718b903fa05ef9ba8b6764b533934bbf9d462c0a2e00caab"
+    },
+    "kakaotalk-memory-carve": {
+      "help": "ba8ade88611798650638be3c2d46999f8366412a4420c3612043498e187986cd",
+      "struct": "e0bd48d9ce89bd0371cbfb6ff00b43ec094192f24e1f94ca405dd360d5aa895f"
+    },
+    "kakaotalk-sqlcipher-probe": {
+      "help": "825a1482215c2d528b7b7501a3f0049019f63bf98d238e07f9472beb11681230",
+      "struct": "879b211fd05e546e0f55201473a77dc8c1a3cad02428b8192c7bc5707badc21c"
+    },
+    "kakaotalk-key-store-inspect": {
+      "help": "abc1a3b6477a1b691d7bb834324d209b7ff01394390e9560e271ad3c2c1e1c27",
+      "struct": "ddf62d5ba3882f349c951c7ec59b46a55238e3098e871d0de4530dd75e0699a6"
+    },
+    "kakaotalk-userdir-bruteforce": {
+      "help": "e297319023d39dd3c90f99beb72f3aae9d5a14c8ea24535d3b7439ec99242b85",
+      "struct": "3661ab40bfb5ad9a12d9fa439e7b80e1721e7d68272479d413e5a0da0144ca26"
+    },
+    "cloud-collect": {
+      "help": "4b034fb726b6a07e1e155cbd415489b60adac2c88d6744438827037c60e455d0",
+      "struct": "2aeb6574d52a6d65543fb4e50dc39abd0bbba03fe093be1388b32fb33eba425f"
+    },
+    "files": {
+      "help": "45f587d8a85758cffc6affdce33808ac965146c0cf8fc22c2255ed68437f9d4d",
+      "struct": "6002b20518a591cacab338e6685fcf1ddb3272b5c803a6f0e133690c446c3580"
+    },
+    "known-good-index": {
+      "help": "119a55ea9d9408a9da55b7fe56e7f615da8818538cf0b262da9606e22acb5d36",
+      "struct": "12fa31a076c3d30b94b8067c84501789c3e7a7ee2ae78fd458874d0763963c7c"
+    },
+    "collect-plan": {
+      "help": "ca0bd3b2b015fee8441df935a9a4949768e14cfa594adef71bc2576f61b5ca6c",
+      "struct": "7ec0c694a3834d98b9782bcc62b418baeec31f1392d3a2cbfd0a5febf5304228"
+    },
+    "collect-export": {
+      "help": "e4e06ac144149e67af54fe0e57786a1b204603259859dfbb87fdbb25f54faa57",
+      "struct": "483920914330c6b8ff3593378d8c37764f5f875011c364af95fb789f3d53d79b"
+    },
+    "vsc-compare": {
+      "help": "6587a607381038f64d770f6b46b9f3644d56eb2d7bbc297dc8e358e473035e62",
+      "struct": "00dac0eab797235c252bde5d50a17495dc55ee059f9fb1da8c47d5468e8b6f67"
+    },
+    "vsc-discover": {
+      "help": "46268618a727f17716450691cce26b00fcb60eae7bd84a3b70b3c37f5df526a0",
+      "struct": "79ea196b43c83344817e53e08c62575a3356ed980557ebad61c8f9fd4ea8df9f"
+    },
+    "vsc-extract": {
+      "help": "5861f47179317e7d60dcbeccb8ff5fff4f9a3080dd0b82c85770d920cf335c97",
+      "struct": "95de8fefdba1a995a0910039923af3de3b616e33da09a16af4324d7c94f3a0d9"
+    },
+    "carve": {
+      "help": "234f8abfc581b402b1e1efea9590018ff75c80d02170348d63c96ae06c4dd860",
+      "struct": "d71c277df13f5f16d70edf686e42b38a6cc8b53a92a97c520def3f934daca2e8"
+    },
+    "ntfs-meta": {
+      "help": "150c6f15961b56a7a54721ec2a7ce7e80a0326d7c1b86e2b08a6a89f439f9cd8",
+      "struct": "3fe9b930f1b411103ac961e2a73a69e9eaee233b616724bc652cc70834616e66"
+    },
+    "compare": {
+      "help": "411b11a6f97cabb8016242b0dfecd87ea4179483e2d428b74470e69dbb9be4e3",
+      "struct": "28e62393251e7e33eb3152d040a8a12d306af268ef3e6f491a8355579d9e397a"
+    },
+    "extract": {
+      "help": "cb05435c4de66081ae8a09b2f1c72ea7aee49380e1e052173d3b8cf2033d8eed",
+      "struct": "8879142ee750f54647e2ef3fc115d9aa68ca7a987eda17bd0a9a5830ab89fec6"
+    },
+    "timeline": {
+      "help": "940aad515118d81b32caffa76b9fc05dc59e5b70f85ea17a76aed8019c1dfea7",
+      "struct": "40b84808bca0b22c54cb7485ba3b3fcfc3136cfb32dfcc88bb1d192f3be361c8"
+    },
+    "search": {
+      "help": "9534d9839a0125bea3d5be356987cadd7b45ad0e7a1b35589dcd36a016683790",
+      "struct": "43f0615340de2e2de0e2628aec35e01395b5cb6f39f0a5bf1347dacaac8d8856"
+    },
+    "search-index": {
+      "help": "8d22956088fa3d1bbf624a10c973277ba657d3d0bc6c6c181fcc5ff53e768674",
+      "struct": "3e7ffc0a9d4c42f6159cd9395d7719e3d17acc1bdab8f3d4c549d0c198707cc0"
+    },
+    "source-read": {
+      "help": "dd3513e0c0aac06bbfa56ae00ee4dcf8c46a24527eb07b582e0911ec34146a88",
+      "struct": "87dc208b27841b89d4ba252cb321060d40f5c91cfa89bb3c2cd431be75e9c9ec"
+    },
+    "source-search": {
+      "help": "bb1978e603f191f4b7b6cb2096749bead015e83c7d48ba53c21f5bfa177803b1",
+      "struct": "5d29ef30c2cb3150a25ac58deccef88c11391b1fafc6d1c3c0a52742ae593e21"
+    },
+    "ocr-queue": {
+      "help": "50ae93618dd71da8abb8eefd7e9bf605ee11484b7d890f757169be43bead7a47",
+      "struct": "f232ea9f9916de9e44c7b63c0e64b075d15d8d9f6233a3a782abae7f43fa68e6"
+    },
+    "indicators": {
+      "help": "1ced62bafec16185d149719b6c7eb8bd24c6b37100bb4b556e4f6815bd05200e",
+      "struct": "3f6b102fb5a3b364a7a1969fe82ef695e47f24803e23a9b4ef83da79d44f70e2"
+    },
+    "doctor": {
+      "help": "eddadad3eba3a21022f0fdb8b4e425819a72d84629bbbe48917c85efb848a4a4",
+      "struct": "844147c8b8befe8024f2e53a4d792eac96d61c9422955c302eead3e3258971d3"
+    },
+    "enterprise-policy": {
+      "help": "692d4dbc994ee2421e4f3cdae41db1eb5383e24219382baa2d05742b662186a7",
+      "struct": "f2427e441cbd405ad3ba173cc33e0affd00571c2fc7ea340c267250765f59b59"
+    },
+    "rearchitecture-status": {
+      "help": "e5009b3b8f05414381c942ad447091d1d4adaf304602203db251b4eb31b61ab4",
+      "struct": "3fb80a030a2fd2a1b4ffba88077eed74328d1c4a80bab4a78b11a46f95cadc34"
+    },
+    "worker-parse": {
+      "help": "9b506906a0914c7b470dad62ce76fc07b1fea0588e40d2b0902796fec80fd83a",
+      "struct": "3d1fd54407fcb01a9b525f375f0853b038778ecfd43411d06e139a78be7f7db0"
+    },
+    "case-backup": {
+      "help": "fed90ed6689d79d9a0fd604a81e4c25d850b852a28696c06f1ac3b3e2ef4ac75",
+      "struct": "8432febd1540812bdd50637062d7c22c6de8a0b270f0adf3c15a7676c2a75683"
+    },
+    "case-restore": {
+      "help": "b27f19c0c9dbf06db8ab2b0468ada35d51f1d35390d229a9c37cd7422b8b5eb7",
+      "struct": "e71df49b730429aa56bc9c24be47c4598456aa8611dc05e2ea20883881304aca"
+    },
+    "case-acquisition": {
+      "help": "0da0fffd8f4c5f89444303653f520e514758ac1860be896daf46fb6b571db2bf",
+      "struct": "400e85c78852df1e770a6222c610a9ff2b4dd4285a8d7d5916fab5fbac9619ca"
+    },
+    "sample": {
+      "help": "53301cdcd380cac6eadfe822c1d5ec888039e9794d88f2025fe6164997e406cd",
+      "struct": "e0531acc73b6a6b1d21b4fad20735b7de0fafe5a95445351dc8e8210e7acd08b"
+    },
+    "case-db": {
+      "help": "4e713b37b3fa5f54315bc16be2ab526fcd54a8ae1b909986f099d6ad11a0c610",
+      "struct": "747ff55613bfa4ce89a6fb10137a012231f1ec597021dea92fced3b377d6697f"
+    },
+    "case-search": {
+      "help": "fc6c6bc8d1ae2fe84b14327406e01d29e0aaf72b8a455db615c4360454a92b57",
+      "struct": "b6333ae97c38ddcd8d318b8bcde7cb25183b8597352c32781b49ca359a9998c7"
+    },
+    "case-review": {
+      "help": "f23e7a7ba31d798ddb1c2a422e1d2ded0968447573ee562158b7e0270d062572",
+      "struct": "fcb8afa88cbbb7a09d9b92aae33c120df5dc94610a18b0099d540a6a25aa5b23"
+    },
+    "case-db-report": {
+      "help": "d7401aad668582c48c807d6ee603fdfca6e0c9419b3b78ec1327cefee959afcd",
+      "struct": "54dc6f489312dc573b6d22bd30948ebededef65b4326aeb3937cf9a41b5a95b4"
+    },
+    "case-export-uco": {
+      "help": "5e9dedc3ca0841382b43e34c9051b2b2d029ff27a50c7f39286d3dd7c66d4cdb",
+      "struct": "bd37ee81e1ae8e05d46852d301fafe97355bd8224568e34d57df989bb8fa97de"
+    },
+    "cross-case-correlate": {
+      "help": "293b17ece259d02dc7cdd94196605b3ab63dfc321b60d3a958e63be519de7a5a",
+      "struct": "de8e43a595a1c8056830a888be1b7be3d623cc4b0466beefcf1b41482ac3ce34"
+    },
+    "evidence": {
+      "help": "d360def2f28359017c43bc2044a68cb06764ed2bae504260b8495bebcd6b78ea",
+      "struct": "c2cadbb35a38cb068601d483d66a3dd6d86c6e0e3187a1b03ebfb0d0850abcc0"
+    },
+    "e01-known-answer": {
+      "help": "3bff1bad551dafd68b01b105aa31f311d6bc05c4d63e34b4e10dc0287c4a32ab",
+      "struct": "dd5700533dfb76b5605997d400658f9c0613ce02002d786e4d5bb2b51e12256c"
+    },
+    "e01-smoke": {
+      "help": "c8a4153aa5dab1eb3d8164eb86520b150b187dcfcc1b2fca81367dbab9d7c140",
+      "struct": "95782b9084c92105092fff76f9eefde22bb10a74f571bc45a51da998e531be2d"
+    },
+    "e01-hash": {
+      "help": "4acf2d0e7404e1b00b13778b958de2273ac94800eeecef9819d10cf0477891b6",
+      "struct": "45f71dd372fdf3112c3b372f7e2b86551949eecf7b71339f51d6b74a826ea8f9"
+    },
+    "benchmark": {
+      "help": "11c5bcecd10d7c91979d52af812b109063a8f5980dd7951c3385d99587aa016a",
+      "struct": "8a607bd4904b72ffbc8431fe32308bebc0642e025912f71ec38a7075e70d97f2"
+    },
+    "macos-live-smoke": {
+      "help": "5f97ce9ac14cabe1cfc103133ea5143d94599496ce8cf8a10a23176577596f3e",
+      "struct": "f44afbbea1df8ab82e5b3a708b1a1a7b4a4e1b7d6db96f2e010702f20fe3597e"
+    },
+    "columnar-benchmark": {
+      "help": "e879958904c31cce0e7eda5eca172f6af4e3b2a45293db6e89c60d52fe5499c3",
+      "struct": "a0523afc15c062b6f3aaea26f666bc33ac5378ed713a225b485de1279c766c07"
+    },
+    "columnar-convert": {
+      "help": "0424d52d41b4a5a33b69a0e614956576cc01299511d22814778c0d7b9efbeecf",
+      "struct": "4f432588f4e2aa06045255c5f9fa381645627081fa31098d7b8daddb4bd45308"
+    },
+    "stress-plan": {
+      "help": "70baa0a202e862d27b52769f0ea056cfe14ff6b4d20e6e3954470da4c1b8c47c",
+      "struct": "d012ec0a8773fa37d85f3220ee8a8e14bf9c6ff4f0555539693a9ae8acf6e67a"
+    },
+    "browser-stress": {
+      "help": "c5dd766a979b1bf0b17286334f2723177565f3a43898f012927bb2cb103d1332",
+      "struct": "8af3a084efcb954ccb601b5902212726a037c80b171cd50455f532fcae97a9ae"
+    },
+    "sqlite-fts-benchmark": {
+      "help": "2cd19a762d09a9d620612725d00bc1a420a83a1685021500e5aaa8d769d2002d",
+      "struct": "03085cf755d10a547f5f556be560b8c56512c074f69c6c3f97d65a700476f13f"
+    },
+    "large-case-readiness": {
+      "help": "8df8b08f841872519ca15d709e375165266346b68766e4a26507dfff4187aa59",
+      "struct": "409e781c20c9f4f99ba1dd3527c54dff84c2f5e4608d83534b29530a02936af1"
+    },
+    "sqlite-wal-preview": {
+      "help": "5f74054f25a237a09cd9660164583fd5aa49452efeb6502c32e79ff8e9e2f614",
+      "struct": "140198d44a8b1d2b2773e3a8cbd462651d35e6d78353f37264b864beb7ddd6fc"
+    },
+    "known-answer-qc": {
+      "help": "e521b9bcedf156f05e785eeb3a922ac9d6cbbe3eaad1afb235b2f8c94b88fdc8",
+      "struct": "935af2043426468f703ecc85b032cd25caa3dd99215df113bd9d148b47ea738e"
+    },
+    "validation": {
+      "help": "3d3d0ba682e4ea1bfe30b276b74c5fe1d8cff1d3b40c96780b35690e5cd0bb17",
+      "struct": "84f24e96c5fb8801b01ffd5918d1c823b487d5c9c86bb77c95cf827ee83860b2"
+    },
+    "validation-diff-runners": {
+      "help": "59d4ab8d2ae3ae3f97cf670c41d264188098f115619a0b110c773b3f440e37b3",
+      "struct": "30d1f1627f202c12f7c4310aeca2eb70886f26cae87ec0aa26be91c89e761dd3"
+    },
+    "final-qc-report": {
+      "help": "b9f8cc349260ef7a0f8b80a4908520cc034a0f01fb4ae66cc631d4b2925a95d1",
+      "struct": "ad3b0b190c74c28fd9c106ec4852513ecb031916d65f6a04a40948d54050329e"
+    },
+    "commercial-readiness": {
+      "help": "324d4f4f42874685ac182d4624192e274ff626554ddcff1ccacaafedc13b0882",
+      "struct": "885d26542b946e48f0d2ae2c58fcfa3ef7ec8756cb8c5ca3b25675dc19397e9d"
+    },
+    "forensic-validation-plan": {
+      "help": "1ffbd6d5e751c39e3308485a8609adc9027947766a2cc127706205005fc8714e",
+      "struct": "6c4c8ed1eccbee13fb0ebb1a2f9614961c0804c7fb62997e8c01ad1492152b70"
+    },
+    "forensic-validation-pack": {
+      "help": "5318a675d1964ba9d90fad5b24de3104f6817890a9fdbe883799892d595544f1",
+      "struct": "09766f2009567714c21db222a857be9a99ded1d147a3c275edfff8f172138b96"
+    },
+    "forensic-validation-pack-assess": {
+      "help": "fa0b3cc94e4365a294979b09942c1594642ea701bb42a08ff65498ffc571558a",
+      "struct": "e74a0cf3fca2fe6076eec6ec962876deca25ebfc33a59b66aaa88e5fe8cba3ed"
+    },
+    "forensic-validation-batches": {
+      "help": "0aaa34ca9c8c012d2ed31ff9fa9f08f881fbfeef5baa80170556af688d13ed37",
+      "struct": "199ca633ba5be6ae653c2451a35048fda60e4514d16341772c69d967b1f581f7"
+    },
+    "forensic-validation-batches-assess": {
+      "help": "859a507d1e9ceba5aedada6cb2781e73266c0922690c9976c91ef9ea4466b2e8",
+      "struct": "44cee827a6b2bc2b33bcefc26ee11a95be1a23be874383f7e0c76e49890575e7"
+    },
+    "forensic-validation-smoke-populate": {
+      "help": "2fe44a3f80714e9a10c5534d5463c77b150e26a6d1604b8e0f0435a66280062e",
+      "struct": "ad7e1a456cc2fc163c9262b55ea7b33a261e7d426a92924ff89b0ec900ad6773"
+    },
+    "forensic-validation-evidence-import": {
+      "help": "9c55042e2e79661ae02c4b7f951b7b949b8ea58cabc2f76d686111070887ae04",
+      "struct": "23bd28d47e6ee7ac67d53c4c1e41141f77f018c53056c979666ccfc58f0818ae"
+    },
+    "cross-tool-validate": {
+      "help": "4a83f50cb85246979ae6329f5a9af98fb3b5f65b4a1985df9e48386128d00ccb",
+      "struct": "d3d52574a670ab77dc219cf69ce6b304c591c6b68d37cd85d129c5319913fe7e"
+    },
+    "image-workflow-validate": {
+      "help": "22c8f9bd6b6959ade265a84667a1928f015c1fe851d3c83fb61893925a3714f2",
+      "struct": "9d54985e8dae979be9dd27efb6f89d53dd1694e22f53f8a782b187cafd855373"
+    },
+    "usn-state-replay-template": {
+      "help": "b2ba60eb885753755a5e9648290da3b5ea41513cd3bb624e62f2e1fe9deee467",
+      "struct": "3608cefe7dcc98aa121e5d268b4fe08b7473f46b9a2a435f52f494ee85bb3907"
+    },
+    "run-attach-validation-diff": {
+      "help": "a15485b556ca61517ff27ba79a07f54c12c982e5992f6fcc7fd035bea2a74ecd",
+      "struct": "d66a6b2b06b2723d17c5ce7035585026373a0fbbeaf7ba5ce926acae6048e137"
+    },
+    "confidence-dashboard": {
+      "help": "01a5e8eeb7395fb623e069844ab5bd976219a2657645859823d46bff72e5be0c",
+      "struct": "04d65b93986ddbfea1190c864f73e3bfb36bb7c6763c9bcde8fc5b859525a600"
+    },
+    "parser-explainability": {
+      "help": "a5b96f31fedb933e69b47633c72b649a50db8b494f4ee254bee00c241765414b",
+      "struct": "da348cd777f14b431053fd85b74170da4364b6d178136bf3e0061d903a488031"
+    },
+    "reproducibility-kit": {
+      "help": "f125031f078b1e6febc739c4c1ff96e490f534927f9c63536d9995c61dcabed9",
+      "struct": "1a20a008529907040f13711d4fca738c8837def4c1bf5fb3515e1c7fa01c08e3"
+    },
+    "case-catalog": {
+      "help": "0a019595e43d215386be76ad5b90cc8574758a1cca939390b61c9543117cda45",
+      "struct": "9b6536ff925daeba3a60c946d66aaf197dec1a040e06e4c8d93b503d90d6cd11"
+    },
+    "timeline-export": {
+      "help": "bdbeaa275347d7e7454fc62840852784079b62bca7d07f938974e9e1033040d2",
+      "struct": "c38048e9377552881129a996c9cf20b5369b823248232639d51e668550d419d3"
+    },
+    "normalize": {
+      "help": "9f27abb0aa04c0947229529d8e88c04b8a2b9bee66cfb6fc5e62a9972f4bd79a",
+      "struct": "c12133cffc32a84b5f2e524353992ee7c2ae333448086b89127b42529785b29b"
+    },
+    "bundle": {
+      "help": "b0e69e0ec6d2bb0e94ac7abf06827024868b524ac28ba2d675593f0654ee4303",
+      "struct": "9e001c50d0e04e0eb1b37f59ce630d33d76f2fdda8fbd0c6d2f03ee5e219024a"
+    },
+    "plugins": {
+      "help": "8eb425ce6474436bfbcd7fbdc4d5a042229427440584adf5cf8cc3c91c01a834",
+      "struct": "c6a51e922c95b757912c72f6d8d5da25a9081c551ce2d369ce2b4bbff2485739"
+    },
+    "keyword-packs": {
+      "help": "8aaad455eb40d9c755eb7f5bb3aa82051f97ad00d2902c8de412d7483bde0a49",
+      "struct": "c0edb7be06c7c2e06976ac06ccf8404e51309dbc983fb6cf2182373400b8b236"
+    },
+    "case": {
+      "help": "200cd974bab821e759700035c7b1bfdd3a782e9dcfda022c2f0bd254433102fe",
+      "struct": "490a9c474a8e5104abef291e15149c7e4956ebaf9ae7c96fd6ecbbc03472c5a3"
+    },
+    "run": {
+      "help": "2f7332cf972ef808134e7a554ff9de5abcdd7b1a41d73250b29a7d6a4f0bba48",
+      "struct": "cba271966440c41f94c11ba1adb07d71f76767b31e3b6f5953bb4d5a5852b132"
+    },
+    "run-plan": {
+      "help": "5674c3b804c7cbbddbb241770ac135606ffe369c3971bfdc579e2c54cb30da96",
+      "struct": "601723f07f415a1095a26828bb90bcdcb2bd8169f066380c4a4c06f48f25a1dc"
+    },
+    "run-control": {
+      "help": "bb04df74c950a9a0464869053e4c0116cf93332b3ef73a79a23b9e0c04b97a93",
+      "struct": "a9d2c0253969ff9a3ad00c0560de0875951ea5145730a49db20104015040e62d"
+    },
+    "web": {
+      "help": "853e5af2b4d98321298b1281528cd2a4c3ef362a728cf6ec108175f0143920a0",
+      "struct": "bcb17e99d463ceaa0bead65e9afa30e95bee0fadbdad7cd3871375a1ffcd685b"
+    }
+  }
+}
