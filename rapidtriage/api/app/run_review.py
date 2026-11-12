@@ -35,6 +35,7 @@ from pathlib import Path
 from ...core.case_db.helpers import normalize_path_for_db
 from ...core.case_db.review import load_review_target_match
 from ...core.json_stream import JsonStreamError, iter_array_items
+from ...core.readonly_runs import readonly_reason_for
 from ...core.run.persist import CASE_DB_FILE_NAME, legacy_run_case_ids, run_case_id
 from ...core.search_hits import base_locator
 
@@ -70,6 +71,23 @@ SOURCE_ALIASES = {
 }
 
 
+def read_only_sqlite_uri(path: Path) -> str:
+    """``file:`` URI that reads ``path`` without writing next to it.
+
+    In a folder held read-only (``core.readonly_runs``: nothing writes there) with no or an empty
+    ``-wal``, ``mode=ro&immutable=1``: a plain ``mode=ro`` open of a WAL-mode case DB creates
+    ``-wal`` / ``-shm`` in the folder. Otherwise (a live DB, or committed rows still in the
+    ``-wal``) ``mode=ro``."""
+    wal = path.with_name(path.name + "-wal")
+    try:
+        pending = wal.stat().st_size > 0
+    except OSError:
+        pending = False
+    if pending or readonly_reason_for(path) is None:
+        return f"{path.as_uri()}?mode=ro"
+    return f"{path.as_uri()}?mode=ro&immutable=1"
+
+
 def canonical_run_case(summary: Mapping[str, object], run_id: str) -> tuple[Path, str]:
     """The run's canonical case DB path and case id.
 
@@ -89,7 +107,7 @@ def canonical_run_case(summary: Mapping[str, object], run_id: str) -> tuple[Path
     older = legacy_run_case_ids(output_dir)
     wanted = (legacy, persisted, *older)
     try:
-        connection = sqlite3.connect(f"{database.as_uri()}?mode=ro", uri=True)
+        connection = sqlite3.connect(read_only_sqlite_uri(database), uri=True)
     except sqlite3.Error:
         return database, legacy
     try:

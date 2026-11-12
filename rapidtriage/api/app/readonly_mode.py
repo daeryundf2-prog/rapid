@@ -42,7 +42,15 @@ _RUN_SCOPED = re.compile(r"/api/runs/(?P<run_id>[^/]+)(?P<rest>/.*)?")
 # Pre-check POSTs that only look at a path and write nothing (case wizard, evidence identify,
 # collection plan).
 SERVER_READ_ONLY_CHECK_POSTS = frozenset(
-    {"/api/cases/output-check", "/api/cases/evidence-check", "/api/evidence/identify", "/api/collect/plan"}
+    {
+        "/api/cases/output-check",
+        "/api/cases/evidence-check",
+        "/api/evidence/identify",
+        "/api/collect/plan",
+        # Query POST (a list with a body): served from a ``mode=ro`` connection on a read-only
+        # server, never initialising or migrating the case DB.
+        "/api/case-db/saved-searches/list",
+    }
 )
 
 

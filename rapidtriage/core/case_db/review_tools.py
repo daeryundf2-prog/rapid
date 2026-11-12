@@ -213,14 +213,18 @@ def _rewrite_mark_names(connection: sqlite3.Connection, case_id: str, tag_id: in
 # --- tags -----------------------------------------------------------------------
 
 
-def list_case_tags(connection: sqlite3.Connection, case_id: str, *, include_deleted: bool = False) -> list[dict[str, object]]:
+def list_case_tags(
+    connection: sqlite3.Connection, case_id: str, *, include_deleted: bool = False, ensure: bool = True
+) -> list[dict[str, object]]:
     """Live tags of a case with their mark counts.
 
     The first read of a case creates its missing system tags (북마크, 우선순위 1-5) -- an
     explicit, write-safe migration (see ``ensure_system_tags``) on a case DB that already
     exists; the API never opens a new DB file for a read (routes_review_tools.py).
+    ``ensure=False`` (a ``mode=ro`` connection to a read-only case DB) lists what is stored.
     """
-    ensure_system_tags(connection, case_id)
+    if ensure:
+        ensure_system_tags(connection, case_id)
     counts = _tag_counts(connection, case_id)
     where = "" if include_deleted else " AND deleted_at = ''"
     rows = connection.execute(f"SELECT * FROM case_tag WHERE case_id = ?{where} ORDER BY id", (case_id,)).fetchall()

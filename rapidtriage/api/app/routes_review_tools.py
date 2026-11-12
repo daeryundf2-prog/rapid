@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -54,7 +54,7 @@ from .helpers import (
     resolve_request_reviewer,
     run_not_finished_message,
 )
-from .run_review import RunLocatorIndex, canonical_run_case
+from .run_review import RunLocatorIndex, canonical_run_case, read_only_sqlite_uri
 from .tree import build_run_tree, read_output_key
 
 # Collections counted as one bar each (artifact kinds get one bar per kind).
@@ -178,6 +178,7 @@ def build_review_tools_router(
     store: RunJobStore,
     open_request_case_database: Callable[[str | Path], CaseDatabase],
     resolve_request_case_db_path: Callable[[str | Path], Path] | None = None,
+    read_only_case_db_path: Callable[[str | Path], Path | None] | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -209,6 +210,22 @@ def build_review_tools_router(
             return _existing_database(database)
         raise HTTPException(status_code=422, detail="run_id 또는 database가 필요합니다")
 
+    def _read_only_case_db(case_id: str, run_id: str | None, database: str | None) -> Path | None:
+        """The case DB path of a list request that must be read ``mode=ro``, else ``None``."""
+        if read_only_case_db_path is None:
+            return None
+        if run_id:
+            job = get_job(store, run_id)
+            if job.summary is None:
+                raise HTTPException(status_code=409, detail=run_not_finished_message(job))
+            path, canonical = canonical_run_case(job.summary, run_id)
+            if case_id != canonical:
+                raise HTTPException(status_code=404, detail=f"이 런의 케이스가 아닙니다: {case_id} (런의 케이스: {canonical})")
+            return read_only_case_db_path(path)
+        if database:
+            return read_only_case_db_path(database)
+        return None
+
     @contextmanager
     def _connection(database: CaseDatabase, case_id: str) -> Iterator[sqlite3.Connection]:
         try:
@@ -229,15 +246,36 @@ def build_review_tools_router(
         database: str | None = Query(None),
         include_deleted: bool = Query(False),
     ) -> dict[str, object]:
-        """Tags of the case with live mark counts; ``exists: false`` before the run has a case DB."""
-        opened = _case_database(case_id, run_id, database, must_exist=False)
+        """Tags of the case with live mark counts; ``exists: false`` before the run has a case DB.
+
+        A case DB in a read-only run folder (or on a read-only server) is read through ``mode=ro``
+        without the system-tag migration: listing never writes (R8 browser check)."""
         payload: dict[str, object] = {
             "command": "case.tags",
             "case_id": case_id,
-            "exists": opened is not None,
+            "exists": False,
             "color_tokens": [{"token": token, "label": COLOR_TOKEN_LABELS[token]} for token in COLOR_TOKENS],
             "tags": [],
         }
+        read_only_path = _read_only_case_db(case_id, run_id, database)
+        if read_only_path is not None:
+            if not read_only_path.is_file():
+                if database and not run_id:
+                    raise HTTPException(status_code=404, detail="케이스 DB 파일을 찾을 수 없습니다. 경로를 확인하세요.")
+                return payload
+            with closing(sqlite3.connect(read_only_sqlite_uri(read_only_path), uri=True)) as connection:
+                connection.row_factory = sqlite3.Row
+                if connection.execute("SELECT 1 FROM case_record WHERE case_id = ?", (case_id,)).fetchone() is None:
+                    raise HTTPException(status_code=404, detail=f"케이스를 찾을 수 없습니다: {case_id}")
+                try:
+                    payload["tags"] = list_case_tags(connection, case_id, include_deleted=include_deleted, ensure=False)
+                except sqlite3.OperationalError:
+                    payload["tags"] = []  # an older DB without the tag tables
+            payload["exists"] = True
+            payload["database"] = str(read_only_path)
+            return payload
+        opened = _case_database(case_id, run_id, database, must_exist=False)
+        payload["exists"] = opened is not None
         if opened is None:
             return payload
         with _connection(opened, case_id) as connection:

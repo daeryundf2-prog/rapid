@@ -276,6 +276,14 @@ def create_app(
             raise ReadOnlyRunWriteError(str(database_path), SERVER_READ_ONLY)
         return open_case_database(database_path)
 
+    def read_only_case_db_path(raw_path: str | Path) -> Path | None:
+        """The resolved case DB path when a read must not write to it (its run folder is read-only,
+        or the server is), else ``None``: list routes then read it through ``mode=ro``."""
+        database_path = Path(resolve_case_db_path(store, raw_path, configured_case_db_roots))
+        if server_read_only or readonly_reason_for(database_path) is not None:
+            return database_path
+        return None
+
     def resolve_request_catalog_path(raw_path: str | Path) -> Path:
         return resolve_case_catalog_path(store, raw_path, configured_case_db_roots)
 
@@ -331,7 +339,9 @@ def create_app(
     api.include_router(
         build_meta_router(store, browse_remote_mode=remote_browse, browse_roots=configured_browse)
     )
-    api.include_router(build_case_db_router(store, open_request_case_database, resolve_request_catalog_path))
+    api.include_router(
+        build_case_db_router(store, open_request_case_database, resolve_request_catalog_path, read_only_case_db_path)
+    )
     api.include_router(build_runs_router(store))
     api.include_router(build_run_plan_router(store))
     api.include_router(build_cases_router(store, case_workspace))
@@ -350,6 +360,7 @@ def create_app(
             store,
             open_request_case_database,
             lambda raw_path: resolve_case_db_path(store, raw_path, configured_case_db_roots),
+            read_only_case_db_path,
         )
     )
 
