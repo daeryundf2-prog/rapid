@@ -16,7 +16,12 @@
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* The tree never scrolls sideways (T-015): one column as wide as the client box (scrollbar
+     gutter excluded), so rows shrink their label instead of pushing the count under the scrollbar.
+     An `auto` track grew to the widest row's nowrap label. */
+  overflow-x: hidden;
   scrollbar-gutter: stable;
+  grid-template-columns: minmax(0, 1fr);
   padding-block-end: var(--space-2);
   /* The list is a grid (.case-tree ul) stretched to the panel height: without this its row tracks
      shared the spare height, so a short (filtered) list showed large gaps between rows (R7 gate:
@@ -59,6 +64,7 @@
   padding-inline-end: var(--space-2);
   color: var(--text);
   font-size: var(--fs-body);
+  min-width: 0;
   cursor: pointer;
   border-radius: var(--radius-sm);
 }
@@ -68,10 +74,10 @@
   color: var(--text-muted);
 }
 
-/* Non-evidence nodes (문자열 후보): openable, but read as secondary. */
+/* Non-evidence nodes (문자열 후보) and shown empty families: openable, but read as secondary.
+   Colour only: italics made Korean labels hard to read (T-015). */
 .case-tree-item.is-dimmed:not(.selected) {
   color: var(--text-muted);
-  font-style: italic;
 }
 
 /* Same selected / hover tokens as the grid rows (review #1). */
@@ -84,14 +90,14 @@
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-/* Top-level nodes (증거 소스 · 전체 보기 · the domains) read as section headers (review #7). */
+/* Top-level nodes (증거 소스 · 전체 보기 · the domains) read as section headers (review #7):
+   weight and colour, never a smaller size than their children (T-015). */
 .case-tree-item[aria-level="1"] {
   height: 24px;
   margin-top: var(--space-2);
   color: var(--text-subtle);
-  font-size: var(--fs-aux);
+  font-size: var(--fs-body);
   font-weight: 600;
-  letter-spacing: 0.02em;
 }
 
 .case-tree-item[aria-level="1"]:first-child {
@@ -157,8 +163,13 @@
   font-size: var(--fs-aux);
 }
 
-/* Counts: one plain style (review #7) — no pill, tabular figures, 0 dimmer than the rest. */
+/* Counts: one plain style (review #7) — no pill, tabular figures, 0 dimmer than the rest. The
+   count column never shrinks and is right-aligned in a fixed minimum (T-015), so the label gives
+   way first and digits line up. */
 .case-tree-item .badge {
+  flex: none;
+  justify-content: flex-end;
+  min-width: 7ch;
   height: auto;
   padding: 0;
   border-radius: 0;
