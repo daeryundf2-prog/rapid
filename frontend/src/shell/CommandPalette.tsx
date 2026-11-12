@@ -56,31 +56,51 @@ interface PaletteGroup {
 /** Older spellings of "no case open" some commands still return; the palette shows one sentence. */
 const NO_CASE_VARIANTS = new Set(["열린 케이스가 없습니다", "열린 케이스가 없습니다."]);
 
+/**
+ * Category moves ("이동: 파일 › 문서", one per collection / tree node — hundreds) appear only
+ * when the query starts with this prefix (T-035): the plain list stays a list of actions.
+ */
+export const CATEGORY_PREFIX = "이동:";
+
+/** Most entries the empty-query list shows (T-035: ≤ 60); typing narrows the rest. */
+export const PALETTE_EMPTY_LIMIT = 60;
+
+function isCategoryMove(command: Command): boolean {
+  return command.label.startsWith(CATEGORY_PREFIX);
+}
+
 export function buildPaletteGroups(
   commands: readonly Command[],
-  query: string,
+  rawQuery: string,
   reasonOf: (command: Command) => string | undefined,
   extra: PaletteItem[] = [],
-  options: { caseOpen?: boolean } = {},
+  options: { caseOpen?: boolean; showAll?: boolean } = {},
 ): PaletteGroup[] {
   const items: PaletteItem[] = [];
   // Two commands with the same label in one group lead to the same place (e.g. the
   // shell's navigate.* and the tree's tree.goto.*): show it once (plan U2).
   const seen = new Set<string>();
   const caseOpen = options.caseOpen ?? true;
+  const showAll = options.showAll ?? false;
+  const trimmed = rawQuery.trim();
+  // "이동:" prefix: only category moves, matched on the rest of the query.
+  const categoryMode = trimmed.startsWith(CATEGORY_PREFIX);
+  const query = categoryMode ? trimmed.slice(CATEGORY_PREFIX.length).trim() : trimmed;
   for (const command of commands) {
     if (HIDDEN_IN_PALETTE.has(command.id)) continue;
     // No case open (C-G11): the hundreds of 이동 entries all say "케이스를 먼저 선택하세요" — hidden.
     if (!caseOpen && command.group === "navigate") continue;
+    if (isCategoryMove(command) !== categoryMode) continue;
     const dedupeKey = `${command.group}\u0000${command.label}`;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
-    const score = fuzzyScore(query, `${command.label} ${command.id}`);
+    const matchText = categoryMode ? command.label.slice(CATEGORY_PREFIX.length) : command.label;
+    const score = fuzzyScore(query, `${matchText} ${command.id}`);
     if (score === null) continue;
     const reason = paletteReason(reasonOf(command));
-    // No case open (C-G11 remainder): commands that cannot run stay out of the plain list (~60
-    // greyed entries); typing their name still finds them, with the one reason.
-    if (!caseOpen && reason && !query.trim()) continue;
+    // Executable only (T-035, C-G11 remainder): a command that cannot run stays out of the plain
+    // list; typing its name still finds it, with its reason, and "모든 명령" lists every one.
+    if (reason && !query && !showAll) continue;
     items.push({
       key: command.id,
       label: command.label,
@@ -94,13 +114,22 @@ export function buildPaletteGroups(
       },
     });
   }
-  const groups: PaletteGroup[] = GROUP_ORDER.map((group) => ({
-    id: group,
-    label: GROUP_LABEL[group],
-    items: items
+  // Runnable entries first in each group, then by match score, then by name.
+  const runnableFirst = (a: PaletteItem, b: PaletteItem) =>
+    Number(Boolean(a.disabledReason)) - Number(Boolean(b.disabledReason));
+  // The cap is for the plain empty list only: a bare "이동:" lists every move (that is its job).
+  let budget = !query && !showAll && !categoryMode ? PALETTE_EMPTY_LIMIT : Number.POSITIVE_INFINITY;
+  const groups: PaletteGroup[] = GROUP_ORDER.map((group) => {
+    const sorted = items
       .filter((i) => i.group === group)
-      .sort((a, b) => (query ? b.score - a.score : 0) || a.label.localeCompare(b.label, "ko")),
-  })).filter((g) => g.items.length > 0);
+      .sort(
+        (a, b) =>
+          runnableFirst(a, b) || (query ? b.score - a.score : 0) || a.label.localeCompare(b.label, "ko"),
+      );
+    const kept = sorted.slice(0, Math.max(0, budget));
+    budget -= kept.length;
+    return { id: group, label: GROUP_LABEL[group], items: kept };
+  }).filter((g) => g.items.length > 0);
   // Free-text actions come last so Enter on a matching command never turns into a search.
   if (extra.length) groups.push({ id: "free-text", label: "전체 검색", items: extra });
   return groups;
@@ -150,6 +179,8 @@ function PaletteDialog() {
   const commands = useCommands();
   const ctx = useCommandContext();
   const [query, setQuery] = useState("");
+  /** "모든 명령": also list commands that cannot run now, each with its reason (T-035). */
+  const [showAll, setShowAll] = useState(false);
   /** -1 = automatic: the first runnable option (a disabled match never captures Enter over a search). */
   const [active, setActive] = useState(-1);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -182,8 +213,9 @@ function PaletteDialog() {
       : [];
     return buildPaletteGroups(commands, trimmed, (c) => disabledReasonOf(c, ctx), extra, {
       caseOpen: Boolean(ctx.runId),
+      showAll,
     });
-  }, [commands, ctx, query, openCollection]);
+  }, [commands, ctx, query, openCollection, showAll]);
 
   const flat = useMemo(() => groups.flatMap((g) => g.items), [groups]);
   const firstRunnable = Math.max(
@@ -272,6 +304,17 @@ function PaletteDialog() {
             }}
             onKeyDown={onKeyDown}
           />
+          <label className="palette-all" data-testid="command-palette-show-all">
+            <input
+              type="checkbox"
+              checked={showAll}
+              onChange={(event) => {
+                setShowAll(event.target.checked);
+                setActive(-1);
+              }}
+            />
+            모든 명령
+          </label>
         </div>
         <div id={listId} role="listbox" aria-label="명령" className="palette-list">
           {flat.length === 0 ? (
@@ -319,7 +362,7 @@ function PaletteDialog() {
           )}
         </div>
         <div className="palette-footer" aria-hidden="true">
-          ↑↓ 이동 · Enter 실행 · Esc 닫기
+          ↑↓ 이동 · Enter 실행 · Esc 닫기 · ‘{CATEGORY_PREFIX}’ 입력 시 범주 이동
         </div>
       </div>
     </div>

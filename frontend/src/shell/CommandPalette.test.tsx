@@ -1,9 +1,9 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { registerCommand, resetCommandRegistry } from "../commands/registry";
-import { KEY_MAP } from "../contracts/command";
+import { getCommands, registerCommand, resetCommandRegistry } from "../commands/registry";
+import { type Command, KEY_MAP } from "../contracts/command";
 import { resetAppStore, useAppStore } from "../state/store";
-import { CommandPalette } from "./CommandPalette";
+import { buildPaletteGroups, CATEGORY_PREFIX, CommandPalette, PALETTE_EMPTY_LIMIT } from "./CommandPalette";
 import { HelpOverlay } from "./HelpOverlay";
 
 function setup() {
@@ -106,6 +106,97 @@ describe("CommandPalette", () => {
     fireEvent.keyDown(input(), { key: "Escape" });
     expect(useAppStore.getState().paletteOpen).toBe(false);
     expect(document.activeElement).toBe(opener);
+  });
+});
+
+describe("CommandPalette: executable commands only (T-035)", () => {
+  /** A case-open registry shaped like the real one: many disabled entries and hundreds of 이동: moves. */
+  function registerMany() {
+    for (let i = 0; i < 100; i += 1) {
+      registerCommand({ id: `grid.ok.${i}`, label: `그리드 동작 ${i}`, group: "grid", run: vi.fn() });
+    }
+    for (let i = 0; i < 300; i += 1) {
+      registerCommand({
+        id: `review.off.${i}`,
+        label: `리뷰 동작 ${i}`,
+        group: "review",
+        run: vi.fn(),
+        disabledReason: () => "선택한 행이 없습니다",
+      });
+    }
+    for (let i = 0; i < 150; i += 1) {
+      registerCommand({ id: `tree.goto.n${i}`, label: `이동: 노드 ${i}`, group: "navigate", run: vi.fn() });
+    }
+    registerCommand({ id: "stage.review", label: "단계: 검토", group: "navigate", run: vi.fn() });
+  }
+
+  beforeEach(() => {
+    useAppStore.getState().navigate({ runId: "r1", collection: "files" });
+  });
+
+  it("empty input lists no disabled entry, at most 60, and no category moves", () => {
+    registerMany();
+    render(<CommandPalette />);
+    act(() => useAppStore.getState().setOverlay("palette", true));
+    const shown = options();
+    expect(shown.length).toBeLessThanOrEqual(PALETTE_EMPTY_LIMIT);
+    expect(shown.length).toBeGreaterThan(0);
+    expect(shown.filter((o) => o.getAttribute("aria-disabled") === "true")).toHaveLength(0);
+    expect(shown.some((o) => o.textContent?.startsWith(CATEGORY_PREFIX))).toBe(false);
+    // Stage moves are actions, not category moves: still listed.
+    expect(shown.some((o) => o.textContent?.includes("단계: 검토"))).toBe(true);
+  });
+
+  it("category moves appear only behind the 이동: prefix", () => {
+    registerMany();
+    render(<CommandPalette />);
+    act(() => useAppStore.getState().setOverlay("palette", true));
+    fireEvent.change(input(), { target: { value: "노드 12" } });
+    expect(options().some((o) => o.textContent?.startsWith(CATEGORY_PREFIX))).toBe(false);
+    fireEvent.change(input(), { target: { value: "이동: 노드 12" } });
+    const moves = options().filter(
+      (o) => o.getAttribute("role") === "option" && o.textContent?.startsWith("이동:"),
+    );
+    expect(moves.length).toBeGreaterThan(0);
+    expect(moves[0]?.textContent).toBe("이동: 노드 12");
+    // In 이동: mode nothing but moves (and the free-text search entry) is listed.
+    expect(options().filter((o) => o.textContent?.includes("그리드 동작"))).toHaveLength(0);
+  });
+
+  it("typing a disabled command's name still finds it with its reason, after runnable matches", () => {
+    registerMany();
+    registerCommand({ id: "review.ok.x", label: "리뷰 동작 실행됨", group: "review", run: vi.fn() });
+    render(<CommandPalette />);
+    act(() => useAppStore.getState().setOverlay("palette", true));
+    fireEvent.change(input(), { target: { value: "리뷰 동작" } });
+    const review = options().filter((o) => o.textContent?.startsWith("리뷰 동작"));
+    expect(review[0]?.getAttribute("aria-disabled")).toBeNull();
+    expect(review[1]?.getAttribute("aria-disabled")).toBe("true");
+    expect(review[1]?.textContent).toContain("선택한 행이 없습니다");
+  });
+
+  it("모든 명령 lists disabled commands too, each with its Korean reason", () => {
+    registerMany();
+    render(<CommandPalette />);
+    act(() => useAppStore.getState().setOverlay("palette", true));
+    fireEvent.click(screen.getByRole("checkbox", { name: "모든 명령" }));
+    const disabled = options().filter((o) => o.getAttribute("aria-disabled") === "true");
+    expect(disabled).toHaveLength(300);
+    expect(disabled.every((o) => o.textContent?.includes("선택한 행이 없습니다"))).toBe(true);
+    expect(options().some((o) => o.textContent?.startsWith(CATEGORY_PREFIX))).toBe(false);
+  });
+
+  it("buildPaletteGroups counts: 401 commands + 150 moves → ≤ 60 runnable on empty input", () => {
+    registerMany();
+    const all = getCommands();
+    const reasonOf = (c: Command) => c.disabledReason?.({} as never) ?? undefined;
+    const empty = buildPaletteGroups(all, "", reasonOf).flatMap((g) => g.items);
+    expect(empty.length).toBe(PALETTE_EMPTY_LIMIT);
+    expect(empty.filter((i) => i.disabledReason)).toHaveLength(0);
+    const everything = buildPaletteGroups(all, "", reasonOf, [], { showAll: true }).flatMap((g) => g.items);
+    expect(everything.length).toBe(100 + 300 + 1);
+    const moves = buildPaletteGroups(all, "이동:", reasonOf).flatMap((g) => g.items);
+    expect(moves.length).toBe(150);
   });
 });
 

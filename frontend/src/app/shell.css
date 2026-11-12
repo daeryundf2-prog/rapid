@@ -763,7 +763,7 @@ kbd {
   color: var(--text-muted);
 }
 
-.palette-input input {
+.palette-input > input {
   flex: 1;
   height: 32px;
   border: none;
@@ -773,8 +773,17 @@ kbd {
   font-size: var(--fs-panel-title);
 }
 
-.palette-input input:focus-visible {
+.palette-input > input:focus-visible {
   outline: none;
+}
+
+.palette-all {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--fs-aux);
+  white-space: nowrap;
+  cursor: pointer;
 }
 
 .palette-input:focus-within {
