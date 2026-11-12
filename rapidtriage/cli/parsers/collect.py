@@ -5,21 +5,22 @@ from __future__ import annotations
 import argparse
 import textwrap
 
-from ...core.artifacts import SUPPORTED_ARTIFACT_KINDS
-from ...core.cloud_api import (
+from ...core.cli_constants import (
     DEFAULT_CLOUD_API_MAX_RESPONSE_BYTES,
     DEFAULT_CLOUD_API_TIMEOUT_SECONDS,
     DEFAULT_CLOUD_BEARER_TOKEN_ENV,
-)
-from ...core.collect_plan import (
     DEFAULT_COLLECT_EXPORT_MAX_FILE_COUNT,
     DEFAULT_COLLECT_EXPORT_MAX_TOTAL_BYTES,
-    supported_collect_profiles,
+    SUPPORTED_INPUT_ROOT_KINDS,
 )
-from ...core.input_root import SUPPORTED_INPUT_ROOT_KINDS
 from ..helpers import (
     add_eventlog_output_arguments,
     add_rules_argument,
+)
+from .lazy_choices import (
+    artifact_kind_choices,
+    collect_profile_choices,
+    set_lazy_choices,
 )
 
 
@@ -99,7 +100,10 @@ def register_sources(sub: argparse._SubParsersAction) -> None:
     )
     artifacts.add_argument("root", nargs="?", default=".", help="Directory to scan (default: current directory)")
     artifacts.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
-    artifacts.add_argument("--kind", required=True, choices=sorted(SUPPORTED_ARTIFACT_KINDS), help="Artifact collector kind")
+    set_lazy_choices(
+        artifacts.add_argument("--kind", required=True, help="Artifact collector kind"),
+        artifact_kind_choices,
+    )
     artifacts.add_argument("--output", help="JSON output path (default: ./rapidtriage-artifacts-KIND.json)")
     artifacts.add_argument(
         "--eventlog-message-catalog",
@@ -226,7 +230,10 @@ def register_plans(sub: argparse._SubParsersAction) -> None:
     )
     collect_plan.add_argument("root", help="Mounted/exported evidence folder to inspect")
     collect_plan.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
-    collect_plan.add_argument("--profile", choices=sorted(supported_collect_profiles()), default="full", help="Target profile to preview")
+    set_lazy_choices(
+        collect_plan.add_argument("--profile", default="full", help="Target profile to preview"),
+        collect_profile_choices,
+    )
     collect_plan.add_argument("--output", default="rapidtriage-collect-plan.json", help="JSON output path")
     collect_plan.add_argument("--json", action="store_true", help="Print the full JSON plan after saving it")
 
@@ -247,7 +254,10 @@ def register_plans(sub: argparse._SubParsersAction) -> None:
     collect_export.add_argument("root", help="Mounted/exported evidence folder to inspect")
     collect_export.add_argument("output_dir", help="Directory that receives the export manifest and optional copied evidence")
     collect_export.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
-    collect_export.add_argument("--profile", choices=sorted(supported_collect_profiles()), default="intrusion", help="Target profile to export")
+    set_lazy_choices(
+        collect_export.add_argument("--profile", default="intrusion", help="Target profile to export"),
+        collect_profile_choices,
+    )
     collect_export.add_argument("--copy", action="store_true", help="Actually copy selected files; omitted means dry-run manifest only")
     collect_export.add_argument("--overwrite", action="store_true", help="Allow overwriting existing files in OUTPUT_DIR/evidence")
     collect_export.add_argument(

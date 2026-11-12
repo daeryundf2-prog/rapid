@@ -5,9 +5,12 @@ from __future__ import annotations
 import argparse
 import textwrap
 
-from ...core.case_catalog import default_case_catalog_path
-from ...core.run import SUPPORTED_RUN_MODES
-from ...core.sample_case import DEFAULT_SAMPLE_DIR, DEFAULT_SAMPLE_MODE
+from ...core.cli_constants import (
+    DEFAULT_SAMPLE_DIR,
+    DEFAULT_SAMPLE_MODE,
+    SUPPORTED_RUN_MODES,
+    default_case_catalog_path,
+)
 
 
 def register_case_db(sub: argparse._SubParsersAction) -> None:

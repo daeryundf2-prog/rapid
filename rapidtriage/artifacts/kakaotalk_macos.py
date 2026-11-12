@@ -16,6 +16,10 @@ import subprocess
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 
+from ..core.cli_constants import (
+    DEFAULT_MACOS_REPORT_MAX_CONTEXT_ROWS,
+    DEFAULT_MACOS_REPORT_MAX_MESSAGES,
+)
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 from .kakaotalk_windows import companion_files, inspect_sqlite_database
@@ -62,8 +66,6 @@ EMPTY_ACCOUNT_SHA512 = (
     "31bca02094eb78126a517b206a88c73cfa9ec6f704c7030d18212cace820f025f00bf0ea68dbf3f3a5436ca63b53bf7bf80ad8d5de7d8359d0b7fed9dbc3ab99"
 )
 SQLCIPHER_TIMEOUT_SECONDS = 6
-DEFAULT_MACOS_REPORT_MAX_MESSAGES = 100_000
-DEFAULT_MACOS_REPORT_MAX_CONTEXT_ROWS = 100_000
 MACOS_REPORT_VERSION = "kakaotalk-macos-report-v1"
 
 

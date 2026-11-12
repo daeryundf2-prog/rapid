@@ -22,6 +22,12 @@ from ..artifacts.windows.registry import (
     parse_registry_vk_cell,
     registry_value_data_preview,
 )
+from .cli_constants import (
+    DEFAULT_MEMORY_MESSAGE_RESIDUE_LIMIT,
+    DEFAULT_MEMORY_SQLCIPHER_KEY_RESIDUE_LIMIT,
+    DEFAULT_MEMORY_SQLITE_MAX_CARVE_BYTES,
+    DEFAULT_MEMORY_SQLITE_MAX_HITS,
+)
 from .docs import write_result
 from .output_guard import check_output_outside_evidence
 from .submission import compute_hashes
@@ -47,9 +53,6 @@ TIME_COLUMN_HINTS = ("time", "date", "created", "sent", "timestamp")
 SQLITE_HEADER = b"SQLite format 3"
 PAGE_SIZE = 4096
 BLOCK_SIZE = 16
-DEFAULT_MEMORY_SQLITE_MAX_HITS = 200
-DEFAULT_MEMORY_SQLITE_MAX_CARVE_BYTES = 64 * 1024 * 1024
-DEFAULT_MEMORY_MESSAGE_RESIDUE_LIMIT = 200
 KEY_MATERIAL_SCAN_LIMIT = 256 * 1024 * 1024
 KEY_MATERIAL_CHUNK_SIZE = 1024 * 1024
 PK_PATTERN = re.compile(rb"(?<![A-Za-z0-9+/])([A-Za-z0-9+/]{86}==)([0-9]{3,20})(?![0-9A-Za-z+/])")
@@ -78,7 +81,6 @@ USERDIR_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
 MEMORY_DUMP_SUFFIXES = (".dmp", ".dump", ".raw", ".mem")
 MEMORY_DUMP_NAME_HINTS = ("kakaotalk", "memory", "process")
 DEFAULT_MEMORY_REVERSE_INDICATOR_LIMIT = 300
-DEFAULT_MEMORY_SQLCIPHER_KEY_RESIDUE_LIMIT = 300
 SQLCIPHER_KEY_LITERAL_PATTERN = re.compile(rb"x'([0-9a-fA-F]{64}|[0-9a-fA-F]{96})'")
 KAKAOTALK_POSTPATCH_ENTROPY_PATTERN = re.compile(rb"([A-Za-z0-9+/]{86}==)")
 MEMORY_REVERSE_INDICATOR_PATTERNS = (

@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import textwrap
 
-from ..core.extract import DEFAULT_EXTRACT_MANIFEST_NAME
+from ..core.cli_constants import DEFAULT_EXTRACT_MANIFEST_NAME
 from .parsers import case, collect, image, kakao, meta, run, validation, web
 
 HELP_FORMATTER = argparse.RawDescriptionHelpFormatter

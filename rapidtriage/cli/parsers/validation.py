@@ -5,25 +5,22 @@ from __future__ import annotations
 import argparse
 import textwrap
 
-from ...core.benchmark import DEFAULT_BENCHMARK_FILE_COUNT, DEFAULT_BENCHMARK_KEYWORD
-from ...core.benchmark_fts import (
+from ...core.cli_constants import (
+    DEFAULT_BENCHMARK_FILE_COUNT,
+    DEFAULT_BENCHMARK_KEYWORD,
+    DEFAULT_BROWSER_STRESS_RECORD_COUNT,
+    DEFAULT_FORENSIC_VALIDATION_ITEMS,
+    DEFAULT_FORENSIC_VALIDATION_PACK_ITEMS,
+    DEFAULT_LARGE_CASE_P95_THRESHOLD_MS,
+    DEFAULT_MACOS_SMOKE_BENCHMARK_FILES,
+    DEFAULT_MACOS_SMOKE_FTS_RECORDS,
+    MATURITY_GATE_ORDER,
     SQLITE_FTS_DEFAULT_HIT_EVERY,
     SQLITE_FTS_DEFAULT_QUERY_ITERATIONS,
     SQLITE_FTS_DEFAULT_RECORD_COUNT,
+    SUPPORTED_RUN_MODES,
+    VERSION_PROBE_TIMEOUT_SECONDS,
 )
-from ...core.browser_stress import DEFAULT_BROWSER_STRESS_RECORD_COUNT
-from ...core.commercial_readiness import MATURITY_GATE_ORDER
-from ...core.forensic_validation_plan import (
-    DEFAULT_FORENSIC_VALIDATION_ITEMS,
-    DEFAULT_FORENSIC_VALIDATION_PACK_ITEMS,
-)
-from ...core.large_case_readiness import DEFAULT_LARGE_CASE_P95_THRESHOLD_MS
-from ...core.macos_live_smoke import (
-    DEFAULT_MACOS_SMOKE_BENCHMARK_FILES,
-    DEFAULT_MACOS_SMOKE_FTS_RECORDS,
-)
-from ...core.run import SUPPORTED_RUN_MODES
-from ...core.validation_diff_runners import VERSION_PROBE_TIMEOUT_SECONDS
 
 
 def register(sub: argparse._SubParsersAction) -> None:

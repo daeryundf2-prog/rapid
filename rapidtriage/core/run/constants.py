@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from ..cli_constants import (
+    SUPPORTED_RUN_MODES,
+)
 from ..extract import SUPPORTED_DOC_KINDS
 
 # Input fingerprint modes recorded as ``fingerprint_mode`` in the fingerprint and run summary:
@@ -62,7 +65,6 @@ __all__ = [
 ]
 
 
-SUPPORTED_RUN_MODES: tuple[str, ...] = ("seizure", "fraud", "hacking", "recovery")
 IMPLEMENTED_RUN_MODES = set(SUPPORTED_RUN_MODES)
 RUN_DOC_EXTRACT_KINDS = SUPPORTED_DOC_KINDS
 GENERAL_FORENSIC_ARTIFACT_KINDS = (
