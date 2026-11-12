@@ -164,6 +164,10 @@ def main(argv=None) -> int:
         help="show the rapidtriage version and exit",
     )
     args = parser.parse_args(argv)
+    from .helpers import guard_default_output
+
+    # T-033: a default single-file --output (a file in the current folder) never lands in the evidence.
+    guard_default_output(parser, args)
     rule_set = None
     if getattr(args, "rules", None):
         import json

@@ -12,6 +12,7 @@ from ...core.cli_constants import (
     SUPPORTED_INPUT_ROOT_KINDS,
     SUPPORTED_RUN_MODES,
 )
+from ..helpers import DefaultOutput
 
 
 def register_volume(sub: argparse._SubParsersAction) -> None:
@@ -31,7 +32,7 @@ def register_volume(sub: argparse._SubParsersAction) -> None:
     )
     vsc_compare.add_argument("current_root", help="Current mounted/exported file tree")
     vsc_compare.add_argument("snapshot_roots", nargs="+", help="One or more VSC snapshot file trees to compare")
-    vsc_compare.add_argument("--output", default="rapidtriage-vsc-compare.json", help="JSON output path")
+    vsc_compare.add_argument("--output", default=DefaultOutput("rapidtriage-vsc-compare.json"), help="JSON output path")
     vsc_compare.add_argument("--hash", action="store_true", help="Hash common files before deciding modified status")
     vsc_compare.add_argument("--case-sensitive", action="store_true", help="Compare paths case-sensitively")
     vsc_compare.add_argument("--max-records", type=int, default=10000, help="Maximum change records per snapshot (0 means unlimited)")
@@ -43,7 +44,7 @@ def register_volume(sub: argparse._SubParsersAction) -> None:
         description="Discover likely VSC snapshot folders near a mounted/exported current volume root",
     )
     vsc_discover.add_argument("current_root", help="Current mounted/exported file tree")
-    vsc_discover.add_argument("--output", default="rapidtriage-vsc-discovery.json", help="JSON output path")
+    vsc_discover.add_argument("--output", default=DefaultOutput("rapidtriage-vsc-discovery.json"), help="JSON output path")
     vsc_discover.add_argument("--max-depth", type=int, default=3, help="Maximum directory depth to inspect around the current root")
     vsc_discover.add_argument("--json", action="store_true", help="Print the full JSON discovery report after saving it")
 

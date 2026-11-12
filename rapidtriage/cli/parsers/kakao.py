@@ -13,6 +13,7 @@ from ...core.cli_constants import (
     DEFAULT_MEMORY_SQLITE_MAX_CARVE_BYTES,
     DEFAULT_MEMORY_SQLITE_MAX_HITS,
 )
+from ..helpers import DefaultOutput
 
 
 def register(sub: argparse._SubParsersAction) -> None:
@@ -31,7 +32,7 @@ def register(sub: argparse._SubParsersAction) -> None:
         ),
     )
     kakao_decrypt.add_argument("root", help="Extracted KakaoTalk user/app-data folder to scan")
-    kakao_decrypt.add_argument("--output", default="rapidtriage-kakaotalk-decrypt.json", help="JSON output path")
+    kakao_decrypt.add_argument("--output", default=DefaultOutput("rapidtriage-kakaotalk-decrypt.json"), help="JSON output path")
     kakao_decrypt.add_argument("--key-hex", help="Authorized 16-byte AES key as hex; prefer env to avoid shell history")
     kakao_decrypt.add_argument("--iv-hex", help="Authorized 16-byte AES IV as hex; prefer env to avoid shell history")
     kakao_decrypt.add_argument("--key-hex-env", default="RAPIDTRIAGE_KAKAO_KEY_HEX", help="Environment variable for AES key hex")
@@ -144,7 +145,7 @@ def register(sub: argparse._SubParsersAction) -> None:
         ),
     )
     kakao_memory_carve.add_argument("root", help="Extracted KakaoTalk folder containing KakaoTalk.DMP or memory dumps")
-    kakao_memory_carve.add_argument("--output", default="rapidtriage-kakaotalk-memory-carve.json", help="JSON output path")
+    kakao_memory_carve.add_argument("--output", default=DefaultOutput("rapidtriage-kakaotalk-memory-carve.json"), help="JSON output path")
     kakao_memory_carve.add_argument("--carve-dir", help="Directory for carved SQLite files when --write-carves is set")
     kakao_memory_carve.add_argument("--write-carves", action="store_true", help="Write carved SQLite fragments to --carve-dir")
     kakao_memory_carve.add_argument("--max-hits", type=int, default=DEFAULT_MEMORY_SQLITE_MAX_HITS, help="Maximum SQLite headers to carve (0 means all)")
@@ -167,7 +168,7 @@ def register(sub: argparse._SubParsersAction) -> None:
         description="Probe post-patch KakaoTalk chatLogs_*.edb with redacted SQLCipher key residues from memory",
     )
     kakao_sqlcipher_probe.add_argument("root", help="Extracted KakaoTalk folder containing chatLogs_*.edb and memory dumps")
-    kakao_sqlcipher_probe.add_argument("--output", default="rapidtriage-kakaotalk-sqlcipher-probe.json", help="JSON output path")
+    kakao_sqlcipher_probe.add_argument("--output", default=DefaultOutput("rapidtriage-kakaotalk-sqlcipher-probe.json"), help="JSON output path")
     kakao_sqlcipher_probe.add_argument("--sqlcipher-bin", default="sqlcipher", help="SQLCipher binary to use for temp-copy probes")
     kakao_sqlcipher_probe.add_argument("--max-keys", type=int, default=DEFAULT_MEMORY_SQLCIPHER_KEY_RESIDUE_LIMIT, help="Maximum unique SQLCipher key residues to test (0 means all)")
     kakao_sqlcipher_probe.add_argument("--max-databases", type=int, default=0, help="Maximum chatLogs databases to test (0 means all)")
@@ -191,7 +192,7 @@ def register(sub: argparse._SubParsersAction) -> None:
         ),
     )
     kakao_key_store.add_argument("root", help="Extracted KakaoTalk folder containing appstate.dat and chatLogs_*.edb")
-    kakao_key_store.add_argument("--output", default="rapidtriage-kakaotalk-key-store.json", help="JSON output path")
+    kakao_key_store.add_argument("--output", default=DefaultOutput("rapidtriage-kakaotalk-key-store.json"), help="JSON output path")
     kakao_key_store.add_argument("--max-memory-sources", type=int, default=2, help="Maximum memory dumps to check for key-store residency (0 disables memory checks)")
     kakao_key_store.add_argument("--json", action="store_true", help="Print JSON payload to stdout")
 
@@ -209,7 +210,7 @@ def register(sub: argparse._SubParsersAction) -> None:
         ),
     )
     kakao_userdir.add_argument("root", help="Extracted KakaoTalk user/app-data folder to scan")
-    kakao_userdir.add_argument("--output", default="rapidtriage-kakaotalk-userdir-bruteforce.json", help="JSON output path")
+    kakao_userdir.add_argument("--output", default=DefaultOutput("rapidtriage-kakaotalk-userdir-bruteforce.json"), help="JSON output path")
     kakao_userdir.add_argument("--userdir", help="40-hex users/<userDir> folder name; inferred when omitted")
     kakao_userdir.add_argument("--userdir-home", help=r'Original Windows users path, e.g. C:\Users\USER\AppData\Local\Kakao\KakaoTalk\users')
     kakao_userdir.add_argument("--pragma", help="Authorized KakaoTalk pragma value; prefer env/file handling outside shell history")

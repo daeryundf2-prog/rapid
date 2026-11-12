@@ -11,6 +11,7 @@ from ...core.cli_constants import (
     SUPPORTED_RUN_MODES,
     default_case_catalog_path,
 )
+from ..helpers import DefaultOutput
 
 
 def register_case_db(sub: argparse._SubParsersAction) -> None:
@@ -263,7 +264,7 @@ def register_catalog(sub: argparse._SubParsersAction) -> None:
     timeline_export.add_argument("--event-type", help="Filter by event type")
     timeline_export.add_argument("--reviewed-status", help="Filter by review status")
     timeline_export.add_argument("--limit", type=int, default=0, help="Maximum events to include")
-    timeline_export.add_argument("--output", default="rapidtriage-timeline-export.json", help="JSON output path")
+    timeline_export.add_argument("--output", default=DefaultOutput("rapidtriage-timeline-export.json"), help="JSON output path")
     timeline_export.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     normalize = sub.add_parser(
@@ -273,7 +274,7 @@ def register_catalog(sub: argparse._SubParsersAction) -> None:
     )
     normalize.add_argument("run_output", help="Completed run output directory or summary JSON")
     normalize.add_argument("--case-id", help="Case ID to write into the normalized model")
-    normalize.add_argument("--output", default="rapidtriage-normalized-case.json", help="JSON output path")
+    normalize.add_argument("--output", default=DefaultOutput("rapidtriage-normalized-case.json"), help="JSON output path")
     normalize.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     bundle = sub.add_parser(

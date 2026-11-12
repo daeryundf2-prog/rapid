@@ -7,10 +7,16 @@ import csv
 import getpass
 import json
 import os
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 
-from ..core.output_guard import OutputInsideEvidenceError, check_output_outside_evidence
+from ..core.output_guard import (
+    OUTPUT_INSIDE_EVIDENCE,
+    OutputInsideEvidenceError,
+    check_output_outside_evidence,
+    output_evidence_conflict,
+)
 
 
 def compact_commercial_readiness_payload(payload: dict[str, object], *, limit: int) -> dict[str, object]:
@@ -108,6 +114,153 @@ def refuse_output_inside_evidence(
         check_output_outside_evidence(output, evidence, allow_evidence_inside=allow_evidence_inside)
     except OutputInsideEvidenceError as exc:
         parser.error(exc.cli_message)
+
+
+class DefaultOutput(str):
+    """An ``--output`` default file name the user did not type (T-033).
+
+    Parsers declare ``default=DefaultOutput("rapidtriage-x.json")`` so the value
+    still behaves as the old cwd-relative file name, while :func:`main` can tell
+    "no ``--output`` given" apart from an explicit path that happens to match.
+    """
+
+    __slots__ = ()
+
+
+#: Commands whose input positional(s) name the evidence a default output must stay out of.
+_EVIDENCE_INPUT_DESTS = ("root", "current_root", "snapshot_roots", "paths")
+#: Commands whose input is a RapidTriage run folder: writing next to it is legitimate.
+_RUN_INPUT_DESTS = ("run_output",)
+#: Commands whose default output is derived in the handler (``--output`` default ``None``).
+_DERIVED_DEFAULT_OUTPUTS = {
+    "artifacts": lambda args: f"rapidtriage-artifacts-{getattr(args, 'kind', '')}.json",
+}
+
+CLI_DEFAULT_OUTPUT_HINT = (
+    "--output 으로 증거 밖의 파일 경로를 지정하거나 증거 밖 폴더에서 실행하세요 / "
+    "pass --output with a path outside the evidence, or run from a folder outside it."
+)
+CLI_DEFAULT_OUTPUT_EVIDENCE_FILES_WARNING = (
+    "경고: 현재 폴더에 증거로 보이는 파일이 있습니다. 기본 출력 파일이 이 폴더에 만들어집니다: {output} "
+    "(--output 으로 증거 밖 경로를 지정하세요) / warning: the current folder holds evidence-like files; "
+    "the default output is written here: {output} (use --output to write outside the evidence)."
+)
+
+
+def _input_paths(args: argparse.Namespace, dests: tuple[str, ...]) -> list[Path]:
+    paths: list[Path] = []
+    for dest in dests:
+        value = getattr(args, dest, None)
+        for item in value if isinstance(value, list) else [value]:
+            if item is not None and str(item).strip():
+                paths.append(Path(str(item)).expanduser())
+    return paths
+
+
+def _run_evidence_roots(run_folders: list[Path]) -> list[Path]:
+    """Evidence roots recorded in the run summaries of the run folders a command reads."""
+    roots: list[Path] = []
+    for folder in run_folders:
+        summary_path = folder / "rapidtriage-run-summary.json"
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        root = summary.get("root") if isinstance(summary, dict) else None
+        if isinstance(root, str) and root.strip() and Path(root).expanduser().is_absolute():
+            roots.append(Path(root).expanduser())
+    return roots
+
+
+def _with_image_folders(evidence: list[Path]) -> list[Path]:
+    """``evidence`` plus the folder of each evidence image file (E01, dd, VHD ... -- ``core/browse.py``).
+
+    A default output is a file in the current folder: run beside ``case.E01`` it would
+    land in the evidence folder, so that folder counts as evidence for the default.
+    """
+    from ..core.browse import EVIDENCE_FILE_SUFFIXES
+
+    folders: list[Path] = []
+    for item in evidence:
+        if item.suffix.lower() in EVIDENCE_FILE_SUFFIXES and item.is_file():
+            folders.append(item.resolve().parent)
+    return evidence + folders
+
+
+def default_output_name(args: argparse.Namespace) -> str | None:
+    """The cwd-relative default file name this command would write, ``None`` when ``--output`` was given."""
+    output = getattr(args, "output", None)
+    if isinstance(output, DefaultOutput):
+        return str(output)
+    if output is None:
+        derive = _DERIVED_DEFAULT_OUTPUTS.get(str(getattr(args, "command", "")))
+        if derive is not None:
+            return derive(args)
+    return None
+
+
+def resolve_output_path(
+    args: argparse.Namespace,
+    evidence_root: list[Path | str] | Path | str | None,
+) -> Path | None:
+    """Absolute default single-file output of ``args`` (``None`` when ``--output`` was given).
+
+    Raises :class:`OutputInsideEvidenceError` (``OUTPUT_INSIDE_EVIDENCE``) when the
+    default -- a file in the current folder -- lands inside ``evidence_root`` (the
+    current folder is the evidence folder or below it). An explicit ``--output``
+    is the operator's choice and is not re-judged here.
+    """
+    name = default_output_name(args)
+    if name is None:
+        return None
+    output = (Path.cwd() / name).resolve()
+    roots = evidence_root if isinstance(evidence_root, list) else [evidence_root]
+    check_output_outside_evidence(output, roots, allow_evidence_inside=True)
+    return output
+
+
+def _cwd_evidence_files(limit: int = 1) -> list[Path]:
+    # Imported here: core.browse loads the evidence adapters (kept off the --help path, T-161).
+    from ..core.browse import EVIDENCE_FILE_SUFFIXES
+
+    found: list[Path] = []
+    try:
+        for entry in Path.cwd().iterdir():
+            if entry.suffix.lower() in EVIDENCE_FILE_SUFFIXES and entry.is_file():
+                found.append(entry)
+                if len(found) >= limit:
+                    break
+    except OSError:
+        return []
+    return found
+
+
+def guard_default_output(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """R7 / IS-068 for single-file ``--output`` defaults (T-033), run once before dispatch.
+
+    * The command names evidence (``root`` / ``paths`` ..., or the ``root`` recorded in
+      the summary of the run folder it reads) and the current folder is that evidence
+      or inside it: exit 2 with ``OUTPUT_INSIDE_EVIDENCE``.
+    * Otherwise (no evidence known, e.g. an index or feed): when the current
+      folder holds evidence-like files (``core/browse.py`` suffixes) and is not the
+      run folder the command reads, print a warning only.
+    """
+    name = default_output_name(args)
+    if name is None:
+        return
+    run_inputs = _input_paths(args, _RUN_INPUT_DESTS)
+    evidence = _input_paths(args, _EVIDENCE_INPUT_DESTS) + _run_evidence_roots(run_inputs)
+    if evidence:
+        try:
+            resolve_output_path(args, _with_image_folders(evidence))
+        except OutputInsideEvidenceError as exc:
+            parser.error(f"[{OUTPUT_INSIDE_EVIDENCE}] {exc.cli_message}. {CLI_DEFAULT_OUTPUT_HINT}")
+        return
+    output = (Path.cwd() / name).resolve()
+    if any(output_evidence_conflict(output, run) == OUTPUT_INSIDE_EVIDENCE for run in run_inputs):
+        return
+    if _cwd_evidence_files():
+        print(CLI_DEFAULT_OUTPUT_EVIDENCE_FILES_WARNING.format(output=output), file=sys.stderr)
 
 
 def add_eventlog_output_arguments(command: argparse.ArgumentParser) -> None:
@@ -295,13 +448,17 @@ def write_kakaotalk_message_residue_csv(payload: dict[str, object], output: Path
                 writer.writerow(row)
 
 __all__ = [
+    "DefaultOutput",
     "add_rules_argument",
     "add_web_arguments",
     "build_source_read_review_note",
     "compact_commercial_readiness_payload",
+    "default_output_name",
+    "guard_default_output",
     "load_image_workflow_rows",
     "load_source_read_review_package",
     "parse_named_cli_values",
+    "resolve_output_path",
     "resolve_reviewer_identity",
     "write_kakaotalk_message_residue_csv",
 ]
