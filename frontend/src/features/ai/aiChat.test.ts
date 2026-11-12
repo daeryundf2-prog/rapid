@@ -6,12 +6,16 @@
 import { describe, expect, it } from "vitest";
 import type { GridRow } from "../../contracts/collection";
 import { parseHash, serializeRoute } from "../../router";
+import { resetAppStore, useAppStore } from "../../state/store";
+import { useGridLocalStore } from "../grid/adapter";
 import { COLLECTIONS } from "../grid/columns/index";
 import { recordLayout, valueReading } from "../viewer/fieldSheets";
 import { viewDisabledReason } from "../views/availability";
 import { groupConversations } from "../views/chat";
+import { switchView } from "../views/commands";
 import { aiSessionLinks } from "./AiSessionLinks";
 import {
+  aiConversationPatch,
   aiConversationRoute,
   aiConversationScope,
   fileTouchRoute,
@@ -127,6 +131,38 @@ describe("AI session conversation (대화 보기)", () => {
     expect(requestedTool(back.cf)).toBe("codex");
     // No session asked for: nothing is dropped.
     expect(aiConversationScope(chatRows, "")).toHaveLength(chatRows.length);
+  });
+
+  it("verify T-190: the 대화 보기 switch with a session row focused carries session_id + tool", () => {
+    resetAppStore({
+      route: {
+        runId: "r1",
+        collection: "artifacts",
+        kind: "ai-agent",
+        types: ["ai-agent-session"],
+        row: chatRows[2]?.ref,
+        mode: "meta",
+      },
+    });
+    useGridLocalStore.setState({ focusedRow: chatRows[2] as GridRow });
+    try {
+      switchView("chat");
+      const route = useAppStore.getState().route;
+      expect(route.view).toBe("chat");
+      expect(route.types).toContain("ai-agent-message");
+      expect(requestedSession(route.cf)).toBe("sess-1");
+      expect(requestedTool(route.cf)).toBe("codex");
+      const back = parseHash(serializeRoute(route));
+      expect(requestedSession(back.cf)).toBe("sess-1");
+      expect(requestedTool(back.cf)).toBe("codex");
+      // A route that already names a session keeps it; a non-AI row adds nothing.
+      expect(aiConversationPatch({ runId: "r1", cf: route.cf }, chatRows[1])).toBeNull();
+      const fileRow = { ...(chatRows[0] as GridRow), ref: { collection: "files", locator: "x" } } as GridRow;
+      expect(aiConversationPatch({ runId: "r1" }, fileRow)).toBeNull();
+    } finally {
+      useGridLocalStore.setState({ focusedRow: null });
+      resetAppStore();
+    }
   });
 
   it("메타 links: a session row opens 대화 보기, its calls, touches and parent / sub-agents", () => {

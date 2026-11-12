@@ -13,7 +13,9 @@ import {
   exportDisabledReason,
   exportWrites,
   performExport,
+  REPORT_TEMPLATES,
   type ReportFormat,
+  type ReportTemplate,
   writtenDetail,
 } from "./exports";
 import { Modal } from "./Modal";
@@ -58,6 +60,7 @@ export function ReportDialog({
     };
   }, [runId]);
   const [format, setFormat] = useState<ReportFormat>("html");
+  const [template, setTemplate] = useState<ReportTemplate>("legal-handoff");
   const [title, setTitle] = useState("");
   // A case run pre-fills 사건 번호 and 분석자 from its case (AXIOM adoption E1).
   const [caseNumber, setCaseNumber] = useState(() => caseLinkOf(runId)?.caseNumber ?? "");
@@ -86,6 +89,7 @@ export function ReportDialog({
           title,
           caseNumber,
           investigator,
+          template,
           ...(hasAi ? { sections: aiSection ? [AI_REPORT_SECTION] : [] } : {}),
         },
       }),
@@ -163,6 +167,22 @@ export function ReportDialog({
       {kind === "case-report" ? (
         <>
           <div className="case-field">
+            <label className="case-label" htmlFor="report-template">
+              보고서 양식
+            </label>
+            <select
+              id="report-template"
+              value={template}
+              onChange={(e) => setTemplate(e.target.value as ReportTemplate)}
+            >
+              {REPORT_TEMPLATES.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="case-field">
             <label className="case-label" htmlFor="report-format">
               보고서 형식
             </label>
@@ -214,7 +234,7 @@ export function ReportDialog({
           ) : null}
           <div className="case-field">
             <label className="case-label" htmlFor="report-investigator">
-              분석관 (선택)
+              {template === "korean-expert" ? "감정인 (선택)" : "분석관 (선택)"}
             </label>
             <input
               id="report-investigator"

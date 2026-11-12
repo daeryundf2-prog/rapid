@@ -37,7 +37,9 @@ describe("stageRows", () => {
     expect(formatDuration(2000)).toBe("00:02");
     expect(formatDuration(65000)).toBe("01:05");
     expect(formatDuration(2_048_900)).toBe("34:08");
-    expect(formatDuration(3_725_000)).toBe("1:02:05");
+    expect(formatDuration(3_725_000)).toBe("01:02:05");
+    expect(formatDuration(8_582_000)).toBe("02:23:02");
+    expect(formatDuration(66_000)).toBe("01:06");
     expect(formatDuration(400)).toBe("1초 미만");
     expect(formatDuration(null)).toBe("—");
   });

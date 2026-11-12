@@ -51,10 +51,22 @@ export const EXPORT_ACTIONS: ExportAction[] = [
 
 export type ReportFormat = "md" | "html" | "docx" | "pdf";
 
+/** Case report templates the 보고서 내보내기 dialog offers (server `TEMPLATE_LABEL_KO`). */
+export const REPORT_TEMPLATES = [
+  { id: "legal-handoff", label: "법률 인계용" },
+  { id: "executive-summary", label: "의사결정자 요약" },
+  { id: "technical-appendix", label: "기술 부록 포함" },
+  { id: "korean-expert", label: "감정서" },
+] as const;
+export type ReportTemplate = (typeof REPORT_TEMPLATES)[number]["id"];
+export const DEFAULT_REPORT_TEMPLATE: ReportTemplate = "legal-handoff";
+
 export interface ReportMeta {
   title: string;
   caseNumber: string;
   investigator: string;
+  /** Report template; undefined = 법률 인계용 (`legal-handoff`). */
+  template?: ReportTemplate;
   /** Optional sections (`ai-usage`); undefined = the server default (nothing sent). */
   sections?: string[];
 }
@@ -284,7 +296,7 @@ async function runExport(
       const format = options.format ?? "html";
       const meta = options.meta ?? {};
       const created = await createCaseReport(runId, {
-        template: "legal-handoff",
+        template: meta.template ?? DEFAULT_REPORT_TEMPLATE,
         title: meta.title?.trim() || null,
         case_number: meta.caseNumber?.trim() || null,
         investigator: meta.investigator?.trim() || null,

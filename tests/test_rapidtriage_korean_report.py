@@ -175,7 +175,7 @@ class KoreanExpertReportTests(unittest.TestCase):
 
     def test_only_report_included_bookmarks_listed(self) -> None:
         markdown = _report()
-        self.assertIn("| 삭제된 문서 복구 | artifact | 관련 있음 | 삭제복구 | 사건 연관 문서 |", markdown)
+        self.assertIn("| 삭제된 문서 복구 | artifact | 관련 있음 | (작성자 미지정) | 삭제복구 | 사건 연관 문서 |", markdown)
         self.assertNotIn("무관한 캐시 파일", markdown)
 
     # T-026 ① two tables ------------------------------------------------------------------------

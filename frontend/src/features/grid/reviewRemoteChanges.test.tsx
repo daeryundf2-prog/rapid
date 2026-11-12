@@ -178,6 +178,33 @@ describe("useReviewMap remote-change toast", () => {
     expect(useToastStore.getState().toasts.at(-1)?.detail).toBe(remoteChangeDetail(1));
   });
 
+  it("switching back to this window refetches inside staleTime and shows the toast (verify T-131)", async () => {
+    let marks = [mark(1), mark(2)];
+    const calls = installFetch({ "/review-map": () => jsonResponse({ marks, truncated: false }) });
+    const { wrapper } = queryWrapper();
+    const { result } = renderHook(() => useReviewMap("r1"), { wrapper });
+    await waitFor(() => expect(result.current?.size).toBe(2));
+    const fetches = () => calls.filter((c) => c.url.includes("/review-map")).length;
+    const first = fetches();
+
+    marks = [later(1, { status: "excluded" }), mark(2)];
+    // Hidden: a focus event (another window's) sends nothing (T-130).
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(fetches()).toBe(first);
+    visibility.mockReturnValue("visible");
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => expect(result.current?.get("files||/candidates/1")?.status).toBe("excluded"));
+    expect(fetches()).toBe(first + 1);
+    const toasts = useToastStore.getState().toasts;
+    expect(toasts.at(-1)).toMatchObject({ text: REMOTE_CHANGE_NOTICE, detail: remoteChangeDetail(1) });
+    visibility.mockRestore();
+  });
+
   it("a 200 with `error` and no marks keeps the last map and raises no toast (review P2-6)", async () => {
     let payload: Record<string, unknown> = { marks: [mark(1), mark(2)], truncated: false };
     installFetch({ "/review-map": () => jsonResponse(payload) });

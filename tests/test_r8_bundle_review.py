@@ -126,8 +126,8 @@ class CaseDbOnlyReviewTests(unittest.TestCase):
         self.assertEqual(manifest["summary"]["report_candidate_count"], counts["report_candidates"])
         self.assertIn(f"- 보고서 포함 후보 수: {counts['report_candidates']}", report)
         # Processing section filled from the run summary (was blank: run_summary={}).
-        self.assertIn("- 분석 모드: `fraud`", report)
-        self.assertNotIn("- 분석 모드: ``", report)
+        self.assertIn("- 분석 모드: 문서·부정 조사", report)
+        self.assertNotIn("- 분석 모드: 기록 없음", report)
         self.assertNotIn("- 산출물 디렉터리: ``", report)
         # The reviewer page's report draft carries the same counts (synthetic marks have no source
         # path, so they are listed as hash-skipped rather than as selected evidence rows).

@@ -32,3 +32,23 @@ export function shouldRetryQuery(failureCount: number, error: unknown): boolean 
 
 /** Poll options of a query: interval fetches only while the document is visible (T-130). */
 export const VISIBLE_ONLY_POLL = { refetchIntervalInBackground: false } as const;
+
+/**
+ * Data another window can change (the review map, r8 T-131): refetch whenever the tab becomes
+ * visible again, even inside its `staleTime` — still nothing while hidden (T-130).
+ */
+export const REFETCH_ON_RETURN = { refetchOnWindowFocus: "always" } as const;
+
+/**
+ * Calls `listener` when this window gets focus back while visible. react-query v5 only watches
+ * `visibilitychange`, which never fires when the analyst switches between two visible browser
+ * windows (T-131: the 다른 창 toast then waited for the next own mark). Returns the unsubscribe.
+ */
+export function onWindowReturn(listener: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const handler = () => {
+    if (typeof document === "undefined" || document.visibilityState !== "hidden") listener();
+  };
+  window.addEventListener("focus", handler);
+  return () => window.removeEventListener("focus", handler);
+}
