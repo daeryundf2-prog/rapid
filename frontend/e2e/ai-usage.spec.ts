@@ -9,6 +9,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
+import { COPY, escapeRegExp } from "../src/contracts/copy";
+import { TEST_IDS, testIdSelector } from "../src/contracts/testIds";
+
+const AI = COPY.ai;
+const NODES = COPY.ai.nodes;
 
 const TOKEN = "e2e-token";
 const HEADERS = { "X-RapidTriage-Token": TOKEN };
@@ -57,7 +62,7 @@ async function go(page: Page, hash: string) {
   await page.evaluate((next) => {
     window.location.hash = next;
   }, hash);
-  await expect(page.getByTestId("workbench-shell")).toBeVisible();
+  await expect(page.getByTestId(TEST_IDS.workbenchShell)).toBeVisible();
 }
 
 async function open(page: Page, hash: string) {
@@ -66,7 +71,7 @@ async function open(page: Page, hash: string) {
   await page.evaluate((next) => {
     window.location.hash = next;
   }, hash);
-  await expect(page.getByTestId("workbench-shell")).toBeVisible();
+  await expect(page.getByTestId(TEST_IDS.workbenchShell)).toBeVisible();
 }
 
 async function shot(page: Page, name: string) {
@@ -88,27 +93,31 @@ test("Q-AI10 tree: the AI 사용 domain lists its nodes with the fixture's count
     if (message.type() === "error") errors.push(message.text());
   });
   await open(page, `#/case/${runId}/explore/artifacts/ai-agent?types=ai-agent-session`);
-  const domain = page.getByRole("treeitem", { name: /^AI 사용, / });
+  const domain = page.getByRole("treeitem", { name: new RegExp(`^${escapeRegExp(AI.domain)}, `) });
   await expect(domain).toBeVisible({ timeout: 30_000 });
   if ((await domain.getAttribute("aria-expanded")) !== "true") await domain.click();
   for (const [label, count] of [
-    ["세션", 29],
-    ["메시지", 49],
-    ["도구 호출", 24],
-    ["파일 접촉", 23],
-    ["MCP 서버", 17],
-    ["지침·메모리 파일", 12],
-    ["자격 증명 존재(값 없음)", 23],
-    ["계정·전환", 9],
-    ["AI 코드 기여", 4],
-    ["사용량", 6],
-    ["보존 정리", 1],
+    [NODES.sessions, 29],
+    [NODES.messages, 49],
+    [NODES.toolCalls, 24],
+    [NODES.fileTouches, 23],
+    [NODES.mcpServers, 17],
+    [NODES.instructionFiles, 12],
+    [NODES.credentialPresence, 23],
+    [NODES.accounts, 9],
+    [NODES.codeContribution, 4],
+    [NODES.usage, 6],
+    [NODES.retention, 1],
   ] as const) {
     await expect(
-      page.getByRole("treeitem", { name: new RegExp(`^${label.replace(/[()]/g, "\\$&")}, ${count}건`) }),
+      page.getByRole("treeitem", {
+        name: new RegExp(`^${escapeRegExp(COPY.common.countedNode(label, count))}`),
+      }),
     ).toBeVisible();
   }
-  const tools = page.getByRole("treeitem", { name: /^도구·설치, 84건/ });
+  const tools = page.getByRole("treeitem", {
+    name: new RegExp(`^${escapeRegExp(COPY.common.countedNode(NODES.tools, 84))}`),
+  });
   await expect(tools).toBeVisible();
   // A group opens its own view on click; ArrowRight expands it.
   await tools.click();
@@ -117,11 +126,17 @@ test("Q-AI10 tree: the AI 사용 domain lists its nodes with the fixture's count
     await expect(tools).toHaveAttribute("aria-expanded", "true", { timeout: 1000 });
   }).toPass({ timeout: 20_000 });
   // 설치·경로 views counted from the presence rows (14 catalog-path rows, 1 MSIX package).
-  await expect(page.getByRole("treeitem", { name: /^경로 흔적\(카탈로그 경로\), 14건/ })).toBeVisible({
+  await expect(
+    page.getByRole("treeitem", {
+      name: new RegExp(`^${escapeRegExp(COPY.common.countedNode(NODES.pathTraces, 14))}`),
+    }),
+  ).toBeVisible({
     timeout: 30_000,
   });
   await expect(
-    page.getByRole("treeitem", { name: /^설치 흔적\(npm·pip·winget·MSIX·확장\), 1건/ }),
+    page.getByRole("treeitem", {
+      name: new RegExp(`^${escapeRegExp(COPY.common.countedNode(NODES.installTraces, 1))}`),
+    }),
   ).toBeVisible();
   await shot(page, "ai-tree");
   expect(errors).toEqual([]);
@@ -133,37 +148,43 @@ test("Q-AI10 grid: session columns read in Korean; the session's 메타 links op
   await open(page, `#/case/${runId}/explore/artifacts/ai-agent?types=ai-agent-session`);
   await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
   const headers = await page.locator('[role="columnheader"]').allInnerTexts();
-  for (const header of ["도구", "시작", "종료", "메시지", "도구 호출"]) {
+  for (const header of Object.values(AI.columns)) {
     expect(headers.join("|")).toContain(header);
   }
   // The Claude Code main session: fixture sess-A, custom title "Fix app" with its 2 sub-agent sessions
   // ("하위 2개"; the sub-agent rows only say "상위: Fix app", so this pins the parent row exactly).
-  const session = rows(page).filter({ hasText: "Fix app" }).filter({ hasText: "하위 2개" });
+  const session = rows(page)
+    .filter({ hasText: "Fix app" })
+    .filter({ hasText: AI.subAgents(2) });
   await expect(session).toHaveCount(1);
   await session.click();
-  const viewer = page.getByRole("region", { name: "원본 뷰어" });
-  await viewer.getByRole("tab", { name: "메타" }).click();
-  const links = viewer.getByTestId("ai-session-links");
+  const viewer = page.getByRole("region", { name: COPY.viewer.region });
+  await viewer.getByRole("tab", { name: COPY.viewer.tabMeta }).click();
+  const links = viewer.getByTestId(TEST_IDS.aiSessionLinks);
   await expect(links).toBeVisible();
-  await expect(links.getByRole("link", { name: "대화 보기" })).toBeVisible();
-  await expect(links.getByRole("link", { name: "하위 에이전트 세션" })).toBeVisible();
+  await expect(links.getByRole("link", { name: AI.openChat })).toBeVisible();
+  await expect(links.getByRole("link", { name: AI.subAgentSessions })).toBeVisible();
   await shot(page, "ai-session-meta");
-  await links.getByRole("link", { name: "대화 보기" }).click();
+  await links.getByRole("link", { name: AI.openChat }).click();
   await expect(page).toHaveURL(/view=chat/);
-  const thread = page.getByTestId("chat-thread");
+  const thread = page.getByTestId(TEST_IDS.chatThread);
   await expect(thread).toBeVisible({ timeout: 30_000 });
   // Role bubbles (사용자 on the right), a folded tool call, a file-touch link.
-  await expect(thread.getByTestId("chat-sender").filter({ hasText: "사용자" }).first()).toBeVisible();
-  await expect(thread.locator('[data-testid="chat-message"][data-direction="out"]').first()).toBeVisible();
-  const call = thread.getByTestId("ai-tool-call").first();
+  await expect(
+    thread.getByTestId(TEST_IDS.chatSender).filter({ hasText: AI.roleUser }).first(),
+  ).toBeVisible();
+  await expect(
+    thread.locator(`${testIdSelector(TEST_IDS.chatMessage)}[data-direction="out"]`).first(),
+  ).toBeVisible();
+  const call = thread.getByTestId(TEST_IDS.aiToolCall).first();
   await expect(call).toBeVisible();
   await expect(call.getByRole("button")).toHaveAttribute("aria-expanded", "false");
   await call.getByRole("button").click();
   await expect(call.getByRole("button")).toHaveAttribute("aria-expanded", "true");
   await expect(
-    call.getByTestId("ai-tool-command").or(call.getByTestId("ai-tool-target")).first(),
+    call.getByTestId(TEST_IDS.aiToolCommand).or(call.getByTestId(TEST_IDS.aiToolTarget)).first(),
   ).toBeVisible();
-  const touch = thread.getByTestId("ai-file-touch").first();
+  const touch = thread.getByTestId(TEST_IDS.aiFileTouch).first();
   await expect(touch.getByRole("link")).toHaveAttribute("href", /explore\/files\?path=/);
   await shot(page, "ai-conversation");
   await expectNoSecrets(page);
@@ -176,26 +197,26 @@ test("Q-AI10 file touch → file list; tool calls / credentials show no secret v
   await go(page, `#/case/${runId}/explore/artifacts/ai-agent?types=ai-credential-presence`);
   await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('[role="gridcell"][data-col="d:value_collected"]').first()).toHaveText(
-    "수집 안 함",
+    COPY.grid.notCollected,
   );
   await expectNoSecrets(page);
   await go(page, `#/case/${runId}/explore/artifacts/ai-agent?types=ai-agent-file-touch`);
   await rows(page).first().click();
-  const viewer = page.getByRole("region", { name: "원본 뷰어" });
-  await viewer.getByRole("tab", { name: "메타" }).click();
-  const find = viewer.getByTestId("ai-session-links").getByRole("link", { name: "파일 목록에서 찾기" });
+  const viewer = page.getByRole("region", { name: COPY.viewer.region });
+  await viewer.getByRole("tab", { name: COPY.viewer.tabMeta }).click();
+  const find = viewer.getByTestId(TEST_IDS.aiSessionLinks).getByRole("link", { name: AI.findInFiles });
   await find.click();
   await expect(page).toHaveURL(/explore\/files\?path=/);
 });
 
 test("Q-AI10 intake: AI 사용 요약 block", async ({ page }) => {
   await open(page, `#/case/${runId}/intake`);
-  const block = page.getByTestId("case-ai-usage");
+  const block = page.getByTestId(TEST_IDS.caseAiUsage);
   await expect(block).toBeVisible({ timeout: 60_000 });
-  await expect(block.getByTestId("ai-usage-facts")).toBeVisible({ timeout: 60_000 });
-  await expect(block.getByRole("link", { name: "AI 세션 29개 보기" })).toBeVisible();
-  await expect(block.getByTestId("ai-usage-credentials")).toContainText("값 미수집");
-  await expect(block.getByTestId("ai-usage-retention")).toBeVisible();
+  await expect(block.getByTestId(TEST_IDS.aiUsageFacts)).toBeVisible({ timeout: 60_000 });
+  await expect(block.getByRole("link", { name: AI.sessionsLink(29) })).toBeVisible();
+  await expect(block.getByTestId(TEST_IDS.aiUsageCredentials)).toContainText(AI.valueNotCollected);
+  await expect(block.getByTestId(TEST_IDS.aiUsageRetention)).toBeVisible();
   await expect(block).not.toContainText(/ai-agent|claude-code|ai-tool-presence/);
   await block.scrollIntoViewIfNeeded();
   await shot(page, "ai-intake");
@@ -203,8 +224,8 @@ test("Q-AI10 intake: AI 사용 요약 block", async ({ page }) => {
 
 test("Q-AI10 처리: AI 사용 기록 section", async ({ page }) => {
   await open(page, `#/case/${runId}/process`);
-  const section = page.getByTestId("process-ai");
+  const section = page.getByTestId(TEST_IDS.processAi);
   await expect(section).toBeVisible({ timeout: 60_000 });
-  await expect(section.getByTestId("process-ai-rows")).toContainText("건");
-  await expect(section.getByTestId("process-ai-scope")).toContainText("메시지 본문");
+  await expect(section.getByTestId(TEST_IDS.processAiRows)).toContainText(COPY.common.countUnit);
+  await expect(section.getByTestId(TEST_IDS.processAiScope)).toContainText(AI.messageBody);
 });
