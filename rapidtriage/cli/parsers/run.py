@@ -13,6 +13,7 @@ from ...core.cli_constants import (
     SUPPORTED_RUN_MODES,
 )
 from ..helpers import (
+    DefaultOutput,
     add_eventlog_output_arguments,
     add_rules_argument,
 )
@@ -37,7 +38,7 @@ def register_files(sub: argparse._SubParsersAction) -> None:
     )
     files.add_argument("root", help="Directory to scan")
     files.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
-    files.add_argument("--output", default="rapidtriage-files.json", help="JSON output path")
+    files.add_argument("--output", default=DefaultOutput("rapidtriage-files.json"), help="JSON output path")
     files.add_argument("--limit", type=int, default=0, help="Stop after collecting N candidates (0 means all)")
     set_lazy_choices(
         files.add_argument(
@@ -93,7 +94,7 @@ def register_analysis(sub: argparse._SubParsersAction) -> None:
     compare.add_argument("--left-label", default="left", help="Human label for the left file")
     compare.add_argument("--right-label", default="right", help="Human label for the right file")
     compare.add_argument("--label", action="append", help="Label for each positional file when comparing 3+ files")
-    compare.add_argument("--output", default="rapidtriage-compare.json", help="JSON output path")
+    compare.add_argument("--output", default=DefaultOutput("rapidtriage-compare.json"), help="JSON output path")
     compare.add_argument("--no-hash", action="store_true", help="Skip MD5/SHA1/SHA256 hashing")
     compare.add_argument("--no-text-diff", action="store_true", help="Skip bounded text diff preview")
     compare.add_argument("--max-text-bytes", type=int, default=256 * 1024, help="Maximum per-file bytes for text diff preview")
@@ -165,7 +166,7 @@ def register_analysis(sub: argparse._SubParsersAction) -> None:
     timeline.add_argument("--files", action="append", help="Path to a rapidtriage files JSON output (repeatable)")
     timeline.add_argument("--docs", action="append", help="Path to a rapidtriage docs JSON output (repeatable)")
     timeline.add_argument("--artifacts", action="append", help="Path to a rapidtriage artifacts JSON output (repeatable)")
-    timeline.add_argument("--output", default="rapidtriage-timeline.json", help="Timeline JSON output path")
+    timeline.add_argument("--output", default=DefaultOutput("rapidtriage-timeline.json"), help="Timeline JSON output path")
     timeline.add_argument("--report", help="Markdown report output path (default: OUTPUT stem + -report.md)")
     add_rules_argument(timeline)
 
@@ -184,7 +185,7 @@ def register_analysis(sub: argparse._SubParsersAction) -> None:
     )
     search.add_argument("run_output", help="Run output directory or rapidtriage-run-summary.json")
     search.add_argument("-k", "--keyword", action="append", required=True, help="Keyword to search for")
-    search.add_argument("--output", default="rapidtriage-search.json", help="JSON output path")
+    search.add_argument("--output", default=DefaultOutput("rapidtriage-search.json"), help="JSON output path")
     search.add_argument("--limit", type=int, default=500, help="Maximum number of combined matches")
     search.add_argument("--no-ocr", action="store_true", help="Skip OCR over image candidates")
     search.add_argument("--no-analysis", action="store_true", help="Skip clustering/entity/graph/workbook analysis pivots")
@@ -222,7 +223,7 @@ def register_analysis(sub: argparse._SubParsersAction) -> None:
     )
     source_read.add_argument("run_output", help="Run output directory or rapidtriage-run-summary.json")
     source_read.add_argument("--path", required=True, help="Source file path, absolute or relative to the run analysis root")
-    source_read.add_argument("--output", default="rapidtriage-source-read.json", help="JSON output path")
+    source_read.add_argument("--output", default=DefaultOutput("rapidtriage-source-read.json"), help="JSON output path")
     source_read.add_argument("--max-chars", type=int, default=20_000, help="Maximum text characters to include in preview")
     source_read.add_argument("--hex-bytes", type=int, default=1024, help="Maximum binary bytes to include in hex preview")
     source_read.add_argument("--sqlite-table", help="Read a bounded page from a SQLite table instead of a generic file preview")
@@ -251,7 +252,7 @@ def register_analysis(sub: argparse._SubParsersAction) -> None:
     source_search.add_argument("run_output", help="Run output directory or rapidtriage-run-summary.json")
     source_search.add_argument("--path", required=True, help="Source file path, absolute, run-root relative, or archive.zip::entry")
     source_search.add_argument("-k", "--keyword", action="append", required=True, help="Keyword to search for")
-    source_search.add_argument("--output", default="rapidtriage-source-search.json", help="JSON output path")
+    source_search.add_argument("--output", default=DefaultOutput("rapidtriage-source-search.json"), help="JSON output path")
     source_search.add_argument("--limit", type=int, default=100, help="Maximum current-source matches")
     source_search.add_argument("--context", type=int, default=120, help="Characters of snippet context around each hit")
     source_search.add_argument("--max-chars", type=int, default=2_000_000, help="Maximum text characters to read from the source preview")
@@ -274,7 +275,7 @@ def register_analysis(sub: argparse._SubParsersAction) -> None:
         ),
     )
     ocr_queue.add_argument("root", help="Directory containing image evidence or extracted files")
-    ocr_queue.add_argument("--output", default="rapidtriage-ocr-queue.json", help="OCR queue JSON output path")
+    ocr_queue.add_argument("--output", default=DefaultOutput("rapidtriage-ocr-queue.json"), help="OCR queue JSON output path")
     ocr_queue.add_argument("--previous", help="Previous OCR queue JSON for retry/status carry-forward")
     ocr_queue.add_argument("--retry-failures", action="store_true", help="Move previous failed items back to retry queue")
     ocr_queue.add_argument("--max-items", type=int, default=0, help="Cap scanned image candidates (0 means all)")
@@ -294,7 +295,7 @@ def register_analysis(sub: argparse._SubParsersAction) -> None:
         ),
     )
     indicators.add_argument("run_output", help="Run output directory or rapidtriage-run-summary.json")
-    indicators.add_argument("--output", default="rapidtriage-indicators.json", help="JSON output path")
+    indicators.add_argument("--output", default=DefaultOutput("rapidtriage-indicators.json"), help="JSON output path")
     indicators.add_argument(
         "--limit",
         type=int,

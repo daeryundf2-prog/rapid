@@ -14,6 +14,7 @@ from ...core.cli_constants import (
     SUPPORTED_INPUT_ROOT_KINDS,
 )
 from ..helpers import (
+    DefaultOutput,
     add_eventlog_output_arguments,
     add_rules_argument,
 )
@@ -43,7 +44,7 @@ def register_sources(sub: argparse._SubParsersAction) -> None:
     docs.add_argument("root", help="Directory to scan")
     docs.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
     docs.add_argument("-k", "--keyword", action="append", required=True, help="Keyword to search for")
-    docs.add_argument("--output", default="rapidtriage-docs.json", help="JSON output path")
+    docs.add_argument("--output", default=DefaultOutput("rapidtriage-docs.json"), help="JSON output path")
     docs.add_argument("--index-output", help="Optional processed-text inverted index JSON sidecar")
     docs.add_argument("--limit", type=int, default=0, help="Stop after scanning N candidates (0 means all)")
     add_rules_argument(docs)
@@ -65,7 +66,7 @@ def register_sources(sub: argparse._SubParsersAction) -> None:
     docs_index_search.add_argument("terms", nargs="*", help="Optional positional query terms")
     docs_index_search.add_argument("-k", "--keyword", action="append", help="Keyword or term to search")
     docs_index_search.add_argument("--limit", type=int, default=500, help="Maximum result rows to return (capped at 5000)")
-    docs_index_search.add_argument("--output", default="rapidtriage-docs-index-search.json", help="JSON output path")
+    docs_index_search.add_argument("--output", default=DefaultOutput("rapidtriage-docs-index-search.json"), help="JSON output path")
     docs_index_search.add_argument("--json", action="store_true", help="Print JSON payload to stdout")
 
     manifest = sub.add_parser(
@@ -83,7 +84,7 @@ def register_sources(sub: argparse._SubParsersAction) -> None:
     )
     manifest.add_argument("root", help="Directory to describe")
     manifest.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
-    manifest.add_argument("--output", default="rapidtriage-manifest.json", help="JSON output path")
+    manifest.add_argument("--output", default=DefaultOutput("rapidtriage-manifest.json"), help="JSON output path")
 
     artifacts = sub.add_parser(
         "artifacts",
@@ -149,7 +150,7 @@ def register_sources(sub: argparse._SubParsersAction) -> None:
         ),
     )
     taxonomy_audit.add_argument("--repo-root", default=".", help="Repository root to audit (default: current directory)")
-    taxonomy_audit.add_argument("--output", default="rapidtriage-taxonomy-audit.json", help="JSON output path")
+    taxonomy_audit.add_argument("--output", default=DefaultOutput("rapidtriage-taxonomy-audit.json"), help="JSON output path")
     taxonomy_audit.add_argument("--json", action="store_true", help="Print machine-readable JSON")
     taxonomy_audit.add_argument("--strict", action="store_true", help="Return exit code 1 when any taxonomy target is incomplete")
 
@@ -211,7 +212,7 @@ def register_plans(sub: argparse._SubParsersAction) -> None:
         ),
     )
     known_good_index.add_argument("feed", nargs="+", help="Known-good feed file or directory (TXT/CSV/JSON/ZIP; repeatable)")
-    known_good_index.add_argument("--output", default="known-good-index.json", help="Normalized index JSON output path")
+    known_good_index.add_argument("--output", default=DefaultOutput("known-good-index.json"), help="Normalized index JSON output path")
     known_good_index.add_argument("--json", action="store_true", help="Print index JSON after saving it")
 
     collect_plan = sub.add_parser(
@@ -234,7 +235,7 @@ def register_plans(sub: argparse._SubParsersAction) -> None:
         collect_plan.add_argument("--profile", default="full", help="Target profile to preview"),
         collect_profile_choices,
     )
-    collect_plan.add_argument("--output", default="rapidtriage-collect-plan.json", help="JSON output path")
+    collect_plan.add_argument("--output", default=DefaultOutput("rapidtriage-collect-plan.json"), help="JSON output path")
     collect_plan.add_argument("--json", action="store_true", help="Print the full JSON plan after saving it")
 
     collect_export = sub.add_parser(
