@@ -11,7 +11,13 @@ import { recordLayout, valueReading } from "../viewer/fieldSheets";
 import { viewDisabledReason } from "../views/availability";
 import { groupConversations } from "../views/chat";
 import { aiSessionLinks } from "./AiSessionLinks";
-import { aiConversationRoute, fileTouchRoute, requestedSession } from "./aiChat";
+import {
+  aiConversationRoute,
+  aiConversationScope,
+  fileTouchRoute,
+  requestedSession,
+  requestedTool,
+} from "./aiChat";
 import { AI_SAMPLE_ROWS } from "./aiSampleRows";
 
 const rows: GridRow[] = AI_SAMPLE_ROWS.map((raw, i) =>
@@ -20,6 +26,32 @@ const rows: GridRow[] = AI_SAMPLE_ROWS.map((raw, i) =>
   }),
 );
 const ofType = (type: string) => rows.filter((row) => row.artifactType === type);
+
+const chatRow = (type: string, details: Record<string, unknown>, i: number): GridRow =>
+  COLLECTIONS.artifacts.mapRow(
+    { provider: "ai-agents", artifact_type: type, path: `p${i}`, details, _kind: "ai-agent", _index: i },
+    i,
+    { ref: { id: "artifacts", kind: "ai-agent" } },
+  );
+/** `sess-1` / `sess-10` of Claude Code, `sess-1` of Codex, and a Claude sub-agent of `sess-1`. */
+const chatRows: GridRow[] = [
+  chatRow("ai-agent-session", { tool: "claude-code", session_id: "sess-1", parent_session_id: "" }, 0),
+  chatRow("ai-agent-session", { tool: "claude-code", session_id: "sess-10", parent_session_id: "" }, 1),
+  chatRow("ai-agent-session", { tool: "codex", session_id: "sess-1", parent_session_id: "" }, 2),
+  chatRow("ai-agent-session", { tool: "claude-code", session_id: "agent-x", parent_session_id: "sess-1" }, 3),
+  chatRow("ai-agent-message", { tool: "claude-code", session_id: "sess-1", role: "user", text: "one" }, 4),
+  chatRow("ai-agent-message", { tool: "claude-code", session_id: "sess-10", role: "user", text: "ten" }, 5),
+  chatRow(
+    "ai-agent-message",
+    { tool: "codex", session_id: "sess-1", role: "user", text: "codex says hi" },
+    6,
+  ),
+  chatRow(
+    "ai-agent-message",
+    { tool: "claude-code", session_id: "agent-x", role: "assistant", text: "sub" },
+    7,
+  ),
+];
 
 describe("AI session conversation (대화 보기)", () => {
   it("is available on the ai-agent kind", () => {
@@ -68,6 +100,33 @@ describe("AI session conversation (대화 보기)", () => {
     expect(back.kind).toBe("ai-agent");
     expect(back.types).toContain("ai-agent-message");
     expect(requestedSession(back.cf)).toBe("sess-A");
+  });
+
+  it("T-190: the session filter is exact — sess-1 never includes sess-10", () => {
+    const scoped = aiConversationScope(chatRows, "sess-1");
+    const ids = new Set(scoped.map((row) => (row.fields.details as Record<string, unknown>).session_id));
+    expect(ids.has("sess-10")).toBe(false);
+    expect(ids.has("sess-1")).toBe(true);
+    expect(groupConversations(scoped).map((c) => c.id)).not.toContain("sess-10");
+  });
+
+  it("T-190: the same id of two tools stays apart; sub-agents only via parent_session_id", () => {
+    const claude = aiConversationScope(chatRows, "sess-1", "claude-code");
+    const tools = new Set(claude.map((row) => (row.fields.details as Record<string, unknown>).tool));
+    expect([...tools]).toEqual(["claude-code"]);
+    const codex = aiConversationScope(chatRows, "sess-1", "codex");
+    expect(codex.map((row) => (row.fields.details as Record<string, unknown>).text).filter(Boolean)).toEqual([
+      "codex says hi",
+    ]);
+    // The child session (parent_session_id = sess-1) is in, its id need not extend the parent's.
+    const sessions = claude.map((row) => (row.fields.details as Record<string, unknown>).session_id);
+    expect(sessions).toContain("agent-x");
+    // The route carries the tool and survives the URL.
+    const back = parseHash(serializeRoute(aiConversationRoute("r1", "sess-1", "codex")));
+    expect(requestedSession(back.cf)).toBe("sess-1");
+    expect(requestedTool(back.cf)).toBe("codex");
+    // No session asked for: nothing is dropped.
+    expect(aiConversationScope(chatRows, "")).toHaveLength(chatRows.length);
   });
 
   it("메타 links: a session row opens 대화 보기, its calls, touches and parent / sub-agents", () => {

@@ -43,12 +43,13 @@ export function aiSessionLinks(row: GridRow | null, runId: string): LinkDef[] {
   const session = aiSessionId(row);
   if (!session) return [];
   const details = detailsOf(row);
+  const tool = text(details.tool);
   if (isAiSessionRow(row)) {
     const links: LinkDef[] = [
       {
         id: "conversation",
         label: "대화 보기",
-        route: aiConversationRoute(runId, session),
+        route: aiConversationRoute(runId, session, tool),
         primary: true,
         title: "이 세션의 메시지를 역할별 말풍선으로, 도구 호출을 접힌 블록으로 봅니다",
       },
@@ -85,7 +86,7 @@ export function aiSessionLinks(row: GridRow | null, runId: string): LinkDef[] {
     {
       id: "conversation",
       label: "세션 대화 보기",
-      route: aiConversationRoute(runId, session),
+      route: aiConversationRoute(runId, session, tool),
       primary: true,
     },
     { id: "session", label: "세션 행", route: aiSessionRowsRoute(runId, session) },
