@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime, timezone
 
+from .case_report_items import md_cell
 from .report_candidates import is_report_candidate, report_scope_notes
 
 TEMPLATE_ID = "korean-expert"
@@ -163,9 +164,10 @@ def build_korean_expert_report(
     if bookmark_rows:
         lines += ["| 항목 | 출처 | 상태 | 태그 | 비고 |", "|---|---|---|---|---|"]
         for row in bookmark_rows:
+            # Evidence / examiner text: one line per cell, ``|`` and backticks neutralised (R8 T-027).
             lines.append(
-                f"| {row['summary']} | `{row['source']}` | {row['status']} "
-                f"| {row['tags'] or '-'} | {row['note'] or '-'} |"
+                f"| {md_cell(row['summary'])} | `{md_cell(row['source'])}` | {md_cell(row['status'])} "
+                f"| {md_cell(row['tags']) or '-'} | {md_cell(row['note']) or '-'} |"
             )
     else:
         lines.append("- 보고서 포함으로 지정된 심사 항목 없음.")

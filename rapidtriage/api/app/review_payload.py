@@ -129,6 +129,15 @@ def _resolve_mark_path(raw: str, summary: Mapping[str, object]) -> str:
     return raw
 
 
+def _mark_preview(entry: Mapping[str, object]) -> str:
+    """The cited row's preview text. A file record's "preview" is its path (``case_db.review``),
+    which is not content and may be the analysis PC's path, so it is not used as a preview."""
+    preview = str(entry.get("preview") or "").strip()
+    if not preview or preview == str(entry.get("path") or "").strip():
+        return ""
+    return preview
+
+
 def case_db_mark_bookmarks(summary: Mapping[str, object], run_id: str) -> list[dict[str, object]]:
     """Active case DB review marks of the run, shaped as case-JSON bookmarks."""
     return read_case_db_marks(summary, run_id).bookmarks
@@ -164,6 +173,8 @@ def read_case_db_marks(summary: Mapping[str, object], run_id: str) -> CaseDbMark
         path = _resolve_mark_path(str(entry.get("path") or ""), summary)
         title = str(entry.get("title") or "") or (Path(path).name if path else f"{target_type} {target_id}")
         updated_at = str(entry.get("updated_at") or "")
+        reviewer = str(entry.get("reviewer") or "")
+        preview = _mark_preview(entry)
         bookmarks.append(
             {
                 "bookmark_id": case_db_bookmark_id(citation_id, target_type, target_id),
@@ -176,6 +187,7 @@ def read_case_db_marks(summary: Mapping[str, object], run_id: str) -> CaseDbMark
                     "status": str(entry.get("status") or "unreviewed"),
                     "include_in_report": bool(entry.get("include_in_report")),
                     "reviewed_at": updated_at or None,
+                    "reviewer": reviewer,
                 },
                 "review_history": [],
                 "reference": {
@@ -192,6 +204,9 @@ def read_case_db_marks(summary: Mapping[str, object], run_id: str) -> CaseDbMark
                     "path": path,
                     "timestamp": str(entry.get("timestamp") or ""),
                     "summary": title,
+                    # The cited row's own content (``build_row_info`` prefers it; "" = none, never
+                    # the title again).
+                    "preview": preview,
                 },
             }
         )

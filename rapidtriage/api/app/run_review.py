@@ -549,7 +549,7 @@ def review_map_entries(
     """Every review mark of the case with its run-output locator (when known)."""
     index = RunLocatorIndex(connection, case_id, outputs, output_dir=output_dir)
     rows = connection.execute(
-        "SELECT citation_id, target_type, target_id, status, tags_json, note, include_in_report, updated_at "
+        "SELECT citation_id, target_type, target_id, status, tags_json, note, include_in_report, updated_at, reviewer "
         f"FROM review_mark WHERE case_id = ? AND {ACTIVE_MARK_SQL} {ACTIVE_MARK_ORDER_SQL} LIMIT ?",
         (case_id, limit + 1),
     ).fetchall()
@@ -571,6 +571,8 @@ def review_map_entries(
             "note": str(row[5] or ""),
             "include_in_report": bool(row[6]),
             "updated_at": str(row[7] or ""),
+            # Examiner who made the latest mark (T-036/T-180); the case report prints it.
+            "reviewer": str(row[8] or ""),
             "collection": "",
             "kind": "",
             "locator": "",
