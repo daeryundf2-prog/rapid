@@ -70,34 +70,37 @@ export function ModeTabs({ modes: all, active, onSelect, notice }: ModeTabsProps
   const action = notice?.action ?? null;
   return (
     <>
-      <div className="viewer-tabs" role="tablist" aria-label="보기 모드" onKeyDown={onKeyDown}>
-        {modes.map((state) => {
-          const selected = state.mode === active;
-          return (
-            <button
-              key={state.mode}
-              ref={(element) => {
-                if (element) refs.current.set(state.mode, element);
-                else refs.current.delete(state.mode);
-              }}
-              type="button"
-              role="tab"
-              id={tabId(state.mode)}
-              data-mode={state.mode}
-              className="viewer-tab"
-              aria-selected={selected}
-              data-viewer-focus={selected ? "" : undefined}
-              // Every tab controls its own panel (inactive panels are rendered `hidden`
-              // and empty), and each panel is labelled by its tab.
-              aria-controls={panelId(state.mode)}
-              tabIndex={selected ? 0 : -1}
-              onClick={() => onSelect(state.mode)}
-            >
-              {MODE_LABELS[state.mode]}
-            </button>
-          );
-        })}
-      </div>
+      {/* No usable mode (no row selected): no tablist at all — an empty tablist is an a11y error. */}
+      {modes.length === 0 ? null : (
+        <div className="viewer-tabs" role="tablist" aria-label="보기 모드" onKeyDown={onKeyDown}>
+          {modes.map((state) => {
+            const selected = state.mode === active;
+            return (
+              <button
+                key={state.mode}
+                ref={(element) => {
+                  if (element) refs.current.set(state.mode, element);
+                  else refs.current.delete(state.mode);
+                }}
+                type="button"
+                role="tab"
+                id={tabId(state.mode)}
+                data-mode={state.mode}
+                className="viewer-tab"
+                aria-selected={selected}
+                data-viewer-focus={selected ? "" : undefined}
+                // Every tab controls its own panel (inactive panels are rendered `hidden`
+                // and empty), and each panel is labelled by its tab.
+                aria-controls={panelId(state.mode)}
+                tabIndex={selected ? 0 : -1}
+                onClick={() => onSelect(state.mode)}
+              >
+                {MODE_LABELS[state.mode]}
+              </button>
+            );
+          })}
+        </div>
+      )}
       {notice ? (
         <p className="viewer-tab-notice" data-testid="viewer-tab-notice">
           {notice.text}
