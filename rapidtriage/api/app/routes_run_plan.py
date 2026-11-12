@@ -24,8 +24,9 @@ from ...core.run.plan import (
     utc_now,
 )
 from ...core.run.profiles import RUN_PROFILES
-from .helpers import get_job, run_progress_payload
-from .models import RunPlanControlRequest
+from .helpers import get_job, run_progress_payload, validate_run_evidence_source
+from .models import RunCreateRequest, RunPlanControlRequest
+from .preflight_space import check_output_space
 
 LIVE_STATUSES = frozenset({"queued", "running"})
 
@@ -124,6 +125,19 @@ def build_run_plan_router(store: RunJobStore) -> APIRouter:
         if mode.lower() not in RUN_PROFILES:
             raise HTTPException(status_code=400, detail=f"지원하지 않는 모드입니다: {mode}")
         return plan_preview(mode, carve=carve, extract=extract, case_db=case_db, input_kind=input_kind)
+
+    @router.post(
+        "/api/run-plan/space",
+        tags=["run-plan"],
+        responses={400: {"description": "증거를 직접 처리할 수 없음"}, 422: {"description": "요청 본문 검사 실패"}},
+    )
+    def preview_run_space(body: RunCreateRequest) -> dict[str, Any]:
+        """Disk free-space check of a run body (T-186): ``{estimated_bytes, free_bytes, ok, level, code, message, basis}``.
+
+        Same body as ``POST /api/runs``; nothing is written. ``level`` ``block`` is the case the run start refuses
+        (507 ``DISK_SPACE_INSUFFICIENT``) unless ``allow_low_disk_space`` is set."""
+        validate_run_evidence_source(body.root)
+        return check_output_space(body.root, body.output_dir or "", partition_start_sector=body.e01_partition_start_sector)
 
     @router.get("/api/runs/{run_id}/plan")
     def get_run_plan(run_id: str, request: Request) -> Response:

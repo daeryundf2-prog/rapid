@@ -10,7 +10,7 @@
 - **노출**: `http` 오류 응답 · `body` 응답 본문 필드 · `notice` 목록 부분 결과 · `readonly_reason` 읽기 전용 사유 · `cli` CLI 전용 · `frontend` 프런트 전용.
 - **종료 코드**(CLI): 0 성공 / 1 실패 / 2 사용법 / 3 부분 성공 / 4 대상 없음. T-249 전까지 CLI는 대부분 2로 끝나며, 표의 값은 목표값입니다.
 
-코드 42종 (active 35 · reserved 7).
+코드 44종 (active 37 · reserved 7).
 
 ## 출력 위치 보호 (`output`)
 
@@ -20,6 +20,8 @@
 | `EVIDENCE_INSIDE_OUTPUT` | 422 | 2 | http | active | 증거가 출력 폴더 안에 있습니다. 출력 폴더는 덮어쓰기·정리 대상이라 증거를 담을 수 없습니다 | 증거를 담지 않은 다른 출력 폴더를 지정하세요 | Evidence is inside the output folder |
 | `OUTPUT_DIR_REQUIRED` | 422 | 2 | http | active | 출력 폴더가 지정되지 않았습니다. 원본 증거 옆이나 증거 폴더 안에는 런 출력을 만들지 않습니다 | 증거 밖의 출력 폴더를 지정하세요 | Output folder is required |
 | `OUTPUT_DIR_BUSY` | 409 | 1 | http | reserved (T-007) | 같은 출력 폴더를 쓰는 런이 대기·실행 중입니다 | 그 런이 끝나기를 기다리거나 다른 출력 폴더를 지정하세요 | Output folder is in use by another run |
+| `DISK_SPACE_INSUFFICIENT` | 507 | 1 | http | active (T-186) | 출력 위치의 여유 공간이 예상 출력 크기보다 작아 런을 시작하지 않았습니다 | 여유 공간이 넉넉한 출력 위치를 지정하거나, 위험을 감수하고 시작하려면 allow_low_disk_space를 켜세요 | Not enough free disk space for the run output |
+| `DISK_SPACE_LOW` | — | — | body | active (T-186) | 출력 위치의 여유 공간이 빠듯합니다(예상 출력 크기의 오차 범위 안) | 가능하면 여유 공간이 더 큰 출력 위치를 지정하세요 | Free disk space is tight for the run output |
 
 ## 경로·접근 제한 (`path`)
 

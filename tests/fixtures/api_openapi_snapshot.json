@@ -134,6 +134,9 @@
     "/api/run-plan/preview": {
       "get": "preview_run_plan_api_run_plan_preview_get"
     },
+    "/api/run-plan/space": {
+      "post": "preview_run_space_api_run_plan_space_post"
+    },
     "/api/runs": {
       "get": "list_runs_api_runs_get",
       "post": "create_run_api_runs_post"

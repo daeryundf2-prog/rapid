@@ -38,6 +38,8 @@ SHIPPED = frozenset({
     # T-007: status defaults for the other statuses the server answers with
     "METHOD_NOT_ALLOWED", "TIME_BUDGET_EXCEEDED", "PAYLOAD_TOO_LARGE", "RANGE_NOT_SATISFIABLE",
     "TOO_MANY_REQUESTS", "SERVICE_UNAVAILABLE",
+    # T-186: disk free-space check before a run
+    "DISK_SPACE_INSUFFICIENT", "DISK_SPACE_LOW",
 })
 
 
