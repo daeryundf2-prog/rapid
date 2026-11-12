@@ -252,6 +252,23 @@ def build_review_tools_router(
         except CaseDatabaseError as exc:
             raise review_tool_http_error(exc) from exc
 
+    @contextmanager
+    def _read_only_connection(path: Path, case_id: str) -> Iterator[sqlite3.Connection]:
+        """A ``mode=ro`` connection to an existing case DB (no schema step); 404 for an unknown case."""
+        with closing(sqlite3.connect(read_only_sqlite_uri(path), uri=True)) as connection:
+            connection.row_factory = sqlite3.Row
+            if connection.execute("SELECT 1 FROM case_record WHERE case_id = ?", (case_id,)).fetchone() is None:
+                raise HTTPException(status_code=404, detail=f"케이스를 찾을 수 없습니다: {case_id}")
+            yield connection
+
+    def _case_in(path: Path, case_id: str) -> bool:
+        """Whether the existing case DB at ``path`` holds ``case_id`` (read ``mode=ro``)."""
+        try:
+            with _read_only_connection(path, case_id):
+                return True
+        except (HTTPException, sqlite3.Error):
+            return False
+
     # --- tags ---------------------------------------------------------------------
 
     @router.get("/api/cases/{case_id}/tags")
@@ -278,10 +295,7 @@ def build_review_tools_router(
                 if database and not run_id:
                     raise HTTPException(status_code=404, detail="케이스 DB 파일을 찾을 수 없습니다. 경로를 확인하세요.")
                 return payload
-            with closing(sqlite3.connect(read_only_sqlite_uri(read_only_path), uri=True)) as connection:
-                connection.row_factory = sqlite3.Row
-                if connection.execute("SELECT 1 FROM case_record WHERE case_id = ?", (case_id,)).fetchone() is None:
-                    raise HTTPException(status_code=404, detail=f"케이스를 찾을 수 없습니다: {case_id}")
+            with _read_only_connection(read_only_path, case_id) as connection:
                 try:
                     payload["tags"] = list_case_tags(connection, case_id, include_deleted=include_deleted, ensure=False)
                 except sqlite3.OperationalError:
@@ -373,12 +387,30 @@ def build_review_tools_router(
         run_id: str | None = Query(None),
         database: str | None = Query(None),
     ) -> dict[str, object]:
+        """Saved baselines of the case; a case DB in a read-only run folder (or on a read-only
+        server) is read through ``mode=ro`` without the schema step, so listing never writes (T-348)."""
+        empty: dict[str, object] = {"command": "case.histogram-baselines", "case_id": case_id, "exists": False, "baselines": []}
+        read_only_path = _read_only_case_db(case_id, run_id, database)
+        if read_only_path is not None:
+            if not read_only_path.is_file():
+                if database and not run_id:
+                    raise HTTPException(status_code=404, detail="케이스 DB 파일을 찾을 수 없습니다. 경로를 확인하세요.")
+                return empty
+            if run_id and not _case_in(read_only_path, case_id):
+                # A read-only run whose case DB has no case for it yet: nothing can be saved there.
+                return empty
+            with _read_only_connection(read_only_path, case_id) as connection:
+                try:
+                    baselines = list_histogram_baselines(connection, case_id)
+                except sqlite3.OperationalError:
+                    baselines = []  # an older DB without the baseline table
+            return {**empty, "exists": True, "baselines": baselines}
         opened = _case_database(case_id, run_id, database, must_exist=False)
         if opened is None:
-            return {"command": "case.histogram-baselines", "case_id": case_id, "exists": False, "baselines": []}
+            return empty
         with _connection(opened, case_id) as connection:
             baselines = list_histogram_baselines(connection, case_id)
-        return {"command": "case.histogram-baselines", "case_id": case_id, "exists": True, "baselines": baselines}
+        return {**empty, "exists": True, "baselines": baselines}
 
     @router.post("/api/cases/{case_id}/histogram-baselines", status_code=201)
     def create_baseline(
@@ -420,12 +452,23 @@ def build_review_tools_router(
         if compare is not None:
             if not database_path.is_file():
                 raise HTTPException(status_code=404, detail=f"기준선을 찾을 수 없습니다: {compare} (케이스 DB 없음)")
-            opened = open_request_case_database(database_path)
-            with _connection(opened, case_id) as connection:
-                try:
-                    baseline = get_histogram_baseline(connection, case_id, compare)
-                except CaseDatabaseError as exc:
-                    raise review_tool_http_error(exc) from exc
+            read_only_path = read_only_case_db_path(database_path) if read_only_case_db_path else None
+            if read_only_path is not None:
+                # T-348: a read-only run (or server) reads its baseline through ``mode=ro``.
+                with _read_only_connection(read_only_path, case_id) as connection:
+                    try:
+                        baseline = get_histogram_baseline(connection, case_id, compare)
+                    except sqlite3.OperationalError as exc:  # an older DB without the baseline table
+                        raise HTTPException(status_code=404, detail=f"기준선을 찾을 수 없습니다: {compare}") from exc
+                    except CaseDatabaseError as exc:
+                        raise review_tool_http_error(exc) from exc
+            else:
+                opened = open_request_case_database(database_path)
+                with _connection(opened, case_id) as connection:
+                    try:
+                        baseline = get_histogram_baseline(connection, case_id, compare)
+                    except CaseDatabaseError as exc:
+                        raise review_tool_http_error(exc) from exc
         base_counts = baseline.get("counts") if isinstance(baseline, dict) else None
         base_counts = base_counts if isinstance(base_counts, dict) else {}
         bars: list[dict[str, object]] = []

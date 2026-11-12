@@ -630,7 +630,7 @@ class RapidTriageApiTests(unittest.TestCase):
     def test_health_and_index_are_available(self) -> None:
         client = api_test_client(RunJobStore())
 
-        self.assertEqual(client.get("/api/health").json(), {"status": "ok"})
+        self.assertEqual(client.get("/api/health").json(), {"status": "ok", "read_only": False})
         self.assertFalse(client.get("/api/enterprise/policy").json()["telemetry"]["enabled"])
         keyword_packs = client.get("/api/keyword-packs").json()
         library_assessment = keyword_packs["keyword_pack_library_assessment"]

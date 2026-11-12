@@ -21,6 +21,7 @@ import re
 import threading
 from collections.abc import Iterable
 
+from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from ...core.error_codes import ERROR_CODES
@@ -57,6 +58,17 @@ SERVER_READ_ONLY_CHECK_POSTS = frozenset(
 def server_read_only_enabled(explicit: bool | None = None) -> bool:
     """``explicit`` when given, else the ``RAPIDTRIAGE_READ_ONLY`` environment variable."""
     return truthy_env(SERVER_READ_ONLY_ENV) if explicit is None else bool(explicit)
+
+
+def effective_readonly_reason(job_reason: str | None, server_read_only: bool) -> str | None:
+    """Why the console must treat a run as read-only (T-348): the run's own D37 reason
+    (``OUTPUT_INSIDE_EVIDENCE``), else ``SERVER_READ_ONLY`` on a read-only server, else ``None``."""
+    return job_reason or (SERVER_READ_ONLY if server_read_only else None)
+
+
+def server_read_only_of(request: Request) -> bool:
+    """Whether the app serving ``request`` runs read-only (``create_app(read_only=…)``)."""
+    return bool(getattr(request.app.state, "server_read_only", False))
 
 
 def server_read_only_detail() -> dict[str, str]:
@@ -131,7 +143,9 @@ __all__ = [
     "SERVER_READ_ONLY_HINT",
     "SERVER_READ_ONLY_MESSAGE",
     "ServerReadOnlyHolds",
+    "effective_readonly_reason",
     "server_read_only_detail",
     "server_read_only_enabled",
+    "server_read_only_of",
     "server_read_only_refusal",
 ]

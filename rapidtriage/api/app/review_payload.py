@@ -37,6 +37,7 @@ from .run_review import (
     ACTIVE_MARK_ORDER_SQL,
     ACTIVE_MARK_SQL,
     canonical_run_case,
+    read_only_sqlite_uri,
     review_map_entries,
 )
 from .runops import load_case_payload_or_empty
@@ -62,7 +63,9 @@ def case_db_bookmark_id(citation_id: str, target_type: str, target_id: str) -> s
 
 
 def _open_ro(database_path: Path) -> sqlite3.Connection:
-    connection = sqlite3.connect(f"{database_path.as_uri()}?mode=ro", uri=True)
+    # ``immutable`` in a read-only folder: a plain ``mode=ro`` open of a WAL case DB creates
+    # ``-wal`` / ``-shm`` next to it (T-348: the histogram tree read wrote them).
+    connection = sqlite3.connect(read_only_sqlite_uri(database_path), uri=True)
     connection.row_factory = sqlite3.Row
     return connection
 

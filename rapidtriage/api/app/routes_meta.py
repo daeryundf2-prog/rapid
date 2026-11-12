@@ -6,7 +6,7 @@ import os
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from ...core.browse import BrowseError, browse_directory
 from ...core.collect_plan import (
@@ -37,6 +37,7 @@ from .models import (
     CollectPlanRequest,
     EvidenceIdentifyRequest,
 )
+from .readonly_mode import server_read_only_of
 from .runops import (
     build_commercial_readiness_api_payload,
 )
@@ -169,8 +170,10 @@ def build_meta_router(
     router = APIRouter()
 
     @router.get("/api/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok"}
+    def health(request: Request) -> dict[str, object]:
+        # T-348: ``read_only`` tells the console a ``web --read-only`` server is answering (band +
+        # disabled writes before any run is open).
+        return {"status": "ok", "read_only": server_read_only_of(request)}
 
 
     @router.get("/api/workbench/smoke-contract")
