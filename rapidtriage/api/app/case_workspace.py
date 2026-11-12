@@ -24,6 +24,10 @@ from ...core.case_db.base import now_iso
 from ...core.case_db.intake import CaseIntake, ensure_intake_schema
 from ...core.e01 import is_e01_path
 from ...core.e01_hash import run_e01_streaming_hash
+from ...core.e01_recorded_hash import (
+    evidence_hash_verdict,
+    read_recorded_acquisition_hash,
+)
 from ...core.evidence import identify_evidence
 from ...core.jobs import RunJob, RunJobStore, RunRequest
 from ...core.run.profiles import RUN_PROFILES
@@ -253,13 +257,10 @@ class CaseWorkspace:
                 source_path=path, output_dir=self.hash_dir(case_id, citation_id), overwrite=True
             )
             digests = {str(k): str(v) for k, v in dict(payload.get("digests") or {}).items()}
-            if expected:
-                algorithm = HASH_LENGTHS.get(len(expected), "")
-                actual = digests.get(algorithm, "")
-                status = "matched" if actual and actual.lower() == expected else "mismatched"
-                message = f"파일 바이트 {algorithm.upper()} 기대값 {expected} / 계산값 {actual or '없음'}"
-            else:
-                status, message = "computed", "기대 해시가 없어 계산값만 기록했습니다 (파일·컨테이너 바이트 기준)"
+            recorded = read_recorded_acquisition_hash(path) if is_e01_path(path) else None
+            status, message = evidence_hash_verdict(expected, digests, recorded)
+            if recorded is not None:
+                digests.update({f"recorded_{k}": v for k, v in (("md5", recorded.md5), ("sha1", recorded.sha1)) if v})
             self.intake.set_evidence_hash(citation_id, status=status, message=message, digests=digests)
         except Exception as exc:  # recorded on the evidence row, never raised into the server
             LOGGER.warning("evidence hash failed for %s: %s", citation_id, exc)
