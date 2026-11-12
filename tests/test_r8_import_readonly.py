@@ -72,6 +72,8 @@ def tearDownModule() -> None:
     quiet_media_checks.tearDownModule()
     if Fixture._base is not None:
         Fixture._base.cleanup()
+        # Other modules (test_server_read_only, ...) reuse ``Base`` in the same process: rebuild.
+        Fixture._base = None
 
 
 class Base(unittest.TestCase):
