@@ -4,6 +4,7 @@ data, windows-search-index early exit, synthetic-media skip/budget."""
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 import tempfile
 import time
@@ -306,11 +307,21 @@ class SyntheticMediaTimingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._tree(root, 200)
-            with mock.patch.object(synthetic_media, "deepfake_lens_module", return_value=None):
+            with mock.patch.object(synthetic_media, "deepfake_lens_module", return_value=None), \
+                    mock.patch.object(synthetic_media.shutil, "which", side_effect=shutil.which) as which:
                 started = time.perf_counter()
+                cpu_started = time.thread_time()
                 records = list(synthetic_media.SyntheticMediaProvider().collect(root))
+                cpu = time.thread_time() - cpu_started
                 elapsed = time.perf_counter() - started
-            self.assertLess(elapsed, 1.0)
+            # The regression guarded here is per-file work on the skip path (e.g. one shutil.which
+            # PATH x PATHEXT walk per candidate, ~50 ms each = ~10 s for these 200 files). That is
+            # checked by count and by this thread's CPU time, which waiting for a busy box does not
+            # inflate; a wall-clock "< 1 s" failed at 2.3 s under an 8-worker run (T-148). The wall
+            # bound stays only as a coarse backstop for a hang.
+            self.assertLessEqual(which.call_count, 1)
+            self.assertLess(cpu, 2.0)
+            self.assertLess(elapsed, 30.0)
             self.assertEqual(len(records), 1)
             details = records[0].details
             self.assertEqual(details["skip_reason"], synthetic_media.SYNTHETIC_MEDIA_SKIP_REASON)

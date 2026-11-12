@@ -33,6 +33,9 @@ from rapidtriage.core.readonly_runs import (
 )
 from rapidtriage.core.run import run_triage_mode
 from rapidtriage.core.sample_case import build_sample_evidence
+from tests import quiet_media_checks
+
+setUpModule = quiet_media_checks.setUpModule
 
 TOKEN = "r8-import-token"
 SUMMARY = "rapidtriage-run-summary.json"
@@ -66,6 +69,7 @@ class Fixture:
 
 
 def tearDownModule() -> None:
+    quiet_media_checks.tearDownModule()
     if Fixture._base is not None:
         Fixture._base.cleanup()
 

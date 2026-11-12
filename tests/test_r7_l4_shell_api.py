@@ -15,7 +15,11 @@ from unittest.mock import patch
 from rapidtriage.api.app.helpers import is_sqlite_candidate, sqlite_detection
 from rapidtriage.api.app.viewer_hint import sqlite_viewer_hint
 from rapidtriage.core.jobs import RunJobStore
+from tests import quiet_media_checks
 from tests.test_rapidtriage_api import HAS_FASTAPI, api_test_client
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
 
 
 def chromium_history(path: Path, rows: int = 30) -> None:

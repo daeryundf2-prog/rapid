@@ -7,6 +7,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests import quiet_media_checks
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
+
+
 try:
     import fastapi  # noqa: F401
 

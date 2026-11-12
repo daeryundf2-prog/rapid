@@ -10,9 +10,16 @@ past its time limit, the parent kills that worker's process tree, records the
 module as ``timeout`` and starts a new worker for the rest of the batch.  The
 exit code is non-zero when any module fails, errors, crashes or times out.
 
+The per-module limit is ``max(floor, factor x recorded duration)`` times a
+load multiplier measured once at start: the box's load (POSIX: 1-minute load
+average per CPU; Windows: CPU busy fraction sampled with ``GetSystemTimes``)
+plus this run's own workers / CPUs.  A box shared with other jobs runs modules
+3-5x slower than recorded; the multiplier keeps that from turning into false
+timeouts.  The summary JSON reports it under ``load``.
+
 Examples::
 
-    python scripts/dev/run-tests.py                       # full suite, 8 workers
+    python scripts/dev/run-tests.py                       # full suite, min(8, CPUs/2) workers
     python scripts/dev/run-tests.py --tier fast --workers 8
     python scripts/dev/run-tests.py --only test_rapidtriage_api,test_dev_*
     python scripts/dev/run-tests.py --failed-first --json-out run.json
@@ -25,6 +32,7 @@ import argparse
 import fnmatch
 import hashlib
 import json
+import math
 import os
 import signal
 import subprocess
@@ -38,9 +46,24 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 TESTS_DIR = REPO_ROOT / "tests"
 TIERS_PATH = Path(__file__).resolve().with_name("test-tiers.json")
 TIERS = ("full", "fast", "slow", "real-data")
-DEFAULT_WORKERS = 8
+MAX_DEFAULT_WORKERS = 8
 DEFAULT_DURATION_S = 5.0
 POLL_S = 0.25
+# Load ratio (busy CPUs / CPUs) at or below which limits are not stretched.
+LOAD_IDLE_RATIO = 0.25
+# Multiplier at a fully busy box (ratio 1.0); higher ratios (POSIX) extrapolate up to LOAD_MAX_MULTIPLIER.
+LOAD_FULL_MULTIPLIER = 3.0
+LOAD_MAX_MULTIPLIER = 4.0
+LOAD_SAMPLE_S = 1.0
+
+
+def default_workers(cpu_count: int | None = None) -> int:
+    """``min(8, CPUs // 2)``, at least 1: leaves half the box to the tests' own threads and other jobs."""
+    cpus = os.cpu_count() if cpu_count is None else cpu_count
+    return max(1, min(MAX_DEFAULT_WORKERS, (cpus or 2) // 2))
+
+
+DEFAULT_WORKERS = default_workers()
 
 
 # --------------------------------------------------------------------------
@@ -234,11 +257,85 @@ def balance(
 
 
 def module_timeout(
-    module: str, durations: dict, fixed: float | None, floor: float, factor: float
+    module: str,
+    durations: dict,
+    fixed: float | None,
+    floor: float,
+    factor: float,
+    multiplier: float = 1.0,
 ) -> float:
+    """``max(floor, factor x recorded) x multiplier``; an explicit ``--timeout`` is used as given."""
     if fixed is not None:
         return fixed
-    return max(floor, factor * float(durations.get(module, DEFAULT_DURATION_S)))
+    recorded = float(durations.get(module, DEFAULT_DURATION_S))
+    return max(floor, factor * recorded) * max(1.0, multiplier)
+
+
+# --------------------------------------------------------------------------
+# load measurement
+# --------------------------------------------------------------------------
+
+
+def load_multiplier(ratio: float | None) -> float:
+    """Map a load ratio (busy CPUs / CPUs; POSIX may exceed 1) to a time-limit multiplier.
+
+    1.0 up to :data:`LOAD_IDLE_RATIO`, then linear to :data:`LOAD_FULL_MULTIPLIER` at
+    ratio 1.0, capped at :data:`LOAD_MAX_MULTIPLIER`.  Unknown load -> 1.0.
+    """
+    if ratio is None or math.isnan(ratio) or ratio <= LOAD_IDLE_RATIO:
+        return 1.0
+    slope = (LOAD_FULL_MULTIPLIER - 1.0) / (1.0 - LOAD_IDLE_RATIO)
+    return round(min(LOAD_MAX_MULTIPLIER, 1.0 + slope * (ratio - LOAD_IDLE_RATIO)), 2)
+
+
+def _windows_cpu_busy(sample_s: float) -> float | None:
+    """System-wide CPU busy fraction over ``sample_s`` seconds (``GetSystemTimes``; no psutil/wmic)."""
+    import ctypes
+    from ctypes import wintypes
+
+    get_times = ctypes.WinDLL("kernel32", use_last_error=True).GetSystemTimes
+    get_times.argtypes = [ctypes.POINTER(wintypes.FILETIME)] * 3
+    get_times.restype = wintypes.BOOL
+
+    def sample() -> tuple[int, int] | None:
+        idle, kernel, user = wintypes.FILETIME(), wintypes.FILETIME(), wintypes.FILETIME()
+        if not get_times(ctypes.byref(idle), ctypes.byref(kernel), ctypes.byref(user)):
+            return None
+        as_int = [(t.dwHighDateTime << 32) | t.dwLowDateTime for t in (idle, kernel, user)]
+        # Kernel time includes idle time.
+        return as_int[0], as_int[1] + as_int[2]
+
+    first = sample()
+    time.sleep(sample_s)
+    second = sample()
+    if first is None or second is None:
+        return None
+    idle = second[0] - first[0]
+    total = second[1] - first[1]
+    if total <= 0:
+        return None
+    return max(0.0, min(1.0, 1.0 - idle / total))
+
+
+def measure_load(sample_s: float = LOAD_SAMPLE_S, workers: int = 0) -> dict:
+    """``{"source", "ratio", "multiplier", ...}``: the box's load right now (before the workers
+    start, ``box_ratio``) plus the ``workers`` this run is about to add (one busy CPU each)."""
+    cpus = os.cpu_count() or 1
+    info: dict = {"source": "unavailable", "cpus": cpus, "box_ratio": None, "own_workers": workers, "ratio": None}
+    try:
+        if hasattr(os, "getloadavg"):
+            load1 = os.getloadavg()[0]
+            info.update(source="loadavg", loadavg_1m=round(load1, 2), box_ratio=round(load1 / cpus, 3))
+        elif os.name == "nt":
+            busy = _windows_cpu_busy(sample_s)
+            if busy is not None:
+                info.update(source="cpu-sample", cpu_percent=round(busy * 100, 1), sample_s=sample_s, box_ratio=round(busy, 3))
+    except (OSError, AttributeError, ValueError):
+        pass
+    if info["box_ratio"] is not None:
+        info["ratio"] = round(info["box_ratio"] + max(0, workers) / cpus, 3)
+    info["multiplier"] = load_multiplier(info["ratio"])
+    return info
 
 
 # --------------------------------------------------------------------------
@@ -399,6 +496,7 @@ def run_batches(
                         args.timeout,
                         args.timeout_floor,
                         args.timeout_factor,
+                        args.load["multiplier"],
                     )
                     elapsed = time.monotonic() - worker.current_started
                     if not exited and elapsed > limit:
@@ -483,6 +581,8 @@ def build_summary(
         "tier": args.tier,
         "workers": len([b for b in batches if b]),
         "wall_s": round(wall, 3),
+        "load": args.load,
+        "timeout_multiplier": args.load["multiplier"],
         "rc": 1 if bad else 0,
         "totals": totals,
         "batches": [
@@ -526,7 +626,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--workers",
         type=int,
         default=DEFAULT_WORKERS,
-        help="worker processes (default: 8)",
+        help=f"worker processes (default: min(8, CPUs/2) = {DEFAULT_WORKERS})",
     )
     parser.add_argument(
         "--only",
@@ -563,7 +663,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--timeout-factor",
         type=float,
         default=3.0,
-        help="limit = max(floor, factor x recorded duration)",
+        help="limit = max(floor, factor x recorded duration) x load multiplier",
+    )
+    parser.add_argument(
+        "--load-multiplier",
+        type=float,
+        default=None,
+        help="use this load multiplier instead of measuring the box (1 = no stretch)",
     )
     parser.add_argument(
         "--json-out",
@@ -598,6 +704,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.workers < 1:
         parser.error("--workers must be >= 1")
+    if args.load_multiplier is not None and args.load_multiplier < 1:
+        parser.error("--load-multiplier must be >= 1")
     return args
 
 
@@ -636,6 +744,19 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     run_dir = state_dir / time.strftime("run-%Y%m%d-%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
+    if args.load_multiplier is not None:
+        args.load = {"source": "argument", "ratio": None, "multiplier": args.load_multiplier}
+    elif args.timeout is not None:
+        args.load = {"source": "fixed-timeout", "ratio": None, "multiplier": 1.0}
+    else:
+        args.load = measure_load(workers=len([b for b in batches if b]))
+    ratio, box = args.load.get("ratio"), args.load.get("box_ratio")
+    detail = f" box {box:.2f} + {args.load['own_workers']} workers = {ratio:.2f}" if ratio is not None and box is not None else ""
+    print(
+        f"[run-tests] load {args.load['source']}{detail}: time limits x{args.load['multiplier']:g}",
+        file=sys.stderr,
+        flush=True,
+    )
     print(
         f"[run-tests] {len(modules)} modules on {len(batches)} workers; logs in {run_dir}",
         file=sys.stderr,
@@ -663,7 +784,8 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"[run-tests] {totals['tests']} tests in {totals['modules']} modules, wall {summary['wall_s']:.1f}s: "
         f"failures={totals['failures']} errors={totals['errors']} skipped={totals['skipped']} "
-        f"timeouts={len(totals['timed_out_modules'])} crashed={len(totals['crashed_modules'])} -> {json_out}",
+        f"timeouts={len(totals['timed_out_modules'])} crashed={len(totals['crashed_modules'])} "
+        f"(limits x{summary['timeout_multiplier']:g}) -> {json_out}",
         file=sys.stderr,
     )
     if args.json:

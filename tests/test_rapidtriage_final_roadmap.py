@@ -21,6 +21,10 @@ from rapidtriage.core.validation import (
     build_known_answer_trusted_diff,
     build_known_answer_validation,
 )
+from tests import quiet_media_checks
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
 
 
 class KnownAnswerReadinessTests(unittest.TestCase):

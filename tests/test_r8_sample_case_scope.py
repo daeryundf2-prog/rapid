@@ -26,6 +26,11 @@ from rapidtriage.core.sample_case import (
     SampleCaseError,
     create_sample_case,
 )
+from tests import quiet_media_checks
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
+
 
 TOKEN = "r8-sample-token"
 

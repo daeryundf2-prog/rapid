@@ -509,9 +509,13 @@ def run(args: argparse.Namespace, command: list[str]) -> tuple[int, dict]:
     job.assign(proc)
     tree = Tree(proc.pid)
     _write_state(state_path, _state_payload(command, proc, tree, started))
+    # Provisional result: if the wrapper itself is killed (outer tool limit, closed console), the
+    # --json-out file still says what ran and since when instead of being missing (T-148).
+    _write_json_out(args, {**result, "status": "running", "pid": proc.pid, "started_at": started})
 
     status = "exited"
     exit_code: int | None = None
+    restore = _trap_termination()
     try:
         while True:
             exit_code = proc.poll()
@@ -525,8 +529,29 @@ def run(args: argparse.Namespace, command: list[str]) -> tuple[int, dict]:
             time.sleep(POLL_SECONDS)
     except KeyboardInterrupt:
         status = "interrupted"
+    finally:
+        restore()
+    if status != "exited":
+        # Record the verdict before the kill: killing a large tree can take a while and the wrapper
+        # may not survive it (the outer limit often fires at the same moment).
+        _write_json_out(
+            args,
+            {
+                **result,
+                "status": status,
+                "exit_code": EXIT_TIMEOUT if status == "timeout" else EXIT_INTERRUPT,
+                "seconds": round(time.monotonic() - t0, 3),
+                "pid": proc.pid,
+                "started_at": started,
+                "killing": True,
+            },
+        )
 
-    remaining = kill_tree(proc, tree, job, args.grace)
+    try:
+        remaining = kill_tree(proc, tree, job, args.grace)
+    except Exception as exc:  # the result must still be written
+        result["kill_error"] = f"{type(exc).__name__}: {exc}"
+        remaining = tree.alive()
     job.close()
     seconds = round(time.monotonic() - t0, 3)
 
@@ -556,10 +581,50 @@ def run(args: argparse.Namespace, command: list[str]) -> tuple[int, dict]:
     return code, result
 
 
+def _write_json_out(args: argparse.Namespace, result: dict) -> None:
+    """Write ``result`` to ``--json-out`` (atomically, parent folders created); never raises."""
+    if not getattr(args, "json_out", None):
+        return
+    path = Path(args.json_out)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(result, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
+        os.replace(tmp, path)
+    except OSError as exc:
+        print(f"run.py: cannot write --json-out {path}: {exc}", file=sys.stderr)
+
+
+def _trap_termination():
+    """Turn SIGTERM (and SIGBREAK on Windows) into KeyboardInterrupt while the command runs, so a
+    polite kill of the wrapper still kills the tree and writes the result.  Returns a restore function."""
+    previous: dict[int, object] = {}
+
+    def handler(signum, _frame):
+        raise KeyboardInterrupt(f"signal {signum}")
+
+    for name in ("SIGTERM", "SIGBREAK"):
+        signum = getattr(signal, name, None)
+        if signum is None:
+            continue
+        try:
+            previous[signum] = signal.signal(signum, handler)
+        except (OSError, ValueError):  # not the main thread / not supported
+            continue
+
+    def restore() -> None:
+        for signum, old in previous.items():
+            try:
+                signal.signal(signum, old)
+            except (OSError, ValueError, TypeError):
+                pass
+
+    return restore
+
+
 def _emit(result: dict, args: argparse.Namespace) -> None:
     text = json.dumps(result, ensure_ascii=False)
-    if args.json_out:
-        Path(args.json_out).write_text(text + "\n", encoding="utf-8", newline="\n")
+    _write_json_out(args, result)
     if args.json:
         sys.stdout.flush()
         print(text, flush=True)

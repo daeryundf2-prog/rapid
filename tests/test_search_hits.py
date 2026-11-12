@@ -27,7 +27,12 @@ from rapidtriage.core.search_hits import (
     hit_locator,
     search_snippet,
 )
+from tests import quiet_media_checks
 from tests.test_rapidtriage_run import build_run_fixture
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
+
 
 REQUIRED = ("title", "path", "display_path", "kind", "artifact_type", "timestamp", "snippet", "locator")
 

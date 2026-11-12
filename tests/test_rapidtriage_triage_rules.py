@@ -32,9 +32,14 @@ from rapidtriage.core.triage_rules.stage import (
     RUN_STAGE_ANALYSIS_PREFIX,
     run_triage_stage,
 )
+from tests import quiet_media_checks
 from tests.triage_cases import all_cases, case_flags, run_case
 from tests.triage_cases.ntfs import CASES as NTFS_CASES
 from tests.triage_cases.ntfs import FN_TIME, SI_BEFORE_FN_GRADES, copied, mft
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
+
 
 GOOD_RULE = """
 families:

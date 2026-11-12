@@ -22,6 +22,11 @@ from fastapi.testclient import TestClient
 from rapidtriage.api.app import create_app, review_payload
 from rapidtriage.core.jobs import RunJobStore
 from rapidtriage.core.sample_case import build_sample_evidence
+from tests import quiet_media_checks
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
+
 
 TOKEN = "r8-candidates-token"
 

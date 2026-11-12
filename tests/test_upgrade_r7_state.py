@@ -27,6 +27,9 @@ from rapidtriage.core.jobs import RunJobStore
 from rapidtriage.core.readonly_runs import may_persist, unregister_readonly_folder
 from rapidtriage.core.run import run_triage_mode
 from rapidtriage.core.sample_case import build_sample_evidence
+from tests import quiet_media_checks
+
+setUpModule = quiet_media_checks.setUpModule
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "r8-upgrade-check.py"
 TOKEN = "r7-upgrade-token"
@@ -216,6 +219,7 @@ class _Run:
 
 
 def tearDownModule() -> None:
+    quiet_media_checks.tearDownModule()
     if _Run._tmp is not None:
         _Run._tmp.cleanup()
 

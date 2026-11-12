@@ -42,7 +42,12 @@ from rapidtriage.artifacts.windows.system_extras import (
 from rapidtriage.core.artifact_domains import artifact_type_domain
 from rapidtriage.core.timeline import TIMELINE_FIELD_MAP
 from rapidtriage.core.triage_rules import load_catalog
+from tests import quiet_media_checks
 from tests import r5_l2_fixtures as fx
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
+
 
 NEW_TYPES = sorted({*R5_DEPTH_ARTIFACT_TYPES, *R5_SYSTEM_EXTRAS_TYPES, "ntfs-volume-information"})
 

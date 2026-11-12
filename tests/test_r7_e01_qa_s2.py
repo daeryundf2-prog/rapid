@@ -13,8 +13,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from rapidtriage.core.jobs import RunJobStore
+from tests import quiet_media_checks
 from tests.test_rapidtriage_api import api_test_client
 from tests.test_rapidtriage_run import build_run_fixture
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
 
 
 def _finished_run(client, tmp_dir: str) -> tuple[str, Path]:

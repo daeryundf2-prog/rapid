@@ -53,8 +53,13 @@ from rapidtriage.core.case_db import (
     validation_warning_ux_core_accuracy_gates,
 )
 from rapidtriage.core.sample_case import run_sample_workflow
+from tests import quiet_media_checks
 from tests.test_rapidtriage_macos_artifacts import build_macos_fixture
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
+
 
 REQUIRED_TABLES = {
     "schema_info",

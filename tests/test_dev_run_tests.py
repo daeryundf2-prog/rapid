@@ -122,6 +122,46 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(rt.module_timeout("m", {}, None, 300, 3), 300)
         self.assertEqual(rt.module_timeout("m", {"m": 200}, 7, 300, 3), 7)
 
+    def test_module_timeout_scales_with_load_but_not_a_fixed_limit(self):
+        # T-148: under load modules ran 3-5x their recorded time; the limit stretches with it.
+        self.assertEqual(rt.module_timeout("m", {"m": 200}, None, 300, 3, 2.5), 1500)
+        self.assertEqual(rt.module_timeout("m", {}, None, 300, 3, 2.0), 600)
+        self.assertEqual(rt.module_timeout("m", {"m": 200}, None, 300, 3, 0.5), 600)
+        self.assertEqual(rt.module_timeout("m", {"m": 200}, 7, 300, 3, 4.0), 7)
+
+    def test_load_multiplier_mapping(self):
+        self.assertEqual(rt.load_multiplier(None), 1.0)
+        self.assertEqual(rt.load_multiplier(float("nan")), 1.0)
+        self.assertEqual(rt.load_multiplier(0.0), 1.0)
+        self.assertEqual(rt.load_multiplier(rt.LOAD_IDLE_RATIO), 1.0)
+        self.assertEqual(rt.load_multiplier(1.0), rt.LOAD_FULL_MULTIPLIER)
+        self.assertEqual(rt.load_multiplier(50.0), rt.LOAD_MAX_MULTIPLIER)
+        mid = rt.load_multiplier(0.6)
+        self.assertTrue(1.0 < mid < rt.LOAD_FULL_MULTIPLIER, mid)
+        self.assertLess(rt.load_multiplier(0.5), rt.load_multiplier(0.9))
+
+    def test_measure_load_reports_a_source_and_a_sane_multiplier(self):
+        info = rt.measure_load(sample_s=0.1, workers=4)
+        self.assertIn(info["source"], {"loadavg", "cpu-sample", "unavailable"})
+        if sys.platform == "win32":
+            self.assertEqual(info["source"], "cpu-sample", info)
+            self.assertTrue(0.0 <= info["box_ratio"] <= 1.0, info)
+        if info["box_ratio"] is not None:
+            # the run's own workers count as load they are about to add
+            self.assertAlmostEqual(info["ratio"], info["box_ratio"] + 4 / info["cpus"], places=2)
+        self.assertEqual(info["own_workers"], 4)
+        self.assertGreaterEqual(info["multiplier"], 1.0)
+        self.assertLessEqual(info["multiplier"], rt.LOAD_MAX_MULTIPLIER)
+        self.assertEqual(info["multiplier"], rt.load_multiplier(info["ratio"]))
+
+    def test_default_workers_is_half_the_cpus_capped_at_8(self):
+        self.assertEqual(rt.default_workers(16), 8)
+        self.assertEqual(rt.default_workers(32), 8)
+        self.assertEqual(rt.default_workers(6), 3)
+        self.assertEqual(rt.default_workers(1), 1)
+        self.assertEqual(rt.default_workers(None), rt.DEFAULT_WORKERS)
+        self.assertEqual(rt.parse_args([]).workers, rt.DEFAULT_WORKERS)
+
 
 class EndToEndTests(unittest.TestCase):
     def setUp(self):
@@ -182,6 +222,19 @@ class EndToEndTests(unittest.TestCase):
         for entry in summary["modules"]:
             self.assertEqual((entry["rc"], entry["status"]), (0, "passed"))
             self.assertIn("duration_s", entry)
+        self.assertIn(summary["load"]["source"], {"loadavg", "cpu-sample", "unavailable"})
+        self.assertGreaterEqual(summary["timeout_multiplier"], 1.0)
+        self.assertEqual(summary["timeout_multiplier"], summary["load"]["multiplier"])
+        self.assertIn("time limits x", proc.stderr)
+
+    def test_load_multiplier_argument_is_reported(self):
+        self.write("test_p1", PASS)
+        proc, summary = self.run_cli("--load-multiplier", "3")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(summary["load"], {"source": "argument", "ratio": None, "multiplier": 3.0})
+        self.assertEqual(summary["timeout_multiplier"], 3.0)
+        proc, _ = self.run_cli("--load-multiplier", "0.5")
+        self.assertEqual(proc.returncode, 2)
 
     def test_fast_tier_excludes_slow(self):
         self.write("test_p1", PASS)

@@ -7,6 +7,11 @@ import unittest
 import zipfile
 from pathlib import Path
 
+from tests import quiet_media_checks
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
+
 
 def load_internal_bundle_module():
     module_path = (
