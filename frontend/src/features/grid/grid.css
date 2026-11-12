@@ -582,10 +582,16 @@
 
 /* Row menu + toasts ------------------------------------------------------ */
 
+/* Portalled to <body> (T-090): above the viewer / tree drawers like the other portalled menus,
+   capped by placePopover's max-height and scrolled; rows keep their content height. */
 .grid-menu {
   position: fixed;
-  z-index: 40;
+  z-index: 750;
   display: grid;
+  grid-auto-rows: max-content;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  max-width: min(420px, calc(100vw - 16px));
   min-width: 220px;
   padding: var(--space-1);
   background: var(--surface-3);

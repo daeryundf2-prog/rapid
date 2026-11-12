@@ -45,6 +45,8 @@ export interface GridCommandHost {
   /** Show the extract manifest summary + download button. */
   showExtract: (result: RunExtractResult) => void;
   openTagPrompt: () => void;
+  /** Replace the checked rows (the row menu's 태그 tags the menu row through the tag prompt). */
+  selectRows?: (keys: string[]) => void;
   runIsActive: boolean;
   /** Visible column specs in display order (CSV export of the selection, AXIOM E3). */
   getExportColumns?: () => ColumnSpec[];
@@ -440,6 +442,40 @@ export function buildRowMarkCommands(hostRef: { current: GridCommandHost }): Com
   );
 }
 
+export const ROW_TAG_COMMAND = "grid.row.tag";
+
+/**
+ * Row-menu 태그 (T-090): the tag prompt of the batch bar, applied to the menu's rows — the
+ * selection when it holds the focused row, else that row alone (selected first so the prompt
+ * acts on it).
+ */
+export function buildRowTagCommand(hostRef: { current: GridCommandHost }): Command {
+  const host = () => hostRef.current;
+  return {
+    id: ROW_TAG_COMMAND,
+    label: `${MARK_LABELS.tag}…`,
+    group: "review",
+    icon: "tag",
+    disabledReason: () => {
+      const h = host();
+      if (!h.runId) return "열린 케이스가 없습니다.";
+      const rows = menuRows(h);
+      if (rows.length === 0) return NO_ROW;
+      if (!h.selectRows) return "이 목록에서는 행에 태그를 붙일 수 없습니다.";
+      if (rows.every((r) => reviewTargetOf(r) === null))
+        return "출처 위치를 알 수 없는 행은 표시할 수 없습니다.";
+      return undefined;
+    },
+    run: () => {
+      const h = host();
+      const row = h.getFocusedRow();
+      if (!row || !h.selectRows) return;
+      if (!h.getSelectedRows().some((r) => r.rowKey === row.rowKey)) h.selectRows([row.rowKey]);
+      h.openTagPrompt();
+    },
+  };
+}
+
 /** Apply a batch mark with optimistic update + rollback and a Korean error toast. */
 export async function runBatch(host: GridCommandHost, action: BatchAction, tag?: string): Promise<boolean> {
   return runMark(host, host.getSelectedRows(), action, tag);
@@ -509,6 +545,7 @@ export function useGridCommands(host: GridCommandHost): void {
       // 계열 보기 · 상위 항목으로 · 선택 확장 (R7 갈래 A).
       ...buildFamilyCommands(hostRef).map(registerCommand),
       ...buildRowMarkCommands(hostRef).map(registerLocalCommand),
+      registerLocalCommand(buildRowTagCommand(hostRef)),
       ...buildReviewToolGridCommands(hostRef).map(registerCommand),
       // Shell review tools (tag propagation, digit keys) read the selection through this.
       registerRowSource({

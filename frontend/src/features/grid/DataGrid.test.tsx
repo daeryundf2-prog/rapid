@@ -330,67 +330,7 @@ describe("DataGrid keyboard", () => {
     expect(document.activeElement).toBe(screen.getByPlaceholderText(/필터/));
   });
 
-  it("Shift+F10 opens the row menu with the seven grid.* commands and the review items; Esc closes it", async () => {
-    await renderFiles();
-    rowAt(0).focus();
-    fireEvent.keyDown(rowAt(0), { key: "F10", shiftKey: true });
-    const menu = await screen.findByRole("menu", { name: "행 메뉴" });
-    expect(screen.getAllByRole("button", { name: "행 메뉴" })[0]?.getAttribute("aria-expanded")).toBe("true");
-    const items = within(menu).getAllByRole("menuitem");
-    const labels = items.map((i) => i.querySelector(".menu-item-label")?.textContent);
-    // Review #13: right-aligned key hints from the registry, and a disabled item's reason line.
-    const keys = Object.fromEntries(
-      items.map((i) => [
-        i.querySelector(".menu-item-label")?.textContent,
-        i.querySelector(".menu-item-kbd")?.textContent,
-      ]),
-    );
-    expect(keys).toMatchObject({
-      "원본 보기": "Enter",
-      "관련 있음 표시": "R",
-      "재검토 표시": "I",
-      "제외 표시": "X",
-      북마크: "B",
-    });
-    expect(keys["보고서 포함 표시"]).toBeUndefined();
-    const ocr = items.find((i) => i.dataset.command === "grid.ocrSelected");
-    expect(ocr?.querySelector(".menu-item-reason")?.textContent).toBe(
-      ocr?.getAttribute("data-disabled-reason"),
-    );
-    expect(labels).toEqual([
-      "원본 보기",
-      "헥스로 보기",
-      "경로 복사",
-      "인용 복사",
-      "타임라인에서 보기",
-      "같은 출처 행",
-      // 계열 (R7 갈래 A).
-      "계열 보기",
-      "상위 항목으로",
-      "선택을 상위+하위 항목으로 확장",
-      "선택 행 OCR 실행",
-      // Record pivots (viewer redesign §5), each disabled with a reason when the row lacks the field.
-      "같은 사용자/SID",
-      "같은 로그온 ID",
-      "같은 해시",
-      "같은 대상 경로/실행 파일",
-      "같은 레지스트리 키",
-      "같은 출처 파일",
-      "타임라인 ±5분",
-      "탐지 → 원 이벤트 열기",
-      "원본 아티팩트 열기",
-      "관련 있음 표시",
-      "재검토 표시",
-      "제외 표시",
-      "보고서 포함 표시",
-      "북마크",
-    ]);
-    // Review items are always listed and enabled for a row with a run-output locator.
-    const relevant = within(menu).getByRole("menuitem", { name: "관련 있음 표시" });
-    expect(relevant.getAttribute("aria-disabled")).toBeNull();
-    fireEvent.keyDown(menu, { key: "Escape" });
-    expect(screen.queryByRole("menu")).toBeNull();
-  });
+  // The row menu's entries, 태그…, and placement: rowMenu.test.tsx (T-090).
 
   it("grid.css never hides the ⋯ row-menu button from hit-testing (transparent until hover/focus)", () => {
     const gridCss = readFileSync(join(process.cwd(), "src/features/grid/grid.css"), "utf8");
@@ -433,8 +373,9 @@ describe("DataGrid keyboard", () => {
     expect(button.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(button);
     const menu = await screen.findByRole("menu", { name: "행 메뉴" });
-    // 7 row actions + 3 계열 (R7 갈래 A) + 9 pivots + 5 review marks (+ contextual entries that apply).
-    expect(within(menu).getAllByRole("menuitem")).toHaveLength(24);
+    // T-090: at most eight entries + 더 보기.
+    expect(within(menu).getAllByRole("menuitem").length).toBeLessThanOrEqual(9);
+    expect(within(menu).getAllByRole("menuitem").at(-1)?.textContent).toBe("더 보기");
     const trigger = screen.getAllByRole("button", { name: "행 메뉴" })[1] as HTMLButtonElement;
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(trigger.getAttribute("aria-controls")).toBe(menu.id);

@@ -129,6 +129,8 @@ test("Q-A6: 선택을 상위+하위 항목으로 확장 selects the whole family
   const target = row(page, "artifacts:email:/artifacts/5");
   await target.click();
   await target.getByRole("button", { name: "행 메뉴" }).click();
+  // T-090: family entries live under 더 보기.
+  await page.getByRole("menu", { name: "행 메뉴" }).getByRole("menuitem", { name: "더 보기" }).click();
   await page.getByRole("menuitem", { name: /선택을 상위\+하위 항목으로 확장/ }).click();
   await expect(page.getByText(/이 목록 3건 선택/).first()).toBeVisible();
   await expect(rows(page)).toHaveCount(3);

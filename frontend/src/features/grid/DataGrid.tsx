@@ -159,7 +159,8 @@ export interface DataGridProps {
   initialPreset?: GridPreset;
 }
 
-type Anchor = { x: number; y: number } | null;
+/** Menu anchor (viewport px): x/y = below-the-trigger point; top = the trigger's top edge (flip above). */
+type Anchor = { x: number; y: number; top?: number } | null;
 
 function readPreset(fallback: GridPreset): GridPreset {
   try {
@@ -1126,7 +1127,7 @@ export function DataGrid(props: DataGridProps = {}) {
       return handled(() => {
         setFocusIdx(index);
         setMenuRow(index);
-        setMenuAnchor({ x: (rect?.left ?? 0) + SELECT_COL_WIDTH, y: rect?.bottom ?? 0 });
+        setMenuAnchor({ x: (rect?.left ?? 0) + SELECT_COL_WIDTH, y: rect?.bottom ?? 0, top: rect?.top });
       });
     }
   };
@@ -1183,7 +1184,7 @@ export function DataGrid(props: DataGridProps = {}) {
     setFocusIdx(index);
     setMenuRow(index);
     const rect = target.getBoundingClientRect();
-    setMenuAnchor({ x: rect.left, y: rect.bottom });
+    setMenuAnchor({ x: rect.left, y: rect.bottom, top: rect.top });
   }, []);
 
   const onToggleCheckbox = useCallback(
@@ -1251,6 +1252,7 @@ export function DataGrid(props: DataGridProps = {}) {
     refetch: cq.refetch,
     showExtract: setExtractResult,
     openTagPrompt: () => setTagPromptOpen(true),
+    selectRows: setSelectionKeys,
     runIsActive: false,
     getExportColumns: () => specs,
     getSelectedCount: () => selectedKeys.size,
