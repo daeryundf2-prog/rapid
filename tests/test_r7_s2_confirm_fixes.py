@@ -20,7 +20,9 @@ class CredentialMaskSpeedTest(unittest.TestCase):
             started = time.perf_counter()
             redact_text(text)
             elapsed = time.perf_counter() - started
-            self.assertLess(elapsed, 0.05, (text[:20], elapsed))
+            # The guarded regression (quadratic regex) took seconds per call; 0.5 s keeps that
+            # signal while tolerating 8-way parallel test load (0.08 s seen under scripts/dev/run-tests.py).
+            self.assertLess(elapsed, 0.5, (text[:20], elapsed))
 
     def test_record_with_many_long_leaves_snippet_is_fast(self) -> None:
         from rapidtriage.core.search_hits import search_snippet
