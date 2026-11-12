@@ -1,7 +1,6 @@
 import { type KeyboardEvent, useRef } from "react";
-import { DisabledReason } from "../../a11y";
 import type { ViewerMode, ViewerModeState } from "../../contracts/viewer";
-import { MODE_LABELS } from "./modes";
+import { MODE_LABELS, type ModeNotice, visibleModes } from "./modes";
 
 /** Id of the panel shown when there are no mode tabs (empty viewer). */
 export const VIEWER_PANEL_ID = "viewer-panel";
@@ -19,21 +18,25 @@ interface ModeTabsProps {
   modes: ViewerModeState[];
   active: ViewerMode;
   onSelect: (mode: ViewerMode) => void;
+  /** Content that cannot be shown: one sentence + one alternative beside the tabs (r8 T-086). */
+  notice?: ModeNotice | null;
 }
 
 /**
- * WAI-ARIA tabs with automatic activation. Disabled modes stay focusable;
- * their reason lives only in S5's <DisabledReason> tooltip (aria-describedby).
+ * WAI-ARIA tabs with automatic activation. Only usable modes are tabs (r8 T-086, IS-024: a tab
+ * that leads nowhere is a dead end); when the content itself cannot be shown, the strip says why
+ * in one sentence and offers one alternative.
  */
-export function ModeTabs({ modes, active, onSelect }: ModeTabsProps) {
+export function ModeTabs({ modes: all, active, onSelect, notice }: ModeTabsProps) {
   const refs = useRef(new Map<ViewerMode, HTMLButtonElement>());
+  const modes = visibleModes(all);
 
   const focusAt = (index: number) => {
     const count = modes.length;
     const next = modes[((index % count) + count) % count];
     if (!next) return;
     refs.current.get(next.mode)?.focus();
-    if (next.available) onSelect(next.mode);
+    onSelect(next.mode);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -64,13 +67,15 @@ export function ModeTabs({ modes, active, onSelect }: ModeTabsProps) {
     }
   };
 
+  const action = notice?.action ?? null;
   return (
-    <div className="viewer-tabs" role="tablist" aria-label="보기 모드" onKeyDown={onKeyDown}>
-      {modes.map((state) => {
-        const selected = state.mode === active;
-        return (
-          <DisabledReason key={state.mode} reason={state.available ? undefined : state.reason}>
+    <>
+      <div className="viewer-tabs" role="tablist" aria-label="보기 모드" onKeyDown={onKeyDown}>
+        {modes.map((state) => {
+          const selected = state.mode === active;
+          return (
             <button
+              key={state.mode}
               ref={(element) => {
                 if (element) refs.current.set(state.mode, element);
                 else refs.current.delete(state.mode);
@@ -90,9 +95,30 @@ export function ModeTabs({ modes, active, onSelect }: ModeTabsProps) {
             >
               {MODE_LABELS[state.mode]}
             </button>
-          </DisabledReason>
-        );
-      })}
-    </div>
+          );
+        })}
+      </div>
+      {notice ? (
+        <p className="viewer-tab-notice" data-testid="viewer-tab-notice">
+          {notice.text}
+          {action ? (
+            <>
+              {" — "}
+              <button
+                type="button"
+                className="viewer-tab-notice-action"
+                data-testid="viewer-tab-notice-action"
+                onClick={() => {
+                  onSelect(action.mode);
+                  refs.current.get(action.mode)?.focus();
+                }}
+              >
+                {action.label}
+              </button>
+            </>
+          ) : null}
+        </p>
+      ) : null}
+    </>
   );
 }

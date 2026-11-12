@@ -22,7 +22,9 @@ export type PreviewType =
   | "hex"
   | "binary"
   /** A directory (runops.build_directory_preview): no content preview. */
-  | "directory";
+  | "directory"
+  /** Credential / secret file (core/credential_files.credential_withheld_preview): no body at all. */
+  | "withheld";
 
 export interface HexRow {
   offset: number;
@@ -205,6 +207,10 @@ export interface SourcePreview {
   message?: string;
   /** Present only for `archive.zip::entry` previews. */
   container_path?: string;
+  /** `"body-withheld"` for a credential / secret file (with `credential_reason`, preview_type withheld). */
+  coverage_status?: string;
+  /** Reason code of a withheld credential file (`browser-credential-store`, `private-key`, …). */
+  credential_reason?: string;
   viewer_limitations?: string[];
   viewer_metadata?: { source_format?: string; strategy?: string; preview_status?: string; parser?: string };
   hex?: { rows?: HexRow[]; bytes_read?: number; truncated?: boolean };
