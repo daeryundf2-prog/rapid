@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from .hash_cache import compute_hashes_cached, compute_hashes_fresh
+from .report_candidates import is_report_candidate
 
 HASH_ALGORITHMS = ("md5", "sha1", "sha256")
 
@@ -21,14 +22,18 @@ def build_submission_manifest(
     allowed = [root.expanduser().resolve() for root in allowed_roots]
     items: list[dict[str, object]] = []
     skipped: list[dict[str, object]] = []
+    candidate_count = 0
+    max_items_skipped = 0
 
     for bookmark in rows:
         review = bookmark.get("review")
         review_payload = dict(review) if isinstance(review, Mapping) else {}
-        if not include_all and not bool(review_payload.get("include_in_report")):
+        if not include_all and not is_report_candidate(bookmark):
             continue
+        candidate_count += 1
         if max_items and len(items) >= max_items:
             skipped.append(build_skip(bookmark, reason="max-items"))
+            max_items_skipped += 1
             continue
 
         snapshot = bookmark.get("snapshot")
@@ -91,8 +96,13 @@ def build_submission_manifest(
         },
         "summary": {
             "case_bookmark_count": len(rows),
+            # Rows selected for the manifest (report candidates, or every row with include_all).
+            "report_candidate_count": candidate_count,
             "hashed_item_count": len(items),
             "skipped_count": len(skipped),
+            # Candidates left out by ``max_items`` (also listed in ``skipped`` as "max-items").
+            "max_items_skipped_count": max_items_skipped,
+            "truncated": max_items_skipped > 0,
             "total_size": sum(int(item["evidence"]["size"]) for item in items),
         },
         "items": items,

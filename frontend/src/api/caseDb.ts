@@ -9,7 +9,28 @@ export interface ReviewCounts {
   by_status: Record<string, number>;
   include_in_report: number;
   case_json: { bookmarks: number; include_in_report: number };
-  report_candidates: number;
+  /** The one report-candidate count (report, manifest, bundle agree); `null` with `error`. */
+  report_candidates: number | null;
+  /** The 5,000-mark cap left case DB marks out of the report. */
+  truncated?: boolean;
+  error?: { code: string; message: string } | null;
+  report_candidates_detail?: {
+    count: number | null;
+    case_db: number;
+    case_json: number;
+    truncated: boolean;
+    case_db_marks_total: number;
+    case_db_mark_limit: number;
+  };
+}
+
+/** "보고 후보 n건" text of a review-counts answer (cap and read error named, never hidden). */
+export function reportCandidatesText(counts: ReviewCounts): string {
+  if (counts.report_candidates == null) return counts.error?.message ?? "확인할 수 없음";
+  const base = `${counts.report_candidates.toLocaleString("ko-KR")}건`;
+  const detail = counts.report_candidates_detail;
+  if (!counts.truncated || !detail) return base;
+  return `${base} (케이스 DB 표시 ${detail.case_db_marks_total.toLocaleString("ko-KR")}건 중 최근 ${detail.case_db_mark_limit.toLocaleString("ko-KR")}건만 반영)`;
 }
 
 export function getReviewCounts(runId: string): Promise<ReviewCounts> {

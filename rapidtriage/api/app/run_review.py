@@ -48,6 +48,8 @@ INDICATOR_PARSER_NAME = "rapidtriage-indicators"
 # not in the report, unverified) is "cleared": the row stays in ``review_mark``
 # (``review_mark_history`` keeps the audit trail) but the review board and the
 # review tallies leave it out.
+# Order of the active marks a review map / report reads (the newest first; the cap keeps these).
+ACTIVE_MARK_ORDER_SQL = "ORDER BY updated_at DESC, id DESC"
 ACTIVE_MARK_SQL = (
     "NOT (status = 'unreviewed' AND include_in_report = 0 AND COALESCE(note, '') = '' "
     "AND COALESCE(tags_json, '[]') IN ('[]', '') "
@@ -530,7 +532,7 @@ def review_map_entries(
     index = RunLocatorIndex(connection, case_id, outputs, output_dir=output_dir)
     rows = connection.execute(
         "SELECT citation_id, target_type, target_id, status, tags_json, note, include_in_report, updated_at "
-        f"FROM review_mark WHERE case_id = ? AND {ACTIVE_MARK_SQL} ORDER BY updated_at DESC, id DESC LIMIT ?",
+        f"FROM review_mark WHERE case_id = ? AND {ACTIVE_MARK_SQL} {ACTIVE_MARK_ORDER_SQL} LIMIT ?",
         (case_id, limit + 1),
     ).fetchall()
     truncated = len(rows) > limit

@@ -41,7 +41,7 @@ export function CaseFeature({ runId }: { runId: string | null }) {
     enabled: Boolean(runId),
     retry: false,
   });
-  const reportCandidates = review.data?.report_candidates;
+  const reportCandidates = review.data?.report_candidates ?? undefined;
 
   // Case / evidence of the open run (commands' disabled reasons, citation prefix).
   useRunCaseLink(runId);

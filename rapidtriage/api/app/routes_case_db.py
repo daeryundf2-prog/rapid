@@ -60,6 +60,7 @@ from .models import (
     RunCaseDbEnsureRequest,
     SampleCaseRunRequest,
 )
+from .review_payload import report_candidate_count
 from .routes_review_tools import apply_review_tag_batch
 from .run_review import (
     ACTIVE_MARK_SQL,
@@ -190,7 +191,6 @@ def build_case_db_router(
                 db_include = 0
                 cleared = 0
         bookmarks = 0
-        bookmarks_in_report = 0
         case_json = output_dir / "rapidtriage-case.json"
         if case_json.is_file():
             try:
@@ -198,11 +198,10 @@ def build_case_db_router(
                 items = payload.get("bookmarks") if isinstance(payload, dict) else None
                 if isinstance(items, list):
                     bookmarks = len(items)
-                    bookmarks_in_report = sum(
-                        1 for item in items if isinstance(item, dict) and item.get("include_in_report")
-                    )
             except (OSError, json.JSONDecodeError):
                 pass
+        # R8 RI-02: the one count the case report, manifest and reviewer bundle use.
+        candidates = report_candidate_count(store, run_id)
         return {
             "command": "case-db.review-counts",
             "run_id": run_id,
@@ -212,8 +211,12 @@ def build_case_db_router(
             "by_status": by_status,
             "cleared": cleared,
             "include_in_report": db_include,
-            "case_json": {"bookmarks": bookmarks, "include_in_report": bookmarks_in_report},
-            "report_candidates": db_include + bookmarks_in_report,
+            "case_json": {"bookmarks": bookmarks, "include_in_report": candidates["case_json"]},
+            # ``null`` with ``error`` when a review store cannot be read (never a silent 0).
+            "report_candidates": candidates["count"],
+            "report_candidates_detail": candidates,
+            "truncated": candidates["truncated"],
+            "error": candidates["error"],
         }
 
 

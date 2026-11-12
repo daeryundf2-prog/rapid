@@ -13,6 +13,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime, timezone
 
+from .report_candidates import is_report_candidate, report_scope_notes
+
 TEMPLATE_ID = "korean-expert"
 
 
@@ -30,7 +32,7 @@ def _bookmark_rows(case_payload: Mapping[str, object], *, limit: int = 50) -> li
         if not isinstance(bookmark, Mapping):
             continue
         review = bookmark.get("review") if isinstance(bookmark.get("review"), Mapping) else {}
-        if not review.get("include_in_report"):
+        if not is_report_candidate(bookmark):
             continue
         reference = bookmark.get("reference") if isinstance(bookmark.get("reference"), Mapping) else {}
         rows.append(
@@ -153,6 +155,7 @@ def build_korean_expert_report(
         "",
         f"- 검토 완료 항목 수: {case_summary.get('bookmark_count', 0)}",
         f"- 보고서 포함 항목 수: {case_summary.get('report_item_count', 0)}",
+        *report_scope_notes(case_payload, submission_manifest),
         "",
         "### 4.1 보고 포함 심사 항목",
         "",
