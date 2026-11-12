@@ -159,7 +159,9 @@ class EvidenceRecordsTests(unittest.TestCase):
             [(segment["name"], segment["sha256"]) for segment in record["segments"]],
             [(path.name, hashlib.sha256(path.read_bytes()).hexdigest()) for path in (self.image, self.second)],
         )
-        self.assertEqual(record["recorded_acquisition_hash"], {"md5": MD5.hex(), "sha1": SHA1.hex(), "reason": ""})
+        self.assertEqual(
+            record["recorded_acquisition_hash"], {"md5": MD5.hex(), "sha1": SHA1.hex(), "reason": "", "incomplete": False}
+        )
         metadata = runops.run_report_metadata({"scope": {"axes": []}}, [record])
         self.assertEqual(set(metadata), set(METADATA_KEYS))
         self.assertEqual(runops.run_report_metadata({}, None)["evidence_records"], [])
