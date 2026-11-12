@@ -82,10 +82,14 @@ describe("wizard model", () => {
     expect(
       validateEvidenceDraft({ ...file, verifyHash: true, expectedHash: "a".repeat(32) }, [file]),
     ).toEqual({});
-    // E01: container bytes are not the media hash — an expected value is neither checked nor sent.
+    // E01 (T-181/T-129): an expected value is checked like any other and sent; the server compares
+    // it with the acquisition hash recorded in the image (the media is not re-hashed).
     const e01 = { ...a, verifyHash: true, expectedHash: "xyz" };
-    expect(validateEvidenceDraft(e01, [e01])).toEqual({});
-    expect(evidenceBody(e01).expected_hash).toBe("");
+    expect(validateEvidenceDraft(e01, [e01]).expectedHash).toContain("MD5");
+    const e01Md5 = { ...a, verifyHash: true, expectedHash: ` ${"b".repeat(32)} ` };
+    expect(validateEvidenceDraft(e01Md5, [e01Md5])).toEqual({});
+    expect(evidenceBody(e01Md5).expected_hash).toBe("b".repeat(32));
+    expect(evidenceBody({ ...e01Md5, verifyHash: false }).expected_hash).toBe("");
     expect(evidenceBody({ ...file, verifyHash: true, expectedHash: " ab " }).expected_hash).toBe("ab");
     expect(evidenceListReason([])).toBe("증거를 하나 이상 추가하세요.");
     expect(evidenceListReason([{ ...a, path: "" }])).toBe("증거 E-01: 증거 경로를 입력하세요.");
@@ -164,6 +168,12 @@ describe("CaseWizard (Q-X1)", () => {
     fill("증거 경로", "D:\\ev\\a.E01", items[0] as HTMLElement);
     expect(within(items[0] as HTMLElement).getByRole("switch", { name: /^해시 검증/ })).toBeTruthy();
     fireEvent.click(within(items[0] as HTMLElement).getByRole("switch"));
+    // E01 expected hash (T-129): offered, labelled as the recorded acquisition hash comparison.
+    const hashInput = within(items[0] as HTMLElement).getByLabelText(/이미지에 기록된 취득 해시와 대조/);
+    expect(document.getElementById(hashInput.getAttribute("aria-describedby") ?? "")?.textContent).toContain(
+      "매체(디스크) 해시는 다시 계산하지 않습니다",
+    );
+    fireEvent.change(hashInput, { target: { value: "c".repeat(32) } });
     fill("증거 경로", "D:\\ev\\b.E01", items[1] as HTMLElement);
     fireEvent.click(screen.getByRole("button", { name: "증거 E-02 삭제" }));
     expect(within(step2).getAllByTestId("wizard-evidence")).toHaveLength(1);
@@ -207,7 +217,12 @@ describe("CaseWizard (Q-X1)", () => {
       examiner: "홍길동",
       case_root: "D:\\cases\\2026",
     });
-    expect(posts[3]?.body).toMatchObject({ evidence_number: "E-01", source_type: "e01", verify_hash: true });
+    expect(posts[3]?.body).toMatchObject({
+      evidence_number: "E-01",
+      source_type: "e01",
+      verify_hash: true,
+      expected_hash: "c".repeat(32),
+    });
     expect(posts[4]?.body).toEqual(caseRunBody(DEFAULT_RUN_FORM, "C-EVID-000001"));
     expect(onNotice).toHaveBeenCalledWith("케이스 2026-고단-1234를 만들고 런 1개를 시작했습니다.");
     expect(window.location.hash).toBe("#/case/run-new01/intake");

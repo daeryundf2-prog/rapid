@@ -34,6 +34,7 @@ export function EvidenceFields({
   const numberError = shown("evidenceNumber");
   const pathError = shown("path");
   const hashError = shown("expectedHash");
+  const isE01 = draft.sourceType === "e01";
 
   return (
     <div className="case-evidence-fields">
@@ -143,15 +144,19 @@ export function EvidenceFields({
         />{" "}
         해시 검증 (파일 증거의 MD5·SHA-1·SHA-256을 백그라운드에서 계산)
       </label>
-      {draft.verifyHash && draft.sourceType === "e01" ? (
-        <p className="case-reason">
-          E01은 이미지 파일(컨테이너) 바이트의 해시를 계산해 기록합니다. 획득 기록의 매체 해시와는 값이 달라
-          비교하지 않습니다.
-        </p>
-      ) : null}
-      {draft.verifyHash && draft.sourceType !== "e01" ? (
+      {draft.verifyHash ? (
         <div className="case-field">
-          <label htmlFor={id("hash")}>기대 해시 (선택 · 이 파일의 MD5/SHA-1/SHA-256)</label>
+          <label htmlFor={id("hash")}>
+            {isE01
+              ? "기대 해시 (선택 · 취득 기록의 MD5/SHA-1 — 이미지에 기록된 취득 해시와 대조)"
+              : "기대 해시 (선택 · 이 파일의 MD5/SHA-1/SHA-256)"}
+          </label>
+          {isE01 ? (
+            <p id={id("hash-note")} className="case-reason">
+              입력값은 E01에 기록된 취득 해시와, 이어서 E01 파일 자체(컨테이너) 바이트 해시와 비교합니다.
+              매체(디스크) 해시는 다시 계산하지 않습니다.
+            </p>
+          ) : null}
           <input
             id={id("hash")}
             type="text"
@@ -159,7 +164,10 @@ export function EvidenceFields({
             value={draft.expectedHash}
             maxLength={128}
             aria-invalid={Boolean(hashError)}
-            aria-describedby={hashError ? id("hash-error") : undefined}
+            aria-describedby={
+              [isE01 ? id("hash-note") : "", hashError ? id("hash-error") : ""].filter(Boolean).join(" ") ||
+              undefined
+            }
             disabled={locked}
             onBlur={() => touch("expectedHash")}
             onChange={(e) => set("expectedHash", e.target.value)}

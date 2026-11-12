@@ -193,10 +193,38 @@ class VerdictTests(unittest.TestCase):
         self.assertEqual(status, "mismatched")
         self.assertIn("이미지에 기록된 취득 해시(MD5 " + "a" * 32 + ")와 다름", message)
         self.assertIn("컨테이너 파일 바이트 계산값(" + "c" * 32 + ")과도 다름", message)
-        _, sha256_message = evidence_hash_verdict("f" * 64, self.container, self.recorded)
+
+    def test_nothing_comparable_is_computed_not_mismatched(self) -> None:
+        """WB-8 P1-1: no recorded value of the input's algorithm -> ``computed`` + "대조 불가"."""
+        sha256_status, sha256_message = evidence_hash_verdict("f" * 64, self.container, self.recorded)
+        self.assertEqual(sha256_status, "computed")
         self.assertIn("E01은 SHA256를 기록하지 않음", sha256_message)
-        _, absent_message = evidence_hash_verdict("f" * 32, self.container, RecordedHash(reason="섹션 없음"))
+        self.assertNotIn("다름", sha256_message.replace("다른 것이 정상", ""))
+        absent_status, absent_message = evidence_hash_verdict(
+            "f" * 32, self.container, RecordedHash(reason="섹션 없음")
+        )
+        self.assertEqual(absent_status, "computed")
         self.assertIn("대조 불가(이미지에 기록된 취득 해시 없음(섹션 없음))", absent_message)
+        md5_only = RecordedHash(md5="a" * 32, source="ewf1-sections")
+        self.assertEqual(evidence_hash_verdict("f" * 40, self.container, md5_only)[0], "computed")
+        unreadable = RecordedHash(reason="기록된 취득 해시를 읽는 중 오류가 나 읽지 못했습니다", detail="x" * 700)
+        status, message = evidence_hash_verdict("f" * 32, self.container, unreadable)
+        self.assertEqual(status, "computed")
+        self.assertNotIn("x" * 20, message)
+
+    def test_read_error_reason_is_short_korean_with_raw_detail(self) -> None:
+        """WB-8 P2-10: libewf's long English error chain stays out of ``reason``."""
+        raw = "libewf_handle_open: unable to open file. " * 20
+        with tempfile.TemporaryDirectory() as tmp:
+            image = Path(tmp) / "case.Ex01"
+            image.write_bytes(EWF2_SIGNATURE + b"\x00" * 64)
+            with mock.patch.object(recorded_hash, "_read_libewf", side_effect=OSError(raw)):
+                result = read_recorded_acquisition_hash(image)
+        self.assertEqual((result.md5, result.sha1), ("", ""))
+        self.assertNotIn("libewf_handle_open", result.reason)
+        self.assertLess(len(result.reason), 80)
+        self.assertIn("libewf_handle_open", result.detail)
+        self.assertNotIn("detail", result.to_dict())
 
     def test_non_ewf_messages_are_unchanged(self) -> None:
         self.assertEqual(
