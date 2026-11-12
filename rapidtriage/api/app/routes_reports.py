@@ -63,6 +63,19 @@ REVIEWER_BUNDLE_EMPTY_MESSAGE = (
 # ``POST /case-report`` export formats, in the order its ``written`` list names them.
 CASE_REPORT_FORMATS = ("md", "html", "docx", "pdf", "manifest")
 
+#: ``detail.code`` of a download GET whose file no export POST has written yet (R8 RI-07 / T-030).
+EXPORT_NOT_WRITTEN = "EXPORT_NOT_WRITTEN"
+
+
+def saved_export(path: Path, label: str) -> Path:
+    """The saved export at ``path`` — GETs never build or write one (404 until a POST wrote it)."""
+    if not path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail={"code": EXPORT_NOT_WRITTEN, "message": f"저장된 {label}이(가) 없습니다. 먼저 내보내기를 실행하세요"},
+        )
+    return path
+
 
 def build_reports_router(
     store: RunJobStore,
@@ -86,16 +99,9 @@ def build_reports_router(
         include_all: bool = False,
         max_items: int = Query(500, ge=1, le=5000),
     ) -> dict[str, object]:
-        manifest_path = default_submission_manifest_path(store, run_id)
-        manifest = build_run_submission_manifest(
-            store,
-            run_id,
-            include_all=include_all,
-            max_items=max_items,
-        )
-        write_json_file(manifest_path, manifest)
-        write_submission_audit(store, run_id, manifest_path, include_all=include_all, max_items=max_items)
-        return manifest
+        """The manifest built in memory — nothing written (``POST`` writes it with its audit).
+        ``summary.truncated`` / ``max_items_skipped_count`` name candidates ``max_items`` left out."""
+        return build_run_submission_manifest(store, run_id, include_all=include_all, max_items=max_items)
 
 
     @router.post("/api/runs/{run_id}/submission-manifest")
@@ -109,7 +115,8 @@ def build_reports_router(
         Like ``POST /validation-package``: the response names every file written (``written``)
         and a read-only ``download_url`` (``GET /submission-manifest/saved``) so the console can
         show and open the saved manifest without building and writing it again (R7 S1 re-review
-        R-4). ``GET /submission-manifest`` and ``/file`` keep their legacy write-on-read behaviour.
+        R-4). No GET writes (R8): ``GET /submission-manifest`` builds in memory, ``/file`` and
+        ``/saved`` return this saved file.
         """
         manifest_path = default_submission_manifest_path(store, run_id)
         manifest = build_run_submission_manifest(store, run_id, include_all=include_all, max_items=max_items)
@@ -137,21 +144,16 @@ def build_reports_router(
 
 
     @router.get("/api/runs/{run_id}/submission-manifest/file")
-    def download_submission_manifest(run_id: str, include_all: bool = False) -> FileResponse:
-        manifest_path = default_submission_manifest_path(store, run_id)
-        manifest = build_run_submission_manifest(store, run_id, include_all=include_all, max_items=500)
-        write_json_file(manifest_path, manifest)
-        write_submission_audit(store, run_id, manifest_path, include_all=include_all, max_items=500)
+    def download_submission_manifest(run_id: str) -> FileResponse:
+        """The saved manifest (written by ``POST /submission-manifest``); 404 before one exists."""
+        manifest_path = saved_export(default_submission_manifest_path(store, run_id), "제출 매니페스트")
         return FileResponse(manifest_path, filename=manifest_path.name)
 
 
     @router.get("/api/runs/{run_id}/validation-package")
     def get_run_validation_package(run_id: str) -> dict[str, object]:
-        package_path = default_run_validation_package_path(store, run_id)
-        package = build_run_validation_package(store, run_id)
-        write_json_file(package_path, package)
-        write_run_validation_package_audit(store, run_id, package_path)
-        return package
+        """The validation package built in memory — nothing written (``POST`` writes it)."""
+        return build_run_validation_package(store, run_id)
 
 
     @router.post("/api/runs/{run_id}/validation-package")
@@ -189,10 +191,8 @@ def build_reports_router(
 
     @router.get("/api/runs/{run_id}/validation-package/file")
     def download_run_validation_package(run_id: str) -> FileResponse:
-        package_path = default_run_validation_package_path(store, run_id)
-        package = build_run_validation_package(store, run_id)
-        write_json_file(package_path, package)
-        write_run_validation_package_audit(store, run_id, package_path)
+        """The saved package (written by ``POST /validation-package``); 404 before one exists."""
+        package_path = saved_export(default_run_validation_package_path(store, run_id), "검증 패키지")
         return FileResponse(package_path, filename=package_path.name)
 
 
@@ -220,12 +220,8 @@ def build_reports_router(
 
     @router.get("/api/runs/{run_id}/case-report/file")
     def download_case_report(run_id: str) -> FileResponse:
-        report_path = default_case_report_path(store, run_id)
-        if not report_path.is_file():
-            request = CaseReportCreateRequest()
-            markdown = build_run_case_report(store, run_id, request)
-            write_case_report_exports(markdown, report_path)
-            write_case_report_audit(store, run_id, report_path, request)
+        """The saved report markdown (written by ``POST /case-report``); 404 before one exists."""
+        report_path = saved_export(default_case_report_path(store, run_id), "보고서")
         return FileResponse(report_path, filename=report_path.name, media_type="text/markdown")
 
 
@@ -234,19 +230,10 @@ def build_reports_router(
         normalized = format_name.lower()
         if normalized not in {"md", "html", "docx", "pdf", "manifest"}:
             raise HTTPException(status_code=404, detail="unsupported case report format")
-        report_path = default_case_report_path(store, run_id)
-        if not report_path.is_file():
-            request = CaseReportCreateRequest()
-            markdown = build_run_case_report(store, run_id, request)
-            write_case_report_exports(markdown, report_path)
-            write_case_report_audit(store, run_id, report_path, request)
-        path = case_report_export_paths(report_path)[normalized]
-        if not path.is_file():
-            # Export missing for an existing report (e.g. written before the
-            # export set changed) — re-export from the stored markdown so the
-            # template the author chose is preserved instead of regenerated
-            # with default settings.
-            write_case_report_exports(report_path.read_text(encoding="utf-8"), report_path)
+        # Saved exports only (R8): an export missing from an older report set is written again by
+        # ``POST /case-report``, never by this GET.
+        report_path = saved_export(default_case_report_path(store, run_id), "보고서")
+        path = saved_export(case_report_export_paths(report_path)[normalized], f"보고서({normalized.upper()})")
         media_types = {
             "md": "text/markdown",
             "html": "text/html",
@@ -295,22 +282,13 @@ def build_reports_router(
 
     @router.get("/api/runs/{run_id}/reviewer-bundle/file")
     def download_reviewer_bundle(run_id: str) -> FileResponse:
+        """The saved bundle archive (written by ``POST /reviewer-bundle``); 404 before one exists.
+
+        It used to rebuild the bundle and rewrite its review snapshot on every download (R8)."""
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail=run_not_finished_message(job))
-        case_path = _reviewer_bundle_case_json(store, run_id)
-        try:
-            payload = build_submission_bundle(
-                case_json=case_path,
-                output_dir=default_reviewer_bundle_dir_path(store, run_id),
-                allowed_roots=allowed_source_roots(job.summary),
-                include_all=False,
-                max_items=500,
-                title=None,
-            )
-        except (BundleError, CaseBookmarkError, OSError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        archive = Path(str(payload.get("archive") or payload.get("outputs", {}).get("archive", "")))
+        archive = saved_export(default_reviewer_bundle_dir_path(store, run_id).with_suffix(".zip"), "리뷰어 번들")
         return FileResponse(archive, filename=archive.name, media_type="application/zip")
 
 

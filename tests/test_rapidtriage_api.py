@@ -1356,7 +1356,10 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             self.assertEqual(bookmark_response.status_code, 200, bookmark_response.text)
 
+            # R8: the GET builds in memory; the POST writes the package and its audit record.
             package_response = client.get(f"/api/runs/{run_id}/validation-package")
+            self.assertFalse((output_dir / "rapidforensic-run-validation-package.json").exists())
+            self.assertEqual(client.post(f"/api/runs/{run_id}/validation-package").status_code, 200)
 
             self.assertEqual(package_response.status_code, 200, package_response.text)
             package = package_response.json()
@@ -3466,7 +3469,10 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(payload["case"]["bookmarks"][0]["review"]["include_in_report"], True)
             self.assertEqual(payload["case"]["bookmarks"][0]["review_history"][0]["action"], "created")
 
+            # R8: the GET builds in memory; the POST writes the manifest and its audit record.
             manifest_response = client.get(f"/api/runs/{run_id}/submission-manifest")
+            self.assertFalse((output_dir / "rapidtriage-submission-manifest.json").exists())
+            self.assertEqual(client.post(f"/api/runs/{run_id}/submission-manifest").status_code, 200)
             self.assertEqual(manifest_response.status_code, 200, manifest_response.text)
             manifest = manifest_response.json()
             self.assertEqual(manifest["command"], "submission-manifest")

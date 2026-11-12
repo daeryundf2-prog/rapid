@@ -315,6 +315,8 @@ def build_export_history(store: RunJobStore, run_id: str, job: RunJob) -> list[d
                     "status": "zip 준비됨" if archive.is_file() else "zip 미생성",
                     "item_count": extracted,
                     "download_url": f"{base}/extract/{folder.name}/file",
+                    # POST that writes the missing zip first (the download GET never writes).
+                    "build_url": None if archive.is_file() else f"{base}/extract/{folder.name}/zip",
                 }
             )
     entries.sort(key=lambda entry: entry.get("created_at") or "", reverse=True)

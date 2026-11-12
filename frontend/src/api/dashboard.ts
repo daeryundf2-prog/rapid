@@ -45,7 +45,15 @@ export interface ExportEntry {
   size: number | null;
   status: string;
   item_count?: number | null;
+  /** Read-only GET of the saved file (404 until an export POST wrote it). */
   download_url: string;
+  /** Extract without its zip yet: POST this first, then download (GETs never write). */
+  build_url?: string | null;
+}
+
+/** Write the missing zip of an extract (`POST …/extract/{name}/zip`) before downloading it. */
+export function buildExportFile(buildUrl: string): Promise<unknown> {
+  return api<unknown>(buildUrl, { method: "POST" });
 }
 
 export interface RunDashboard {
