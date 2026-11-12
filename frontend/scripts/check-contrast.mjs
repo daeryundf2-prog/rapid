@@ -2,12 +2,18 @@
 // WCAG 2.1 contrast gate for src/tokens/tokens.css (plan §4.4 / Q-A6).
 // Text pairs need >= 4.5:1; large text, UI borders, focus rings and status/tag
 // indicators (non-text) need >= 3:1. Exit code 1 when any pair fails.
+// R8 T-002: also checks the appendix C.5 role pairs (text 1/2/3 x background 0/1/2, chip text x
+// chip background, accent x background) in every theme once those role tokens exist (T-061 adds
+// them; until then they are counted as pending), prints the failing pairs as one list at the end,
+// and `--json` emits the whole result.
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const cssPath = resolve(here, process.argv[2] ?? "../src/tokens/tokens.css");
+const cliArgs = process.argv.slice(2);
+const jsonOut = cliArgs.includes("--json");
+const cssPath = resolve(here, cliArgs.find((a) => !a.startsWith("--")) ?? "../src/tokens/tokens.css");
 
 const TEXT = 4.5;
 const UI = 3;
@@ -56,6 +62,30 @@ const PAIRS = [
     SURFACES.map((b) => [`scrollbar / resize grip ${f.slice(2)}`, f, b, UI, "ui"]),
   ),
 ];
+
+// Appendix C.5 colour roles (v3 names). Text 3 is disabled/placeholder only (>= 3:1); chip
+// backgrounds are the role colour mixed 14% into the surface (`color-mix`).
+const ROLE_BGS = ["--bg-0", "--bg-1", "--bg-2"];
+const ROLE_STATES = ["--state-ok", "--state-warn", "--state-fail", "--forensic-recovered", "--review-report"];
+const chipBg = (colour, bg) => `color-mix(in srgb, var(${colour}) 14%, var(${bg}))`;
+export const ROLE_PAIRS = [
+  ...ROLE_BGS.map((b) => ["C.5 text 1", "--fg-1", b, TEXT, "text"]),
+  ...ROLE_BGS.map((b) => ["C.5 text 2", "--fg-2", b, TEXT, "text"]),
+  ...ROLE_BGS.map((b) => ["C.5 text 3 (disabled/placeholder)", "--fg-3", b, UI, "ui"]),
+  ...ROLE_BGS.map((b) => ["C.5 accent (links, focus)", "--accent", b, TEXT, "text"]),
+  ...ROLE_STATES.flatMap((c) => ROLE_BGS.map((b) => [`C.5 ${c.slice(2)} on background`, c, b, TEXT, "text"])),
+  ...ROLE_STATES.flatMap((c) =>
+    ROLE_BGS.map((b) => [`C.5 chip text ${c.slice(2)} on its chip`, c, chipBg(c, b), TEXT, "text"]),
+  ),
+  ...ROLE_BGS.map((b) => ["C.5 judgment mark", "--judgment", b, UI, "ui"]),
+];
+
+/** Token names a pair needs (a chip background names its two inputs). */
+function pairTokens(fg, bg) {
+  return [fg, bg].flatMap((t) =>
+    t.startsWith("color-mix(") ? [...t.matchAll(/var\((--[\w-]+)\)/g)].map((m) => m[1]) : [t],
+  );
+}
 
 function stripComments(s) {
   return s.replace(/\/\*[\s\S]*?\*\//g, "");
@@ -162,6 +192,10 @@ function toHex(rgb) {
 
 /** Token (or `--x@--base`: token --x painted over --base) → opaque hex. */
 function resolveToken(vars, name) {
+  if (name.startsWith("color-mix(")) {
+    const color = resolveColor(vars, name);
+    return color && color.alpha >= 1 ? toHex(color.rgb) : undefined;
+  }
   const [token, base] = name.split("@");
   const color = resolveColor(vars, `var(${token})`);
   if (!color) return undefined;
@@ -193,7 +227,12 @@ export function contrast(fg, bg) {
 }
 
 function main() {
+  const print = console.log;
+  if (jsonOut) console.log = () => {};
   const themes = parseThemes(readFileSync(cssPath, "utf8"));
+  const failed = [];
+  const results = [];
+  let pending = 0;
   // Every non-dark theme must redefine every literal colour token of the dark theme.
   let failures = 0;
   let missing = 0;
@@ -211,7 +250,14 @@ function main() {
   for (const [theme, vars] of Object.entries(themes)) {
     console.log(`\n== ${theme} ==`);
     console.log("status  ratio  min   kind  pair");
-    for (const [label, fgTok, bgTok, min, kind] of PAIRS) {
+    const rolePairs = ROLE_PAIRS.filter(([, fg, bg]) => pairTokens(fg, bg).every((t) => t in vars));
+    if (rolePairs.length < ROLE_PAIRS.length) {
+      pending += ROLE_PAIRS.length - rolePairs.length;
+      console.log(
+        `(C.5 role pairs pending until T-061 defines their tokens: ${ROLE_PAIRS.length - rolePairs.length})`,
+      );
+    }
+    for (const [label, fgTok, bgTok, min, kind] of [...PAIRS, ...rolePairs]) {
       const fg = resolveToken(vars, fgTok);
       const bg = resolveToken(vars, bgTok);
       if (!fg || !bg) {
@@ -221,13 +267,39 @@ function main() {
       }
       const ratio = contrast(fg, bg);
       const ok = ratio >= min;
-      if (!ok) failures++;
+      const row = {
+        theme,
+        label,
+        fg: fgTok,
+        fgHex: fg,
+        bg: bgTok,
+        bgHex: bg,
+        ratio: Number(ratio.toFixed(2)),
+        min,
+        kind,
+      };
+      results.push({ ...row, ok });
+      if (!ok) {
+        failures++;
+        failed.push(row);
+      }
       console.log(
         `${ok ? "PASS   " : "FAIL   "} ${ratio.toFixed(2).padStart(5)}  ${min.toFixed(1)}   ${kind.padEnd(4)}  ${label}: ${fgTok} ${fg} on ${bgTok} ${bg}`,
       );
     }
   }
-  console.log(`\n${failures} failing pair(s), ${missing} missing token(s).`);
+  if (failed.length) {
+    console.log("\nFailing pairs (below the minimum ratio):");
+    for (const f of failed)
+      console.log(`  [${f.theme}] ${f.label}: ${f.fg} on ${f.bg} = ${f.ratio} < ${f.min}`);
+  }
+  console.log(
+    `\n${failures} failing pair(s), ${missing} missing token(s), ${pending} C.5 role pair(s) pending.`,
+  );
+  if (jsonOut) {
+    const ok = failures === 0 && missing === 0;
+    print(JSON.stringify({ ok, failures, missing, rolePairsPending: pending, failed, results }, null, 2));
+  }
   process.exit(failures > 0 || missing > 0 ? 1 : 0);
 }
 
