@@ -214,7 +214,7 @@ class ArtifactSortApiTests(unittest.TestCase):
         for params in ({"sort": "timestamp", "limit": 5}, {"sort": "timestamp", "limit": 5, "kind": ["eventlog", "browser"]}):
             response = self.client.get(url, params=params)
             self.assertEqual(response.status_code, 400)
-            self.assertEqual(response.json(), {"detail": "sort requires exactly one kind"})
+            self.assertEqual(response.json()["detail"], "sort requires exactly one kind")
         bad_order = self.client.get(url, params={"sort": "timestamp", "order": "up", "kind": "eventlog", "limit": 5})
         self.assertEqual(bad_order.status_code, 400)
 

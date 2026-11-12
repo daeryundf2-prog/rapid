@@ -9,13 +9,11 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
-from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from ...core.case_db import open_case_database
-from ...core.crash import write_crash_report
 from ...core.jobs import RunJobStore, default_job_store
 from ...core.readonly_runs import (
     RUN_READ_ONLY,
@@ -27,6 +25,12 @@ from ...core.readonly_runs import (
 from .analyses import ANALYSIS_RUNNER, COMPLETION_HOOKS
 from .case_workspace import CaseWorkspace
 from .constants import MUTATING_METHODS
+from .errors import (
+    crash_response,
+    error_response,
+    install_error_envelope,
+    validation_errors_detail,
+)
 from .helpers import (
     allowed_api_hosts,
     request_host,
@@ -102,9 +106,8 @@ def read_only_run_refusal(store: RunJobStore, method: str, path: str) -> JSONRes
     rest = match.group("rest") or ""
     if (method == "DELETE" and rest in {"", "/"}) or (method == "POST" and rest in READ_ONLY_RUN_QUERY_POSTS):
         return None
-    return JSONResponse(
-        status_code=409,
-        content={"detail": {"code": RUN_READ_ONLY, "message": RUN_READ_ONLY_MESSAGE, "readonly_reason": job.readonly_reason}},
+    return error_response(
+        409, {"code": RUN_READ_ONLY, "message": RUN_READ_ONLY_MESSAGE, "readonly_reason": job.readonly_reason}
     )
 
 
@@ -160,24 +163,22 @@ def create_app(
 
     @api.exception_handler(ReadOnlyRunWriteError)
     async def read_only_run_write(_request: Request, exc: ReadOnlyRunWriteError):
-        return JSONResponse(status_code=409, content={"detail": exc.to_detail()})
+        return error_response(409, exc.to_detail())
 
     @api.exception_handler(RequestValidationError)
     async def korean_analysis_body_errors(request: Request, exc: RequestValidationError):
         """Malformed ``POST /analyses`` bodies get Korean 422 messages; other routes keep FastAPI's."""
         if REVIEW_TOOL_BODY_PATH.fullmatch(request.url.path):
-            return JSONResponse(status_code=422, content={"detail": korean_body_errors(exc.errors(), REVIEW_BATCH_FIELD_LABELS)})
+            return error_response(422, korean_body_errors(exc.errors(), REVIEW_BATCH_FIELD_LABELS))
         if request.method == "POST" and ANALYSIS_POST_PATH.fullmatch(request.url.path):
-            return JSONResponse(status_code=422, content={"detail": korean_body_errors(exc.errors())})
+            return error_response(422, korean_body_errors(exc.errors()))
         if CASE_INTAKE_PATH.fullmatch(request.url.path):
-            return JSONResponse(
-                status_code=422, content={"detail": korean_body_errors(exc.errors(), CASE_FIELD_LABELS)}
-            )
+            return error_response(422, korean_body_errors(exc.errors(), CASE_FIELD_LABELS))
         try:
-            return await request_validation_exception_handler(request, exc)
+            return error_response(422, validation_errors_detail(exc))
         except UnicodeEncodeError:
             # A lone surrogate in the body (valid JSON escape, invalid text) must stay a 422, not a 500.
-            return JSONResponse(status_code=422, content={"detail": _without_surrogates(jsonable_encoder(exc.errors()))})
+            return error_response(422, _without_surrogates(jsonable_encoder(exc.errors())))
     static_dir = Path(__file__).resolve().parent.parent.parent / "web" / "static"
     auth_disabled = truthy_env("RAPIDTRIAGE_DISABLE_AUTH") or require_auth is False
     if auth_disabled and (auth_token or os.environ.get("RAPIDTRIAGE_AUTH_TOKEN")):
@@ -212,42 +213,29 @@ def create_app(
                 host = request_host(request.headers.get("host"))
                 allowed_hosts = allowed_api_hosts()
                 if host and host not in allowed_hosts:
-                    return JSONResponse(status_code=403, content={"detail": "RapidTriage API host is not allowed"})
+                    return error_response(403, "RapidTriage API host is not allowed")
                 origin = request.headers.get("origin")
                 if origin and request.method.upper() in MUTATING_METHODS:
                     origin_host = request_host(origin.split("//", 1)[-1])
                     if origin_host and origin_host not in allowed_hosts:
-                        return JSONResponse(status_code=403, content={"detail": "RapidTriage API origin is not allowed"})
+                        return error_response(403, "RapidTriage API origin is not allowed")
             if expected_token and request.url.path.startswith("/api"):
                 if "token" in request.query_params:
-                    return JSONResponse(
-                        status_code=401,
-                        content={"detail": "query token authentication is disabled; use X-RapidTriage-Token header"},
-                    )
+                    return error_response(401, "query token authentication is disabled; use X-RapidTriage-Token header")
                 supplied = request.headers.get("X-RapidTriage-Token")
                 if supplied is None or not secrets.compare_digest(supplied, expected_token):
-                    return JSONResponse(status_code=401, content={"detail": "missing or invalid RapidTriage auth token"})
+                    return error_response(401, "missing or invalid RapidTriage auth token")
             refusal = read_only_run_refusal(store, request.method.upper(), request.url.path)
             if refusal is not None:
                 return refusal
             return await call_next(request)
         except Exception as exc:
-            report = write_crash_report(
-                exc,
-                context={
-                    "component": "web-api",
-                    "method": request.method,
-                    "path": request.url.path,
-                },
-            )
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "detail": "internal RapidTriage error; local crash report written",
-                    "crash_id": report["crash_id"],
-                    "crash_report": report["path"],
-                },
-            )
+            # T-007: the body names the crash only by ``crash_id``; the report path is logged.
+            return crash_response(exc, request)
+
+    # T-007 / D.7: error envelope for HTTPException and JSON error bodies, security headers on
+    # every response. Added after ``require_auth_token`` so both layers wrap its answers too.
+    install_error_envelope(api)
 
     api.include_router(build_meta_router(store))
     api.include_router(build_case_db_router(store, open_request_case_database, resolve_request_catalog_path))
