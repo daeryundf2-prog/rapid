@@ -272,6 +272,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Korean Windows consoles default to cp949, which cannot print "—" and crashed the summary.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
     args = parse_args(list(sys.argv[1:] if argv is None else argv))
     out = sys.stderr if args.json else sys.stdout
     base = resolve_base(args.base)
