@@ -125,6 +125,9 @@ function hasCommandModifier(shortcut: string): boolean {
  */
 const MODAL_SAFE_SHORTCUTS: ReadonlySet<string> = new Set(["Escape", "Ctrl+K"]);
 
+/** Modified keys a text field keeps for itself (Ctrl+Z undoes typing, not the last review mark). */
+const TEXT_FIELD_SHORTCUTS: ReadonlySet<string> = new Set([KEY_MAP.undoReview]);
+
 /**
  * Route one keydown to its command. Returns true when a command claimed the
  * key (the event is then preventDefault-ed).
@@ -148,6 +151,7 @@ export function dispatchShortcut(event: KeyboardEvent): boolean {
   ) {
     return false;
   }
+  if (TEXT_FIELD_SHORTCUTS.has(shortcut) && isTextEntry(target)) return false;
   if (!modified && shortcut !== "Escape") {
     if (isTextEntry(target)) return false;
     if ((shortcut === "Enter" || shortcut === "Space") && isInteractiveTarget(target)) return false;
@@ -209,6 +213,9 @@ export const KEY_DESCRIPTIONS: Record<keyof typeof KEY_MAP, string> = {
   mediaBlur: "미디어 흐리게 켜기/끄기",
   familyView: "계열 보기 (상위·형제·하위 항목)",
   familyParent: "상위 항목으로",
+  markIncludeInReport: "보고서 포함 표시",
+  nextUnreviewed: "다음 미검토 행으로",
+  undoReview: "방금 한 표시 실행 취소",
 };
 
 /** Apple platform (review #14): only there does Ctrl+K read as the ⌘ glyph. */

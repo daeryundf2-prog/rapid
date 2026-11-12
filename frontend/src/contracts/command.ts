@@ -82,4 +82,10 @@ export const KEY_MAP = {
   familyView: "Shift+F",
   /** 상위 항목으로 (R7 갈래 A): the focused row's parent item. */
   familyParent: "U",
+  /** 보고서 포함 표시 (r8 T-036): the fourth judgement key next to R / X / I. */
+  markIncludeInReport: "P",
+  /** 다음 미검토 행으로 (r8 T-036): the next loaded row below the focus without a judgement. */
+  nextUnreviewed: "G",
+  /** 실행 취소 (r8 T-036): take back the last judgement (one batch = one unit); text fields keep their own. */
+  undoReview: "Ctrl+Z",
 } as const;

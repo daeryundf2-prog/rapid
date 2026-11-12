@@ -1,5 +1,5 @@
 import type { StateCreator } from "zustand";
-import { pushToast } from "../../components/toastStore";
+import { pushToast, type ToastOptions } from "../../components/toastStore";
 import type { AppState } from "../store";
 
 /**
@@ -91,7 +91,8 @@ export interface OverlaySlice {
   setViewerPane: (mode: ViewerPaneMode) => void;
   /** Last command feedback (disabled reason / failure); shown as a toast (U-V7). */
   notice: { text: string; tone: "info" | "error"; at: number } | null;
-  showNotice: (text: string, tone?: "info" | "error") => void;
+  /** Status-bar notice + toast; `options` carries a toast button (e.g. 실행 취소, r8 T-036). */
+  showNotice: (text: string, tone?: "info" | "error", options?: ToastOptions) => void;
   clearNotice: () => void;
   setOverlay: (name: OverlayName, open: boolean) => void;
   setViewerIsDrawer: (drawer: boolean) => void;
@@ -144,9 +145,9 @@ export const createOverlaySlice: StateCreator<AppState, [], [], OverlaySlice> = 
     set({ viewerPane: mode });
   },
   notice: null,
-  showNotice: (text, tone = "info") => {
+  showNotice: (text, tone = "info", options) => {
     set({ notice: { text, tone, at: Date.now() } });
-    pushToast(text, tone);
+    pushToast(text, tone, options);
   },
   clearNotice: () => set({ notice: null }),
   setOverlay: (name, open) => {

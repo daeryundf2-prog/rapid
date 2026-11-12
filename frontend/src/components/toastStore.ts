@@ -14,6 +14,10 @@ export interface ToastAction {
   /** Opens in a new tab (a read-only file URL). */
   href?: string;
   run?: () => void;
+  /** Names the action's kind (e.g. "review-undo"): `dismissActionKey` drops a stale button. */
+  key?: string;
+  /** The key that does the same thing (KEY_MAP notation, e.g. "Ctrl+Z"): aria-keyshortcuts + title. */
+  shortcut?: string;
 }
 
 export interface ToastItem {
@@ -43,6 +47,8 @@ interface ToastState {
   dismissNewest: () => boolean;
   /** Drop error toasts (a stage change: the error belonged to the page that was left). */
   clearErrors: () => void;
+  /** Drop the toasts whose action has this `key` (a newer mark makes an older "실행 취소" stale). */
+  dismissActionKey: (key: string) => void;
   clear: () => void;
 }
 
@@ -73,6 +79,11 @@ export const useToastStore = create<ToastState>((set, get) => ({
   clearErrors: () => {
     if (get().toasts.some((t) => t.tone === "error")) {
       set((s) => ({ toasts: s.toasts.filter((t) => t.tone !== "error") }));
+    }
+  },
+  dismissActionKey: (key) => {
+    if (get().toasts.some((t) => t.action?.key === key)) {
+      set((s) => ({ toasts: s.toasts.filter((t) => t.action?.key !== key) }));
     }
   },
   clear: () => set({ toasts: [] }),

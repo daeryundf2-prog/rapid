@@ -5,6 +5,11 @@ import { useAppStore } from "../state/store";
 import { TOAST_MS, type ToastItem, useToastStore } from "./toastStore";
 import "./toast.css";
 
+/** KEY_MAP notation → aria-keyshortcuts notation ("Ctrl+Z" → "Control+Z"). */
+export function ariaShortcut(shortcut: string): string {
+  return shortcut.replace(/\bCtrl\b/g, "Control");
+}
+
 function ToastView({ toast }: { toast: ToastItem }) {
   const dismiss = useToastStore((s) => s.dismiss);
   // Hover / keyboard focus holds the timer so a toast never vanishes while it is being read.
@@ -64,6 +69,13 @@ function ToastView({ toast }: { toast: ToastItem }) {
             type="button"
             className="toast-action view-link"
             data-testid="toast-action"
+            // "실행 취소" (r8 T-036): the same key as the action, for screen readers and the tooltip.
+            {...(action.shortcut
+              ? {
+                  "aria-keyshortcuts": ariaShortcut(action.shortcut),
+                  title: `${action.label} (${action.shortcut})`,
+                }
+              : {})}
             onClick={() => {
               action.run?.();
               dismiss(toast.id);

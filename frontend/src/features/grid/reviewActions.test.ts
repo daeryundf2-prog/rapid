@@ -50,7 +50,7 @@ describe("applyReviewAction", () => {
         { collection: "files", locator: "/candidates/1" },
         { collection: "files", locator: "/candidates/2" },
       ],
-      reviewer: "web-ui",
+      reviewer: "",
       include_in_report: true,
     });
     expect(calls[2]?.body).toMatchObject({
@@ -102,7 +102,7 @@ describe("applyReviewAction", () => {
         { target_type: "file_record", target_id: "11" },
         { target_type: "file_record", target_id: "12" },
       ],
-      reviewer: "web-ui",
+      reviewer: "",
       status: "excluded",
       include_in_report: false,
     });

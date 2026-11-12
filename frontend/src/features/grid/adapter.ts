@@ -22,7 +22,7 @@
 
 import { create } from "zustand";
 import { registerCommand as registerShellCommand } from "../../commands/registry";
-import { pushToast as pushGlobalToast, TOAST_MAX } from "../../components/toastStore";
+import { pushToast as pushGlobalToast, TOAST_MAX, type ToastOptions } from "../../components/toastStore";
 import type { CollectionQuery, CollectionRef, GridRow, ServerSort } from "../../contracts/collection";
 import type { Command } from "../../contracts/command";
 import type { RowRef } from "../../contracts/rowRef";
@@ -74,7 +74,7 @@ interface LocalState {
   publishFocusedRow: (row: GridRow | null, target: ViewerTarget | null) => void;
   requestViewerFocus: () => void;
   setDensity: (density: Density) => void;
-  pushToast: (message: string, tone: Toast["tone"]) => void;
+  pushToast: (message: string, tone: Toast["tone"], options?: ToastOptions) => void;
   dismissToast: (id: number) => void;
 }
 
@@ -108,8 +108,8 @@ export const useGridLocalStore = create<LocalState>((set) => ({
   setDensity: (density) => set({ density }),
   // Grid feedback shows in the shell's one toast stack (U-V7); the local list keeps the last few
   // for the grid's own announce() and tests.
-  pushToast: (message, tone) => {
-    pushGlobalToast(message, tone);
+  pushToast: (message, tone, options) => {
+    pushGlobalToast(message, tone, options);
     set((s) => ({ toasts: [...s.toasts, { id: ++toastSeq, message, tone }].slice(-TOAST_MAX) }));
   },
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
@@ -167,7 +167,8 @@ export function useToast() {
   const dismiss = useGridLocalStore((s) => s.dismissToast);
   return {
     toasts,
-    show: (message: string, tone: Toast["tone"] = "error") => pushToast(message, tone),
+    show: (message: string, tone: Toast["tone"] = "error", options?: ToastOptions) =>
+      pushToast(message, tone, options),
     dismiss,
   };
 }
