@@ -1,6 +1,8 @@
 /**
  * Mode resolution: which viewer modes a target supports, why the others are
- * disabled (Korean reason → tab tooltip), and which one to auto-select.
+ * not offered, and which one to auto-select. Only usable modes become tabs (r8 T-086, IS-024);
+ * when the content itself cannot be shown (withheld credential file, binary, failed extraction,
+ * empty file, directory) `notice` carries one Korean sentence + one alternative for the tab strip.
  * Pure functions so the matrix is unit-testable without rendering.
  */
 
@@ -72,7 +74,45 @@ export const REASONS = {
   archiveHex: "ZIP 내부 항목은 헥스 미리보기를 제공하지 않습니다.",
   directory: "디렉터리는 미리보기가 없습니다. 디렉터리 안의 파일을 선택하세요.",
   notFamily: "계열은 파일·아티팩트·분석 결과 행에서 볼 수 있습니다.",
+  withheld: "자격 증명 파일이라 본문을 보여 주지 않습니다.",
 } as const;
+
+/** Sentences of the tab-strip notice (r8 T-086): what cannot be shown, then one way forward. */
+export const NOTICES = {
+  binary: "텍스트로 표시할 수 없는 파일입니다",
+  extractionFailed: "문서 텍스트를 추출하지 못했습니다",
+  emptyFile: "빈 파일(0바이트)이라 표시할 내용이 없습니다",
+  directory: "디렉터리는 미리보기가 없습니다",
+  toHex: "헥스로 보기",
+  toMeta: "파일 정보 보기",
+} as const;
+
+/** `credential_reason` codes (core/credential_files.credential_file_reason) → Korean. */
+export const CREDENTIAL_REASON_LABELS: Record<string, string> = {
+  "catalog-credential": "자격 증명 폴더",
+  "credential-folder": "자격 증명 폴더",
+  "credential-name": "알려진 자격 증명 파일 이름",
+  "browser-credential-store": "브라우저 쿠키·로그인 저장소",
+  "private-key": "개인 키",
+  "ai-tool-credential-name": "AI 도구 자격 증명",
+};
+
+/** One sentence for a withheld body, naming the kind of credential file when the server does. */
+export function withheldSentence(preview: Pick<SourcePreview, "credential_reason">): string {
+  const label = preview.credential_reason ? CREDENTIAL_REASON_LABELS[preview.credential_reason] : undefined;
+  return label
+    ? `자격 증명 파일(${label})이라 본문을 보여 주지 않습니다`
+    : "자격 증명 파일이라 본문을 보여 주지 않습니다";
+}
+
+/** Server withheld the body (credential / secret file): no text, table, hex or media. */
+export function isWithheldPreview(preview: SourcePreview | null): boolean {
+  return (
+    preview?.preview_type === "withheld" ||
+    preview?.coverage_status === "body-withheld" ||
+    preview?.viewer_metadata?.preview_status === "withheld"
+  );
+}
 
 /**
  * 계열 tab (R7 갈래 A): rows with an item ref (files, artifacts — archive entries too — and analysis
@@ -117,9 +157,22 @@ export interface ResolveInput {
   loading?: boolean;
 }
 
+/** What the tab strip says when the content cannot be shown: one sentence + one alternative. */
+export interface ModeNotice {
+  text: string;
+  action: { mode: ViewerMode; label: string } | null;
+}
+
 export interface ResolvedModes {
+  /** Every mode with its availability (the reason stays for commands / the 팝아웃 announce). */
   modes: ViewerModeState[];
   best: ViewerMode | null;
+  notice?: ModeNotice | null;
+}
+
+/** The tabs the strip renders: usable modes only (no disabled tab, r8 T-086). */
+export function visibleModes(modes: ViewerModeState[]): ViewerModeState[] {
+  return modes.filter((m) => m.available);
 }
 
 function state(mode: ViewerMode, reason?: string): ViewerModeState {
@@ -208,7 +261,21 @@ export function resolveModes(input: ResolveInput): ResolvedModes {
     target.preferredMode === "family" && modes.find((m) => m.mode === "family")?.available
       ? "family"
       : resolved.best;
-  return { modes, best };
+  return { modes, best, notice: noticeFor(input, modes) };
+}
+
+function noticeFor(input: ResolveInput, modes: ViewerModeState[]): ModeNotice | null {
+  const { target, preview } = input;
+  if (!target?.sourcePath || !preview) return null;
+  const available = (mode: ViewerMode) => modes.some((m) => m.mode === mode && m.available);
+  const meta = available("meta") ? { mode: "meta" as const, label: NOTICES.toMeta } : null;
+  const hex = available("hex") ? { mode: "hex" as const, label: NOTICES.toHex } : meta;
+  if (isDirectoryTarget(target, preview)) return { text: NOTICES.directory, action: meta };
+  if (isWithheldPreview(preview)) return { text: withheldSentence(preview), action: meta };
+  if (preview.size === 0) return { text: NOTICES.emptyFile, action: meta };
+  if (naturalMode(preview) !== "hex") return null;
+  if (isDocumentPreview(preview)) return { text: NOTICES.extractionFailed, action: hex };
+  return { text: NOTICES.binary, action: hex };
 }
 
 function resolveContentModes(input: ResolveInput): ResolvedModes {
@@ -246,6 +313,14 @@ function resolveContentModes(input: ResolveInput): ResolvedModes {
           : "meta"
         : null;
     return { modes, best };
+  }
+
+  if (isWithheldPreview(preview)) {
+    // Credential / secret file: the server returns no text, rows, hex or media (403 for each read).
+    return {
+      modes: MODE_ORDER.map((mode) => (mode === "meta" ? state("meta") : state(mode, REASONS.withheld))),
+      best: "meta",
+    };
   }
 
   const natural = naturalMode(preview);

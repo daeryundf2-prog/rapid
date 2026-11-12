@@ -113,7 +113,8 @@ describe("Viewer — empty state and toolbar", () => {
       expect(tool(id).getAttribute("data-disabled-reason")).toBe("뷰어에 표시된 행이 없습니다.");
     }
     expect(tool("viewer.mark.relevant").getAttribute("aria-disabled")).toBe("true");
-    expect(screen.getAllByRole("tab").every((t) => t.getAttribute("aria-disabled") === "true")).toBe(true);
+    // r8 T-086: only usable modes are tabs — with no row there are none.
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
   });
 
   it("registers the toolbar actions as commands that report disabledReason", async () => {
@@ -237,31 +238,52 @@ describe("Viewer — loading, modes, focus", () => {
     expect(screen.getAllByRole("tabpanel")).toHaveLength(1);
   });
 
-  it("renders disabled tabs with a Korean reason in the tooltip only — never in the panel body", async () => {
+  it("r8 T-086: renders only usable tabs — no disabled tab, no reason text in the strip for text", async () => {
     await show({ preview_type: "text", extension: ".txt", text: "hi" });
-    const sqlite = tab("SQLite");
-    expect(sqlite.getAttribute("aria-disabled")).toBe("true");
-    const described = document.getElementById(sqlite.getAttribute("aria-describedby") || "");
-    expect(described?.hasAttribute("hidden")).toBe(true);
-    expect(described?.textContent).toBe("SQLite 데이터베이스가 아닙니다.");
-    fireEvent.click(sqlite);
-    expect(sqlite.getAttribute("aria-selected")).toBe("false");
-    const panel = screen.getByRole("tabpanel");
-    for (const reason of [
-      "SQLite 데이터베이스가 아닙니다.",
-      "이미지 파일이 아닙니다.",
-      "오디오·비디오 파일이 아닙니다.",
-    ]) {
-      expect(panel.textContent).not.toContain(reason);
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.map((t) => t.textContent)).toEqual(["원본", "헥스", "메타", "계열"]);
+    expect(tabs.some((t) => t.getAttribute("aria-disabled") === "true")).toBe(false);
+    expect(document.getElementById("viewer-tab-sqlite")).toBeNull();
+    expect(screen.queryByTestId("viewer-tab-notice")).toBeNull();
+    for (const reason of ["SQLite 데이터베이스가 아닙니다.", "이미지 파일이 아닙니다."]) {
+      expect(region().textContent).not.toContain(reason);
     }
-    // Only the hidden description / on-hover tooltip carry reasons; no visible text node has them.
-    const holders = Array.from(document.querySelectorAll("*")).filter(
-      (el) => el.children.length === 0 && el.textContent === "이미지 파일이 아닙니다.",
+  });
+
+  it("r8 T-086: a binary file says so in one sentence beside the tabs, with 헥스로 보기", async () => {
+    await show({ preview_type: "binary", extension: ".dat" }, {}, { "source-file": () => new Response("x") });
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["헥스", "메타", "계열"]);
+    fireEvent.click(tab("메타"));
+    const notice = screen.getByTestId("viewer-tab-notice");
+    expect(notice.textContent).toBe("텍스트로 표시할 수 없는 파일입니다 — 헥스로 보기");
+    fireEvent.click(screen.getByTestId("viewer-tab-notice-action"));
+    expect(tab("헥스").getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("r8 T-086: a withheld credential file shows 메타 only, the reason sentence and one alternative", async () => {
+    await show({
+      preview_type: "withheld",
+      extension: "",
+      name: "Cookies",
+      coverage_status: "body-withheld",
+      credential_reason: "browser-credential-store",
+      message: "자격 증명 파일 — 본문 미수집 (browser-credential-store)",
+    });
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["메타", "계열"]);
+    expect(tab("메타").getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByTestId("viewer-tab-notice").textContent).toBe(
+      "자격 증명 파일(브라우저 쿠키·로그인 저장소)이라 본문을 보여 주지 않습니다 — 파일 정보 보기",
     );
-    expect(holders.length).toBeGreaterThan(0);
-    expect(holders.every((el) => el.hasAttribute("hidden") || el.getAttribute("role") === "tooltip")).toBe(
-      true,
+  });
+
+  it("r8 T-086: the 원본 tab never prints binary bytes as text", async () => {
+    await show({ preview_type: "text", extension: ".txt", text: "a\u0000b\u0000c" });
+    expect(screen.getByTestId("viewer-source-binary").textContent).toBe(
+      "텍스트로 표시할 수 없는 파일입니다 — 헥스로 보기",
     );
+    expect(region().querySelector(".viewer-lines")).toBeNull();
+    fireEvent.click(screen.getByTestId("viewer-source-binary").querySelector("button") as HTMLButtonElement);
+    expect(tab("헥스").getAttribute("aria-selected")).toBe("true");
   });
 
   it("uses no banner landmark and no local live region (S5 announcer only)", async () => {
@@ -271,16 +293,20 @@ describe("Viewer — loading, modes, focus", () => {
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("file.bin");
   });
 
-  it("moves between tabs with arrow keys (disabled tabs focus but do not activate)", async () => {
-    await show({ preview_type: "text", extension: ".txt", text: "hi" });
+  it("moves between tabs with arrow keys (every tab is usable and activates)", async () => {
+    await show(
+      { preview_type: "text", extension: ".txt", text: "hi" },
+      {},
+      { "source-file": () => new Response("x") },
+    );
     tab("원본").focus();
     fireEvent.keyDown(tab("원본"), { key: "ArrowRight" });
     expect(document.activeElement).toBe(tab("헥스"));
     expect(tab("헥스").getAttribute("aria-selected")).toBe("true");
     fireEvent.keyDown(tab("헥스"), { key: "ArrowRight" });
-    expect(document.activeElement).toBe(tab("SQLite"));
-    expect(tab("헥스").getAttribute("aria-selected")).toBe("true");
-    fireEvent.keyDown(tab("SQLite"), { key: "End" });
+    expect(document.activeElement).toBe(tab("메타"));
+    expect(tab("메타").getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(tab("메타"), { key: "End" });
     // The last tab is 계열 (R7 갈래 A), available on a files row.
     expect(document.activeElement).toBe(tab("계열"));
     expect(tab("계열").getAttribute("aria-selected")).toBe("true");

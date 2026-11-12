@@ -44,7 +44,7 @@ import {
 } from "./commands";
 import { targetKey } from "./history";
 import { ModeTabs, panelId, tabId, VIEWER_PANEL_ID } from "./ModeTabs";
-import { resolveModes, sqliteRowTarget } from "./modes";
+import { resolveModes, sqliteRowTarget, visibleModes } from "./modes";
 import { POPOUT_COMMAND_ID } from "./popout/host";
 import { recordByteRange } from "./record";
 import { pendingRowKey, viewerSession } from "./session";
@@ -179,7 +179,7 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
   }, [target, path, previewState]);
 
   // ---- modes --------------------------------------------------------------
-  const { modes, best } = useMemo(
+  const { modes, best, notice } = useMemo(
     () =>
       resolveModes({
         target,
@@ -223,8 +223,12 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
     userMode && userMode.key === key && modes.find((m) => m.mode === userMode.mode)?.available
       ? userMode.mode
       : null;
-  const activeMode: ViewerMode = userChoice ?? best ?? target?.preferredMode ?? "meta";
-  const hasActiveTab = modes.some((m) => m.mode === activeMode);
+  // Only usable modes are tabs (r8 T-086): a requested mode that is not one falls back to the first
+  // tab, so the strip always has its one selected tab.
+  const tabs = useMemo(() => visibleModes(modes), [modes]);
+  const wanted: ViewerMode = userChoice ?? best ?? target?.preferredMode ?? "meta";
+  const activeMode: ViewerMode = tabs.some((m) => m.mode === wanted) ? wanted : (tabs[0]?.mode ?? wanted);
+  const hasActiveTab = tabs.some((m) => m.mode === activeMode);
   const selectMode = useCallback(
     (mode: ViewerMode) => {
       if (key) setUserMode({ key, mode });
@@ -522,10 +526,10 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
       {/* 특이사항 (U-F4): the row's flags with their evidence, above the tabs (every mode). */}
       {/* Keyed by row: each row starts with its own default (open for A), never the last row's toggle. */}
       <FlagBanner key={row?.rowKey ?? key ?? "none"} row={row} />
-      <ModeTabs modes={modes} active={activeMode} onSelect={selectMode} />
+      <ModeTabs modes={modes} active={activeMode} onSelect={selectMode} notice={notice} />
       {/* Inactive modes get an empty, hidden panel so every tab's aria-controls resolves to a
           tabpanel labelled by that tab; only the active mode renders content. */}
-      {modes
+      {tabs
         .filter((m) => m.mode !== activeMode)
         .map((m) => (
           <div
@@ -574,6 +578,7 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
             }}
             onOpenPath={openGalleryPath}
             onCopy={copyAndAnnounce}
+            onShowHex={tabs.some((m) => m.mode === "hex") ? () => selectMode("hex") : undefined}
           />
         )}
       </div>
@@ -597,6 +602,8 @@ interface ViewerBodyProps {
   onComputeHash: () => void;
   onOpenPath: (path: string) => void;
   onCopy: (text: string, sentence: string) => void;
+  /** Switch to the 헥스 tab (absent when this row has none). */
+  onShowHex?: () => void;
 }
 
 function ViewerBody(props: ViewerBodyProps) {
@@ -655,7 +662,15 @@ function ViewerBody(props: ViewerBodyProps) {
   }
   switch (mode) {
     case "source":
-      return <SourceView key={preview.path} runId={target.runId} preview={preview} terms={props.terms} />;
+      return (
+        <SourceView
+          key={preview.path}
+          runId={target.runId}
+          preview={preview}
+          terms={props.terms}
+          onShowHex={props.onShowHex}
+        />
+      );
     case "document":
       return <DocumentView preview={preview} terms={props.terms} />;
     case "hex":

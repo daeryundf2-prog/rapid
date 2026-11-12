@@ -269,15 +269,29 @@
   font-weight: 600;
 }
 
-/* Unavailable mode: dimmed (still ≥ 4.5:1), no strike-through — the line read as noise in the
-   light theme where --line is dark (B2 #10); the reason is the tab's tooltip. */
-/* Not applicable to this row (review #6): every tab stays in the strip (one tablist, stable
-   e2e names), but the inapplicable ones recede to 45%; the reason is the tooltip. */
-.viewer-tab[aria-disabled="true"] {
-  cursor: not-allowed;
+/* Only usable modes are tabs (r8 T-086). Content that cannot be shown (withheld credential file,
+   binary, failed extraction) is one sentence + one alternative under the strip. */
+.viewer-tab-notice {
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--line);
   color: var(--text-muted);
-  font-weight: 400;
-  opacity: 0.45;
+  font-size: var(--fs-aux);
+}
+
+.viewer-tab-notice-action {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.viewer-tab-notice-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* Panel ------------------------------------------------------------------- */
