@@ -277,5 +277,16 @@ class HashWorkerTests(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in evidence.iterdir()), ["img.E01"])
 
 
+
+class ErrorDetailCapTests(unittest.TestCase):
+    def test_long_raw_error_is_cut_and_marked(self) -> None:
+        from rapidtriage.core import e01_recorded_hash as module
+
+        detail = module._error_detail(OSError("x" * (module.ERROR_DETAIL_LIMIT + 500)))
+        self.assertIn("detail_truncated", detail)
+        self.assertLess(len(detail), module.ERROR_DETAIL_LIMIT + 100)
+        self.assertNotIn("detail_truncated", module._error_detail(OSError("short")))
+
+
 if __name__ == "__main__":
     unittest.main()

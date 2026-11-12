@@ -231,7 +231,14 @@ ERROR_DETAIL_LIMIT = 2000
 
 
 def _error_detail(exc: BaseException) -> str:
-    return f"{type(exc).__name__}: {exc}"[:ERROR_DETAIL_LIMIT]
+    """The raw error, cut to ``ERROR_DETAIL_LIMIT``; a cut is marked in the text itself
+    (``detail_truncated`` / ``detail_total`` characters), never silent."""
+    detail = f"{type(exc).__name__}: {exc}"
+    detail_total = len(detail)
+    detail_truncated = detail_total > ERROR_DETAIL_LIMIT
+    if detail_truncated:
+        return f"{detail[:ERROR_DETAIL_LIMIT]} … [detail_truncated: {detail_total} chars]"
+    return detail
 
 
 HASH_ALGORITHM_BY_LENGTH = {32: "md5", 40: "sha1", 64: "sha256"}
