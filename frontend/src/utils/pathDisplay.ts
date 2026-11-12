@@ -1,7 +1,8 @@
 /**
  * Path display (review #9 / #6, plan r7 §3.2 L2 C-D8): grid 경로 cells, the viewer header, the
  * 보고 table and the landing show the path TAIL FIRST — the file name and its two parent folders
- * stay, the leading folders ellipsize ("…"); the full path is the tooltip.
+ * stay, the front gives way under ONE leading ellipsis ("…", r8 C.9.1); the full path is the
+ * tooltip. Listed paths are paths inside the evidence (`evidencePathOf`), not the result folder.
  */
 
 /** "C:\a\b\file.txt" → "C:\a\b"; "/var/log/syslog" → "/var/log"; "file.txt" → "" (no parent). */
@@ -64,4 +65,75 @@ export function tailPathParts(path: string, keep = 2): TailPathParts {
 export function pathCellParts(path: string | null | undefined): TailPathParts | null {
   if (!path) return null;
   return tailPathParts(path);
+}
+
+/**
+ * Stage folders a run extracts an image's file system into (core/run: `_e01` · `_disk_image` ·
+ * `_archive_image` · `_virtual_disk`, each holding `fs` or the legacy `filesystem`). Everything up
+ * to and including that pair is the analysis PC's result folder, not a path inside the evidence.
+ */
+const RESULT_STAGE = /[\\/]_(?:e01|disk_image|archive_image|virtual_disk)[\\/](?:fs|filesystem)(?=[\\/]|$)/i;
+
+/**
+ * Pseudo folders the tools put recovered items in (`_deleted_mft`: the native E01 engine's
+ * deleted-record sweep; `$OrphanFiles`: The Sleuth Kit's orphan folder). An item under one has
+ * no known original location (r8 C.9.1, IS-128).
+ */
+const RECOVERY_FOLDERS: ReadonlySet<string> = new Set(["_deleted_mft", "$orphanfiles"]);
+
+export interface EvidencePath {
+  /**
+   * The path inside the evidence ("\\Users\\kim\\a.txt"; "C:\\Users\\kim\\a.txt" when the volume
+   * letter is known; the path itself when it holds no result folder). null when the original
+   * location is unknown (recovery pseudo folder) or there is no path.
+   */
+  path: string | null;
+  /** True when a result-folder prefix was removed. */
+  stripped: boolean;
+  /** True when the item sits in a recovery pseudo folder: its original location is unknown. */
+  locationUnknown: boolean;
+}
+
+/** "c" / "C:" / "c:\\" → "C:"; anything else → "". */
+function volumeLetter(volume: string | null | undefined): string {
+  const match = /^\s*([A-Za-z]):?[\\/]?\s*$/.exec(volume ?? "");
+  return match?.[1] ? `${match[1].toUpperCase()}:` : "";
+}
+
+/**
+ * The in-evidence path of a listed path (r8 C.9.1, IS-128 / GAP-335): the result-folder prefix
+ * (`…\_e01\fs\`) is removed and the rest is rooted at the volume — "C:\\…" when `volume` names
+ * the letter, else the volume root "\\…". A path with no result folder (a folder input's own
+ * files) is already an evidence path and is returned as it is.
+ */
+export function evidencePathOf(path: string | null | undefined, volume?: string | null): EvidencePath {
+  if (!path) return { path: null, stripped: false, locationUnknown: false };
+  const match = RESULT_STAGE.exec(path);
+  if (!match) {
+    const unknown = path.split(/[\\/]/).some((segment) => RECOVERY_FOLDERS.has(segment.toLowerCase()));
+    return { path: unknown ? null : path, stripped: false, locationUnknown: unknown };
+  }
+  const sep = path.includes("\\") ? "\\" : "/";
+  const segments = path
+    .slice(match.index + match[0].length)
+    .split(/[\\/]/)
+    .filter(Boolean);
+  if (RECOVERY_FOLDERS.has((segments[0] ?? "").toLowerCase())) {
+    return { path: null, stripped: true, locationUnknown: true };
+  }
+  return {
+    path: `${volumeLetter(volume)}${sep}${segments.join(sep)}`,
+    stripped: true,
+    locationUnknown: false,
+  };
+}
+
+/**
+ * The folder a files 경로 cell shows (the 이름 column already names the file): the in-evidence
+ * parent folder; a file at the volume root shows the root. null when the location is unknown.
+ */
+export function evidenceFolderOf(path: string | null | undefined, volume?: string | null): string | null {
+  const evidence = evidencePathOf(path, volume).path;
+  if (!evidence) return null;
+  return parentDir(evidence) || evidence;
 }

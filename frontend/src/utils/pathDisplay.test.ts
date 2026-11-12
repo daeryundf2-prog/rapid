@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { middlePathParts, parentDir, pathCellParts, tailPathParts } from "./pathDisplay";
+import {
+  evidenceFolderOf,
+  evidencePathOf,
+  middlePathParts,
+  parentDir,
+  pathCellParts,
+  tailPathParts,
+} from "./pathDisplay";
 
 describe("path display (review #9: parent folder, one middle ellipsis)", () => {
   it("parentDir drops the file name and keeps roots", () => {
@@ -47,5 +54,42 @@ describe("path display (review #9: parent folder, one middle ellipsis)", () => {
     expect(pathCellParts("readme.txt")).toEqual({ head: "", parents: "", name: "readme.txt" });
     expect(pathCellParts(null)).toBeNull();
     expect(pathCellParts("")).toBeNull();
+  });
+});
+
+describe("evidencePathOf (r8 C.9.1, T-171)", () => {
+  it("removes the result-folder prefix and roots the rest at the volume", () => {
+    expect(evidencePathOf("D:\\out\\r1\\_e01\\fs\\Users\\kim\\a.txt")).toEqual({
+      path: "\\Users\\kim\\a.txt",
+      stripped: true,
+      locationUnknown: false,
+    });
+    expect(evidencePathOf("D:\\out\\r1\\_E01\\FileSystem\\boot.ini", "c:").path).toBe("C:\\boot.ini");
+    expect(evidencePathOf("/srv/out/_disk_image/filesystem/etc/passwd").path).toBe("/etc/passwd");
+    expect(evidencePathOf("D:\\out\\_e01\\fs").path).toBe("\\");
+  });
+
+  it("keeps a path with no result folder (a folder input) and flags recovery pseudo folders", () => {
+    expect(evidencePathOf("E:\\collect\\a.txt")).toEqual({
+      path: "E:\\collect\\a.txt",
+      stripped: false,
+      locationUnknown: false,
+    });
+    // `fs` alone is not a stage: only `_e01\fs` etc.
+    expect(evidencePathOf("E:\\fs\\a.txt").path).toBe("E:\\fs\\a.txt");
+    expect(evidencePathOf("D:\\out\\_e01\\fs\\_deleted_mft\\12-a.doc")).toEqual({
+      path: null,
+      stripped: true,
+      locationUnknown: true,
+    });
+    expect(evidencePathOf("E:\\tsk\\$OrphanFiles\\x").locationUnknown).toBe(true);
+    expect(evidencePathOf(null)).toEqual({ path: null, stripped: false, locationUnknown: false });
+  });
+
+  it("evidenceFolderOf gives the in-evidence parent folder (root for a root file)", () => {
+    expect(evidenceFolderOf("D:\\out\\_e01\\fs\\Users\\kim\\a.txt")).toBe("\\Users\\kim");
+    expect(evidenceFolderOf("D:\\out\\_e01\\fs\\a.txt")).toBe("\\");
+    expect(evidenceFolderOf("D:\\out\\_e01\\fs\\a.txt", "C")).toBe("C:\\");
+    expect(evidenceFolderOf("D:\\out\\_e01\\fs\\_deleted_mft\\1-a")).toBeNull();
   });
 });

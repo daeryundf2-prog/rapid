@@ -1,5 +1,6 @@
 import { fetchFilesPage } from "../../../api/collections";
 import type { CollectionQuery } from "../../../contracts/collection";
+import { evidencePathOf } from "../../../utils/pathDisplay";
 import { formatGridTime } from "../../../utils/time";
 import { parseFlags } from "../../flags/flags";
 import type { CollectionDef, ColumnSpec } from "../types";
@@ -27,6 +28,7 @@ import {
 } from "./FileCells";
 import { flagsColumn } from "./families";
 import { familyDedupColumns, familyDedupFields } from "./familyDedup";
+import { type PathCellOptions, pathCell, pathCellText, pathCellTooltip } from "./PathCell";
 
 /** Shown on the NTFS columns while no NTFS-meta analysis has been joined (plan U-P1-3). */
 export const NTFS_EMPTY_HINT = "NTFS 메타 분석을 실행하면 채워집니다";
@@ -245,6 +247,53 @@ export function deletionStateOf(raw: Record<string, unknown>): DeletionState | n
   return flag === null ? null : flag ? "deleted" : "allocated";
 }
 
+/** `recovery.candidate_kind` values of a recovered (not a live, allocated) file (files.schema). */
+const RECOVERED_KINDS: ReadonlySet<string> = new Set([
+  "deleted-entry",
+  "orphan-record",
+  "carved",
+  "partial-corrupt",
+]);
+/** Kinds whose original location is unknown: a carved run of bytes, an orphaned MFT record. */
+const LOCATION_UNKNOWN_KINDS: ReadonlySet<string> = new Set(["orphan-record", "carved"]);
+
+export interface FileRecovery {
+  /** A recovered item (deleted entry, carved, orphan, partial) or one in a recovery pseudo folder. */
+  recovered: boolean;
+  /** Its original location is unknown: show "원래 위치 알 수 없음", not a pseudo folder. */
+  locationUnknown: boolean;
+}
+
+/**
+ * Whether a files row is a recovered item (r8 C.9.1, IS-128 / GAP-335): `recovery.candidate_kind`
+ * other than `existing`, or a path under a recovery pseudo folder (`_deleted_mft`,
+ * `$OrphanFiles`), which also means its original location is unknown.
+ */
+export function fileRecoveryOf(raw: Record<string, unknown>, path: string | null): FileRecovery {
+  const recovery = isRecord(raw.recovery) ? raw.recovery : {};
+  const kind = str(recovery.candidate_kind).toLowerCase();
+  const pseudo = evidencePathOf(path).locationUnknown;
+  return {
+    recovered: pseudo || RECOVERED_KINDS.has(kind),
+    locationUnknown: pseudo || LOCATION_UNKNOWN_KINDS.has(kind),
+  };
+}
+
+/** Volume letter of a files row, when the server names one (none does yet: rooted at "\\"). */
+function volumeOf(raw: Record<string, unknown>): string | null {
+  return strOrNull(raw.volume_letter) ?? strOrNull(raw.drive_letter);
+}
+
+/** 경로 cell options of a mapped files row (folder only: the 이름 column names the file). */
+export function filesPathOptions(row: { fields: Record<string, unknown> }): PathCellOptions {
+  return {
+    folderOnly: true,
+    recovered: row.fields.recovered === true,
+    locationUnknown: row.fields.locationUnknown === true,
+    volume: strOrNull(row.fields.volume),
+  };
+}
+
 /** How a row was matched to its NTFS / inventory record (`match_method`) → Korean. */
 export const MATCH_METHOD_LABELS: Readonly<Record<string, string>> = {
   "relative-path": "상대 경로",
@@ -364,6 +413,7 @@ export const filesCollection: CollectionDef = {
     const deletion = deletionStateOf(raw);
     const deleted = deletion === "deleted" ? true : deletion === "allocated" ? false : null;
     const signature = fileSignatureOf(raw);
+    const recovered = fileRecoveryOf(raw, path);
     const categories = Array.isArray(raw.categories) ? raw.categories.map(str).filter(Boolean) : [];
     return makeRow(
       makeRef("files", `/${inventoryOnly ? "inventory" : "candidates"}/${index}`),
@@ -393,6 +443,10 @@ export const filesCollection: CollectionDef = {
         siModified: strOrNull(ntfs?.si_modified_at),
         attributes: Array.isArray(ntfs?.attributes) ? joinList(ntfs?.attributes) : str(ntfs?.attributes),
         recovery: str(recovery.candidate_kind),
+        // 경로 = the path inside the evidence (r8 C.9.1): recovered marker / unknown location.
+        recovered: recovered.recovered,
+        locationUnknown: recovered.locationUnknown,
+        volume: volumeOf(raw),
         knownGood: str(raw.known_good_status),
         // NTFS provenance (plan analysis-workbench-p1 §3.3): null until an NTFS-meta analysis is joined.
         ntfs: isRecord(raw.ntfs) ? raw.ntfs : null,
@@ -416,7 +470,15 @@ export const filesCollection: CollectionDef = {
     { ...col.title("이름", 220), minWidth: 220, sortKey: "name" },
     // 특이사항 (U-F4): hidden while no loaded row carries a flag (FILES_PRIORITY empty-column rule).
     flagsColumn(["analysis", "compact"]),
-    { ...col.path(200, ["analysis", "source"]), sortKey: "path" },
+    {
+      ...col.path(200, ["analysis", "source"]),
+      sortKey: "path",
+      // The in-evidence folder (r8 C.9.1): never the result folder, recovered items marked.
+      value: (r) => pathCellText(r.sourcePath, { ...filesPathOptions(r), folderOnly: false }),
+      format: (r) => pathCellText(r.sourcePath, filesPathOptions(r)) ?? "",
+      tooltip: (r) => pathCellTooltip(r.sourcePath, filesPathOptions(r)),
+      render: (r) => pathCell(r.sourcePath, filesPathOptions(r)),
+    },
     col.field("size", "크기", 80, ["analysis", "compact"], (r) => (r.fields.size as number | null) ?? null, {
       align: "right",
       minWidth: 80,
