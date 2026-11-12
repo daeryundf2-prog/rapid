@@ -92,6 +92,7 @@
             "properties": {
               "path": { "type": "string" },
               "relative_path": { "type": "string" },
+              "relative_to": { "type": "string", "enum": ["evidence-root", ""] },
               "name": { "type": "string" },
               "size": { "type": "integer" },
               "modified_at": { "type": "string", "format": "date-time" },

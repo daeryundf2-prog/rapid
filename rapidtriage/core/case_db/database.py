@@ -981,7 +981,16 @@ class CaseDatabase:
         priority: str | None = None,
         due_at: str | None = None,
         source_citation_package: Mapping[str, object] | None = None,
+        actor_source: str | None = None,
     ) -> dict[str, object]:
+        """Create or update one review mark (+ history and a ``review.marked`` audit row).
+
+        ``reviewer`` is the actor of THIS action: an empty or missing name never inherits the
+        previous mark's reviewer (that would attribute the change to another examiner); the mark
+        then has no reviewer and the audit/history actor is ``local-user``. ``actor_source`` says
+        where the name came from (``client-supplied`` / ``server-env`` / ``local-default``); by
+        default ``client-supplied`` for a non-empty name, else ``local-default`` (R8 T-036/T-180).
+        """
         normalized_case_id = normalize_identifier(case_id, fallback="case")
         timestamp = now_iso()
         with self.connect() as connection:
@@ -1021,7 +1030,10 @@ class CaseDatabase:
                 if include_in_report is not None
                 else previous_review.get("include_in_report", False)
             )
-            effective_reviewer = str(reviewer if reviewer is not None else previous_review.get("reviewer", ""))
+            effective_reviewer = str(reviewer or "").strip()
+            effective_actor_source = (
+                actor_source if actor_source and effective_reviewer else ("client-supplied" if effective_reviewer else "local-default")
+            )
             effective_assignee = str(assignee if assignee is not None else previous_review.get("assignee", ""))
             effective_priority = normalize_review_priority(
                 str(priority if priority is not None else previous_review.get("priority", "normal"))
@@ -1157,9 +1169,9 @@ class CaseDatabase:
                             "due_at": effective_due_at,
                             "source_citation_package_hash": source_citation_package_hash(effective_source_citation_package),
                             "source_citation_package_attached": bool(effective_source_citation_package),
-                            # R8 T-180: the actor is the reviewer name the client sent (not an
-                            # authenticated identity); an empty one falls back to "local-user".
-                            "actor_source": "client-supplied" if effective_reviewer else "local-default",
+                            # R8 T-180: where the actor name came from (never an authenticated
+                            # identity); an empty one is "local-user" / "local-default".
+                            "actor_source": effective_actor_source,
                         },
                         ensure_ascii=False,
                         sort_keys=True,
@@ -1184,6 +1196,7 @@ class CaseDatabase:
         assignee: str | None = None,
         priority: str | None = None,
         due_at: str | None = None,
+        actor_source: str | None = None,
     ) -> dict[str, object]:
         marks: list[dict[str, object]] = []
         for target in targets:
@@ -1205,6 +1218,7 @@ class CaseDatabase:
                     assignee=assignee,
                     priority=priority,
                     due_at=due_at,
+                    actor_source=actor_source,
                 )
             )
         return {

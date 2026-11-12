@@ -1741,7 +1741,9 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(updated["verification_status"], "verified")
             self.assertEqual(updated["tags"], ["credential"])
             self.assertEqual(updated["note"], "Initial review")
-            self.assertEqual(updated["reviewer"], "analyst-a")
+            # R8 T-036/T-180: the reviewer is the actor of this update, never inherited from the
+            # previous mark (an unnamed change is not attributed to analyst-a).
+            self.assertEqual(updated["reviewer"], "")
 
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):

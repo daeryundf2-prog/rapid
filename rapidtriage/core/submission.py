@@ -19,16 +19,43 @@ SKIP_REASON_KO = {
 }
 
 
+def evidence_relative_roots(summary: Mapping[str, object]) -> list[Path]:
+    """The analysed file-system roots of a run (``source.analysis_root``, ``root``,
+    ``scan_scope_root``): what ``evidence.relative_path`` is relative to. Never the output folder
+    or an image stage folder, which hold copies and recovered output, not the evidence tree."""
+    values: list[object] = []
+    source = summary.get("source")
+    if isinstance(source, Mapping):
+        values.append(source.get("analysis_root"))
+    values.extend((summary.get("root"), summary.get("scan_scope_root")))
+    roots: list[Path] = []
+    for value in values:
+        if isinstance(value, str) and value:
+            root = Path(value).expanduser().resolve()
+            if root not in roots:
+                roots.append(root)
+    return roots
+
+
 def build_submission_manifest(
     case_payload: Mapping[str, object],
     *,
     allowed_roots: Sequence[Path],
     include_all: bool = False,
     max_items: int = 500,
+    evidence_roots: Sequence[Path] | None = None,
 ) -> dict[str, object]:
+    """``evidence_roots``: the analysed file-system roots ``evidence.relative_path`` is relative
+    to (default: ``allowed_roots``). A file under none of them -- carved or recovered output,
+    extracts in the result folder -- gets ``relative_path: ""`` and ``relative_to: ""`` instead of
+    a path relative to the output folder (R8 T-178 review P2-6); ``relative_to`` is
+    ``"evidence-root"`` when the path is relative to an analysed root."""
     bookmarks = case_payload.get("bookmarks")
     rows = [item for item in bookmarks if isinstance(item, Mapping)] if isinstance(bookmarks, list) else []
     allowed = [root.expanduser().resolve() for root in allowed_roots]
+    relative_roots = (
+        [root.expanduser().resolve() for root in evidence_roots] if evidence_roots is not None else allowed
+    )
     items: list[dict[str, object]] = []
     skipped: list[dict[str, object]] = []
     candidate_count = 0
@@ -63,6 +90,7 @@ def build_submission_manifest(
 
         stat_result = source_path.stat()
         hashes = compute_hashes_fresh(source_path)
+        relative_root = next((root for root in relative_roots if is_relative_to(source_path, root)), None)
         reference = bookmark.get("reference")
         items.append(
             {
@@ -75,7 +103,8 @@ def build_submission_manifest(
                 "row": build_row_info(bookmark),
                 "evidence": {
                     "path": str(source_path),
-                    "relative_path": source_path.relative_to(containing_root).as_posix(),
+                    "relative_path": source_path.relative_to(relative_root).as_posix() if relative_root else "",
+                    "relative_to": "evidence-root" if relative_root else "",
                     "name": source_path.name,
                     "size": stat_result.st_size,
                     "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, tz=dt.timezone.utc).isoformat(),

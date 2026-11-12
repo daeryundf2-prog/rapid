@@ -17,7 +17,11 @@ from .case_report import (
 )
 from .docs import write_result
 from .forensic_accuracy import build_accuracy_gate
-from .submission import build_submission_manifest, compute_hashes
+from .submission import (
+    build_submission_manifest,
+    compute_hashes,
+    evidence_relative_roots,
+)
 
 COURT_EXHIBIT_EXPORT_GAP_ID = "#94"
 TAMPER_EVIDENT_AUDIT_BUNDLE_GAP_ID = "#100"
@@ -82,6 +86,7 @@ def build_submission_bundle(
         allowed_roots=allowed_roots,
         include_all=include_all,
         max_items=max_items,
+        evidence_roots=evidence_relative_roots(run_summary) if run_summary is not None else None,
     )
     manifest_path = output_dir / "rapidtriage-submission-manifest.json"
     selected_path = output_dir / "rapidtriage-selected-evidence.json"

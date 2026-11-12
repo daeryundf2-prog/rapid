@@ -150,8 +150,11 @@ def build_reports_router(
 
     @router.get("/api/runs/{run_id}/validation-package")
     def get_run_validation_package(run_id: str) -> dict[str, object]:
-        """The validation package built in memory — nothing written (``POST`` writes it)."""
-        return build_run_validation_package(store, run_id)
+        """The validation package built in memory — nothing written (``POST`` writes it).
+
+        Source and segment digests are ``deferred-to-generation`` here: a read never re-reads the
+        evidence image; ``POST`` computes them fresh from disk (R8 T-179)."""
+        return build_run_validation_package(store, run_id, compute_source_hashes=False)
 
 
     @router.post("/api/runs/{run_id}/validation-package")
