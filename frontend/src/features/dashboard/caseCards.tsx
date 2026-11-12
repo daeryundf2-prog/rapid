@@ -28,6 +28,7 @@ import { CommandButton } from "../../commands/CommandButton";
 import { StatusBadge } from "../../components/Badge";
 import { ToneChip } from "../../components/ToneChip";
 import { type Route, serializeRoute } from "../../router";
+import { useWriteBlock } from "../../shell/readOnly";
 import { AI_TOOL_SOURCE_LABELS, type AiToolSource, type AiUsageSummary, aiToolTitle } from "../ai/aiUsage";
 import { aiRowCount, aiTypeCount, useAiUsageSummary } from "../ai/useAiUsage";
 import { LEVEL_LABEL } from "../case/CaseDialogs";
@@ -154,6 +155,7 @@ const REHASH_FROM = new Set(["not-requested", "failed", "interrupted"]);
 /** "해시 계산" / "해시 다시 계산" for a file evidence item (POST …/evidence/{eid}/hash). */
 export function EvidenceHashButton({ caseId, item }: { caseId: string; item: CaseEvidence }) {
   const client = useQueryClient();
+  const writeBlock = useWriteBlock("server"); // T-348
   const rehash = useMutation({
     mutationFn: () => rehashEvidence(caseId, item.citation_id),
     onSuccess: () => {
@@ -172,7 +174,7 @@ export function EvidenceHashButton({ caseId, item }: { caseId: string; item: Cas
     <ReasonButton
       className="button ghost"
       aria-label={`증거 ${item.evidence_number} ${label}`}
-      reason={rehash.isPending ? "요청 중입니다" : undefined}
+      reason={writeBlock ?? (rehash.isPending ? "요청 중입니다" : undefined)}
       onClick={() => rehash.mutate()}
     >
       {label}

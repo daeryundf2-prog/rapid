@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ApiError } from "../../api/client";
 import { createRun, getCollectProfiles, planCollect } from "../../api/runs";
+import { useWriteBlock } from "../../shell/readOnly";
 import { useAppStore } from "../../state/store";
 import { navigate } from "../tree/adapter";
 import { AiRunOptionsField } from "./AiRunOptionsField";
@@ -62,9 +63,12 @@ export function RunDialog({
   const invalidReason = firstRunFormError(errors);
   // R7: the output folder is required and never inside / around the evidence (server re-checks).
   const outputError = outputOverlapReason(form.outputDir, [form.root]);
-  const submitReason = runIsActive
+  // T-348: a read-only result / server says why instead of answering with a 409.
+  const writeBlock = useWriteBlock("server");
+  const submitReasonOwn = runIsActive
     ? "실행 중 런이 있습니다"
     : (invalidReason ?? outputRequiredReason(QUICK_RUN_OUTPUT_SPEC, form.outputDir) ?? outputError);
+  const submitReason = writeBlock ?? submitReasonOwn;
 
   const profiles = useQuery({
     queryKey: ["collect-profiles"],
@@ -200,7 +204,12 @@ export function RunDialog({
         <div className="case-actions">
           <ReasonButton
             reason={
-              runIsActive ? "실행 중 런이 있습니다" : sample.isPending ? "샘플을 만드는 중입니다" : undefined
+              writeBlock ??
+              (runIsActive
+                ? "실행 중 런이 있습니다"
+                : sample.isPending
+                  ? "샘플을 만드는 중입니다"
+                  : undefined)
             }
             onClick={() => sample.mutate()}
             aria-busy={sample.isPending || undefined}

@@ -11,6 +11,7 @@ import { addCaseNote, type CaseNotes, deleteCaseNote } from "../../api/cases";
 import { type CaseNotes as RunNotes, saveCaseNotes } from "../../api/dashboard";
 import { ApiError } from "../../api/errors";
 import type { Route } from "../../router";
+import { readOnlyErrorSentence, useWriteBlock } from "../../shell/readOnly";
 import { registerLeaveGuard, UNSAVED_LEAVE_MESSAGE } from "../../state/leaveGuard";
 import { InlineConfirm } from "../case/InlineConfirm";
 import { ReasonButton } from "../case/ReasonButton";
@@ -28,6 +29,8 @@ const HANGUL = /[가-힣]/;
  * browser or server error.
  */
 export function memoFailureText(action: string, error: unknown): string {
+  const readOnly = readOnlyErrorSentence(error); // T-348: the band's sentence, not a failure
+  if (readOnly) return readOnly;
   const why =
     error instanceof ApiError && HANGUL.test(error.message) && !/[A-Za-z]{3,}/.test(error.message)
       ? error.message.replace(/[.。]\s*$/, "")
@@ -95,6 +98,9 @@ export function NotesCard({
     void client.invalidateQueries({ queryKey: caseNotesQueryKey(caseId) });
     void client.invalidateQueries({ queryKey: caseQueryKey(caseId) });
   };
+  // T-348: case memos live in the case workspace; the summary note in the result folder.
+  const caseWriteBlock = useWriteBlock("server");
+  const runWriteBlock = useWriteBlock("run");
   const add = useMutation({
     mutationFn: () => addCaseNote(caseId as string, { text: text.trim(), author: examiner.trim() }),
     onSuccess: () => {
@@ -136,11 +142,11 @@ export function NotesCard({
   });
   const onAdd = (event: FormEvent) => {
     event.preventDefault();
-    if (text.trim() && !add.isPending) add.mutate();
+    if (text.trim() && !add.isPending && !caseWriteBlock) add.mutate();
   };
   const onSave = (event: FormEvent) => {
     event.preventDefault();
-    if (!save.isPending && dirty) save.mutate();
+    if (!save.isPending && dirty && !runWriteBlock) save.mutate();
   };
   const history = caseNotes?.history ?? [];
 
@@ -192,7 +198,10 @@ export function NotesCard({
                       className="button ghost"
                       aria-label={`${note.author || "검사관 미지정"} 메모 삭제 (${formatTime(note.created_at)})`}
                       aria-expanded={confirmNoteId === note.id}
+                      aria-disabled={caseWriteBlock ? true : undefined}
+                      title={caseWriteBlock}
                       onClick={() => {
+                        if (caseWriteBlock) return;
                         remove.reset();
                         setConfirmNoteId(note.id);
                       }}
@@ -241,7 +250,8 @@ export function NotesCard({
                   type="submit"
                   className="button primary"
                   reason={
-                    add.isPending ? "추가 중입니다" : !text.trim() ? "메모 내용을 입력하세요" : undefined
+                    caseWriteBlock ??
+                    (add.isPending ? "추가 중입니다" : !text.trim() ? "메모 내용을 입력하세요" : undefined)
                   }
                 >
                   {add.isPending ? "추가 중…" : "메모 추가"}
@@ -304,7 +314,8 @@ export function NotesCard({
             <button
               type="submit"
               className="button primary"
-              aria-disabled={save.isPending || !dirty || undefined}
+              aria-disabled={save.isPending || !dirty || Boolean(runWriteBlock) || undefined}
+              title={runWriteBlock}
               aria-describedby={save.isPending || !dirty ? noteStateId : undefined}
             >
               {save.isPending ? "저장 중…" : "요약 노트 저장"}

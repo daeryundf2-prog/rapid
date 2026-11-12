@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
 import { getReviewCounts, reportCandidatesText } from "../../api/caseDb";
 import { getRunTree } from "../../api/runs";
+import { useWriteBlock } from "../../shell/readOnly";
 import { aiRowCount } from "../ai/useAiUsage";
 import { caseLinkOf } from "./caseLink";
 import { ErrorText } from "./ErrorText";
@@ -108,9 +109,12 @@ export function ReportDialog({
       reportCandidates: counts.data?.report_candidates ?? undefined,
     });
   const chosen = EXPORT_ACTIONS.find((action) => action.kind === kind) ?? EXPORT_ACTIONS[0];
-  const reason =
+  // T-348: a read-only result / server says why instead of answering with a 409.
+  const writeBlock = useWriteBlock("run");
+  const reasonOwn =
     (chosen ? reasonOf(chosen) : "내보낼 항목을 고르세요") ??
     (exportMutation.isPending ? "내보내는 중입니다" : undefined);
+  const reason = writeBlock ?? reasonOwn;
 
   return (
     <Modal

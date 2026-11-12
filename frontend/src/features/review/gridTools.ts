@@ -15,6 +15,7 @@ import { type ExportContext, getExportContext, postTagBatch } from "../../api/re
 import { NO_RUN_REASON } from "../../commands/reasons";
 import type { GridRow } from "../../contracts/collection";
 import type { Command } from "../../contracts/command";
+import { writeBlockReason } from "../../shell/readOnly";
 import { useAppStore } from "../../state/store";
 import type { GridCommandHost } from "../grid/gridCommands";
 import { notifyReviewApplied, reviewTargetOf } from "../grid/reviewActions";
@@ -90,6 +91,8 @@ export function propagateReason(
   names?: readonly string[],
 ): string | undefined {
   if (!runId) return NO_RUN_REASON;
+  const readOnly = writeBlockReason("run"); // T-348
+  if (readOnly) return readOnly;
   if (rows.length === 0) return NO_PROPAGATE_ROW;
   if (rows.some((row) => reviewTargetOf(row) === null)) return NO_LOCATOR_PROPAGATE;
   if (names) return names.length ? undefined : NO_TAGS_TO_PROPAGATE;

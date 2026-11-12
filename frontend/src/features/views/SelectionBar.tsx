@@ -7,6 +7,7 @@
 import { useState } from "react";
 import { announce } from "../../a11y";
 import type { GridRow } from "../../contracts/collection";
+import { useWriteBlock } from "../../shell/readOnly";
 import { applyReviewAction, type BatchAction, optimisticPatch, storeNotice } from "../grid/reviewActions";
 
 const ACTIONS: BatchAction[] = ["relevant", "needs-review", "excluded", "bookmark"];
@@ -31,6 +32,7 @@ export function SelectionBar({
 }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ text: string; tone: "info" | "error" } | null>(null);
+  const writeBlock = useWriteBlock("run"); // T-348
   if (rows.length === 0) return null;
 
   const run = async (action: BatchAction) => {
@@ -59,7 +61,13 @@ export function SelectionBar({
     <div className="view-selection-bar" role="toolbar" aria-label="선택 항목 작업">
       <span className="view-selection-count">{rows.length.toLocaleString("ko-KR")}개 선택</span>
       {ACTIONS.map((action) => (
-        <button key={action} type="button" disabled={busy || !runId} onClick={() => void run(action)}>
+        <button
+          key={action}
+          type="button"
+          disabled={busy || !runId || Boolean(writeBlock)}
+          title={writeBlock}
+          onClick={() => void run(action)}
+        >
           {LABELS[action]}
         </button>
       ))}

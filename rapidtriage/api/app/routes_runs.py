@@ -14,7 +14,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import (
     FileResponse,
     PlainTextResponse,
@@ -144,6 +144,7 @@ from .pagination import (
     with_record_index,
 )
 from .preflight_space import DISK_SPACE_INSUFFICIENT, check_output_space
+from .readonly_mode import effective_readonly_reason, server_read_only_of
 from .row_conditions import (
     MATCH_CACHE,
     RowConditions,
@@ -590,8 +591,12 @@ def build_runs_router(
 
 
     @router.get("/api/runs/{run_id}")
-    def get_run(run_id: str) -> dict[str, Any]:
+    def get_run(run_id: str, request: Request) -> dict[str, Any]:
         payload = get_job_payload(store, run_id, include_summary=True)
+        # T-348: a read-only server reports every run read-only (the run's own D37 reason wins).
+        payload["readonly_reason"] = effective_readonly_reason(
+            payload.get("readonly_reason"), server_read_only_of(request)
+        )
         # Live per-provider progress (rapidtriage-run-progress.json); null
         # until the run has written it.
         job = get_job(store, run_id)
@@ -746,9 +751,11 @@ def build_runs_router(
 
 
     @router.get("/api/runs/{run_id}/dashboard")
-    def get_run_dashboard(run_id: str) -> dict[str, object]:
+    def get_run_dashboard(run_id: str, request: Request) -> dict[str, object]:
         """접수 dashboard: run profile keywords, evidence source + partitions, export history."""
-        return build_run_dashboard(store, run_id, get_job(store, run_id))
+        return build_run_dashboard(
+            store, run_id, get_job(store, run_id), server_read_only=server_read_only_of(request)
+        )
 
 
     @router.get("/api/runs/{run_id}/case-notes")

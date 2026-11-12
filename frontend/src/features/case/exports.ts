@@ -14,6 +14,7 @@ import {
 } from "../../api/reports";
 import { NO_RUN_REASON } from "../../commands/reasons";
 import { pushToast } from "../../components/toastStore";
+import { readOnlyReasonOf, useReadOnlyStore, writeBlockReason } from "../../shell/readOnly";
 import { joinRunPath } from "./WriteConfirm";
 
 export type ExportKind = "case-report" | "reviewer-bundle" | "submission-manifest" | "validation-package";
@@ -253,6 +254,18 @@ export async function performExport(
   runId: string,
   options: { format?: ReportFormat; meta?: Partial<ReportMeta> } = {},
 ): Promise<ExportResult> {
+  const readOnly = writeBlockReason("run");
+  if (readOnly) {
+    // T-348: never sent — the caller shows the same sentence a 409 RUN_READ_ONLY would carry.
+    throw new ApiError(
+      readOnly,
+      409,
+      { readonly_reason: readOnlyReasonOf(useReadOnlyStore.getState()) },
+      {
+        code: "RUN_READ_ONLY",
+      },
+    );
+  }
   const result = await runExport(kind, runId, options);
   const label = EXPORT_ACTIONS.find((action) => action.kind === kind)?.label ?? kind;
   useExportHistory

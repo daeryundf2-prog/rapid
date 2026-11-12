@@ -4,6 +4,7 @@ import { deleteRun, listRuns, type RunListItem, runStartedMs } from "../../api/r
 import { StatusBadge } from "../../components/Badge";
 import { MenuButton } from "../../components/MenuButton";
 import { Icon } from "../../icons";
+import { useWriteBlock } from "../../shell/readOnly";
 import { useTimezone } from "../../state/hooks";
 import { navigate } from "../tree/adapter";
 import { DELETE_RUN_LABEL, DELETE_RUN_TITLE, useCaseDialogs } from "./dialogs";
@@ -204,6 +205,7 @@ export function DeleteCaseDialog({
   onNotice?: (message: string) => void;
 }) {
   const queryClient = useQueryClient();
+  const writeBlock = useWriteBlock("server"); // T-348
   const mutation = useMutation({
     mutationFn: () => deleteRun(runId),
     onSuccess: () => {
@@ -235,7 +237,7 @@ export function DeleteCaseDialog({
           <ReasonButton
             className="button danger roomy"
             data-testid="delete-run-confirm"
-            reason={mutation.isPending ? "삭제하는 중입니다" : undefined}
+            reason={writeBlock ?? (mutation.isPending ? "삭제하는 중입니다" : undefined)}
             onClick={() => mutation.mutate()}
           >
             삭제

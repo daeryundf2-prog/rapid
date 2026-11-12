@@ -62,6 +62,7 @@ export const ICON_PATHS = {
   "bar-chart": ["M4 20h16", "M7 16v-5M12 16V6M17 16v-8"],
   density: ["M4 6h16M4 10h16M4 14h16M4 18h16"],
   clock: [circle(12, 12, 9), "M12 7v5l3 2"],
+  lock: ["M5 11h14v10H5z", "M8 11V7a4 4 0 0 1 8 0v4"],
   shield: ["M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z", "M12 8v4M12 15h.01"],
   list: ["M9 6h12M9 12h12M9 18h12", "M4 6h.01M4 12h.01M4 18h.01"],
   inbox: ["M3 13l3-8h12l3 8v6H3z", "M3 13h5l1 3h6l1-3h5"],

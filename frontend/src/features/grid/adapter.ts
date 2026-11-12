@@ -21,7 +21,7 @@
  */
 
 import { create } from "zustand";
-import { registerCommand as registerShellCommand } from "../../commands/registry";
+import { registerCommand as registerShellCommand, withReadOnlyGate } from "../../commands/registry";
 import { pushToast as pushGlobalToast, TOAST_MAX, type ToastOptions } from "../../components/toastStore";
 import type { CollectionQuery, CollectionRef, GridRow, ServerSort } from "../../contracts/collection";
 import type { Command } from "../../contracts/command";
@@ -177,7 +177,9 @@ export function useToast() {
  * Register a command locally (RowMenu/BatchBar lookups, tests) AND in the S1
  * registry (palette, help, CommandButton). Returns the unregister function.
  */
-export function registerCommand(command: Command): () => void {
+export function registerCommand(registered: Command): () => void {
+  // T-348: the grid's own menus see the read-only gate too.
+  const command = withReadOnlyGate(registered);
   const store = useGridLocalStore;
   store.getState().commands.set(command.id, command);
   let offShell: (() => void) | null = null;
@@ -195,7 +197,8 @@ export function registerCommand(command: Command): () => void {
 }
 
 /** Register a command for the grid's own menus only (not the palette/shortcut registry). */
-export function registerLocalCommand(command: Command): () => void {
+export function registerLocalCommand(registered: Command): () => void {
+  const command = withReadOnlyGate(registered);
   const map = useGridLocalStore.getState().commands;
   map.set(command.id, command);
   return () => {

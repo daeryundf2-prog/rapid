@@ -330,11 +330,19 @@ def run_case(job: RunJob, run_id: str) -> tuple[Path, str]:
     return canonical_run_case(job.summary, run_id)
 
 
+def _case_db_ro_uri(database: Path) -> str:
+    """``mode=ro`` URI of the run's case DB; ``immutable`` in a read-only folder, where a plain
+    ``mode=ro`` open of a WAL case DB would create ``-wal`` / ``-shm`` next to it (T-348)."""
+    from .run_review import read_only_sqlite_uri
+
+    return read_only_sqlite_uri(database.resolve())
+
+
 def _case_exists(database: Path, case_id: str) -> bool:
     if not database.is_file():
         return False
     try:
-        connection = sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True)
+        connection = sqlite3.connect(_case_db_ro_uri(database), uri=True)
     except sqlite3.Error:
         return False
     try:
@@ -357,7 +365,7 @@ def artifact_summaries(job: RunJob, run_id: str, keys: Sequence[tuple[str, str]]
         return {}
     outputs = job.summary.get("outputs")
     try:
-        connection = sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True)
+        connection = sqlite3.connect(_case_db_ro_uri(database), uri=True)
         try:
             index = RunLocatorIndex(connection, case_id, outputs if isinstance(outputs, dict) else {}, output_dir=run_output_dir(job.summary))
             return index.artifact_summaries(keys)
@@ -389,7 +397,7 @@ class ReviewMarks:
             return None
         outputs = self.job.summary.get("outputs")
         try:
-            connection = sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True)
+            connection = sqlite3.connect(_case_db_ro_uri(database), uri=True)
             connection.row_factory = sqlite3.Row
             try:
                 entries, truncated = review_map_entries(
@@ -621,7 +629,7 @@ def _case_connection(job: RunJob, run_id: str, *, write: bool) -> Iterator[tuple
         with CaseDatabase(database).connect() as connection:
             yield connection, case_id
         return
-    connection = sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True)
+    connection = sqlite3.connect(_case_db_ro_uri(database), uri=True)
     connection.row_factory = sqlite3.Row
     try:
         yield connection, case_id

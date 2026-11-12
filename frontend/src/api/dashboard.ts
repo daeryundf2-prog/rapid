@@ -108,6 +108,11 @@ export interface RunDashboard {
   scope: RunScope | null;
   /** null until the run has a summary (or from an older server). */
   steps: StepsSummary | null;
+  /**
+   * T-348: why the run is read-only — "OUTPUT_INSIDE_EVIDENCE" (result folder inside the evidence),
+   * "SERVER_READ_ONLY" (`web --read-only`); null when writable (or an older server).
+   */
+  readonly_reason: string | null;
 }
 
 function normalizeScope(raw: unknown): RunScope | null {
@@ -183,6 +188,8 @@ export function normalizeDashboard(
     exports: Array.isArray(raw?.exports) ? raw.exports : [],
     scope: normalizeScope(raw?.scope),
     steps: normalizeSteps(raw?.steps),
+    readonly_reason:
+      typeof raw?.readonly_reason === "string" && raw.readonly_reason ? raw.readonly_reason : null,
   };
 }
 

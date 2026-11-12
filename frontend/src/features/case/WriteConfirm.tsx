@@ -12,6 +12,7 @@ import { create } from "zustand";
 import { announce } from "../../a11y";
 import { getRun } from "../../api/runs";
 import { pushToast, type ToastAction } from "../../components/toastStore";
+import { readOnlyErrorSentence } from "../../shell/readOnly";
 import "../../components/toast.css";
 import { Modal } from "./Modal";
 
@@ -69,6 +70,13 @@ export function notifyWritten(text: string, path: string | null | undefined, act
 
 /** Failure toast of a write (Korean; the server's own message when it sent one). */
 export function notifyWriteFailed(what: string, error: unknown): void {
+  const readOnly = readOnlyErrorSentence(error);
+  if (readOnly) {
+    // T-348: a refused write of a read-only result says why, in the band's words — not "실패".
+    announce(readOnly);
+    pushToast(readOnly, "info");
+    return;
+  }
   const reason = error instanceof Error && error.message ? error.message : "알 수 없는 오류";
   announce(`${what} 실패: ${reason}`, { politeness: "assertive" });
   pushToast(`${what} 실패: ${reason}`, "error");

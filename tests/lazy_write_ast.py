@@ -102,6 +102,17 @@ def _opens_for_writing(call: ast.Call) -> bool:
     return False  # default mode "r"
 
 
+def _read_only_uri(node: ast.expr) -> bool:
+    """A ``?mode=ro`` literal, or a call of a helper that always builds one
+    (``run_review.read_only_sqlite_uri`` and the ``*_ro_uri`` wrappers around it)."""
+    if "mode=ro" in _text(node):
+        return True
+    if isinstance(node, ast.Call):
+        name = _call_name(node.func) or ""
+        return name == "read_only_sqlite_uri" or name.endswith("_ro_uri")
+    return False
+
+
 def is_write(call: ast.Call) -> str | None:
     """The write a call makes (``None`` for anything else)."""
     name = _call_name(call.func)
@@ -116,7 +127,7 @@ def is_write(call: ast.Call) -> str | None:
     if owner == "shutil":
         return f"shutil.{name}" if name in SHUTIL_WRITES else None
     if owner == "sqlite3" and name == "connect":
-        return None if call.args and "mode=ro" in _text(call.args[0]) else "sqlite3.connect"
+        return None if call.args and _read_only_uri(call.args[0]) else "sqlite3.connect"
     if isinstance(call.func, ast.Attribute) and name in WRITE_METHODS:
         return name
     if name == "open" and _opens_for_writing(call):

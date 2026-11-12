@@ -20,6 +20,7 @@ import {
   patchCase,
 } from "../../api/cases";
 import { ApiError } from "../../api/client";
+import { useWriteBlock } from "../../shell/readOnly";
 import { problemMessageKo, stepLabelKo } from "../dashboard/disclosures";
 import { navigate } from "../tree/adapter";
 import { caseRunBody, caseRunFormReason } from "./CaseWizard";
@@ -107,7 +108,9 @@ export function LinkCaseDialog({
   );
   const chosenEvidence = evidence.find((item) => item.citation_id === evidenceId);
   const pathDiffers = Boolean(chosenEvidence && run.data && !samePathText(runRoot, chosenEvidence.path));
-  const reason = !caseId
+  // T-348: a read-only result / server says why instead of answering with a 409.
+  const writeBlock = useWriteBlock("server");
+  const reasonOwn = !caseId
     ? "연결할 케이스를 고르세요"
     : !evidenceId && !evidenceNumber.trim()
       ? "기존 증거를 고르거나 새 증거 번호를 입력하세요"
@@ -116,6 +119,7 @@ export function LinkCaseDialog({
         : pathDiffers && !forceReason.trim()
           ? "런 경로가 증거 경로와 다릅니다. 그래도 연결하려면 사유를 입력하세요"
           : undefined;
+  const reason = writeBlock ?? reasonOwn;
   const link = useMutation({
     mutationFn: () =>
       linkCaseRun(caseId, {
@@ -288,7 +292,10 @@ export function CaseEditDialog({
   const [form, setForm] = useState<CaseInfoForm | null>(null);
   const current = form ?? (detail.data ? infoFromCase(detail.data) : null);
   const errors = current ? validateCaseInfo({ ...current, caseRoot: "" }) : {};
-  const reason = !current ? "사건 정보를 불러오는 중입니다" : firstError(errors);
+  // T-348: a read-only result / server says why instead of answering with a 409.
+  const writeBlock = useWriteBlock("server");
+  const reasonOwn = !current ? "사건 정보를 불러오는 중입니다" : firstError(errors);
+  const reason = writeBlock ?? reasonOwn;
   const unchanged =
     current && detail.data && Object.keys(changedCaseFields(detail.data, current)).length === 0;
   const changes = current && detail.data ? changedCaseFields(detail.data, current) : {};
@@ -396,7 +403,10 @@ export function AddEvidenceDialog({
   const [attempted, setAttempted] = useState(false);
   const all = [...existing, draft];
   const errors = validateEvidenceDraft(draft, all);
-  const reason = detail.isPending ? "케이스를 불러오는 중입니다" : firstError(errors);
+  // T-348: a read-only result / server says why instead of answering with a 409.
+  const writeBlock = useWriteBlock("server");
+  const reasonOwn = detail.isPending ? "케이스를 불러오는 중입니다" : firstError(errors);
+  const reason = writeBlock ?? reasonOwn;
   const save = useMutation({
     mutationFn: () => addEvidence(caseId, evidenceBody(draft)),
     onSuccess: (saved) => {
@@ -478,13 +488,16 @@ export function AddRunDialog({
     form.outputDir,
     allEvidence.map((item) => item.path),
   );
-  const reason = runIsActive
+  // T-348: a read-only result / server says why instead of answering with a 409.
+  const writeBlock = useWriteBlock("server");
+  const reasonOwn = runIsActive
     ? "실행 중 런이 있습니다"
     : !evidenceId
       ? "증거를 고르세요"
       : (caseRunFormReason(form) ??
         (detail.data ? outputRequiredReason(outputSpec, form.outputDir) : undefined) ??
         outputError);
+  const reason = writeBlock ?? reasonOwn;
   const start = useMutation({
     mutationFn: () => createCaseRun(caseId, body),
     onSuccess: (result) => {

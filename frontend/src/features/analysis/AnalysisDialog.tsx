@@ -36,6 +36,7 @@ import { openAnalysis, runDisabledReason } from "./commands";
 import { KIND_CAUTION, kindLabel, nodeOfKind } from "./kinds";
 import { analysesFor, analysesQueryKey, useAnalyses } from "./store";
 import "./analysis.css";
+import { useWriteBlock } from "../../shell/readOnly";
 
 /** A run in the cross-case list (L1 handoff): its name and start time, never the raw run ID. */
 function runChoiceLabel(
@@ -492,9 +493,12 @@ export function AnalysisDialog({
   const hasSnapshot = ANALYSIS_FIELDS[kind].some((field) => field.type === "snapshot");
   const snapshots = useSnapshotChoices(runId, hasSnapshot);
   // While the job list / discover rows load, "탐색을 먼저 완료하세요" would be premature.
-  const submitReason = snapshots.loading
+  // T-348: a read-only result / server says why instead of answering with a 409.
+  const writeBlock = useWriteBlock("run");
+  const submitReasonOwn = snapshots.loading
     ? "스냅샷 목록을 불러오는 중입니다"
     : (blocked ?? firstAnalysisError(errors));
+  const submitReason = writeBlock ?? submitReasonOwn;
   const label = kindLabel(kind);
   const formId = useId();
 

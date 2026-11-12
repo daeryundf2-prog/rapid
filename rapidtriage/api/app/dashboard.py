@@ -34,6 +34,7 @@ from .helpers import (
     get_output_path,
     job_output_dir,
 )
+from .readonly_mode import effective_readonly_reason
 from .run_scope import build_run_scope
 from .run_steps_summary import summarize_steps
 
@@ -329,7 +330,9 @@ def build_export_history(store: RunJobStore, run_id: str, job: RunJob) -> list[d
 # --- aggregate --------------------------------------------------------------
 
 
-def build_run_dashboard(store: RunJobStore, run_id: str, job: RunJob) -> dict[str, Any]:
+def build_run_dashboard(
+    store: RunJobStore, run_id: str, job: RunJob, *, server_read_only: bool = False
+) -> dict[str, Any]:
     mode = str(getattr(job.request, "mode", "") or "")
     profile = RUN_PROFILES.get(mode)
     return {
@@ -347,4 +350,6 @@ def build_run_dashboard(store: RunJobStore, run_id: str, job: RunJob) -> dict[st
         "steps": summarize_steps(job.summary) if job.summary is not None else None,
         # T-023: processing scope on four axes (partitions/allocated/deleted/unallocated).
         "scope": build_run_scope(job.summary, job_output_dir(job)),
+        # T-348: why the console shows the read-only band and disables writes (null: writable).
+        "readonly_reason": effective_readonly_reason(job.readonly_reason, server_read_only),
     }

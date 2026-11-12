@@ -35,6 +35,7 @@ import { viewerPaneCollapsed } from "../state/slices/overlays";
 import { useAppStore } from "../state/store";
 import { CommandPalette } from "./CommandPalette";
 import { HelpOverlay } from "./HelpOverlay";
+import { ReadOnlyBanner } from "./ReadOnlyBanner";
 import { StatusBar } from "./StatusBar";
 import { Slot } from "./slots";
 import { TopBar } from "./TopBar";
@@ -653,6 +654,7 @@ export function Layout() {
     >
       <SkipLink target={MAIN_ID} />
       <TopBar />
+      <ReadOnlyBanner />
       <div className="shell-body">
         <StageRail />
         <div className="shell-panes">
