@@ -23,6 +23,7 @@ import { ApiError } from "../../api/client";
 import { useWriteBlock } from "../../shell/readOnly";
 import { problemMessageKo, stepLabelKo } from "../dashboard/disclosures";
 import { navigate } from "../tree/adapter";
+import { AiRunOptionsField } from "./AiRunOptionsField";
 import { caseRunBody, caseRunFormReason } from "./CaseWizard";
 import { snapshotQueryKey } from "./caseLink";
 import { ErrorText } from "./ErrorText";
@@ -30,6 +31,7 @@ import { EvidenceFields } from "./EvidenceFields";
 import { Modal } from "./Modal";
 import { ReasonButton } from "./ReasonButton";
 import { RunOptionsFields } from "./RunOptionsFields";
+import { RunPlanGroupsField } from "./RunPlanGroupsField";
 import {
   caseRunOutputSpec,
   DEFAULT_RUN_FORM,
@@ -563,6 +565,18 @@ export function AddRunDialog({
         idPrefix={`${id}-run`}
         output={outputSpec}
         outputError={outputError}
+      />
+      {/* The same 처리 그룹 checklist and AI 사용 기록 fields as the quick-run dialog and the
+          wizard step 3 (plan r8 T-080 / T-191; verify WB-10). */}
+      <RunPlanGroupsField
+        form={form}
+        onChange={(skipGroups) => set("skipGroups", skipGroups)}
+        idPrefix={`${id}-run`}
+      />
+      <AiRunOptionsField
+        form={form}
+        onChange={(patch) => setForm((f) => ({ ...f, ...patch }))}
+        idPrefix={`${id}-run`}
       />
       <table className="data-table dash-table" aria-label="처리 옵션 요약">
         <tbody>

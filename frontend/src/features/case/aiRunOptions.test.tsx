@@ -7,6 +7,7 @@ import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AiProcessSection, aiScopeText } from "../ai/AiProcessSection";
 import { AiRunOptionsField } from "./AiRunOptionsField";
+import { AddRunDialog } from "./CaseDialogs";
 import { RunDialog } from "./RunDialog";
 import { aiCollectorOptions, buildRunBody, DEFAULT_RUN_FORM, type RunForm, validateRunForm } from "./runForm";
 import { summarizeRunRequest } from "./runSummary";
@@ -116,6 +117,73 @@ describe("AI 사용 기록 run options", () => {
         ai_read_mb: 1024,
       },
     });
+  });
+
+  it("case 런 추가 has the same 처리 그룹 checklist and AI fields, sent with the case run (WB-10)", async () => {
+    const { calls } = mockFetch({
+      "GET /api/run-plan/preview": PREVIEW,
+      "GET /api/cases/case-1": {
+        case: {
+          case_id: "case-1",
+          case_root: "D:casesc1",
+          evidence: [
+            {
+              citation_id: "C-EVID-000001",
+              case_id: "case-1",
+              evidence_number: "E-01",
+              display_name: "a",
+              source_type: "folder",
+              path: "D:eva",
+              runnable: true,
+            },
+          ],
+        },
+      },
+      "POST /api/cases/case-1/runs": { run: { run_id: "r9" } },
+    });
+    renderWithQuery(
+      <AddRunDialog
+        caseId="case-1"
+        evidenceCitationId="C-EVID-000001"
+        runIsActive={false}
+        onClose={() => {}}
+      />,
+    );
+    expect(await screen.findByTestId("run-plan-groups")).toBeTruthy();
+    const ai = (await screen.findByLabelText(/AI 사용 기록/)) as HTMLInputElement;
+    expect(ai.checked).toBe(true);
+    fireEvent.change(screen.getByLabelText(/조직 이메일 도메인/), { target: { value: "corp.example" } });
+    fireEvent.change(screen.getByLabelText(/AI 읽기 예산/), { target: { value: "2048" } });
+    await vi.waitFor(() =>
+      expect((screen.getByLabelText("증거") as HTMLSelectElement).value).toBe("C-EVID-000001"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "실행" }));
+    await vi.waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+    const post = calls.find((c) => c.method === "POST");
+    expect(post?.url).toBe("/api/cases/case-1/runs");
+    expect(post?.body).toMatchObject({
+      collector_options: { "ai-agent": { org_email_domain: "corp.example", ai_read_mb: 2048 } },
+    });
+    // Unchecking the group drops the AI options and sends skip_groups.
+    cleanup();
+    calls.length = 0;
+    renderWithQuery(
+      <AddRunDialog
+        caseId="case-1"
+        evidenceCitationId="C-EVID-000001"
+        runIsActive={false}
+        onClose={() => {}}
+      />,
+    );
+    fireEvent.click(await screen.findByLabelText(/AI 사용 기록/));
+    await vi.waitFor(() =>
+      expect((screen.getByLabelText("증거") as HTMLSelectElement).value).toBe("C-EVID-000001"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "실행" }));
+    await vi.waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+    const skipped = calls.find((c) => c.method === "POST")?.body as Record<string, unknown>;
+    expect(skipped.skip_groups).toEqual(["ai"]);
+    expect(skipped).not.toHaveProperty("collector_options");
   });
 
   it("the field is absent when the plan has no ai group", async () => {
