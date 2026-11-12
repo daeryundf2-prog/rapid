@@ -15,7 +15,13 @@ import { MiddlePath } from "../../components/MiddlePath";
 import type { GridRow } from "../../contracts/collection";
 import { encodeRowRef } from "../../contracts/rowRef";
 import { serializeRoute } from "../../router";
-import { fileTouchRoute, isAiSessionRow, requestedSession } from "../ai/aiChat";
+import {
+  aiConversationScope,
+  fileTouchRoute,
+  isAiSessionRow,
+  requestedSession,
+  requestedTool,
+} from "../ai/aiChat";
 import { useFilterStore } from "../filters/filterStore";
 import { useViewerTarget } from "../grid/adapter";
 import { REVIEW_LABELS } from "../grid/columns/common";
@@ -451,16 +457,22 @@ function AiFileLink({ message, runId }: { message: ChatMessage; runId: string | 
 }
 
 export function ChatView() {
-  const { cq, rows, runId, q } = useViewRows({ predicate: isChatSourceRow, textFilter: false });
+  const { cq, rows: loaded, runId, q } = useViewRows({ predicate: isChatSourceRow, textFilter: false });
   const capped = useAutoLoad(cq, true, CHAT_AUTOLOAD_ROWS);
+  // AI 사용 › 세션 → 대화 보기 asks for one session (`cf=f:session_id:<id>`, `f:tool:<tool>`): the
+  // substring filter is narrowed to that exact session of that tool and its sub-agents.
+  const requested = useFilterStore((s) => requestedSession(s.filters.columns));
+  const requestedToolId = useFilterStore((s) => requestedTool(s.filters.columns));
+  const rows = useMemo(
+    () => aiConversationScope(loaded, requested, requestedToolId),
+    [loaded, requested, requestedToolId],
+  );
   const conversations = useMemo(() => groupConversations(rows), [rows]);
   const messageCount = useMemo(
     () => conversations.reduce((sum, conversation) => sum + conversation.messages.length, 0),
     [conversations],
   );
   const terms = useMemo(() => highlightTerms(q), [q]);
-  // AI 사용 › 세션 → 대화 보기 asks for one session (`cf=f:session_id:<id>`): open that one first.
-  const requested = useFilterStore((s) => requestedSession(s.filters.columns));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusRequest, setFocusRequest] = useState(0);
   const layoutRef = useRef<HTMLDivElement | null>(null);

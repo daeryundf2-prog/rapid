@@ -145,17 +145,21 @@ export function aiSessionLabels(rows: readonly GridRow[]): Map<string, string> {
 }
 
 /**
- * 대화 보기 route of a session (and its sub-agent sessions, whose ids extend it): the AI 사용 rows
- * of that session in the conversation view; the view opens the exact session first.
+ * 대화 보기 route of a session: the AI 사용 rows of that session in the conversation view, which
+ * opens the exact session first. A `:` column filter is a substring match, so `cf` only narrows
+ * the rows (`sess-1` also keeps `sess-10`, `claude` keeps `claude-code`); the view keeps the exact session of the exact tool
+ * and its sub-agents by `parent_session_id` (`aiConversationScope`).
  */
-export function aiConversationRoute(runId: string, sessionId: string): Route {
+export function aiConversationRoute(runId: string, sessionId: string, tool = ""): Route {
+  const cf: NonNullable<Route["cf"]> = [{ col: "f:session_id", op: ":", value: sessionId }];
+  if (tool) cf.push({ col: "f:tool", op: ":", value: tool });
   return {
     runId,
     collection: "artifacts",
     kind: "ai-agent",
     types: [...AI_CONVERSATION_TYPES],
     view: "chat",
-    cf: [{ col: "f:session_id", op: ":", value: sessionId }],
+    cf,
   };
 }
 
@@ -182,7 +186,37 @@ export function aiSessionTypeRoute(runId: string, sessionId: string, type: strin
   };
 }
 
+type CfList = ReadonlyArray<{ col: string; value: string }> | undefined;
+
 /** The exact session id a conversation route asks for (`cf=f:session_id:<id>`), else "". */
-export function requestedSession(cf: ReadonlyArray<{ col: string; value: string }> | undefined): string {
+export function requestedSession(cf: CfList): string {
   return cf?.find((filter) => filter.col === "f:session_id")?.value ?? "";
+}
+
+/** The tool a conversation route asks for (`cf=f:tool:<tool>`), else "" (any tool). */
+export function requestedTool(cf: CfList): string {
+  return cf?.find((filter) => filter.col === "f:tool")?.value ?? "";
+}
+
+/**
+ * Rows of exactly session `sessionId` (of `tool` when given) plus its sub-agent sessions, which
+ * are included only through a session row whose `parent_session_id` is `sessionId` — never by an
+ * id that merely contains or extends it. Non-AI rows pass untouched; no session → all rows.
+ */
+export function aiConversationScope<T extends GridRow>(
+  rows: readonly T[],
+  sessionId: string,
+  tool = "",
+): T[] {
+  if (!sessionId) return [...rows];
+  const toolOk = (row: GridRow) => !tool || text(detailsOf(row).tool) === tool;
+  const keep = new Set([sessionId]);
+  for (const row of rows) {
+    if (!isAiSessionRow(row) || !toolOk(row)) continue;
+    const details = detailsOf(row);
+    if (text(details.parent_session_id) === sessionId) keep.add(text(details.session_id));
+  }
+  return rows.filter(
+    (row) => !(isAiSessionRow(row) || isAiChatRow(row)) || (toolOk(row) && keep.has(aiSessionId(row))),
+  );
 }

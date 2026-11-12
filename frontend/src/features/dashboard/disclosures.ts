@@ -30,11 +30,10 @@ export interface DisclosureItem {
 }
 
 /**
- * Korean name of a run step: `artifacts-<kind>` reads "아티팩트 수집: <수집기 이름>" (kindLabel),
- * every other id goes through the shared stepNameLabel.
+ * Korean name of a run step: the shared stepNameLabel (`artifacts-<kind>` reads
+ * "아티팩트 수집: <수집기 이름>").
  */
 export function stepLabelKo(name: string): string {
-  if (name.startsWith("artifacts-")) return `아티팩트 수집: ${kindLabel(name.slice("artifacts-".length))}`;
   return stepNameLabel(name);
 }
 

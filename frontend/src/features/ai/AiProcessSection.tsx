@@ -1,7 +1,7 @@
 /**
  * 처리 › AI 사용 기록 (R7 단계 3.5 갈래 D, plan §3.5): how this run collected AI usage — the plan
  * group `ai`'s state and time, the rows it wrote (and parse errors), and the collection scope
- * (메시지 본문 포함·마스킹 / 메타만, 대형 DB 해시) the run was started with. The options are chosen
+ * (메시지 본문 포함·마스킹 / 메타만, 조직 도메인, 사건 증거 폴더, 읽기 예산) the run was started with. The options are chosen
  * in the run dialog (처리 그룹 › AI 사용 기록 수집 범위) for the next run.
  */
 
@@ -21,7 +21,7 @@ export function aiScopeText(request: Record<string, unknown> | null | undefined)
   if (options && typeof options === "object" && "ai-agent" in (options as Record<string, unknown>)) {
     return collectorOptionsText({ "ai-agent": (options as Record<string, unknown>)["ai-agent"] });
   }
-  return "기본값 — 메시지 본문 포함(마스킹) · 대형 DB 해시 안 함";
+  return "기본값 — 메시지 본문 포함(마스킹) · 조직 도메인·사건 증거 폴더 없음 · 읽기 예산 기본";
 }
 
 function durationText(ms: number | null | undefined): string {
@@ -83,8 +83,8 @@ export function AiProcessSection({
         </dd>
       </dl>
       <p className="analysis-desc">
-        다음 런의 수집 범위(메시지 본문 포함 여부, 대형 AI 데이터베이스 해시)는 런 시작 대화상자의 처리 그룹
-        아래에서 고릅니다. 자격 증명 파일의 값은 어떤 설정에서도 수집하지 않습니다.
+        다음 런의 수집 범위(메시지 본문 포함 여부, 조직 이메일 도메인, 사건 증거 폴더, AI 읽기 예산)는 런 시작
+        대화상자의 처리 그룹 아래에서 고릅니다. 자격 증명 파일의 값은 어떤 설정에서도 수집하지 않습니다.
       </p>
     </section>
   );

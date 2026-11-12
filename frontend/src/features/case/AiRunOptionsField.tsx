@@ -1,15 +1,18 @@
 /**
- * AI 사용 기록 run options (R7 단계 3.5 갈래 D, plan §3.2/§3.5): the collector options of kind
- * `ai-agent` (run plan group `ai`) — 메시지 본문 포함(마스킹, 기본 켬) and 대형 AI DB 해시(기본 끔).
- * Shown while the plan has the `ai` group; disabled with the reason while that group is unchecked.
- * Sent as `collector_options["ai-agent"]` only when they differ from the defaults (runForm.ts).
+ * AI 사용 기록 run options (R7 단계 3.5 갈래 D, plan §3.2/§3.5; r8 T-191): the collector options of
+ * kind `ai-agent` (run plan group `ai`) — 메시지 본문 포함(마스킹, 기본 켬) and the three inputs
+ * 조직 이메일 도메인 · 사건 증거 폴더 · AI 읽기 예산. Shown while the plan has the `ai` group;
+ * disabled with the reason while that group is unchecked. Sent as `collector_options["ai-agent"]`
+ * only for the keys that differ from the defaults (runForm.ts). The domain is checked by the
+ * server (its error sentence is shown on start); the large-DB hash option is hidden until it is
+ * read (T-320).
  */
 
 import { useQuery } from "@tanstack/react-query";
 import { useId } from "react";
 import { previewRunPlan } from "../../api/runPlan";
 import { runPlanPreviewKey } from "./RunPlanGroupsField";
-import type { RunForm } from "./runForm";
+import { type AiOptionFields, aiReadMbError, type RunForm } from "./runForm";
 
 /** Run plan group of the AI usage collector (core/run/plan.py). */
 export const AI_PLAN_GROUP = "ai";
@@ -21,7 +24,7 @@ export function AiRunOptionsField({
   idPrefix = "run",
 }: {
   form: RunForm;
-  onChange: (patch: Partial<Pick<RunForm, "aiBodies" | "aiHashDbs">>) => void;
+  onChange: (patch: Partial<Pick<RunForm, AiOptionFields>>) => void;
   idPrefix?: string;
 }) {
   const reasonId = useId();
@@ -42,6 +45,8 @@ export function AiRunOptionsField({
   if (!group) return null;
   const skipped = form.skipGroups.includes(AI_PLAN_GROUP);
   const id = (name: string) => `${idPrefix}-ai-${name}`;
+  const describedBy = skipped ? reasonId : undefined;
+  const readMbError = aiReadMbError(form.aiReadMb);
   return (
     <fieldset className="case-field run-ai-options" data-testid="run-ai-options">
       <legend>AI 사용 기록 수집 범위</legend>
@@ -51,24 +56,51 @@ export function AiRunOptionsField({
           type="checkbox"
           checked={form.aiBodies}
           disabled={skipped}
-          aria-describedby={skipped ? reasonId : undefined}
+          aria-describedby={describedBy}
           onChange={(event) => onChange({ aiBodies: event.target.checked })}
         />{" "}
         메시지 본문 포함 (비밀값·API 키는 가림)
       </label>
-      <label htmlFor={id("hash")}>
-        <input
-          id={id("hash")}
-          type="checkbox"
-          checked={form.aiHashDbs}
-          disabled={skipped}
-          aria-describedby={skipped ? reasonId : undefined}
-          onChange={(event) => onChange({ aiHashDbs: event.target.checked })}
-        />{" "}
-        대형 AI 데이터베이스 해시 계산 (느림 · 복사하지 않음)
-      </label>
+      <label htmlFor={id("domain")}>조직 이메일 도메인 (선택)</label>
+      <input
+        id={id("domain")}
+        type="text"
+        value={form.aiOrgDomain}
+        placeholder="예: example.com"
+        disabled={skipped}
+        aria-describedby={describedBy}
+        autoComplete="off"
+        spellCheck={false}
+        onChange={(event) => onChange({ aiOrgDomain: event.target.value })}
+      />
+      <label htmlFor={id("roots")}>사건 증거 폴더 (선택, 한 줄에 하나)</label>
+      <textarea
+        id={id("roots")}
+        rows={2}
+        value={form.aiEvidenceRoots}
+        placeholder="예: D:\사건\증거"
+        disabled={skipped}
+        aria-describedby={describedBy}
+        spellCheck={false}
+        onChange={(event) => onChange({ aiEvidenceRoots: event.target.value })}
+      />
+      <label htmlFor={id("read-mb")}>AI 읽기 예산 (MiB, 비우면 도구당 4 GiB)</label>
+      <input
+        id={id("read-mb")}
+        type="text"
+        inputMode="numeric"
+        value={form.aiReadMb}
+        placeholder="4096"
+        disabled={skipped}
+        aria-invalid={Boolean(readMbError)}
+        aria-describedby={describedBy}
+        onChange={(event) => onChange({ aiReadMb: event.target.value })}
+      />
+      {readMbError ? <p className="case-error">{readMbError}</p> : null}
       <p className="case-reason">
-        본문을 끄면 메시지는 시각·역할·길이만 남습니다. 자격 증명 파일의 값은 어느 경우에도 수집하지 않습니다.
+        본문을 끄면 메시지는 시각·역할·길이만 남습니다. 조직 도메인을 넣으면 그 밖의 계정을 개인 계정으로
+        표시하고, 사건 증거 폴더를 넣으면 도구 호출이 그 폴더를 건드린 행을 표시합니다. 자격 증명 파일의 값은
+        어느 경우에도 수집하지 않습니다.
       </p>
       {skipped ? (
         <p id={reasonId} className="case-reason" data-testid="run-ai-options-skipped">

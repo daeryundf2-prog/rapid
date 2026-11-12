@@ -514,7 +514,8 @@ export interface RunCreateBody {
   skip_groups?: string[];
   skip_tasks?: string[];
   /**
-   * Per-kind collector options (R7 AI 사용: `{"ai-agent": {ai_bodies, ai_hash_dbs}}`); sent only
+   * Per-kind collector options (R7 AI 사용: `{"ai-agent": {ai_bodies, org_email_domain, evidence_roots,
+   * ai_read_mb}}`); sent only
    * when an option differs from its default.
    */
   collector_options?: Record<string, Record<string, unknown>>;

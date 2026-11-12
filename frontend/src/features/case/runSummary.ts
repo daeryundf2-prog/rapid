@@ -84,18 +84,24 @@ const FIELDS: Record<string, { label: string; format: (value: unknown) => string
   },
 };
 
-/** "AI 사용 기록: 메시지 본문 포함 · 대형 DB 해시 안 함" of `collector_options`. */
+/** "AI 사용 기록: 메시지 본문 포함(마스킹) · 조직 도메인 example.com" of `collector_options`. */
 export function collectorOptionsText(value: unknown): string {
   if (!value || typeof value !== "object" || Array.isArray(value)) return "기본값";
   const parts: string[] = [];
   for (const [kind, options] of Object.entries(value as Record<string, unknown>)) {
     const o = (options && typeof options === "object" ? options : {}) as Record<string, unknown>;
     if (kind === "ai-agent") {
-      parts.push(
-        `AI 사용 기록: 메시지 본문 ${o.ai_bodies === false ? "수집 안 함(메타만)" : "포함(마스킹)"} · 대형 DB 해시 ${
-          o.ai_hash_dbs === true ? "계산" : "안 함"
-        }`,
-      );
+      const ai = [`메시지 본문 ${o.ai_bodies === false ? "수집 안 함(메타만)" : "포함(마스킹)"}`];
+      // Older runs may carry the large-DB hash option (hidden in the dialog until T-320).
+      if (o.ai_hash_dbs === true) ai.push("대형 DB 해시 계산");
+      if (typeof o.org_email_domain === "string" && o.org_email_domain) {
+        ai.push(`조직 도메인 ${o.org_email_domain}`);
+      }
+      if (Array.isArray(o.evidence_roots) && o.evidence_roots.length) {
+        ai.push(`사건 증거 폴더 ${o.evidence_roots.length}개`);
+      }
+      if (typeof o.ai_read_mb === "number") ai.push(`읽기 예산 ${o.ai_read_mb.toLocaleString("ko-KR")} MiB`);
+      parts.push(`AI 사용 기록: ${ai.join(" · ")}`);
     } else {
       parts.push(`${kind}: ${JSON.stringify(options)}`);
     }
