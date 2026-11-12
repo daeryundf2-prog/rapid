@@ -109,7 +109,10 @@ describe("un-press keeps a later 보고서 포함 (P1-4)", () => {
 
   it("제외 → 보고서 포함 → 제외 해제 keeps the flag set after the 제외", async () => {
     const calls = installFetch({ "/case-db/ensure": ENSURE, "/review-batch": () => jsonResponse({}) });
-    const row = fileRow(2, { reviewStatus: "relevant", fields: { ...fileRow(2).fields, includeInReport: false } });
+    const row = fileRow(2, {
+      reviewStatus: "relevant",
+      fields: { ...fileRow(2).fields, includeInReport: false },
+    });
     await applyReviewAction("r1", [row], "excluded");
     await applyReviewAction("r1", [row], "include-in-report");
     await applyReviewAction("r1", [row], "clear-review");

@@ -19,6 +19,7 @@ import { KEY_MAP } from "../../contracts/command";
 import type { MarkAction } from "../../contracts/viewer";
 import { useAppStore } from "../../state/store";
 import { currentReviewer } from "../review/author";
+import { currentRowSource } from "../review/rowSource";
 import { baseName, str } from "./columns/common";
 
 export type BatchAction = MarkAction | "tag" | "extract" | UnmarkAction;
@@ -529,6 +530,22 @@ export function snapshotOf(row: GridRow): ReviewSnapshot {
       status === "relevant" || status === "needs-review" || status === "excluded" ? status : "unreviewed",
     include: row.fields.includeInReport === true || status === "include-in-report",
   };
+}
+
+/** A row's judgement and tags as one string: it changes whenever the list's row does (viewer chip). */
+export function judgementKey(row: GridRow | null): string {
+  if (!row) return "";
+  const { status, include } = snapshotOf(row);
+  return `${row.rowKey}|${status}|${include}|${row.tags.join(",")}`;
+}
+
+/**
+ * An un-press made outside the list (the viewer's status menu) patches the list's row too, so the
+ * list shows it and a later mark patches from there (T-036: 해제, then R, stayed 미검토).
+ */
+export function patchListAfterUnpress(rowKey: string, undo: UnmarkAction, result: ApplyResult): void {
+  const patch = result.restored ? optimisticRestore(result.restored) : optimisticPatch(undo);
+  currentRowSource()?.patchRows?.([rowKey], patch);
 }
 
 /** Optimistic row transform back to a stored judgement (un-press, 실행 취소). */
