@@ -222,11 +222,12 @@ def create_app(
     async def read_only_run_sqlite_write(request: Request, exc: sqlite3.OperationalError):
         """A SQLite write refused by the guard's ``PRAGMA query_only`` (D37) is 409 ``RUN_READ_ONLY``.
 
-        Only for a request about a read-only run. A write refused by another writer's lock
-        (``database is locked``, e.g. a tag edit while another window saves) is 409 ``CASE_DB_LOCKED``
-        with a Korean message; any other SQLite error keeps the crash path.
+        Only for a request about a read-only run. On a case-DB route (``/api/case-db/*``,
+        ``/api/cases/*``) a write refused by another writer's lock (``database is locked``, e.g. a
+        tag edit while another window saves) is 409 ``CASE_DB_LOCKED`` with a Korean message; any
+        other SQLite error keeps the crash path.
         """
-        if is_lock_error(exc):
+        if is_lock_error(exc) and request.url.path.startswith(("/api/case-db/", "/api/cases/")):
             return error_response(409, case_db_locked_detail())
         reason = None
         if str(exc) == SQLITE_READONLY_MESSAGE:
