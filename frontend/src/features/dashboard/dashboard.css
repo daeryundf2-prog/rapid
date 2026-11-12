@@ -97,6 +97,45 @@
 }
 
 /* r7 L4 (C-I1): "카드 N/M 준비됨" while the intake cards load. */
+/* Processing-scope band (T-024): four axes on one amber line under the strip; neutral note when
+   the result has no extraction stats. */
+.dash-scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-3);
+  margin: var(--space-1) 0 0;
+  padding: var(--space-1) var(--space-2);
+  border-inline-start: 3px solid var(--warn);
+  background: var(--caution-bg);
+  font-size: var(--fs-table-aux);
+}
+
+.dash-scope-line {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.dash-scope-extra {
+  margin-inline-start: var(--space-2);
+  color: var(--text-muted);
+}
+
+.dash-scope-details summary {
+  cursor: pointer;
+}
+
+.dash-scope-details ul {
+  margin: var(--space-1) 0;
+  padding-inline-start: var(--space-4);
+}
+
+.dash-scope-note {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
 .dash-card-progress {
   display: flex;
   align-items: center;
