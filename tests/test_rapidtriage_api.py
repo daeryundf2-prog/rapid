@@ -727,7 +727,7 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertEqual(index_response.status_code, 200)
         # The v2 console bundle is served at "/" by default (2026-10-12).
         self.assertIn('<div id="root"></div>', index_response.text)
-        self.assertIn("RapidForensic", index_response.text)
+        self.assertIn("RapidTriage", index_response.text)
         favicon_response = client.get("/favicon.ico")
         self.assertEqual(favicon_response.status_code, 200)
         self.assertEqual(favicon_response.headers["content-type"].split(";")[0], "image/svg+xml")
