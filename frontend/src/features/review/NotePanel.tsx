@@ -40,10 +40,21 @@ const STATUS_LABELS: Record<string, string> = {
   excluded: "제외",
 };
 
+/**
+ * True when the entry's tag set really changed (T-144): an entry may list "tags" with the same
+ * set before and after (both empty included), which must not read "태그: 없음 → 없음".
+ */
+export function tagsChanged(entry: ReviewHistoryEntry): boolean {
+  if (!entry.changed_fields.includes("tags")) return false;
+  const before = [...(entry.tags_before ?? [])].sort().join("|");
+  const after = [...(entry.tags_after ?? [])].sort().join("|");
+  return before !== after;
+}
+
 /** "메모, 태그" — the changed fields of a history entry in Korean (unknown names kept). */
 export function changedLabel(entry: ReviewHistoryEntry): string {
   const names = entry.changed_fields
-    .filter((field) => field !== "reviewer")
+    .filter((field) => field !== "reviewer" && (field !== "tags" || tagsChanged(entry)))
     .map((field) => FIELD_LABELS[field] ?? field);
   return names.length ? names.join(", ") : "변경 없음";
 }
@@ -51,7 +62,7 @@ export function changedLabel(entry: ReviewHistoryEntry): string {
 function HistoryItem({ entry, timezone }: { entry: ReviewHistoryEntry; timezone: string }) {
   const when = formatTimestamp(entry.changed_at, timezone);
   const noteChanged = entry.changed_fields.includes("note");
-  const tagsChanged = entry.changed_fields.includes("tags");
+  const tagLine = tagsChanged(entry);
   const statusChanged = entry.changed_fields.includes("status");
   return (
     <li className="note-history-item" data-testid="note-history-item">
@@ -69,7 +80,7 @@ function HistoryItem({ entry, timezone }: { entry: ReviewHistoryEntry; timezone:
           <span>{entry.note_after || "(메모 지움)"}</span>
         </p>
       ) : null}
-      {tagsChanged ? (
+      {tagLine ? (
         <p className="note-history-body">
           태그: {entry.tags_before.join(", ") || "없음"} → {entry.tags_after.join(", ") || "없음"}
         </p>

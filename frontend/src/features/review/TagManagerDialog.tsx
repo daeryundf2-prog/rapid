@@ -13,7 +13,7 @@ import { ErrorText } from "../case/ErrorText";
 import { InlineConfirm } from "../case/InlineConfirm";
 import { Modal } from "../case/Modal";
 import { ReasonButton } from "../case/ReasonButton";
-import { currentReviewer, setReviewer } from "./author";
+import { reviewerPlaceholder, setReviewer, typedReviewer } from "./author";
 import { removeTag, saveNewTag, saveTagChanges, sortTags, useCaseTags } from "./tagStore";
 import "./review.css";
 
@@ -66,7 +66,9 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
   const [confirmDelete, setConfirmDelete] = useState<CaseTag | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [author, setAuthor] = useState(() => (currentReviewer() === "web-ui" ? "" : currentReviewer()));
+  // T-144: the field holds only a typed name; empty, the case's 담당자 signs (its name is the
+  // placeholder, else "담당자 이름") — never a system id such as "web-ui".
+  const [author, setAuthor] = useState(typedReviewer);
   const formId = useId();
   const nameId = useId();
   const shortcutId = useId();
@@ -182,7 +184,7 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
             id={authorId}
             type="text"
             value={author}
-            placeholder="web-ui"
+            placeholder={reviewerPlaceholder(runId)}
             maxLength={60}
             onChange={(event) => setAuthor(event.target.value)}
             onBlur={() => setReviewer(author)}
@@ -225,7 +227,7 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
                 <td>{tag.shortcut ?? "—"}</td>
                 <td className="num">{tag.count.toLocaleString("ko-KR")}</td>
                 <td className="tag-desc">{tag.description || "—"}</td>
-                <td>{tag.created_by || "—"}</td>
+                <td>{tag.created_by && tag.created_by !== "web-ui" ? tag.created_by : "—"}</td>
                 <td className="tag-actions">
                   <button
                     type="button"

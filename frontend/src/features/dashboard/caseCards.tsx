@@ -8,7 +8,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, Fragment, useId, useRef, useState } from "react";
+import { type FormEvent, Fragment, useEffect, useId, useRef, useState } from "react";
 import { announce } from "../../a11y";
 import {
   addCaseNote,
@@ -25,12 +25,14 @@ import {
   rehashEvidence,
 } from "../../api/cases";
 import { type EvidenceSource, type CaseNotes as RunNotes, saveCaseNotes } from "../../api/dashboard";
+import { ApiError } from "../../api/errors";
 import { fetchIrregularSummary, type IrregularSummary } from "../../api/families";
 import { type CanonicalCounts, getRunTree, type RunWarning } from "../../api/runs";
 import { CommandButton } from "../../commands/CommandButton";
 import { StatusBadge } from "../../components/Badge";
 import { ToneChip } from "../../components/ToneChip";
 import { type Route, serializeRoute } from "../../router";
+import { registerLeaveGuard, UNSAVED_LEAVE_MESSAGE } from "../../state/leaveGuard";
 import { AI_TOOL_SOURCE_LABELS, type AiToolSource, type AiUsageSummary, aiToolTitle } from "../ai/aiUsage";
 import { aiRowCount, aiTypeCount, useAiUsageSummary } from "../ai/useAiUsage";
 import { LEVEL_LABEL } from "../case/CaseDialogs";
@@ -855,6 +857,26 @@ export function WarningsCard({
 
 // --- 노트·메모 (케이스 메모 + 요약 노트, 검사관 한 칸) ---------------------------------------
 
+const HANGUL = /[가-힣]/;
+
+/**
+ * Korean sentence for a failed memo request (T-144): "{action} 못했습니다. {why}" — the ApiError's
+ * Korean message when it has one, else a generic Korean reason; never the raw English text of a
+ * browser or server error.
+ */
+export function memoFailureText(action: string, error: unknown): string {
+  const why =
+    error instanceof ApiError && HANGUL.test(error.message) && !/[A-Za-z]{3,}/.test(error.message)
+      ? error.message.replace(/[.。]\s*$/, "")
+      : "서버가 요청을 처리하지 않았습니다";
+  return `${action} 못했습니다. ${why}. 잠시 뒤 다시 시도하세요.`;
+}
+
+/** True when moving `prev → next` leaves this run's 접수 dashboard (where the memo block lives). */
+function leavesDashboard(prev: Route, next: Route): boolean {
+  return next.runId !== prev.runId || next.collection !== prev.collection;
+}
+
 /**
  * 노트·메모: one 검사관 field drives both the memo author and the run's 요약 노트 examiner. 케이스 메모
  * (작성자 · 시각 · 이력, case DB) is on top; the 요약 노트 (PUT /case-notes, fills the report's 분석자 ·
@@ -887,6 +909,23 @@ export function NotesCard({
   const examiner = examinerEdit ?? (runNotes?.examiner || caseExaminer);
   const summary = summaryEdit ?? runNotes?.summary ?? "";
   const dirty = examinerEdit !== null || summaryEdit !== null;
+  // Unsaved input of the block: the 검사관·요약 edits and a typed but not yet added memo.
+  const unsaved = dirty || text.trim() !== "";
+  useEffect(() => {
+    if (!unsaved) return;
+    const unregister = registerLeaveGuard((prev, next) =>
+      leavesDashboard(prev, next) ? UNSAVED_LEAVE_MESSAGE : null,
+    );
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      unregister();
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    };
+  }, [unsaved]);
 
   const refreshCase = () => {
     if (!caseId) return;
@@ -901,9 +940,7 @@ export function NotesCard({
       announce("케이스 메모를 추가했습니다");
     },
     onError: (error: unknown) =>
-      announce(`메모 추가 실패: ${error instanceof Error ? error.message : String(error)}`, {
-        politeness: "assertive",
-      }),
+      announce(memoFailureText("메모를 추가하지", error), { politeness: "assertive" }),
   });
   // Memo delete asks first (T-034): 삭제 opens an inline confirmation on that memo.
   const [confirmNoteId, setConfirmNoteId] = useState<number | null>(null);
@@ -920,6 +957,8 @@ export function NotesCard({
       refreshCase();
       announce("메모를 삭제했습니다 (이력에 남음)");
     },
+    onError: (error: unknown) =>
+      announce(memoFailureText("메모를 삭제하지", error), { politeness: "assertive" }),
   });
   const save = useMutation<RunNotes, Error>({
     mutationFn: () => saveCaseNotes(runId, { examiner, summary }),
@@ -930,9 +969,7 @@ export function NotesCard({
       announce("요약 노트를 저장했습니다");
     },
     onError: (error: unknown) =>
-      announce(`노트 저장 실패: ${error instanceof Error ? error.message : String(error)}`, {
-        politeness: "assertive",
-      }),
+      announce(memoFailureText("요약 노트를 저장하지", error), { politeness: "assertive" }),
   });
   const onAdd = (event: FormEvent) => {
     event.preventDefault();
@@ -992,7 +1029,10 @@ export function NotesCard({
                       className="button ghost"
                       aria-label={`${note.author || "검사관 미지정"} 메모 삭제 (${formatTime(note.created_at)})`}
                       aria-expanded={confirmNoteId === note.id}
-                      onClick={() => setConfirmNoteId(note.id)}
+                      onClick={() => {
+                        remove.reset();
+                        setConfirmNoteId(note.id);
+                      }}
                     >
                       삭제
                     </button>
@@ -1009,10 +1049,9 @@ export function NotesCard({
                           이 메모를 케이스 메모 목록에서 지웁니다. 메모 이력에는 삭제 기록으로 남고, 원본
                           증거와 처리 결과는 바뀌지 않습니다.
                         </p>
-                        {remove.error ? (
-                          <p className="error-banner" role="alert">
-                            메모를 삭제하지 못했습니다.{" "}
-                            {String((remove.error as Error).message ?? remove.error)}
+                        {remove.isError ? (
+                          <p className="error-banner" data-testid="memo-delete-error">
+                            {memoFailureText("메모를 삭제하지", remove.error)}
                           </p>
                         ) : null}
                       </InlineConfirm>
@@ -1056,8 +1095,8 @@ export function NotesCard({
               </div>
             </form>
             {add.isError ? (
-              <p className="error-banner">
-                추가하지 못했습니다: {add.error instanceof Error ? add.error.message : ""}
+              <p className="error-banner" data-testid="memo-add-error">
+                {memoFailureText("메모를 추가하지", add.error)}
               </p>
             ) : null}
             {showHistory ? (
@@ -1117,8 +1156,8 @@ export function NotesCard({
             </span>
           </div>
           {save.isError ? (
-            <p className="error-banner">
-              저장하지 못했습니다: {save.error instanceof Error ? save.error.message : String(save.error)}
+            <p className="error-banner" data-testid="summary-save-error">
+              {memoFailureText("요약 노트를 저장하지", save.error)}
             </p>
           ) : null}
           <p className="dash-note">
