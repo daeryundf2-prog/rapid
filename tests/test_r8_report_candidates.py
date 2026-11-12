@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import tempfile
 import unittest
 import zipfile
@@ -125,6 +126,98 @@ class ReportCandidateCountTests(unittest.TestCase):
         with patch.object(review_payload, "case_db_mark_flags", broken):
             counts = self.client.get(f"/api/runs/{self.run_id}/review-counts").json()
         self.assertIsNone(counts["report_candidates"])
+        self.assertEqual(counts["error"]["code"], "CASE_DB_UNREADABLE")
+        self.assertIn("케이스 DB", counts["error"]["message"])
+
+    # --- T-025 remaining scope: the store combinations and the status tallies -----------------
+
+    def counts(self) -> dict[str, object]:
+        response = self.client.get(f"/api/runs/{self.run_id}/review-counts")
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def case_json_path(self) -> Path:
+        return self.output_dir / "rapidtriage-case.json"
+
+    def keep_case_json(self) -> dict[str, object]:
+        """The case JSON as it is now; restored after the test."""
+        original = self.case_json_path().read_bytes()
+        self.addCleanup(self.case_json_path().write_bytes, original)
+        return json.loads(original)
+
+    def mark_citation(self, target_id: str) -> str:
+        connection = sqlite3.connect(f"{Path(self.database).as_uri()}?mode=ro", uri=True)
+        try:
+            row = connection.execute(
+                "SELECT citation_id FROM review_mark WHERE case_id = ? AND target_type = 'document' AND target_id = ?",
+                (self.case_id, target_id),
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertIsNotNone(row)
+        return str(row[0])
+
+    def test_case_db_only(self) -> None:
+        self.keep_case_json()
+        self.case_json_path().unlink()
+        counts = self.counts()
+        self.assertEqual(counts["report_candidates"], 2)
+        self.assertEqual(counts["report_candidates_detail"]["case_db"], 2)
+        self.assertEqual(counts["case_json"]["include_in_report"], 0)
+        manifest = self.client.get(f"/api/runs/{self.run_id}/submission-manifest").json()
+        self.assertEqual(manifest["summary"]["report_candidate_count"], 2)
+
+    def test_case_json_only(self) -> None:
+        missing = self.output_dir / "no-such-case.db"
+        with patch.object(review_payload, "canonical_run_case", lambda _summary, _run_id: (missing, self.case_id)):
+            counts = self.counts()
+            manifest = self.client.get(f"/api/runs/{self.run_id}/submission-manifest").json()
+        self.assertEqual(counts["report_candidates"], 1)
+        self.assertEqual(counts["report_candidates_detail"]["case_db"], 0)
+        self.assertEqual(counts["case_json"]["include_in_report"], 1)
+        self.assertEqual(manifest["summary"]["report_candidate_count"], 1)
+
+    def test_same_item_in_both_stores_counts_once(self) -> None:
+        """The dedup key is the citation, not the bookmark id each store gave the item."""
+        payload = self.keep_case_json()
+        bookmarks = list(payload["bookmarks"])
+        bookmarks.append(
+            {
+                "bookmark_id": "bookmark-copied-from-bundle",
+                "review": {"status": "relevant", "include_in_report": True},
+                "reference": {"citation_id": self.mark_citation("a")},
+            }
+        )
+        bookmarks.append(
+            {
+                "bookmark_id": "bookmark-same-target",
+                "review": {"status": "relevant", "include_in_report": True},
+                "reference": {"target_type": "document", "target_id": "b"},
+            }
+        )
+        payload["bookmarks"] = bookmarks
+        self.case_json_path().write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        counts = self.counts()
+        self.assertEqual(counts["report_candidates"], 3)  # was 5: both copies counted twice
+        self.assertEqual(counts["report_candidates_detail"]["case_db"], 0)
+        self.assertEqual(counts["case_json"]["include_in_report"], 3)
+        manifest = self.client.get(f"/api/runs/{self.run_id}/submission-manifest").json()
+        self.assertEqual(manifest["summary"]["report_candidate_count"], 3)
+        report = self.client.post(f"/api/runs/{self.run_id}/case-report", json={}).json()["markdown"]
+        self.assertIn("- 보고서 포함 후보 수: 3", report)
+
+    def test_unreadable_case_db_tallies_are_null_not_zero(self) -> None:
+        real_connect = sqlite3.connect
+
+        def connect(target, *args, **kwargs):
+            if str(target).startswith("file:") and "mode=ro" in str(target):
+                raise sqlite3.DatabaseError("database disk image is malformed")
+            return real_connect(target, *args, **kwargs)
+
+        with patch("sqlite3.connect", connect):
+            counts = self.counts()
+        for key in ("by_status", "include_in_report", "cleared", "report_candidates"):
+            self.assertIsNone(counts[key], key)
         self.assertEqual(counts["error"]["code"], "CASE_DB_UNREADABLE")
         self.assertIn("케이스 DB", counts["error"]["message"])
 

@@ -96,6 +96,8 @@ def case_db_mark_flags(summary: Mapping[str, object], run_id: str) -> CaseDbMark
         {
             "bookmark_id": case_db_bookmark_id(str(row[0] or ""), str(row[1]), str(row[2])),
             "review": {"include_in_report": bool(row[3])},
+            # Same citation fields as :func:`read_case_db_marks` so the dedup key is the same.
+            "reference": {"citation_id": str(row[0] or ""), "target_type": str(row[1]), "target_id": str(row[2])},
         }
         for row in rows[:MAX_CASE_DB_MARKS]
     ]
@@ -201,12 +203,46 @@ def _json_bookmarks(payload: Mapping[str, object]) -> list[Mapping[str, object]]
     return [item for item in existing if isinstance(item, Mapping)] if isinstance(existing, list) else []
 
 
+def review_citation_keys(bookmark: Mapping[str, object]) -> set[str]:
+    """Dedup keys of one review item (R8 T-025): its citation, not the store's own bookmark id.
+
+    ``reference.citation_id`` (the case DB mark's citation) and ``reference.target_type/target_id``
+    (the cited target) when the item carries them; empty when it carries neither (then only the
+    bookmark id can match)."""
+    reference = bookmark.get("reference")
+    if not isinstance(reference, Mapping):
+        return set()
+    keys: set[str] = set()
+    citation_id = str(reference.get("citation_id") or "").strip()
+    if citation_id:
+        keys.add(f"citation:{citation_id}")
+    target_type = str(reference.get("target_type") or "").strip()
+    target_id = str(reference.get("target_id") or "").strip()
+    if target_type and target_id:
+        keys.add(f"target:{target_type}/{target_id}")
+    return keys
+
+
 def merge_review_bookmarks(
     json_bookmarks: list[Mapping[str, object]], marks: list[dict[str, object]]
 ) -> list[Mapping[str, object]]:
-    """Bookmark JSON first, then every case DB mark whose bookmark id the JSON does not hold."""
-    known = {str(item.get("bookmark_id") or "") for item in json_bookmarks}
-    return [*json_bookmarks, *(item for item in marks if item["bookmark_id"] not in known)]
+    """Bookmark JSON first, then every case DB mark the JSON does not already hold.
+
+    A mark is the same item as a JSON bookmark when both carry the same citation id or cited
+    target (:func:`review_citation_keys`), or the same bookmark id (a snapshot of an earlier
+    merge) — so an item present in both stores under different bookmark ids counts once."""
+    known_ids = {str(item.get("bookmark_id") or "") for item in json_bookmarks}
+    known_citations: set[str] = set()
+    for item in json_bookmarks:
+        known_citations |= review_citation_keys(item)
+    return [
+        *json_bookmarks,
+        *(
+            item
+            for item in marks
+            if item["bookmark_id"] not in known_ids and not (review_citation_keys(item) & known_citations)
+        ),
+    ]
 
 
 def review_scope(marks: CaseDbMarks) -> dict[str, object] | None:

@@ -24,14 +24,22 @@ from rapidtriage.core.jobs import RunJobStore
 from rapidtriage.core.sample_case import build_sample_evidence
 
 TOKEN = "r8-get-token"
+#: The two in-memory JSON GETs (T-030 route 1-2).
+QUERY_GETS = ("submission-manifest", "validation-package")
+#: Saved-file GETs: 404 ``EXPORT_NOT_WRITTEN`` until the export POST wrote the file (T-030 route 3-6;
+#: ``/saved`` carries the code too since T-030's remaining scope).
 FILE_GETS = (
+    "submission-manifest/saved",
     "submission-manifest/file",
+    "validation-package/saved",
     "validation-package/file",
     "case-report/file",
     "case-report/file/md",
     "case-report/file/pdf",
     "reviewer-bundle/file",
 )
+#: Route 7, the extract zip download, needs an extract folder name (see ``extract_file_get``).
+EXTRACT_NAME = "pick-legacy"
 
 
 def snapshot(root: Path) -> dict[str, str]:
@@ -67,29 +75,39 @@ class GetNeverWritesTests(unittest.TestCase):
     def url(self, rest: str) -> str:
         return f"/api/runs/{self.run_id}/{rest}"
 
-    def test_gets_before_any_export_write_nothing(self) -> None:
+    def legacy_extract_folder(self) -> None:
+        """An extract folder without its zip (written before the zip POST existed)."""
+        folder = self.output / "extract" / EXTRACT_NAME
+        (folder / "Users").mkdir(parents=True)
+        (folder / "Users" / "memo.txt").write_text("memo", encoding="utf-8")
+        (folder / "rapidtriage-extract-manifest.json").write_text(json.dumps({"summary": {"extracted_count": 1}}), encoding="utf-8")
+
+    def test_all_seven_routes_before_any_export_write_nothing(self) -> None:
+        self.legacy_extract_folder()
         before = snapshot(self.output)
-        for rest in ("submission-manifest", "validation-package"):
+        for rest in QUERY_GETS:
             response = self.client.get(self.url(rest))
             self.assertEqual(response.status_code, 200, f"{rest}: {response.text[:200]}")
-        for rest in FILE_GETS:
+        for rest in (*FILE_GETS, f"extract/{EXTRACT_NAME}/file"):
             response = self.client.get(self.url(rest))
             self.assertEqual(response.status_code, 404, f"{rest}: {response.text[:200]}")
             self.assertEqual(response.json()["detail"]["code"], "EXPORT_NOT_WRITTEN", rest)
-            self.assertIn("먼저 내보내기를 실행하세요", response.json()["detail"]["message"])
+            self.assertIn("먼저", response.json()["detail"]["message"], rest)
         self.assertEqual(snapshot(self.output), before)
 
-    def test_file_gets_return_what_the_post_wrote(self) -> None:
+    def test_all_seven_routes_after_the_posts_write_nothing(self) -> None:
+        self.legacy_extract_folder()
         for rest, body in (
             ("submission-manifest", None),
             ("validation-package", None),
             ("case-report", {}),
             ("reviewer-bundle", {}),
+            (f"extract/{EXTRACT_NAME}/zip", None),
         ):
             response = self.client.post(self.url(rest), json=body) if body is not None else self.client.post(self.url(rest))
             self.assertEqual(response.status_code, 200, f"{rest}: {response.text[:200]}")
         before = snapshot(self.output)
-        for rest in (*FILE_GETS, "submission-manifest", "validation-package", "submission-manifest/saved"):
+        for rest in (*QUERY_GETS, *FILE_GETS, f"extract/{EXTRACT_NAME}/file"):
             response = self.client.get(self.url(rest))
             self.assertEqual(response.status_code, 200, f"{rest}: {response.text[:200]}")
         self.assertEqual(snapshot(self.output), before)

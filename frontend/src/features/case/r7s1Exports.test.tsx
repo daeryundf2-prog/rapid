@@ -2,8 +2,19 @@
 // and after the export; the submission manifest downloads the saved file (`/saved`).
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../../api/client";
+import { isExportNotWritten } from "../../api/reports";
 import { useToastStore } from "../../components/toastStore";
-import { CASE_REPORT_FILES, caseReportWritten, exportWrites, performExport, writtenDetail } from "./exports";
+import {
+  CASE_REPORT_FILES,
+  caseReportWritten,
+  downloadSavedExport,
+  exportWrites,
+  NOT_EXPORTED_MESSAGE,
+  openSavedExport,
+  performExport,
+  writtenDetail,
+} from "./exports";
 import { ReportDialog } from "./ReportDialog";
 import { mockFetch, renderWithQuery } from "./testUtils";
 
@@ -146,5 +157,85 @@ describe("R-4: submission manifest is written once (POST) and re-read (/saved)",
         (c) => c.method === "GET" && /submission-manifest(\/file)?$/.test(c.url.split("?")[0] ?? ""),
       ),
     ).toBe(false);
+  });
+});
+
+describe("R8 T-030: a saved export that was never written (404 EXPORT_NOT_WRITTEN)", () => {
+  const notWritten = () =>
+    new Response(
+      JSON.stringify({
+        detail: {
+          code: "EXPORT_NOT_WRITTEN",
+          message: "저장된 검증 패키지이(가) 없습니다. 먼저 내보내기를 실행하세요",
+        },
+      }),
+      { status: 404, headers: { "content-type": "application/json" } },
+    );
+
+  it("the download rejects with the one 'not exported yet' state, code kept", async () => {
+    mockFetch({ "GET /api/runs/r8a/submission-manifest/saved": notWritten() });
+    const failure = await downloadSavedExport("/api/runs/r8a/submission-manifest/saved", "m.json").catch(
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(ApiError);
+    expect((failure as ApiError).message).toBe(NOT_EXPORTED_MESSAGE);
+    expect((failure as ApiError).code).toBe("EXPORT_NOT_WRITTEN");
+    expect(isExportNotWritten(failure)).toBe(true);
+  });
+
+  it("other download errors pass through unchanged", async () => {
+    mockFetch({});
+    const failure = await downloadSavedExport("/api/runs/r8a/case-report/file/md", "r.md").catch(
+      (error: unknown) => error,
+    );
+    expect(isExportNotWritten(failure)).toBe(false);
+    expect((failure as ApiError).message).not.toBe(NOT_EXPORTED_MESSAGE);
+  });
+
+  it("열기 on a missing package shows the state with a 내보내기 action that POSTs, then downloads", async () => {
+    let saved = false;
+    const { calls } = mockFetch({
+      "GET /api/runs/r8b/validation-package/saved": () =>
+        saved ? file("rapidforensic-run-validation-package.json") : notWritten(),
+      "POST /api/runs/r8b/validation-package": () => {
+        saved = true;
+        return {
+          package_path: "D:\\o\\rapidforensic-run-validation-package.json",
+          audit: "D:\\o\\rapidforensic-run-validation-package.audit.json",
+          written: [],
+          download_url: "/api/runs/r8b/validation-package/saved",
+        };
+      },
+    });
+    const opened = await openSavedExport(
+      "validation-package",
+      "r8b",
+      "/api/runs/r8b/validation-package/saved",
+      "rapidforensic-run-validation-package.json",
+    );
+    expect(opened).toBeUndefined();
+    const toast = useToastStore.getState().toasts.at(-1);
+    expect(toast?.text).toBe(`검증 패키지: ${NOT_EXPORTED_MESSAGE}`);
+    expect(toast?.tone).toBe("warn");
+    expect(toast?.action?.label).toBe("내보내기");
+    toast?.action?.run?.();
+    await waitFor(() =>
+      expect(useToastStore.getState().toasts.at(-1)?.text).toBe(
+        "검증 패키지: rapidforensic-run-validation-package.json을(를) 저장했습니다.",
+      ),
+    );
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
+      "GET /api/runs/r8b/validation-package/saved",
+      "POST /api/runs/r8b/validation-package",
+    ]);
+    // The new package's own 열기 then reads the saved file.
+    expect(
+      await openSavedExport(
+        "validation-package",
+        "r8b",
+        "/api/runs/r8b/validation-package/saved",
+        "rapidforensic-run-validation-package.json",
+      ),
+    ).toBe("rapidforensic-run-validation-package.json");
   });
 });
