@@ -47,13 +47,15 @@ export function reviewTargetFallback(targetType: string, targetId: string, index
   return /^\d+$/.test(targetId) ? `${label} #${targetId}` : `${label} ${index + 1}`;
 }
 
-/** An internal type id ("prefetch-file", "windows_prefetch", "evtx.record") followed by ":". */
-const TYPE_ID_PREFIX = /^([a-z0-9]+(?:[-_.][a-z0-9]+)+)\s*:\s*/i;
+/** A leading "<id>:" whose id may be a type id (the catalogue decides; no generic pattern, T-176). */
+const LEADING_ID = /^([A-Za-z0-9][\w.-]*)\s*:\s*/;
 
 /**
  * The 요약 of a review row without the internal type-id prefix (T-176, GAP-090): "prefetch-file:
- * CHROME.EXE" → "CHROME.EXE". A summary that is only the type id reads as the type's Korean name.
- * Drive letters ("C:\\…") and URLs ("https://…") keep their colon (no hyphen / underscore id).
+ * CHROME.EXE" → "CHROME.EXE". Only the row's own kind or an id the artifact type catalogue knows is
+ * dropped: timestamps ("2026-01-01T10:23:45 …"), addresses ("192.168.0.5:445 …"), host names and
+ * file names ("setup.exe: 3 runs") stay whole. A summary that is only the type id reads as the
+ * type's Korean name.
  */
 export function reviewSummary(text: string | null, kind?: string | null): string | null {
   const raw = (text ?? "").trim();
@@ -64,7 +66,8 @@ export function reviewSummary(text: string | null, kind?: string | null): string
   if (typeId && rest.toLowerCase().startsWith(`${typeId.toLowerCase()}:`)) {
     rest = rest.slice(typeId.length + 1).trim();
   } else {
-    rest = rest.replace(TYPE_ID_PREFIX, "").trim();
+    const lead = LEADING_ID.exec(rest);
+    if (lead?.[1] && artifactTypeLabel(lead[1]) !== null) rest = rest.slice(lead[0].length).trim();
   }
   if (rest) return rest;
   return typeId ? (artifactTypeLabel(typeId) ?? null) : null;

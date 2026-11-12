@@ -22,8 +22,25 @@ const caseDbMark = (extra: Record<string, unknown>) => ({
 describe("검토 목록 요약 (T-176)", () => {
   it("drops an internal type-id prefix", () => {
     expect(reviewSummary("prefetch-file: CHROME.EXE", "prefetch-file")).toBe("CHROME.EXE");
-    expect(reviewSummary("windows_prefetch: CHROME.EXE")).toBe("CHROME.EXE");
-    expect(reviewSummary("evtx.record:  4624 로그온")).toBe("4624 로그온");
+    // No kind on the row: an id the artifact type catalogue knows is still dropped.
+    expect(reviewSummary("prefetch-file: CHROME.EXE")).toBe("CHROME.EXE");
+    expect(reviewSummary("browser-history:  방문 기록")).toBe("방문 기록");
+  });
+
+  it("keeps a leading time, address, host or file name that only looks like an id (P1-6)", () => {
+    for (const text of [
+      "2026-01-01T10:23:45 logon",
+      "192.168.0.5:445 SMB",
+      "mail.example.com:443 session",
+      "setup.exe: 3 runs",
+      "report_final.docx: opened",
+      "windows_prefetch: CHROME.EXE",
+    ]) {
+      expect(reviewSummary(text)).toBe(text);
+      expect(reviewSummary(text, "prefetch-file")).toBe(text);
+    }
+    const row = mapRow(caseDbMark({ title: "192.168.0.5:445 SMB", target_kind: "network-connection" }));
+    expect(row.title).toBe("192.168.0.5:445 SMB");
   });
 
   it("keeps drive letters, URLs and plain sentences", () => {
