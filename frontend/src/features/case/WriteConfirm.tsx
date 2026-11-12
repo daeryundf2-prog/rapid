@@ -28,6 +28,11 @@ export interface WriteConfirmRequest {
   /** Extra sentence under the list (e.g. "원본 증거는 바꾸지 않습니다."). */
   note?: string;
   confirmLabel: string;
+  /**
+   * The write replaces or discards something that cannot be got back (T-034): the confirm button
+   * takes the danger style. Focus starts on 취소 either way.
+   */
+  danger?: boolean;
 }
 
 interface WriteConfirmState {
@@ -112,6 +117,7 @@ export function WriteConfirmHost() {
     <Modal
       title={pending.title}
       onClose={() => settle(false)}
+      initialFocus="cancel"
       footer={
         <>
           <button
@@ -119,6 +125,7 @@ export function WriteConfirmHost() {
             type="button"
             className="button roomy"
             data-testid="write-confirm-cancel"
+            data-dialog-cancel=""
             onClick={() => settle(false)}
           >
             취소
@@ -126,7 +133,7 @@ export function WriteConfirmHost() {
           <button
             ref={okRef}
             type="button"
-            className="button primary roomy"
+            className={`button ${pending.danger ? "danger" : "primary"} roomy`}
             data-testid="write-confirm-ok"
             onClick={() => settle(true)}
           >

@@ -218,7 +218,7 @@ describe("런 / 케이스 wording (C-G5 · C-L1)", () => {
     expect(row.textContent).toContain("소요 34:08 · af54ff24");
     expect(screen.queryByRole("button", { name: /삭제$/ })).toBeNull();
     fireEvent.click(screen.getAllByRole("button", { name: /런 메뉴$/ })[0] as HTMLElement);
-    fireEvent.click(screen.getByRole("menuitem", { name: /런 삭제/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /처리 결과 삭제/ }));
     expect(openDelete).toHaveBeenCalledWith(WEB_RUN.run_id);
   });
 });

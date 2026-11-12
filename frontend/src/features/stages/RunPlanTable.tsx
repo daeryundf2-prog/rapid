@@ -233,6 +233,8 @@ export function RunPlanTable({
         ],
         note: "건너뛴 처리는 이 런에서 되돌릴 수 없습니다(다시 실행 = 새 런).",
         confirmLabel: action === "skip" ? "건너뛰기" : "취소 요청",
+        // Cannot be undone within this run (T-034).
+        danger: true,
       });
       if (!ok) return;
     }

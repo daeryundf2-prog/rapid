@@ -3,7 +3,7 @@ import { NO_RUN_REASON } from "../../commands/reasons";
 import type { Command } from "../../contracts/command";
 import { navigate, registerCommand } from "../tree/adapter";
 import { caseLinkOf } from "./caseLink";
-import { useCaseDialogs } from "./dialogs";
+import { DELETE_RUN_LABEL, useCaseDialogs } from "./dialogs";
 import { EXPORT_ACTIONS, exportDisabledReason } from "./exports";
 import { useSearchState } from "./searchState";
 import { confirmWrite, notifyWriteFailed, notifyWritten } from "./WriteConfirm";
@@ -33,6 +33,8 @@ export async function runSampleWithConfirm(): Promise<string | null> {
     ],
     note: "연습용 합성 데이터입니다. 실제 증거·다른 런은 건드리지 않습니다.",
     confirmLabel: "샘플 실행",
+    // Replaces the previous sample's folder: an overwrite (T-034).
+    danger: true,
   });
   if (!ok) return null;
   try {
@@ -194,7 +196,7 @@ export function buildCaseCommands(facts: CaseCommandFacts): Command[] {
     },
     {
       id: "case.delete",
-      label: "현재 케이스 삭제…",
+      label: DELETE_RUN_LABEL,
       group: "case",
       disabledReason: (ctx) =>
         !ctx.runId ? NO_CASE : ctx.runIsActive ? "실행 중인 런은 먼저 취소해야 합니다" : undefined,

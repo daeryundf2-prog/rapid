@@ -271,6 +271,41 @@ describe("접수 case cards (Q-X1/Q-X3/Q-X4, r7 merged cards)", () => {
     expect(post?.body).toEqual({ text: "USB 2개 확인", author: "홍길동" });
   });
 
+  it("memo delete asks first: wording, focus on 취소, Esc cancels, danger 삭제 deletes (T-034)", async () => {
+    const { calls } = mockFetch({
+      ...routes(true),
+      "DELETE /api/cases/case-1/notes/1": { note: { ...notes.notes[0], deleted_at: "2026-10-18T00:00:00Z" } },
+    });
+    renderWithQuery(<CaseDashboard runId="r1" />);
+    const memo = await waitFor(() => {
+      const card = cardOf("노트·메모");
+      expect(within(card).getByText("압수 목록 확인")).toBeTruthy();
+      return card;
+    });
+    // The first test may have added a memo: take the delete button of "압수 목록 확인" (note 1).
+    const item = within(memo).getByText("압수 목록 확인").closest("li") as HTMLElement;
+    const opener = within(item).getByRole("button", { name: /^홍길동 메모 삭제/ });
+    fireEvent.click(opener);
+    expect(calls.some((call) => call.method === "DELETE")).toBe(false);
+    let confirm = within(item).getByRole("group", { name: "메모 삭제 확인" });
+    expect(confirm.textContent).toContain("메모 이력에는 삭제 기록으로 남고");
+    expect(document.activeElement).toBe(within(confirm).getByTestId("memo-delete-cancel"));
+    expect(within(confirm).getByTestId("memo-delete-ok").className).toContain("danger");
+
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Escape" });
+    expect(within(memo).queryByRole("group", { name: "메모 삭제 확인" })).toBeNull();
+    expect(document.activeElement).toBe(opener);
+    expect(calls.some((call) => call.method === "DELETE")).toBe(false);
+
+    fireEvent.click(opener);
+    confirm = within(item).getByRole("group", { name: "메모 삭제 확인" });
+    fireEvent.click(within(confirm).getByTestId("memo-delete-ok"));
+    await waitFor(() => expect(calls.some((call) => call.method === "DELETE")).toBe(true));
+    expect(calls.find((call) => call.method === "DELETE")?.url).toBe(
+      "/api/cases/case-1/notes/1?actor=%ED%99%8D%EA%B8%B8%EB%8F%99",
+    );
+  });
+
   it("a run without a case keeps working and offers 케이스에 연결 (Q-X2)", async () => {
     mockFetch(routes(false));
     renderWithQuery(<CaseDashboard runId="r1" />);
