@@ -505,13 +505,18 @@ export function sourceThumbnailUrl(runId: string, path: string, size = THUMBNAIL
   return `${runBase(runId)}/source-thumbnail?${query({ path: fileApiPath(path), size })}`;
 }
 
+/**
+ * The thumbnail JPEG, or `null` when the server answers HTTP 204 (`X-RapidTriage-Thumbnail:
+ * unavailable`): an image-typed file that does not decode has "no preview" (r8 T-017/T-018).
+ */
 export async function fetchSourceThumbnailBlob(
   runId: string,
   path: string,
   size = THUMBNAIL_DEFAULT_SIZE,
   signal?: AbortSignal,
-): Promise<Blob> {
+): Promise<Blob | null> {
   const response = await apiResponse(sourceThumbnailUrl(runId, path, size), { signal });
+  if (response.status === 204) return null;
   return response.blob();
 }
 
