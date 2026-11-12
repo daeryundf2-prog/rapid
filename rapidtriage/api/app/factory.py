@@ -90,30 +90,48 @@ REVIEW_BATCH_FIELD_LABELS = {
 }
 # ``/api/runs/{run_id}/…`` — the run a request acts on (D37 read-only gate).
 RUN_SCOPED_PATH = re.compile(r"/api/runs/(?P<run_id>[^/]+)(?P<rest>/.*)?")
-# State-changing methods a read-only run still answers: queries sent as POST bodies (no write; the
-# write guard refuses any lazy write they would make) and removing the run from the list.
+# Allowlist (contract D.10): the only state-changing requests a read-only run still answers.
+# Queries sent as POST bodies (they write nothing; the write guard refuses any lazy write they
+# would make) and removing the run from the list (``DELETE /api/runs/{run_id}``; the folder stays).
 READ_ONLY_RUN_QUERY_POSTS = frozenset({"/search/count", "/search/query", "/search/entities", "/search/hashes"})
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
-def read_only_run_refusal(store: RunJobStore, method: str, path: str) -> JSONResponse | None:
-    """409 ``RUN_READ_ONLY`` for a state-changing request on a read-only run (D37), else ``None``."""
-    if method in {"GET", "HEAD", "OPTIONS"}:
-        return None
-    match = RUN_SCOPED_PATH.fullmatch(path)
-    if match is None:
+def _readonly_run_reason(store: RunJobStore, run_id: str | None) -> str | None:
+    if not run_id:
         return None
     try:
-        job = store.get(match.group("run_id"))
+        return store.get(run_id).readonly_reason or None
     except KeyError:
         return None
-    if not job.readonly_reason:
+
+
+def read_only_run_refusal(
+    store: RunJobStore, method: str, path: str, query_run_id: str | None = None
+) -> JSONResponse | None:
+    """409 ``RUN_READ_ONLY`` for a state-changing request on a read-only run (D37), else ``None``.
+
+    The run is the ``{run_id}`` of an ``/api/runs/{run_id}/…`` path or, for any other ``/api``
+    path, the ``run_id`` query parameter (``/api/cases/{case_id}/tags?run_id=…`` and the other
+    review-tool writes find the run's case DB through it).
+    """
+    if method in SAFE_METHODS:
         return None
-    rest = match.group("rest") or ""
-    if (method == "DELETE" and rest in {"", "/"}) or (method == "POST" and rest in READ_ONLY_RUN_QUERY_POSTS):
+    match = RUN_SCOPED_PATH.fullmatch(path)
+    if match is not None:
+        reason = _readonly_run_reason(store, match.group("run_id"))
+        rest = match.group("rest") or ""
+        if reason is None:
+            return None
+        if (method == "DELETE" and rest in {"", "/"}) or (method == "POST" and rest in READ_ONLY_RUN_QUERY_POSTS):
+            return None
+    elif path.startswith("/api/"):
+        reason = _readonly_run_reason(store, query_run_id)
+        if reason is None:
+            return None
+    else:
         return None
-    return error_response(
-        409, {"code": RUN_READ_ONLY, "message": RUN_READ_ONLY_MESSAGE, "readonly_reason": job.readonly_reason}
-    )
+    return error_response(409, {"code": RUN_READ_ONLY, "message": RUN_READ_ONLY_MESSAGE, "readonly_reason": reason})
 
 
 # Case intake routes (AXIOM adoption E1): every validation error in Korean.
@@ -232,7 +250,9 @@ def create_app(
                 supplied = request.headers.get("X-RapidTriage-Token")
                 if supplied is None or not secrets.compare_digest(supplied, expected_token):
                     return error_response(401, "missing or invalid RapidTriage auth token")
-            refusal = read_only_run_refusal(store, request.method.upper(), request.url.path)
+            refusal = read_only_run_refusal(
+                store, request.method.upper(), request.url.path, request.query_params.get("run_id")
+            )
             if refusal is not None:
                 return refusal
             return await call_next(request)

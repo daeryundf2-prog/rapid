@@ -13,8 +13,11 @@ Three layers keep that promise:
   ``api/app/factory.py``).
 * :func:`install_write_guard` — a process audit hook (installed by the web app) that refuses any
   file creation, write, rename or copy under a registered read-only folder with
-  :class:`ReadOnlyRunWriteError`, so a writer that forgot to ask cannot write either. Deletes are
-  not intercepted: no lazy writer deletes, and the operator must stay able to remove the folder.
+  :class:`ReadOnlyRunWriteError`, so a writer that forgot to ask cannot write either. Deleting an
+  existing file or folder under it is refused the same way (the operator removes the folder outside
+  the app, after removing the run from the list), and a SQLite database that already exists there is
+  opened with ``PRAGMA query_only`` so no statement can change it (SQLite writes its file in C,
+  where the ``open`` audit event never fires).
 
 The registry is process-wide (the API threads, background index builders and the search-history
 writer all see it) and holds canonical folder paths only.
@@ -22,10 +25,13 @@ writer all see it) and holds canonical folder paths only.
 
 from __future__ import annotations
 
+import functools
 import os
+import sqlite3
 import sys
 import threading
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 from .output_guard import canonical_path
 
@@ -54,6 +60,14 @@ _PATH_EVENTS: dict[str, tuple[int, ...]] = {
     "shutil.move": (0, 1),
     "shutil.make_archive": (0,),
 }
+# Audit events that delete, with the index of their path argument: refused only when the target
+# exists (a ``missing_ok`` clean-up of a file that was never written changes nothing).
+_DELETE_EVENTS: dict[str, int] = {
+    "os.remove": 0,  # also ``os.unlink`` / ``Path.unlink``
+    "os.rmdir": 0,
+    "shutil.rmtree": 0,
+}
+_ORIGINAL_SQLITE_CONNECT = sqlite3.connect
 
 
 class ReadOnlyRunWriteError(PermissionError):
@@ -73,6 +87,28 @@ class ReadOnlyRunWriteError(PermissionError):
 def _rebuild_prefixes_locked() -> None:
     global _PREFIXES
     _PREFIXES = tuple((folder, reason) for folder, reason in _READONLY.items())
+    _canonical_dir.cache_clear()
+
+
+@functools.lru_cache(maxsize=4096)
+def _canonical_dir(directory: str) -> str:
+    return canonical_path(directory)
+
+
+def _canonical(path: Path | str) -> str:
+    """:func:`canonical_path` with the parent folder's resolution cached.
+
+    ``realpath`` (and even ``lstat``) costs about a millisecond on Windows, and the guard asks for
+    every write, delete and SQLite connection while a read-only run is open — mostly for files of a
+    few folders. The parent folder is resolved in full (links, junctions, 8.3 names) and cached until
+    the registry changes; the leaf is resolved in full only when it looks like an 8.3 short name.
+    A link planted as the leaf itself is not followed.
+    """
+    absolute = os.path.abspath(os.path.expanduser(os.fspath(path)))
+    head, tail = os.path.split(absolute)
+    if not tail or tail in {".", ".."} or "~" in tail or absolute.startswith("\\\\?\\"):
+        return canonical_path(absolute)
+    return os.path.normcase(os.path.join(_canonical_dir(head), tail))
 
 
 def register_readonly_folder(folder: Path | str, reason: str) -> None:
@@ -99,7 +135,7 @@ def readonly_reason_for(path: Path | str | None) -> str | None:
     if path is None or not _PREFIXES:
         return None
     try:
-        return _match(canonical_path(path))
+        return _match(_canonical(path))
     except (OSError, ValueError):
         return None
 
@@ -133,6 +169,47 @@ def _refuse(raw: object) -> None:
         raise ReadOnlyRunWriteError(text, reason)
 
 
+def _sqlite_file(text: str) -> str | None:
+    """File path of a ``sqlite3.connect`` database argument (plain path or ``file:`` URI)."""
+    if text == ":memory:" or not text:
+        return None
+    if not text.startswith("file:"):
+        return text
+    parts = urlsplit(text)
+    path = unquote(parts.path)
+    if not path or path == ":memory:" or "mode=memory" in parts.query:
+        return None
+    if os.name == "nt" and len(path) >= 3 and path[0] == "/" and path[2] == ":":
+        path = path[1:]  # file:///C:/x -> C:/x
+    return path
+
+
+def _audit_sqlite_connect(args: tuple[object, ...]) -> None:
+    # Creating a database file (index, history) is a write; an existing one is opened read-only by
+    # :func:`_guarded_sqlite_connect`.
+    text = _path_text(args[0]) if args else None
+    path = _sqlite_file(text) if text else None
+    if path and not os.path.exists(path):
+        _refuse(path)
+
+
+def _guarded_sqlite_connect(database, *args, **kwargs):  # type: ignore[no-untyped-def]
+    """``sqlite3.connect`` that turns on ``PRAGMA query_only`` for a database under a read-only folder.
+
+    SQLite writes its file in C, where no ``open`` audit event fires, and the connection is not usable
+    yet inside the ``sqlite3.connect/handle`` audit event, so the switch is made right after connecting:
+    reads keep working, every statement that would change the database fails
+    ("attempt to write a readonly database").
+    """
+    connection = _ORIGINAL_SQLITE_CONNECT(database, *args, **kwargs)
+    if _PREFIXES:
+        text = _path_text(database)
+        path = _sqlite_file(text) if text else None
+        if path and readonly_reason_for(path) is not None:
+            connection.execute("PRAGMA query_only = ON")
+    return connection
+
+
 def _audit(event: str, args: tuple[object, ...]) -> None:
     if not _PREFIXES:
         return
@@ -141,11 +218,14 @@ def _audit(event: str, args: tuple[object, ...]) -> None:
             _refuse(args[0])
         return
     if event == "sqlite3.connect":
-        # Creating a database file (index, history) is a write; opening an existing one is left to
-        # the API gate (state-changing requests are refused) so reads keep working.
-        text = _path_text(args[0]) if args else None
-        if text and not text.startswith("file:") and text != ":memory:" and not os.path.exists(text):
-            _refuse(text)
+        _audit_sqlite_connect(args)
+        return
+    delete_index = _DELETE_EVENTS.get(event)
+    if delete_index is not None:
+        if delete_index < len(args):
+            text = _path_text(args[delete_index])
+            if text and os.path.lexists(text):
+                _refuse(text)
         return
     indexes = _PATH_EVENTS.get(event)
     if indexes is None:
@@ -162,6 +242,7 @@ def install_write_guard() -> None:
         if _GUARD_INSTALLED:
             return
         sys.addaudithook(_audit)
+        sqlite3.connect = _guarded_sqlite_connect  # type: ignore[assignment]
         _GUARD_INSTALLED = True
 
 
