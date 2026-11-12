@@ -5,11 +5,9 @@ from __future__ import annotations
 import argparse
 import textwrap
 
-from ...artifacts.kakaotalk_macos import (
+from ...core.cli_constants import (
     DEFAULT_MACOS_REPORT_MAX_CONTEXT_ROWS,
     DEFAULT_MACOS_REPORT_MAX_MESSAGES,
-)
-from ...core.kakaotalk import (
     DEFAULT_MEMORY_MESSAGE_RESIDUE_LIMIT,
     DEFAULT_MEMORY_SQLCIPHER_KEY_RESIDUE_LIMIT,
     DEFAULT_MEMORY_SQLITE_MAX_CARVE_BYTES,

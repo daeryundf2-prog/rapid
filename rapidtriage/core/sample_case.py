@@ -9,11 +9,11 @@ import sqlite3
 import zipfile
 from pathlib import Path
 
+from .cli_constants import (
+    DEFAULT_SAMPLE_DIR,  # noqa: F401 - re-exported for existing importers
+    DEFAULT_SAMPLE_MODE,
+)
 from .run import run_triage_mode
-
-DEFAULT_SAMPLE_DIR = "rapidtriage-sample"
-DEFAULT_SAMPLE_MODE = "fraud"
-
 
 #: The marker every sample folder carries; ``overwrite`` clears a folder only when it is present.
 SAMPLE_MARKER_NAME = "rapidtriage-sample-expected.json"

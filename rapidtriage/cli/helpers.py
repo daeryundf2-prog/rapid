@@ -10,7 +10,6 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 
-from ..core.cross_tool import iter_rows as iter_cross_tool_rows
 from ..core.output_guard import OutputInsideEvidenceError, check_output_outside_evidence
 
 
@@ -203,6 +202,10 @@ def load_image_workflow_rows(path: Path, *, max_rows: int = 50000) -> list[dict[
     `details` blocks, so preserve those rows too before applying field-specific
     normalization in the image trusted-diff layer.
     """
+    # Imported here: core.cross_tool loads the artifact engine, and helpers is
+    # imported by the argparse parsers that ``--help`` builds (T-161b).
+    from ..core.cross_tool import iter_rows as iter_cross_tool_rows
+
     rows = list(iter_cross_tool_rows(path, max_rows=max_rows))
     if path.suffix.lower() != ".json" or len(rows) >= max_rows:
         return rows[:max_rows]

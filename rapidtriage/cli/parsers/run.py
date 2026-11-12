@@ -5,15 +5,18 @@ from __future__ import annotations
 import argparse
 import textwrap
 
-from ...core.case import REVIEW_STATUSES
-from ...core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, SUPPORTED_DOC_KINDS
-from ...core.files import ALL_FILE_CATEGORIES
-from ...core.input_root import SUPPORTED_INPUT_ROOT_KINDS
-from ...core.run import SUPPORTED_RUN_MODES
+from ...core.cli_constants import (
+    DEFAULT_EXTRACT_MANIFEST_NAME,
+    REVIEW_STATUSES,
+    SUPPORTED_DOC_KINDS,
+    SUPPORTED_INPUT_ROOT_KINDS,
+    SUPPORTED_RUN_MODES,
+)
 from ..helpers import (
     add_eventlog_output_arguments,
     add_rules_argument,
 )
+from .lazy_choices import file_category_choices, set_lazy_choices
 
 
 def register_files(sub: argparse._SubParsersAction) -> None:
@@ -36,11 +39,13 @@ def register_files(sub: argparse._SubParsersAction) -> None:
     files.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
     files.add_argument("--output", default="rapidtriage-files.json", help="JSON output path")
     files.add_argument("--limit", type=int, default=0, help="Stop after collecting N candidates (0 means all)")
-    files.add_argument(
-        "--category",
-        action="append",
-        choices=sorted(ALL_FILE_CATEGORIES),
-        help="Restrict categories (repeatable; defaults to all built-in categories)",
+    set_lazy_choices(
+        files.add_argument(
+            "--category",
+            action="append",
+            help="Restrict categories (repeatable; defaults to all built-in categories)",
+        ),
+        file_category_choices,
     )
     files.add_argument("--name-contains", action="append", help="Only keep files whose basename contains this text")
     files.add_argument("--path-contains", action="append", help="Only keep files whose path contains this text")
@@ -121,11 +126,13 @@ def register_analysis(sub: argparse._SubParsersAction) -> None:
     extract.add_argument("--name-contains", action="append", help="Only extract files whose basename contains this text")
     extract.add_argument("--path-contains", action="append", help="Only extract files whose path contains this text")
     extract.add_argument("--ext", action="append", help="Only extract files with this extension (repeatable)")
-    extract.add_argument(
-        "--category",
-        action="append",
-        choices=sorted(ALL_FILE_CATEGORIES),
-        help="Only for files JSON: restrict extracted candidates by category",
+    set_lazy_choices(
+        extract.add_argument(
+            "--category",
+            action="append",
+            help="Only for files JSON: restrict extracted candidates by category",
+        ),
+        file_category_choices,
     )
     extract.add_argument(
         "--kind",

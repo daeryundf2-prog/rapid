@@ -9,6 +9,10 @@ from pathlib import Path
 from ..artifacts.windows.antiforensics import file_holds_recovery_secret
 from ..artifacts.windows.system_extras import file_holds_store_secret
 from .audit import compute_sha256
+from .cli_constants import (
+    DEFAULT_EXTRACT_MANIFEST_NAME,  # noqa: F401 - re-exported for existing importers
+    SUPPORTED_DOC_KINDS,
+)
 from .credential_files import BODY_WITHHELD, credential_file_reason
 from .files import (
     ALL_FILE_CATEGORIES,
@@ -20,33 +24,6 @@ from .files import (
 from .input_root import InputRoot, resolve_input_root
 
 SUPPORTED_EXTRACT_COMMANDS: tuple[str, ...] = ("docs", "files")
-SUPPORTED_DOC_KINDS: tuple[str, ...] = (
-    "cfg",
-    "conf",
-    "csv",
-    "docx",
-    "eml",
-    "htm",
-    "html",
-    "ini",
-    "json",
-    "jsonl",
-    "log",
-    "md",
-    "odp",
-    "ods",
-    "odt",
-    "pdf",
-    "pptx",
-    "rtf",
-    "tsv",
-    "txt",
-    "xlsx",
-    "xml",
-    "yaml",
-    "yml",
-)
-DEFAULT_EXTRACT_MANIFEST_NAME = "rapidtriage-extract-manifest.json"
 
 
 class ExtractError(ValueError):

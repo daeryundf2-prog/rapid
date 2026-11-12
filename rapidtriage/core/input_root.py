@@ -5,7 +5,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Union
 
-SUPPORTED_INPUT_ROOT_KINDS = ("folder", "mounted-image", "e01-derived", "disk-image-derived", "archive-image-derived", "live")
+from .cli_constants import (
+    SUPPORTED_INPUT_ROOT_KINDS,
+)
+
 EWF_IMAGE_SUFFIXES = (".e01", ".ex01")
 EWF_SEGMENT_SUFFIXES = tuple(f".e{index:02d}" for index in range(1, 100))
 DISK_IMAGE_SUFFIXES = (

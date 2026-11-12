@@ -5,13 +5,13 @@ from __future__ import annotations
 import argparse
 import textwrap
 
-from ...core.carving import (
+from ...core.cli_constants import (
     DEFAULT_MAX_CANDIDATES,
     DEFAULT_MAX_CARVE_BYTES,
     DEFAULT_MAX_SCAN_BYTES,
+    SUPPORTED_INPUT_ROOT_KINDS,
+    SUPPORTED_RUN_MODES,
 )
-from ...core.input_root import SUPPORTED_INPUT_ROOT_KINDS
-from ...core.run import SUPPORTED_RUN_MODES
 
 
 def register_volume(sub: argparse._SubParsersAction) -> None:

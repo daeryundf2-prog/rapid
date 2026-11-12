@@ -10,6 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import carving_formats as formats
+from .cli_constants import (
+    DEFAULT_MAX_CANDIDATES,
+    DEFAULT_MAX_CARVE_BYTES,
+    DEFAULT_MAX_SCAN_BYTES,
+)
 from .docs import write_result
 from .input_root import InputRoot, resolve_input_root
 from .recovery import (
@@ -25,10 +30,6 @@ from .recovery import (
     build_recovery_record,
     count_candidate_kinds,
 )
-
-DEFAULT_MAX_SCAN_BYTES = 256 * 1024 * 1024
-DEFAULT_MAX_CARVE_BYTES = 50 * 1024 * 1024
-DEFAULT_MAX_CANDIDATES = 250
 
 # Source files are scanned in bounded windows so multi-GB inputs do not
 # load into memory. The overlap carries incomplete headers across chunk
