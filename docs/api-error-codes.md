@@ -10,7 +10,7 @@
 - **노출**: `http` 오류 응답 · `body` 응답 본문 필드 · `notice` 목록 부분 결과 · `readonly_reason` 읽기 전용 사유 · `cli` CLI 전용 · `frontend` 프런트 전용.
 - **종료 코드**(CLI): 0 성공 / 1 실패 / 2 사용법 / 3 부분 성공 / 4 대상 없음. T-249 전까지 CLI는 대부분 2로 끝나며, 표의 값은 목표값입니다.
 
-코드 35종 (active 15 · reserved 20).
+코드 41종 (active 31 · reserved 10).
 
 ## 출력 위치 보호 (`output`)
 
@@ -50,8 +50,8 @@
 | 코드 | HTTP | 종료 | 노출 | 상태 | 문장 | 힌트 | English |
 |---|---|---|---|---|---|---|---|
 | `RUN_READ_ONLY` | 409 | 1 | http | active | 읽기 전용으로 연 결과입니다(결과 폴더가 증거 안에 있음). 이 결과 폴더에는 아무것도 쓰지 않습니다 | 결과 폴더를 증거 밖으로 옮긴 뒤 다시 가져오세요 | Run is read-only |
-| `RUN_NOT_FOUND` | 404 | 4 | http | reserved (T-007·T-160) | 해당 런을 찾지 못했습니다 | 런 목록에서 런 ID를 확인하세요 | Run not found |
-| `RUN_NOT_FINISHED` | 409 | 1 | http | reserved (T-007·T-160) | 런이 아직 끝나지 않았습니다 | 런이 끝난 뒤 다시 시도하세요 | Run has not finished |
+| `RUN_NOT_FOUND` | 404 | 4 | http | active (T-007·T-160) | 해당 런을 찾지 못했습니다 | 런 목록에서 런 ID를 확인하세요 | Run not found |
+| `RUN_NOT_FINISHED` | 409 | 1 | http | active (T-007·T-160) | 런이 아직 끝나지 않았습니다 | 런이 끝난 뒤 다시 시도하세요 | Run has not finished |
 
 ## 내보내기 (`export`)
 
@@ -79,14 +79,20 @@
 
 | 코드 | HTTP | 종료 | 노출 | 상태 | 문장 | 힌트 | English |
 |---|---|---|---|---|---|---|---|
-| `BAD_REQUEST` | 400 | 2 | http | reserved (T-007) | 요청 내용이 올바르지 않습니다 | 입력값을 확인한 뒤 다시 시도하세요 | Bad request |
-| `UNAUTHORIZED` | 401 | 1 | http | reserved (T-007) | 인증 토큰이 없거나 맞지 않습니다 | 콘솔을 서버가 알려 준 주소로 다시 여세요 | Unauthorized |
-| `FORBIDDEN` | 403 | 1 | http | reserved (T-007) | 이 요청은 허용되지 않습니다 | 허용된 주소·경로에서 다시 시도하세요 | Forbidden |
-| `NOT_FOUND` | 404 | 4 | http | reserved (T-007) | 요청한 대상을 찾지 못했습니다 | 주소나 ID를 확인하세요 | Not found |
-| `CONFLICT` | 409 | 1 | http | reserved (T-007) | 현재 상태와 맞지 않아 요청을 처리하지 못했습니다 | 상태를 새로 고친 뒤 다시 시도하세요 | Conflict |
-| `UNSUPPORTED_MEDIA` | 415 | 2 | http | reserved (T-007) | 지원하지 않는 요청 형식입니다 | JSON 본문(application/json)으로 보내세요 | Unsupported media type |
-| `VALIDATION_FAILED` | 422 | 2 | http | reserved (T-007) | 입력값 검사를 통과하지 못했습니다 | 표시된 항목을 고친 뒤 다시 시도하세요 | Validation failed |
-| `INTERNAL_ERROR` | 500 | 1 | http | reserved (T-007) | 서버 내부 오류가 발생했습니다 | 오류 ID(crash_id)를 기록해 관리자에게 알리세요 | Internal error |
+| `BAD_REQUEST` | 400 | 2 | http | active (T-007) | 요청 내용이 올바르지 않습니다 | 입력값을 확인한 뒤 다시 시도하세요 | Bad request |
+| `UNAUTHORIZED` | 401 | 1 | http | active (T-007) | 인증 토큰이 없거나 맞지 않습니다 | 콘솔을 서버가 알려 준 주소로 다시 여세요 | Unauthorized |
+| `FORBIDDEN` | 403 | 1 | http | active (T-007) | 이 요청은 허용되지 않습니다 | 허용된 주소·경로에서 다시 시도하세요 | Forbidden |
+| `NOT_FOUND` | 404 | 4 | http | active (T-007) | 요청한 대상을 찾지 못했습니다 | 주소나 ID를 확인하세요 | Not found |
+| `CONFLICT` | 409 | 1 | http | active (T-007) | 현재 상태와 맞지 않아 요청을 처리하지 못했습니다 | 상태를 새로 고친 뒤 다시 시도하세요 | Conflict |
+| `UNSUPPORTED_MEDIA` | 415 | 2 | http | active (T-007) | 지원하지 않는 요청 형식입니다 | JSON 본문(application/json)으로 보내세요 | Unsupported media type |
+| `VALIDATION_FAILED` | 422 | 2 | http | active (T-007) | 입력값 검사를 통과하지 못했습니다 | 표시된 항목을 고친 뒤 다시 시도하세요 | Validation failed |
+| `INTERNAL_ERROR` | 500 | 1 | http | active (T-007) | 서버 내부 오류가 발생했습니다 | 오류 ID(crash_id)를 기록해 관리자에게 알리세요 | Internal error |
+| `METHOD_NOT_ALLOWED` | 405 | 2 | http | active (T-007) | 이 주소는 해당 요청 방식(메서드)을 지원하지 않습니다 | API 문서에서 허용된 메서드를 확인하세요 | Method not allowed |
+| `TIME_BUDGET_EXCEEDED` | 408 | 1 | http | active (T-007) | 시간 예산 안에 요청을 마치지 못했습니다 | 조건을 좁혀 다시 시도하세요 | Time budget exceeded |
+| `PAYLOAD_TOO_LARGE` | 413 | 1 | http | active (T-007) | 대상이 너무 커서 처리하지 않았습니다 | 더 작은 범위를 고르거나 원본을 직접 내보내세요 | Payload too large |
+| `RANGE_NOT_SATISFIABLE` | 416 | 2 | http | active (T-007) | 요청한 위치가 파일 범위를 벗어났습니다 | 파일 크기 안의 오프셋을 지정하세요 | Range not satisfiable |
+| `TOO_MANY_REQUESTS` | 429 | 1 | http | active (T-007) | 동시에 처리 중인 요청이 너무 많습니다 | 잠시 뒤 다시 시도하세요 | Too many requests |
+| `SERVICE_UNAVAILABLE` | 503 | 1 | http | active (T-007) | 지금은 이 기능을 쓸 수 없습니다 | 잠시 뒤 다시 시도하거나 서버 구성(필요한 구성 요소)을 확인하세요 | Service unavailable |
 | `USAGE_ERROR` | — | 2 | cli | reserved (T-160) | 명령 사용법이 올바르지 않습니다 | --help로 사용법을 확인하세요 | Usage error |
 
 ## 네트워크(프런트 전용) (`network`)

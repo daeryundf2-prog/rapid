@@ -4505,7 +4505,7 @@ class RapidTriageApiTests(unittest.TestCase):
 
             unscoped = client.get(f"/api/runs/{run_id}/artifacts", params={"limit": 1, "sort": "timestamp:desc"})
             self.assertEqual(unscoped.status_code, 400)
-            self.assertEqual(unscoped.json(), {"detail": "sort requires exactly one kind"})
+            self.assertEqual(unscoped.json()["detail"], "sort requires exactly one kind")
             inline = client.get(
                 f"/api/runs/{run_id}/artifacts", params={"limit": 1, "kind": "browser", "sort": "timestamp"}
             ).json()
