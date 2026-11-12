@@ -179,6 +179,8 @@ BASELINE_UNDISCLOSED_PER_FILE = {
     "rapidtriage/core/files.py": 11,
     "rapidtriage/core/frametrace_import.py": 2,
     "rapidtriage/core/hash_cache.py": 4,
+    # T-350: bounds of the imported-root fingerprint check (not result truncation; a refusal says why).
+    "rapidtriage/core/import_roots.py": 3,
     "rapidtriage/core/incremental.py": 1,
     "rapidtriage/core/indicators.py": 4,
     "rapidtriage/core/iso9660.py": 6,

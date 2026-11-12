@@ -342,18 +342,27 @@ class RunJob:
         request_payload = payload.get("request")
         request = RunRequest.from_dict(request_payload if isinstance(request_payload, Mapping) else {})
         summary_payload = payload.get("summary")
+        origin = str(payload.get("origin") or "web")
+        summary = dict(summary_payload) if isinstance(summary_payload, Mapping) else None
+        if summary is not None:
+            if origin == "imported":
+                # T-350: a run imported before the marker existed is checked like an API import;
+                # an explicit False (a server-side import, e.g. the practice sample) is kept.
+                summary["imported_run"] = summary.get("imported_run") is not False
+            else:
+                summary.pop("imported_run", None)
         return cls(
             run_id=str(payload.get("run_id") or uuid.uuid4().hex[:12]),
             request=request,
             status=normalize_run_status(payload.get("status") or "failed"),
-            origin=str(payload.get("origin") or "web"),
+            origin=origin,
             created_at=str(payload.get("created_at") or now_iso()),
             updated_at=str(payload.get("updated_at") or now_iso()),
             started_at=str(payload["started_at"]) if payload.get("started_at") else None,
             completed_at=str(payload["completed_at"]) if payload.get("completed_at") else None,
             error=str(payload["error"]) if payload.get("error") else None,
             error_type=str(payload["error_type"]) if payload.get("error_type") else None,
-            summary=dict(summary_payload) if isinstance(summary_payload, Mapping) else None,
+            summary=summary,
             steps=[
                 _normalize_record_spelling(step, ("status",))
                 for step in payload.get("steps", [])
@@ -746,17 +755,22 @@ class RunJobStore:
             )
         return files
 
-    def import_completed_run(self, output_dir_or_summary: str | Path) -> RunJob:
+    def import_completed_run(self, output_dir_or_summary: str | Path, *, verify_roots: bool = False) -> RunJob:
         """Register a finished run folder (R8 RI-05: the summary's paths are not trusted).
 
         ``output_dir`` becomes the folder the summary file is in; every ``outputs`` path must
         resolve inside it (:func:`validated_import_summary`); ``root`` is kept as the evidence
-        reference only. A folder that overlaps its evidence opens read-only (D37)."""
+        reference only. A folder that overlaps its evidence opens read-only (D37).
+
+        ``verify_roots`` (``POST /api/runs/import``, T-350): the folder came from a client, so the
+        source routes read only from the folder and the evidence root its own input fingerprint
+        verifies (``core/import_roots.py``). In-process callers (the practice sample) keep the
+        summary's roots."""
         summary_path = resolve_run_summary_path(Path(output_dir_or_summary).expanduser())
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         if not isinstance(summary, dict):
             raise RunImportError(IMPORT_SUMMARY_INVALID, "실행 요약 JSON이 객체가 아닙니다")
-        summary = validated_import_summary(summary, summary_path)
+        summary = validated_import_summary(summary, summary_path, verify_roots=verify_roots)
 
         run_id = uuid.uuid5(uuid.NAMESPACE_URL, str(summary_path.resolve())).hex[:12]
         safety = summary.get("safety")
@@ -2388,7 +2402,9 @@ class RunImportError(ValueError):
         return {"code": self.code, "message": str(self)}
 
 
-def validated_import_summary(summary: Mapping[str, object], summary_path: Path) -> dict[str, object]:
+def validated_import_summary(
+    summary: Mapping[str, object], summary_path: Path, *, verify_roots: bool = False
+) -> dict[str, object]:
     """The imported summary with its paths pinned to the folder it was read from (R8 RI-05).
 
     * ``output_dir`` is the summary file's folder — whatever the JSON says. A different value (a
@@ -2425,6 +2441,9 @@ def validated_import_summary(summary: Mapping[str, object], summary_path: Path) 
     validated = dict(summary)
     validated["outputs"] = pinned
     validated["output_dir"] = str(folder)
+    # T-350: set by the import, never read from the file. ``True`` (``POST /api/runs/import``):
+    # the source routes stop trusting the summary's evidence paths (core/import_roots.py).
+    validated["imported_run"] = bool(verify_roots)
     if claimed is not None and str(claimed) != str(folder):
         validated["imported_output_dir_claimed"] = str(claimed_raw)
     return validated

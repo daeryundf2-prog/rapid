@@ -549,7 +549,8 @@ def build_runs_router(
     @router.post("/api/runs/import", status_code=201)
     def import_run(request: RunImportRequest) -> dict[str, Any]:
         try:
-            job = store.import_completed_run(request.output_dir)
+            # T-350: a folder named over the API is untrusted — its evidence roots must verify.
+            job = store.import_completed_run(request.output_dir, verify_roots=True)
         except RunImportError as exc:
             raise HTTPException(status_code=400, detail=exc.to_detail()) from exc
         except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError) as exc:

@@ -119,6 +119,10 @@ _ROWS: tuple[ErrorCode, ...] = (
     _e("IMPORT_OUTPUT_OUTSIDE_FOLDER", 400, 1, "import", "http", "active",
        "실행 요약의 산출물 경로가 가져오는 결과 폴더 밖을 가리킵니다",
        "결과 폴더를 통째로 옮긴 원본인지 확인하세요", "Run output path escapes the folder"),
+    _e("IMPORT_SOURCE_ROOT_UNVERIFIED", 403, 1, "import", "http", "active",
+       "원본 위치를 확인할 수 없습니다. 가져온 결과의 증거 경로가 결과에 기록된 입력과 맞지 않거나 허용하지 않는 위치라 원본을 읽지 않습니다",
+       "증거를 결과에 기록된 그대로(같은 파일·크기) 두고 그 경로로 다시 가져오세요. 홈·드라이브 최상위·자격 증명 폴더는 증거 루트로 받지 않습니다",
+       "Imported run evidence root is unverified"),
     # -- run state --------------------------------------------------------------------------------
     _e("RUN_READ_ONLY", 409, 1, "run", "http", "active",
        "읽기 전용으로 연 결과입니다(결과 폴더가 증거 안에 있음). 이 결과 폴더에는 아무것도 쓰지 않습니다",
