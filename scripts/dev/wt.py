@@ -327,7 +327,9 @@ def cmd_new(root: Path, branch: str, ref: str, name: str | None) -> dict[str, ob
 
 
 def dirty_entries(path: Path) -> list[str]:
-    out = git(["status", "--porcelain", "--ignore-submodules"], path).stdout
+    # -uall: on POSIX a worktree whose only untracked content is the node_modules symlink
+    # would otherwise be folded into "?? frontend/" and counted as dirty.
+    out = git(["status", "--porcelain", "--ignore-submodules", "--untracked-files=all"], path).stdout
     dirty = []
     nm = NODE_MODULES.as_posix()
     for line in out.splitlines():

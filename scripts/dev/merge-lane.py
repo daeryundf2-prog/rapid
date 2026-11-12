@@ -27,6 +27,7 @@ Examples::
 from __future__ import annotations
 
 import argparse
+import os
 import shlex
 import shutil
 import subprocess
@@ -184,6 +185,9 @@ class Lane:
             mode = self.git("ls-files", "-s", "--", path).split(" ", 1)[0]
             if mode == "100644":
                 self.git("update-index", "--chmod=+x", "--", path, write=True)
+                if os.name != "nt":
+                    # Keep the working file in step with the index, or POSIX git reports it modified.
+                    target.chmod(target.stat().st_mode | 0o111)
                 fixed.append(path)
         if not fixed:
             self.say("exec bits: ok")
