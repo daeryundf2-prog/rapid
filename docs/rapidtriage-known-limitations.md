@@ -5,9 +5,9 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 ## Evidence Handling
 
 - Mounted folders and exported evidence folders are the most reliable input.
-- E01/Ex01 direct handling requires external `libewf` and Sleuth Kit tools. RapidTriage records tool preflight/version data, partition offsets, command history, source integrity, and read-only safety notes, but this remains `commercial_grade_ready=false` until independently validated against broad known-answer and malformed corpora.
+- E01/Ex01 direct handling: see "E01/Ex01 엔진 (현재 엔진 기준, R8 T-187)" below. In short, with the `native-e01` extra installed the default `auto` engine decodes the image in-process (pyewf + dissect.ntfs) and the external libewf/Sleuth Kit path is the fallback or an explicit choice. Every E01 result stays `commercial_grade_ready=false` until independently validated against broad known-answer and malformed corpora.
 - Raw/split images can be extracted with Sleuth Kit (`mmls`, `tsk_recover`) when those tools are installed. Split-part discovery, gap warnings, bounded source hashes, partition metadata, selected offsets, and command history are recorded, but filesystem recovery remains delegated to installed Sleuth Kit behavior.
-- E01 extraction writes to `<output>/_e01/fs` (completed runs that recorded `_e01/filesystem` keep resolving to it). After `tsk_recover`, a coverage-gap stage keeps the full stderr (`tsk_recover-stderr.log`, parsed into `extraction-failures.json`), writes one `fls -rpl -z UTC` listing (`fls-rpl.txt`), maps extracted paths to inodes (`extraction-inode-map.jsonl`), recovers files lost to Windows `MAX_PATH` with `icat` into `_e01/long/<inode>.bin` (`long-path-map.json`; cap 50,000 files / 20 GB), lists zero-byte `$DATA` files (`zero-byte-listing.json`), and recovers ADS streams up to 1 MB each into `_e01/ads/` (`ads-map.json`; `Zone.Identifier` first, parsed into `zone-identifier` artifact rows). Limitations: TSK win32 prints names in the ANSI code page, so listing names are decoded best-effort and characters outside that code page appear as `?`; inode and `$DATA` size are authoritative, names are not. Zero-byte rows are deduplicated by inode when the inode map has the file, otherwise by case-insensitive relative path. The files index keeps its category filter, so zero-byte/long-path/ADS rows appear only when they match a selected category. Resumed pre-2026-10 checkpoints only have the 2000-character stderr preview, and the gap stage runs on resume only for direct-EWF (`sleuthkit-direct-ewf`) runs.
+- E01 extraction writes to `<output>/_e01/fs` (completed runs that recorded `_e01/filesystem` keep resolving to it). External engine only (`mount_strategy` `ewfmount-fuse` / `sleuthkit-direct-ewf`; the native engine has no such stage): after `tsk_recover`, a coverage-gap stage keeps the full stderr (`tsk_recover-stderr.log`, parsed into `extraction-failures.json`), writes one `fls -rpl -z UTC` listing (`fls-rpl.txt`), maps extracted paths to inodes (`extraction-inode-map.jsonl`), recovers files lost to Windows `MAX_PATH` with `icat` into `_e01/long/<inode>.bin` (`long-path-map.json`; cap 50,000 files / 20 GiB, `LONG_PATH_FALLBACK_MAX_FILES`/`LONG_PATH_FALLBACK_MAX_BYTES` in `core/extraction_failures.py:63-64`), lists zero-byte `$DATA` files (`zero-byte-listing.json`), and recovers ADS streams up to 1 MiB each, at most 50,000 streams (`ADS_STREAM_MAX_BYTES`/`ADS_MAX_STREAMS`, `core/extraction_failures.py:65-66`), into `_e01/ads/` (`ads-map.json`; `Zone.Identifier` first, parsed into `zone-identifier` artifact rows). Limitations: TSK win32 prints names in the ANSI code page, so listing names are decoded best-effort and characters outside that code page appear as `?`; inode and `$DATA` size are authoritative, names are not. Zero-byte rows are deduplicated by inode when the inode map has the file, otherwise by case-insensitive relative path. The files index keeps its category filter, so zero-byte/long-path/ADS rows appear only when they match a selected category. Resumed pre-2026-10 checkpoints only have the 2000-character stderr preview, and the gap stage runs on resume only for direct-EWF (`sleuthkit-direct-ewf`) runs.
 - ISO/DMG/WIM/SWM images can be extracted when supported archive tooling is available (`7zz`/`7z`, or `bsdtar` for ISO).
 - VHD/VHDX/VMDK/VDI/QCOW/QCOW2 virtual disks can be converted with `qemu-img` and then recovered with Sleuth Kit when those tools are installed. Output includes source and converted-raw integrity, tool preflight, conversion command history, nested raw recovery metadata, and warnings, but snapshot/differencing chains and encrypted/corrupt VM disks are not commercial-grade native handling.
 - AD1, L01/Lx01, AFF/AFF4/AFF4-L, XVA, and proprietary mobile acquisition packages are still adapter-detected only and require vendor/tool export first. The evidence preflight records bounded source integrity, warnings, limitations, and export-first guidance; native container parsing is not implemented. Mobile CSV/JSON/JSONL export folders can be imported for normalized review. Memory dumps also receive bounded indicator scanning, not full process reconstruction.
@@ -30,6 +30,98 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 - Run artifact collection streams each provider through temporary JSONL files next to the output (`*.raw.tmp`, then `*.tmp`), so the artifacts directory briefly needs about 2× a provider's final JSONL size in free disk space.
 - Runs now enforce a default memory cap of 50% of physical RAM, checked after each artifact provider; a breach stops the run with `progress.error.code = "memory-cap"` (set `--memory-cap-bytes` or `RAPIDTRIAGE_MEMORY_CAP_BYTES`, `0` to disable). Providers already running when the cap trips finish in the background before the process exits.
 - Deep deleted-file carving is available as a bounded signature workflow for JPEG, PNG, GIF, PDF, ZIP, 7z, RAR, SQLite and (r3) WAV, MP3, M4A/MP4, DOCX/XLSX/PPTX, HWP/HWPX, EML, PE and EVTX candidates. It is intentionally capped and does not replace full filesystem-aware carving or commercial media validation.
+
+## E01/Ex01 엔진 (현재 엔진 기준, R8 T-187)
+
+이 절의 모든 수치와 동작은 괄호 안의 코드 위치에서 온다. 코드가 바뀌면 이 절도 같이 고친다.
+
+### 엔진 선택
+
+- 엔진은 `auto`·`native`·`external` 셋이다(`E01_ENGINE_CHOICES`, `rapidtriage/core/e01.py:175`). 고르는 순서는 함수 인자 → 환경 변수 `RAPIDTRIAGE_E01_ENGINE` → `auto`다(`resolve_e01_engine`, `core/e01.py:178-191`). `rapidtriage run`은 인자를 넘기지 않으므로(`core/run/__init__.py:2326-2330`) 실제로는 환경 변수 아니면 `auto`이고, 엔진을 고르는 CLI 옵션은 없다.
+- `auto`는 네이티브 엔진(pyewf + dissect.ntfs, 프로세스 안)을 먼저 쓴다(`core/e01.py:1744-1767`). 네이티브가 실패하면 외부 도구(ewfmount·mmls·tsk_recover, `E01_REQUIRED_TOOLS`, `core/e01.py:31`)로 넘어가고, 그 실패는 `command_history`에 `"fallback": "external-tools"`로 남는다. 외부 도구도 없으면 처리가 멈추고 오류 문장에 네이티브 실패 사유가 붙는다(`core/e01.py:1806-1855`).
+- 네이티브 엔진은 `native-e01` 추가 설치(`dissect.ntfs`·`libewf-python`, `pyproject.toml:47-50`)가 있어야 켜진다(`native_e01_available`, `core/e01_native.py:97`). 이 추가 설치는 `full`에 들어 있지만(`pyproject.toml:42-44`) 기본 의존성과 해시 고정 파일 `requirements.lock`에는 없다. 잠금 파일로만 설치한 환경에서 `auto`는 곧바로 외부 도구 경로를 탄다.
+- 어느 엔진이 돌았는지는 결과의 `mount_strategy`에 남는다: 네이티브 `python-native-ewf`(`NATIVE_MOUNT_STRATEGY`, `core/e01_native.py:32`), 외부 `ewfmount-fuse` 또는 `sleuthkit-direct-ewf`. 네이티브 결과의 첫 경고는 "engineering-grade path, not a trusted-tool substitute"이고(`core/e01.py:2246-2266`), 어느 엔진이든 `commercial_grade_ready=false`다.
+- 사전 점검(`rapidtriage evidence IMAGE.E01 --json`)은 외부 도구가 없을 때만 "네이티브로 풀 것"이라고 말한다(`core/evidence.py:439`). 외부 도구가 설치돼 있어도 `auto` 실행은 네이티브를 먼저 쓰므로, 사전 점검이 말한 경로와 실제 실행 경로가 다를 수 있다.
+
+### 네이티브 엔진이 하는 일과 하지 않는 일
+
+- **NTFS만**: 고른 파티션의 부트 섹터 OEM ID가 `NTFS`가 아니면 네이티브는 실패한다(`core/e01_native.py:668-675`). 그 뒤는 위의 대체 규칙을 따른다.
+- **파티션 하나**: 실행당 파티션 하나만 처리한다. 시작 섹터를 지정하지 않으면 지원 파일 시스템 중 가장 큰 파티션을 고른다(`select_native_partition`, `core/e01_native.py:446-470`).
+- **할당 파일 순회**: 루트(MFT 5번 레코드)부터 폴더를 내려가며 파일 내용을 `_e01/fs/`로 복사한다. 긴 이름을 먼저 쓰고 DOS 8.3 별칭만 있는 레코드도 한 번 복사한다(`core/e01_native.py:533-552`). 깊이 64단계를 넘는 폴더는 건너뛰고 `depth_skips`로 센다(`core/e01_native.py:526-528`).
+- **삭제 레코드 훑기**: `$MFT`의 사용 중 표시가 꺼진 파일 레코드의 내용을 `_e01/fs/_deleted_mft/<레코드 번호>-<이름>`으로 꺼낸다(`_sweep_deleted_mft_records`, `core/e01_native.py:589-625`). 원래 폴더 경로는 복원하지 않는다. 읽지 못한 레코드가 100,000개 연달아 나오면 훑기를 멈춘다(`core/e01_native.py:606`, 상수 아닌 숫자).
+- **파일 수 상한**: 할당 순회와 삭제 훑기가 함께 쓰는 상한 200,000개(`MAX_NATIVE_EXTRACT_FILES`, `core/e01_native.py:79`). 환경 변수 `RAPIDTRIAGE_NATIVE_MAX_EXTRACT_FILES`(양의 정수)로 바꿀 수 있고(`core/e01_native.py:81-94`), 적용된 값은 통계의 `file_limit`에 남는다(`core/e01_native.py:687`). 상한 뒤의 파일은 `truncated`로 센다.
+- **하지 않는 것**: ADS 스트림·재분석 지점 대상·암호화 볼륨은 펼치지 않는다(실행 경고, `core/e01.py:2268-2271`). 비할당 영역은 훑지 않는다(처리 범위의 비할당 축이 `measured: false`, `api/app/run_scope.py:353`). 외부 엔진의 보완 단계(긴 경로 `icat` 복구·ADS 복구·`fls` 목록, 위 Evidence Handling 절)는 네이티브 경로에 없다.
+- **`$MFT` 사본**: `$MFT`(0번 레코드)를 `_e01/_system/MFT.bin`으로 따로 떠 둔다(`core/e01_native.py:694-703`). 처리 범위 계산(아래)과 기준 도구 대조 스크립트가 이 사본을 읽는다.
+- **읽기 오류**: 파일을 열거나 읽다 실패하면 그 파일은 만들지 않고(반쯤 쓴 파일은 지운다) `errors`를 하나 올린다. 삭제 레코드에서 난 오류는 `deleted_read_errors`로도 센다(`core/e01_native.py:487-516, 619-623`). 어떤 파일이 실패했는지 목록은 남지 않고 건수만 남는다.
+
+### 처리 범위: 네 축 (T-023)
+
+처리 범위는 숫자 하나로 말하지 않는다(`api/app/run_scope.py:1-27`). 대시보드(`GET /api/runs/{id}/dashboard`의 `scope`, `api/app/dashboard.py:349`)와 보고서 맥락(`api/app/runops.py:728-731`)이 같은 계산을 쓴다.
+
+1. **파티션**: 이미지의 파티션 수, 지원 파일 시스템 수, 이번 실행이 처리한 수.
+2. **할당 영역**: 목록에 오른 비율과 내용을 읽은 비율.
+3. **삭제 영역**: `$MFT` 사본의 머리만 세어 얻은 삭제 파일 레코드 수, 그중 훑기가 시도·목록화한 비율.
+4. **비할당 영역**: 측정하지 않는다(`NOTE_UNALLOCATED`, `api/app/run_scope.py:54`).
+
+한계: 추출 통계는 상한에 닿은 쪽이 할당 순회인지 삭제 훑기인지 구분하지 못한다. "삭제 훑기는 `files < 상한`일 때만 쓰므로 훑기가 무엇이든 썼다면 할당 순회는 상한 전에 끝났다"는 규칙으로 추론하고, 결과에 `basis: "inferred"`를 단다(`api/app/run_scope.py:19-24`). Sleuth Kit `fls`·`ils` 대조(T-038)나 축별 카운터(T-270) 전까지 확정 수치가 아니다. 추출 통계가 없는 실행(폴더 증거, 이전 결과)은 `basis: "unavailable"`이다. 비율은 소수 첫째 자리에서 내림하므로 100 미만이 100으로 보이지 않는다.
+
+### 처리 문제 목록에 나오는 E01 한계 (T-184)
+
+`GET /api/runs/{id}/problems`(`api/app/routes_cases.py:559`)는 아래를 한국어 줄로 낸다(`api/app/run_problem_limits.py`). 문장 안의 상한 숫자는 실행이 기록한 `file_limit` 또는 상수를 그때 읽어 만든다.
+
+- `e01-extract-cap`: 파일 수 상한 도달. 삭제 훑기가 시도했으면 "삭제 영역 축", 아니면 두 축 모두 잘렸을 수 있다고 쓴다(`run_problem_limits.py:115-129`).
+- `e01-read-error`: 할당 영역 오류(`errors - deleted_read_errors`)와 삭제 레코드 오류를 따로 쓴다(`run_problem_limits.py:130-141`).
+- `e01-depth-cap`: 깊이 64단계로 건너뛴 폴더 수. 64는 엔진에 숫자로 박혀 있어 `E01_WALK_MAX_DEPTH`(`run_problem_limits.py:43`)로 따라 적고, 테스트가 둘이 같은지 확인한다(`tests/test_r8_run_problems.py:224-235`).
+- 엔진 실행 결과(`rapidtriage-e01.json`의 `warnings`)에도 영문 경고가 남지만, 그 문장의 상한 숫자는 `200,000`으로 고정돼 있다(`core/e01.py:2275`). 환경 변수로 상한을 바꾼 실행에서는 이 영문 경고의 숫자가 틀리므로 처리 문제 목록의 숫자(실제 `file_limit`)를 본다.
+- 주의: 결과의 `recovery_scope`는 외부 도구의 범위 기록(`build_tsk_recover_recovery_scope`, `core/e01.py:197-215`)을 바탕으로 `tool`·`note`만 바꿔 쓴다(`core/e01.py:2134-2146`). 그래서 네이티브 실행에도 `flags: ["-e"]`·`unallocated_files: true`·`scope: "all-files-allocated-and-unallocated"`가 남는다. 네이티브는 비할당 영역을 훑지 않으므로 네이티브 실행에서는 이 세 키를 읽지 않는다(GAP-260, 엔진 수정은 별도 과제).
+
+### 해시와 원본 무결성
+
+- **사전 점검 해시**: 선택한 세그먼트 파일이 128 MiB 이하일 때만 SHA-256을 계산하고, 넘으면 `hash_status: deferred-large-source`로 둔다(`DIRECT_IMAGE_HASH_LIMIT_BYTES`, `core/e01.py:33`; `describe_source_integrity`, `core/e01.py:2771-2791`).
+- **복구 폴더 목록**: 복구된 폴더의 앞 5,000개 파일만 목록·해시하고(128 MiB 넘는 파일은 해시 생략) 넘으면 `truncated: true`(`build_recovered_root_manifest`, `core/e01.py:2460-2530`).
+- **이미지에 기록된 취득 해시(T-181)**: 취득 도구가 이미지 안에 적어 둔 MD5·SHA-1을 읽기만 한다. EWF1(`.E01`)은 `hash`·`digest`·`xhash` 섹션을 직접 훑고, EWF2(`.Ex01`)이거나 EWF1에서 못 찾으면 pyewf에 묻는다(`core/e01_recorded_hash.py:1-20, 188-217`). 매체 해시를 다시 계산하지 않는다(`recomputed: false`, `core/e01_recorded_hash.py:68`). 세그먼트당 섹션 100,000개(`MAX_SECTIONS_PER_SEGMENT`, `:39`)에 닿으면 `sections_truncated`와 한국어 사유를 남기고, `xhash`는 1 MiB까지만 푼다(`XHASH_INFLATE_LIMIT`, `:41`). 검사관 입력값이 기록된 취득 해시와 같으면 상태는 `matched`가 아니라 `computed`다(매체를 다시 해시하지 않았으므로, `evidence_hash_verdict`, `:226-278`).
+- **검증 패키지의 원본(T-179)**: 이미지 실행에서 원본은 추출 폴더가 아니라 `summary.source.source_path`다(`validation_source_path`, `api/app/validation_source.py:29-43`). E01/Ex01이면 찾은 세그먼트 전부를 이름·크기·SHA-256으로 나열하고(`scope: container-segments`), 해시는 패키지를 만들 때(POST) 디스크에서 새로 읽는다. 읽기 전용 GET은 `hash_status: deferred-to-generation`이다(`api/app/validation_source.py:46-110`).
+- **세그먼트 찾기**: 확장자 두 자리 `.E01`~`.E99`·`.Ex01`~`.Ex99`만, 줄기 이름이 대소문자까지 같은 파일만 같은 세트로 본다(`ewf_segment_number`·`discover_e01_segments`, `core/e01.py:375-405`). 100번째 이후 세그먼트(`.EAA` 등)는 세트에 들지 않는다. 검증 패키지는 이런 같은 이름의 파일과 빠진 세그먼트 번호를 경고로 적고 해시하지 않는다(`ewf_segment_set_warnings`, `api/app/validation_source.py:113-153`).
+
+### 감사 기록: DB 안에는 해시 사슬이 없다
+
+- 케이스 DB의 `audit_event` 표(`core/case_db/constants.py:782-797`)에는 앞 행의 해시를 담는 열이 없다. 추가 전용은 SQLite 트리거 두 개(`audit_event_no_update`·`audit_event_no_delete`, `:799-809`)로만 지킨다. DB 파일에 쓸 수 있는 사람이 트리거를 지우거나 파일을 직접 고치면 RapidTriage는 그것을 알아채지 못한다.
+- 해시 사슬은 내보내기 감사 이력 파일 `rapidtriage-export-audit.jsonl`에만 있다. 각 줄이 앞 줄의 SHA-256(`previous_record_sha256`)을 담고(`EXPORT_AUDIT_LOG_NAME`·`CHAIN_FIELD`, `core/audit.py:22,25`), `verify_audit_chain`(`core/audit.py:250`)이 사슬 깨짐을 찾는다. 이 검증 함수를 부르는 CLI 명령은 아직 없다(T-359에서 `rapidtriage audit-verify` 예정). 사슬 머리를 외부에서 서명·공증하는 기능도 없다.
+
+### 그 밖의 E01 엔진 한계
+
+- `E01_NATIVE_CAPABILITIES`·`E01_REPORT_GRADE_BLOCKERS`(`core/e01.py:63-79`)는 외부 도구 시절 기준으로 남아 있다. 예: `native_e01_segment_metadata_decode: false`(기록된 취득 해시는 이제 읽는다), `deleted-corrupt-filesystem-recovery-delegated-to-sleuthkit`(기본 경로는 네이티브 삭제 훑기). 이 두 값을 근거로 엔진 능력을 말하지 않는다.
+- `core/e01_native.py`의 모듈 설명은 아직 "ewfmount/Sleuth Kit이 없을 때의 대체"라고 적지만(`core/e01_native.py:3`), 실제 `auto` 순서는 네이티브가 먼저다(위 엔진 선택).
+
+## 엔진·수집기 상한 표 (R8 T-187)
+
+T-165 상한 일람(`python scripts/check-collector-caps.py --json`)이 이름으로 고정한 상한 18개다: 계획에 이름이 오른 10개(`KNOWN_CAPS`)와 고지 누락으로 지목된 8개(GAP-272, `GAP_272_CAPS`, 모두 `tests/test_collector_caps_inventory.py:39-63`). 행 수 18 = 10 + 8. 일람 전체(약 750개, 그중 결과에 상한 도달이 온전히 기록되지 않는 것 약 650개)는 위 명령으로 본다. 위 E01 절의 숫자(깊이 64, 연속 미읽기 100,000, 사전 점검 해시 128 MiB 등)는 엔진에 숫자로 박혀 있거나 이 고정 목록 밖이라 표에 넣지 않았다.
+
+열 설명:
+
+- **일람 판정**: 스크립트의 휴리스틱(상수 사용 위치 50줄 안에 `*_truncated`+`*_total` 또는 경고 문장이 있으면 `full`, 잘림 표시만 있으면 `flag`, 없으면 `none`). 같은 함수 밖에서 기록하는 경우를 놓친다.
+- **도달 시 실제 기록**: 코드를 읽어 확인한 것. "처리 문제"는 `GET /api/runs/{id}/problems`의 항목(`reason_id`)이다. `undisclosed-cap`은 상한에 닿았는지와 상관없이 그 수집기가 돌았으면 늘 나오는 안내다(`run_problem_limits.py:235-255`).
+
+| 이름 | 값 | 정의 위치 | 일람 판정 | 도달 시 실제 기록·고지 |
+|---|---|---|---|---|
+| `NATIVE_SCAN_LIMIT` | 16 MiB | `rapidtriage/artifacts/windows/filesystem.py:31` | full | `$MFT`·USN 행의 `record_limit_reached`. 파일이 16 MiB를 넘으면 처리 문제 `ntfs-parse-cap`("파일 앞 16 MiB만 읽음", `run_problem_limits.py:175-215`) |
+| `parse_mft_record_headers` 레코드 수(숫자 `5000`) | 5,000건 | `rapidtriage/artifacts/windows/filesystem.py:5602` | none | 행에는 없음. 처리 문제 `ntfs-parse-cap`이 `mft-record` 행 수로 판정(따라 적은 값 `MFT_RECORD_SCAN_LIMIT`, `run_problem_limits.py:41`, 테스트로 고정) |
+| `USN_RECORD_SCAN_LIMIT` | 5,000건 | `rapidtriage/artifacts/windows/filesystem.py:79` | full | USN 행의 `record_limit_reached`. 처리 문제 `ntfs-parse-cap` |
+| `NTFS_LOGFILE_SCAN_LIMIT` | 8 MiB | `rapidtriage/artifacts/windows/filesystem.py:32` | none | 행에는 없음. `$LogFile`이 더 크고 후보 행이 있으면 처리 문제 `ntfs-parse-cap`("앞 8 MiB만 훑음") |
+| `MAX_NATIVE_EXTRACT_FILES` | 200,000개 (환경 변수 `RAPIDTRIAGE_NATIVE_MAX_EXTRACT_FILES`) | `rapidtriage/core/e01_native.py:79` | flag | 추출 통계 `truncated`·`file_limit`. 처리 문제 `e01-extract-cap`. 영문 엔진 경고(숫자 고정, 위 E01 절) |
+| `SYNTHETIC_MEDIA_MAX_FILES` | 512개 | `rapidtriage/artifacts/synthetic_media.py:21` | full | 행의 `scan_capped`와 한국어 안내. 단계 경고 "후보 n개 중 m개 파일 미선별"(`core/run/steps.py:243-251`) |
+| `MAX_VALUES_PER_TABLE` | 200,000개 | `rapidtriage/core/derived/engine.py:115` | none | 통합 보기 표마다 `capped`·`cap_reason`·`dropped_values`(`core/derived/engine.py:54-57, 311-317, 737`). 처리 문제에는 없음 |
+| `build_submission_bundle(max_items)` | 500개 | `rapidtriage/core/bundle.py:75` | none | 제출 목록의 `truncated`·`max_items_skipped_count`와 건너뜀 사유 `max-items`(`core/submission.py:15, 62-72, 136-146`) |
+| `DEFAULT_AI_READ_MB` | 4096 MiB (환경 변수 `RAPIDTRIAGE_AI_READ_MB`) | `rapidtriage/artifacts/ai_agents/base.py:161` | none | `ai-agent` 요약의 `collection_notes` "AI 기록 읽기 상한 도달"과 `rapidtriage-ai-agent-skipped.json`의 `skipped_count`(`artifacts/ai_agents/__init__.py:198-223`) |
+| `DOCUMENT_SUBSTRING_SCAN_BUDGET` | 200,000건 | `rapidtriage/core/case_db/search.py:144` | none | 1~2글자 검색 결과 행의 `recall_note`("전체 n건 중 200,000건만 검사", `core/case_db/search.py:156-161`) |
+| `PICTURE_ROW_LIMIT` | 20,000건 | `rapidtriage/artifacts/kakaotalk_messages.py:86` | none | 기록 없음. `kakaotalk-windows`가 돌면 처리 문제 `undisclosed-cap` 안내(T-301 예정) |
+| `KAKAO_APP_DB_LIMIT` | 500개 | `rapidtriage/artifacts/kakaotalk_windows.py:31` | none | 기록 없음. 처리 문제 `undisclosed-cap` 안내(T-302 예정) |
+| `CONTAINER_SCAN_LIMIT` | 16 MiB (파일당) | `rapidtriage/artifacts/email.py:37` | none | 기록 없음. `email`이 돌면 처리 문제 `undisclosed-cap` 안내(T-303 예정) |
+| `CLOUD_ARCHIVE_PARSE_ENTRY_LIMIT` | 25개 (보관 파일당) | `rapidtriage/artifacts/cloud.py:29` | full | 행의 `archive_embedded_parse_truncated`(`cloud.py:1025`). 그런데도 처리 문제 `undisclosed-cap` 안내 목록에 들어 있어 "기록되지 않는다"는 안내가 함께 나온다(T-304 예정) |
+| `CLOUD_ARCHIVE_MBOX_MESSAGE_LIMIT` | 50개 (mbox 파일당) | `rapidtriage/artifacts/cloud.py:34` | none | 기록 없음. 처리 문제 `undisclosed-cap` 안내(T-304 예정) |
+| `SHIMCACHE_MAX_ENTRIES` | 8,192개 | `rapidtriage/artifacts/windows/execution.py:53` | flag | 행의 `truncated_by_cap`(전체 수 없음, `execution.py:995`). 처리 문제 `undisclosed-cap` 안내(T-305 예정) |
+| `ETL_SCAN_LIMIT` | 4 MiB (파일당) | `rapidtriage/artifacts/windows/eventlog.py:48` | none | 기록 없음. `eventlog`가 돌면 처리 문제 `undisclosed-cap` 안내(T-306 예정) |
+| `MEMORY_DUMP_SCAN_LIMIT` | 256 MiB (파일당) | `rapidtriage/artifacts/memory.py:26` | flag | 행의 `scan_truncated`·`pivots_truncated`(`memory.py:226-229`, 전체 수 없음). 처리 문제 `undisclosed-cap` 안내(T-307 예정) |
 
 ## Parser Coverage
 
