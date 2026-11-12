@@ -1,11 +1,19 @@
 import type { ReactNode } from "react";
 import { ToneChip } from "../../../components/ToneChip";
 import type { GridRow } from "../../../contracts/collection";
+import { Icon } from "../../../icons/Icon";
+
+/** Short label of an acquisition-copy time (r8 C.9.1, T-173): it is not a time of the evidence. */
+export const COPY_TIME_LABEL = "증거 시각 아님";
 
 /** Title of a modified cell whose time is the acquisition copy's host mtime (parser-quality r1). */
-export const COPY_TIME_TITLE = "취득 사본의 시각 — 원본 시각 아님";
+export const COPY_TIME_TITLE = `${COPY_TIME_LABEL} — 취득 사본을 만든 시각입니다`;
 
-/** 수정 cell: the chosen time; an acquisition-copy time renders muted with COPY_TIME_TITLE. */
+/**
+ * 수정 cell: the chosen time. An acquisition-copy time is muted and carries a clock marker with
+ * the "증거 시각 아님" name (r8 C.9.1, T-173: a marker, not italics); COPY_TIME_TITLE is the
+ * cell's tooltip.
+ */
 export function modifiedCell(row: GridRow, text: string): ReactNode {
   if (!text) {
     return (
@@ -17,6 +25,8 @@ export function modifiedCell(row: GridRow, text: string): ReactNode {
   if (row.fields.modifiedOrigin === "acquisition-copy") {
     return (
       <span className="grid-cell-text grid-cell-copytime" data-testid="files-copy-time">
+        {/* Decorative: the sr-only text below names it once for assistive tech. */}
+        <Icon name="clock" size={12} className="grid-copytime-mark" />
         {text}
         <span className="sr-only"> ({COPY_TIME_TITLE})</span>
       </span>

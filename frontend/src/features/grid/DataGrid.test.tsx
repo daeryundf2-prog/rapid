@@ -159,7 +159,8 @@ describe("DataGrid ARIA", () => {
     expect(within(header()).getByRole("button").getAttribute("title")).toMatch(/불러온 행만 정렬/);
     fireEvent.click(within(header()).getByRole("button"));
     expect(header().getAttribute("aria-sort")).toBe("ascending");
-    expect(view.some((c) => /sort=/.test(c.url))).toBe(false);
+    // Only the default 수정 order (T-173) ever reaches the server; the client key never does.
+    expect(view.some((c) => /sort=/.test(c.url) && !/sort=mtime&order=desc/.test(c.url))).toBe(false);
     await waitFor(() =>
       expect(screen.getByTestId("grid-scope-banner").textContent).toMatch(/정렬·필터는 불러온 행 기준/),
     );

@@ -761,6 +761,48 @@ button.chip:hover {
   color: var(--text);
 }
 
+/* One front ellipsis (r8 C.9.1: never a second ellipsis in the middle). The box runs right to
+   left so overflow — and its single "…" — falls on the left; the isolated LTR run inside keeps the
+   path's own order, and the parts are plain inline text (their colours only). */
+.mid-path.mid-path-front {
+  display: inline-block;
+  vertical-align: top;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+.mid-path-front > .mid-path-text {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.mid-path-front .mid-path-head,
+.mid-path-front .mid-path-parents,
+.mid-path-front .mid-path-tail {
+  display: inline;
+  min-width: 0;
+  overflow: visible;
+}
+
+/* Files 경로 cell (r8 C.9.1): a `복구` marker before the folder or "원래 위치 알 수 없음". */
+.grid-path-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.grid-path-cell > .mid-path {
+  min-width: 0;
+}
+
+.grid-path-cell > .tone-chip {
+  flex: 0 0 auto;
+}
+
 /* --- toast (U-V7: one kind, bottom-right) ------------------------------------- */
 
 .toast-region {
