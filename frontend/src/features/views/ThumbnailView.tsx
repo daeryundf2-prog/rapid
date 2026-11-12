@@ -61,7 +61,7 @@ import {
   THUMB_SORT_LABELS,
   type ThumbSort,
 } from "./thumbnails";
-import { useAutoLoad, useElementWidth, useViewRows } from "./useViewRows";
+import { autoLoadPending, useAutoLoad, useElementWidth, useViewRows } from "./useViewRows";
 import { EmptyState, ErrorState, LoadingCard } from "./ViewState";
 
 export const TILE_WIDTH = 152;
@@ -260,11 +260,10 @@ export function ThumbnailView() {
   const mediaCapped = useAutoLoad(media, wantMore, THUMB_AUTOLOAD_ROWS);
   const capped = filesCapped || mediaCapped;
   const scanned = cq.loadedCount + (withArtifacts ? media.loadedCount : 0);
+  // Settled once enough rows are loaded or a page failed, though the server has more (r8 verify F4).
   const paging =
-    cq.isFetching ||
-    (withArtifacts && media.isFetching) ||
-    (cq.canLoadMore && !filesCapped) ||
-    (withArtifacts && media.canLoadMore && !mediaCapped);
+    autoLoadPending(cq, wantMore, THUMB_AUTOLOAD_ROWS) ||
+    (withArtifacts && autoLoadPending(media, wantMore, THUMB_AUTOLOAD_ROWS));
   const loadMoreAll = () => {
     if (filesCapped) cq.loadMore();
     if (mediaCapped) media.loadMore();

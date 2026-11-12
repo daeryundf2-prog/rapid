@@ -102,6 +102,14 @@
   gap: 0;
   min-width: 180px;
   padding: var(--space-1);
+  overflow-y: auto;
+}
+
+/* A capped menu (placePopover max-height) scrolls; its rows never shrink below their content —
+   an item with a reason line would otherwise overlap its neighbours (r8 verify F1). */
+.popover.menu > *,
+.popover.menu .menu-row > * {
+  flex: none;
 }
 
 .menu-row {

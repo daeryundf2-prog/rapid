@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -189,5 +191,17 @@ describe("MenuButton portal + collision correction (plan r8 T-014)", () => {
     expect(high.top).toBe(20 + 28 + 4);
     const roomy = placePopover(trigger(400, 500), panel, viewport, "end", "above");
     expect(roomy.above).toBe(true);
+  });
+});
+
+describe("capped menu layout (r8 verify F1)", () => {
+  it("menu rows never shrink below their content; the capped menu scrolls instead", () => {
+    const css = readFileSync(resolve(__dirname, "popover.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const menuRule = /\.popover\.menu \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(menuRule).toMatch(/flex-direction: column/);
+    expect(menuRule).toMatch(/overflow-y: auto/);
+    const noShrink =
+      /\.popover\.menu > \*,\s*\.popover\.menu \.menu-row > \* \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(noShrink).toMatch(/flex: none/);
   });
 });

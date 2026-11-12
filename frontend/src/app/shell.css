@@ -410,6 +410,36 @@ kbd {
   font-size: inherit;
 }
 
+/* Run delete from the picker (r8 verify F3): a row trash icon on hover / the active row, and the
+   labelled 처리 결과 삭제… button under the list that acts on the active row. */
+.case-picker-option-delete {
+  flex: none;
+  display: inline-grid;
+  place-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  opacity: 0;
+}
+
+.case-picker-option:hover .case-picker-option-delete,
+.case-picker-option.active .case-picker-option-delete {
+  opacity: 1;
+}
+
+.case-picker-option-delete:hover {
+  background: var(--bg-raised);
+  color: var(--danger);
+}
+
+.case-picker-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line-subtle);
+}
+
 .case-picker-empty {
   margin: 0;
   padding: var(--space-3) var(--space-2);

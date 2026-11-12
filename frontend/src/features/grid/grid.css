@@ -415,11 +415,23 @@
 
 /* A kept core column with no value on the loaded page (UX-round review): a quiet note, not a hint link. */
 .grid-hcell-novalue {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   margin-inline-end: 4px;
+  overflow: hidden;
   color: var(--text-muted);
   font-size: var(--fs-table-aux);
   font-weight: 400;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The header label ellipsizes inside its sort button: a bare text node would keep its full width
+   and run over the "이 페이지 값 없음" note in a narrow column (r8 verify F6, 1280 + viewer). */
+.grid-sort-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -431,6 +443,7 @@
 .grid-sort {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);

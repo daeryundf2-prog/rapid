@@ -1870,7 +1870,7 @@ export function DataGrid(props: DataGridProps = {}) {
                           data-flag-hint={flagsHint || undefined}
                           onClick={() => cycleSort(spec)}
                         >
-                          {spec.header}
+                          <span className="grid-sort-label">{spec.header}</span>
                           <span aria-hidden="true" className="grid-sort-mark">
                             {sort === "ascending" ? (
                               <Icon name="chevron-up" />

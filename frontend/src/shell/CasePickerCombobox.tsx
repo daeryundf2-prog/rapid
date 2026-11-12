@@ -1,8 +1,16 @@
 import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Popover } from "../components/Popover";
+import { DELETE_RUN_LABEL, useCaseDialogs } from "../features/case/dialogs";
+import { ReasonButton } from "../features/case/ReasonButton";
 import { Icon } from "../icons";
 import { useRoute, useRuns, useTimezone } from "../state/hooks";
-import { type CaseOption, casePickerOptions, caseStatusLabel, moveActiveIndex } from "./casePicker";
+import {
+  type CaseOption,
+  casePickerOptions,
+  caseStatusLabel,
+  moveActiveIndex,
+  runDeleteReason,
+} from "./casePicker";
 
 /**
  * Top-bar run picker (review #5, R7 C-G5): "런: 이름 · 모드" opens a 420px popover with a search
@@ -45,6 +53,15 @@ export function CasePickerCombobox() {
     navigate({ runId: option.runId, collection: "intake" });
     close();
     triggerRef.current?.focus();
+  };
+  // Run delete from the picker row (r8 verify F3): the T-034 confirm dialog (starts on 취소), never a
+  // direct delete. Focus goes back to the trigger first, so the dialog returns there on close.
+  const confirmDelete = useCaseDialogs((s) => s.confirmDelete);
+  const requestDelete = (option: CaseOption) => {
+    if (runDeleteReason(option.status)) return;
+    close();
+    triggerRef.current?.focus();
+    confirmDelete(option.runId);
   };
 
   const onInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -159,10 +176,41 @@ export function CasePickerCombobox() {
                   aria-label={caseStatusLabel(option.status)}
                   title={caseStatusLabel(option.status)}
                 />
+                {runDeleteReason(option.status) ? null : (
+                  // Pointer shortcut on the row; keyboard / screen readers use the 삭제 button under
+                  // the list (it acts on the active row) — a listbox option holds no controls.
+                  <span
+                    className="case-picker-option-delete"
+                    aria-hidden="true"
+                    title={`${option.name} ${DELETE_RUN_LABEL}`}
+                    data-testid="case-picker-row-delete"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      requestDelete(option);
+                    }}
+                  >
+                    <Icon name="trash" />
+                  </span>
+                )}
               </div>
             ))
           )}
         </div>
+        {activeOption ? (
+          <div className="case-picker-actions">
+            <ReasonButton
+              className="button case-picker-delete"
+              data-testid="case-picker-run-delete"
+              aria-label={`${activeOption.name} ${DELETE_RUN_LABEL}`}
+              reason={runDeleteReason(activeOption.status)}
+              quietReason
+              onClick={() => requestDelete(activeOption)}
+            >
+              <Icon name="trash" /> {DELETE_RUN_LABEL}
+            </ReasonButton>
+          </div>
+        ) : null}
       </Popover>
     </div>
   );
