@@ -34,8 +34,8 @@ from .helpers import (
     get_output_path,
     job_output_dir,
 )
-from .run_steps_summary import summarize_steps
 from .run_scope import build_run_scope
+from .run_steps_summary import summarize_steps
 
 CASE_NOTES_FILE_NAME = "rapidtriage-case-notes.json"
 CASE_NOTES_PROFILE = "rapidtriage-case-notes-v1"
