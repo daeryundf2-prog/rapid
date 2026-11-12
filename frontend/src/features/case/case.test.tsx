@@ -199,7 +199,7 @@ describe("RunDialog", () => {
     expect(calls.some((c) => c.method === "POST")).toBe(false);
     fireEvent.click(screen.getByTestId("write-confirm-ok"));
     await waitFor(() => expect(window.location.hash).toBe("#/case/s1/intake"));
-    expect(calls.find((c) => c.method === "POST")?.body).toEqual({});
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ overwrite: true });
   });
 });
 

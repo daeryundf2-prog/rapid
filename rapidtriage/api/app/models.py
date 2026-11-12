@@ -72,9 +72,11 @@ class RunImportRequest(BaseModel):
 
 
 class SampleCaseRunRequest(BaseModel):
+    #: A folder under the server's sample root (``~/.rapidtriage``); default ``sample-case``.
     output_dir: str | None = None
     mode: str = DEFAULT_SAMPLE_MODE
-    overwrite: bool = True
+    #: Replace a previous sample — only a folder carrying the sample marker is ever cleared.
+    overwrite: bool = False
     read_only: bool = True
 
 

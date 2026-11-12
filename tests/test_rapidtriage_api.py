@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import struct
 import tempfile
@@ -1305,6 +1306,7 @@ class RapidTriageApiTests(unittest.TestCase):
 
     def test_sample_case_api_creates_and_imports_practice_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
+            self.enterContext(patch.dict(os.environ, {"RAPIDTRIAGE_SAMPLE_ROOT": tmp_dir}))
             client = api_test_client(RunJobStore())
             response = client.post(
                 "/api/sample-case/run",
@@ -1325,6 +1327,7 @@ class RapidTriageApiTests(unittest.TestCase):
 
     def test_run_validation_package_exports_hashes_review_status_and_blockers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
+            self.enterContext(patch.dict(os.environ, {"RAPIDTRIAGE_SAMPLE_ROOT": tmp_dir}))
             client = api_test_client(RunJobStore())
             response = client.post(
                 "/api/sample-case/run",

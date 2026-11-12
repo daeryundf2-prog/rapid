@@ -26,10 +26,19 @@ from ...core.keyword_packs import (
     KeywordPackError,
     resolve_keyword_packs,
 )
+from ...core.output_guard import (
+    OutputInsideEvidenceError,
+    canonical_path,
+    check_output_outside_evidence,
+)
 from ...core.run import RunModeError
 from ...core.sample_case import (
+    SAMPLE_DIR_HAS_OTHER_FILES,
+    SAMPLE_DIR_NOT_EMPTY,
+    SAMPLE_DIR_NOT_SAMPLE,
     SampleCaseError,
     run_sample_workflow,
+    sample_case_root,
 )
 from ...core.search import (
     SearchError,
@@ -60,6 +69,48 @@ from .run_review import (
     split_batch_targets,
 )
 
+#: ``detail.code`` of a sample folder outside the server's sample root (stable).
+PATH_OUTSIDE_ALLOWED_ROOT = "PATH_OUTSIDE_ALLOWED_ROOT"
+SAMPLE_CONFLICT_CODES = frozenset({SAMPLE_DIR_NOT_EMPTY, SAMPLE_DIR_NOT_SAMPLE, SAMPLE_DIR_HAS_OTHER_FILES})
+
+
+def _known_evidence_paths(store: RunJobStore) -> list[str]:
+    paths: list[str] = []
+    for job in store.list():
+        if job.request is not None and job.request.root:
+            paths.append(str(job.request.root))
+        root = (job.summary or {}).get("root")
+        if isinstance(root, str) and root:
+            paths.append(root)
+    return paths
+
+
+def sample_request_output_dir(store: RunJobStore, raw: str | None) -> Path:
+    """The practice-sample folder of ``POST /api/sample-case/run`` (R8 RI-04).
+
+    The server chooses the parent (:func:`~rapidtriage.core.sample_case.sample_case_root`,
+    ``~/.rapidtriage``): a request may name a folder under it, never anywhere else (403). The folder
+    must not overlap the evidence of any run the server knows (``core/output_guard``, 422)."""
+    allowed = sample_case_root()
+    target = (Path(raw).expanduser() if raw else allowed / "sample-case").resolve()
+    if target == allowed or not target.is_relative_to(allowed):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": PATH_OUTSIDE_ALLOWED_ROOT,
+                "message": f"샘플 폴더는 서버의 샘플 위치({allowed}) 아래에만 만들 수 있습니다: {target}",
+            },
+        )
+    try:
+        # A previous sample's own synthetic evidence (``<target>/evidence``) is replaced, not guarded.
+        own = canonical_path(target / "evidence")
+        check_output_outside_evidence(
+            target, [path for path in _known_evidence_paths(store) if canonical_path(path) != own]
+        )
+    except OutputInsideEvidenceError as exc:
+        raise HTTPException(status_code=422, detail=exc.to_detail()) from exc
+    return target
+
 
 def _summary_output_dir(summary: dict[str, object]) -> Path | None:
     try:
@@ -77,8 +128,8 @@ def build_case_db_router(
 
     @router.post("/api/sample-case/run", status_code=201)
     def run_sample_case(request: SampleCaseRunRequest) -> dict[str, object]:
+        output_dir = sample_request_output_dir(store, request.output_dir)
         try:
-            output_dir = Path(request.output_dir).expanduser() if request.output_dir else Path.home() / ".rapidtriage" / "sample-case"
             sample_payload = run_sample_workflow(
                 output_dir,
                 mode=request.mode,
@@ -91,7 +142,10 @@ def build_case_db_router(
                 "sample": sample_payload,
                 "run": job.to_dict(include_summary=True),
             }
-        except (SampleCaseError, RunModeError, OSError, json.JSONDecodeError, ValueError) as exc:
+        except SampleCaseError as exc:
+            status = 409 if exc.code in SAMPLE_CONFLICT_CODES else 400
+            raise HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
+        except (RunModeError, OSError, json.JSONDecodeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
 
