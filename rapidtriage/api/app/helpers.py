@@ -89,6 +89,20 @@ def resolve_request_reviewer(explicit: str | None) -> str | None:
     return env_value or None
 
 
+def resolve_request_actor(explicit: str | None) -> tuple[str | None, str]:
+    """``(reviewer, actor_source)`` of one review action (R8 T-036/T-180).
+
+    ``client-supplied`` for a name the request sent, ``server-env`` for ``RAPIDTRIAGE_REVIEWER``,
+    ``(None, "local-default")`` when neither is set: the case DB then records ``local-user`` and
+    never the previous mark's reviewer."""
+    if explicit and explicit.strip():
+        return explicit.strip(), "client-supplied"
+    env_value = os.environ.get("RAPIDTRIAGE_REVIEWER", "").strip()
+    if env_value:
+        return env_value, "server-env"
+    return None, "local-default"
+
+
 def get_job(store: RunJobStore, run_id: str):
     try:
         return store.get(run_id)

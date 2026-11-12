@@ -18,6 +18,8 @@ from ...core.case_db import (
     CaseDatabase,
     CaseDatabaseError,
 )
+from ...core.case_db.base import normalize_identifier
+from ...core.case_db.review import saved_search_to_dict
 from ...core.jobs import (
     RunJobStore,
     run_output_dir,
@@ -45,7 +47,7 @@ from ...core.search import (
 )
 from .helpers import (
     get_job,
-    resolve_request_reviewer,
+    resolve_request_actor,
     run_not_finished_message,
 )
 from .models import (
@@ -66,6 +68,7 @@ from .run_review import (
     ACTIVE_MARK_SQL,
     RunLocatorIndex,
     canonical_run_case,
+    read_only_sqlite_uri,
     review_map_entries,
     split_batch_targets,
 )
@@ -120,10 +123,33 @@ def _summary_output_dir(summary: dict[str, object]) -> Path | None:
         return None
 
 
+def read_only_saved_searches(database_path: Path, case_id: str) -> list[dict[str, object]]:
+    """Saved searches of a case read through a ``mode=ro`` connection (none without a DB file or
+    before the table exists): a read-only run folder or server never has its case DB written."""
+    if not database_path.is_file():
+        return []
+    try:
+        connection = sqlite3.connect(read_only_sqlite_uri(database_path), uri=True)
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=400, detail=f"케이스 DB를 열 수 없습니다: {exc}") from exc
+    connection.row_factory = sqlite3.Row
+    try:
+        rows = connection.execute(
+            "SELECT * FROM saved_search WHERE case_id = ? ORDER BY updated_at DESC, name ASC",
+            (normalize_identifier(case_id, fallback="case"),),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []  # an older DB without the table: nothing saved
+    finally:
+        connection.close()
+    return [saved_search_to_dict(row) for row in rows]
+
+
 def build_case_db_router(
     store: RunJobStore,
     open_request_case_database: Callable[[str | Path], CaseDatabase],
     resolve_request_catalog_path: Callable[[str | Path], Path],
+    read_only_case_db_path: Callable[[str | Path], Path | None] | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -304,6 +330,7 @@ def build_case_db_router(
     def mark_case_db_review(request: CaseDbReviewRequest) -> dict[str, object]:
         try:
             database = open_request_case_database(request.database)
+            reviewer, actor_source = resolve_request_actor(request.reviewer)
             return database.mark_review(
                 case_id=request.case_id,
                 target_type=request.target_type,
@@ -312,7 +339,8 @@ def build_case_db_router(
                 verification_status=request.verification_status,
                 tags=request.tags,
                 note=request.note,
-                reviewer=resolve_request_reviewer(request.reviewer),
+                reviewer=reviewer,
+                actor_source=actor_source,
                 assignee=request.assignee,
                 priority=request.priority,
                 due_at=request.due_at,
@@ -411,7 +439,7 @@ def build_case_db_router(
         targets: list[dict[str, str]],
     ) -> dict[str, object]:
         """Console marks: omitted ``tags`` keep the row's tags; ``add_tags`` merges."""
-        reviewer = resolve_request_reviewer(request.reviewer)
+        reviewer, actor_source = resolve_request_actor(request.reviewer)
         marks: list[dict[str, object]] = []
         for target in targets:
             tags: list[str] | None = list(request.tags) if request.tags is not None else None
@@ -434,6 +462,7 @@ def build_case_db_router(
                     tags=tags,
                     note=request.note,
                     reviewer=reviewer,
+                    actor_source=actor_source,
                     assignee=request.assignee,
                     priority=request.priority,
                     due_at=request.due_at,
@@ -462,6 +491,7 @@ def build_case_db_router(
                 return apply_review_tag_batch(database, request, targets)
             if request.run_id or request.add_tags:
                 return _mark_preserving_tags(database, request, targets)
+            reviewer, actor_source = resolve_request_actor(request.reviewer)
             return database.mark_reviews_batch(
                 case_id=request.case_id,
                 targets=targets,
@@ -469,7 +499,8 @@ def build_case_db_router(
                 verification_status=request.verification_status,
                 tags=request.tags,
                 note=request.note,
-                reviewer=resolve_request_reviewer(request.reviewer),
+                reviewer=reviewer,
+                actor_source=actor_source,
                 assignee=request.assignee,
                 priority=request.priority,
                 due_at=request.due_at,
@@ -514,12 +545,17 @@ def build_case_db_router(
     @router.post("/api/case-db/saved-searches/list")
     def list_case_db_saved_searches(request: CaseDbSavedSearchListRequest) -> dict[str, object]:
         try:
-            database = open_request_case_database(request.database)
+            read_only_path = read_only_case_db_path(request.database) if read_only_case_db_path else None
+            if read_only_path is not None:
+                # A read-only run folder / server: read through ``mode=ro``, never initialise it.
+                saved_searches = read_only_saved_searches(read_only_path, request.case_id)
+            else:
+                saved_searches = open_request_case_database(request.database).list_saved_searches(request.case_id)
             return {
                 "command": "case-db.saved-searches",
                 "database": str(Path(request.database).expanduser().resolve()),
                 "case_id": request.case_id,
-                "saved_searches": database.list_saved_searches(request.case_id),
+                "saved_searches": saved_searches,
             }
         except CaseDatabaseError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
