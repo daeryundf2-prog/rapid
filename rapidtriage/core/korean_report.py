@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from .. import PRODUCT_NAME, __version__
+from .artifact_domains import ARTIFACT_DOMAIN_TABLE, DOMAIN_LABELS
 from .case_report_items import (
     NOT_RECORDED,
     catalog_versions,
@@ -31,12 +32,13 @@ from .case_report_items import (
     md_cell,
     md_code,
     md_inline,
+    output_relative_name,
     path_name,
     review_status_label,
     roots_for,
     scope_lines,
     skipped_lines,
-    step_lines,
+    step_status_label,
     subject_lines,
 )
 from .report_candidates import is_report_candidate, report_scope_notes
@@ -56,6 +58,33 @@ RUN_MODE_KO = {
     "recovery": "복구",
     "quick": "빠른 선별",
 }
+#: Korean run-step names (``frontend/src/features/stages/stepLabels.ts`` ``STEP_NAME_LABEL``); the
+#: step ids themselves stay in the technical appendix template (WB-8 P2-15).
+STEP_NAME_KO = {
+    "fingerprint": "증거 지문(해시)",
+    "artifacts": "아티팩트 수집",
+    "carve": "카빙",
+    "extract": "추출",
+    "persist": "결과 저장",
+    "report": "보고서 작성",
+    "manifest": "증거 목록(매니페스트)",
+    "docs": "문서 텍스트 추출",
+    "docs-index": "문서 색인",
+    "files": "파일 목록",
+    "docs-extract": "문서 추출",
+    "files-extract": "파일 추출",
+    "timeline": "타임라인",
+    "indicators": "지표 요약",
+    "silent-failure-detector": "누락 위험 점검",
+    "triage": "분류",
+    "prepare": "준비",
+    "finalize": "마무리",
+    "triage-flags": "특이사항",
+    "derived": "통합 보기",
+    "case-db": "케이스 DB",
+}
+#: Artifact kind -> Korean evidence-tree domain label (``core.artifact_domains`` kind defaults).
+KIND_DOMAIN_KO = {kind: DOMAIN_LABELS[domain] for domain, kind, types in ARTIFACT_DOMAIN_TABLE if types is None}
 #: What an evidence hash covers (``core.e01_hash`` ``hash_scope.scope``).
 HASH_SCOPE_KO = {
     "ewf-container-segment-bytes": "E01 컨테이너 세그먼트 파일의 바이트(디스크 매체 내용의 해시가 아님)",
@@ -122,6 +151,32 @@ def reviewed_count(case_payload: Mapping[str, object]) -> int:
             status = str(_mapping(bookmark.get("review")).get("status") or "unreviewed")
             count += int(status != "unreviewed")
     return count
+
+
+def step_name_ko(name: object) -> str:
+    """Korean name of a run step; never the raw step id (``artifacts-<kind>`` -> the kind's domain)."""
+    key = str(name or "").strip().lower()
+    if key in STEP_NAME_KO:
+        return STEP_NAME_KO[key]
+    if key.startswith("artifacts-"):
+        domain = KIND_DOMAIN_KO.get(key[len("artifacts-"):])
+        return f"아티팩트 수집: {domain}" if domain else "아티팩트 수집: 기타 종류"
+    return "기타 단계"
+
+
+def _step_lines(run_summary: Mapping[str, object]) -> list[str]:
+    """Processing steps with Korean names and outputs relative to the result folder."""
+    output_dir = run_summary.get("output_dir", "")
+    lines: list[str] = []
+    for step in run_summary.get("steps") or []:
+        if not isinstance(step, Mapping):
+            continue
+        shown = output_relative_name(step.get("output"), output_dir)
+        lines.append(
+            f"- {step_name_ko(step.get('name'))}: {step_status_label(step.get('status'))}"
+            + (f" (산출물 `{md_inline(shown)}`)" if shown else "")
+        )
+    return lines
 
 
 def _validation_text(run_summary: Mapping[str, object]) -> str:
@@ -239,8 +294,8 @@ def method_lines(
         f"- 표시 시간대: {display_label}. 모든 시각은 UTC 값을 함께 적음.",
     ]
     if steps:
-        failed = ", ".join(md_inline(name) for name in steps.get("failed_names") or []) or "없음"
-        partial = ", ".join(md_inline(name) for name in steps.get("partial_names") or []) or "없음"
+        failed = ", ".join(step_name_ko(name) for name in steps.get("failed_names") or []) or "없음"
+        partial = ", ".join(step_name_ko(name) for name in steps.get("partial_names") or []) or "없음"
         lines += [
             f"- 처리 단계: 전체 {steps.get('total', 0)} · 완료 {steps.get('completed', 0)} · "
             f"부분 {steps.get('partial', 0)} · 실패 {steps.get('failed', 0)} · 건너뜀 {steps.get('skipped', 0)}",
@@ -251,7 +306,7 @@ def method_lines(
         lines.append(f"- 실패·부분 단계: {NOT_RECORDED}")
     lines += scope_lines(scope or None)
     lines.append(f"- 검증 상태: {_validation_text(run_summary)}")
-    lines += ["- 처리 절차:", *(f"  {line}" for line in step_lines(run_summary, technical=False) or ["- 절차 정보 없음"])]
+    lines += ["- 처리 절차:", *(f"  {line}" for line in _step_lines(run_summary) or ["- 절차 정보 없음"])]
     return lines
 
 
@@ -303,7 +358,7 @@ def build_korean_expert_report(
         "## 2. 감정물의 내역 및 인계·인수",
         "",
         *subject_lines(run_summary, technical=False),
-        f"- 분석 모드: {RUN_MODE_KO.get(mode) or _text(mode, NOT_RECORDED)}",
+        f"- 분석 모드: {RUN_MODE_KO.get(mode) or ('기타 모드' if mode else NOT_RECORDED)}",
         f"- 인계 인수 시각: {_text(metadata.get('received_at'))}",
         f"- 제출 항목 해시 산출 시각: {hashed_at}",
         f"- 제출 항목 수(해시 산출): {manifest_summary.get('hashed_item_count', 0)}",

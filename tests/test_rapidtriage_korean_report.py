@@ -27,8 +27,9 @@ def _run_summary() -> dict[str, object]:
         "mode": "fraud",
         "output_dir": "D:/work/Client-Kim/run-001",
         "steps": [
-            {"name": "intake", "status": "completed", "output": "D:/work/Client-Kim/run-001/stage/intake.json"},
-            {"name": "parse", "status": "completed", "output": "stage/parse.json"},
+            {"name": "manifest", "status": "completed", "output": "D:/work/Client-Kim/run-001/stage/intake.json"},
+            {"name": "artifacts-browser", "status": "failed", "output": "stage/browser.json"},
+            {"name": "custom-step", "status": "completed", "output": ""},
         ],
         "validation": {"commercial_grade_ready": False, "validation_required": True},
     }
@@ -263,7 +264,13 @@ class KoreanExpertReportTests(unittest.TestCase):
         self.assertNotIn("Client-Kim", markdown)
         self.assertNotIn("산출물 디렉터리", markdown)
         self.assertIn("- 분석 대상(증거 이름): `BSH.E01`", markdown)
-        self.assertIn("  - `intake`: 완료 (산출물 `stage/intake.json`)", markdown)
+        self.assertIn("  - 증거 목록(매니페스트): 완료 (산출물 `stage/intake.json`)", markdown)
+        self.assertIn("  - 아티팩트 수집: 웹·브라우저: 실패 (산출물 `stage/browser.json`)", markdown)
+        self.assertIn("  - 기타 단계: 완료", markdown)
+        # Evidence records carry the analysis PC's path: only the evidence name is printed.
+        self.assertNotIn("D:/evidence/disk.E01", markdown)
+        for identifier in ("`intake`", "artifacts-browser", "korean-expert", "fraud", "ewf-container"):
+            self.assertNotIn(identifier, markdown)
 
     def test_hostile_metadata_cannot_add_headings(self) -> None:
         markdown = _report(

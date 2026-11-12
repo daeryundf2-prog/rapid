@@ -245,6 +245,11 @@ class CaseReportProductPathTests(unittest.TestCase):
         self.assertRegex(markdown, rf"\| 1 \| `{re.escape(relative)}` \| `[0-9a-f]{{64}}` \|")
         self.assertIn("- 인계 인수 시각: 미기재", markdown)
         self.assertIn("- 검토 완료 항목 수(미검토 제외): 3", markdown)
+        # Step ids, the mode and the template id are not printed (WB-8 P2-15): Korean labels only.
+        for step in self.summary["steps"]:
+            self.assertNotIn(f"`{step['name']}`", markdown)
+        self.assertIn("- 분석 모드: 문서·부정 조사", markdown)
+        self.assertNotIn("korean-expert", markdown)
 
     def test_expert_report_hostile_text_and_audit(self) -> None:
         markdown = self.markdown("korean-expert")
