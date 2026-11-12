@@ -123,7 +123,7 @@
 - 수용: "알 수 없음초" 0. C2 썸네일 보기에서 빈 사각형 0, 브라우저 콘솔 error 0(깨진 삭제 이미지 25건 포함).
 - 검증: `cd frontend && npx vitest run src/features/views src/features/viewer`.
 - 주의: 민감 미디어 흐림(`mediaBlur`) 동작 불변.
-- 〔v3〕 T-017 → WB-3 · T-018 → WB-2
+- 〔v3〕 T-017 → WB-3(부록 F 표 우선; 〔추적 감사〕 의존란의 `204`는 HTTP 상태 코드다. 과제 번호 T-204(WC)로 읽혀 WB가 뒤 물결에 의존하는 것처럼 보였다. 의존은 없다) · T-018 → WB-2
 
 **T-018 썸네일 415를 정상 응답으로** (3 h · W1-a)
 - 대상: `rapidtriage/api/app/routes_media.py`(썸네일 처리기), `rapidtriage/api/app/thumbnail.py`(`render_thumbnail_jpeg` `:40`, `cached_thumbnail` `:87`).
@@ -235,7 +235,7 @@
 - 〔v3〕 T-132 → WB-5
 
 **T-133·T-134 읽기 전용 결과: 지연 쓰기 차단** (각 4 h · W1-e) — 부록 F 표. 공통 검증: `tests/test_r8_readonly_run.py`에 화면별 시나리오(타임라인·지도·계열·폴더·레지스트리·정렬 / 미디어 유사·SQLite·특이사항·조건·검색)를 더하고, AST 검사(대상 파일에서 `write_text`·`write_bytes`·`open(…, "w")`·`mkdir`·쓰기용 `sqlite3.connect`가 `may_persist` 분기 밖에 0)를 테스트로 둔다. 주의: 일반 처리의 캐시 파일 이름·형식 불변(전/후 바이트 동일).
-- 〔v3〕 T-133 → WB-4(부록 F 표 우선; **병합분(bc6c970, 코드 확인)**: 9파일의 디스크 쓰기는 전부 `index_persist_enabled(path)` → `may_persist`를 거친다(`timeline_index.py:886,1023`, `geo_index.py:470`, `families.py:592`, `index_cache.py:23-30`). 나머지 6파일에는 HEAD에 디스크 쓰기 지점이 없다. 위 수용의 "`may_persist(output_dir)`를 거친다"는 `index_persist_enabled` 경유를 포함한다. **남은 것**: ① AST 시험(쓰기 호출 직접 사용 0, 9/9 파일) ② 화면 6종(타임라인·지도·계열·폴더·레지스트리·정렬)을 연 뒤 스냅샷 동일 6/6 ③ 일반 처리의 캐시 파일 목록이 병합 전과 같음 1회) · T-134 → WB-4(부록 F 표 우선; **병합분(bc6c970, 코드 확인)**: 검색 이력·저장 건수 쓰기 가드(`search_index_service.py:457,732`). `media_similar`·`media`·`sqlite`·`triage_flags`·`row_conditions`에는 HEAD에 디스크 쓰기 지점이 없고, `previews.write_json_file`은 내보내기 POST에서만 불려 관문이 막는다. **남은 것**: ① 색인 생성 요청의 전용 문장이 없다(일반 `RUN_READ_ONLY` 문구가 나온다) ② 이력 `_write` 자체 가드(호출자 가드와 훅에만 기댄다) ③ AST 시험 7/7 파일 ④ 화면 5종(미디어 유사·SQLite 미리보기·특이사항·조건·검색) 스냅샷 동일 5/5)
+- 〔v3〕 T-133 → WB-4(부록 F 표 우선; **병합분(bc6c970, 코드 확인)**: 9파일의 디스크 쓰기는 전부 `index_persist_enabled(path)` → `may_persist`를 거친다(`timeline_index.py:886,1023`, `geo_index.py:470`, `families.py:592`, `index_cache.py:23-30`). 나머지 6파일에는 HEAD에 디스크 쓰기 지점이 없다. 위 수용의 "`may_persist(output_dir)`를 거친다"는 `index_persist_enabled` 경유를 포함한다. **남은 것**: ① AST 시험(쓰기 호출 직접 사용 0, 9/9 파일) ② 화면 6종(타임라인·지도·계열·폴더·레지스트리·정렬)을 연 뒤 스냅샷 동일 6/6 ③ 일반 처리의 캐시 파일 목록이 병합 전과 동일 1회) · T-134 → WB-4(부록 F 표 우선; **병합분(bc6c970, 코드 확인)**: 검색 이력·저장 건수 쓰기 가드(`search_index_service.py:457,732`). `media_similar`·`media`·`sqlite`·`triage_flags`·`row_conditions`에는 HEAD에 디스크 쓰기 지점이 없고, `previews.write_json_file`은 내보내기 POST에서만 불려 관문이 막는다. **남은 것**: ① 색인 생성 요청의 전용 문장이 없다(일반 `RUN_READ_ONLY` 문구가 나온다) ② 이력 `_write` 자체 가드(호출자 가드와 훅에만 기댄다) ③ AST 시험 7/7 파일 ④ 화면 5종(미디어 유사·SQLite 미리보기·특이사항·조건·검색) 스냅샷 동일 5/5)
 
 **T-130 4xx 재시도 금지·유휴 폴링·숨은 탭** (2 h · W1-f) — 부록 F 표. 검증: `cd frontend && npx vitest run src/api src/features/analysis` + QA-101 네트워크 예산 스펙 골격. 주의: 처리 중(`queued`·`running`) 폴링 1.5 s는 유지.
 - 〔v3〕 T-130 → WB-5
@@ -277,26 +277,26 @@
 - 수용: 131계열 + C2·기준선에 나온 유형 전부 분류(미분류 0, 검증기가 누락을 오류로). 프런트 fallback JSON(`npm run gen:families`) 재생성. 기존 트리·그리드 동작 변화 0(e2e 13스펙).
 - 검증: `python -m unittest tests.test_rapidtriage_triage_rules tests.test_r7_l3_catalog_sources tests.test_rapidtriage_catalog_security && cd frontend && npm run gen:families`.
 - 주의: 카탈로그 YAML은 금지 구역. 규칙(`rules`)·열 정의는 건드리지 않는다.
-- 〔v3〕 T-045 → WD-1
+- 〔v3〕 T-045 → WC-1(부록 F 표 우선; 〔추적 감사〕 WD-1에서 WC로 당겼다. T-319(WP4)의 "미분류 0(검증기)"이 이 검증기를 쓰는데, 엔진 차선은 WC 뒤에 바로 시작해 WD를 기다릴 수 없다. 이 과제는 의존이 없고 뒤 과제(T-047·077 등)는 모두 더 늦은 물결이라 순서가 어긋나지 않는다)
 
 **T-046 `/brief` 엔드포인트** (4 h · W3-a 2단계) — 계약은 부록 D.6 전부. 구현 순서: 골격(case·evidence·run·review·limits) → 카드 건수(목록 API와 같은 계수 함수 호출) → T-047·T-048 결과 끼우기. 수용: 응답 ≤ 30 KB·서버 처리 ≤ 200 ms(C2, 웜 3회 중앙값; 초과 시 사전 계산 파일을 처리 끝에 만들고 GET은 읽기만 — GET은 쓰지 않는다), `cards[].count`·`findings.counts`·`review.*`가 `link`가 여는 목록 total과 같음(계약 테스트가 SYN 전수 + 실데이터 스크립트). 검증: `python -m unittest tests.test_brief_count_contract`.
-- 〔v3〕 T-046 → WD-3(부록 F 표 우선) · T-047 → WD-2(부록 F 표 우선) · T-048 → WD-2
+- 〔v3〕 T-046 → WD-2(부록 F 표 우선) · T-047 → WD-1(부록 F 표 우선) · T-048 → WD-1
 
 **T-047 0건 사유 판정기** (4 h · W3-a 1단계, 선합의)
 - 대상: `rapidtriage/api/app/zero_reason.py`(신규: `zero_reason(card_id, summary, scope) -> {code, message, action}`).
 - 판정 순서(먼저 맞는 것): `not_run`(해당 분석·수집기가 계획에 없음) → `not_collected_mode`(처리 모드가 그 수집기를 뺌) → `collector_failed`(수집기 상태 error/`failed-isolated`) → `scope_truncated`(범위 축 중 100% 미만이고 대상 경로가 미처리 영역일 수 있음) → `container_only`(컨테이너 파일은 있으나 내용 미해석: PST·OST) → `encrypted_store`(암호화 저장소 후보 존재) → `no_input`(대상 파일 자체가 없음) → `none_found`(수집기 완료 + 대상 파일을 읽음 + 0행).
 - 수용: 단위 테스트 24종(코드 8 × 3경우). `none_found`는 "완료 + 대상 읽음" 증거가 요약에 있을 때만 — 없으면 `no_input` 또는 `not_run`. C2 수동 대조(QA-023): 브라우저 방문 `none_found`, USB `none_found`, 이메일 `container_only`.
 - 검증: 신규 `tests/test_r8_zero_reason.py`.
-- 〔v3〕 T-047 → WD-2(부록 F 표 우선)
+- 〔v3〕 T-047 → WD-1(부록 F 표 우선)
 
 **T-048 사용 기간·주요 프로그램·다음 할 일 산정** (4 h · W3-a 1단계, 선합의) — 부록 F 표. 보충: `next_action` 규칙 5종 우선순위 = ① 무결성 불일치 → "증거 확인" ② 범위 축 중 100% 미만 → "처리 범위 보기" ③ 실패 단계 → "실패 단계 다시 시도" ④ 미검토 특이사항 → "먼저 확인할 것 검토" ⑤ 보고서 포함 ≥ 1 → "보고서 미리보기". 검증: 신규 `tests/test_r8_brief_insights.py`.
-- 〔v3〕 T-048 → WD-2
+- 〔v3〕 T-048 → WD-1
 
 **T-049 `/summary`·`/runs/{id}` 다이어트, 압축·ETag** (4 h · W3-a 1단계) — 부록 F 표. 보충: gzip은 `GZipMiddleware(minimum_size=1024)`, ETag는 요약 파일 mtime_ns + 크기. `?fields=` 없는 기존 호출의 본문은 불변(호환). 수용: 첫 로드 전송 합계 측정(QA-101)에서 `/api/runs/{id}` ≤ 100 KB(기본 응답에서 큰 목록을 `compact` 기본으로 바꾸는 것은 **금지** — 프런트가 `?fields=`를 쓰게 한다, 프런트 변경은 T-073·T-116). 검증: `python -m unittest tests.test_rapidtriage_api tests.test_rapidtriage_api_contract`.
 - 〔v3〕 T-049 → WD-1 · T-073 → WF-1(부록 F 표 우선) · T-116 → WH-2(부록 F 표 우선; v3: 번들 예산을 1.0 MB로 내린다(T-156 기준선 갱신))
 
 **T-050 CLI `brief --json`** (2 h · W3-a 3단계) — `/brief`와 같은 함수 호출, 봉투·종료 코드는 부록 D.8. 검증: 신규 `tests/test_r8_cli_brief.py`.
-- 〔v3〕 T-050 → WD-4(부록 F 표 우선; 파서 분할(T-159) 뒤 `cli/parsers/run.py`에 등록)
+- 〔v3〕 T-050 → WD-3(부록 F 표 우선; 파서 분할(T-159) 뒤 `cli/parsers/run.py`에 등록)
 
 **T-051 유형 색인과 캐시** (4 h · W3-b 1단계)
 - 대상: `rapidtriage/api/app/artifact_type_index.py`(신규), `rapidtriage/api/app/artifact_filter.py`(유형 필터만 걸린 요청의 색인 분기).
@@ -307,7 +307,7 @@
 - 〔v3〕 T-051 → WD-1
 
 **T-052 검색 `lang:`·`list:`·부정 조건 구동·예산 고지** (4 h · W3-b 1단계) — 대상: `core/search_index/engine.py`(`field_lang` `:1154-1163`, `field_list` `:1183-1209`), `api/app/routes_search_index.py`(`:397-429` 후처리). 할 일: 부정 필드 조건이 전체 문서를 훑지 않게 구동 조건(양의 조건) 또는 문서 id 범위로 나눠 평가, 후처리(관련 행 붙이기)도 같은 마감 시각 안에서. 수용: C2에서 `-lang:ko 계약`·`list:execution`·`pdf OR docx` 각 ≤ 3 s, 어떤 질의도 15 s 안에 응답(초과분은 `notice`), 결과 집합 불변(전/후 문서 id 비교 — 빨라진 질의 10종). 검증: `python -m unittest tests.test_search_query tests.test_search_api tests.test_r7_search_latency tests.test_r7_p2_search_v2`.
-- 〔v3〕 T-052 → WD-2(부록 F 표 우선; 원인 확정(T-216) 뒤 수정)
+- 〔v3〕 T-052 → WD-3(부록 F 표 우선; 원인 확정(T-216) 뒤 수정)
 
 **T-053 파일 목록 서버 필터·정렬 키 검증** (4 h · W3-b 1단계) — 대상: `api/app/files_index.py`(`extension_bits` `:310` 활용), `frontend/src/features/filters/filterModel.ts`(`:386-391`). 수용: `ext=docx,mp4,sqlite,eml` 서버 처리, 건수 = JSONL 직접 집계(QA-027), 무효 `sort` 키는 422 + 봉투(조용히 버리지 않음), "불러온 행에서만" 배너 코드 경로 삭제. 검증: `python -m unittest tests.test_r6_files_sections tests.test_r7_files_sort` + `cd frontend && npx vitest run src/features/filters`.
 - 〔v3〕 T-053 → WD-1
@@ -319,7 +319,7 @@
 - 〔v3〕 T-055 → WD-2(부록 F 표 우선; 〔리뷰〕 병합분이 추출 zip 생성을 `POST /extract` 안의 동기 작업으로 옮겼다(`routes_runs.py:1680`, `POST /extract/{name}/zip` 추가). 이 과제는 그 POST를 작업으로 바꾼다(GET은 이미 저장본만 준다).) · T-081 → WF-2(부록 F 표 우선)
 
 **T-057 문서 단위 검색 응답** (4 h · W3-c 1단계) — 대상: `api/app/search_documents.py`(신규), `routes_search_index.py`(등록·호출). 응답: `documents[]: {doc_key(파일 경로 또는 대화 id), title, hit_count, snippets[≤3](≥40자, 가림 적용), locations[], related_rows[], time}` + `hidden_expert_hits`(Tier 3 적중 수) + 기존 pagination·notice. 수용: 같은 파일이 두 번 나오지 않음(1,000건 표본 중복 0), 스니펫 길이 ≥ 40자(본문이 더 짧으면 전체), 비밀 패턴 원문 0. 검증: `python -m unittest tests.test_search_hits tests.test_search_api` + 신규 `tests/test_r8_search_documents.py`.
-- 〔v3〕 T-057 → WD-3(부록 F 표 우선; v3: 응답에 `partial`(예산 중단 여부)을 실어 묶음·보고서가 기록)
+- 〔v3〕 T-057 → WD-4(부록 F 표 우선; v3: 응답에 `partial`(예산 중단 여부)을 실어 묶음·보고서가 기록)
 
 **T-058 사람·장치 롤업 파생 표** (4 h · W3-c 1단계) `[확인]` — 대상: `core/derived/tables_people_devices.py`(신규), `core/derived/engine.py`(등록만). 규칙: 계정은 SID 뿌리로 묶고 시스템·서비스 계정은 `hidden:true`(대화형 로그온이 있는 내장 계정은 보임), 장치는 시리얼 키로 USB 3출처(레지스트리·setupapi·이벤트) 병합. 수용: C3-0(기준선)에서 장치 5대 = 5줄, 숨긴 시스템 계정 수 표시, 수집기 출력 불변(전/후 JSONL 해시). 검증: `python -m unittest tests.test_rapidtriage_derived_engine tests.test_rapidtriage_derived_api`.
 - 〔v3〕 T-058 → WD-2
@@ -328,7 +328,7 @@
 - 〔v3〕 T-059 → WD-2(부록 F 표 우선; 판정은 `core/content_state.py`(T-185) 사용)
 
 **T-060 개체 요약 작업화·검색 색인 분석 건수** (3 h · W3-c 2단계) — 수용: `POST …/search/entities` body `{}`가 202 + 진행(또는 캐시된 직전 결과 200), C2에서 완료, 색인 분석 카드가 "완료 n건"(n = 색인 문서 수, 약 76.5만). 검증: `python -m unittest tests.test_r7_b_patterns tests.test_search_index_build`.
-- 〔v3〕 T-060 → WD-4
+- 〔v3〕 T-060 → WD-5
 
 ---
 
