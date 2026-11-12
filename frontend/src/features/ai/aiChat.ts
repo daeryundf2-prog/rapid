@@ -163,6 +163,28 @@ export function aiConversationRoute(runId: string, sessionId: string, tool = "")
   };
 }
 
+/**
+ * The 대화 보기 switch on the AI 사용 node with an AI session / message row focused (verify T-190):
+ * the route fields that scope the conversation to that row's exact session and tool — the same
+ * `cf` as the 메타 tab's 대화 보기 link — or null when the row is not an AI row with a session id
+ * or the route already asks for a session.
+ */
+export function aiConversationPatch(
+  route: Pick<Route, "runId" | "cf">,
+  row: GridRow | null | undefined,
+): Pick<Route, "kind" | "types" | "cf"> | null {
+  if (!route.runId || !row || row.ref.collection !== "artifacts") return null;
+  if (!(isAiSessionRow(row) || isAiChatRow(row))) return null;
+  if (requestedSession(route.cf)) return null;
+  const session = aiSessionId(row);
+  if (!session) return null;
+  const target = aiConversationRoute(route.runId, session, text(detailsOf(row).tool));
+  const others = (route.cf ?? []).filter(
+    (filter) => filter.col !== "f:session_id" && filter.col !== "f:tool",
+  );
+  return { kind: target.kind, types: target.types, cf: [...others, ...(target.cf ?? [])] };
+}
+
 /** Route of the session rows of `sessionId` (its 세션 row, plus sub-agents whose ids extend it). */
 export function aiSessionRowsRoute(runId: string, sessionId: string, field = "session_id"): Route {
   return {
