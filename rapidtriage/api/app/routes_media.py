@@ -58,9 +58,18 @@ from .runops import (
 from .sqlite import (
     build_sqlite_table_page,
 )
-from .thumbnail import THUMBNAIL_DEFAULT_SIZE, THUMBNAIL_MAX_SIZE, cached_thumbnail
+from .thumbnail import (
+    THUMBNAIL_DEFAULT_SIZE,
+    THUMBNAIL_MAX_SIZE,
+    ThumbnailUnavailable,
+    cached_thumbnail,
+)
 
 THUMBNAIL_CACHE_CONTROL = "private, max-age=86400"
+#: Header of a thumbnail answered without a picture (r8 T-017/T-018 contract: HTTP 204 + this
+#: header = "no preview"; the console draws the type glyph and "미리보기 없음").
+THUMBNAIL_STATUS_HEADER = "X-RapidTriage-Thumbnail"
+THUMBNAIL_UNAVAILABLE = "unavailable"
 
 
 def stored_ocr_sidecar(store: RunJobStore, run_id: str, source_path: Path) -> dict[str, object] | None:
@@ -143,8 +152,12 @@ def build_media_router(
         output_dir = Path(output_value) if isinstance(output_value, str) and output_value else None
         if not may_persist(output_dir):
             output_dir = None  # D37 read-only run folder: the thumbnail is answered from memory
-        cache_path, data = cached_thumbnail(source_path, size, output_dir)
         headers = {"Cache-Control": THUMBNAIL_CACHE_CONTROL}
+        try:
+            cache_path, data = cached_thumbnail(source_path, size, output_dir)
+        except ThumbnailUnavailable:
+            # An image-typed file that does not decode is "no preview", not an error (T-018).
+            return Response(status_code=204, headers={**headers, THUMBNAIL_STATUS_HEADER: THUMBNAIL_UNAVAILABLE})
         if cache_path is not None:
             return FileResponse(cache_path, media_type="image/jpeg", headers=headers)
         return Response(content=data or b"", media_type="image/jpeg", headers=headers)

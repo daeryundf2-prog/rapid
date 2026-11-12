@@ -3,13 +3,19 @@
 The thumbnail is a derived preview only: it is written under the run's output
 directory (``<output_dir>/thumbs``), never next to the evidence, and the
 original stays the reference for any reportable finding.
+
+A file that looks like an image but does not decode (zero-filled deleted clusters, truncated
+or corrupt headers) is not an error for the console: :class:`ThumbnailUnavailable` lets the
+route answer "no preview" (204) so the grid draws a type glyph instead of a broken tile.
 """
 
 from __future__ import annotations
 
 import hashlib
 import io
+import logging
 import os
+import struct
 import tempfile
 import warnings
 from pathlib import Path
@@ -23,6 +29,26 @@ THUMBNAIL_MAX_SOURCE_BYTES = 64 * 1024 * 1024
 THUMBNAIL_MAX_PIXELS = 64_000_000
 THUMBNAIL_JPEG_QUALITY = 82
 THUMBNAIL_CACHE_DIRNAME = "thumbs"
+#: Longest file extension echoed into the server log (the log never carries the path).
+_LOG_SUFFIX_MAX = 16
+
+LOGGER = logging.getLogger(__name__)
+
+#: Decoder failures that mean "this file has no usable picture" rather than a server fault.
+#: Pillow's format plugins raise more than ``UnidentifiedImageError``/``OSError`` on damaged
+#: input (truncated ICO directories, short BMP headers, bad PNG chunks).
+_UNDECODABLE_ERRORS: tuple[type[Exception], ...] = (
+    OSError, ValueError, SyntaxError, EOFError, struct.error, IndexError, KeyError, ZeroDivisionError,
+)
+
+
+class ThumbnailUnavailable(Exception):
+    """The source has an image type but could not be decoded; the caller answers "no preview"."""
+
+
+def _log_suffix(source_path: Path) -> str:
+    suffix = source_path.suffix.lower()[:_LOG_SUFFIX_MAX]
+    return "".join(ch if ch.isascii() and (ch.isalnum() or ch == ".") else "?" for ch in suffix) or "(none)"
 
 
 def thumbnail_cache_path(output_dir: Path, source_path: Path, size: int) -> Path:
@@ -80,12 +106,20 @@ def render_thumbnail_jpeg(source_path: Path, size: int) -> bytes:
         raise
     except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
         raise HTTPException(status_code=413, detail="source image has too many pixels for a thumbnail") from exc
-    except (UnidentifiedImageError, OSError, ValueError, SyntaxError) as exc:
-        raise HTTPException(status_code=415, detail="source file could not be decoded as an image") from exc
+    except (UnidentifiedImageError, *_UNDECODABLE_ERRORS) as exc:
+        # One line, no path: extension, size and the decoder's exception class only.
+        LOGGER.warning(
+            "thumbnail unavailable: image did not decode (ext=%s, bytes=%d, error=%s)",
+            _log_suffix(source_path), source_bytes, type(exc).__name__,
+        )
+        raise ThumbnailUnavailable from exc
 
 
 def cached_thumbnail(source_path: Path, size: int, output_dir: Path | None) -> tuple[Path | None, bytes | None]:
-    """Return ``(cache_path, None)`` for a cached thumbnail, or ``(None, jpeg)`` when no cache dir is usable."""
+    """Return ``(cache_path, None)`` for a cached thumbnail, or ``(None, jpeg)`` when no cache dir is usable.
+
+    Raises :class:`ThumbnailUnavailable` (nothing is written) when the source does not decode.
+    """
     if output_dir is not None and output_dir.is_dir():
         cache_path = thumbnail_cache_path(output_dir, source_path, size)
         if _cache_is_fresh(cache_path, source_path):
