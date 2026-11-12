@@ -339,6 +339,37 @@ class CaseWorkspace:
             ),
         }
 
+    def run_evidence_records(self, run_id: str) -> list[dict[str, object]]:
+        """Evidence rows of a case run with their hash results, for report metadata (R8 T-182):
+        name, size, container digests, per-segment SHA-256 and the recorded acquisition hash.
+        ``[]`` for a run without a case or when the workspace case DB cannot be read."""
+        try:
+            if self._intake is None and not self.path().is_file():
+                return []  # no case was ever created: never create the workspace DB for a report
+            snapshot = self.intake.get_snapshot(run_id)
+            if snapshot is None:
+                return []
+            row = self.intake.get_evidence(str(snapshot["case_id"]), str(snapshot["evidence_citation_id"]))
+        except Exception as exc:  # report export must not fail on the workspace DB
+            LOGGER.warning("evidence records for run %s not read: %s", run_id, exc)
+            return []
+        view = self.hash_view(row)
+        hashes = row.get("hashes") if isinstance(row.get("hashes"), Mapping) else {}
+        return [{
+            "evidence_number": row.get("evidence_number", ""),
+            "citation_id": row.get("citation_id", ""),
+            "display_name": row.get("display_name", ""),
+            "source_type": row.get("source_type", ""),
+            "path": row.get("path", ""),
+            "size_bytes": row.get("size_bytes"),
+            "hash_status": row.get("hash_status", ""),
+            "hash_message": row.get("hash_message", ""),
+            "hashes": {name: str(hashes.get(name) or "") for name in ("md5", "sha1", "sha256") if hashes.get(name)},
+            "hash_scope": view["hash_scope"],
+            "segments": view["hash_segments"],
+            "recorded_acquisition_hash": view["hash_recorded"],
+        }]
+
     def hash_running(self, citation_id: str) -> bool:
         with self._lock:
             thread = self._hash_threads.get(citation_id)
