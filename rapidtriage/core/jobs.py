@@ -21,6 +21,7 @@ from .output_guard import (
     check_output_outside_evidence,
     output_evidence_conflict,
 )
+from .power import prevent_system_sleep
 from .readonly_runs import register_readonly_folder, unregister_readonly_folder
 from .rules import RuleConfigError, load_rule_set
 from .run import RunModeError, run_triage_mode
@@ -1061,7 +1062,8 @@ class RunJobStore:
             self._mark_step(run_id, "prepare", "completed", message="Run request accepted")
             self._mark_step(run_id, "triage", "running", message="Executing triage workflow")
             # Control requests written after submission (a quick "모두 취소") apply to this run.
-            summary = execute_run_request(job.request, run_id=run_id, control_since=job.created_at)
+            with prevent_system_sleep():  # T-353: no system sleep mid-run; released on any end
+                summary = execute_run_request(job.request, run_id=run_id, control_since=job.created_at)
         except Exception as exc:
             with self._lock:
                 job.status = "failed"
