@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { useAppStore } from "../state/store";
 import { api } from "./client";
-import { pollWhenVisible } from "./queryPolicy";
+import { VISIBLE_ONLY_POLL } from "./queryPolicy";
 import type { RunListItem } from "./runs";
 
 export interface RunProgressCompact {
@@ -77,7 +77,8 @@ export function useRunsPoll() {
   const query = useQuery({
     queryKey: RUNS_QUERY_KEY,
     queryFn: listRunsWithProgress,
-    refetchInterval: (q) => pollWhenVisible(runsPollInterval(q.state.data)),
+    refetchInterval: (q) => runsPollInterval(q.state.data),
+    ...VISIBLE_ONLY_POLL,
   });
   const { data, isError } = query;
   useEffect(() => {

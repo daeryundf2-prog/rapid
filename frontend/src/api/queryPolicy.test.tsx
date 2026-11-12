@@ -5,7 +5,7 @@ import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { quickJsonResponse } from "../features/grid/testSupport";
 import { ApiError } from "./errors";
-import { MAX_QUERY_RETRIES, pollWhenVisible, shouldRetryQuery } from "./queryPolicy";
+import { MAX_QUERY_RETRIES, shouldRetryQuery, VISIBLE_ONLY_POLL } from "./queryPolicy";
 import { ACTIVE_POLL_MS, IDLE_POLL_MS, runsPollInterval, useRunsPoll } from "./runsProgress";
 
 afterEach(() => {
@@ -48,13 +48,8 @@ describe("poll intervals", () => {
     expect(runsPollInterval([{ run_id: "a", status: "completed" } as never])).toBe(30_000);
   });
 
-  it("is off while the document is hidden", () => {
-    expect(pollWhenVisible(1500)).toBe(1500);
-    expect(pollWhenVisible(false)).toBe(false);
-    focusManager.setFocused(false);
-    expect(pollWhenVisible(1500)).toBe(false);
-    focusManager.setFocused(true);
-    expect(pollWhenVisible(1500)).toBe(1500);
+  it("relies on react-query's background rule, never a hidden-tab `false` interval", () => {
+    expect(VISIBLE_ONLY_POLL.refetchIntervalInBackground).toBe(false);
   });
 });
 
@@ -134,6 +129,44 @@ describe("useRunsPoll network budget (QA-101)", () => {
       await vi.advanceTimersByTimeAsync(ACTIVE_POLL_MS * 2);
     });
     expect(calls).toBeGreaterThan(visibleAgain);
+    client.clear();
+  });
+
+  it("a fetch that lands during a short hide does not leave the poll off", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        calls += 1;
+        return quickJsonResponse({ runs: [{ run_id: "r1", status: "running" }] });
+      }),
+    );
+    // The app's 2 s staleTime: coming back within it triggers no focus refetch.
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: shouldRetryQuery, staleTime: 2_000 } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <Probe />
+      </QueryClientProvider>,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    act(() => focusManager.setFocused(false));
+    // Something refetches while hidden (an invalidation after a mark, another reader).
+    await act(async () => {
+      await client.refetchQueries();
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    act(() => focusManager.setFocused(true));
+    const back = calls;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ACTIVE_POLL_MS * 4);
+    });
+    // Running → the 1.5 s poll goes on (it used to stay off until something re-rendered).
+    expect(calls - back).toBeGreaterThanOrEqual(3);
     client.clear();
   });
 });
