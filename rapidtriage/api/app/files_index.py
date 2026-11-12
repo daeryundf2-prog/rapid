@@ -777,10 +777,7 @@ def files_sort_order(
     if sort.key == "mtime":
         # R8 T-173: a copy time (when the analysis PC wrote the extracted file) is not an
         # evidence time -- those rows follow every row with an evidence time in both orders.
-        # Among copy-time rows the time says nothing about the evidence (recovered files are
-        # simply extracted later), so allocated copies come before recovered ones; each group
-        # keeps its time order. Without this a run whose rows all carry copy times opens on 50
-        # recovered rows (re-verify @91fe6e9, IMG-B).
+        # Among copy-time rows allocated copies lead recovered ones (recovered files are extracted later).
         with_value.sort(key=lambda position: (copy_time[position], copy_time[position] and recovered[position]))
     order = array("L", with_value)
     order.extend(position for position in range(len(rows)) if not present[position])
