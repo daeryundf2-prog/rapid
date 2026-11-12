@@ -10,6 +10,7 @@ import { useId, useState } from "react";
 import { announce } from "../../a11y";
 import { getReviewHistory, type ReviewHistoryEntry } from "../../api/reviewTools";
 import { useTimezone } from "../../state/hooks";
+import { evidencePathOf } from "../../utils/pathDisplay";
 import { formatTimestamp } from "../../utils/time";
 import { ErrorText } from "../case/ErrorText";
 import { Modal } from "../case/Modal";
@@ -147,7 +148,7 @@ export function NotePanel({ target, onClose }: { target: NotePanelTarget; onClos
 
   return (
     <Modal
-      title={`메모·이력 — ${row.title || row.sourcePath || row.rowKey}`}
+      title={`메모·이력 — ${row.title || evidencePathOf(row.sourcePath).path || row.rowKey}`}
       wide
       onClose={onClose}
       footer={

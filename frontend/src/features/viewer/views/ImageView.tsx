@@ -8,6 +8,7 @@ import {
   type SourcePreview,
 } from "../../../api/viewer";
 import "../../review/review.css";
+import { evidencePathOf } from "../../../utils/pathDisplay";
 import { useViewPrefs } from "../../review/viewPrefs";
 import { ThumbGlyph } from "../../views/ThumbGlyph";
 import { errorText, useAsync, useBlobUrl } from "../useAsync";
@@ -184,7 +185,11 @@ export function ImageView({ runId, preview, onOpenPath }: ImageViewProps) {
                     className={`image-thumb${item.is_anchor ? " is-current" : ""}`}
                     aria-current={item.is_anchor ? "true" : undefined}
                     aria-disabled={item.is_anchor ? "true" : undefined}
-                    title={item.is_anchor ? "현재 보고 있는 이미지입니다." : item.path}
+                    title={
+                      item.is_anchor
+                        ? "현재 보고 있는 이미지입니다."
+                        : (evidencePathOf(item.path).path ?? item.name)
+                    }
                     onClick={() => {
                       if (!item.is_anchor) onOpenPath(item.path);
                     }}

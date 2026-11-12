@@ -28,7 +28,8 @@ import {
 } from "./FileCells";
 import { flagsColumn } from "./families";
 import { familyDedupColumns, familyDedupFields } from "./familyDedup";
-import { type PathCellOptions, pathCell, pathCellText, pathCellTooltip } from "./PathCell";
+import { type PathCellOptions, pathCell, pathCellText, pathCellTooltip, recoveredNameCell } from "./PathCell";
+import { gridTimeText, TIME_COLUMN_WIDTH } from "./TimelineCells";
 
 /** Shown on the NTFS columns while no NTFS-meta analysis has been joined (plan U-P1-3). */
 export const NTFS_EMPTY_HINT = "NTFS 메타 분석을 실행하면 채워집니다";
@@ -87,7 +88,8 @@ function ntfsOf(row: { fields: Record<string, unknown> }): Record<string, unknow
 }
 
 /** Time columns hold "YYYY-MM-DD HH:MM:SS" whole (C-D6): never narrower than this. */
-export const FILES_TIME_WIDTH = 180;
+/** files 시각 columns (수정 · NTFS times): the one fixed 176px 시각 width (T-175). */
+export const FILES_TIME_WIDTH = TIME_COLUMN_WIDTH;
 
 /**
  * Sort keys `GET /files` orders the WHOLE list by (files column index, plan r7 §3.2 L2):
@@ -156,6 +158,13 @@ export function runInputIsImage(run: unknown): boolean {
 function ntfsTime(id: string, header: string, key: string): ColumnSpec {
   return col.field(id, header, FILES_TIME_WIDTH, ["source"], (r) => strOrNull(ntfsOf(r)[key]), {
     format: (r) => {
+      const value = ntfsOf(r)[key];
+      return typeof value === "string" || typeof value === "number"
+        ? gridTimeText(value, currentTimezone())
+        : "";
+    },
+    // The zone is in the tooltip's full reading; the fixed cell holds "YYYY-MM-DD HH:MM:SS" (T-175).
+    tooltip: (r) => {
       const value = ntfsOf(r)[key];
       return typeof value === "string" || typeof value === "number"
         ? formatGridTime(value, currentTimezone())
@@ -486,7 +495,14 @@ export const filesCollection: CollectionDef = {
   // Default layout (visual-polish S4): 이름 · 경로 · 크기 · 수정 · NTFS 생성 · 선별. Default width =
   // minimum width; 이름 takes the slack and a narrow grid hides columns by FILES_PRIORITY.
   columns: [
-    { ...col.title("이름", 220), minWidth: 220, sortKey: "name" },
+    {
+      ...col.title("이름", 220),
+      minWidth: 220,
+      sortKey: "name",
+      // T-171: the 복구 marker rides on the name too, so it shows when 경로 is hidden.
+      render: (r) =>
+        recoveredNameCell(r.title, { ...filesPathOptions(r), folderOnly: false, path: r.sourcePath }),
+    },
     // 특이사항 (U-F4): hidden while no loaded row carries a flag (FILES_PRIORITY empty-column rule).
     flagsColumn(["analysis", "compact"]),
     {
@@ -513,15 +529,9 @@ export const filesCollection: CollectionDef = {
       presets: ["analysis", "compact"],
       filterKind: "time",
       value: (r) => strOrNull(r.fields.modifiedAt),
-      format: (r) => {
-        const value = strOrNull(r.fields.modifiedAt);
-        return value ? formatGridTime(value, currentTimezone()) : "";
-      },
+      format: (r) => gridTimeText(strOrNull(r.fields.modifiedAt), currentTimezone()),
       tooltip: (r) => modifiedTooltip(r),
-      render: (r) => {
-        const value = strOrNull(r.fields.modifiedAt);
-        return modifiedCell(r, value ? formatGridTime(value, currentTimezone()) : "");
-      },
+      render: (r) => modifiedCell(r, gridTimeText(strOrNull(r.fields.modifiedAt), currentTimezone())),
     },
     {
       ...ntfsTime("ntfsCreated", "NTFS 생성", "created_at"),

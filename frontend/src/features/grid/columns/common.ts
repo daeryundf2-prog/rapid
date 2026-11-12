@@ -3,10 +3,11 @@ import type { RowRef } from "../../../contracts/rowRef";
 import { runEvidenceTimezone } from "../../../state/hooks";
 import { currentRun } from "../../../state/slices/runs";
 import { useAppStore } from "../../../state/store";
-import { evidenceTimeTooltip, formatGridTime } from "../../../utils/time";
+import { evidenceTimeTooltip } from "../../../utils/time";
 import type { CellValue, ColumnSpec } from "../types";
 import { pathCell, pathCellText, pathCellTooltip } from "./PathCell";
 import { reviewStatusCell } from "./StatusCells";
+import { gridTimeText, TIME_COLUMN_WIDTH } from "./TimelineCells";
 
 /** Effective display timezone (URL tz > preference > evidence > local); useCollectionQuery re-renders the grid on change. */
 export function currentTimezone(): string {
@@ -139,8 +140,11 @@ export function makeRow(
   };
 }
 
-/** Minimum width of every time column: the whole "YYYY-MM-DD HH:MM:SS" (C-D6, plan r7 §3.2). */
-export const TIME_COLUMN_MIN = 180;
+/**
+ * Minimum width of every time column: the whole "YYYY-MM-DD HH:MM:SS" (C-D6, plan r7 §3.2) — the
+ * one fixed 시각 width (T-175, `TIME_COLUMN_WIDTH`), so every grid's time columns line up.
+ */
+export const TIME_COLUMN_MIN = TIME_COLUMN_WIDTH;
 
 /**
  * Share of the grid's spare width a column takes (C-D7): the long-text columns — 항목/이름 (3),
@@ -199,16 +203,17 @@ export const col = {
       render: (r) => pathCell(r.sourcePath),
     };
   },
-  timestamp(width = TIME_COLUMN_MIN, presets: ColumnSpec["presets"] = ["analysis", "compact"]): ColumnSpec {
+  timestamp(presets: ColumnSpec["presets"] = ["analysis", "compact"]): ColumnSpec {
     return {
       id: "timestamp",
       header: "시각",
-      width: Math.max(width, TIME_COLUMN_MIN),
-      // "YYYY-MM-DD HH:MM:SS" never loses its seconds (C-D6).
-      minWidth: TIME_COLUMN_MIN,
+      // T-175: one fixed 176px 시각 width in every grid; "YYYY-MM-DD HH:MM:SS" never loses its
+      // seconds (C-D6) — the zone is in the tooltip's full reading, not the cell.
+      width: TIME_COLUMN_WIDTH,
+      minWidth: TIME_COLUMN_WIDTH,
       presets,
       value: (r) => r.timestamp,
-      format: (r) => (r.timestamp ? formatGridTime(r.timestamp, currentTimezone()) : ""),
+      format: (r) => gridTimeText(r.timestamp, currentTimezone()),
       // Full evidence reading (local · zone · UTC · FILETIME) on hover.
       tooltip: (r) => (r.timestamp ? evidenceTimeTooltip(r.timestamp, currentTimezone()) : ""),
     };

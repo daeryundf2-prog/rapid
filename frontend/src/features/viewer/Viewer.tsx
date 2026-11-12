@@ -33,7 +33,13 @@ import {
   useViewerRowContext,
   useViewerTarget,
 } from "./adapter";
-import { applyMark, buildCitation, MARK_LABELS } from "./citation";
+import {
+  applyMark,
+  buildCitation,
+  evidenceSourceText,
+  MARK_LABELS,
+  SOURCE_LOCATION_UNKNOWN,
+} from "./citation";
 import {
   buildViewerCommands,
   NO_TARGET_REASON,
@@ -291,9 +297,11 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
       }
     },
     copyPath: async () => {
-      if (!target?.sourcePath) return;
+      // The in-evidence path, never the result folder (T-172, IS-128).
+      const evidencePath = evidenceSourceText(target?.sourcePath);
+      if (!evidencePath) return;
       try {
-        await writeClipboard(target.sourcePath);
+        await writeClipboard(evidencePath);
         announce("경로를 복사했습니다.");
       } catch (error) {
         copyFailed("경로 복사 실패", error);
@@ -437,6 +445,9 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
 
   const busy = previewState.status === "loading";
   const title = target ? targetTitle(target, preview, row) : "원본 뷰어";
+  const headerPath = target?.sourcePath
+    ? (evidenceSourceText(target.sourcePath) ?? SOURCE_LOCATION_UNKNOWN)
+    : null;
 
   return (
     <section
@@ -474,13 +485,13 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
           </DisabledReason>
         </div>
         <div className="viewer-heading">
-          <h2 className="viewer-title" title={target?.sourcePath ?? undefined}>
+          <h2 className="viewer-title" title={headerPath ?? undefined}>
             {title}
           </h2>
-          {/* Parent folder, middle-ellipsized (review #6); the full path is the tooltip. */}
-          {target?.sourcePath ? (
+          {/* In-evidence path, tail first (review #6, IS-128); the result folder stays under 기술 정보. */}
+          {headerPath ? (
             <p className="viewer-path">
-              <MiddlePath path={target.sourcePath} />
+              <MiddlePath path={headerPath} />
             </p>
           ) : null}
         </div>

@@ -198,7 +198,7 @@ describe("catalogue columns (U-F3)", () => {
     expect(container.textContent).not.toContain("기록 시각");
     expect(time.tooltip?.(row({ details }))).toContain("기록 시각(logged)");
     expect(time.sortKey).toBe("details.time_created");
-    expect(time.minWidth).toBeGreaterThanOrEqual(180);
+    expect(time.minWidth).toBeGreaterThanOrEqual(176);
     // A `timestamp` column whose row says its time is another kind keeps the chip.
     const generic = catalogColumn({ key: "timestamp", label: "시각", format: "time", ts_kind: "logged" });
     render(

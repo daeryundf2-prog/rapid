@@ -7,6 +7,7 @@ import { parseFlags } from "../../flags/flags";
 import type { CollectionDef } from "../types";
 import { baseName, col, currentTimezone, isRecord, makeRef, makeRow, str, strOrNull } from "./common";
 import { familyFactsLine, flagsColumn } from "./families";
+import { pathCellTooltip } from "./PathCell";
 import { sourceCountCell, TIME_KINDS_SEPARATOR, timeKindsCell } from "./TimelineCells";
 
 /** Time-kind labels moved to utils/timeKinds.ts (shared with the record view); re-exported. */
@@ -245,7 +246,7 @@ export const timelineCollection: CollectionDef = {
   },
   columns: [
     {
-      ...col.timestamp(190, ["analysis", "compact", "source"]),
+      ...col.timestamp(["analysis", "compact", "source"]),
       // 시각 tooltip: the formatted time plus what it means ("수정", "실행 3회차", …) and its zone note.
       tooltip: (r) => {
         const time = r.timestamp ? formatEvidenceTime(r.timestamp, currentTimezone()) : "";
@@ -312,7 +313,9 @@ export const timelineCollection: CollectionDef = {
           const sources = Array.isArray(r.fields.groupSources)
             ? (r.fields.groupSources as Array<{ artifactType: string; path: string }>)
             : [];
-          return sources.map((s) => `${timelineAreaLabel(s.artifactType)} — ${s.path}`).join("\n");
+          return sources
+            .map((s) => `${timelineAreaLabel(s.artifactType)} — ${pathCellTooltip(s.path || null)}`)
+            .join("\n");
         },
         render: sourceCountCell,
       },
@@ -321,7 +324,8 @@ export const timelineCollection: CollectionDef = {
     // 출처 행: the source file without the acquisition root (last folders + name); full path on hover.
     col.field("sourceRow", "출처 행", 260, ["analysis", "source"], (r) => str(r.fields.sourceRow) || null, {
       minWidth: 140,
-      tooltip: (r) => r.sourcePath ?? "",
+      // The in-evidence path, never the result folder (T-171, IS-128).
+      tooltip: (r) => pathCellTooltip(r.sourcePath),
     }),
     // Selectable, off by default: summary, source, raw event id, review mark, full path.
     { ...col.title("요약", 380), presets: ["compact", "source", "axiom"] },

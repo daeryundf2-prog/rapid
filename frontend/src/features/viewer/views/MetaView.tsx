@@ -10,6 +10,7 @@ import { Icon } from "../../../icons";
 import { serializeRoute } from "../../../router";
 import { useRoute, useRuns, useTimezone } from "../../../state/hooks";
 import { flatValue, isScalarish } from "../../../utils/flatValue";
+import { evidenceDisplayValue } from "../../../utils/pathDisplay";
 import { evidenceTime, evidenceTimeTooltip, parseInstant } from "../../../utils/time";
 import { timestampKindLabel } from "../../../utils/timeKinds";
 import { AiSessionLinks } from "../../ai/AiSessionLinks";
@@ -558,7 +559,8 @@ function EntryValue({
   fields: Record<string, unknown>;
   runId: string;
 }) {
-  const raw = entry.raw;
+  // A result-folder path reads as the in-evidence path; the raw one is under 기술 정보 (IS-128).
+  const raw = evidenceDisplayValue(entry.raw, SOURCE_LOCATION_UNKNOWN);
   if (entry.missing) {
     return (
       <span className="meta-missing" data-missing="">
@@ -632,7 +634,7 @@ function EntryValue({
 
 /** Copy text of an entry (full value; objects as JSON). */
 function entryText(entry: SheetEntry): string {
-  return flatValue(entry.raw);
+  return flatValue(evidenceDisplayValue(entry.raw, SOURCE_LOCATION_UNKNOWN));
 }
 
 /** A key/value list of sheet entries: label (raw key + aliases as tooltip), value, hover copy. */
@@ -1132,13 +1134,13 @@ export function MetaView({
       <AiSessionLinks row={row} runId={target.runId} />
       {sourceMissing ? (
         <p className="meta-notice" role="alert" data-testid="source-missing">
-          소스를 찾을 수 없습니다 — 원본 경로: <span className="mono viewer-break">{target.sourcePath}</span>
+          소스를 찾을 수 없습니다 — 원본 경로: <span className="mono viewer-break">{sourceText}</span>
         </p>
       ) : null}
       {directory ? (
         <p className="meta-notice" data-testid="directory-info">
           디렉터리입니다 — 미리보기와 해시가 없습니다. 디렉터리 안의 파일을 선택하세요. 경로:{" "}
-          <span className="mono viewer-break">{target.sourcePath}</span>
+          <span className="mono viewer-break">{sourceText}</span>
         </p>
       ) : null}
       {hasRecord ? (
@@ -1171,7 +1173,7 @@ export function MetaView({
           {provenance.map(([key, value]) => (
             <Fragment key={key}>
               <dt>{key}</dt>
-              <dd className="viewer-break">{value}</dd>
+              <dd className="viewer-break">{String(evidenceDisplayValue(value, SOURCE_LOCATION_UNKNOWN))}</dd>
             </Fragment>
           ))}
           {row?.timestamp ? (
@@ -1203,7 +1205,9 @@ export function MetaView({
             <summary>기술 정보</summary>
             <dl className="viewer-dl">
               <dt>추출 위치</dt>
-              <dd className="mono viewer-break">{extracted}</dd>
+              <dd className="mono viewer-break">
+                {extracted} <CopyButton text={extracted} label="추출 위치" />
+              </dd>
             </dl>
           </details>
         ) : null}

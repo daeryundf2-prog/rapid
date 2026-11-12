@@ -298,7 +298,7 @@ export function analysisColumnsForKind(kind: string | undefined, family?: Catalo
     return [
       ...head,
       typeColumn,
-      { ...col.timestamp(170), sortKey: "timestamp", filterKind: "time" },
+      { ...col.timestamp(), sortKey: "timestamp", filterKind: "time" },
       col.path(420, ["analysis", "source"]),
       col.sha256(),
     ];

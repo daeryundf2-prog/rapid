@@ -28,7 +28,8 @@ import { eventLevelLabel, logonTypeLabel, severityLabel } from "../../viewer/fie
 import { EVENT_DATA_KEYS } from "../../viewer/fieldSheets";
 import type { ColumnSpec } from "../types";
 import { keyValueReading } from "../valueLabels";
-import { currentTimezone, formatBytes, isRecord, TIME_COLUMN_MIN } from "./common";
+import { currentTimezone, formatBytes, isRecord } from "./common";
+import { gridTimeText, TIME_COLUMN_WIDTH } from "./TimelineCells";
 
 /** Korean reading of a timestamp kind (chip tooltip / accessible text). */
 export const TS_KIND_LABELS: Record<string, string> = {
@@ -352,8 +353,12 @@ export function keyTail(path: string, parts = 3): string {
   return segments.length <= parts ? path : `…\\${segments.slice(-parts).join("\\")}`;
 }
 
-/** Default width of a catalogue column: a time cell holds its kind chip and the time (C7). */
-export const TIME_COLUMN_WIDTH = 200;
+/**
+ * Width of a catalogue time column whose cell can hold a kind chip before the time (C7, C-D6: a
+ * `timestamp`-keyed column shows the row's own kind when it differs). A time-only column is the
+ * one fixed 176px 시각 width (`TIME_COLUMN_WIDTH`, T-175). Both are fixed: the content always fits.
+ */
+export const TIME_CHIP_COLUMN_WIDTH = 200;
 /** Default width of a catalogue URL / path column: wide enough to read a host and a path (r7 S1). */
 export const LINK_COLUMN_WIDTH = 240;
 const LINK_FORMATS = new Set(["url", "path"]);
@@ -397,6 +402,30 @@ function derivedCatalogColumn(def: CatalogColumn & { derive: string }, aux: bool
   };
 }
 
+/**
+ * Width of a catalogue time column (T-175): 176px fixed for the time alone, 200px when the cell
+ * can carry a kind chip (a `timestamp`-keyed column with a ts_kind; it still never shrinks below
+ * 176px, which always holds the time); undefined for other formats.
+ */
+export function catalogTimeWidth(
+  def: Pick<CatalogColumn, "format" | "key" | "aliases" | "ts_kind">,
+): number | undefined {
+  if (def.format !== "time") return undefined;
+  const chip = Boolean(def.ts_kind) && [def.key, ...(def.aliases ?? [])].includes("timestamp");
+  return chip ? TIME_CHIP_COLUMN_WIDTH : TIME_COLUMN_WIDTH;
+}
+
+/**
+ * A catalogue cell's text: one time as "YYYY-MM-DD HH:MM:SS" without the zone (T-175: it fits the
+ * fixed column; the tooltip keeps the zone), anything else as `displayValue`.
+ */
+function cellText(def: CatalogColumn, value: unknown): string {
+  if (def.format === "time" && (typeof value === "string" || typeof value === "number")) {
+    if (!catalogValueReading(def, value)) return gridTimeText(value, currentTimezone());
+  }
+  return displayValue(def, value);
+}
+
 /** Grid column of one catalogue column. `aux` columns start hidden (열 선택 › 카탈로그 보조 열). */
 export function catalogColumn(def: CatalogColumn, aux = false): ColumnSpec {
   if (def.derive) return derivedCatalogColumn({ ...def, derive: def.derive }, aux);
@@ -404,18 +433,14 @@ export function catalogColumn(def: CatalogColumn, aux = false): ColumnSpec {
   const sortable = !def.key.includes(".");
   const read = (row: { fields: Record<string, unknown> }) => readColumn(detailsOf(row), def);
   const tsKind = def.format === "time" ? def.ts_kind : undefined;
+  const timeWidth = catalogTimeWidth(def);
   return {
     id: familyColumnId(def.key),
     header: def.label,
-    width:
-      def.width ??
-      (def.format === "time"
-        ? TIME_COLUMN_WIDTH
-        : LINK_FORMATS.has(def.format ?? "")
-          ? LINK_COLUMN_WIDTH
-          : 150),
-    // A time never loses its seconds (C-D6, plan r7 §3.2 L2).
-    minWidth: def.format === "time" ? TIME_COLUMN_MIN : 60,
+    width: timeWidth ?? def.width ?? (LINK_FORMATS.has(def.format ?? "") ? LINK_COLUMN_WIDTH : 150),
+    // A time never loses its seconds (C-D6, plan r7 §3.2 L2): never below the 176px 시각 width
+    // (T-175); a chip-capable column gives up only its chip room on a narrow pane.
+    minWidth: timeWidth === undefined ? 60 : TIME_COLUMN_WIDTH,
     presets: aux ? [] : ["analysis", "axiom"],
     ...(MONO_FORMATS.has(def.format ?? "") ? { mono: true } : {}),
     ...(numeric ? { align: "right" as const, filterKind: "number" as const } : {}),
@@ -430,7 +455,7 @@ export function catalogColumn(def: CatalogColumn, aux = false): ColumnSpec {
     },
     format: (row) => {
       const hit = read(row);
-      return hit ? displayValue(def, hit.value) : "";
+      return hit ? cellText(def, hit.value) : "";
     },
     tooltip: (row) => {
       const hit = read(row);
@@ -455,7 +480,7 @@ export function catalogColumn(def: CatalogColumn, aux = false): ColumnSpec {
             // The column's own kind is its header ("마지막 방문", "수정"): a chip only when this
             // row's time is another kind ($FN vs $SI, key LastWrite vs value time …; C-D6).
             if (rowKind === tsKind) {
-              return createElement("span", { className: "grid-cell-text" }, displayValue(def, hit.value));
+              return createElement("span", { className: "grid-cell-text" }, cellText(def, hit.value));
             }
             return createElement(
               "span",
@@ -466,7 +491,7 @@ export function catalogColumn(def: CatalogColumn, aux = false): ColumnSpec {
                 { className: "ts-kind-chip", title: `${tsKindLabel(rowKind)} (${rowKind})` },
                 tsKindLabel(rowKind),
               ),
-              createElement("span", { className: "grid-cell-text" }, displayValue(def, hit.value)),
+              createElement("span", { className: "grid-cell-text" }, cellText(def, hit.value)),
             );
           },
         }
@@ -559,6 +584,8 @@ export function auxColumnIds(family: CatalogFamily): string[] {
 export interface SummaryEntry {
   label: string;
   value: string;
+  /** A time's full reading with its zone (tooltip); `value` is the zone-free cell text (T-175). */
+  full?: string;
 }
 
 /** Up to three non-time catalogue facts of the row's own family, in catalogue order. */
@@ -582,11 +609,13 @@ function rowFacts(row: Pick<GridRow, "artifactType" | "timestamp" | "fields">): 
     const value = displayValue(def, hit.value).trim();
     if (!value) continue;
     if (def.format === "time") {
-      if (!time) time = { label: def.ts_kind ? tsKindLabel(def.ts_kind) : def.label, value };
+      const label = def.ts_kind ? tsKindLabel(def.ts_kind) : def.label;
+      if (!time) time = { label, value: cellText(def, hit.value).trim() || value, full: value };
     } else if (facts.length < 3) facts.push({ label: def.label, value });
   }
   if (!time && row.timestamp) {
-    time = { label: "시각", value: formatGridTime(row.timestamp, currentTimezone()) };
+    const full = formatGridTime(row.timestamp, currentTimezone());
+    time = { label: "시각", value: gridTimeText(row.timestamp, currentTimezone()) || full, full };
   }
   return { facts, time };
 }
@@ -671,12 +700,13 @@ function summaryColumn(
   header: string,
   pick: (row: GridRow) => SummaryEntry | null | undefined,
   width: number,
+  minWidth = 120,
 ): ColumnSpec {
   return {
     id,
     header,
     width,
-    minWidth: 120,
+    minWidth,
     presets: ["analysis", "compact", "axiom"],
     filterKind: "text",
     value: (row) => pick(row)?.value ?? null,
@@ -686,7 +716,7 @@ function summaryColumn(
     },
     tooltip: (row) => {
       const entry = pick(row);
-      return entry ? `${entry.label}: ${entry.value}` : "";
+      return entry ? `${entry.label}: ${entry.full ?? entry.value}` : "";
     },
     render: (row) => twoLine(pick(row)),
   };
@@ -698,7 +728,14 @@ export function mixedSummaryColumns(): ColumnSpec[] {
     summaryColumn("sum:main", "주요 세부 정보", (row) => factsOf(row).facts[0], 220),
     summaryColumn("sum:support", "지원 세부 정보", (row) => factsOf(row).facts[1], 180),
     summaryColumn("sum:extra", "추가 세부 정보", (row) => factsOf(row).facts[2], 180),
-    summaryColumn("sum:time", "날짜 및 시각", (row) => factsOf(row).time, TIME_COLUMN_WIDTH),
+    // T-175: the kind label sits above the zone-free time, so the one fixed 176px 시각 width fits it.
+    summaryColumn(
+      "sum:time",
+      "날짜 및 시각",
+      (row) => factsOf(row).time,
+      TIME_COLUMN_WIDTH,
+      TIME_COLUMN_WIDTH,
+    ),
   ];
 }
 

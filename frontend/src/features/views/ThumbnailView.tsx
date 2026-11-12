@@ -34,6 +34,7 @@ import { fetchSourceBlob, fetchSourceThumbnailBlob, isArchiveEntryPath } from ".
 import type { CollectionRef, GridRow } from "../../contracts/collection";
 import { encodeRowRef } from "../../contracts/rowRef";
 import { useAppStore } from "../../state/store";
+import { evidencePathOf } from "../../utils/pathDisplay";
 import {
   MEDIA_PANEL_LABELS,
   MediaExplorerPanel,
@@ -167,7 +168,7 @@ const Tile = memo(function Tile({
       <span className="thumb-frame">
         <Thumb runId={runId} path={row.sourcePath ?? ""} />
       </span>
-      <span className="thumb-name" title={row.sourcePath ?? name}>
+      <span className="thumb-name" title={evidencePathOf(row.sourcePath).path ?? name}>
         {name}
       </span>
     </div>

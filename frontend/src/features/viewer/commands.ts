@@ -6,7 +6,13 @@
 import { type Command, KEY_MAP } from "../../contracts/command";
 import type { MarkAction, ViewerTarget } from "../../contracts/viewer";
 import { citationDisabledReason } from "../case/caseLink";
-import { MARK_LABELS, MARK_ORDER, markDisabledReason } from "./citation";
+import {
+  evidenceSourceText,
+  MARK_LABELS,
+  MARK_ORDER,
+  markDisabledReason,
+  SOURCE_LOCATION_UNKNOWN,
+} from "./citation";
 import { REASONS } from "./modes";
 
 export const NO_TARGET_REASON = "뷰어에 표시된 행이 없습니다.";
@@ -67,7 +73,12 @@ export function buildViewerCommands(controller: ViewerController): Command[] {
       label: "경로 복사",
       group: "viewer",
       icon: "copy",
-      disabledReason: needsPath,
+      // The path inside the evidence (T-171/T-172, IS-128); a recovered item has none to copy.
+      disabledReason: () => {
+        const reason = needsPath();
+        if (reason) return reason;
+        return evidenceSourceText(controller.getTarget()?.sourcePath) ? undefined : SOURCE_LOCATION_UNKNOWN;
+      },
       run: () => controller.copyPath(),
     },
     {
