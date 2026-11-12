@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import dataclasses
-import datetime as dt
 import functools
 import json
 import logging
@@ -24,6 +23,7 @@ from fastapi.responses import (
 from ...artifacts.ai_agents.run_indirect import normalize_run_collector_options
 from ...core.ai_report import ai_usage_gaps, ai_usage_summary
 from ...core.artifact_profiles import payload_record_count
+from ...core.clock import now_local
 from ...core.columnar_store import query_columnar_artifact_records
 from ...core.credential_files import credential_file_reason
 from ...core.eventlog_channels import ChannelFilter
@@ -1649,7 +1649,7 @@ def build_runs_router(
             if row.locator:
                 item["locator"] = row.locator
             items.append(item)
-        name = dt.datetime.now().strftime("%Y%m%dT%H%M%S%f")
+        name = now_local().strftime("%Y%m%dT%H%M%S%f")
         if request.output_name:
             if not EXTRACT_NAME_PATTERN.fullmatch(request.output_name):
                 raise HTTPException(

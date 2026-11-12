@@ -23,6 +23,7 @@ from xml.etree import ElementTree as ET
 from ..artifacts import all_providers, collect_cached
 from ..artifacts.windows.antiforensics import redact_recovery_key_text
 from ..artifacts.windows.system_extras import redact_secret_store_text
+from .clock import now_local_iso
 from .credential_files import (
     BODY_WITHHELD,
     CREDENTIAL_EXTRACTION_METHOD,
@@ -350,7 +351,7 @@ def build_manifest(
         # provider order deterministic regardless of completion order.
         provider_rows = list(executor.map(collect_row, providers))
     return {
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "root": str(input_root.root_path),
         "platform": platform.platform(),
         "keywords": list(keywords),
@@ -506,7 +507,7 @@ def run_docs_search(
     payload = {
         "command": "docs",
         "root": str(input_root.root_path),
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "summary": {
             "candidate_count": len(candidates),
             "match_count": len(matches),
@@ -629,7 +630,7 @@ def build_docs_index(
         "command": "docs-index",
         "version": DOCS_INDEX_VERSION,
         "root": str(input_root.root_path),
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "strategy": "processed-text-inverted-index",
         "analyzer": {
             "case_fold": True,
@@ -854,7 +855,7 @@ def search_docs_index_payload(
     output_core = {
         "command": "docs-index-search",
         "profile_version": "docs-index-query-v1",
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "root": index_payload.get("root"),
         "index_strategy": index_payload.get("strategy"),
         "index_version": index_payload.get("version"),

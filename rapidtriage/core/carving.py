@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import datetime as dt
 import hashlib
 import io
 import json
@@ -15,6 +14,7 @@ from .cli_constants import (
     DEFAULT_MAX_CARVE_BYTES,
     DEFAULT_MAX_SCAN_BYTES,
 )
+from .clock import now_local_iso
 from .docs import write_result
 from .input_root import InputRoot, resolve_input_root
 from .recovery import (
@@ -424,7 +424,7 @@ def run_bounded_carving(
         "command": "carve",
         "root": str(source_root),
         "input_kind": input_root.kind,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "output_dir": str(output_dir),
         "safety": {
             "extract": extract,
@@ -1049,7 +1049,7 @@ def _write_checkpoint(
         "schema": CARVE_CHECKPOINT_SCHEMA,
         "config_fingerprint": fingerprint,
         "complete": complete,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "completed_sources": sorted(completed_sources),
         "entries": list(entries),
         "skipped": list(skipped),

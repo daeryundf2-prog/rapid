@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { shouldRetryQuery } from "./api/queryPolicy";
 import { App } from "./app/App";
 import { registerAppSlots } from "./app/registerSlots";
 import { RegionBoundary } from "./components/RegionBoundary";
@@ -30,13 +31,8 @@ if (!popout) registerAppSlots();
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: (failureCount, error) => {
-        if (error instanceof Error && "status" in error) {
-          const status = (error as { status: number }).status;
-          if (status === 401 || status === 403) return false;
-        }
-        return failureCount < 2;
-      },
+      // T-130: no retry on a 4xx (except 408 / 429); 5xx / network failures twice.
+      retry: shouldRetryQuery,
       staleTime: 2_000,
     },
   },

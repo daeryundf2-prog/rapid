@@ -19,6 +19,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
+from .clock import now_local_iso
 from .extraction_failures import (
     ADS_SOURCE_ID,
     E01_EXTRACT_DIR_NAME,
@@ -863,7 +864,7 @@ def run_files_scan(
     payload = {
         "command": "files",
         "root": str(input_root.root_path),
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "filters": {
             "categories": list(selected_categories),
             "name_contains": normalized_name_filters,
@@ -1434,7 +1435,7 @@ def build_known_good_index_payload(paths: Sequence[str | Path]) -> dict[str, obj
     core = {
         "command": "known-good-index",
         "profile_version": "known-good-index-v1",
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "summary": summary,
         "feed_paths": [str(path) for path in known_good_index.get("feed_paths", [])],
         "feed_summaries": known_good_index.get("feed_summaries", []),

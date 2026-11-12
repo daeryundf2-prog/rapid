@@ -13,6 +13,7 @@ from .cli_constants import (
     DEFAULT_EXTRACT_MANIFEST_NAME,  # noqa: F401 - re-exported for existing importers
     SUPPORTED_DOC_KINDS,
 )
+from .clock import now_local_iso
 from .credential_files import BODY_WITHHELD, credential_file_reason
 from .files import (
     ALL_FILE_CATEGORIES,
@@ -172,7 +173,7 @@ def run_extract(
         "source_command": source_command,
         "input_json": str(input_json),
         "root": str(root.root_path) if root else None,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "output_dir": str(output_dir),
         "filters": {
             "name_contains": normalized_name_filters,
@@ -223,7 +224,7 @@ def build_disabled_extract_payload(
         "source_command": source_command,
         "input_json": str(input_json),
         "root": None,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "output_dir": str(output_dir),
         "disabled": True,
         "disabled_reason": "extraction-disabled-by-default; rerun with --extract to copy and hash candidates",

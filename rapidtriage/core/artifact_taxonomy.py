@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import datetime as dt
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from ..artifacts import artifact_collectors
+from .clock import now_local_iso
 
 TAXONOMY_VERSION = "forensic-artifact-taxonomy-v1"
 KNOWN_DYNAMIC_ARTIFACT_TYPES = {
@@ -775,7 +775,7 @@ def build_taxonomy_audit(repo_root: Path | None = None) -> dict[str, object]:
     return {
         "command": "taxonomy-audit",
         "taxonomy_version": TAXONOMY_VERSION,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "repo_root": str(root),
         "summary": {
             "target_count": len(target_results),

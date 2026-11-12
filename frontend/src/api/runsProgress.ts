@@ -1,10 +1,12 @@
 // GET /api/runs with the compact `progress` block (routes_runs.compact_run_progress),
-// polled every 1.5 s while any run is queued/running and every 5 s when idle.
+// polled every 1.5 s while any run is queued/running, every 30 s when idle and not at all while
+// the document is hidden (T-130).
 
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { useAppStore } from "../state/store";
 import { api } from "./client";
+import { pollWhenVisible } from "./queryPolicy";
 import type { RunListItem } from "./runs";
 
 export interface RunProgressCompact {
@@ -55,7 +57,7 @@ export interface RunWithProgress extends RunListItem {
 
 export const RUNS_QUERY_KEY = ["runs"] as const;
 export const ACTIVE_POLL_MS = 1500;
-export const IDLE_POLL_MS = 5000;
+export const IDLE_POLL_MS = 30_000;
 
 export async function listRunsWithProgress(): Promise<RunWithProgress[]> {
   const payload = await api<{ runs?: RunWithProgress[] }>("/api/runs");
@@ -75,7 +77,7 @@ export function useRunsPoll() {
   const query = useQuery({
     queryKey: RUNS_QUERY_KEY,
     queryFn: listRunsWithProgress,
-    refetchInterval: (q) => runsPollInterval(q.state.data),
+    refetchInterval: (q) => pollWhenVisible(runsPollInterval(q.state.data)),
   });
   const { data, isError } = query;
   useEffect(() => {

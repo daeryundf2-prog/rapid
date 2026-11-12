@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import hashlib
 import json
 from collections import Counter
@@ -12,6 +11,7 @@ from collections.abc import (
 )
 from pathlib import Path
 
+from ..clock import now_local_iso
 from ..credential_files import credential_disclosure_from_summary
 from ..forensic_accuracy import build_accuracy_gate
 from ..rules import (
@@ -165,7 +165,7 @@ def build_run_summary(
     payload = {
         "command": "run",
         "mode": profile.mode,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "root": str(root),
         "source": dict(source or {}),
         "scan_scope_root": str(files_payload.get("scan_scope_root") or docs_payload.get("scan_scope_root") or root),
