@@ -8,6 +8,7 @@ on:
     paths:
       - "pyproject.toml"
       - "requirements*.txt"
+      - "requirements*.lock"
       - "scripts/check-dependencies.py"
       - ".github/workflows/dependency-monitoring.yml"
 
@@ -25,13 +26,12 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
-      - name: Install package and advisory scanner in a clean venv
+      - name: Install hashed lock files (scanner version comes from the dev lock)
         run: |
-          python -m pip install -U pip
-          python -m pip install -e ".[test]"
-          python -m pip install pip-audit cyclonedx-bom
+          python -m pip install --require-hashes -r requirements-dev.lock
+          python -m pip install --no-deps -e .
 
       - name: Record scanner and advisory database versions
         run: |
@@ -47,11 +47,12 @@ jobs:
           cat dependency-scanner-environment.json
 
       - name: Build dependency monitoring evidence
-        run: python scripts/check-dependencies.py --output dependency-monitoring-ci.json
+        # Audits the lock files, not the runner site-packages (T-009).
+        run: python scripts/check-dependencies.py -r requirements.lock -r requirements-dev.lock --output dependency-monitoring-ci.json
 
       - name: Generate CycloneDX SBOM
         run: |
-          python -m pip_audit --format cyclonedx-json -o rapidtriage-sbom.cdx.json > /dev/null 2>&1 || true
+          python -m pip_audit -r requirements.lock -r requirements-dev.lock --require-hashes --disable-pip --format cyclonedx-json -o rapidtriage-sbom.cdx.json > /dev/null 2>&1 || true
           python - <<'PY'
           import json
           from pathlib import Path
@@ -74,6 +75,10 @@ jobs:
           raw = str(scan.get("raw_output") or "")
           findings = [line for line in raw.splitlines() if "known vulnerabilities" in line.lower() or "No known vulnerabilities" in line]
           print("Scanner available:", scan.get("available"), "| return code:", scan.get("return_code"))
+          print("Audit target:", scan.get("audit_target"), "| packages:", scan.get("audited_package_count"))
+          for name, item in (scan.get("findings_by_package") or {}).items():
+              print(f"  {name} {item['version']}: {item['advisory_count']} advisories ({item['fixable_count']} fixable)")
+          print("Open findings are listed in docs/dependency-lock-exceptions.md.")
           for line in findings:
               print("Advisories:", line.strip())
           print("Release gate policy: disclosed-blocker mode — high/critical findings must be triaged in")

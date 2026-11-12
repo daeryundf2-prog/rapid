@@ -3,8 +3,8 @@ name: RapidTriage CI
 # Trigger/matrix policy (R8 CI-green decision default; owner can revert):
 # - Pull requests are the gate: ubuntu + windows on Python 3.12, plus frontend/contract/Rust jobs.
 #   Feature-branch pushes no longer start a second, identical run next to the PR run.
-# - The full matrix (ubuntu/windows/macos x 3.11/3.12) runs on push to main, nightly, and on
-#   manual dispatch (`gh workflow run "RapidTriage CI" --ref <branch>`), so macOS and 3.11
+# - The full matrix (ubuntu/windows/macos on Python 3.12) runs on push to main, nightly, and on
+#   manual dispatch (`gh workflow run "RapidTriage CI" --ref <branch>`), so macOS
 #   coverage is kept but no longer blocks every PR behind the macOS runner queue.
 # - A newer push to the same PR cancels the superseded PR run; main/nightly runs are never cancelled.
 on:
@@ -32,7 +32,8 @@ jobs:
       fail-fast: false
       matrix:
         os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest", "windows-latest"]' || '["ubuntu-latest", "windows-latest", "macos-latest"]') }}
-        python-version: ${{ fromJSON(github.event_name == 'pull_request' && '["3.12"]' || '["3.11", "3.12"]') }}
+        # requires-python >= 3.12 (T-009): 3.11 left the matrix with the lock files.
+        python-version: ["3.12"]
 
     steps:
       - name: Checkout
@@ -61,10 +62,10 @@ jobs:
 
       - name: Audit Python dependencies
         # Non-blocking visibility step: pip-audit (from the test extra)
-        # reports known vulnerabilities in installed dependencies without
-        # failing the build.
+        # audits the hashed lock files (not the runner's site-packages)
+        # without failing the build. Open findings: docs/dependency-lock-exceptions.md.
         continue-on-error: true
-        run: python -m pip_audit
+        run: python -m pip_audit -r requirements.lock -r requirements-dev.lock --require-hashes --disable-pip
 
       - name: Check doc path references
         # Gate: fails on stale repo-path references in maintained markdown
@@ -119,7 +120,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install package
         run: python -m pip install -e ".[web]"
@@ -176,7 +177,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Check contract drift
         # Gate: contracts/ vendors lazy-contracts; fails when file hashes
@@ -196,7 +197,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Check Rust formatting
         working-directory: engines/rust
