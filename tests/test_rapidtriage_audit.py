@@ -1,12 +1,24 @@
 from __future__ import annotations
 
+import datetime as dt
+import hashlib
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
+import rapidtriage
 from rapidtriage.cli import main
-from rapidtriage.core.audit import audit_path_for, write_audit_record
+from rapidtriage.core.audit import (
+    CHAIN_FIELD,
+    RECORD_HASH_FIELD,
+    audit_path_for,
+    audit_timestamps,
+    export_audit_log_path,
+    verify_audit_chain,
+    write_audit_record,
+)
 from rapidtriage.core.run import run_triage_mode
 from tests import quiet_media_checks
 from tests.test_rapidtriage_run import build_run_fixture
@@ -119,6 +131,160 @@ class RapidTriageAuditTests(unittest.TestCase):
             summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
             self.assertEqual(summary_payload, payload)
             self.assertEqual(summary_payload["audit"], str((output_dir / "rapidtriage-run-audit.json").resolve()))
+
+
+class ExportAuditChainTests(unittest.TestCase):
+    """T-029: export audit records accumulate, carry zone-aware time and tool version, and chain."""
+
+    def _export(self, folder: Path, name: str = "report.md") -> dict[str, object]:
+        output = folder / name
+        output.write_text(f"report {name}\n", encoding="utf-8")
+        return write_audit_record(audit_path_for(output), command="report", output_files=[("report", output)])
+
+    def test_two_exports_in_a_row_keep_both_records(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            folder = Path(tmp_dir)
+            first = self._export(folder)
+            second = self._export(folder)
+            log_path = export_audit_log_path(audit_path_for(folder / "report.md"))
+            self.assertEqual(log_path.name, "rapidtriage-export-audit.jsonl")
+            raw = log_path.read_bytes()
+            self.assertNotIn(b"\r", raw)
+            lines = raw.decode("utf-8").splitlines()
+            self.assertEqual(len(lines), 2)
+            self.assertEqual(json.loads(lines[0]), first)
+            self.assertEqual(json.loads(lines[1]), second)
+            self.assertEqual(first[CHAIN_FIELD], "")
+            self.assertEqual(second[CHAIN_FIELD], hashlib.sha256(lines[0].encode("utf-8")).hexdigest())
+            # Sidecar keeps its name and holds the latest record.
+            sidecar = audit_path_for(folder / "report.md")
+            self.assertEqual(sidecar.name, "report.audit.md")
+            self.assertEqual(json.loads(sidecar.read_text(encoding="utf-8")), second)
+            report = verify_audit_chain(log_path)
+            self.assertTrue(report["ok"])
+            self.assertEqual((report["records"], report["chained"], report["pre_chain_lines"]), (2, 2, 0))
+
+    def test_record_carries_zone_aware_time_tool_version_and_writer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            record = self._export(Path(tmp_dir))
+        local = dt.datetime.fromisoformat(str(record["generated_at"]))
+        utc = dt.datetime.fromisoformat(str(record["generated_at_utc"]))
+        self.assertIsNotNone(local.utcoffset())
+        self.assertEqual(utc.utcoffset(), dt.timedelta(0))
+        self.assertEqual(local, utc)
+        self.assertRegex(str(record["generated_at"]), r"[+-]\d\d:\d\d$")
+        self.assertTrue(str(record["generated_at"]).endswith(str(record["utc_offset"])))
+        self.assertEqual(record["tool_name"], "rapidtriage")
+        self.assertEqual(record["tool_version"], rapidtriage.__version__)
+        self.assertTrue(record["tool_version"])
+        self.assertEqual(record["pid"], os.getpid())
+        self.assertTrue(record["host"])
+        self.assertIn("os_user", record)
+        self.assertEqual(record["audit_sidecar"], "report.audit.md")
+
+    def test_timestamps_name_one_instant_in_any_zone(self) -> None:
+        instant = dt.datetime(2026, 11, 12, 1, 2, 3, tzinfo=dt.timezone.utc)
+        stamps = audit_timestamps(instant)
+        self.assertEqual(stamps["generated_at_utc"], "2026-11-12T01:02:03+00:00")
+        self.assertEqual(dt.datetime.fromisoformat(stamps["generated_at"]), instant)
+
+    def test_editing_middle_line_is_reported_by_number(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            folder = Path(tmp_dir)
+            for index in range(4):
+                self._export(folder, f"report-{index}.md")
+            log_path = folder / "rapidtriage-export-audit.jsonl"
+            pristine = log_path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(pristine), 4)
+            self.assertTrue(verify_audit_chain(log_path)["ok"])
+
+            # Still valid JSON, one value changed: the line names itself.
+            lines = list(pristine)
+            lines[1] = lines[1].replace('"command":"report"', '"command":"rep0rt"')
+            self.assertNotEqual(lines[1], pristine[1])
+            log_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+            report = verify_audit_chain(log_path)
+            self.assertFalse(report["ok"])
+            self.assertEqual(report["first_broken_line"], 2)
+            self.assertEqual([item["line"] for item in report["broken_lines"]], [2])
+
+            # One byte changed so the line is no longer JSON.
+            lines = list(pristine)
+            lines[2] = lines[2][:-1]
+            log_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+            report = verify_audit_chain(log_path)
+            self.assertEqual([item["line"] for item in report["broken_lines"]], [3])
+
+            # Hash fields recomputed by hand for the edited line: the next line's chain still names it.
+            lines = list(pristine)
+            edited = json.loads(lines[1])
+            edited["command"] = "forged"
+            edited.pop(RECORD_HASH_FIELD)
+            canonical = json.dumps(edited, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            edited[RECORD_HASH_FIELD] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+            lines[1] = json.dumps(edited, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            log_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+            report = verify_audit_chain(log_path)
+            self.assertEqual(report["first_broken_line"], 2)
+
+            # A removed line is reported at the line before the gap.
+            lines = [pristine[0], pristine[1], pristine[3]]
+            log_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+            self.assertEqual(verify_audit_chain(log_path)["first_broken_line"], 2)
+
+    def test_old_records_are_pre_chain_not_broken(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            folder = Path(tmp_dir)
+            old_record = {"command": "report", "generated_at": "2026-04-23T10:00:00", "provenance": {}, "integrity": {}}
+            sidecar = folder / "old.audit.json"
+            sidecar.write_text(json.dumps(old_record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            report = verify_audit_chain(sidecar)
+            self.assertTrue(report["ok"])
+            self.assertEqual((report["records"], report["pre_chain_lines"]), (1, 1))
+            self.assertEqual(report["pre_chain_label"], "사슬 이전 1줄")
+
+            log_path = folder / "rapidtriage-export-audit.jsonl"
+            log_path.write_text("".join(json.dumps(old_record) + "\n" for _ in range(4)), encoding="utf-8", newline="\n")
+            report = verify_audit_chain(log_path)
+            self.assertTrue(report["ok"])
+            self.assertEqual(report["pre_chain_lines"], 4)
+            self.assertEqual(report["pre_chain_label"], "사슬 이전 4줄")
+
+            # New exports chain on from the old lines; the old lines stay untouched and pre-chain.
+            before = log_path.read_bytes()
+            appended = self._export(folder)
+            self.assertTrue(log_path.read_bytes().startswith(before))
+            last_old = before.decode("utf-8").splitlines()[-1]
+            self.assertEqual(appended[CHAIN_FIELD], hashlib.sha256(last_old.encode("utf-8")).hexdigest())
+            report = verify_audit_chain(log_path)
+            self.assertTrue(report["ok"])
+            self.assertEqual((report["records"], report["pre_chain_lines"], report["chained"]), (5, 4, 1))
+
+            # Stripping the chain field from a line after the chain started is not "pre-chain".
+            lines = log_path.read_text(encoding="utf-8").splitlines()
+            stripped = json.loads(lines[-1])
+            stripped.pop(CHAIN_FIELD)
+            lines[-1] = json.dumps(stripped)
+            self._export(folder, "again.md")
+            lines.append(log_path.read_text(encoding="utf-8").splitlines()[-1])
+            log_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+            self.assertEqual(verify_audit_chain(log_path)["first_broken_line"], 5)
+
+    def test_upgrade_check_accepts_the_chain(self) -> None:
+        import importlib.util
+
+        script = Path(__file__).resolve().parents[1] / "scripts" / "r8-upgrade-check.py"
+        spec = importlib.util.spec_from_file_location("r8_upgrade_check_for_audit", script)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            folder = Path(tmp_dir)
+            for index in range(3):
+                self._export(folder, f"r-{index}.md")
+            result = module.check_audit([folder / "rapidtriage-export-audit.jsonl"])
+        self.assertEqual(module.CHAIN_FIELD, CHAIN_FIELD)
+        self.assertEqual((result["records"], result["chained"], result["broken"]), (3, 3, 0))
 
 
 if __name__ == "__main__":
