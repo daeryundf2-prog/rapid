@@ -148,7 +148,7 @@
       "frontend/src/features/analysis/analysis.test.tsx": 610,
       "frontend/src/features/analysis/qaRealData2.test.tsx": 419,
       "frontend/src/features/case/CaseDialogs.tsx": 643,
-      "frontend/src/features/case/CaseWizard.tsx": 762,
+      "frontend/src/features/case/CaseWizard.tsx": 759,
       "frontend/src/features/case/case.test.tsx": 419,
       "frontend/src/features/dashboard/CaseDashboard.test.tsx": 516,
       "frontend/src/features/dashboard/CaseDashboard.tsx": 462,
