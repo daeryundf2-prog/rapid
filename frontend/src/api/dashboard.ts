@@ -56,12 +56,53 @@ export function buildExportFile(buildUrl: string): Promise<unknown> {
   return api<unknown>(buildUrl, { method: "POST" });
 }
 
+/**
+ * Processing scope on four axes (R8 T-023, `rapidtriage/api/app/run_scope.py`). Never one number:
+ * partitions · allocated · deleted · unallocated. Percentages are floored server-side (shown as-is).
+ * `basis` "inferred" = derived from extraction stats before a Sleuth Kit comparison;
+ * "unavailable" = no stats (folder evidence, older results).
+ */
+export interface RunScope {
+  basis: "inferred" | "measured" | "unavailable" | string;
+  partitions: { total: number | null; supported: number | null; processed: number | null };
+  allocated: { listed_pct: number | null; content_pct: number | null; basis?: string };
+  deleted: {
+    records: number | null;
+    attempted: number | null;
+    attempted_pct: number | null;
+    listed_pct: number | null;
+    not_attempted?: number | null;
+  };
+  unallocated: { scanned_pct: number | null; measured: boolean };
+  caps: { code: string; limit?: number; reached?: boolean; skipped?: number; axis?: string }[];
+  partial: boolean | null;
+  notes: string[];
+}
+
 export interface RunDashboard {
   run_id: string;
   completed: boolean;
   profile: { mode: string; description: string; keywords: string[] };
   evidence_source: EvidenceSource;
   exports: ExportEntry[];
+  /** Four-axis processing scope (T-023); null when the server predates it. */
+  scope: RunScope | null;
+}
+
+function normalizeScope(raw: unknown): RunScope | null {
+  if (!raw || typeof raw !== "object") return null;
+  const value = raw as Partial<RunScope>;
+  if (typeof value.basis !== "string") return null;
+  return {
+    basis: value.basis,
+    partitions: { total: null, supported: null, processed: null, ...value.partitions },
+    allocated: { listed_pct: null, content_pct: null, ...value.allocated },
+    deleted: { records: null, attempted: null, attempted_pct: null, listed_pct: null, ...value.deleted },
+    unallocated: { scanned_pct: null, measured: false, ...value.unallocated },
+    caps: Array.isArray(value.caps) ? value.caps : [],
+    partial: typeof value.partial === "boolean" ? value.partial : null,
+    notes: Array.isArray(value.notes) ? value.notes.filter((note) => typeof note === "string") : [],
+  };
 }
 
 /** Fills missing blocks so cards never read through `undefined` (older servers, partial payloads). */
@@ -88,6 +129,7 @@ export function normalizeDashboard(
       selected_partition: source.selected_partition ?? null,
     },
     exports: Array.isArray(raw?.exports) ? raw.exports : [],
+    scope: normalizeScope(raw?.scope),
   };
 }
 

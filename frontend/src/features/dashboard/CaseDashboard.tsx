@@ -37,6 +37,7 @@ import {
 } from "./caseCards";
 import { disclosureItems, runWarnings } from "./disclosures";
 import { categoryBars, keywordRows, reviewSummary, stageRows } from "./model";
+import { ScopeBand } from "./scopeBand";
 import { useDashboardData } from "./useDashboardData";
 import "./dashboard.css";
 
@@ -261,6 +262,7 @@ export function CaseDashboard({ runId }: { runId: string }) {
             </button>
           ) : null}
         </StatusStrip>
+        <ScopeBand scope={dashboard.data?.scope} />
         <CardProgress ready={readyCards} total={shownCards.length} />
       </div>
 

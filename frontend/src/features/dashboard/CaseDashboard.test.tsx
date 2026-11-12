@@ -185,6 +185,20 @@ const cardIds = () =>
   [...document.querySelectorAll<HTMLElement>(".dash-grid > .dash-card")].map((el) => el.dataset.card);
 
 describe("CaseDashboard (접수, r7 examiner-first)", () => {
+  it("shows the four-axis scope band in the head block when /dashboard sends a partial scope (T-024)", async () => {
+    const base = routes()["GET /api/runs/r1/dashboard"] as object;
+    const scope = { basis: "inferred", partitions: { total: 2, supported: 2, processed: 1 }, partial: true };
+    await renderDashboard({ "GET /api/runs/r1/dashboard": { ...base, scope } });
+    const band = await screen.findByTestId("dash-scope");
+    expect(band.closest(".dash-head")).not.toBeNull();
+    expect(band.querySelectorAll("[data-count]")).toHaveLength(4);
+  });
+
+  it("has no scope band when /dashboard sends no scope", async () => {
+    await renderDashboard();
+    expect(screen.queryByTestId("dash-scope") ?? screen.queryByTestId("dash-scope-note")).toBeNull();
+  });
+
   it("renders the 9 cards in examiner order with 12-column spans (8+4 · 6+6 · 4+4+4 · 8+4)", async () => {
     await renderDashboard();
     expect(CARD_IDS).toEqual([
