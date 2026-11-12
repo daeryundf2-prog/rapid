@@ -1045,7 +1045,9 @@ function TimelineEventSection({ row }: { row: GridRow | null }) {
         {(core?.facts ?? []).map((fact) => (
           <Fragment key={fact.label}>
             <dt>{fact.label}</dt>
-            <dd className="viewer-break">{typeof fact.value === "string" ? shownPath(fact.value) : fact.value}</dd>
+            <dd className="viewer-break">
+              {typeof fact.value === "string" ? shownPath(fact.value) : fact.value}
+            </dd>
           </Fragment>
         ))}
       </dl>

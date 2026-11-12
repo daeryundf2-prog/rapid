@@ -576,7 +576,11 @@ describe("C10 timeline viewer", () => {
         targetFull: stage,
         groupSources: [
           { artifactType: "lnk-file", path: stage, recordIndex: 0 },
-          { artifactType: "jumplist-entry", path: "D:\\out\\run1\\_e01\\fs\\$OrphanFiles\\x.lnk", recordIndex: null },
+          {
+            artifactType: "jumplist-entry",
+            path: "D:\\out\\run1\\_e01\\fs\\$OrphanFiles\\x.lnk",
+            recordIndex: null,
+          },
         ],
       },
     };
