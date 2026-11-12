@@ -2,7 +2,8 @@
 // its controls (cancel / skip / cancel_all / finish) and the pre-run group preview.
 
 import { useQuery } from "@tanstack/react-query";
-import { ApiError, api, authToken, errorMessageFromDetail } from "./client";
+import { ApiError, api, authToken } from "./client";
+import { apiErrorFromFetchFailure, apiErrorFromResponse } from "./errors";
 import { normalizeRunStatus } from "./runs";
 
 export { type RetryOptions, type RetryResult, retryRun } from "./runControl";
@@ -171,13 +172,11 @@ export async function getRunPlan(runId: string): Promise<RunPlan> {
       ...(token ? { "X-RapidTriage-Token": token } : {}),
       ...(cached ? { "If-None-Match": cached.etag } : {}),
     },
+  }).catch((error: unknown) => {
+    throw apiErrorFromFetchFailure(error);
   });
   if (response.status === 304 && cached) return cached.plan;
-  if (!response.ok) {
-    const detail = await response.json().catch(() => ({ detail: response.statusText }));
-    const raw = (detail as { detail?: unknown }).detail ?? detail;
-    throw new ApiError(errorMessageFromDetail(raw), response.status, raw);
-  }
+  if (!response.ok) throw await apiErrorFromResponse(response);
   const plan = normalizePlan((await response.json()) as RunPlan);
   const etag = response.headers?.get?.("etag");
   if (etag) etagCache.set(runId, { etag, plan });

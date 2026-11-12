@@ -459,11 +459,11 @@ describe("Viewer — toolbar actions", () => {
       {},
       {
         ensure: () => ({ database: "D:/case.db", case_id: "run-run-1" }),
-        "review-batch": () => jsonResponse({ detail: "case DB has no row for run locator(s)" }, 400),
+        "review-batch": () => jsonResponse({ detail: "케이스 DB에 이 런의 행이 없습니다" }, 400),
       },
     );
     fireEvent.click(tool("viewer.mark.bookmark"));
-    await waitFor(() => expect(live()).toBe("표시 실패: case DB has no row for run locator(s)"));
+    await waitFor(() => expect(live()).toBe("표시 실패: 케이스 DB에 이 런의 행이 없습니다"));
   });
 
   it("R-1: a failed mark (403) rolls the status chip back to the previous status", async () => {

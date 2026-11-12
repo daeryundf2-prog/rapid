@@ -131,8 +131,8 @@ describe("applyReviewAction", () => {
   });
 
   it("server errors from ensure do not fall back silently", async () => {
-    installFetch({ "/case-db/ensure": () => jsonResponse({ detail: "boom" }, 500) });
-    await expect(applyReviewAction("r1", [fileRow(1)], "relevant")).rejects.toThrow("boom");
+    installFetch({ "/case-db/ensure": () => jsonResponse({ detail: "케이스 DB 오류" }, 500) });
+    await expect(applyReviewAction("r1", [fileRow(1)], "relevant")).rejects.toThrow("케이스 DB 오류");
   });
 
   it("notifies listeners (review-counts / review-map invalidation) after a mark", async () => {
@@ -226,8 +226,8 @@ describe("applyReviewAction", () => {
   });
 
   it("propagates API failures so the caller can roll back", async () => {
-    installFetch({ "/case-db/ensure": ENSURE, "/review-batch": () => jsonResponse({ detail: "nope" }, 400) });
-    await expect(applyReviewAction("r1", [fileRow(1)], "relevant")).rejects.toThrow("nope");
+    installFetch({ "/case-db/ensure": ENSURE, "/review-batch": () => jsonResponse({ detail: "검토 표시 거부됨" }, 400) });
+    await expect(applyReviewAction("r1", [fileRow(1)], "relevant")).rejects.toThrow("검토 표시 거부됨");
   });
 
   it("extract needs source paths and respects the per-call limit", async () => {
