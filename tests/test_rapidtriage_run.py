@@ -44,7 +44,11 @@ from rapidtriage.core.run_workflow import (
     stage_for_step_name,
 )
 from rapidtriage.core.silent_failure import build_silent_failure_report
+from tests import quiet_media_checks
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
 
 
 def write_minimal_docx(path: Path, text: str) -> None:

@@ -6,8 +6,13 @@ import unittest
 from pathlib import Path
 
 from rapidtriage.cli import main
+from tests import quiet_media_checks
 from tests.schema_validation import validate
 from tests.test_rapidtriage_run import build_run_fixture
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCHEMAS_DIR = REPO_ROOT / "rapidtriage" / "schemas"

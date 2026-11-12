@@ -29,7 +29,12 @@ from rapidtriage.core.search_fts import (
     keyword_candidate_term,
     regex_leading_literal,
 )
+from tests import quiet_media_checks
 from tests.test_rapidtriage_run import build_run_fixture
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
+
 
 KOREAN_NAME = "진정서(배○현)_2024-005727.pdf"
 

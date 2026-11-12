@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -14,6 +16,7 @@ import textwrap
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[1]
 RUN_PY = REPO / "scripts" / "dev" / "run.py"
@@ -96,6 +99,75 @@ class DevRunTests(unittest.TestCase):
         self.assertFalse(dev_run.is_alive(grand_pid))
         self.assertIsNone(bystander.poll(), "an unrelated python process was killed")
         self.assertEqual(list(self.state_dir.glob("run-*.json")), [])
+
+    def test_json_out_is_written_on_timeout_into_a_new_folder(self) -> None:
+        out = self.tmp / "nested" / "deeper" / "run.json"
+        proc = subprocess.run(
+            [sys.executable, str(RUN_PY), "--state-dir", str(self.state_dir), "--json-out", str(out),
+             "--timeout", "2", "--", sys.executable, "-c", "import time; time.sleep(60)"],
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+        self.assertEqual(proc.returncode, dev_run.EXIT_TIMEOUT, proc.stderr)
+        result = json.loads(out.read_text(encoding="utf-8"))
+        self.assertEqual((result["status"], result["exit_code"]), ("timeout", dev_run.EXIT_TIMEOUT))
+        self.assertNotIn("killing", result)
+        self.assertEqual(result["remaining"], [])
+        self.assertEqual(list(out.parent.glob("*.tmp")), [])
+
+    def test_json_out_exists_while_running_and_survives_a_killed_wrapper(self) -> None:
+        # T-148: the 3600 s discover run left no result because the wrapper itself was killed.
+        out = self.tmp / "run.json"
+        started_marker = self.tmp / "child.pid"
+        code = (
+            "import os, sys, time; open(sys.argv[1], 'w').write(str(os.getpid())); time.sleep(60)"
+        )
+        wrapper = subprocess.Popen(
+            [sys.executable, str(RUN_PY), "--state-dir", str(self.state_dir), "--json-out", str(out),
+             "--timeout", "120", "--", sys.executable, "-c", code, str(started_marker)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        self.extra.append(wrapper)
+        _wait_for(started_marker)
+        _wait_for(out)
+        result = json.loads(out.read_text(encoding="utf-8"))
+        self.assertEqual(result["status"], "running")
+        self.assertEqual(result["timeout"], 120)
+        self.assertIsInstance(result["pid"], int)
+        wrapper.kill()  # only the wrapper we started; its tree is cleaned up below
+        wrapper.wait(timeout=10)
+        self.assertEqual(json.loads(out.read_text(encoding="utf-8"))["status"], "running")
+        child_pid = int(started_marker.read_text())
+        subprocess.run(
+            [sys.executable, str(RUN_PY), "--cleanup", "--state-dir", str(self.state_dir)],
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+        deadline = time.monotonic() + 10
+        while dev_run.is_alive(child_pid) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        self.assertFalse(dev_run.is_alive(child_pid))
+
+    def test_result_is_written_even_when_the_kill_step_raises(self) -> None:
+        out = self.tmp / "run.json"
+        real_kill_tree = dev_run.kill_tree
+
+        def kill_then_fail(*args, **kwargs):
+            real_kill_tree(*args, **kwargs)
+            raise RuntimeError("boom")
+
+        args = dev_run.build_parser().parse_args(
+            ["--timeout", "1", "--state-dir", str(self.state_dir), "--json-out", str(out)]
+        )
+        command = [sys.executable, "-c", "import time; time.sleep(60)"]
+        with mock.patch.object(dev_run, "kill_tree", side_effect=kill_then_fail):
+            code, result = dev_run.run(args, command)
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            dev_run._emit(result, args)
+        self.assertIn("run.py: timeout", err.getvalue())
+        self.assertEqual(code, dev_run.EXIT_TIMEOUT)
+        written = json.loads(out.read_text(encoding="utf-8"))
+        self.assertEqual(written["status"], "timeout")
+        self.assertEqual(written["kill_error"], "RuntimeError: boom")
+        self.assertEqual(written["remaining"], [])
 
     def test_normal_exit_kills_orphaned_grandchild(self) -> None:
         code = textwrap.dedent(

@@ -47,7 +47,12 @@ from rapidtriage.core.run.progress import (
     load_run_progress_view,
     read_run_progress,
 )
+from tests import quiet_media_checks
 from tests.test_rapidtriage_run import build_run_fixture
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
+
 
 try:
     from fastapi.testclient import TestClient

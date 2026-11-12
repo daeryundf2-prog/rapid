@@ -14,6 +14,12 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
+from tests import quiet_media_checks
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
+
+
 HAS_FASTAPI = True
 try:
     from fastapi.testclient import TestClient

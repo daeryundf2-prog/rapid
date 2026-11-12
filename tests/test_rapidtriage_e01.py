@@ -50,7 +50,11 @@ from rapidtriage.core.virtual_disk import (
     build_virtual_disk_report_grade_validation_plan,
     extract_virtual_disk_to_directory,
 )
+from tests import quiet_media_checks
 from tests.test_rapidtriage_run import build_run_fixture
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
 
 
 class RapidTriageE01Tests(unittest.TestCase):

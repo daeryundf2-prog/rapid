@@ -9,6 +9,10 @@ from pathlib import Path
 
 from rapidtriage.cli import build_parser, main
 from rapidtriage.core.sample_case import create_sample_case
+from tests import quiet_media_checks
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
 
 
 class RapidTriageSampleCaseTests(unittest.TestCase):
