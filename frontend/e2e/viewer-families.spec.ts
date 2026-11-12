@@ -259,6 +259,37 @@ test("Q-F13: every artifact = summary columns with label-above-value cells; one 
   await expect(page.getByRole("columnheader", { name: COPY.grid.summaryColumn })).toHaveCount(0);
 });
 
+test("T-014: the viewer ⋯ menu stays inside the viewport at 880 and 1280 widths", async ({ page }) => {
+  await open(page, `#/case/${runId}/explore/files`);
+  await page.locator('[role="grid"] [role="row"][aria-rowindex="2"]').first().click();
+  for (const width of [880, 1280]) {
+    await page.setViewportSize({ width, height: 800 });
+    const trigger = page.getByTestId(TEST_IDS.viewerActionsMenu);
+    // Below 1200px the viewer is a focus-trapped drawer (transformed): open it from its handle.
+    if (width < 1200) await page.getByTestId("viewer-drawer-open").click();
+    await expect(trigger).toBeVisible();
+    await expect(trigger).toHaveAccessibleName(COPY.common.more);
+    await trigger.click();
+    const menu = page.getByRole("menu", { name: COPY.common.more });
+    await expect(menu).toBeVisible();
+    // Portalled: no pane's overflow clips it.
+    expect(await menu.evaluate((el) => el.parentElement === document.body)).toBe(true);
+    const box = await menu.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width);
+    expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(800);
+    // No item is cut: each label's box lies inside the menu's box.
+    const firstItem = menu.locator("[role^=menuitem]").first();
+    const first = await firstItem.boundingBox();
+    expect(first?.x ?? -1).toBeGreaterThanOrEqual(box?.x ?? 0);
+    await expect(firstItem).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+  }
+});
+
 test("Q-F14/Q-F15: R/X/B marks give one stripe each; the meta tail lists seven facts", async ({ page }) => {
   await open(page, `#/case/${runId}/explore/files`);
   const row = page.locator('[role="grid"] [role="row"][aria-rowindex="2"]').first();

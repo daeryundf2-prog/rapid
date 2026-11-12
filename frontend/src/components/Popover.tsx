@@ -58,19 +58,24 @@ export interface PopoverPlacement {
 }
 
 /**
- * Where a portalled popover goes (fixed coordinates): below the trigger unless it does not fit
- * there and there is more room above (flip); horizontally aligned to the trigger's start / end
- * edge, then clamped into the viewport.
+ * Where a portalled popover / menu goes (fixed coordinates): on the preferred side of the
+ * trigger (below by default) unless it does not fit there and the other side has more room
+ * (flip); horizontally aligned to the trigger's start / end edge, then shifted into the
+ * viewport so neither edge is cut off (plan r8 T-014).
  */
 export function placePopover(
   trigger: { top: number; bottom: number; left: number; right: number },
   panel: { width: number; height: number },
   viewport: { width: number; height: number },
   align: "start" | "end",
+  prefer: "below" | "above" = "below",
 ): PopoverPlacement {
   const below = viewport.height - trigger.bottom - TRIGGER_GAP - VIEWPORT_MARGIN;
   const aboveRoom = trigger.top - TRIGGER_GAP - VIEWPORT_MARGIN;
-  const above = panel.height > below && aboveRoom > below;
+  const above =
+    prefer === "above"
+      ? !(panel.height > aboveRoom && below > aboveRoom)
+      : panel.height > below && aboveRoom > below;
   const maxHeight = Math.max(120, Math.floor(above ? aboveRoom : below));
   const height = Math.min(panel.height, maxHeight);
   const top = above ? trigger.top - TRIGGER_GAP - height : trigger.bottom + TRIGGER_GAP;

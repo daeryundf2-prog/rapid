@@ -32,8 +32,9 @@
   outline: none;
 }
 
-/* Portalled (plan r7 §3.2 L2, C-D4): fixed to the trigger by Popover's placement, above every
-   pane — the viewer and its resize handles included — and never clipped by the grid pane. */
+/* Portalled (plan r7 §3.2 L2, C-D4; menus too, plan r8 T-014): fixed to the trigger by
+   placePopover, above every pane — the viewer, its drawer and resize handles included — and never
+   clipped by a pane's overflow. */
 .popover.popover-portal {
   position: fixed;
   right: auto;
