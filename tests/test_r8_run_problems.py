@@ -161,6 +161,36 @@ class RunProblemLimitsTests(unittest.TestCase):
         self.assertIn("USN 저널 레코드 분석 상한(5,000건)", messages[1])
         self.assertIn("$LogFile 9 MiB 중 앞 8 MiB만 훑었습니다", messages[2])
 
+    def _set_counts(self, **counts: int) -> None:
+        output = Path(self.summary["outputs"]["artifacts_windows-filesystem"])
+        payload = json.loads(output.read_text(encoding="utf-8"))
+        payload["summary"]["artifact_type_counts"].update(counts)
+        output.write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_read_window_without_the_record_cap_is_worded_as_the_window(self) -> None:
+        # Review P2-16: 3,000 $MFT rows from a 20 MiB $MFT never reached the 5,000-record cap.
+        self._set_counts(**{"mft-record": 3000, "usn-record": 40})
+        _sparse(self.root / "$Extend" / "$UsnJrnl", 40 * MIB)
+        messages = [item["message"] for item in self.limits() if item["reason_id"] == "ntfs-parse-cap"]
+        mft = next(message for message in messages if message.startswith("$MFT"))
+        self.assertIn("$MFT 20 MiB 중 앞 16 MiB만 읽어 3,000건을", mft)
+        self.assertIn("레코드 상한 5,000건에는 닿지 않음", mft)
+        self.assertNotIn("에 닿아", mft)
+        usn = next(message for message in messages if message.startswith("USN"))
+        self.assertIn("USN 저널 40 MiB 중 앞 16 MiB만 읽어 40건을 반영했습니다(레코드 상한 5,000건에는 닿지 않음)", usn)
+        self.assertNotIn("에 닿아", usn)
+
+    def test_large_usn_and_logfile_with_zero_rows_still_get_an_item(self) -> None:
+        # Review P2-16: a large $UsnJrnl / $LogFile that produced 0 rows used to give no item at all.
+        self._set_counts(**{"usn-record": 0, "ntfs-logfile-transaction-candidate": 0})
+        _sparse(self.root / "$Extend" / "$UsnJrnl", 40 * MIB)
+        messages = [item["message"] for item in self.limits() if item["reason_id"] == "ntfs-parse-cap"]
+        usn = next(message for message in messages if message.startswith("USN"))
+        self.assertIn("USN 저널 40 MiB 중 앞 16 MiB만 읽어 반영한 레코드가 0건입니다", usn)
+        self.assertIn("기록이 없다는 뜻이 아님", usn)
+        logfile = next(message for message in messages if message.startswith("$LogFile"))
+        self.assertIn("$LogFile 9 MiB 중 앞 8 MiB만 훑었습니다(부분). 그 구간에서 찾은 트랜잭션 후보는 0건입니다.", logfile)
+
     def test_no_ntfs_items_below_the_caps(self) -> None:
         output = Path(self.summary["outputs"]["artifacts_windows-filesystem"])
         payload = json.loads(output.read_text(encoding="utf-8"))
