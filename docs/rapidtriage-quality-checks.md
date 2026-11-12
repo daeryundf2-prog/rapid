@@ -4,6 +4,56 @@ Local quality infrastructure that complements the test suite and static
 analysis gates. All commands assume an environment with the `test` extra
 installed (`python -m pip install -e ".[web,test]"`).
 
+## Local gate (one line)
+
+`scripts/dev/gate.py` runs every local check in a fixed order and prints one
+line per step (`pass` / `FAIL` / `TIMEOUT` / `skip`, seconds, exit code) and
+the total wall time. Each step runs under `scripts/dev/run.py --timeout`, so a
+hung step kills only its own process tree. Step output goes to a log file
+under the temp dir; the last 30 lines are printed when a step fails.
+
+```bash
+python scripts/dev/gate.py --tier fast            # default; every task before hand-back
+python scripts/dev/gate.py --tier static          # L0 only
+python scripts/dev/gate.py --tier full --json     # coordinator, end of a batch
+python scripts/dev/gate.py --fast --changed       # unit tests only for modules touched vs --base
+python scripts/dev/gate.py --list                 # print the planned steps
+```
+
+`--fast`, `--full` and `--static` are short for `--tier ...`. `--base`
+defaults to `feat/r6-ux` (then `main`); it decides whether `frontend/`
+changed and which modules `--changed` selects.
+
+| Level | Step | Command | Tiers |
+|---|---|---|---|
+| L0 | check-eol | `python scripts/dev/check-eol.py` | all |
+| L0 | check-staged | `python scripts/dev/check-staged.py` (staged size, EOL, bundle path) | all |
+| L0 | ruff | `python -m ruff check rapidtriage tests scripts` | all |
+| L0 | vulture | `python -m vulture rapidtriage tests scripts --min-confidence 80` | all |
+| L0 | compileall | `python -m compileall -q rapidtriage tests scripts` | all |
+| L0 | exec-bits | `python -m unittest tests.test_script_exec_bits` | all |
+| L0 | architecture | `python -m unittest tests.test_architecture` (import boundaries) | all |
+| L0 | fe-typecheck, fe-lint, fe-bundle | `npm run typecheck`, `npm run lint`, `npm run check:bundle` | when `frontend/` changed; always in full |
+| L1 | unit-tests | `python scripts/dev/run-tests.py --tier fast\|full [--changed]` | fast, full |
+| L1 | fe-vitest | `npx vitest run` | fast (frontend changed), full |
+| L2 | ui-contract | `node scripts/extract-ui-contract.mjs --check` | fast, full |
+| L2 | known-answer-qc, trusted-diff, normalize-trusted-export, build-evidence-bundle | the Tier 0 commands of the RapidForensic Validation Contract in `AGENTS.md` | fast, full |
+| L2 | pip-audit | `python -m pip_audit -r requirements.lock -r requirements-dev.lock --require-hashes --disable-pip` | fast, full |
+| L3 | e2e-smoke | `npm run e2e -- case-intake.spec.ts` (port from `.rt-dev.env`) | full |
+
+A failing L0 step stops the run (later steps are reported `not-run`;
+`--keep-going` overrides). L1-L3 failures do not stop later steps, so one run
+shows every failure. Frontend steps and the UI contract check need
+`frontend/node_modules`; worktrees made with `python scripts/dev/wt.py new`
+link it. Exit code 0 = every step passed or was skipped.
+
+`--json` prints `{tier, ok, total_seconds, failed, steps: [{name, level,
+status, exit_code, seconds, command, reason, log}]}` on stdout (the table then
+goes to stderr); the same JSON is kept as `gate.json` in the log directory.
+The whole-suite `python -m unittest discover -s tests` run is replaced by the
+parallel runner `scripts/dev/run-tests.py` (one process per module batch,
+per-module time limits).
+
 ## Test coverage
 
 `coverage` is included in the `test` extra and configured in
