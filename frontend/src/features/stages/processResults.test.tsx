@@ -12,6 +12,7 @@ import type { RunWithProgress } from "../../api/runsProgress";
 import { resetCommandRegistry } from "../../commands/registry";
 import { EMPTY_ROUTE, parseHash } from "../../router";
 import { useAppStore } from "../../state/store";
+import { IMG_B_PROVIDERS, IMG_B_STEPS, IMG_B_STEPS_TEXT } from "../dashboard/stepsFixture";
 import { installFetch, jsonResponse } from "../grid/testSupport";
 import { ProcessPage, processLayout, stepElapsedText, stepsElapsedMs } from "./ProcessStage";
 import { isLegacyPlan } from "./RunPlanTable";
@@ -144,6 +145,42 @@ describe("처리 results layout (C-G1)", () => {
     expect(screen.getByTestId("process-run-elapsed").textContent).toBe("34:09");
     expect(screen.getByTestId("process-step-tally").textContent).toContain("단계 소요 합계 34:01");
     expect(screen.getByRole("table", { name: "처리 단계" }).textContent).toContain("10:00");
+  });
+
+  it("T-022: the 처리 단계 count line is the server's — the same text as the 접수 strip", async () => {
+    setRun({
+      status: "completed",
+      created_at: "2026-10-17T11:18:42Z",
+      progress: {
+        status: "completed",
+        providers: IMG_B_PROVIDERS,
+        completed_count: 12,
+        total_count: 12,
+        error_count: 0,
+      },
+    } as Partial<RunWithProgress>);
+    // IMG-B-like summary: 39 completed, the browser step failed_isolated, the detector failed, OCR skipped.
+    const steps = [
+      ...Array.from({ length: 39 }, (_, i) => ({ name: `step-${i + 1}`, status: "completed" })),
+      { name: "artifacts-browser", status: "failed_isolated" },
+      { name: "silent-failure-detector", status: "failed" },
+      { name: "ocr", status: "skipped" },
+    ];
+    installFetch({
+      "/plan": () => jsonResponse(legacyPlan()),
+      "/summary": () => jsonResponse({ steps }),
+      "/dashboard": () => jsonResponse({ run_id: RUN, completed: true, steps: IMG_B_STEPS }),
+      "/processing-snapshot": () => jsonResponse(SNAPSHOT),
+      "/analyses": () => jsonResponse({ analyses: [] }),
+    });
+    renderPage();
+    await screen.findByRole("table", { name: "처리 단계" });
+    await waitFor(() => expect(screen.getByTestId("process-step-tally").textContent).toBe(IMG_B_STEPS_TEXT));
+    const page = screen.getByTestId("process-page").textContent ?? "";
+    expect(page).not.toMatch(/12\/12/);
+    expect(page).not.toMatch(/완료·오류 0/);
+    // Collector errors are labelled as such, not as a bare "오류" beside the step failures.
+    expect(screen.getByText("수집기 오류")).toBeTruthy();
   });
 
   it("a completed run with a real plan keeps it as a folded read-only record", async () => {

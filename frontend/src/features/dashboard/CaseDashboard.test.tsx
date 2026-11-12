@@ -137,6 +137,8 @@ function routes(overrides: Record<string, unknown> = {}) {
           download_url: "/api/runs/r1/extract/sel-1/file",
         },
       ],
+      // T-021 summarize_steps (name lists omitted; normalizeSteps fills them).
+      steps: { total: 2, completed: 2, partial: 0, failed: 0, skipped: 0, incomplete: 0 },
     },
     "GET /api/runs/r1/case-notes": {
       run_id: "r1",
@@ -248,7 +250,11 @@ describe("CaseDashboard (접수, r7 examiner-first)", () => {
     expect(strip.textContent).toContain("총 소요");
     expect(strip.textContent).toContain("총 소요05:00");
     const bar = within(strip).getByRole("progressbar", { name: "처리 단계 진행" });
-    expect(bar.getAttribute("aria-valuetext")).toBe("단계 2/2 완료");
+    // T-022: the server's step counts (`/dashboard` `steps`), not the pipeline stages.
+    expect(bar.getAttribute("aria-valuetext")).toBe("단계 2 · 완료 2 · 부분 0 · 실패 0");
+    expect(within(strip).getByTestId("dash-strip-steps").textContent).toBe(
+      "단계 2 · 완료 2 · 부분 0 · 실패 0",
+    );
     expect(within(strip).getByRole("button", { name: /처리 요약 보기/ })).toBeTruthy();
     expect(within(strip).getByRole("button", { name: "런 ID 복사" })).toBeTruthy();
     // Each card keeps its head (the sticky title row) as the first child.
@@ -278,7 +284,7 @@ describe("CaseDashboard (접수, r7 examiner-first)", () => {
     const details = within(status).getByTestId("stage-details") as HTMLDetailsElement;
     expect(details.open).toBe(false);
     expect(details.querySelector("summary")?.textContent).toBe(
-      "단계 상세 — 단계 2/2 · 수집기 1/1 · 오류 0 · 검증 이슈 1건",
+      "단계 상세 — 단계 2 · 완료 2 · 부분 0 · 실패 0 · 수집기 1 · 검증 이슈 1건",
     );
     expect(within(status).getByRole("table", { name: "수집기 진행" })).toBeTruthy();
     expect(status.querySelector('td[title="registry"]')).toBeTruthy();

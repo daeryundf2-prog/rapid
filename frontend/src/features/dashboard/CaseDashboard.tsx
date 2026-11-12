@@ -246,6 +246,7 @@ export function CaseDashboard({ runId }: { runId: string }) {
         <StatusStrip
           run={run}
           stages={stages}
+          steps={dashboard.data?.steps}
           crumb={crumb}
           onOpenSummary={() => {
             if (completed) go("outputs");
@@ -272,6 +273,7 @@ export function CaseDashboard({ runId }: { runId: string }) {
             <StatusCard
               run={run}
               stages={stages}
+              steps={dashboard.data?.steps}
               counts={counts}
               outputDir={outputDir}
               issues={issues.data?.rows}

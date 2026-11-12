@@ -79,6 +79,25 @@ export interface RunScope {
   notes: string[];
 }
 
+/**
+ * `steps` of the dashboard (T-021 `summarize_steps`): the run summary's processing steps by class —
+ * the one count the 접수 cards and the 처리 screen print (T-022). `failed_isolated` is `partial`,
+ * never `completed`. Not the collector progress (`progress.providers`), which counts a different thing.
+ */
+export interface StepsSummary {
+  total: number;
+  completed: number;
+  partial: number;
+  failed: number;
+  skipped: number;
+  incomplete: number;
+  failed_names: string[];
+  partial_names: string[];
+  skipped_names: string[];
+  incomplete_names: string[];
+  by_status: Record<string, number>;
+}
+
 export interface RunDashboard {
   run_id: string;
   completed: boolean;
@@ -87,6 +106,8 @@ export interface RunDashboard {
   exports: ExportEntry[];
   /** Four-axis processing scope (T-023); null when the server predates it. */
   scope: RunScope | null;
+  /** null until the run has a summary (or from an older server). */
+  steps: StepsSummary | null;
 }
 
 function normalizeScope(raw: unknown): RunScope | null {
@@ -102,6 +123,37 @@ function normalizeScope(raw: unknown): RunScope | null {
     caps: Array.isArray(value.caps) ? value.caps : [],
     partial: typeof value.partial === "boolean" ? value.partial : null,
     notes: Array.isArray(value.notes) ? value.notes.filter((note) => typeof note === "string") : [],
+  };
+}
+
+const stepCount = (value: unknown): number =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+const stepNames = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+
+/** The server's step counts, or null when missing or malformed (the screens then print none, never 0/0). */
+export function normalizeSteps(raw: unknown): StepsSummary | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.total !== "number") return null;
+  const byStatus: Record<string, number> = {};
+  if (r.by_status && typeof r.by_status === "object") {
+    for (const [key, value] of Object.entries(r.by_status as Record<string, unknown>)) {
+      byStatus[key] = stepCount(value);
+    }
+  }
+  return {
+    total: stepCount(r.total),
+    completed: stepCount(r.completed),
+    partial: stepCount(r.partial),
+    failed: stepCount(r.failed),
+    skipped: stepCount(r.skipped),
+    incomplete: stepCount(r.incomplete),
+    failed_names: stepNames(r.failed_names),
+    partial_names: stepNames(r.partial_names),
+    skipped_names: stepNames(r.skipped_names),
+    incomplete_names: stepNames(r.incomplete_names),
+    by_status: byStatus,
   };
 }
 
@@ -130,6 +182,7 @@ export function normalizeDashboard(
     },
     exports: Array.isArray(raw?.exports) ? raw.exports : [],
     scope: normalizeScope(raw?.scope),
+    steps: normalizeSteps(raw?.steps),
   };
 }
 
