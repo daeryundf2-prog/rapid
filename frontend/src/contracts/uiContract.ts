@@ -397,6 +397,7 @@ export const A11Y_NAME_TABLE: readonly A11yNameRow[] = [
   ["(label)", "입력 종류", "alias", "source"],
   ["(label)", "자주", "alias", "source"],
   ["(label)", "작성자", "alias", "source"],
+  ["(label)", "작성자 (태그·메모에 기록)", "alias", "source"],
   ["(label)", "전체 검색어", "keep", "source"],
   ["(label)", "종료 시각", "alias", "source"],
   ["(label)", "종류", "alias", "source"],
