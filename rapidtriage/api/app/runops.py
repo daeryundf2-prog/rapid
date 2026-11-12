@@ -49,7 +49,11 @@ from ...core.source_reader import (
 from ...core.source_reader import (
     build_archived_source_preview as build_archived_source_read_preview,
 )
-from ...core.submission import build_submission_manifest, compute_hashes
+from ...core.submission import (
+    build_submission_manifest,
+    compute_hashes,
+    evidence_relative_roots,
+)
 from .constants import (
     DEFAULT_INTERNAL_VALIDATION_PACKAGE,
     DOCUMENT_PREVIEW_MAX_BYTES,
@@ -118,6 +122,7 @@ from .sqlite import (
     search_sqlite_file,
     sqlite_row_review_note_citation,
 )
+from .validation_source import build_run_validation_source_integrity
 from .viewer_core import (
     archived_source_viewer_actions,
     build_run_validation_diff_inventory,
@@ -125,7 +130,6 @@ from .viewer_core import (
     build_run_validation_output_hashes,
     build_run_validation_parser_execution,
     build_run_validation_review_status,
-    build_run_validation_source_integrity,
     build_run_validation_warning_inventory,
     build_run_viewer_route_coverage,
     build_run_viewer_workflow_accuracy_gates,
@@ -675,6 +679,7 @@ def build_run_submission_manifest(
             allowed_roots=allowed_source_roots(job.summary),
             include_all=include_all,
             max_items=max_items,
+            evidence_roots=evidence_relative_roots(job.summary),
         )
     except OSError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -715,7 +720,9 @@ def build_run_case_report(
     )
 
 
-def build_run_validation_package(store: RunJobStore, run_id: str) -> dict[str, object]:
+def build_run_validation_package(store: RunJobStore, run_id: str, *, compute_source_hashes: bool = True) -> dict[str, object]:
+    """The run validation package. `compute_source_hashes=False` (read-only `GET`) lists the
+    source and its segments without re-reading them; generation (`POST`) reads every byte."""
     job = get_job(store, run_id)
     if job.summary is None:
         raise HTTPException(status_code=409, detail=run_not_finished_message(job))
@@ -723,7 +730,7 @@ def build_run_validation_package(store: RunJobStore, run_id: str) -> dict[str, o
     output_dir = run_output_dir(summary)
     case_path = default_case_path(store, run_id)
     generated_at = dt.datetime.now(dt.timezone.utc).isoformat()
-    source_integrity = build_run_validation_source_integrity(summary)
+    source_integrity = build_run_validation_source_integrity(summary, compute_hashes=compute_source_hashes)
     output_hashes = build_run_validation_output_hashes(summary, output_dir=output_dir)
     review_payload, review_error = _validation_review_payload(store, run_id, summary)
     review_status = build_run_validation_review_status(

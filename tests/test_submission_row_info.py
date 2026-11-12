@@ -7,7 +7,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rapidtriage.core.submission import SKIP_REASON_KO, build_submission_manifest
+from rapidtriage.core.submission import (
+    SKIP_REASON_KO,
+    build_submission_manifest,
+    evidence_relative_roots,
+)
 from tests.schema_validation import validate
 
 SCHEMA_PATH = Path(__file__).resolve().parents[1] / "rapidtriage" / "schemas" / "submission-manifest.schema.json"
@@ -109,7 +113,7 @@ class SubmissionRowInfoTests(unittest.TestCase):
         manifest = build_submission_manifest({"bookmarks": bookmarks}, allowed_roots=[self.root])
         item = manifest["items"][0]
         self.assertEqual(set(item), ITEM_KEYS_BEFORE | {"row"})
-        self.assertEqual(set(item["evidence"]), EVIDENCE_KEYS_BEFORE | {"relative_path"})
+        self.assertEqual(set(item["evidence"]), EVIDENCE_KEYS_BEFORE | {"relative_path", "relative_to"})
         self.assertEqual(set(manifest["summary"]), SUMMARY_KEYS_BEFORE)
         skip = manifest["skipped"][0]
         self.assertEqual(set(skip), SKIP_KEYS_BEFORE | {"reason_ko"})
@@ -150,6 +154,35 @@ class SubmissionRowInfoTests(unittest.TestCase):
                 "outside-allowed-roots": SKIP_REASON_KO["outside-allowed-roots"],
             },
         )
+
+    def test_relative_path_is_relative_to_the_analysed_root_only(self) -> None:
+        # An E01 run's roots: output folder (allowed, holds carved/recovered output), the
+        # extracted file system under it (the analysed root) and the image stage folder.
+        output_dir = self.root / "out"
+        analysis_root = output_dir / "_e01" / "fs"
+        (analysis_root / "Users" / "u").mkdir(parents=True)
+        (output_dir / "carved").mkdir()
+        inside = analysis_root / "Users" / "u" / "a.docx"
+        inside.write_bytes(b"synthetic doc")
+        carved = output_dir / "carved" / "00001.jpg"
+        carved.write_bytes(b"synthetic carve")
+        summary = {"root": str(analysis_root), "output_dir": str(output_dir), "source": {"analysis_root": str(analysis_root)}}
+        bookmarks = [case_db_mark(1, inside), case_db_mark(2, carved)]
+        # Allowed roots in the order the API lists them: output folder first.
+        manifest = build_submission_manifest(
+            {"bookmarks": bookmarks},
+            allowed_roots=[output_dir, analysis_root],
+            evidence_roots=evidence_relative_roots(summary),
+        )
+        evidence = {item["bookmark_id"]: item["evidence"] for item in manifest["items"]}
+        self.assertEqual(evidence["case-db:CIT-0001"]["relative_path"], "Users/u/a.docx")
+        self.assertEqual(evidence["case-db:CIT-0001"]["relative_to"], "evidence-root")
+        self.assertEqual(evidence["case-db:CIT-0002"]["relative_path"], "")
+        self.assertEqual(evidence["case-db:CIT-0002"]["relative_to"], "")
+        self.assertEqual(evidence["case-db:CIT-0002"]["path"], str(carved))
+        self.assertEqual(manifest["summary"]["hashed_item_count"], 2)
+        validate(manifest, json.loads(SCHEMA_PATH.read_text(encoding="utf-8")))
+        self.assertEqual(evidence_relative_roots(summary), [analysis_root.resolve()])
 
     def test_long_preview_is_capped(self) -> None:
         bookmark = case_db_mark(1, self.make_file("long.txt"))

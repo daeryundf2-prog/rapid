@@ -14,13 +14,14 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from rapidtriage.api.app import runops
-from rapidtriage.api.app.viewer_core import (
-    build_run_validation_output_hashes,
-    build_run_validation_source_integrity,
-)
+from rapidtriage.api.app import routes_reports, runops
+from rapidtriage.api.app.validation_source import build_run_validation_source_integrity
+from rapidtriage.api.app.viewer_core import build_run_validation_output_hashes
 from rapidtriage.core.hash_cache import compute_hashes_cached
+from rapidtriage.core.input_root import InputRoot
+from rapidtriage.core.run.source import build_run_source_record
 
 
 def tamper_one_byte_keep_metadata(path: Path) -> None:
@@ -100,6 +101,87 @@ class ValidationPackageFreshHashTests(unittest.TestCase):
         result = build_run_validation_source_integrity({"root": str(self.base / "disk.Ex01")})
         self.assertEqual(result["scope"], "container-segments")
         self.assertEqual([segment["name"] for segment in result["segments"]], ["disk.Ex01", "disk.Ex02"])
+
+    def e01_run_summary(self, *, source_type: str = "e01") -> dict[str, object]:
+        """The summary shape an E01 run writes: ``root`` is the extraction folder
+        (``core/run/__init__.py`` ``build_run_summary(root=input_root.root_path)``), the image is
+        ``source.source_path`` (``core/run/source.py``)."""
+        for n in (1, 2, 3):
+            (self.base / f"disk.E0{n}").write_bytes(bytes([n]) * (64 * n))
+        extract_dir = self.base / "out" / "_e01" / "fs"
+        extract_dir.mkdir(parents=True)
+        (extract_dir / "Windows").mkdir()
+        input_root = InputRoot(source_path=str(self.base / "disk.E01"), root_path=extract_dir, kind="e01-derived")
+        source = build_run_source_record(input_root, image_result=None)
+        if source_type == "e01":
+            source = {**source, "type": "e01", "stage_dir": str(self.base / "out" / "_e01")}
+        return {
+            "root": str(input_root.root_path),
+            "scan_scope_root": str(input_root.root_path),
+            "source": source,
+        }
+
+    def test_e01_run_summary_hashes_the_image_not_the_extraction_folder(self) -> None:
+        for source_type in ("e01", "e01-derived"):
+            with self.subTest(source_type=source_type):
+                self.base = Path(self._tmp.name).resolve() / source_type
+                self.base.mkdir()
+                summary = self.e01_run_summary(source_type=source_type)
+                result = build_run_validation_source_integrity(summary)
+                self.assertEqual(result["kind"], "e01")
+                self.assertEqual(result["path"], str(self.base / "disk.E01"))
+                self.assertEqual(result["path_origin"], "source.source_path")
+                self.assertEqual(result["scope"], "container-segments")
+                self.assertEqual(
+                    [segment["name"] for segment in result["segments"]], ["disk.E01", "disk.E02", "disk.E03"]
+                )
+                self.assertEqual(
+                    result["segments"][2]["sha256"], hashlib.sha256((self.base / "disk.E03").read_bytes()).hexdigest()
+                )
+                self.assertNotIn("fs", Path(str(result["path"])).parts[-1:])
+                self.assertEqual(result["source_metadata"]["analysis_root"], summary["root"])
+                self.assertEqual(result["limitations"], [])
+
+    def test_e01_run_tampered_segment_visible_through_run_summary(self) -> None:
+        summary = self.e01_run_summary()
+        before = build_run_validation_source_integrity(summary)
+        tamper_one_byte_keep_metadata(self.base / "disk.E02")
+        after = build_run_validation_source_integrity(summary)
+        self.assertNotEqual(before["segments"][1]["sha256"], after["segments"][1]["sha256"])
+        self.assertEqual(before["segments"][0], after["segments"][0])
+
+    def test_read_only_build_defers_every_digest(self) -> None:
+        summary = self.e01_run_summary()
+        with mock.patch("rapidtriage.api.app.validation_source.compute_hashes_fresh") as fresh, mock.patch(
+            "rapidtriage.api.app.validation_source.sha256_fresh"
+        ) as segment_fresh:
+            result = build_run_validation_source_integrity(summary, compute_hashes=False)
+        fresh.assert_not_called()
+        segment_fresh.assert_not_called()
+        self.assertEqual(result["hash_status"], "deferred-to-generation")
+        self.assertEqual(result["hashes"], {})
+        self.assertEqual([segment["hash_status"] for segment in result["segments"]], ["deferred-to-generation"] * 3)
+        self.assertEqual([segment["size"] for segment in result["segments"]], [64, 128, 192])
+
+    def test_get_route_defers_and_post_route_hashes(self) -> None:
+        source = inspect.getsource(routes_reports.build_reports_router)
+        get_body = source.split('@router.get("/api/runs/{run_id}/validation-package")')[1].split("@router")[0]
+        post_body = source.split('@router.post("/api/runs/{run_id}/validation-package")')[1].split("@router")[0]
+        self.assertIn("compute_source_hashes=False", get_body)
+        self.assertNotIn("compute_source_hashes=False", post_body)
+
+    def test_segment_gap_and_undiscovered_siblings_are_named(self) -> None:
+        for name in ("disk.E01", "disk.E03", "disk.EAA", "DISK.E02"):
+            (self.base / name).write_bytes(b"seg")
+        result = build_run_validation_source_integrity({"root": str(self.base / "disk.E01")})
+        warnings = result["segment_warnings"]
+        self.assertTrue(any("missing" in warning and "[2]" in warning for warning in warnings), warnings)
+        undiscovered = [warning for warning in warnings if "not included" in warning]
+        self.assertEqual(len(undiscovered), 1)
+        self.assertIn("disk.EAA", undiscovered[0])
+        self.assertIn("DISK.E02", undiscovered[0])
+        for warning in warnings:
+            self.assertIn(warning, result["limitations"])
 
     def test_review_status_uses_the_t028_merged_review_payload(self) -> None:
         # Same function T-028 wired in: the merged bookmark JSON + case DB payload.
