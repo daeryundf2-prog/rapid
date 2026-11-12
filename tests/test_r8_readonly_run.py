@@ -22,7 +22,11 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from rapidtriage.api.app.factory import READ_ONLY_RUN_QUERY_POSTS, read_only_run_refusal
+from rapidtriage.api.app.factory import (
+    READ_ONLY_RUN_MESSAGES,
+    READ_ONLY_RUN_QUERY_POSTS,
+    read_only_run_refusal,
+)
 from rapidtriage.core.readonly_runs import (
     RUN_READ_ONLY_MESSAGE,
     ReadOnlyRunWriteError,
@@ -101,11 +105,11 @@ class ReadOnlyGateTests(Base):
         self.run_id = response.json()["run_id"]
         self.assertEqual(response.json()["readonly_reason"], "OUTPUT_INSIDE_EVIDENCE")
 
-    def assert_read_only(self, response, label: str) -> None:
+    def assert_read_only(self, response, label: str, message: str = RUN_READ_ONLY_MESSAGE) -> None:
         self.assertEqual(response.status_code, 409, f"{label}: {response.text[:300]}")
         body = response.json()
         self.assertEqual(body["code"], "RUN_READ_ONLY", label)
-        self.assertEqual(body["message"], RUN_READ_ONLY_MESSAGE, label)
+        self.assertEqual(body["message"], message, label)
         self.assertIn("증거 밖", body["hint"], label)
         self.assertEqual(body["detail"]["code"], "RUN_READ_ONLY", label)
         self.assertEqual(body["detail"]["readonly_reason"], "OUTPUT_INSIDE_EVIDENCE", label)
@@ -134,7 +138,8 @@ class ReadOnlyGateTests(Base):
                     self.assertNotEqual(response.json().get("code"), "RUN_READ_ONLY", label)
                 else:
                     refused.append(label)
-                    self.assert_read_only(response, label)
+                    rest = path.removeprefix("/api/runs/{run_id}")
+                    self.assert_read_only(response, label, READ_ONLY_RUN_MESSAGES.get(rest, RUN_READ_ONLY_MESSAGE))
         self.assertEqual(len(allowed), len(ALLOWED))
         self.assertGreaterEqual(len(refused), 20, refused)
         self.assertEqual(snapshot(self.evidence), before)
