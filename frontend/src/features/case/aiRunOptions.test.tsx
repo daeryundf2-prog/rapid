@@ -1,12 +1,14 @@
-// R7 AI 사용 기록 run options (갈래 D, plan r7-ai-usage §3.5): ai_bodies (default on) / ai_hash_dbs
-// (default off) of kind ai-agent (plan group `ai`), sent as collector_options only when they differ
-// from the defaults; the 처리 stage section shows the scope a run used.
+// R7 AI 사용 기록 run options (갈래 D, plan r7-ai-usage §3.5; r8 T-191): ai_bodies (default on) and
+// org_email_domain / evidence_roots / ai_read_mb of kind ai-agent (plan group `ai`), sent as
+// collector_options only when they differ from the defaults; ai_hash_dbs is hidden (read nowhere,
+// T-320); the 처리 stage section shows the scope a run used.
 
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AiProcessSection, aiScopeText } from "../ai/AiProcessSection";
 import { AiRunOptionsField } from "./AiRunOptionsField";
-import { aiCollectorOptions, buildRunBody, DEFAULT_RUN_FORM, type RunForm } from "./runForm";
+import { RunDialog } from "./RunDialog";
+import { aiCollectorOptions, buildRunBody, DEFAULT_RUN_FORM, type RunForm, validateRunForm } from "./runForm";
 import { summarizeRunRequest } from "./runSummary";
 import { mockFetch, renderWithQuery } from "./testUtils";
 
@@ -26,27 +28,39 @@ afterEach(() => {
 describe("AI 사용 기록 run options", () => {
   it("defaults: body unchanged (no collector_options)", () => {
     expect(DEFAULT_RUN_FORM.aiBodies).toBe(true);
-    expect(DEFAULT_RUN_FORM.aiHashDbs).toBe(false);
+    expect(DEFAULT_RUN_FORM).not.toHaveProperty("aiHashDbs");
     expect(buildRunBody({ ...DEFAULT_RUN_FORM, root: "D:/e" })).not.toHaveProperty("collector_options");
   });
 
   it("sends collector_options for ai-agent when an option differs; not when the group is skipped", () => {
     const body = buildRunBody({ ...DEFAULT_RUN_FORM, root: "D:/e", aiBodies: false });
-    expect(body.collector_options).toEqual({ "ai-agent": { ai_bodies: false, ai_hash_dbs: false } });
-    expect(aiCollectorOptions({ aiBodies: true, aiHashDbs: true })).toEqual({
-      ai_bodies: true,
-      ai_hash_dbs: true,
+    expect(body.collector_options).toEqual({ "ai-agent": { ai_bodies: false } });
+    const filled = {
+      aiOrgDomain: " corp.example ",
+      aiEvidenceRoots: "D:\\case\\a\n\n E:\\b ",
+      aiReadMb: "512",
+    };
+    expect(aiCollectorOptions(filled)).toEqual({
+      org_email_domain: "corp.example",
+      evidence_roots: ["D:\\case\\a", "E:\\b"],
+      ai_read_mb: 512,
     });
     expect(
-      buildRunBody({ ...DEFAULT_RUN_FORM, root: "D:/e", aiHashDbs: true, skipGroups: ["ai"] }),
+      buildRunBody({ ...DEFAULT_RUN_FORM, root: "D:/e", ...filled, skipGroups: ["ai"] }),
     ).not.toHaveProperty("collector_options");
     const rows = summarizeRunRequest(body as unknown as Record<string, unknown>);
     expect(rows.find((row) => row.key === "collector_options")?.value).toBe(
-      "AI 사용 기록: 메시지 본문 수집 안 함(메타만) · 대형 DB 해시 안 함",
+      "AI 사용 기록: 메시지 본문 수집 안 함(메타만)",
     );
+    // The read budget is validated before the run starts (1 .. 1 TiB in MiB); empty = default.
+    expect(validateRunForm({ ...DEFAULT_RUN_FORM, root: "D:/e", aiReadMb: "0" }).aiReadMb).toContain(
+      "AI 읽기 예산",
+    );
+    expect(validateRunForm({ ...DEFAULT_RUN_FORM, root: "D:/e", aiReadMb: "abc" }).aiReadMb).toBeDefined();
+    expect(validateRunForm({ ...DEFAULT_RUN_FORM, root: "D:/e", aiReadMb: "4096" }).aiReadMb).toBeUndefined();
   });
 
-  it("the dialog field toggles both options; disabled with the reason while the group is skipped", async () => {
+  it("the dialog field: 본문 + 3 inputs, no dead hash checkbox; disabled while the group is skipped", async () => {
     mockFetch({ "GET /api/run-plan/preview": PREVIEW });
     let form: RunForm = { ...DEFAULT_RUN_FORM };
     const onChange = vi.fn((patch: Partial<RunForm>) => {
@@ -57,14 +71,51 @@ describe("AI 사용 기록 run options", () => {
     expect(bodies.checked).toBe(true);
     fireEvent.click(bodies);
     expect(onChange).toHaveBeenLastCalledWith({ aiBodies: false });
-    fireEvent.click(screen.getByLabelText(/대형 AI 데이터베이스 해시/));
-    expect(onChange).toHaveBeenLastCalledWith({ aiHashDbs: true });
+    // ai_hash_dbs is read nowhere (T-320): its checkbox is hidden.
+    expect(screen.queryByLabelText(/해시/)).toBeNull();
+    expect(screen.getAllByRole("checkbox")).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText(/조직 이메일 도메인/), { target: { value: "corp.example" } });
+    expect(onChange).toHaveBeenLastCalledWith({ aiOrgDomain: "corp.example" });
+    fireEvent.change(screen.getByLabelText(/사건 증거 폴더/), { target: { value: "D:\\case" } });
+    expect(onChange).toHaveBeenLastCalledWith({ aiEvidenceRoots: "D:\\case" });
+    fireEvent.change(screen.getByLabelText(/AI 읽기 예산/), { target: { value: "256" } });
+    expect(onChange).toHaveBeenLastCalledWith({ aiReadMb: "256" });
     view.unmount();
     renderWithQuery(
       <AiRunOptionsField form={{ ...DEFAULT_RUN_FORM, skipGroups: ["ai"] }} onChange={onChange} />,
     );
     expect(((await screen.findByLabelText(/메시지 본문 포함/)) as HTMLInputElement).disabled).toBe(true);
     expect(screen.getByTestId("run-ai-options-skipped").textContent).toContain("AI 사용 기록");
+  });
+
+  it("RunDialog: the 3 inputs ride in collector_options; a bad domain shows the server's sentence", async () => {
+    const serverError = "ai-agent.org_email_domain은 이메일 도메인(예: example.com)이어야 합니다";
+    const { calls } = mockFetch({
+      "GET /api/run-plan/preview": PREVIEW,
+      "GET /api/collect-profiles": { profiles: [] },
+      "POST /api/runs": new Response(JSON.stringify({ detail: serverError }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      }),
+    });
+    renderWithQuery(<RunDialog runIsActive={false} onClose={() => {}} />);
+    fireEvent.change(await screen.findByLabelText(/조직 이메일 도메인/), {
+      target: { value: "not a domain" },
+    });
+    fireEvent.change(screen.getByLabelText(/사건 증거 폴더/), { target: { value: "D:\\case\\evidence" } });
+    fireEvent.change(screen.getByLabelText(/AI 읽기 예산/), { target: { value: "1024" } });
+    fireEvent.change(screen.getByLabelText(/증거 경로/), { target: { value: "D:/case/img.E01" } });
+    fireEvent.change(screen.getByLabelText(/^출력 폴더/), { target: { value: "D:/out/run1" } });
+    fireEvent.click(screen.getByRole("button", { name: "실행" }));
+    await screen.findByText(new RegExp(serverError.replace(/[().]/g, "\\$&")));
+    const post = calls.find((c) => c.method === "POST" && c.url.startsWith("/api/runs"));
+    expect((post?.body as Record<string, unknown> | undefined)?.collector_options).toEqual({
+      "ai-agent": {
+        org_email_domain: "not a domain",
+        evidence_roots: ["D:\\case\\evidence"],
+        ai_read_mb: 1024,
+      },
+    });
   });
 
   it("the field is absent when the plan has no ai group", async () => {

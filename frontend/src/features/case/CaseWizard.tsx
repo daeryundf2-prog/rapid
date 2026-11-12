@@ -667,10 +667,7 @@ export function CaseWizard({
             />
             <AiRunOptionsField
               form={runForm}
-              onChange={(patch) => {
-                if (patch.aiBodies !== undefined) setRun("aiBodies", patch.aiBodies);
-                if (patch.aiHashDbs !== undefined) setRun("aiHashDbs", patch.aiHashDbs);
-              }}
+              onChange={(patch) => setRunForm((f) => ({ ...f, ...patch }))}
               idPrefix={`${baseId}-run`}
             />
             {outputDirReason(explicitOutput, toRun.length) ? (

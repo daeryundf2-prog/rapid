@@ -19,9 +19,16 @@ export interface RunForm {
   skipGroups: string[];
   /** R7 AI 사용 기록 (kind `ai-agent`): message bodies (masked) collected — default on. */
   aiBodies: boolean;
-  /** R7 AI 사용 기록: hash the large AI databases (never copied) — default off. */
-  aiHashDbs: boolean;
+  /** AI 사용 기록: organisation e-mail domain (`org_email_domain`; the server validates it). */
+  aiOrgDomain: string;
+  /** AI 사용 기록: case evidence folders, one per line (`evidence_roots`). */
+  aiEvidenceRoots: string;
+  /** AI 사용 기록: per-tool read budget in MiB (`ai_read_mb`); empty = server default. */
+  aiReadMb: string;
 }
+
+/** Upper bound of `ai_read_mb` (MAX_AI_READ_MB, artifacts/ai_agents/run_indirect.py). */
+export const MAX_AI_READ_MB = 1024 * 1024;
 
 export const DEFAULT_RUN_FORM: RunForm = {
   root: "",
@@ -40,7 +47,9 @@ export const DEFAULT_RUN_FORM: RunForm = {
   extract: false,
   skipGroups: [],
   aiBodies: true,
-  aiHashDbs: false,
+  aiOrgDomain: "",
+  aiEvidenceRoots: "",
+  aiReadMb: "",
 };
 
 /**
@@ -169,7 +178,17 @@ export function validateRunForm(form: RunForm): RunFormErrors {
   if (form.dryRun && form.extract) {
     errors.extract = "모의 실행에서는 추출할 수 없습니다.";
   }
+  const readMb = aiReadMbError(form.aiReadMb);
+  if (readMb) errors.aiReadMb = readMb;
   return errors;
+}
+
+/** Why an AI 읽기 예산 entry cannot be sent (empty = server default), else undefined. */
+export function aiReadMbError(value: string): string | undefined {
+  const text = value.trim();
+  if (!text) return undefined;
+  if (NON_NEGATIVE_INT.test(text) && Number(text) >= 1 && Number(text) <= MAX_AI_READ_MB) return undefined;
+  return `AI 읽기 예산은 1~${MAX_AI_READ_MB.toLocaleString("ko-KR")} 사이의 정수(MiB)여야 합니다.`;
 }
 
 export function firstRunFormError(errors: RunFormErrors): string | undefined {
@@ -190,17 +209,38 @@ export function buildRunBody(form: RunForm): RunCreateBody {
   };
 }
 
+/** `collector_options["ai-agent"]` keys the run dialog sends (run_indirect.AI_RUN_OPTION_KEYS). */
+export type AiCollectorOptions = {
+  ai_bodies?: false;
+  org_email_domain?: string;
+  evidence_roots?: string[];
+  ai_read_mb?: number;
+};
+
+export type AiOptionFields = "aiBodies" | "aiOrgDomain" | "aiEvidenceRoots" | "aiReadMb";
+
 /**
- * `collector_options["ai-agent"]` of the AI 사용 기록 options: only when they differ from the
- * defaults (본문 포함 · 해시 안 함) and the `ai` group runs — a default run sends the same body.
+ * `collector_options["ai-agent"]` of the AI 사용 기록 options: only the keys that differ from the
+ * defaults (본문 포함 · 도메인/증거 폴더 없음 · 서버 기본 예산), and only while the `ai` group
+ * runs — a default run sends the same body. The domain goes as typed: the server says what is wrong.
  */
 export function aiCollectorOptions(
-  form: Pick<RunForm, "aiBodies" | "aiHashDbs">,
+  form: Partial<Pick<RunForm, AiOptionFields>>,
   skipGroups: readonly string[] = [],
-): { ai_bodies: boolean; ai_hash_dbs: boolean } | null {
+): AiCollectorOptions | null {
   if (skipGroups.includes("ai")) return null;
-  if (form.aiBodies !== false && form.aiHashDbs !== true) return null;
-  return { ai_bodies: form.aiBodies !== false, ai_hash_dbs: form.aiHashDbs === true };
+  const out: AiCollectorOptions = {};
+  if (form.aiBodies === false) out.ai_bodies = false;
+  const domain = (form.aiOrgDomain ?? "").trim();
+  if (domain) out.org_email_domain = domain;
+  const roots = (form.aiEvidenceRoots ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (roots.length) out.evidence_roots = roots;
+  const readMb = (form.aiReadMb ?? "").trim();
+  if (/^\d+$/.test(readMb) && Number(readMb) >= 1) out.ai_read_mb = Number(readMb);
+  return Object.keys(out).length ? out : null;
 }
 
 function buildBaseRunBody(form: RunForm): RunCreateBody {
