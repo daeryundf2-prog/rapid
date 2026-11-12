@@ -63,7 +63,6 @@
       "rapidtriage/artifacts/windows/shellbags.py": 1034,
       "rapidtriage/artifacts/windows/system.py": 6371,
       "rapidtriage/artifacts/windows/system_extras.py": 1973,
-      "rapidtriage/cli/parser.py": 2160,
       "rapidtriage/core/ai_catalog/catalog.py": 1332,
       "rapidtriage/core/analysis.py": 4780,
       "rapidtriage/core/artifact_profiles.py": 1009,
