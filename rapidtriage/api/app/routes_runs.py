@@ -116,9 +116,11 @@ from .geo_index import (
     parse_cell,
 )
 from .helpers import (
+    EXTRACT_ZIP_POLICY_MARKER,
     allowed_source_roots,
     default_case_path,
     enrich_summary_counts,
+    extract_zip_has_policy,
     get_job,
     get_job_payload,
     get_named_output,
@@ -145,6 +147,7 @@ from .pagination import (
 )
 from .preflight_space import preflight_space_for
 from .readonly_mode import effective_readonly_reason, server_read_only_of
+from .routes_media import credential_file_http_error
 from .row_conditions import (
     MATCH_CACHE,
     RowConditions,
@@ -194,20 +197,40 @@ def write_extract_zip(base: Path, name: str) -> dict[str, object]:
     """Write ``<base>/<name>.zip`` from the extract folder (once; an existing zip is kept).
 
     Links are skipped, and so is any file :func:`credential_file_reason` flags (R8 RI-03: an
-    extract folder copied before the credential policy never ships a credential body)."""
+    extract folder copied before the credential policy never ships a credential body). A zip is
+    kept only when it carries the policy marker; one written before the policy (no marker, T-347)
+    is rewritten here, and the download GET refuses it until then."""
     folder = base / name
     archive = base / f"{name}.zip"
-    if archive.is_file():
+    if archive.is_file() and extract_zip_has_policy(archive):
         return {"status": "exists", "path": str(archive), "size": archive.stat().st_size, "skipped_credential_files": 0}
     files = [path for path in sorted(folder.rglob("*")) if path.is_file() and not path.is_symlink()]
     withheld = {path for path in files if credential_file_reason(path)}
     files = [path for path in files if path not in withheld]
     if sum(path.stat().st_size for path in files) > EXTRACT_ZIP_MAX_BYTES:
         return {"status": "too-large", "path": None, "size": None, "skipped_credential_files": len(withheld)}
-    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+    partial = base / f"{name}.zip.partial"
+    with zipfile.ZipFile(partial, "w", zipfile.ZIP_DEFLATED) as bundle:
         for path in files:
             bundle.write(path, path.relative_to(folder).as_posix())
+        bundle.comment = EXTRACT_ZIP_POLICY_MARKER
+    partial.replace(archive)
     return {"status": "written", "path": str(archive), "size": archive.stat().st_size, "skipped_credential_files": len(withheld)}
+
+
+def reject_credential_output(store: RunJobStore, run_id: str, path: Path) -> None:
+    """403 ``CREDENTIAL_FILE_WITHHELD`` for a run output file the credential rule flags (T-347).
+
+    The rule sees the path below the run's output folder, so where the operator keeps that folder
+    (even under ``~/.claude``) never withholds an ordinary report; a credential file copied into
+    the output folder keeps its own folder parts (``extract/x/Users/a/.ssh/id_rsa``)."""
+    try:
+        relative = path.resolve().relative_to(run_output_dir(get_job(store, run_id).summary or {}).resolve())
+    except (RuntimeError, ValueError):
+        relative = Path(path.name)
+    reason = credential_file_reason(path, name=path.name, directory=relative.parent.as_posix())
+    if reason:
+        raise credential_file_http_error(reason)
 
 
 _TRUE_FLAGS = frozenset({"1", "true", "yes", "on"})
@@ -726,6 +749,7 @@ def build_runs_router(
     @router.get("/api/runs/{run_id}/outputs/{output_name}/preview")
     def preview_run_output(run_id: str, output_name: str) -> dict[str, object]:
         path = get_output_path(store, run_id, output_name)
+        reject_credential_output(store, run_id, path)
         return build_run_output_preview(run_id=run_id, output_name=output_name, output_path=path)
 
 
@@ -744,6 +768,7 @@ def build_runs_router(
     @router.get("/api/runs/{run_id}/outputs/{output_name}/file")
     def download_run_output(run_id: str, output_name: str) -> FileResponse:
         path = get_output_path(store, run_id, output_name)
+        reject_credential_output(store, run_id, path)
         return FileResponse(path, filename=path.name)
 
 
@@ -1740,6 +1765,16 @@ def build_runs_router(
                 detail={
                     "code": "EXPORT_NOT_WRITTEN",
                     "message": "추출 zip이 아직 없습니다. 추출 이력에서 zip 만들기를 먼저 실행하세요",
+                },
+            )
+        if not extract_zip_has_policy(archive):
+            # Written before credential files were dropped from extract zips (T-347): never served;
+            # ``POST /extract/{name}/zip`` rewrites it under the policy.
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "EXPORT_NOT_WRITTEN",
+                    "message": "자격 증명 정책 이전에 만든 추출 zip입니다. 추출 이력에서 zip 만들기를 다시 실행하세요",
                 },
             )
         return FileResponse(archive, filename=archive.name, media_type="application/zip")

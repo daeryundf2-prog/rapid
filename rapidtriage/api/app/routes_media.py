@@ -114,8 +114,20 @@ def credential_file_http_error(reason: str) -> HTTPException:
 def reject_credential_source(source_path: Path) -> None:
     """Credential / secret files (core/credential_files.py) never return their bytes, rows, thumbnails
     or hashes from any source route: source-file, thumbnail, hex, SQLite, WAL, email attachment,
-    image gallery and hashed metadata all refuse them the same way."""
+    image gallery, media cue, OCR queue / translation and hashed metadata all refuse them the same
+    way (``/outputs/{name}/file`` and archive members too — T-347)."""
     reason = credential_file_reason(source_path)
+    if reason:
+        raise credential_file_http_error(reason)
+
+
+def reject_credential_archive_member(archive_path: Path, entry_name: str) -> None:
+    """``archive.zip::member`` preview: the member name gets the same credential judgment, both on
+    its own (``.ssh/id_rsa``) and as if unpacked next to the archive (a ``*token*`` member of a zip
+    kept under ``~/.claude``). The member is never opened to sniff, so ``*.key`` counts as a key."""
+    reason = credential_file_reason(entry_name, sniff=False) or credential_file_reason(
+        f"{archive_path.parent.as_posix()}/{entry_name}", sniff=False
+    )
     if reason:
         raise credential_file_http_error(reason)
 
@@ -172,6 +184,7 @@ def build_media_router(
         archive_request = parse_source_preview_archive_request(path)
         if archive_request:
             source_path = resolve_allowed_source_file(store, run_id, archive_request["archive_path"], **row_ref)
+            reject_credential_archive_member(source_path, archive_request["entry_name"])
             return build_archived_source_api_preview(run_id, source_path, archive_request["entry_name"])
         source_path = resolve_allowed_source_file(store, run_id, path, allow_directory=True, **row_ref)
         if source_path.is_dir():
@@ -345,6 +358,7 @@ def build_media_router(
         retry_failures: bool = False,
     ) -> dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
+        reject_credential_source(source_path)
         if not is_image_preview_candidate(source_path):
             raise HTTPException(status_code=400, detail="source file is not a supported image preview")
         return build_source_ocr_queue(
@@ -363,6 +377,7 @@ def build_media_router(
         include_text: bool = True,
     ) -> dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
+        reject_credential_source(source_path)
         if not is_image_preview_candidate(source_path):
             raise HTTPException(status_code=400, detail="source file is not a supported image preview")
         package = build_source_ocr_translation_package(
