@@ -469,7 +469,7 @@ def ai_usage_section_lines(summary: Mapping[str, object], *, metadata: Mapping[s
     browser_urls = _int(browser.get("urls")) or 0  # type: ignore[union-attr]
     if not summary.get("collected"):
         lines.append(
-            "- 이 런에는 AI 사용 기록 종류(ai-agent)가 포함되지 않았거나 그 산출물을 읽을 수 없음 — 도구 설치·세션 기록은 확인하지 않음."
+            "- 이 런에는 AI 사용 기록 종류가 포함되지 않았거나 그 산출물을 읽을 수 없음 — 도구 설치·세션 기록은 확인하지 않음."
             + ("" if browser_urls else " 아래 갭 표는 모든 분류를 '로컬 증거 없음'으로 표시함.")
         )
     if browser_urls:

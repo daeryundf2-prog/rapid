@@ -16,6 +16,7 @@ from .ai_report import AI_SECTION_ID, ai_usage_section_lines, ai_usage_summary
 from .korean_report import TEMPLATE_ID as KOREAN_EXPERT_TEMPLATE_ID
 from .korean_report import build_korean_expert_report
 from .report_candidates import report_scope_notes
+from .step_labels import run_mode_ko
 
 CASE_REPORT_EXPORTS = {
     "md": "rapidtriage-case-report.md",
@@ -94,7 +95,8 @@ def build_case_report_markdown(
         [
             "## 2. 분석 대상 및 범위",
             "",
-            f"- 분석 모드: {report_items.md_code(run_summary.get('mode', ''))}",
+            f"- 분석 모드: {run_mode_ko(run_summary.get('mode'))}"
+            + (f" ({report_items.md_code(run_summary.get('mode', ''))})" if technical else ""),
             *report_items.subject_lines(run_summary, technical=technical),
             *report_items.reproducibility_lines(run_summary, report_context, display_label=display_label),
             report_items.conditions_line(submission_manifest, case_payload),

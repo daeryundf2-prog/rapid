@@ -21,6 +21,7 @@ from pathlib import Path
 
 from .. import PRODUCT_NAME, __version__
 from .report_candidates import is_report_candidate
+from .step_labels import step_name_ko
 from .submission import (
     SKIP_REASON_KO,
     build_row_info,
@@ -278,8 +279,8 @@ def reproducibility_lines(
         f"- 표시 시간대: {display_label}. 모든 시각은 UTC 값을 함께 적음.",
     ]
     if steps:
-        failed = ", ".join(md_inline(name) for name in steps.get("failed_names") or []) or "없음"
-        partial = ", ".join(md_inline(name) for name in steps.get("partial_names") or []) or "없음"
+        failed = ", ".join(step_name_ko(name) for name in steps.get("failed_names") or []) or "없음"
+        partial = ", ".join(step_name_ko(name) for name in steps.get("partial_names") or []) or "없음"
         lines.append(
             f"- 처리 단계: 전체 {steps.get('total', 0)} · 완료 {steps.get('completed', 0)} · "
             f"부분 {steps.get('partial', 0)} · 실패 {steps.get('failed', 0)} · 건너뜀 {steps.get('skipped', 0)}"
@@ -570,7 +571,8 @@ def subject_lines(run_summary: Mapping[str, object], *, technical: bool) -> list
 
 
 def step_lines(run_summary: Mapping[str, object], *, technical: bool) -> list[str]:
-    """Section 3 step list; outputs relative to the result folder unless technical."""
+    """Section 3 step list with Korean step names (WB-10); the raw step id and the absolute
+    output path only in the technical appendix, else the output relative to the result folder."""
     lines: list[str] = []
     output_dir = run_summary.get("output_dir", "")
     for step in run_summary.get("steps") or []:
@@ -578,9 +580,11 @@ def step_lines(run_summary: Mapping[str, object], *, technical: bool) -> list[st
             continue
         output = step.get("output")
         shown = md_inline(output) if technical else output_relative_name(output, output_dir)
+        name = step_name_ko(step.get("name"))
+        if technical:
+            name += f" ({md_code(step.get('name'))})"
         lines.append(
-            f"- {md_code(step.get('name'))}: {step_status_label(step.get('status'))}"
-            + (f" (산출물 `{md_inline(shown)}`)" if shown else "")
+            f"- {name}: {step_status_label(step.get('status'))}" + (f" (산출물 `{md_inline(shown)}`)" if shown else "")
         )
     return lines
 

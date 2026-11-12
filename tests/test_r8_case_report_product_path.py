@@ -259,6 +259,39 @@ class CaseReportProductPathTests(unittest.TestCase):
         result = _load_audit().audit_text(markdown)
         self.assertTrue(result["ok"], result)
 
+    # WB-10 (verify T-027 S2): the default report names steps and kinds in Korean ---------------
+
+    def test_default_report_has_no_step_or_kind_ids(self) -> None:
+        markdown = self.markdown()
+        procedure = markdown.split("## 3. 분석 절차 요약", 1)[1].split("## 4.", 1)[0]
+        step_names = [str(step["name"]) for step in self.summary["steps"]]
+        self.assertTrue(any(name.startswith("artifacts-") for name in step_names), step_names)
+        self.assertIn("- 아티팩트 수집: ", procedure)
+        for name in step_names:
+            self.assertNotIn(f"`{name}`", markdown)
+            self.assertNotIn(f"- {name}:", procedure)
+        # Output file names stay as secondary detail only, never as the step's name.
+        self.assertIsNone(re.search(r"^- `", procedure, flags=re.MULTILINE), procedure)
+        body = re.sub(r" \(산출물 `[^`]*`\)", "", markdown)
+        self.assertNotIn("artifacts-", body)
+        self.assertNotIn("ai-agent", body)
+        self.assertIn("- 분석 모드: 문서·부정 조사", markdown)
+        self.assertNotIn("`fraud`", markdown)
+        # The technical appendix keeps the ids next to the Korean names.
+        technical = self.markdown("technical-appendix")
+        artifacts_step = next(name for name in step_names if name.startswith("artifacts-"))
+        self.assertIn(f"(`{artifacts_step}`)", technical)
+
+    def test_expert_review_table_has_a_reviewer_column(self) -> None:
+        markdown = self.markdown("korean-expert")
+        table = markdown.split("### 4.1 보고 포함 심사 항목", 1)[1].split("\n## ", 1)[0]
+        rows = [line for line in table.splitlines() if line.startswith("|")]
+        self.assertEqual(rows[0], "| 항목 | 출처 | 상태 | 검토자 | 태그 | 비고 |")
+        body = rows[2:]
+        self.assertEqual(len(body), 3, table)
+        for row in body:
+            self.assertEqual(row.split(" | ")[3], REVIEWER, row)
+
 
 class ExpertReportCaseEvidenceTests(unittest.TestCase):
     """T-026 through the product path with a case: a synthetic two-segment E01 added to a case with
