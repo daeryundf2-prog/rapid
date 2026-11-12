@@ -1,6 +1,6 @@
 import { fetchArtifactsPage, locateArtifactRow } from "../../../api/collections";
 import { clipValue, flatValue } from "../../../utils/flatValue";
-import { formatGridTime } from "../../../utils/time";
+import { evidenceTimeTooltip, formatGridTime } from "../../../utils/time";
 import { isAiType } from "../../ai/aiLabels";
 import { artifactTypeLabel } from "../../filters/typeLabels";
 import {
@@ -40,6 +40,7 @@ import { familyDedupColumns, familyDedupFields } from "./familyDedup";
 import { mismatchDirectionLabel } from "./files";
 import { pathCell } from "./PathCell";
 import { typeChipCell } from "./StatusCells";
+import { gridTimeText, TIME_COLUMN_WIDTH } from "./TimelineCells";
 
 /** Row time = first of these details keys. Same order as the server's `sort=timestamp` (plan §4.1). */
 export const TIME_KEYS = [
@@ -112,7 +113,14 @@ const detailColumn = col.field("detail", "내용", 320, ["analysis"], (r) => fie
 /** Kind layouts keep the summary column, off by default (the kind columns carry the detail). */
 const quietDetailColumn: ColumnSpec = { ...detailColumn, presets: [] };
 /** Server-sorted on `timestamp` (first TIME_KEYS value, the same rule as the server). */
-const timeColumn: ColumnSpec = { ...col.timestamp(), sortKey: "timestamp" };
+const timeColumn: ColumnSpec = {
+  ...col.timestamp(),
+  // T-175: 176px fixed and never truncated; the zone lives in the tooltip's full reading.
+  width: TIME_COLUMN_WIDTH,
+  minWidth: TIME_COLUMN_WIDTH,
+  format: (r) => gridTimeText(r.timestamp, currentTimezone()),
+  sortKey: "timestamp",
+};
 const tail = [
   col.field(
     "provider",
@@ -186,12 +194,21 @@ export function kindColumn(def: KindColumnDef): ColumnSpec {
   return {
     id: `d:${def.keys[0]}`,
     header: def.header,
-    width: def.width ?? 150,
-    minWidth: 60,
+    // T-175: kind time columns are fixed 176px like 시각 (the zone sits in the tooltip).
+    width: def.time ? TIME_COLUMN_WIDTH : (def.width ?? 150),
+    minWidth: def.time ? TIME_COLUMN_WIDTH : 60,
     presets: def.presets ?? ["analysis", "axiom"],
     ...(def.mono ? { mono: true } : {}),
     ...(def.time
-      ? { filterKind: "time" as const }
+      ? {
+          filterKind: "time" as const,
+          tooltip: (row: { fields: Record<string, unknown> }) => {
+            const v = read(row);
+            return typeof v === "string" || typeof v === "number"
+              ? evidenceTimeTooltip(v, currentTimezone())
+              : "";
+          },
+        }
       : def.number || def.bytes
         ? { filterKind: "number" as const }
         : {}),
@@ -218,12 +235,10 @@ export function kindColumn(def: KindColumnDef): ColumnSpec {
       if (def.display) return def.display(v, detailsOf(row));
       if (def.bytes && typeof v === "number") return formatBytes(v);
       // Time columns — and any ISO date-time value — read in the display zone (viewer redesign §2).
-      if (
-        (def.time && (typeof v === "string" || typeof v === "number")) ||
-        (typeof v === "string" && ISO_DATETIME.test(v))
-      ) {
-        return formatGridTime(v, currentTimezone());
+      if (def.time && (typeof v === "string" || typeof v === "number")) {
+        return gridTimeText(v, currentTimezone());
       }
+      if (typeof v === "string" && ISO_DATETIME.test(v)) return formatGridTime(v, currentTimezone());
       return clipValue(flatValue(v), 300);
     },
     ...(def.tooltip
