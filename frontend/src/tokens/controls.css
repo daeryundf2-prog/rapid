@@ -233,6 +233,17 @@ select:not([multiple]):not([size]) {
   border-radius: 50%;
 }
 
+/* Box geometry keeps normal specificity (T-013): a container rule such as
+   `.some-panel input { width: 100% }` must not stretch a checkbox / radio into a bar.
+   Feature CSS that really wants another size uses a class (0,2,x and up). */
+input[type="checkbox"],
+input[type="radio"] {
+  width: 16px;
+  min-width: 0;
+  height: 16px;
+  padding: 0;
+}
+
 :where(input[type="checkbox"]:hover:not(:disabled), input[type="radio"]:hover:not(:disabled)) {
   border-color: var(--accent);
 }
