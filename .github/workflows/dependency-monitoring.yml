@@ -19,6 +19,7 @@ jobs:
   dependency-monitoring:
     name: Dependency advisory, SBOM, and severity gate
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
