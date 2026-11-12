@@ -1,12 +1,12 @@
-# R8 부록 B — 현재와의 차이 (GAP-001 ~ GAP-358) · 계획 v3
+# R8 부록 B — 현재와의 차이 (GAP-001 ~ GAP-373) · 계획 v3
 
-마스터 4절. 기준 커밋 `feat/r6-ux` bc6c970(출력 가드 ffab479, 2차 리뷰 부분 편집 ebe4760, lint 수정 6e2a8a3, 레인 `fix/r8-security`·`fix/r8-ci-green` 병합 bc6c970). **표의 file:line은 병합 전(194ce7e~6e2a8a3)에 연 것이다** — 병합이 고친 파일(`routes_reports.py`·`routes_media.py`·`routes_runs.py`·`routes_case_db.py`·`review_payload.py`·`core/jobs.py`·`core/sample_case.py`·CI 워크플로·e2e 설정)은 과제 착수 때 다시 연다. 병합분이 겨눈 GAP(004·012·016·209~212·291·308 등)은 독립 검증 전까지 닫지 않는다. 심각도: **S1** 틀린 사실·증거/방어 가능성 훼손·화면 먹통, **S2** 기능 고장·누락·심한 지연·주 과제 실패, **S3** 표시·다듬기.
+마스터 4절. 기준 커밋 `feat/r6-ux` bc6c970(출력 가드 ffab479, 2차 리뷰 부분 편집 ebe4760, lint 수정 6e2a8a3, 레인 `fix/r8-security`·`fix/r8-ci-green` 병합 bc6c970). **표의 file:line은 병합 전(194ce7e~6e2a8a3)에 연 것이다** — 병합이 고친 파일(`routes_reports.py`·`routes_media.py`·`routes_runs.py`·`routes_case_db.py`·`review_payload.py`·`core/jobs.py`·`core/sample_case.py`·CI 워크플로·e2e 설정)은 과제 착수 때 다시 연다. **v3 적대적 리뷰(2026-11-12)가 병합 뒤 HEAD(1da1b1e)에서 S1·S2 행 97개의 인용 약 125건을 다시 열었다**: 줄이 밀린 것 20건은 번호를 고쳤고, 병합분이 코드에서 해소한 행(GAP-003·004·012·016·210·211·212·308)은 행 머리에 "〔병합으로 코드 해소 — 검증 대기〕"를 달았으며(실데이터 검증 전까지 닫지 않는다), 부분 해소(209·214·291·300·121)는 남은 것을 적었고, 주장이 틀렸던 것(007·191·307·231의 위치)은 고쳐 썼다. 다시 열지 않은 행의 file:line은 여전히 병합 전 기준이다. 심각도: **S1** 틀린 사실·증거/방어 가능성 훼손·화면 먹통, **S2** 기능 고장·누락·심한 지연·주 과제 실패, **S3** 표시·다듬기.
 
 출처 약어: **BD** IMG-B 전수 점검 결함 · **AD** IMG-A E01 QA 결함 · **U** UX 감사 · **P** 시각 감사 · **C** 콘솔 적대적 리뷰 · **SR** 검색 리뷰 · **API**/**UI** 인벤토리 · **CM** coverage-matrix · **AR** 아티팩트 검토 · **BV**/**FV** 계획 중 코드 확인 · **KL** known-limitations · **v1** r8-redesign. v3가 더한 행의 "출처" 열은 소유자 리뷰의 원래 번호다(UIUX OD·M·W·O / AX-DX X / AI A·R·P·U / 처리 PG / RI I·R·A·P·S·V).
 
 경로는 저장소 기준(`rapidtriage/…`, `frontend/src/…`를 `fe/…`로 줄임). 스크린샷은 Git 밖 `D:\rapid-qa\derived\` 아래 파일명만 적는다.
 
-**v3(2026-11-12) 반영**: ① v2의 "IMG-B는 볼륨의 31%만 처리" 진단은 **틀렸다** — 할당 파일은 사실상 전부 추출됐고 잘린 43만 건은 삭제 레코드다. 그 숫자 위에 섰던 GAP-026·027·046·068·202를 다시 썼다(화면에 넣을 뻔한 새 거짓 문장을 뺐다). ② 2차 리뷰가 도중에 멈춰 마스터(190행)와 이 부록(208행)의 집계가 어긋나 있던 것을 맞췄다. ③ 다섯 소유자 리뷰의 결함을 GAP-209~358(150행)로 더했다 — v2와 같은 것은 새 번호를 주지 않고 기존 행을 고쳤다(016·026·027·028·030·037·046·068·119·146·149·151·152·170·202). ④ W-C 이후 새로 찾는 결함은 **GAP-359부터** 번호를 준다.
+**v3(2026-11-12) 반영**: ① v2의 "IMG-B는 볼륨의 31%만 처리" 진단은 **틀렸다** — 할당 파일은 사실상 전부 추출됐고 잘린 43만 건은 삭제 레코드다. 그 숫자 위에 섰던 GAP-026·027·046·068·202를 다시 썼다(화면에 넣을 뻔한 새 거짓 문장을 뺐다). ② 2차 리뷰가 도중에 멈춰 마스터(190행)와 이 부록(208행)의 집계가 어긋나 있던 것을 맞췄다. ③ 다섯 소유자 리뷰의 결함을 GAP-209~373(165행)로 더했다 — v2와 같은 것은 새 번호를 주지 않고 기존 행을 고쳤다(003·004·007·009·010·011·012·015·016·018·023·026·027·028·030·037·046·068·092·119·121·122·129·146·149·151·152·168·170·191·193·202). ④ W-C 이후 새로 찾는 결함은 **GAP-374부터** 번호를 준다.
 
 ## 4.1 증거 무결성·방어 가능성 (S1 중심)
 
@@ -14,27 +14,27 @@
 |---|---|---|---|---|
 | GAP-001 | 067·068 | 출력-증거 포함 가드(`core/output_guard.py`, 467c1c8 병합)는 새 처리·재시도·분석에 적용됐으나 **브라우저 확인 없음**(vitest만) | S1 | 가장 중요한 보증이 실화면에서 미검증(IS-125) |
 | GAP-002 | 068 | 단일 파일 `--output` CLI 명령(약 60개)의 기본값이 cwd `rapidtriage-*.json` — 증거 폴더에서 실행하면 증거 안에 쓴다(API 6-6, 가드 병합 보고의 잔여) | S1 | 검사관이 증거 폴더에서 터미널을 여는 것은 흔하다 |
-| GAP-003 | 068 | `/api/runs/import`가 가져오는 결과 폴더가 증거 안인지 검사하지 않음(`api/app/routes_runs.py:525-531`). 과거 결과(출력이 증거 안)를 열면 썸네일·색인·케이스 DB·메모·보고서가 증거 안에 쓰인다(BV15) | S1 | 가드 이전에 만든 결과가 실제로 존재한다(Q 케이스) |
-| GAP-004 | 073 | `/api/sample-case/run`이 요청한 임의 `output_dir`에 쓴다(`api/app/routes_case_db.py:81-87`). 〔정정: 더 무겁다〕 요청 모델의 `overwrite` 기본값이 `True`(`api/app/models.py:77`)이고, 대상 폴더가 비어 있지 않으면 `shutil.rmtree(root)`로 **통째 삭제**한 뒤 쓴다(`core/sample_case.py:25-28`). 증거 폴더·사건 폴더를 `output_dir`로 주면 지워진다 | S1 | 토큰만 있으면 임의 폴더 삭제·덮어쓰기 |
+| GAP-003 | 068 | 〔병합으로 코드 해소(bc6c970) — 실데이터 검증 대기〕 가져오는 결과 폴더가 증거 안이면 거부하지 않고 읽기 전용으로 연다: `readonly_reason="OUTPUT_INSIDE_EVIDENCE"`(`core/jobs.py:749-806`) → `core/readonly_runs.py`가 지연 쓰기를 막고 비-GET은 409 `RUN_READ_ONLY`. 병합 전에는 검사가 없어 썸네일·색인·케이스 DB·메모·보고서가 증거 안에 쓰였다(BV15). 남은 것은 GAP-360(화면이 모름)·GAP-363(관문의 틈) 〔v3 개정〕 | S1 | 가드 이전에 만든 결과가 실제로 존재한다(Q 케이스) |
+| GAP-004 | 073 | 〔병합으로 코드 해소(bc6c970) — 실데이터 검증 대기〕 `/api/sample-case/run`은 이제 `~/.rapidtriage`(또는 `RAPIDTRIAGE_SAMPLE_ROOT`) 아래만 허용하고(밖 403, 증거와 겹치면 422 — `api/app/routes_case_db.py:89-113,130-150`), 요청 기본값은 `overwrite=False`(`api/app/models.py:79`), 삭제는 표식 파일이 있을 때 샘플 항목만 한다(`core/sample_case.py:60-82`). 병합 전에는 임의 폴더를 통째로 지울 수 있었다. 콘솔은 `overwrite: true`를 보낸다(`fe/features/case/commands.ts:40`) — 표식 검사가 있어 유지 〔v3 개정〕 | S1 | 토큰만 있으면 임의 폴더 삭제·덮어쓰기 |
 | GAP-005 | 073 | `/api/browse`가 scope 없이 전체 파일시스템을 나열(`routes_meta.py:132-152`, `core/browse.py:67-80`) | S2 | 원격 모드(`--remote`)에서 정보 노출 |
 | GAP-006 | 068 | 〔정정: 경로〕 `artifacts/mobile/vendor.py:345`(`cli/vendor.py`는 없다)의 `output_root = path.parent / f"{path.stem}-rapidtriage-validation"` — 제안 명령 문자열이 증거 옆 경로를 권한다(가드 병합 보고) | S3 | 따라 하면 증거 옆에 쓴다 |
-| GAP-007 | 069 | 해시 작업이 EWF **컨테이너 바이트**를 해시하고 사용자 기대값과만 비교. E01 내장 취득 해시와 대조 없음. 취득 로그의 매체 해시를 넣으면 반드시 `mismatched`(`api/app/case_workspace.py:239-272`, `core/e01_hash.py:134-153`). 엔진은 이미 정직하다(`hash_scope.claims_acquisition_media_hash=False`, 메시지 "파일 바이트 … 기대값", 입력 라벨 "이 파일의 MD5/SHA-1/SHA-256" `fe/features/case/EvidenceFields.tsx:154`) — 결함은 **상태값 `mismatched`와 그 칩**이 "증거가 바뀌었다"로 읽히는 것이다 | S1 | 거짓 불일치·거짓 안심 모두 가능 |
+| GAP-007 | 069 | 〔v3 리뷰 정정: "반드시 `mismatched`"는 지금 코드에서 성립하지 않는다〕 해시 작업은 EWF **컨테이너 바이트**를 해시하고 사용자 기대값과만 비교한다(`api/app/case_workspace.py:239-272`, `core/e01_hash.py:134-153`). 그러나 E01 증거에 기대 해시를 넣는 길은 이미 막혀 있다 — API는 422(`api/app/routes_cases.py:237-241`), 화면은 E01이면 입력란을 숨긴다(`fe/features/case/EvidenceFields.tsx:152`). 남는 결함은 둘이다: ① 이미지에 기록된 취득 해시를 읽지도 대조하지도 않는다(GAP-248) ② `source_type`은 요청이 정하므로 E01 경로를 `file`로 보내면 컨테이너 해시가 기대값과 비교돼 `mismatched`가 될 수 있다(서버가 확장자·서명으로 다시 판정하는지 확인 필요) 〔v3 개정〕 | S2 | 취득 해시와 대조할 길이 없다(거짓 안심). 거짓 불일치는 API를 직접 부를 때만 |
 | GAP-008 | 003 | 무결성 상태가 회색·초록 작은 칩 하나, "계산됨"과 "검증됨" 구분 없음(P-I6, `10-intake.png`) | S2 | 가장 중요한 사실이 가장 작다 |
-| GAP-009 | 060 | 감정서 증거 표가 최상위 `item["sha256"]`·`item["path"]`를 읽어 "미기재"·"-"를 출력(`core/korean_report.py:122-123,198-199`; 실제는 `item.evidence.hashes`) | S1 | 법정 제출 문서의 해시 표가 빈다 |
-| GAP-010 | 060 | 감정서가 "도구·버전·해시를 기재"라고 쓰지만 버전을 쓰지 않음(`korean_report.py:135,179`), "검토 완료 항목 수"가 실제로는 전체 북마크 수(`:154`) | S1 | 문서가 스스로 거짓을 말한다 |
-| GAP-011 | 059 | 보고서에 도구 버전·카탈로그/규칙 버전·원본 증거 해시·처리 범위(네 축)·시간대 진술·필터 조건이 없다. 처리 한계는 technical-appendix 템플릿에만(`core/case_report.py:240-265`) | S1 | 재현성·한계 고지 부재 |
-| GAP-012 | 057 | 후보 수 계산이 세 갈래: 보고서는 `review.include_in_report`(`core/case.py:445-472`), `/review-counts`는 최상위 `include_in_report`를 읽어 JSON 측 항상 0(`api/app/routes_case_db.py:147-148`; 실제 저장 위치는 `bookmark.review.include_in_report` `core/case.py:497-500`) → `report_candidates = db_include + 0`(`:162`), `/review-counts` 자신도 DB 오류를 조용히 0으로 만든다(`:134-137`), 케이스 DB 조회 실패는 조용히 `[]`(`api/app/review_payload.py:76-77`) | S1 | CM-7: 표시 5건인데 보고서 0건 |
+| GAP-009 | 060 | 감정서 증거 표가 최상위 `item["sha256"]`·`item["path"]`를 읽어 "미기재"·"-"를 출력(`core/korean_report.py:124-125,201-202`; 실제는 `item.evidence.hashes`) 〔v3 개정〕 | S1 | 법정 제출 문서의 해시 표가 빈다 |
+| GAP-010 | 060 | 감정서가 "도구·버전·해시를 기재"라고 쓰지만 버전을 쓰지 않음(`korean_report.py:137,182`), "검토 완료 항목 수"가 실제로는 전체 북마크 수(`:156`) 〔v3 개정〕 | S1 | 문서가 스스로 거짓을 말한다 |
+| GAP-011 | 059 | 보고서에 도구 버전·카탈로그/규칙 버전·원본 증거 해시·처리 범위(네 축)·시간대 진술·필터 조건이 없다. 처리 한계는 technical-appendix 템플릿에만(`core/case_report.py:242-267`) 〔v3 개정〕 | S1 | 재현성·한계 고지 부재 |
+| GAP-012 | 057 | 〔병합으로 코드 대부분 해소(bc6c970) — 실데이터 검증 대기〕 후보 수는 한 판정 함수 `is_report_candidate`(`core/report_candidates.py:15`)를 사건 요약(`core/case.py:446-474`)·매니페스트·감정서·`/review-counts`(`api/app/review_payload.py:243-275`, `api/app/routes_case_db.py:153-222`)가 같이 쓴다. DB 읽기 실패는 `null` + `error`. 병합 전에는 세 갈래였다(CM-7). **남은 것**: 중복 제거 키가 `bookmark_id`라 DB·JSON에 같은 대상이 다른 id로 있으면 2로 센다(`review_payload.py:204-209`), `by_status`는 SQLite 오류에서 여전히 조용히 빈 값(`routes_case_db.py:189-192`) 〔v3 개정〕 | S1 | CM-7: 표시 5건인데 보고서 0건 |
 | GAP-013 | 064 | 검증 패키지의 검토 상태가 케이스 JSON만 보고 DB 표시를 빠뜨리며 영문 limitation을 낸다(`api/app/viewer_core.py:850-868`, 호출부 〔정정: 경로〕 `api/app/runops.py:695`). 리뷰어 번들 보고서는 `run_summary={}`(`core/bundle.py:96-101`) | S2 | 콘솔 검토가 산출물에 반영되지 않는다 |
 | GAP-014 | 063 | 내보내기 감사가 사이드카 1개를 매번 덮어씀, 확장자 `.audit.md`에 JSON, 입력에 케이스 DB 해시 없음(`core/audit.py:24-27,153`, 〔정정: 경로〕 `api/app/runops.py:895-949`의 `write_submission_audit`·`write_run_validation_package_audit`·`write_case_report_audit` — 입력은 `case-json`·`submission-manifest`뿐) | S2 | 제출본 이력 증명 불가 |
-| GAP-015 | 071 | 리뷰 `audit_event.tool_version=""`(`core/case_db/database.py:1145-1146`), 감사·산출물 `generated_at`이 시간대 없는 로컬 시각 〔정정: 수〕 35곳(`grep -rn "datetime.now()" rapidtriage` 기준; `core/audit.py:125`, `core/timeline.py:720` 등) | S2 | 기록의 증명력 |
-| GAP-016 | 066 | GET이 파일을 쓴다 〔v3 정정: 7경로〕: `/submission-manifest`·`/submission-manifest/file`·`/validation-package`·`/case-report`·`/reviewer-bundle`·`/reviewer-bundle/file`(번들을 다시 만들고 스냅샷을 씀)·감정서 GET(`api/app/routes_reports.py:83-98,139-145,148-154,190-196,221-229,232-249,296-314`) 〔v3 개정〕 | S2 | 읽기 전용 감사·자동화 위반 |
+| GAP-015 | 071 | 리뷰 `audit_event.tool_version=""`(`core/case_db/database.py:1147`), 감사·산출물 `generated_at`이 시간대 없는 로컬 시각 〔정정: 수〕 35곳(`grep -rn "datetime.now()" rapidtriage` 기준; `core/audit.py:125`, `core/timeline.py:720` 등) 〔v3 개정〕 | S2 | 기록의 증명력 |
+| GAP-016 | 066 | 〔병합으로 코드 해소(bc6c970) — 실데이터 검증 대기〕 보고서 계열 7경로 GET은 더 이상 쓰지 않는다: 조회 둘은 메모리 계산, 파일 다섯은 저장본만 반환(없으면 404 `EXPORT_NOT_WRITTEN`), 생성은 POST(`api/app/routes_reports.py:96-104,137-150,153-156,221-246,283-292`). 남은 것: `/saved` GET의 404에 코드 없음, 프런트가 `EXPORT_NOT_WRITTEN`을 모른다. 보통 처리의 캐시 쓰기 GET은 GAP-361 〔v3 개정〕 | S2 | 읽기 전용 감사·자동화 위반 |
 | GAP-017 | 076 | 케이스 DB WAL이나 busy_timeout·충돌 처리 없음(`case_db/database.py:279`, `core/enterprise.py:217`) | S2 | 두 창 동시 검토 시 유실 가능 |
-| GAP-018 | 074 | 500 응답이 로컬 crash report 절대경로 노출(`api/app/factory.py:192-198`). 처리 stderr 840 KB에 예외 추적 906회·추출 경로 전체(v1 C17) | S2 | 경로·사용자명 유출 |
+| GAP-018 | 074 | 500 응답이 로컬 crash report 절대경로 노출(`api/app/factory.py:235-248`). 처리 stderr 840 KB에 예외 추적 906회·추출 경로 전체(v1 C17) 〔v3 개정〕 | S2 | 경로·사용자명 유출 |
 | GAP-019 | 053 | 원본 탭에서 키·토큰 미가림(U-08, `fe/features/viewer/views/SourceView.tsx`), 스니펫 가림은 됨(SR16) | S2 | 화면 공유 사고 |
 | GAP-020 | 070 | 처리 이력(모듈·버전)이 한 화면에 없고 보고서 부록으로 못 냄 | S2 | "무엇을 돌렸나" |
 | GAP-021 | 075 | 무결성·검증 문구 검토 안 됨(외부 리서치 2절 주의) | S3 | 단정 문구 위험 |
 | GAP-022 | 067 | AI 스캔의 원본 불변이 앱 실행 중이라 미확정(r7-ai-usage Q-AI9) | S2 | 재측정 필요 |
-| GAP-023 | 061 | PDF가 한글 글꼴(HYGoThic-Medium) 미포함, 글자 수 기준 줄 자르기로 해시·경로가 끊김(`case_report.py:654-662,686-688`) | S2 | 제출물 깨짐 |
+| GAP-023 | 061 | PDF가 한글 글꼴(HYGoThic-Medium) 미포함, 글자 수 기준 줄 자르기로 해시·경로가 끊김(`case_report.py:656-664,688-690`) 〔v3 개정〕 | S2 | 제출물 깨짐 |
 | GAP-024 | 042 | 표시 "해제"가 직전 상태가 아니라 미검토로 되돌림, 실행 취소 없음(`fe/features/grid/reviewActions.ts:22-33`) | S2 | 판단 유실 |
 | GAP-025 | 043 | 메모 작성자 `web-ui`, 이력 "태그 없음→없음"(AD11, `TagManagerDialog.tsx:184`); 작성자 기본값의 출처는 `fe/features/review/author.ts:10`(`DEFAULT_REVIEWER`)·`fe/api/collections.ts:1253`·`fe/features/case/SearchOptionsPopover.tsx:140`; 메모 삭제 확인·오류 처리 없음(`fe/features/dashboard/caseCards.tsx:907-913,976-983`); 미저장 메모 이동 가드 없음(`:888`) | S2 | 작성자 증명·유실 |
 
@@ -128,7 +128,7 @@
 | GAP-089 | 020 | 셀 29~37% 잘림, 평균 7.5~8.3열·최대 15(U-03), 경로 열이 이름 반복(P-D1), 시각 열 잘림·이탤릭(P-D2), 죽은 여백 60px(P-D3), 내용 같은 열(P-D4), 연도만 보이는 열(P-D5), 9~10px 두 줄 셀 라벨(P-D6, `grid.css:865,910`), 유형 점 색 범례 없음(P-D7), "관련 있…" 배지 잘림(BD16) | S1 | 읽을 수 없는 표 |
 | GAP-090 | 021 | 원시·영문 노출(BD10, P-D8, P-V5, U-13, AD10, C-D13 등): 메타 `deleted`·`direction/detected/expected`·`deleted-entry`·`e01-native-deleted-mft-sweep`·`not-configured`, 표 `zero-filled`·`signature-extension-mismatch`(요약이 원시 슬러그 `fe/features/grid/columns/artifactSummary.ts:123-124`), 머리글 `evtx_record_id_position`, "기본 태그 system", 단계명 `ai-agent`, 요약 `prefetch-file:`, 탐지 행 영문, 트리 유형 라벨 원시 슬러그(`api/app/tree.py:103-107,678,735`), 그리드 토큰 21~138종 | S2 | — |
 | GAP-091 | 021 | UI 영어 잔존(UI-19): `BrandMark.tsx:32`, `FilterBar.tsx:370`, `analysis/kinds.ts:87`, `domains.ts` 423~1701의 원어 라벨, `fieldSheets.ts` 다수, 〔정정: 줄〕 `app/collections.ts:12` "IOC/위험", 새 시각 종류 `switched`·`cleanup`·`committed` 라벨 없음 | S3 | — |
-| GAP-092 | 024 | 뷰어 9탭 항상 렌더(`fe/features/viewer/modes.ts:13-23`), 5~6개 비활성(P-V2), `withheld`·`credential_reason`이 프런트에 없음 → 쿠키 행 SQLite·원본 비활성 사유 미표시(BD13) | S2 | — |
+| GAP-092 | 024 | 뷰어 9탭 항상 렌더(`fe/features/viewer/modes.ts:13-23`), 5~6개 비활성(P-V2), `withheld`·`credential_reason`이 프런트에 없음 → 쿠키 행 SQLite·원본 비활성 사유 미표시(BD13) 〔병합 뒤〕 자격 증명 거부(403) 경로가 8개로 늘어 사유를 보이지 않는 영향이 커졌다(프런트의 `withheld`·`credential_reason` 참조 0). 〔v3 개정〕 | S2 | — |
 | GAP-093 | 024 | 원본 탭이 이진을 깨진 글리프로(P-V3), 헥스 마지막 열 잘림(P-V4), 미디어 "길이 알 수 없음초"(BD11, `MediaView.tsx:97`), 이메일 탭에 닿는 행 없음(eml이 문서 탭으로) | S3 | — |
 | GAP-094 | 025 | 메타 약 90필드·14절, 한영 혼용, 행마다 복사 아이콘 15개(P-V5, U-10) | S2 | — |
 | GAP-095 | 026·102 | 행 메뉴 24(비활성 9, 사유 두 줄 — P-V7)·뷰어 ⋯ 24, 두 메뉴 구성 다름(C-W8, P7), **행 메뉴에 태그 항목 없음**(U-05), 뷰어 더보기 메뉴 왼쪽 잘림(P-V6; `MenuButton` 포털 없음 + `.pane-frame{overflow:clip}` `fe/app/shell.css:93`) | S2 | 메뉴를 못 읽음 |
@@ -167,8 +167,8 @@
 | GAP | IS | 현재(증거) | 심각도 | 이유 |
 |---|---|---|---|---|
 | GAP-120 | 056 | 보고 단계 본문이 산출 JSON 52행 표, 미리보기 없음(P-E1, U-06), 내보내기 명령이 사이드바 글자 줄(P-E2) | S1 | 변호사 화면 부재 |
-| GAP-121 | 057 | 후보 수 조회 실패 시 "보고 후보 확인 중" 영구(`fe/features/case/ReportDialog.tsx:136`), 0건 사유가 버튼 위 작은 글씨(P-E4), 후보 0건에도 내보내기가 활성(U-06) | S2 | — |
-| GAP-122 | 058 | 보고서 영문: `Report template`·`Noise policy`+5문장·`Executive summary`·`IOC/Indicator review pivots`·`A/B compare review pivots`·`status= report= tags= note=`·Source-search cited hits 블록·`Technical appendix` 블록·HTML/DOCX 제목 "RapidTriage Case Report"(`core/case_report.py:53-54,76-78,130-152,173-207,247-264,279-283,484,562,797`), 작성자 기본 `web-ui`, DOCX·PDF 표가 세로선 문자로 그린 텍스트 | S1 | 제출물 |
+| GAP-121 | 057 | 후보 수 조회 실패 시 "보고 후보 확인 중" 영구(`fe/features/case/ReportDialog.tsx:136`), 0건 사유가 버튼 위 작은 글씨(P-E4), 후보 0건에도 내보내기가 활성(U-06) 〔병합 뒤(bc6c970)〕 서버가 읽기 실패를 `error`로 주면 사유를 보인다(`fe/api/caseDb.ts:28-34`, `ReportDialog.tsx:135`). 요청 자체가 실패하면 여전히 "확인 중"이다. 〔v3 개정〕 | S2 | — |
+| GAP-122 | 058 | 보고서 영문: `Report template`·`Noise policy`+5문장·`Executive summary`·`IOC/Indicator review pivots`·`A/B compare review pivots`·`status= report= tags= note=`·Source-search cited hits 블록·`Technical appendix` 블록·HTML/DOCX 제목 "RapidTriage Case Report"(`core/case_report.py:54,77,132-154,175-209,249-266,281-285,486,799`), 작성자 기본 `web-ui`, DOCX·PDF 표가 세로선 문자로 그린 텍스트 〔v3 개정〕 | S1 | 제출물 |
 | GAP-123 | 062 | 제출 전 점검 없음, 다이얼로그 "쓰는 위치" 경로 6줄(P-E3), 성공 토스트 6줄·전체 경로(P-E5, `ReportDialog.tsx:93-101`) | S2 | — |
 | GAP-124 | 056 | 의견란·항목 순서·범위 선택·범주별 요약 절·처리 제한 절 없음, `korean-expert`·`hash-only` 템플릿에 AI 절 없음, 인쇄 스타일 없음(`tokens.css:185`는 색만) | S2 | — |
 | GAP-125 | 065 | 완료 토스트 "열기"가 검증 패키지에만(KL) | S3 | — |
@@ -180,7 +180,7 @@
 | GAP-126 | 091 | 공통 오류 봉투 없음. 영문 `detail=` 리터럴 약 36곳(runs 10·media 8·search_index 6 등), `detail=str(exc)` 약 65곳으로 core 영문 예외 통과, 미들웨어 401·403·500 영문, `api()` 기본 "Request failed"·네트워크 오류 원문(`fe/api/client.ts:79,82-95`) | S2 | API-6, BV12 |
 | GAP-127 | 092 | 빈 상태 4종·로딩 5종·오류 4종+`role=alert` 직접 17곳(FV9), 빈 표가 좌상단 한 줄(통합 보기), 0건 탭이 같은 무게 | S2 | — |
 | GAP-128 | 093 | 오류 경계가 영역 9곳뿐, 카드·뷰 단위 아님(`fe/shell/Layout.tsx:101,276,285,312`), 실데이터 확인 없음 | S2 | — |
-| GAP-129 | 094 | 런 삭제 버튼이 primary, 기본 포커스가 닫기 X(`fe/features/case/CasePicker.tsx:217-236`), 명령명 "현재 케이스 삭제…" vs 모달 "런 삭제"(`case/commands.ts:196`), Modal 포커스 트랩이 aria-disabled·숨김 요소 미제외(`Modal.tsx:39-57`) | S2 | — |
+| GAP-129 | 094 | 런 삭제 버튼이 primary, 기본 포커스가 닫기 X(`fe/features/case/CasePicker.tsx:217-236`), 명령명 "현재 케이스 삭제…" vs 모달 "런 삭제"(`case/commands.ts:197`), Modal 포커스 트랩이 aria-disabled·숨김 요소 미제외(`Modal.tsx:39-57`) 〔v3 개정〕 | S2 | — |
 | GAP-130 | 096 | 용어 혼용(UI-20): 검사관 10/분석관 9(+분석자), 검토 57/리뷰 22, 런 181/실행 219/처리 128/작업 55, 아티팩트/항목/행/레코드, 원본/출처/소스, 특이사항/지표/플래그/IOC, 산출물/출력/내보내기, 이메일/메일, 조건/필터, 재시도 3표기. 용어집은 "검사관" 표준인데 R7 계획은 "분석관"(v1 C18). lint 스크립트 미착수 | S2 | — |
 | GAP-131 | 099 | 단축키 물리키 폴백이 `Key[A-Z]`뿐 → 한글 모드 Shift+/ 무시(BD "Shift+/ 안 열림", `fe/shortcuts.ts:61-66,84-85`), 팔레트 "CSV" 순위가 그룹 고정 순서에 밀림(BD16, C-R6; `fe/shell/CommandPalette.tsx:11-20,97-103`), 팔레트 492~507 중 326 비활성(C-G11) | S2 | — |
 | GAP-132 | 100 | 그리드 첫 행까지 Tab 32(U-15, C-D18), 24px 미만 대상 55%(체크박스 16, 행 메뉴 20·opacity 0, `fe/features/grid/grid.css:471-485`), 드로어 초기 포커스(P8), 정렬 변경 알림 없음 | S2 | — |
@@ -239,7 +239,7 @@
 | GAP | IS | 현재(증거) | 심각도 | 이유 |
 |---|---|---|---|---|
 | GAP-167 | 057 | `/review-counts` 키 오독(GAP-012에 포함) — 접수 "검토·보고서" 카드 숫자가 틀릴 수 있음 | S1 | — |
-| GAP-168 | 069 | E01 내장 해시 미대조(GAP-007에 포함) — "해시 검증 완료"라는 v1 와이어 문구가 현재 구현으로는 거짓이 될 수 있다 | S1 | v1 계획의 가정 오류 |
+| GAP-168 | 069 | E01 내장 해시 미대조(GAP-007에 포함) — "해시 검증 완료"라는 v1 와이어 문구가 현재 구현으로는 거짓이 될 수 있다 〔v3 리뷰〕 콘솔은 E01에 기대 해시 입력을 받지 않으므로 지금 위험은 "검증 완료" 문구를 새로 넣을 때다. 〔v3 개정〕 | S1 | v1 계획의 가정 오류 |
 | GAP-169 | 006 | v1의 `zero_reason`에 "미실행(not_run)"·"부분 실행" 코드가 없다 → IS-006에 추가 | S2 | NTFS 메타·VSS·OCR |
 | GAP-170 | 012·035 | 숨긴 85%가 검사관의 주 작업 대상이다. 역할마다 다른 **기본값**이 필요하다(두 벌의 "모드"가 아니다 — v2의 역할 모드·첫 실행 질문은 폐기, D30 개정) 〔v3 개정〕 | S2 | 검사관 경험 열화 위험 |
 | GAP-171 | 001 | v1 브리핑 와이어의 "사용 기간"·"가장 바쁜 날"은 타임라인 품질(취득 사본 시각, MFT 일색)에 좌우되는데 폴더 증거에서의 정의가 없다 | S2 | 틀린 기간 표시 위험 |
@@ -299,14 +299,14 @@
 
 ## 4.15 집계 (v3)
 
-| 심각도 | 1차(GAP-001~190) | 2차(GAP-191~208) | v3(GAP-209~358) | 합계 |
+| 심각도 | 1차(GAP-001~190) | 2차(GAP-191~208) | v3(GAP-209~373) | 합계 |
 |---|---|---|---|---|
-| S1 | 26 | 2 | 27 | 55 |
-| S2 | 117 | 12 | 94 | 223 |
-| S3 | 47 | 4 | 29 | 80 |
-| 합계 | 190 | 18 | 150 | 358 |
+| S1 | 25 | 1 | 33 | 59 |
+| S2 | 118 | 13 | 101 | 232 |
+| S3 | 47 | 4 | 31 | 82 |
+| 합계 | 190 | 18 | 165 | 373 |
 
-v3 신규의 영역별 분포: CI·유지보수자 경험(DX) 22 · 에이전트·자동화 경험(AX) 14 · 처리·수집·범위·성능 47 · 무결성·보고서·감사·보안·검토 27 · AI 사용 분석·제품 안의 AI 19 · UI/UX(실화면 재점검과 v2 설계 결함) 21.
+v3 신규의 영역별 분포: CI·유지보수자 경험(DX) 22 · 에이전트·자동화 경험(AX) 14 · 처리·수집·범위·성능 47 · 무결성·보고서·감사·보안·검토 27 · AI 사용 분석·제품 안의 AI 19 · UI/UX(실화면 재점검과 v2 설계 결함) 21 · 적대적 리뷰(2026-11-12): 병합분 대조·사용자 여정·부록 F 점검 15.
 
 "닫는 과제"는 부록 G.2(GAP → 과제 → QA)에 있다. v2의 4.16 표에 있던 "닫는 과제" 열은 물결이 바뀌어 지웠다.
 
@@ -314,9 +314,9 @@ v3 신규의 영역별 분포: CI·유지보수자 경험(DX) 22 · 에이전트
 
 | GAP | IS | 현재(증거) | 심각도 | 이유 |
 |---|---|---|---|---|
-| GAP-191 | 069 | 매체 해시 대조(T-125)는 승인 묶음 W10에 있는데, **승인 전 구간에 거짓 "불일치"를 없애는 과제가 W1에 없었다.** 브리핑(T-073, W5)이 나오기 전까지 E01 증거에 취득 로그 해시를 넣은 사건은 빨강 `mismatched`로 남는다(`api/app/case_workspace.py:259`) | S1 | S-6(형사 변호)의 첫 질문에 거짓 답 |
+| GAP-191 | 069 | 〔v3 리뷰 정정〕 매체 해시 대조(T-125)는 승인 차선에 있다. 승인 전 구간의 거짓 "불일치"는 콘솔 경로에서는 나오지 않는다(E01 + 기대 해시는 422·입력란 숨김 — GAP-007 정정 참조). 남는 것은 승인 전에 "이미지에 기록된 취득 해시"를 읽어 보여 주는 일(T-181)과 `source_type`을 속인 API 호출의 `mismatched`(`api/app/case_workspace.py:259`)다 〔v3 개정〕 | S2 | S-6(형사 변호)의 첫 질문에 거짓 답 |
 | GAP-192 | 068 | 지연 쓰기 지점이 `api/app` 27개 파일·약 80곳에 흩어져 있다(쓰기 호출 수: `timeline_index.py` 7 · `routes_reports.py` 7 · `analyses.py` 7 · `analysis_kinds.py` 5 · `routes_runs.py` 4 · `fs_tree.py` 4 · `thumbnail.py` 3 · `previews.py` 3 · `media_similar.py` 3 · `dashboard.py` 3 …). 1차 T-032의 배타 파일은 `thumbnail.py`·`dashboard.py` 2개뿐이라 "쓰기 0" 수용 검사를 만족할 수 없다 | S1 | GAP-003·175의 과제가 과소 범위 |
-| GAP-193 | 091·116 | 오류 봉투(부록 D.7 1차안)는 `detail`의 형을 문자열 → 객체로 바꾸고 옛 문자열을 `detail_text`로 옮긴다. `tests/`에 `["detail"]` 단언이 190곳(32파일), `HTTPException(` 396곳, 프런트 `client.ts:79`가 `detail`을 읽는다. 출력 가드는 이미 `detail={code,message}` 객체를 쓴다(`routes_runs.py:515`) | S2 | W0에서 테스트 190곳을 깨면 계약 물결이 회귀 물결이 된다 |
+| GAP-193 | 091·116 | 오류 봉투(부록 D.7 1차안)는 `detail`의 형을 문자열 → 객체로 바꾸고 옛 문자열을 `detail_text`로 옮긴다. `tests/`에 `["detail"]` 단언이 190곳(32파일), `HTTPException(` 396곳, 프런트 `client.ts:79`가 `detail`을 읽는다. 출력 가드는 이미 `detail={code,message}` 객체를 쓴다(`routes_runs.py:519,539`) 〔v3 개정〕 | S2 | W0에서 테스트 190곳을 깨면 계약 물결이 회귀 물결이 된다 |
 | GAP-194 | 116 | e2e가 `getByRole`을 173회(한글 이름), vitest가 536회 쓴다(UI-23·24). 부록 D.4는 이름 7개만 고정한다. 문구 단언(e2e 40·vitest 457+109)과 CSS를 직접 읽는 테스트(`shell/scrollLayout.test.ts`, `DataGrid.test.tsx:396`, `app/themeBoot.test.ts`, StatusChip, CaseDashboard)도 표에 없다 | S2 | 재설계가 조용히 깨는 가장 큰 표면 |
 | GAP-195 | 112 | CLI `--json` 77개 명령은 이미 저마다 최상위 키(`command` + 결과 필드)를 낸다. 부록 D.8 1차안(`data`로 감싸기)은 기존 자동화·테스트·`e2e/ai_fixture.py`의 파싱을 깬다 | S2 | "봉투 통일"이 호환 파괴가 된다 |
 | GAP-196 | 071·049 | 시간대 없는 `datetime.now()` 35곳 중 T-029의 배타 파일은 `core/audit.py` 하나다. `core/timeline.py:720` 등 나머지 34곳의 주인이 없다 | S2 | GAP-015·177이 부분만 닫힌다 |
@@ -337,12 +337,12 @@ v3 신규의 영역별 분포: CI·유지보수자 경험(DX) 22 · 에이전트
 
 | GAP | IS | 현재(증거) | 심각도 | 이유 | 출처 |
 |---|---|---|---|---|---|
-| GAP-209 | 167 | CI 빨강: 최근 30회 중 실패 26, `feat/r6-ux`는 60회 안에 성공 0. 실패 테스트 4건(`tests/test_rapidtriage_run.py:432` 3 OS 전부 · `tests/test_r6_grid_readability.py:321` ubuntu·macOS · `tests/test_r7s1_rereview_reports.py:49` windows·macOS · `tests/test_ai_agents_adapters.py:174` macOS). 첫째는 출력 가드 병합 뒤의 제품 쪽 변화일 수 있다 | S1 | 초록이 아닌 CI는 아무것도 막지 못한다. 팀이 "통과"를 구두로 보고하게 된다 | AX-DX X-01 |
-| GAP-210 | 167 | 프런트 CI가 lint에서 죽어 vitest·빌드·e2e 단계가 **CI에서 실행된 적이 없다**(`.github/workflows/rapidtriage-ci.yml:121-141`). 포맷 오류 자체는 6e2a8a3에서 고쳤으나 단계가 여전히 직렬 의존이다 | S1 | R7 현황표의 "vitest·e2e 통과"는 로컬 값이다 | AX-DX X-02 |
-| GAP-211 | 168 | e2e 서버가 사용자 브라우저에 토큰 붙은 탭을 연다(`RAPIDTRIAGE_NO_BROWSER` 미설정, `frontend/e2e/start-server.mjs:28-34`, `rapidtriage/cli/web.py:115-124`) | S1 | 토큰이 사용자 화면에 열리고 닫히지 않는다(UX 감사 중 실제 사고) | AX-DX X-03 |
-| GAP-212 | 168 | e2e가 8791에 떠 있는 **다른 워크트리 서버를 그대로 쓴다**(`reuseExistingServer: !CI`, 포트 변수는 서버만 읽고 설정은 8791 고정 — `frontend/e2e/playwright.config.ts:10-11,15`, `start-server.mjs:13`) | S1 | 다른 코드의 서버를 검증하고 "통과"라고 말한다 | AX-DX X-04 |
+| GAP-209 | 167 | CI 빨강: 최근 30회 중 실패 26, `feat/r6-ux`는 60회 안에 성공 0. 실패 테스트 4건(`tests/test_rapidtriage_run.py:432` 3 OS 전부 · `tests/test_r6_grid_readability.py:321` ubuntu·macOS · `tests/test_r7s1_rereview_reports.py:49` windows·macOS · `tests/test_ai_agents_adapters.py:174` macOS). 첫째는 출력 가드 병합 뒤의 제품 쪽 변화일 수 있다 〔병합 뒤(bc6c970)〕 원인 수정이 들어갔다(처리 결정 넘침·POSIX basename·프로필 중복 제거·경로 비교). 로컬 Windows에서는 네 테스트가 통과하지만 **완료된 초록 CI 실행은 아직 없다**(GAP-364). `test_rapidtriage_run.py:432`를 직접 겨눈 변경은 찾지 못했다. | S1 | 초록이 아닌 CI는 아무것도 막지 못한다. 팀이 "통과"를 구두로 보고하게 된다 | AX-DX X-01 |
+| GAP-210 | 167 | 〔병합으로 코드 해소(bc6c970) — CI 관측 대기〕 프런트 CI의 Lint·Typecheck·Unit·Build·E2E가 `if: !cancelled() && steps.schemas.outcome == 'success'`로 독립 단계가 됐다(`.github/workflows/rapidtriage-ci.yml:136-169`). 병합 전에는 lint에서 죽어 vitest·빌드·e2e가 CI에서 실행된 적이 없었다. 다섯 단계가 각자 결과를 남긴 실행은 아직 관측하지 못했다 | S1 | R7 현황표의 "vitest·e2e 통과"는 로컬 값이다 | AX-DX X-02 |
+| GAP-211 | 168 | 〔병합으로 코드 해소(bc6c970) — 검증 대기〕 e2e 서버가 `RAPIDTRIAGE_NO_BROWSER=1`로 뜬다(`frontend/e2e/start-server.mjs:29-35`, `playwright.config.ts:21-22`). 병합 전에는 사용자 브라우저에 토큰 붙은 탭을 열었다. `web`은 여전히 환경 변수로만 끈다(`rapidtriage/cli/web.py:115-125`) — `--no-browser` 인자는 GAP-237 | S1 | 토큰이 사용자 화면에 열리고 닫히지 않는다(UX 감사 중 실제 사고) | AX-DX X-03 |
+| GAP-212 | 168 | 〔병합으로 코드 해소(bc6c970) — 검증 대기〕 포트는 설정과 서버가 같은 `RAPIDTRIAGE_E2E_PORT`를 읽고, 재사용은 `RAPIDTRIAGE_E2E_REUSE=1`일 때만(CI에서는 금지 — `frontend/e2e/playwright.config.ts:10-12,20-26`). 병합 전에는 8791의 다른 워크트리 서버를 그대로 썼다. 남은 것: 8791이 점유돼 있으면 다른 포트로 뜨지 않고 실패한다(재사용 0은 지켜진다. 포트 배정은 T-150), `playwright.dev.config.ts`의 기본 API 포트 8710 | S1 | 다른 코드의 서버를 검증하고 "통과"라고 말한다 | AX-DX X-04 |
 | GAP-213 | 168 | `.claude/launch.json`이 8710으로 서버를 띄우고 브라우저 방지 변수가 없다. Vite 포트 5173 ↔ 설정 5174(`frontend/vite.config.ts:12`) | S2 | 8710은 사용자의 서버다 | AX-DX X-12 |
-| GAP-214 | 167 | CI 구성: push와 pull_request가 같은 커밋에 두 번 돈다, 동시 실행 취소·제한 시간 없음, macOS 러너 대기 약 90분(전체 1시간 46~50분), 감사 `continue-on-error`, 번들 일치 검사 없음(`rapidtriage-ci.yml:3-7,15-22,39,53-54,131-133`) | S2 | PR 신호가 2시간 뒤에 온다 | AX-DX X-17 |
+| GAP-214 | 167 | CI 구성: push와 pull_request가 같은 커밋에 두 번 돈다, 동시 실행 취소·제한 시간 없음, macOS 러너 대기 약 90분(전체 1시간 46~50분), 감사 `continue-on-error`, 번들 일치 검사 없음(`rapidtriage-ci.yml:3-7,15-22,39,53-54,131-133`) 〔병합 뒤(bc6c970)〕 고쳐진 것: push는 `main`만, `concurrency` 취소(PR), 제한 시간 45/30분, PR 행렬 ubuntu + windows 3.12(`rapidtriage-ci.yml:10-24,30,34-35`). 남은 것: 감사 `continue-on-error`(`:66`), 번들 일치 검사, 일부 작업의 제한 시간, 20분 목표(GAP-364). | S2 | PR 신호가 2시간 뒤에 온다 | AX-DX X-17 |
 | GAP-215 | 172 | 빌드 산출물이 Git에 있고 파일 이름에 해시가 있다(`rapidtriage/web/static/v2/assets/index-<해시>.js`, 이 경로를 건드린 커밋 43개). 병렬 UI 과제 두 개가 번들을 커밋하면 반드시 충돌한다 | S2 | 병렬 작업의 숨은 충돌원 | AX-DX X-18 |
 | GAP-216 | 119 | vitest에 풀·제한 시간 설정이 없어 멈춘 프로세스가 남는다. `features/ai` 6건 86초, `dashboard` 41건 104초(`frontend/vite.config.ts:18-22`) | S2 | 전체 1,559건의 실제 벽시계를 아무도 모른다 | AX-DX X-19 |
 | GAP-217 | 119 | 느린 테스트가 한 파일·한 클래스(`tests/test_rapidtriage_ops.py:109` 8,369줄·88건·하위 프로세스 60회·383초). 상위 4모듈이 1,051초(23%). 층 구분·실행기 없음 | S2 | 병렬로 나눌 수 없다 | AX-DX X-20 |
@@ -364,14 +364,14 @@ v3 신규의 영역별 분포: CI·유지보수자 경험(DX) 22 · 에이전트
 
 | GAP | IS | 현재(증거) | 심각도 | 이유 | 출처 |
 |---|---|---|---|---|---|
-| GAP-231 | 112 | v2 계약 D.8의 최상위 `status`·`warnings`·`errors` 추가가 기존 출력과 충돌한다: `doctor --json`은 이미 `status: "warn"`(`core/doctor.py:97`), `plugins --json`은 이미 `errors: []`(`core/plugins.py:81`), `evidence --json`에는 `command` 키가 없다(`cli/runops.py:511`) | S1 | 뜻이 다른 값이 같은 키에 들어가 자동화가 틀린 판정을 한다(계획 결함) | AX-DX X-05 |
+| GAP-231 | 112 | v2 계약 D.8의 최상위 `status`·`warnings`·`errors` 추가가 기존 출력과 충돌한다: `doctor --json`은 이미 `status: "warn"`(`core/doctor.py:97`), `plugins --json`은 이미 `errors: []`(`core/plugins.py:81`), `evidence --json`에는 `command` 키가 없다(`cli/analyze.py:386-391` — `identify_evidence().to_dict()`를 그대로 낸다) | S1 | 뜻이 다른 값이 같은 키에 들어가 자동화가 틀린 판정을 한다(계획 결함) | AX-DX X-05 |
 | GAP-232 | 112 | 실행 중 오류가 전부 사용법 오류로 나간다: `parser.error` 106곳 → 종료 2 + 사용법 1.3~1.6 KB가 stderr에(예: `core/indicators.py:618`의 문장이 그대로 전달) | S2 | 에이전트가 실패 원인을 문자열로 파싱해야 한다 | AX-DX X-06 |
 | GAP-233 | 112 | `evidence <없는 경로> --json`이 종료 0(`cli/analyze.py:436`, `cli/parser.py:1228`) | S2 | 실패를 성공으로 읽는다 | AX-DX X-07 |
 | GAP-234 | 112 | 공용 출력 함수 없음: `print(json.dumps(` 80곳. 봉투를 한 곳에서 붙일 수 없다 | S2 | T-111 한 과제(4 h)로는 불가능했다 | AX-DX X-08 |
 | GAP-235 | 169·098 | `--version` 없음(종료 2), 최상위 도움말 241줄·영문에 89개를 한 줄로, 파서가 한 함수 2,160줄(`cli/parser.py:94-146`) — 금지 구역 충돌원(T-050·111·112가 같은 파일) | S2 | — | AX-DX X-09 |
 | GAP-236 | 169 | `--help`에도 `cv2`·`numpy`·수집기 전부가 로드된다(1.48초, `cli/__init__.py:10`, `cli/analyze.py:10`, `core/docs.py:23`, `artifacts/media.py:21`) | S2 | 에이전트 호출 40회에 1분 | AX-DX X-10 |
 | GAP-237 | 146 | `web`에 `--no-browser` 인자가 없고(환경 변수만), 토큰을 표준 출력에 찍으며, 토큰 변수 이름이 둘이다(`cli/helpers.py:163-178`, `cli/web.py:60,89-96`) | S2 | 로그·화면 공유로 토큰이 샌다 | AX-DX X-11 |
-| GAP-238 | 170 | 처리 요청에 멱등 키가 없고 `wait=true`는 요청 안에서 처리 전체를 돈다(`api/app/routes_runs.py:517,522`) | S2 | 시간 초과 뒤 재시도가 두 번째 처리를 만든다 | AX-DX X-13 |
+| GAP-238 | 170 | 처리 요청에 멱등 키가 없고 `wait=true`는 요청 안에서 처리 전체를 돈다(`api/app/routes_runs.py:529-530,541`) | S2 | 시간 초과 뒤 재시도가 두 번째 처리를 만든다 | AX-DX X-13 |
 | GAP-239 | 170 | 진행은 1.5초/5초 폴링뿐, 대기형 엔드포인트·CLI 대기 명령 없음(`frontend/src/api/runsProgress.ts:57-58`) | S3 | 에이전트가 폴링 루프를 직접 짠다 | AX-DX X-26 |
 | GAP-240 | 169 | CLI 출력 크기 예산 없음: `keyword-packs --json` 209 KB, `enterprise-policy --json` 118 KB | S2 | 에이전트 맥락을 한 번에 채운다 | AX-DX X-30 |
 | GAP-241 | 171 | 증거에서 온 문자열이 응답의 어느 필드에 들어가는지 규칙이 없고(안내문·`hint`에 섞일 수 있다), 에이전트 안내 문서가 없어 "증거 글은 자료이지 지시가 아니다"를 말한 곳이 없다 | S2 | 증거 속 문장이 에이전트를 조종할 수 있다 | AX-DX 1.5 |
@@ -436,25 +436,25 @@ v3 신규의 영역별 분포: CI·유지보수자 경험(DX) 22 · 에이전트
 | GAP | IS | 현재(증거) | 심각도 | 이유 | 출처 |
 |---|---|---|---|---|---|
 | GAP-289 | 069 | 합산 다이제스트가 "세그먼트를 이어 붙인 바이트"라 외부 도구로 재현하려면 같은 순서로 이어 붙여야 한다(`core/e01_hash.py:134-158`). 화면·보고서가 세그먼트별 값을 주로 쓰지 않는다 | S3 | — | RI I-03 |
-| GAP-290 | 143 | 검증 패키지 "원본 무결성"이 메타데이터 키 **캐시 해시**를 쓰고(크기·mtime이 같으면 재계산 안 함), 분할 E01은 지정 파일 하나(첫 세그먼트)만 해시한다(`api/app/viewer_core.py:26,796-800,836`, `core/submission.py:103-110`) | S1 | 변조 탐지에 쓸 수 없는 값을 무결성 칸에 적는다 | RI I-04 |
-| GAP-291 | 145 | `/api/runs/import`가 요약 JSON의 `output_dir`·`root`·`outputs` 경로를 그대로 신뢰한다(`core/jobs.py:739-769`) → 지연 쓰기 대상·허용 소스 루트를 가져온 파일이 정한다 | S1 | 조작된 요약으로 임의 파일 읽기·임의 위치 쓰기 | RI I-05 |
+| GAP-290 | 143 | 검증 패키지 "원본 무결성"이 메타데이터 키 **캐시 해시**를 쓰고(크기·mtime이 같으면 재계산 안 함), 분할 E01은 지정 파일 하나(첫 세그먼트)만 해시한다(`api/app/viewer_core.py:26,796-800,836`, `core/submission.py:113-120`) | S1 | 변조 탐지에 쓸 수 없는 값을 무결성 칸에 적는다 | RI I-04 |
+| GAP-291 | 145 | `/api/runs/import`가 요약 JSON의 `output_dir`·`root`·`outputs` 경로를 그대로 신뢰한다(`core/jobs.py:739-769`) → 지연 쓰기 대상·허용 소스 루트를 가져온 파일이 정한다 〔병합 뒤(bc6c970): 부분 해소〕 쓰기 위치는 고정됐다 — `output_dir`는 요약 파일이 있는 실제 폴더, 폴더 밖 `outputs`는 400(`core/jobs.py:749-806,2391-2430`). **읽기 쪽은 그대로다**(GAP-362). | S1 | 조작된 요약으로 임의 파일 읽기·임의 위치 쓰기 | RI I-05 |
 | GAP-292 | 150 | 처리 전/후 증거 상태를 제품이 기록하지 않는다(QA 스크립트만, `core/run/`에 전후 비교 없음) | S2 | "원본을 바꾸지 않았다"의 제품 산출물이 없다 | RI I-09 |
 | GAP-293 | 150·059 | 처리 요약·처리 감사에 도구 버전·빌드·호스트·실행 계정이 없다. `__version__="0.2.0"` 고정이라 빌드를 구분할 수 없다(`core/run/__init__.py:1649-1663`, `rapidtriage/__init__.py:2`) | S1 | "이 버전으로 돌렸다"를 증명할 수 없다 | RI I-10 |
-| GAP-294 | 139 | 감정서 "감정물 내역" 표의 대상이 원본 증거가 아니라 **보고서 포함 파일의 추출 사본**이다. "인계 증거 항목 수" = 해시된 북마크 수(`core/korean_report.py:113,116-126`, `core/submission.py:41-50`) | S1 | GAP-009의 키만 고치면 틀린 표가 값으로 채워진다 | RI R-02 |
-| GAP-295 | 139 | 감정서 "인계 인수 시각(매니페스트 생성)"에 매니페스트 생성 시각을 적는다(`korean_report.py:72,114`) | S1 | 인수 시각이 아니다 | RI R-03 |
-| GAP-296 | 139·075 | 감정서가 "원본 매체는 읽기 전용으로 처리하였으며"라고 단정한다(`korean_report.py:130-131`). 제품이 증명한 범위 밖 | S1 | 상대방이 가장 먼저 반박할 문장 | RI R-04 |
-| GAP-297 | 058 | 감정서에 `output=`·`validation_required` 같은 영문 토큰이 있고 처리 범위가 없다(`korean_report.py:140-147,183`). 건너뜀 사유가 영문(`no-source-path`·`outside-allowed-roots`·`max-items`, `core/submission.py:30-47`) | S2 | — | RI R-06·R-09 |
-| GAP-298 | 138 | 보고서 5절은 파일 메타·해시·메모만 출력한다(`core/case_report.py:161-213`). 아티팩트 행의 값·증거 시각·레코드 위치가 없다(매니페스트 항목에 `snapshot.timestamp`가 실리지 않는다) | S1 | 핵심 산출물이 핵심 증거를 싣지 못한다 | RI R-07 |
-| GAP-299 | 128 | 보고서·매니페스트의 경로가 분석 PC의 절대 경로(추출 사본)다(`core/submission.py:41,61`) | S2 | 분석자 폴더 구조가 제출물에 나간다 | RI R-08 |
-| GAP-300 | 140 | DB 표시 5,000건 초과분을 조용히 버리고(`_truncated` 미사용) DB 오류는 `[]`로 삼킨다(`api/app/review_payload.py:29,67,76-77`). 매니페스트 500건 상한, `/file` GET은 500 고정(`routes_reports.py:87,142`, `core/submission.py:17,30-32`) | S2 | 후보 수 일치(IS-057)가 상한 위에서는 성립하지 않는다 | RI R-11·R-12 |
+| GAP-294 | 139 | 감정서 "감정물 내역" 표의 대상이 원본 증거가 아니라 **보고서 포함 파일의 추출 사본**이다. "인계 증거 항목 수" = 해시된 북마크 수(`core/korean_report.py:115,118-126`, `core/submission.py:41-52`) | S1 | GAP-009의 키만 고치면 틀린 표가 값으로 채워진다 | RI R-02 |
+| GAP-295 | 139 | 감정서 "인계 인수 시각(매니페스트 생성)"에 매니페스트 생성 시각을 적는다(`korean_report.py:74,116`) | S1 | 인수 시각이 아니다 | RI R-03 |
+| GAP-296 | 139·075 | 감정서가 "원본 매체는 읽기 전용으로 처리하였으며"라고 단정한다(`korean_report.py:132-133`). 제품이 증명한 범위 밖 | S1 | 상대방이 가장 먼저 반박할 문장 | RI R-04 |
+| GAP-297 | 058 | 감정서에 `output=`·`validation_required` 같은 영문 토큰이 있고 처리 범위가 없다(`korean_report.py:142-149,186`). 건너뜀 사유가 영문(`no-source-path`·`outside-allowed-roots`·`max-items`, `core/submission.py:30-47`) | S2 | — | RI R-06·R-09 |
+| GAP-298 | 138 | 보고서 5절은 파일 메타·해시·메모만 출력한다(`core/case_report.py:163-215`). 아티팩트 행의 값·증거 시각·레코드 위치가 없다(매니페스트 항목에 `snapshot.timestamp`가 실리지 않는다) | S1 | 핵심 산출물이 핵심 증거를 싣지 못한다 | RI R-07 |
+| GAP-299 | 128 | 보고서·매니페스트의 경로가 분석 PC의 절대 경로(추출 사본)다(`core/submission.py:41,66`) | S2 | 분석자 폴더 구조가 제출물에 나간다 | RI R-08 |
+| GAP-300 | 140 | DB 표시 5,000건 초과분을 조용히 버리고(`_truncated` 미사용) DB 오류는 `[]`로 삼킨다(`api/app/review_payload.py:29,67,76-77`). 매니페스트 500건 상한, `/file` GET은 500 고정(`routes_reports.py:87,142`, `core/submission.py:17,30-32`) 〔병합 뒤(bc6c970): 고지 기준으로 해소〕 5,000 상한은 남지만 `truncated`·`case_db_marks_total`·`review_scope`로 드러내고 DB 오류를 삼키지 않는다(`review_payload.py:45,93-94,155-156`). 매니페스트 500 상한도 `report_candidate_count`·`max_items_skipped_count`·`truncated`와 보고서 주의 줄로 드러낸다(`core/report_candidates.py:38-45`, `core/submission.py:18,31-37`). `/file` GET은 더 이상 다시 만들지 않는다. | S2 | 후보 수 일치(IS-057)가 상한 위에서는 성립하지 않는다 | RI R-11·R-12 |
 | GAP-301 | 141 | 보고서 파일이 고정 이름이라 내보낼 때마다 덮어쓴다(`core/case_report.py:20-23`, `routes_reports.py:199-218`) | S2 | 제출본의 판이 남지 않는다 | RI R-13 |
 | GAP-302 | 064 | 리뷰어 번들 보고서가 `run_summary={}`로 만들어져 범위·절차가 공란(`core/bundle.py:97-102`) | S2 | — | RI R-16 |
 | GAP-303 | 136 | PDF가 Letter 판형(MediaBox 612×792)이다 | S2 | 한국 문서는 A4 | RI R-17 |
 | GAP-304 | 053·136 | 보고서·번들에 가림 처리가 없다(메모·요약·스니펫 원문, `case_report.py`·`korean_report.py`·`bundle.py`에 가림 호출 0) | S2 | 제3자 정보가 제출물에 실린다 | RI R-19 |
 | GAP-305 | 147 | 감시연속성 모듈(`core/case_db/custody.py` 1,086줄·`acquisition.py` 1,222줄)이 API 라우트에 연결된 곳이 없다 | S2 | 감정서 2장의 인수 사실을 적을 방법이 없다 | RI R-20 |
 | GAP-306 | 142 | 감사 행위자가 클라이언트가 보낸 문자열이거나 `local-user`다(`core/case_db/database.py:1127,1141`). 서버가 확인하는 신원 없음(토큰 하나 공유) | S2 | "누가"를 증명할 수 없다 | RI A-02 |
-| GAP-307 | 142 | `audit_event`에 수정·삭제 방지 트리거가 없고 해시 사슬은 내보낼 때만 계산한다(`core/case_db/audit_trail.py:952-1003`). 같은 DB의 `case_note_history`에는 추가 전용 트리거가 있다 | S2 | "나중에 고치지 않았다"를 증명할 수 없다 | RI A-03 |
-| GAP-308 | 144 | `/source-file` 다운로드가 자격 증명 파일을 거르지 않는다(`api/app/routes_media.py:100-107`; 거부 호출은 `:163,190,215`뿐) | S1 | 자격 증명 파일 본문이 그대로 나온다 | RI P-01 |
+| GAP-307 | 142 | 〔v3 리뷰 정정〕 `audit_event`에는 수정·삭제 방지 트리거가 **이미 있다**(`core/case_db/constants.py:799-809`, 병합 이전부터). 없는 것은 DB 안의 해시 사슬이다 — 사슬은 내보낼 때만 계산한다(`core/case_db/audit_trail.py:952-1003`) | S2 | 트리거는 DB 파일을 직접 고치는 사람을 막지 못한다. "나중에 고치지 않았다"는 사슬이 있어야 증명된다 | RI A-03 |
+| GAP-308 | 144 | 〔병합으로 코드 해소(bc6c970) — 실데이터 검증 대기〕 `/source-file`이 자격 증명 파일을 거른다(`api/app/routes_media.py:105-127`). 거부 호출은 8경로(`:126,138,186,213,238,267,291,313`)로 늘었다. 병합 전에는 다운로드 한 경로가 빠져 본문이 그대로 나왔다. 남은 경로 넷은 GAP-359 | S1 | 자격 증명 파일 본문이 그대로 나온다 | RI P-01 |
 | GAP-309 | 146 | 원격 모드에 TLS 옵션이 없다. 토큰이 평문 HTTP 헤더로 간다(`cli/web.py`에 ssl·certfile 0건) | S2 | 같은 망의 제3자가 토큰을 얻는다 | RI P-05 |
 | GAP-310 | 146 | API·정적 응답에 `X-Content-Type-Options`·프레임 차단·`Referrer-Policy`가 없다(`api/app/factory.py`) | S3 | — | RI P-07 |
 | GAP-311 | 053 | 개체 원값 보기의 기본값이 켜짐(`RAPIDTRIAGE_PII_REVEAL` 미설정 = 허용)이고 사유는 브라우저 세션당 1회(`api/app/entity_reveal.py:1-17,41-56`) | S3 | — | RI P-09 |
@@ -467,10 +467,10 @@ v3 신규의 영역별 분포: CI·유지보수자 경험(DX) 22 · 에이전트
 
 | GAP | IS | 현재(증거) | 심각도 | 이유 | 출처 |
 |---|---|---|---|---|---|
-| GAP-316 | 165 | `ai-agent`가 E01 입력에서 행을 낸 적이 없다(IMG-A 0·IMG-B 0). 어댑터가 `Path` 접근이라 이미지 파생 트리에 `Users/<u>/.claude` 등이 풀려 있어야 하는데 그 경로가 추출 대상에 드는지 미확인(`adapters/_common.py:52-101`) | S1 | AI 사용 조사가 실제 포렌식 이미지에서 동작하는지 모른다 | AI A-01 |
-| GAP-317 | 161 | 메시지·명령을 16 KB에서 자르고 원문 해시·레코드 위치가 없다(`artifacts/ai_agents/base.py:180`, `_common.py:833-856`): 실물 1,109건 절단 | S1 | 큰 붙여넣기가 가장 먼저 잘린다 | AI A-02 |
+| GAP-316 | 165 | `ai-agent`가 E01 입력에서 행을 낸 적이 없다(IMG-A 0·IMG-B 0). 어댑터가 `Path` 접근이라 이미지 파생 트리에 `Users/<u>/.claude` 등이 풀려 있어야 하는데 그 경로가 추출 대상에 드는지 미확인(`adapters/_common.py:68-117`) | S1 | AI 사용 조사가 실제 포렌식 이미지에서 동작하는지 모른다 | AI A-01 |
+| GAP-317 | 161 | 메시지·명령을 16 KB에서 자르고 원문 해시·레코드 위치가 없다(`artifacts/ai_agents/base.py:180`, `_common.py:846-871`): 실물 1,109건 절단 | S1 | 큰 붙여넣기가 가장 먼저 잘린다 | AI A-02 |
 | GAP-318 | 161 | AI 행에 출처 파일 해시가 없다(지침 파일만). `ai_hash_dbs`는 어디서도 읽지 않는 죽은 옵션인데 콘솔에 체크박스가 있다(`base.py:189-190`, `frontend/src/features/case/runForm.ts:200-203`) | S1 | 세션 파일이 바뀌면 같은 행을 재현할 수 없다 | AI A-03 |
-| GAP-319 | 161 | "메타만 수집"(`ai_bodies=false`)이 메시지 `text`만 비운다. 도구 호출 `command`·세션 제목·미리보기·지침 파일 `head_text`·Codex 첫 메시지는 그대로 수집되는데 보고서는 "메타만"이라고 적는다(`_common.py:838,860-862,613-634`, `core/ai_report.py:328`) | S1 | 수집 범위 허위 기재 | AI A-04 |
+| GAP-319 | 161 | "메타만 수집"(`ai_bodies=false`)이 메시지 `text`만 비운다. 도구 호출 `command`·세션 제목·미리보기·지침 파일 `head_text`·Codex 첫 메시지는 그대로 수집되는데 보고서는 "메타만"이라고 적는다(`_common.py:851,873-881,626-647`, `core/ai_report.py:327`) | S1 | 수집 범위 허위 기재 | AI A-04 |
 | GAP-320 | 162 | 계정 이메일을 수집 시점에 되돌릴 수 없게 버리고(도메인 + 해시, `redact.py:117-124`) 본문 속 이메일은 원문으로 둔다. IS-053(해제 + 감사)을 AI 행에서는 구현할 수 없다 | S2 | 서버 측 기록 요청에 필요한 식별자가 없다 | AI A-05 |
 | GAP-321 | 162 | 계정 행이 없는 도구: Codex·Antigravity·Kiro·ZCode·OmO·Claude 데스크톱(이메일 빈칸)·웹 챗봇 전부. 조직 도메인·사건 증거 폴더·읽기 예산 입력 칸이 콘솔에 없다(API는 받는다) → 규칙 `ai.personal_account_on_corporate`를 켤 방법이 없다 | S2 | "어느 계정인가"에 답하지 못한다 | AI A-06·U-03 |
 | GAP-322 | 163 | 파일 접촉이 증거 파일과 이어지지 않는다(원래 PC 경로 → 증거 경로 정규화 없음, `file_locator`는 `antigravity.py:296`만). Cursor 첨부 컨텍스트 미파싱(도구 호출 11,485 대 파일 접촉 126) | S2 | "어느 파일이 AI로 갔나" | AI A-07·A-08 |
@@ -512,3 +512,23 @@ v3 신규의 영역별 분포: CI·유지보수자 경험(DX) 22 · 에이전트
 | GAP-353 | 039·105 | 계획 결함: "관련 있음" 남색이 강조색(파랑) 선택 행 위에서 묻히고 "보고서 포함"(보라)과 두 색으로 갈린다. 건수를 `1.2만`으로 줄이면 화면마다 숫자가 달라 보인다 | S3 | — | UIUX W-5·W-6 |
 | GAP-354 | 040 | 계획 결함: 검토 묶음 v1이 저장 검색(살아 있는 질의) 기반이라 표시할 때마다 분모가 움직인다 | S2 | "전부 검토했다"를 방어할 수 없다 | UIUX W-8 |
 | GAP-355 | 001 | 계획 결함: 변호사가 볼 첫 화면(브리핑)이 과제 약 70개 뒤에 나오고, 공용 컴포넌트 20종을 쓰는 화면 없이 먼저 만든다 | S2 | — | UIUX O-1·O-2 |
+
+## 4.23 〔v3〕 적대적 리뷰(2026-11-12): 병합분 대조·사용자 여정·부록 F 점검
+
+| GAP | IS | 현재(증거) | 심각도 | 이유 | 출처 |
+|---|---|---|---|---|---|
+| GAP-359 | 144 | 병합분(bc6c970)이 8경로를 막았지만 자격 증명 본문이 나올 길이 넷 남았다: `/source-ocr-queue`·`/source-ocr-translation`은 이미지 확장자만 본다(`api/app/routes_media.py:326-362`), `/source-preview`의 압축 파일 구성원 경로는 항목 이름을 검사하지 않는다(`routes_media.py:159-162` → `api/app/runops.py:951`), 정책 이전에 만든 추출 zip은 그대로 내려간다(`routes_runs.py:198-199`), `/outputs/{name}/file`은 거르지 않는다(`routes_runs.py:724`). 시험은 8경로 × 4파일 = 32칸이다(계획은 180칸) | S1 | "어떤 경로로도 나오지 않는다"(IS-144)가 아직 거짓이다 | 병합 대조 |
+| GAP-360 | 175·068 | 읽기 전용 결과를 콘솔이 모른다: `frontend/src`에 `readonly_reason`·`RUN_READ_ONLY` 참조 0, `/dashboard` 응답에 필드 없음(`api/app/dashboard.py` `build_run_dashboard`). 쓰기 동작은 눌린 뒤 일반 오류로 떨어진다. 병합 기록도 "콘솔 띠 미구현"이고 닫는 과제가 없었다 | S2 | D37("읽기 전용으로 열기")의 절반인 상단 경고가 없다 | 병합 대조 |
+| GAP-361 | 066 | 보통 처리에서 GET이 여전히 쓴다: 썸네일 캐시(`routes_media.py:141-149` → `api/app/thumbnail.py:95-99`), 타임라인·지도·계열 지연 색인. T-030은 보고서 7경로만, T-133·134는 읽기 전용 처리만 겨눈다. IS-066과 QA-108("모든 GET 뒤 스냅샷 동일")을 닫을 과제가 없었다 | S2 | 계획이 자기 수용 기준을 통과할 수 없다(계획 결함). 캐시까지 금지할지는 결정 D74 | 병합 대조 |
+| GAP-362 | 145 | 가져온 요약의 `root`·`scan_scope_root`·`source.analysis_root`·`source.stage_dir`가 여전히 허용 소스 루트가 된다(`api/app/helpers.py:293-313`). 병합분은 쓰기 위치(`output_dir`·`outputs`)만 고정했다(`core/jobs.py:2391-2431`) | S1 | 조작한 요약으로 서버가 읽을 수 있는 임의 파일을 원본 보기로 꺼낸다 | 병합 대조 |
+| GAP-363 | 068 | 읽기 전용 관문의 남은 틈: `/api/cases/{id}/…` 쓰기는 경로에서 막지 않고 감사 훅에만 기댄다 · 훅은 이미 있는 SQLite 파일 쓰기와 삭제를 막지 않는다(`core/readonly_runs.py:143-148`) · 비-GET 전수가 아니라 8건만 시험했다 · 허용된 POST 4개(`/search/count·query·entities·hashes`, `api/app/factory.py:86`)가 계약 문서에 없다 | S2 | "전부 409"가 표본으로만 증명됐다 | 병합 대조 |
+| GAP-364 | 167 | 병합 뒤 완료된 초록 CI 실행이 아직 없다(0543c33 실패 · bc6c970 취소 · 그다음은 조회 시점에 진행 중). PR 게이트 제한은 45분(목표 20분)이고 `contract-drift`·`rust-worker` 작업에는 제한 시간이 없다. 프런트 작업은 ubuntu·Python 3.11에서만 돈다. 실행기는 여전히 `unittest discover`(`rapidtriage-ci.yml:52`) | S1 | "CI 초록"은 아직 관측된 적이 없다 — WA의 전제이자 D42의 조건 | 병합 대조 |
+| GAP-365 | 174 | 검토자 링크를 보내는 흐름이 없다(GAP-186은 "정의 안 됨"이라고만 적었다). 토큰은 서버를 켤 때마다 새로 만들어져(`cli/web.py:89`) 다시 켜면 보낸 링크가 전부 죽고, T-112가 토큰을 표준 출력에서 빼면 링크를 얻을 곳이 없어진다. QA-118·119는 링크가 이미 있다고 가정하고 루프백에서만 연다 | S1 | 변호사 여정의 첫 단계가 계획에 없었다 | 여정 1·20 |
+| GAP-366 | 177 | 처리 중 디스크 부족(ENOSPC)과 Windows 절전에 대한 처리가 계획에 없다. QA-133의 "진행 중 부족" 기대를 구현하는 과제가 없고(T-186은 시작 전 점검뿐), 취소·다시 시도·이어서 처리의 QA(131·132)는 승인 차선에만 묶여 있다 — 현 엔진의 `/retry`·`/cancel`(`routes_runs.py:601-613`)은 승인 없이도 잴 수 있다 | S2 | 밤샘 처리의 가장 흔한 실패가 미검증으로 남는다 | 여정 2·3·14·19 |
+| GAP-367 | 176 | 기존 사건 상태를 새 버전으로 여는 검증이 없다. 계획은 스키마·감사 필드를 더하는데(T-029·180·267·278) 업그레이드 문구와 QA가 없고, 이미 있는 스키마 관문과 `case-backup`/`case-restore`(`core/backup.py:264-294`)를 쓰지 않는다. 사슬 필드가 없는 옛 감사 줄을 검증 함수가 어떻게 판정하는지 정해지지 않았다 | S1 | 진행 중 사건의 판단 기록 손실, 옛 감사의 "변조" 오판 | 여정 4·17 |
+| GAP-368 | 170·171·111 | AX 여정 QA가 페르소나의 목표를 덮지 않는다: QA-116은 이미 처리된 결과의 읽기 전용 서버에서 시작하고 QA-145는 합성 + 처리 요청뿐이다. `POST /api/cases`·표시·내보내기를 재시도하면 중복 사건·중복 이력·유령 보고서 판이 생긴다(T-219는 처리 요청만). QA-147(주입)은 쓰기가 불가능한 읽기 전용 서버에서 "쓰기 0"을 기대해 실패할 수 없는 시험이다 | S1 | 에이전트의 주 시나리오(만들기 → 처리 → 끊김 → 재시도 → 검토 → 보고서)가 실데이터에서 검증되지 않는다 | 여정 5·6 |
+| GAP-369 | 178·142 | 재현성을 실행으로 검증하지 않는다(QA-115는 문서 점검, QA-174는 보고서 바이트만). 감사 줄 사슬의 검증 함수는 테스트 안에만 있어, 내보낸 파일만 가진 상대방 감정인이 돌릴 명령도 알고리즘 설명도 없다 | S2 | "재현된다"·"고치지 않았다"가 우리 말뿐이다 | 여정 7·8 |
+| GAP-370 | 180 | 사건 보관·삭제가 계획에도 코드에도 없다(`api/app/routes_cases.py`에 DELETE 없음). 처리를 지운 뒤 보존된 보고서 판과 감사가 남는지 정해지지 않았다. QA-086은 대화상자 모양만 본다 | S2 | 끝난 사건을 치울 수 없고, 처리 삭제가 제출 근거를 지울 수 있다 | 여정 9 |
+| GAP-371 | 179·007 | 제품 안에서 용어를 찾을 길이 없고, 위험 표가 약속한 "용어 대응표·첫 실행 안내 1장"에 과제가 없다. 깨끗한 PC에서 README만 보고 첫 사건까지 가는 QA가 없다(`docs/rapidtriage-fresh-machine-smoke-test.md`는 있지만 계획이 쓰지 않는다) | S2 | "교육 없이 쓴다"의 첫 10분이 비어 있다 | 여정 10·11 |
+| GAP-372 | 119·040·136 | 작은 빈칸 셋: AGENTS.md만 읽고 게이트까지 가는 온보딩 QA가 없다(T-152의 수용은 grep) · 다음 날 브리핑의 "이어서 검토하기"를 누르는 QA가 없다 · 보고서 파일 메타데이터(DOCX `docProps`, PDF Info·XMP의 작성자·호스트)를 검사하지 않는다(QA-178은 본문 정규식) | S3 | 각각 한 사람의 하루를 막거나 분석 PC 계정명을 밖으로 낸다 | 여정 12·13·16 |
+| GAP-373 | 121 | 부록 F 점검: 신규 과제 54개가 검증 명령에 적은 테스트 모듈을 "파일" 열에 선언하지 않았다(있는 모듈인지 새로 만드는지 알 수 없고, 병렬 충돌 검사가 그 파일을 보지 못한다) · 19행이 동작·수용을 "같음"으로 적었다 · WZ 여섯 과제는 QA 20~45개를 4시간에 돌린다고 적었다 · T-170의 수용(화면·CLI·보고서)이 파일 열(화면 1개)보다 넓었다 | S3 | 구현자가 범위를 추측해야 한다(계획 결함) | F 점검 |

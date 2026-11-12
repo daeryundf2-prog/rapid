@@ -31,7 +31,7 @@
 - 수용: 합성 폴더에서 1바이트 변경·신규 1파일·삭제 1파일을 각각 검출. 가짜 비밀 3종·가짜 경로 2종 검출, 깨끗한 로그에서 적중 0. 필드 1개를 뺀 보고서에서 실패. 현재 부록으로 trace-audit 실행 시 구멍 0.
 - 검증: `python -m unittest tests.test_r8_qa_scripts && python scripts/r8-trace-audit.py --check`.
 - 주의: 스크립트는 읽기 전용(증거 폴더에 임시 파일 금지 — 출력은 `--output` 필수).
-- 〔v3〕 T-003 → WA-1(부록 F 표 우선; `r8-trace-audit.py`는 v3 추적표 규칙(고아 0)을 물결마다 다시 검사)
+- 〔v3〕 T-003 → WA-1(부록 F 표 우선; `r8-trace-audit.py`는 v3 추적표 규칙(고아 0)을 물결마다 다시 검사 〔리뷰〕 `r8-trace-audit.py`에 검사 둘을 더한다: 검증 명령의 테스트 모듈이 "파일" 열이나 저장소에 있는가, 동작·수용에 "같음"이 없는가.)
 
 **T-004 합성 풍부 픽스처 생성기** (4 h · W0-a)
 - 대상: `scripts/make-r8-fixture.py`, `tests/fixtures/r8_rich/`(생성 스크립트 입력·매니페스트만 커밋), `frontend/e2e/r8_fixture.py`(e2e용 처리 결과 폴더 생성 — 기존 `e2e/ai_fixture.py` 방식 답습).
@@ -166,14 +166,14 @@
 - 대상·수용: 부록 F 표. 함수 하나(`report_candidate_count`)를 보고서 생성(`build_run_case_report` 경로)·`/review-counts`·(이후) `/brief.review.include_in_report`가 호출한다.
 - 검증: 신규 `tests/test_r8_report_candidates.py`(DB만·JSON만·둘 다·중복·DB 손상 5경우) + `python -m unittest tests.test_r7s1_rereview_reports tests.test_rapidtriage_case_db`.
 - 주의: 응답의 기존 키(`include_in_report`, `case_json`, `report_candidates`)는 이름 유지. 프런트 `ReportDialog.tsx:136`은 `report_candidates:null`을 "확인 실패 — 다시 시도"로 보여야 한다(프런트 반영은 T-110, 그 전까지는 "확인 중" 대신 오류가 보이도록 `error` 필드만 추가).
-- 〔v3〕 T-025 → WB-1(부록 F 표 우선; v3 보강(RI-02): 응답에 `truncated`(5,000 초과)·`error`, 보고서 본문에 "표시 n건 중 5,000건만 반영")
+- 〔v3〕 T-025 → WB-1(부록 F 표 우선; **병합분(bc6c970, 코드 확인)**: 한 판정 함수 `is_report_candidate`(`core/report_candidates.py:15`)를 사건 요약·매니페스트·감정서·`/review-counts`가 같이 쓴다. 5건 픽스처 → 3, `CASE_DB_UNREADABLE` + `report_candidates:null`, `truncated`, 보고서 줄 "케이스 DB 표시 n건 중 최근 5,000건만 반영함". **계획과 다른 이름(코드가 정본)**: 함수는 `report_candidate_count(store, run_id)`, 반환 키는 `count`·`case_db`·`case_json`·`truncated`·`error`. **남은 것**: ① 중복 제거 키가 `bookmark_id`라 DB와 JSON에 같은 대상이 다른 id로 있으면 2로 센다 → 인용 id로 바꾸고 시험 1건 ② 카드의 5경우 중 DB만·JSON만·중복 3경우 시험(현재 2/5) ③ `by_status`·`include_in_report`·`cleared`가 SQLite 오류에서 조용히 0 → `null` + `error` ④ 실데이터 QA-075·176)
 
 **T-027 사건 보고서 영문 제거·방어 필드 추가** (4 h · W1-c)
 - 대상·수용: 부록 F 표(줄 목록 포함).
 - 할 일 보충: 허용 목록(고유명사 `RapidTriage`·`Windows`·`SHA-256`·`MD5`·파일명·경로) 밖의 ASCII 단어 3자 이상이 제목·필드 라벨에 0. `status= report= tags= note=`는 "판단 · 보고서 포함 · 태그 · 메모" 표 열로. 작성자 기본 `web-ui`는 "(작성자 미지정)".
 - 검증: `python -m unittest tests.test_r7s1_rereview_reports tests.test_rapidtriage_output_samples` + `python scripts/r8-report-audit.py <샘플 폴더>`.
 - 주의: `case_report.py`는 금지 구역. 템플릿 id(`executive-summary` 등)와 요청 스키마는 바꾸지 않는다. 표 그리기(세로선 문자)는 T-108·T-109.
-- 〔v3〕 T-027 → WB-8(부록 F 표 우선)
+- 〔v3〕 T-027 → WB-8(부록 F 표 우선; 〔리뷰〕 병합분이 `case_report.py:127`에 범위 고지 줄을 넣어 줄 번호가 +2 밀렸다(부록 B의 고친 번호를 본다).)
 
 **T-028 번들·검증 패키지가 케이스 DB 검토 반영 + 감사 입력에 케이스 DB** (3 h · W1-c) — 부록 F 표. 검증: `python -m unittest tests.test_rapidtriage_case_export tests.test_r7s1_rereview_reports tests.test_rapidtriage_audit`. 주의: `api/app/runops.py`는 이 묶음에서 이 과제만.
 - 〔v3〕 T-028 → WB-3(부록 F 표 우선; v3: 번들 보고서에 `run_summary` 전달(공란 0))
@@ -183,24 +183,24 @@
 - 할 일 보충: 누적 파일은 줄 단위 추가(`open(..., "a")` + `flush` + `os.fsync`), 한 줄 = JSON 1건. 사이드카 확장자가 `.md`인데 내용이 JSON인 문제는 **이름을 바꾸지 않고**(계약) 누적 파일로 해결하고, known-limitations에 "사이드카는 최신 1건, 이력은 `rapidtriage-export-audit.jsonl`"을 적는다(T-119).
 - 검증: `python -m unittest tests.test_rapidtriage_audit tests.test_rapidtriage_reviewer_attribution`.
 - 주의: `core/audit.py:125`의 시각만 이 과제가 고친다(나머지 34곳은 T-132). 읽기 전용 처리에서는 누적 파일도 쓰지 않는다(T-032 관문).
-- 〔v3〕 T-029 → WB-4(부록 F 표 우선)
+- 〔v3〕 T-029 → WB-4(부록 F 표 우선; 〔리뷰〕 검증 함수는 사슬 필드가 없는 옛 줄을 "사슬 이전 n줄"로 센다(깨짐이 아니다 — T-355가 시험한다). `audit_event` 표에는 수정·삭제 금지 트리거가 이미 있다(`core/case_db/constants.py:799-809`). 이 과제의 대상은 내보내기 감사 파일이다. 검증 명령은 T-359.)
 
 **T-030 GET이 쓰지 않게(6경로)** (4 h · W1-c)
 - 대상·수용: 부록 F 표.
 - 할 일 보충: 프런트 다운로드 흐름 — "내보내기" 확인 → POST(쓰기, `written[]` 응답) → 저장본 GET으로 내려받기. 기존 다운로드 링크(접수의 5개)는 저장본이 없으면 "아직 내보내지 않았습니다 — 내보내기" 상태로.
 - 검증: `python -m unittest tests.test_r7s1_rereview_reports tests.test_rapidtriage_api_contract` + 신규 `tests/test_r8_get_is_readonly.py`(OpenAPI의 GET 전수를 TestClient로 호출하고 결과 폴더 스냅샷 비교) + `cd frontend && npx vitest run src/features/case/r7s1Exports.test.tsx`.
 - 주의: `routes_reports.py`는 금지 구역. 응답 본문 모양(매니페스트·패키지 JSON)은 불변.
-- 〔v3〕 T-030 → WB-1(부록 F 표 우선; v3 보강(RI-07): `/reviewer-bundle/file`도 저장본만 반환(없으면 404). 7경로 GET 전후 결과 폴더 스냅샷 동일)
+- 〔v3〕 T-030 → WB-1(부록 F 표 우선; **병합분(bc6c970, 코드 확인)**: 보고서 7경로 GET이 쓰지 않는다 — 조회 둘은 메모리 계산(`routes_reports.py:96,153`), 파일 다섯은 저장본 또는 404 `EXPORT_NOT_WRITTEN`(`:67-78,146,192,221,228,283`), 생성은 POST(`:107`). 추출 zip 생성도 POST로 옮겼다. **남은 것**: ① 프런트에 `EXPORT_NOT_WRITTEN` 처리가 없다 → "아직 내보내지 않았습니다 — 내보내기" 상태 1개 ② `/saved` GET 둘의 404에 오류 코드 ③ 전후 스냅샷 시험을 7경로 전부로(현재 6 + 조회 2 + 추출) ④ 위 수용의 "OpenAPI의 모든 GET"은 보통 처리에서 성립하지 않는다(썸네일·지연 색인 캐시 — GAP-361). 그 문장은 T-349로 옮겼고 이 과제의 수용은 보고서 7경로 7/7이다)
 
 **T-031 가져오기·샘플·찾아보기 경로 범위** (4 h · W1-d 1단계) — 부록 F 표가 명세 전부다. 검증: `python -m unittest tests.test_rapidtriage_sample_case tests.test_rapidtriage_browse tests.test_rapidtriage_remote_mode tests.test_r7_no_output_in_evidence` + 신규 `tests/test_api_path_scope.py`. 주의: 샘플 삭제 조건 변경은 CLI `sample` 명령에도 적용된다 — CLI에서 `--overwrite`를 명시하면 표식 파일이 있을 때만 삭제.
-- 〔v3〕 T-031 → WB-2(부록 F 표 우선; v3 보강(RI-04·05): 샘플 기본 `overwrite=False`·표식 파일이 있을 때만 삭제. 가져오기는 요약의 `output_dir`를 실제 폴더로 보정, `outputs`가 폴더 밖이면 거부, 결과 폴더가 `root` 안이면 `output_inside_evidence=True`)
+- 〔v3〕 T-031 → WB-2(부록 F 표 우선; **병합분(bc6c970, 코드 확인)**: (1) 샘플 — `~/.rapidtriage`/`RAPIDTRIAGE_SAMPLE_ROOT` 밖 403(`routes_case_db.py:89-104`), 기본 `overwrite=False`(`models.py:79`), 표식이 있을 때 샘플 항목만 삭제·아니면 409(`core/sample_case.py:53-80`), 증거와 겹치면 422. (2) 가져오기 — `output_dir`를 실제 폴더로 고정, 폴더 밖 `outputs`는 `IMPORT_OUTPUT_OUTSIDE_FOLDER`, 증거 안이면 `readonly_reason="OUTPUT_INSIDE_EVIDENCE"`(`core/jobs.py:793,2391-2431`). 계획이 적은 `output_inside_evidence=True`는 쓰지 않는다(코드 이름이 정본). **남은 것**: (3) 찾아보기 범위 전부 — `--browse-root`가 어디에도 없고 `routes_meta.py`·`core/browse.py`는 병합에서 바뀌지 않았다. 3모드(루프백 전체 / 원격 루트 안 200 / 원격 루트 밖 403) 시험 3/3. 가져온 요약의 읽기 루트 신뢰는 T-350)
 
 **T-032 읽기 전용 결과 모드 — 관문** (4 h · W1-d 2단계)
 - 대상·수용: 부록 F 표.
 - 할 일 보충: `run_readonly_reason(job)`는 (a) T-031이 기록한 `readonly_reason`, (b) 서버 단위 읽기 전용(T-112가 나중에 켬), (c) 결과 폴더가 그 처리의 증거 경로 안/같음(`core/output_guard.check_output_outside_evidence` 재사용, 가져오기 시점 1회 계산해 처리에 저장)을 본다. `may_persist(output_dir)`는 처리 → 사유 조회 캐시(O(1)).
 - 검증: 신규 `tests/test_r8_readonly_run.py`(비-GET 전수 409, GET 후 스냅샷 동일 — 색인류는 T-133·T-134 뒤에 완전 통과하므로 이 과제에서는 썸네일·메모·미들웨어만 단언) + `python -m unittest tests.test_r7_no_output_in_evidence`.
 - 주의: 미들웨어는 경로에서 처리 ID를 뽑는다(`/api/runs/{id}/…`, `/api/cases/{id}/…`는 사건의 처리 중 하나라도 읽기 전용이면 해당 처리 쓰기만 거부). 일반 처리의 지연 ≤ 1 ms(요청당).
-- 〔v3〕 T-032 → WB-3
+- 〔v3〕 T-032 → WB-3(부록 F 표 우선; **병합분(bc6c970, 코드 확인)**: 미들웨어 409 `RUN_READ_ONLY`(`factory.py:89-108,230`), `/api/case-db/*`의 본문 지정 DB 거부(`:197-203`), `GET /api/runs/{id}`에 `readonly_reason`(`core/jobs.py:301`), 썸네일 메모리 응답, 메모 409, 프로세스 감사 훅(`core/readonly_runs.py:158`), 복원된 옛 처리 소급 표시(`jobs.py:1075-1079`). **계획과 다른 이름(코드가 정본)**: `api/app/readonly_run.py`는 없다. 판정은 `core/readonly_runs.py`의 `may_persist`. **남은 것**: ① 허용 POST 4개(`/search/count`·`query`·`entities`·`hashes` — 읽기 질의, `factory.py:86`)를 부록 D.10과 시험에 명시(위 "허용 목록: 없음"을 이것으로 고친다) ② `/api/cases/{id}/…` 쓰기를 경로에서 거부 ③ OpenAPI 비-GET 전수 시험(현재 8건) ④ 훅이 못 막는 둘(이미 있는 SQLite 파일 쓰기·삭제)의 차단과 시험 ⑤ 일반 처리 타이밍 ±5% 측정 1회. `/dashboard`의 `readonly_reason`과 화면 띠는 T-348)
 
 **T-033 CLI 단일 파일 출력 기본 위치 가드** (4 h · W1-e) — 부록 F 표. 보충: "증거 폴더"의 판정은 명령이 받은 입력 경로(루트·이미지) 기준으로 cwd가 그 안/같음일 때. 입력 경로가 없는 명령(`doctor` 등)은 cwd에 증거 확장자 파일(E01 계열 등, `core/browse.py`의 `EVIDENCE_FILE_SUFFIXES`)이 있으면 경고만. 검증: `python -m unittest tests.test_cli_output_guard tests.test_rapidtriage_artifacts_cli tests.test_r7_no_output_in_evidence`.
 - 〔v3〕 T-033 → WB-4
@@ -216,7 +216,7 @@
 - 〔v3〕 T-035 → WB-4(부록 F 표 우선)
 
 **T-036 표시 해제 = 직전 상태, 실행 취소, 작성자** (4 h · W1-d) — 부록 F 표. 검증: `cd frontend && npx vitest run src/features/grid/reviewActions.test.ts src/components/ToastRegion.test.tsx src/features/review` + QA-065 스펙 골격. 주의: 실행 취소 스택은 새로고침하면 사라진다(문구 "방금 한 표시만 되돌릴 수 있습니다"). 일괄 표시(n건)는 한 단위로 되돌린다.
-- 〔v3〕 T-036 → WB-4(부록 F 표 우선)
+- 〔v3〕 T-036 → WB-5(부록 F 표 우선)
 
 **T-144 메모 보호·태그 관리 작성자 칸** (3 h · W1-d) — 부록 F 표. 검증: `cd frontend && npx vitest run src/features/dashboard src/features/review`. 주의: `caseCards.tsx`의 메모 블록 밖(증거·해시 라벨)은 T-129.
 - 〔v3〕 T-144 → WB-6 · T-129 → WB-9(부록 F 표 우선; v3: 세그먼트별 값을 주로 표시, 기록된 취득 해시(T-181)가 있으면 세 번째 줄로)
@@ -235,7 +235,7 @@
 - 〔v3〕 T-132 → WB-5
 
 **T-133·T-134 읽기 전용 결과: 지연 쓰기 차단** (각 4 h · W1-e) — 부록 F 표. 공통 검증: `tests/test_r8_readonly_run.py`에 화면별 시나리오(타임라인·지도·계열·폴더·레지스트리·정렬 / 미디어 유사·SQLite·특이사항·조건·검색)를 더하고, AST 검사(대상 파일에서 `write_text`·`write_bytes`·`open(…, "w")`·`mkdir`·쓰기용 `sqlite3.connect`가 `may_persist` 분기 밖에 0)를 테스트로 둔다. 주의: 일반 처리의 캐시 파일 이름·형식 불변(전/후 바이트 동일).
-- 〔v3〕 T-133 → WB-5(부록 F 표 우선; 병합분(bc6c970)이 `index_cache.py`·`timeline_index.py`·`geo_index.py`·`families.py`의 지연 쓰기 일부를 이미 막았다. 먼저 병합분과 대조하고 남은 지점만 한다) · T-134 → WB-5(부록 F 표 우선; T-133과 같다: 병합분(`core/readonly_runs.py`)과 대조한 뒤 남은 지점만)
+- 〔v3〕 T-133 → WB-4(부록 F 표 우선; **병합분(bc6c970, 코드 확인)**: 9파일의 디스크 쓰기는 전부 `index_persist_enabled(path)` → `may_persist`를 거친다(`timeline_index.py:886,1023`, `geo_index.py:470`, `families.py:592`, `index_cache.py:23-30`). 나머지 6파일에는 HEAD에 디스크 쓰기 지점이 없다. 위 수용의 "`may_persist(output_dir)`를 거친다"는 `index_persist_enabled` 경유를 포함한다. **남은 것**: ① AST 시험(쓰기 호출 직접 사용 0, 9/9 파일) ② 화면 6종(타임라인·지도·계열·폴더·레지스트리·정렬)을 연 뒤 스냅샷 동일 6/6 ③ 일반 처리의 캐시 파일 목록이 병합 전과 같음 1회) · T-134 → WB-4(부록 F 표 우선; **병합분(bc6c970, 코드 확인)**: 검색 이력·저장 건수 쓰기 가드(`search_index_service.py:457,732`). `media_similar`·`media`·`sqlite`·`triage_flags`·`row_conditions`에는 HEAD에 디스크 쓰기 지점이 없고, `previews.write_json_file`은 내보내기 POST에서만 불려 관문이 막는다. **남은 것**: ① 색인 생성 요청의 전용 문장이 없다(일반 `RUN_READ_ONLY` 문구가 나온다) ② 이력 `_write` 자체 가드(호출자 가드와 훅에만 기댄다) ③ AST 시험 7/7 파일 ④ 화면 5종(미디어 유사·SQLite 미리보기·특이사항·조건·검색) 스냅샷 동일 5/5)
 
 **T-130 4xx 재시도 금지·유휴 폴링·숨은 탭** (2 h · W1-f) — 부록 F 표. 검증: `cd frontend && npx vitest run src/api src/features/analysis` + QA-101 네트워크 예산 스펙 골격. 주의: 처리 중(`queued`·`running`) 폴링 1.5 s는 유지.
 - 〔v3〕 T-130 → WB-5
@@ -262,7 +262,7 @@
 - 〔v3〕 T-043 → WC-4(부록 F 표 우선; C5의 공개 공격 이벤트 로그 표본 사용) · T-135 → WF-6(부록 F 표 우선)
 
 **T-138 C3-0: 기존 기준선 산출물 가져오기** (3 h) — 부록 F 표. 재처리·승인 없이 대화 보기·사람·장치를 실데이터로 처음 확인하는 경로다.
-- 〔v3〕 T-138 → WC-1
+- 〔v3〕 T-138 → WC-1(부록 F 표 우선)
 
 **T-044 기준선 종합과 재계획 입력** (3 h, Fable) — 부록 F 표.
 - 〔v3〕 T-044 → WC-8(부록 F 표 우선)
@@ -316,7 +316,7 @@
 - 〔v3〕 T-054 → WD-1
 
 **T-055 계열·중복·예외·케이스 DB 준비·추출 zip을 작업으로** (4 h · W3-b 2단계) — 수용: 다섯 요청 모두 응답 ≤ 1 s(C2; 계산 중이면 202 + 직전 결과), 완료 뒤 결과가 동기 계산과 동일(바이트 비교), 읽기 전용 처리에서는 메모리 계산 + 저장 없음. 프런트는 202를 "다시 계산 중" 띠로(임시; 작업 센터는 T-081). 검증: `python -m unittest tests.test_r7_a_dedup tests.test_r7_a_families tests.test_r7_a_irregular tests.test_rapidtriage_extract`.
-- 〔v3〕 T-055 → WD-2 · T-081 → WF-2(부록 F 표 우선)
+- 〔v3〕 T-055 → WD-2(부록 F 표 우선; 〔리뷰〕 병합분이 추출 zip 생성을 `POST /extract` 안의 동기 작업으로 옮겼다(`routes_runs.py:1680`, `POST /extract/{name}/zip` 추가). 이 과제는 그 POST를 작업으로 바꾼다(GET은 이미 저장본만 준다).) · T-081 → WF-2(부록 F 표 우선)
 
 **T-057 문서 단위 검색 응답** (4 h · W3-c 1단계) — 대상: `api/app/search_documents.py`(신규), `routes_search_index.py`(등록·호출). 응답: `documents[]: {doc_key(파일 경로 또는 대화 id), title, hit_count, snippets[≤3](≥40자, 가림 적용), locations[], related_rows[], time}` + `hidden_expert_hits`(Tier 3 적중 수) + 기존 pagination·notice. 수용: 같은 파일이 두 번 나오지 않음(1,000건 표본 중복 0), 스니펫 길이 ≥ 40자(본문이 더 짧으면 전체), 비밀 패턴 원문 0. 검증: `python -m unittest tests.test_search_hits tests.test_search_api` + 신규 `tests/test_r8_search_documents.py`.
 - 〔v3〕 T-057 → WD-3(부록 F 표 우선; v3: 응답에 `partial`(예산 중단 여부)을 실어 묶음·보고서가 기록)
@@ -411,7 +411,7 @@
 - 〔v3〕 T-085 → WF-3(부록 F 표 우선)
 
 **T-086 뷰어 탭(가능한 것만)·보류 사유·이진 안내·원본 가림** (4 h) — 수용: 11종 표본(QA-046)에서 탭 평균 ≤ 4, `withheld`는 사유 문장(자격 증명 파일 등) + 대안, 이진은 "텍스트로 표시할 수 없는 파일입니다 — 헥스로 보기", 원본 탭의 키·토큰 `[가림:종류]` + 해제는 확인 + 감사 1건(케이스 DB 없으면 해제 불가), 탭 전환 ≤ 500 ms.
-- 〔v3〕 T-086 → WB-4(부록 F 표 우선)
+- 〔v3〕 T-086 → WB-5(부록 F 표 우선)
 
 **T-087 메타 12필드·출처 구역** (4 h · 2단계) — 수용: 첫 화면 필드 ≤ 12, "기술 정보" 접힘, 출처 구역(원본 위치·시각 현지 + UTC·해석 범위) 하단 고정·스크롤 없이 보임, 영문 키 0, `MetaView.tsx` ≤ 600줄. 주의: MetaView 테스트가 문구 40개를 고정 — 계약표 밖은 testid로.
 - 〔v3〕 T-087 → WF-4(부록 F 표 우선; 출처 구역은 T-172가 먼저 고친다(같은 파일))
@@ -488,7 +488,7 @@
 - 〔v3〕 T-107 → WG-1(부록 F 표 우선; v3: 점검에 "원값 열람 n건"·"검색이 일부 결과였음")
 
 **T-108 PDF 한글 글꼴·줄바꿈·실제 표** (4 h · 1단계) · **T-109 프로파일·머리글/바닥글·AI 절·DOCX 표** (4 h · 2단계) · **T-110 내보내기 이력·파일 해시·알림 한 줄** (3 h · 1단계) — 부록 F 표. T-110 보충: `ReportDialog.tsx:136` "확인 중" 고착 제거(`report_candidates:null` → "확인 실패 — 다시 시도"), 성공 알림 1줄 + "폴더 열기"(`:93-101`).
-- 〔v3〕 T-108 → WG-1(부록 F 표 우선) · T-109 → WG-2(부록 F 표 우선; v3: AI 절에 검사관이 태그한 AI 증거 인용 포함) · T-110 → WG-1
+- 〔v3〕 T-108 → WG-1(부록 F 표 우선) · T-109 → WG-2(부록 F 표 우선; v3: AI 절에 검사관이 태그한 AI 증거 인용 포함) · T-110 → WG-1(부록 F 표 우선; 〔리뷰〕 병합분: 서버가 읽기 실패를 `error`로 주면 사유를 보인다(`fe/api/caseDb.ts:28-34`, `ReportDialog.tsx:135`). 남은 것: 요청 자체가 실패할 때의 "확인 중" 고착, 이력 해시, 알림 한 줄.)
 
 ---
 
@@ -501,7 +501,7 @@
 - T-116: 수용 = 첫 화면 JS ≤ 1.0 MB(비압축), 전문가 화면(헥스·SQLite·레지스트리 탐색기·지도·그래프)은 동적 import, 번들 예산 스크립트가 초과 시 실패.
 - T-117: 삭제 전에 `grep`으로 import 0 확인, 한 PR에서 새 것 도입과 옛 것 삭제를 같이 하지 않는다(부록 C.8 3항).
 - T-118: 재확인 표(`docs/research/r8-s3-recheck.md`)의 행 = 콘솔 리뷰 S3 45건 + P1·P3·P5·P7·P8 + GAP-201. "해소"는 스크린샷 필수.
-- 〔v3〕 T-111 → WH-1(부록 F 표 우선; 89명령 한 과제는 불가능 → T-246·247·249로 분리) · T-141 → WH-4(부록 F 표 우선) · T-142 → WH-5(부록 F 표 우선; 인자 654개 전부 번역은 하지 않는다) · T-112 → WB-5(부록 F 표 우선) · T-113 → WH-2(부록 F 표 우선; 나머지 5개는 T-250~254) · T-140 → WH-8(부록 F 표 우선) · T-114 → WH-8(부록 F 표 우선) · T-115 → WH-2(부록 F 표 우선) · T-116 → WH-2(부록 F 표 우선; v3: 번들 예산을 1.0 MB로 내린다(T-156 기준선 갱신)) · T-117 → WH-2(부록 F 표 우선) · T-118 → WH-2 · T-119 → WH-2(부록 F 표 우선)
+- 〔v3〕 T-111 → WH-1(부록 F 표 우선; 89명령 한 과제는 불가능 → T-246·247·249로 분리) · T-141 → WH-5(부록 F 표 우선) · T-142 → WH-6(부록 F 표 우선; 인자 654개 전부 번역은 하지 않는다) · T-112 → WB-5(부록 F 표 우선; 〔리뷰〕 재사용할 관문은 병합분의 `api/app/factory.py:89-108`이다(`readonly_run.py`는 없다). 서버 단위 사유 코드 `SERVER_READ_ONLY`를 더한다. 토큰은 로그 파일·비대화형 출력에서 0으로 하되 대화형 터미널의 접속 주소 한 줄은 T-351(링크 복사·토큰 유지·폐기)이 들어갈 때까지 남긴다. 원격 TLS 인증서를 마련하는 절차 10줄을 `docs/rapidtriage-admin-deployment-guide.md`에 적는다(T-119).) · T-113 → WH-2(부록 F 표 우선; 나머지 5개는 T-250~254) · T-140 → WH-8(부록 F 표 우선) · T-114 → WH-8(부록 F 표 우선) · T-115 → WH-2(부록 F 표 우선) · T-116 → WH-2(부록 F 표 우선; v3: 번들 예산을 1.0 MB로 내린다(T-156 기준선 갱신)) · T-117 → WH-2(부록 F 표 우선) · T-118 → WH-2 · T-119 → WH-2(부록 F 표 우선)
 
 ---
 

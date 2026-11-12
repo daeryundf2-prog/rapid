@@ -157,11 +157,11 @@ v2의 "최상위에 `status`·`warnings`·`errors` 세 키 추가"는 폐기한�
 ## D.10 서버 쓰기 계약
 
 - 어떤 요청도 증거 경로 아래에 쓰지 않는다. `core/output_guard.py`의 두 코드가 모든 쓰기 진입점의 공통 관문이다(새 처리·재시도·사건 처리·증거 추가·분석·가져오기·샘플·CLI).
-- GET은 쓰지 않는다. 예외 없이 색인·캐시 생성은 (a) 처리 끝의 사전 계산 또는 (b) POST 202 작업으로만. 〔2차〕 지금 쓰는 GET은 보고서 계열 **7개**(v3: `/reviewer-bundle/file` 포함 — 번들을 다시 만들고 스냅샷을 쓴다. `/submission-manifest`, `/submission-manifest/file`, `/validation-package`, `/validation-package/file`, `/case-report/file`, `/case-report/file/{format}` — T-030)와 지연 색인·캐시(타임라인·지도·계열·폴더 트리·썸네일 등 — T-133·T-134)다. 회귀 게이트: QA-108(OpenAPI의 GET 전수 호출 전/후 결과 폴더 스냅샷 동일).
-- 읽기 전용 처리(`readonly_reason`이 있는 처리)에 대한 비-GET 요청은 미들웨어 한 곳에서 409 `RUN_READ_ONLY`로 거부한다(T-032). 서버 단위 읽기 전용(`web --read-only`, T-112)은 같은 미들웨어를 모든 처리에 적용한다(허용 목록: 로그인·토큰 확인뿐).
+- GET은 증거·케이스 DB·보고서·감사·산출물에 쓰지 않는다. 〔v3 리뷰〕 보통 처리에서 GET이 쓸 수 있는 곳은 결과 폴더의 **다시 만들 수 있는 캐시 접두 목록**(썸네일·지연 색인, 6개 이하 — `api/app/get_write_policy.py`, T-349)뿐이고 읽기 전용 처리에서는 0이다. 캐시까지 금지할지는 결정 D74((가) 허용 목록 = 기본값 / (나) 전부 금지 — 사전 계산 또는 POST 202 작업으로만). 〔2차·v3 리뷰〕 보고서 계열 **7개** GET의 쓰기는 병합분(bc6c970)이 없앴다 — 검증 대기(v3: `/reviewer-bundle/file` 포함 — 번들을 다시 만들고 스냅샷을 쓴다. `/submission-manifest`, `/submission-manifest/file`, `/validation-package`, `/validation-package/file`, `/case-report/file`, `/case-report/file/{format}` — T-030)와 지연 색인·캐시(타임라인·지도·계열·폴더 트리·썸네일 등 — T-133·T-134)다. 회귀 게이트: QA-108(OpenAPI의 GET 전수 호출 전/후 결과 폴더 스냅샷 동일).
+- 읽기 전용 처리(`readonly_reason`이 있는 처리)에 대한 비-GET 요청은 미들웨어 한 곳에서 409 `RUN_READ_ONLY`로 거부한다(T-032). 서버 단위 읽기 전용(`web --read-only`, T-112)은 같은 미들웨어를 모든 처리에 적용한다(허용 목록: 로그인·토큰 확인, 그리고 읽기 질의인 POST 4개 `/search/count`·`/search/query`·`/search/entities`·`/search/hashes` — 병합분 `api/app/factory.py:86`. 그 밖의 비-GET은 전부 409).
 - 임의 경로를 받는 쓰기(`/api/sample-case/run`의 `output_dir`)는 허용 루트(`~/.rapidtriage/`) 밖을 거부하고, 폴더 삭제는 샘플 표식 파일이 있을 때만 한다(GAP-004).
 - `/api/browse`: 루프백 서버는 전체 디스크(분석 담당이 증거를 골라야 한다), `--remote` 서버는 `--browse-root` 안만(GAP-207).
-- 과거 결과가 증거 안에 있으면 "읽기 전용으로 열기"(지연 쓰기 전부 비활성, 메모리 계산, 상단 경고) — 결정 D37.
+- 과거 결과가 증거 안에 있으면 "읽기 전용으로 열기"(지연 쓰기 전부 비활성, 메모리 계산, 상단 경고) — 결정 D37. 〔v3 리뷰〕 서버 쪽은 병합됐고(`core/readonly_runs.py`, 필드 이름은 `readonly_reason`) 상단 경고는 아직 없다(T-348). 가져온 요약의 경로는 쓰기 위치뿐 아니라 **읽기 루트로도 신뢰하지 않는다**(T-350).
 
 ## D.11 그 밖의 고정 표면 〔2차 신규〕
 
@@ -180,7 +180,7 @@ v2의 "최상위에 `status`·`warnings`·`errors` 세 키 추가"는 폐기한�
 | CSS를 직접 읽는 테스트 | `shell/scrollLayout.test.ts`, `DataGrid.test.tsx:396`, `app/themeBoot.test.ts`, StatusChip, CaseDashboard | vitest | 해당 CSS·`index.html`을 고치는 과제(T-013·T-015·T-061)가 같은 PR에서 기대값을 갱신하고 PR에 적는다 |
 | 레이아웃 상수 | TREE_DEFAULT 260, VIEWER_DEFAULT 440, 레일 36, 분기 1200/900/1600 | `gridLayout`·`responsiveColumns`·`treePane`·`viewerPane` 테스트 | 값 변경 시 테스트를 "범위" 단언으로(D.3) — 분석 담당 모드의 기본값은 유지 |
 
-회귀 위험 요약(1,559 vitest + e2e 44건 기준): 가장 큰 표면은 ① 한글 접근성 이름(vitest 536·e2e 173회) ② 문구 단언(vitest 566·e2e 40) ③ 오류 본문의 `detail`(파이썬 190곳) ④ CSS·상수 직접 단언이다. ①③은 이 부록의 추가 방식으로 **깨지지 않게** 했고, ②④는 "그 화면을 바꾸는 과제가 같은 PR에서 testid로 옮긴다"는 규칙과 분석 담당 모드 회귀(e2e 13스펙)로 잡는다. 물결마다 `vitest` 전체의 통과 수가 줄면(삭제·skip) 물결 실패다.
+회귀 위험 요약(1,559 vitest + e2e 44건 기준): 가장 큰 표면은 ① 한글 접근성 이름(vitest 536·e2e 173회) ② 문구 단언(vitest 566·e2e 40) ③ 오류 본문의 `detail`(파이썬 190곳) ④ CSS·상수 직접 단언이다. ①③은 이 부록의 추가 방식으로 **깨지지 않게** 했고, ②④는 "그 화면을 바꾸는 과제가 같은 PR에서 `copy.ts` 키나 `testIds.ts` 상수로 옮긴다"는 규칙(부록 F.1)과 기존 e2e 13스펙 회귀로 잡는다(〔v3〕 "모드"는 없다). 물결마다 `vitest` 전체의 통과 수가 줄면(삭제·skip) 물결 실패다.
 
 ## D.12 증거에서 온 글의 자리 (v3 신규)
 
@@ -202,3 +202,12 @@ v2의 "최상위에 `status`·`warnings`·`errors` 세 키 추가"는 폐기한�
 | 검토 감사(`audit_event`) | `tool_version` 값, `params_json.actor_source`. 스키마 불변. DB 안 사슬은 R9 | T-180 |
 | 검증 패키지 | 원본 해시는 새로 계산, E01은 세그먼트 전부, `scope: container-segments` | T-179 |
 | 처리 요약 | 기존 키 불변. 추가(승인 뒤): `tool{…}`, `evidence_state` | T-276·277 |
+
+## D.14 v3 리뷰 추가 계약 (2026-11-12)
+
+- **병합된 코드의 이름이 정본이다**: `readonly_reason`(값 `OUTPUT_INSIDE_EVIDENCE` 등), 409 `RUN_READ_ONLY`, 404 `EXPORT_NOT_WRITTEN`, 403 `CREDENTIAL_FILE_WITHHELD`, 403 `PATH_OUTSIDE_ALLOWED_ROOT`, `IMPORT_OUTPUT_OUTSIDE_FOLDER`, `CASE_DB_UNREADABLE`, 매니페스트 요약의 `max_items_skipped_count`, `report_candidate_count(store, run_id)`. 계획의 다른 이름(`output_inside_evidence`, `over_limit_count`, `api/app/readonly_run.py`)은 쓰지 않는다. 오류 코드표(T-162)는 이 코드들을 그대로 싣는다.
+- **새 오류 코드**(추가만): `OUTPUT_DISK_FULL`(T-352) · `SERVER_READ_ONLY`(T-112) · `IDEMPOTENCY_KEY_REUSED`(T-356) · `CASE_ARCHIVED`(T-360).
+- **토큰**(T-351): `--token-file`의 파일은 소유자만 읽는다. 토큰은 표준 출력·로그·`localStorage`·로드 뒤 주소창 어디에도 남지 않는다. `--rotate-token` 뒤 옛 토큰은 401이고 응답 문장은 재발급을 안내한다.
+- **멱등 키**(T-219·T-356): `Idempotency-Key`가 같은 처리 요청·사건 만들기·표시 쓰기·내보내기는 첫 결과를 돌려준다. 본문이 다르면 409. 보관 24시간.
+- **감사 검증**(T-359): `rapidtriage audit-verify <파일> --json` — 종료 0(온전)·3(깨짐), 출력 키 `first_broken_line`·`pre_chain_lines`·`lines`. 사슬 필드가 없는 옛 줄은 깨짐이 아니다.
+- **사건 보관·삭제**(T-360, D73): 보관된 사건의 비-GET은 409 `CASE_ARCHIVED`. 삭제는 증거 경로에 손대지 않고 `exports/`와 내보내기 감사를 기본으로 남긴다.
