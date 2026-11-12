@@ -112,6 +112,8 @@ export interface ReviewMapPayload {
   exists: boolean;
   marks: ReviewMapMark[];
   truncated: boolean;
+  /** Set (with empty `marks`) when the case DB could not be read; the marks are then unknown. */
+  error?: string;
 }
 
 /** Read-only; never creates the case DB. */

@@ -99,11 +99,17 @@ interface OwnWrite {
   at: number;
 }
 
-/** Per run: the last fetched map (the baseline), this tab's pending writes, the quiet deadline. */
+/**
+ * Per run: the last fetched map (the baseline), this tab's pending writes, the quiet deadline,
+ * the marks of this tab's unkeyed writes in the quiet window (`null`: a tag tool, tags only) and
+ * the rows already attributed to them in that window.
+ */
 interface RemoteTracking {
   baseline: ReviewMap | null;
   own: Map<string, OwnWrite>;
   quietUntil: number;
+  unkeyed: Array<ReviewMarkBody | null>;
+  quietSeen: Set<string>;
 }
 
 const tracking = new Map<string, RemoteTracking>();
@@ -111,7 +117,7 @@ const tracking = new Map<string, RemoteTracking>();
 function trackingOf(runId: string): RemoteTracking {
   let entry = tracking.get(runId);
   if (!entry) {
-    entry = { baseline: null, own: new Map(), quietUntil: 0 };
+    entry = { baseline: null, own: new Map(), quietUntil: 0, unkeyed: [], quietSeen: new Set() };
     tracking.set(runId, entry);
   }
   return entry;
@@ -127,7 +133,10 @@ export function recordOwnReviewWrite(write: ReviewWrite, now = Date.now()): void
   const entry = trackingOf(write.runId);
   const keys = write.rows?.map(rowReviewKey) ?? [null];
   if (!write.mark || keys.some((key) => key === null)) {
+    if (now >= entry.quietUntil) entry.unkeyed = [];
     entry.quietUntil = now + QUIET_AFTER_UNKEYED_WRITE_MS;
+    entry.unkeyed.push(write.mark);
+    entry.quietSeen.clear();
   }
   if (!write.mark) return;
   for (const key of keys) if (key) entry.own.set(key, { mark: write.mark, at: now });
@@ -153,28 +162,69 @@ function changed(before: ReviewMapMark | undefined, after: ReviewMapMark): boole
   );
 }
 
+/** A tag tool (no mark) changes tags only: status, report flag and note stay as they were. */
+function tagsOnly(before: ReviewMapMark | undefined, after: ReviewMapMark): boolean {
+  if (!before) return after.status === "unreviewed" && !after.include_in_report && !after.note;
+  return (
+    before.status === after.status &&
+    before.include_in_report === after.include_in_report &&
+    before.note === after.note
+  );
+}
+
+/**
+ * Inside the quiet window: can this tab's unkeyed write explain the change? Only once per row
+ * (a row that changes again in the window was changed elsewhere), and only by what the write can
+ * do — a tag tool changes tags, a status write shows its status. Anything else is reported.
+ */
+function explainedByUnkeyedWrite(
+  entry: RemoteTracking,
+  key: string,
+  before: ReviewMapMark | undefined,
+  after: ReviewMapMark,
+): boolean {
+  if (entry.quietSeen.has(key)) return false;
+  const explained = entry.unkeyed.some((mark) =>
+    mark === null ? tagsOnly(before, after) : showsOwnWrite(after, mark),
+  );
+  if (explained) entry.quietSeen.add(key);
+  return explained;
+}
+
 /**
  * Compare a freshly fetched map with the run's previous one: the marks that changed and were not
  * written by this tab (or no longer show what this tab wrote) were changed elsewhere. The first
  * fetch of a run only sets the baseline. Returns how many rows another window changed.
+ *
+ * An empty map after a non-empty one is treated as a failed read (the review map never drops
+ * marks: clearing a mark stores `unreviewed`), so it neither reports nor becomes the baseline.
+ * Inside the quiet window after an unkeyed write, a change is skipped only when that write can
+ * explain it; the rest is still reported (review P2-7: the window used to swallow every change).
  */
 export function detectRemoteChanges(runId: string, map: ReviewMap, now = Date.now()): number {
   const entry = trackingOf(runId);
   const previous = entry.baseline;
+  if (previous !== null && previous.size > 0 && map.size === 0) return 0;
   entry.baseline = map;
   for (const [key, write] of entry.own) if (now - write.at > OWN_WRITE_TTL_MS) entry.own.delete(key);
+  const quiet = now < entry.quietUntil;
+  if (!quiet) {
+    entry.unkeyed = [];
+    entry.quietSeen.clear();
+  }
   if (previous === null) return 0;
   let remote = 0;
   for (const [key, mark] of map) {
-    if (!changed(previous.get(key), mark)) continue;
+    const before = previous.get(key);
+    if (!changed(before, mark)) continue;
     const own = entry.own.get(key);
     if (own) {
       entry.own.delete(key);
       if (showsOwnWrite(mark, own.mark)) continue;
     }
+    if (quiet && explainedByUnkeyedWrite(entry, key, before, mark)) continue;
     remote += 1;
   }
-  if (now < entry.quietUntil) return 0;
   return remote;
 }
 
@@ -192,7 +242,11 @@ export function useReviewMap(runId: string | null, enabled = true): ReviewMap | 
   const query = useQuery({
     queryKey: reviewMapKey(runId),
     queryFn: async ({ signal }) => {
-      const map = buildReviewMap((await getReviewMap(runId as string, signal)).marks ?? []);
+      const payload = await getReviewMap(runId as string, signal);
+      // A 200 with `error` is an unread case DB, not "no marks": keep the last good map (the query
+      // keeps its data on error) and never compare it (review P2-6: a false toast for every mark).
+      if (payload.error) throw new Error(payload.error);
+      const map = buildReviewMap(payload.marks ?? []);
       notifyRemoteChanges(detectRemoteChanges(runId as string, map));
       return map;
     },

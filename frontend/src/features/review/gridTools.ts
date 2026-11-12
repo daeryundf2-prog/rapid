@@ -122,7 +122,12 @@ export async function propagateTagsByHash(
   currentRowSource()?.refetch?.();
   const label = chosen.map((tag) => `'${tag.name}'`).join(", ");
   const hashless = result.propagation?.hashless_targets ?? 0;
-  const tail = hashless ? ` (해시가 없는 행 ${hashless.toLocaleString("ko-KR")}건은 그 행에만 적용)` : "";
+  const skippedEmpty = result.propagation?.skipped_empty ?? 0;
+  const notes = [
+    hashless ? `해시가 없는 행 ${hashless.toLocaleString("ko-KR")}건은 그 행에만 적용` : "",
+    skippedEmpty ? `빈 파일(0바이트) ${skippedEmpty.toLocaleString("ko-KR")}건은 전파하지 않음` : "",
+  ].filter(Boolean);
+  const tail = notes.length ? ` (${notes.join(" · ")})` : "";
   return `같은 해시 행 ${result.applied_count.toLocaleString("ko-KR")}건에 태그 ${label}을(를) 전파했습니다${tail}`;
 }
 
