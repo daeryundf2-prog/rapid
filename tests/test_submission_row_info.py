@@ -86,6 +86,8 @@ class SubmissionRowInfoTests(unittest.TestCase):
             {
                 "timestamp": "2026-01-01T00:00:00Z",
                 "preview": "row preview 1",
+                "preview_truncated": False,
+                "preview_total": 13,
                 "citation_id": "CIT-0001",
                 "collection": "browser_history",
                 "kind": "url_visit",
@@ -93,6 +95,13 @@ class SubmissionRowInfoTests(unittest.TestCase):
             },
         )
         self.assertEqual(first["evidence"]["relative_path"], "nested/row1.txt")
+        # The 200-character preview cap is disclosed, never silent (collector caps inventory).
+        from rapidtriage.core import submission
+
+        long_row = submission.build_row_info({"summary": "가" * 450})
+        self.assertTrue(long_row["preview_truncated"])
+        self.assertEqual(long_row["preview_total"], 450)
+        self.assertEqual(len(long_row["preview"]), submission.PREVIEW_MAX_CHARS)
         validate(manifest, json.loads(SCHEMA_PATH.read_text(encoding="utf-8")))
 
     def test_existing_keys_unchanged_snapshot(self) -> None:

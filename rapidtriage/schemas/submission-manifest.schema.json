@@ -77,6 +77,8 @@
             "properties": {
               "timestamp": { "type": "string" },
               "preview": { "type": "string" },
+              "preview_truncated": { "type": "boolean" },
+              "preview_total": { "type": "integer", "minimum": 0 },
               "citation_id": { "type": "string" },
               "collection": { "type": "string" },
               "kind": { "type": "string" },

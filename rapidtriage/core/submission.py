@@ -139,7 +139,7 @@ def _first_text(*values: object) -> str:
     return ""
 
 
-def build_row_info(bookmark: Mapping[str, object]) -> dict[str, str]:
+def build_row_info(bookmark: Mapping[str, object]) -> dict[str, object]:
     """The artifact row a manifest item cites (R8 T-178): time, preview and where it came from.
 
     Case DB marks carry ``reference.citation_id/collection/kind/locator`` and ``snapshot.timestamp``;
@@ -150,9 +150,13 @@ def build_row_info(bookmark: Mapping[str, object]) -> dict[str, str]:
     snapshot = bookmark.get("snapshot")
     snap = snapshot if isinstance(snapshot, Mapping) else {}
     preview = _first_text(snap.get("summary"), bookmark.get("summary"), bookmark.get("note"))
-    if len(preview) > PREVIEW_MAX_CHARS:
+    preview_total = len(preview)
+    preview_truncated = preview_total > PREVIEW_MAX_CHARS
+    if preview_truncated:
         preview = preview[: PREVIEW_MAX_CHARS - 1] + "…"
     return {
+        "preview_truncated": preview_truncated,
+        "preview_total": preview_total,
         "timestamp": _first_text(snap.get("timestamp"), ref.get("timestamp")),
         "preview": preview,
         "citation_id": _first_text(ref.get("citation_id")),
