@@ -143,7 +143,7 @@ from .pagination import (
     paginate_payload,
     with_record_index,
 )
-from .preflight_space import DISK_SPACE_INSUFFICIENT, check_output_space
+from .preflight_space import preflight_space_for
 from .readonly_mode import effective_readonly_reason, server_read_only_of
 from .row_conditions import (
     MATCH_CACHE,
@@ -539,15 +539,9 @@ def build_runs_router(
             is_file = Path(request.root).expanduser().is_file()
             message = FILE_EVIDENCE_NEEDS_OUTPUT if is_file else FOLDER_EVIDENCE_NEEDS_OUTPUT
             raise HTTPException(status_code=422, detail={"code": OUTPUT_DIR_REQUIRED, "message": message})
-        space: dict[str, Any] | None = None
-        if not request.dry_run:
-            # T-186: estimated output vs free space of the output volume, before anything is written.
-            space = check_output_space(request.root, request.output_dir or "", partition_start_sector=request.e01_partition_start_sector)
-            if space["level"] == "block" and not request.allow_low_disk_space:
-                raise HTTPException(
-                    status_code=507,
-                    detail={"code": DISK_SPACE_INSUFFICIENT, "message": space["message"], "preflight_space": space},
-                )
+        # T-186 / WB-9 P1-1: estimated output vs free space of the output volume, before anything is
+        # written. Advice only until the console can confirm an override (T-079): never a 507.
+        space = preflight_space_for(request)
         try:
             job = store.run_sync(run_request) if request.wait else store.submit(run_request)
         except RunOutputDirBusy as exc:
@@ -638,6 +632,12 @@ def build_runs_router(
         409 (Korean) while another queued/running run writes into the target folder."""
         resume = bool(body.resume) if body is not None else False
         try:
+            previous = store.get(run_id).request
+        except KeyError:
+            raise HTTPException(status_code=404, detail="런을 찾을 수 없습니다")
+        # WB-9 P1-1: same advice as POST /api/runs (a fresh retry writes next to the old folder: same volume).
+        space = preflight_space_for(dataclasses.replace(previous, resume=resume))
+        try:
             payload = store.retry(run_id, resume=resume).to_dict(include_summary=True)
         except KeyError:
             raise HTTPException(status_code=404, detail="런을 찾을 수 없습니다")
@@ -646,6 +646,8 @@ def build_runs_router(
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
         payload["retry_mode"] = "resume" if resume else "fresh"
+        if space is not None:
+            payload["preflight_space"] = space
         return payload
 
 

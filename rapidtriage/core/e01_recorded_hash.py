@@ -53,6 +53,9 @@ class RecordedHash:
     sections: list[str] = field(default_factory=list)  # e.g. ["hash", "digest"]
     reason: str = ""  # why the values are empty (Korean), "" when a value was read
     sections_truncated: bool = False
+    #: The segment set is known to be incomplete (the last walked segment does not end in ``done``):
+    #: the hash sections live in the last segment, so "no value" means "not read", never "none recorded".
+    incomplete: bool = False
     #: Raw (often English, long) error text behind ``reason``: logged and audited, never shown.
     detail: str = ""
 
@@ -67,6 +70,7 @@ class RecordedHash:
             "sections": list(self.sections),
             "reason": self.reason,
             "sections_truncated": self.sections_truncated,
+            "incomplete": self.incomplete,
             "claims_acquisition_media_hash": bool(self.md5 or self.sha1),
             "recomputed": False,
         }
@@ -121,6 +125,8 @@ SECTION_PARSERS = {"hash": parse_hash_section, "digest": parse_digest_section, "
 #: MD5 + SHA-1 + padding). ``xhash`` is a zlib stream with its own checksum.
 SECTION_CHECKSUM_SPAN = {"hash": 32, "digest": 76}
 INCOMPLETE_SEGMENT_SET_REASON = "세그먼트 집합이 불완전함(마지막 세그먼트 없음)"
+#: Verdict wording for an incomplete set (R8 WB-9 P1-3): never "기록된 취득 해시 없음".
+INCOMPLETE_RECORDED_NOTE = "기록된 취득 해시를 읽지 못함(세그먼트 집합 불완전)"
 
 _SEGMENT_SUFFIX = re.compile(r"^\.(?:E(?P<en>\d{2})|(?P<x>Ex)(?P<xn>\d{2}))$", re.IGNORECASE)
 _SEGMENT_LETTER_SUFFIX = re.compile(r"^\.[E-Z](?P<x>x?)[A-Z]{2}$", re.IGNORECASE)
@@ -164,6 +170,51 @@ def discover_recorded_hash_segments(path: Path) -> list[Path]:
     else:
         LOGGER.warning("세그먼트 이름 상한 %d개에 닿아 잘림(그 뒤 세그먼트는 찾지 않음)", MAX_SEGMENT_INDEX)
     return segments or [path]
+
+
+def ewf_segment_index(path: Path) -> int | None:
+    """1-based segment index of ``.E01``..``.E99`` / ``.EAA``..``.ZZZ`` (and the Ex01 forms), else ``None``."""
+    suffix = Path(path).suffix
+    match = _SEGMENT_SUFFIX.match(suffix)
+    if match is not None:
+        return int(match.group("en") or match.group("xn"))
+    letter = _SEGMENT_LETTER_SUFFIX.match(suffix)
+    if letter is None:
+        return None
+    body = suffix[1:].upper().replace("X", "", 1) if letter.group("x") else suffix[1:].upper()
+    return 100 + (ord(body[0]) - ord("E")) * 676 + (ord(body[1]) - ord("A")) * 26 + (ord(body[2]) - ord("A"))
+
+
+def discover_segment_files(path: Path) -> tuple[list[Path], list[int]]:
+    """``(segments, gaps)``: every segment file of the set in index order, and the missing indices.
+
+    The container hash and the disk preflight use this (R8 WB-9 P1-4) instead of the engine's
+    two-digit :func:`rapidtriage.core.e01.discover_e01_segments`, so a set past ``.E99`` is covered
+    in full. The chain from segment 1 comes from :func:`discover_recorded_hash_segments`;
+    two-digit segments present after a gap are appended (as the engine's discovery did) and the
+    gap indices are returned so callers can disclose them. Read only (lists the folder).
+    """
+    path = Path(path)
+    chain = discover_recorded_hash_segments(path)
+    first = ewf_segment_index(chain[0])
+    if first is None:
+        return chain, []
+    ex_family = bool(re.match(r"^\.[E-Z]x", chain[0].suffix, re.IGNORECASE))
+    have = {ewf_segment_index(item) for item in chain}
+    extra: list[tuple[int, Path]] = []
+    for child in path.parent.iterdir():
+        if child.stem.lower() != path.stem.lower() or child.name in {item.name for item in chain}:
+            continue
+        match = _SEGMENT_SUFFIX.match(child.suffix)
+        if match is None or bool(match.group("x")) != ex_family:
+            continue
+        index = int(match.group("en") or match.group("xn"))
+        if index not in have:
+            extra.append((index, child))
+    segments = sorted(chain + [child for _, child in extra], key=lambda item: ewf_segment_index(item) or 0)
+    indices = {ewf_segment_index(item) or 0 for item in segments}
+    gaps = [index for index in range(1, max(indices) + 1) if index not in indices]
+    return segments, gaps
 
 
 def _checksum_ok(section_type: str, descriptor: bytes, data: bytes) -> bool:
@@ -309,6 +360,7 @@ def read_recorded_acquisition_hash(path: Path) -> RecordedHash:
             result, complete, notes = _read_ewf1_sections(segments)
             if not complete:
                 notes.insert(0, INCOMPLETE_SEGMENT_SET_REASON)
+                result.incomplete = True
             elif not (result.md5 or result.sha1) and not notes:
                 fallback = _read_libewf(segments)
                 if fallback.md5 or fallback.sha1:
@@ -376,11 +428,12 @@ def evidence_hash_verdict(
     recorded_note = ""
     if recorded is not None:
         parts = [f"{name.upper()} {value}" for name, value in (("md5", recorded.md5), ("sha1", recorded.sha1)) if value]
-        recorded_note = (
-            f"이미지에 기록된 취득 해시 {' · '.join(parts)}"
-            if parts
-            else f"이미지에 기록된 취득 해시 없음({recorded.reason or '사유 미상'})"
-        )
+        if parts:
+            recorded_note = f"이미지에 기록된 취득 해시 {' · '.join(parts)}"
+        elif recorded.incomplete:
+            recorded_note = f"{INCOMPLETE_RECORDED_NOTE}({recorded.reason or '사유 미상'})"
+        else:
+            recorded_note = f"이미지에 기록된 취득 해시 없음({recorded.reason or '사유 미상'})"
     if not expected:
         message = "기대 해시가 없어 계산값만 기록했습니다 (파일·컨테이너 바이트 기준)"
         return "computed", f"{message} · {recorded_note}" if recorded_note else message

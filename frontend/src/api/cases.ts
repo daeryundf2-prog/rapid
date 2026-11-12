@@ -50,7 +50,14 @@ export interface CaseEvidence {
   /** T-129: per-segment digests of the container bytes (one row for a single file). */
   hash_segments?: EvidenceHashSegment[];
   /** T-181: acquisition hash recorded in the image (never recomputed); null for non-EWF evidence. */
-  hash_recorded?: { md5: string; sha1: string; reason: string } | null;
+  hash_recorded?: { md5: string; sha1: string; reason: string; incomplete?: boolean } | null;
+  /** WB-9 P1-5: server-side comparison of the input with the image's recorded acquisition hash (E01). */
+  hash_recorded_compare?: "" | "equals" | "differs" | "not-comparable";
+  /** WB-9 P1-3: the segment set is known to be incomplete (missing last segment or a gap). */
+  hash_set_incomplete?: boolean;
+  /** WB-9 P1-4: segments the container hash covered, and the missing segment numbers. */
+  hash_segment_count?: number | null;
+  hash_segment_gaps?: number[];
   added_at: string | null;
   runs: CaseRunBrief[];
   /** The run gate: folders always run; a file only when an adapter reads it directly (else 등록만). */

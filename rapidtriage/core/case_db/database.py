@@ -148,7 +148,11 @@ from .search import (
 from .trusted_diffs import (
     build_forensic_integrity_matrix,
 )
-from .write_lock import retry_when_locked
+from .write_lock import CaseDatabaseLockedError, retry_when_locked
+
+#: Rows per review-batch transaction (WB-9 P2-15): one chunk holds the write lock ~0.7 s (500 rows,
+#: measured on a synthetic DB; 2,000 rows took 3.5 s, close to the 5 s busy timeout of other windows).
+REVIEW_BATCH_CHUNK_ROWS = 500
 
 __all__ = [
     "CaseDatabase",
@@ -1025,14 +1029,25 @@ class CaseDatabase:
     def _write_review_marks(
         self, case_id: str, targets: list[tuple[str, str]], fields: dict[str, object]
     ) -> list[dict[str, object]]:
-        """Every target in ONE ``BEGIN IMMEDIATE`` transaction (all or nothing), retried as a whole
-        on a lasting lock; the marks are read back after the commit, outside the retry (P2-1)."""
+        """Up to :data:`REVIEW_BATCH_CHUNK_ROWS` targets per ``BEGIN IMMEDIATE`` transaction, each retried as
+        a whole on a lasting lock, so a select-all batch never holds the lock for its whole length (WB-9
+        P2-15). Every target is checked before the first write, so a missing one still writes nothing; a
+        lock lasting past the retries on a later chunk raises ``CaseDatabaseLockedError`` with
+        ``applied_rows`` (earlier chunks stay saved). Marks are read back after the commits (P2-1)."""
         normalized_case_id = normalize_identifier(case_id, fallback="case")
         for key in ("tags", "add_tags"):  # a generator must survive a retry
             if fields.get(key) is not None:
                 fields[key] = list(fields[key])  # type: ignore[call-overload]
 
-        def write() -> None:
+        chunks = [targets[start:start + REVIEW_BATCH_CHUNK_ROWS] for start in range(0, len(targets), REVIEW_BATCH_CHUNK_ROWS)]
+        if len(chunks) > 1:
+            with self.connect() as connection:
+                for target_type, target_id in targets:
+                    table = REVIEW_TARGET_TABLES.get(target_type)
+                    if table and connection.execute(f"SELECT 1 FROM {table} WHERE id = ? LIMIT 1", (target_id,)).fetchone() is None:
+                        raise CaseDatabaseError(f"review target not found: {target_type}:{target_id} in case {normalized_case_id}")
+
+        def write(chunk: list[tuple[str, str]]) -> None:
             with self.connect(write=True) as connection:
                 apply_schema(connection)
                 if not connection.in_transaction and not self.bulk_load:  # a migration committed the lock away (P2-5)
@@ -1041,10 +1056,15 @@ class CaseDatabase:
                     "SELECT 1 FROM case_record WHERE case_id = ?", (normalized_case_id,)
                 ).fetchone() is None:
                     raise CaseDatabaseError(f"case not found: {normalized_case_id}")
-                for target_type, target_id in targets:
+                for target_type, target_id in chunk:
                     self._write_review_mark(connection, normalized_case_id, target_type, target_id, **fields)
 
-        retry_when_locked(write)
+        for index, chunk in enumerate(chunks):
+            try:
+                retry_when_locked(lambda chunk=chunk: write(chunk))  # type: ignore[misc]
+            except CaseDatabaseLockedError as exc:
+                exc.applied_rows, exc.total_rows = index * REVIEW_BATCH_CHUNK_ROWS, len(targets)
+                raise
         with self.connect() as connection:
             rows = [
                 connection.execute(
@@ -1287,6 +1307,7 @@ class CaseDatabase:
             "database": str(self.path),
             "case_id": normalize_identifier(case_id, fallback="case"),
             "updated_count": len(marks),
+            "transactions": max(1, -(-len(pairs) // REVIEW_BATCH_CHUNK_ROWS)),
             "marks": marks,
         }
 

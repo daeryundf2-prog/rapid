@@ -15,7 +15,12 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from ...core.case_db import open_case_database
-from ...core.case_db.write_lock import case_db_locked_detail, is_lock_error
+from ...core.case_db.write_lock import (
+    CaseDatabaseLockedError,
+    case_db_locked_detail,
+    is_lock_error,
+    raised_in_case_db_code,
+)
 from ...core.jobs import RunJobStore, default_job_store
 from ...core.readonly_runs import (
     RUN_READ_ONLY,
@@ -218,16 +223,23 @@ def create_app(
             return error_response(409, server_read_only_detail())
         return error_response(409, exc.to_detail())
 
+    @api.exception_handler(CaseDatabaseLockedError)
+    async def case_db_locked(_request: Request, exc: CaseDatabaseLockedError):
+        """A case-DB write still locked after its retries is 409 ``CASE_DB_LOCKED`` on any URL (WB-9 P2-16)."""
+        return error_response(409, case_db_locked_detail(exc))
+
     @api.exception_handler(sqlite3.OperationalError)
     async def read_only_run_sqlite_write(request: Request, exc: sqlite3.OperationalError):
         """A SQLite write refused by the guard's ``PRAGMA query_only`` (D37) is 409 ``RUN_READ_ONLY``.
 
         Only for a request about a read-only run. On a case-DB route (``/api/case-db/*``,
-        ``/api/cases/*``) a write refused by another writer's lock (``database is locked``, e.g. a
-        tag edit while another window saves) is 409 ``CASE_DB_LOCKED`` with a Korean message; any
-        other SQLite error keeps the crash path.
+        ``/api/cases/*``) -- or from case-DB code under any URL, e.g. ``/api/runs/…`` (WB-9 P2-16) -- a
+        write refused by another writer's lock (``database is locked``) is 409 ``CASE_DB_LOCKED`` with a
+        Korean message; any other SQLite error keeps the crash path.
         """
-        if is_lock_error(exc) and request.url.path.startswith(("/api/case-db/", "/api/cases/")):
+        if is_lock_error(exc) and (
+            raised_in_case_db_code(exc) or request.url.path.startswith(("/api/case-db/", "/api/cases/"))
+        ):
             return error_response(409, case_db_locked_detail())
         reason = None
         if str(exc) == SQLITE_READONLY_MESSAGE:

@@ -500,7 +500,7 @@ def build_case_db_router(
                 include_in_report=request.include_in_report,
             )
         except CaseDatabaseLockedError as exc:
-            raise HTTPException(status_code=409, detail=case_db_locked_detail()) from exc
+            raise HTTPException(status_code=409, detail=case_db_locked_detail(exc)) from exc
         except CaseDatabaseError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 

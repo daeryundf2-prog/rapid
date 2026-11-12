@@ -32,12 +32,43 @@ CASE_DB_LOCKED = "CASE_DB_LOCKED"
 
 
 class CaseDatabaseLockedError(CaseDatabaseError):
-    """A write still refused by SQLite's lock after every retry (Korean message)."""
+    """A write still refused by SQLite's lock after every retry (Korean message).
+
+    ``applied_rows`` / ``total_rows`` are set when a chunked batch (WB-9 P2-15) had already committed
+    earlier chunks: those rows are saved, the rest are not."""
+
+    applied_rows: int = 0
+    total_rows: int = 0
 
 
-def case_db_locked_detail() -> dict[str, str]:
-    """HTTP 409 ``detail`` for a locked case DB: nothing of the refused request was written."""
-    return {"code": CASE_DB_LOCKED, "message": CASE_DB_LOCKED_MESSAGE}
+def case_db_locked_detail(exc: BaseException | None = None) -> dict[str, object]:
+    """HTTP 409 ``detail`` for a locked case DB. Nothing of the refused transaction was written; for a
+    chunked batch the message says how many rows earlier transactions already saved."""
+    applied = int(getattr(exc, "applied_rows", 0) or 0)
+    if not applied:
+        return {"code": CASE_DB_LOCKED, "message": CASE_DB_LOCKED_MESSAGE}
+    total = int(getattr(exc, "total_rows", 0) or 0)
+    return {
+        "code": CASE_DB_LOCKED,
+        "message": f"{CASE_DB_LOCKED_MESSAGE} 이 요청의 {total:,}행 중 앞의 {applied:,}행은 이미 저장되었고 나머지는 저장되지 않았습니다.",
+        "applied_count": applied,
+        "total_count": total,
+    }
+
+
+def raised_in_case_db_code(exc: BaseException) -> bool:
+    """The error came through case-DB code (``core/case_db`` or the API's case-DB modules), whatever the URL."""
+    tb = exc.__traceback__
+    while tb is not None:
+        name = tb.tb_frame.f_code.co_filename.replace("\\", "/")
+        if "/core/case_db/" in name or name.rsplit("/", 1)[-1] in CASE_DB_API_MODULES:
+            return True
+        tb = tb.tb_next
+    return False
+
+
+#: API modules whose SQLite work is case-DB work (a lock there is ``CASE_DB_LOCKED`` on any URL).
+CASE_DB_API_MODULES = frozenset({"routes_case_db.py", "routes_review_tools.py", "routes_cases.py", "case_workspace.py"})
 
 
 def is_lock_error(exc: BaseException) -> bool:

@@ -70,7 +70,9 @@ class EvidenceHashDisplayTests(unittest.TestCase):
         self.assertEqual([segment["name"] for segment in segments], ["disk.E01", "disk.E02"])
         self.assertEqual(segments[0]["sha256"], hashlib.sha256(self.image.read_bytes()).hexdigest())
         self.assertEqual(segments[1]["sha256"], hashlib.sha256(self.second.read_bytes()).hexdigest())
-        self.assertEqual(row["hash_recorded"], {"md5": MD5.hex(), "sha1": SHA1.hex(), "reason": ""})
+        self.assertEqual(row["hash_recorded"], {"md5": MD5.hex(), "sha1": SHA1.hex(), "reason": "", "incomplete": False})
+        self.assertEqual((row["hash_recorded_compare"], row["hash_set_incomplete"]), ("equals", False))
+        self.assertEqual((row["hash_segment_count"], row["hash_segment_gaps"]), (2, []))
         # Container columns stay container (aggregate) hashes.
         aggregate = hashlib.sha256(self.image.read_bytes() + self.second.read_bytes()).hexdigest()
         self.assertEqual(row["hashes"]["sha256"], aggregate)
@@ -136,6 +138,63 @@ class EvidenceHashDisplayTests(unittest.TestCase):
             ]
         self.assertEqual(params[-1]["recorded_error"], raw)
         self.assertEqual(params[-1]["status"], "computed")
+
+
+class WB9HashHonestyTests(unittest.TestCase):
+    """R8 WB-9 P1-3 / P1-4 / P1-5 on the product path (case API + hash worker)."""
+
+    setUp = EvidenceHashDisplayTests.setUp
+    add = EvidenceHashDisplayTests.add
+
+    def evidence_dir(self, name: str) -> Path:
+        folder = self.base / name
+        folder.mkdir()
+        return folder
+
+    def test_incomplete_segment_set_is_not_no_recorded_hash(self) -> None:
+        for expected in ("", MD5.hex()):
+            image = self.evidence_dir(f"cut{len(expected)}") / "cut.E01"
+            image.write_bytes(build_ewf1_segment([("header", b"h"), ("next", b"")]))  # last segment missing
+            row = self.add(f"E-I{len(expected)}", "e01", image, expected)
+            self.assertEqual(row["hash_status"], "computed")
+            self.assertTrue(row["hash_set_incomplete"], row)
+            self.assertTrue(row["hash_recorded"]["incomplete"])
+            self.assertIn("기록된 취득 해시를 읽지 못함(세그먼트 집합 불완전", row["hash_message"])
+            self.assertIn("세그먼트 집합 불완전 — 컨테이너 해시는 있는 세그먼트만", row["hash_message"])
+            self.assertNotIn("기록된 취득 해시 없음", row["hash_message"])
+
+    def test_more_than_99_segments_are_all_hashed(self) -> None:
+        folder = self.evidence_dir("big")
+        parts = [build_ewf1_segment([("header", b"h"), ("next", b"")])]
+        parts += [build_ewf1_segment([("next", b"")], segment_number=n) for n in range(2, 100)]
+        parts.append(build_ewf1_segment([("digest", digest_data()), ("done", b"")], segment_number=100))
+        for number, data in enumerate(parts, start=1):
+            suffix = f".E{number:02d}" if number < 100 else ".EAA"
+            (folder / f"big{suffix}").write_bytes(data)
+        row = self.add("E-BIG", "e01", folder / "big.E01", MD5.hex())
+        self.assertEqual(row["hash_segment_count"], 100)
+        self.assertEqual(len(row["hash_segments"]), 100)
+        self.assertEqual((row["hash_segments"][-1]["name"], row["hash_segments"][-1]["segment_number"]), ("big.EAA", 100))
+        self.assertEqual(row["hashes"]["sha256"], hashlib.sha256(b"".join(parts)).hexdigest())
+        self.assertFalse(row["hash_set_incomplete"])
+        self.assertEqual(row["hash_recorded_compare"], "equals")
+
+    def test_gap_in_segment_set_is_disclosed(self) -> None:
+        folder = self.evidence_dir("gap")
+        (folder / "gap.E01").write_bytes(build_ewf1_segment([("header", b"h"), ("next", b"")]))
+        (folder / "gap.E03").write_bytes(build_ewf1_segment([("digest", digest_data()), ("done", b"")], segment_number=3))
+        row = self.add("E-GAP", "e01", folder / "gap.E01")
+        self.assertEqual((row["hash_segment_count"], row["hash_segment_gaps"], row["hash_set_incomplete"]), (2, [2], True))
+
+    def test_recorded_mismatch_is_decided_server_side_without_the_sidecar(self) -> None:
+        row = self.add("E-MIS", "e01", self.image, "f" * 32)
+        self.assertEqual((row["hash_status"], row["hash_recorded_compare"]), ("mismatched", "differs"))
+        sidecar = self.workspace.hash_dir(self.case_id, row["citation_id"]) / HASH_VIEW_FILE
+        sidecar.unlink()
+        rows = self.client.get(f"/api/cases/{self.case_id}/evidence").json()["evidence"]
+        again = next(item for item in rows if item["evidence_number"] == "E-MIS")
+        self.assertIsNone(again["hash_recorded"])  # sidecar gone ...
+        self.assertEqual(again["hash_recorded_compare"], "differs")  # ... the server still knows
 
 
 if __name__ == "__main__":

@@ -90,10 +90,11 @@ _ROWS: tuple[ErrorCode, ...] = (
        "그 런이 끝나기를 기다리거나 다른 출력 폴더를 지정하세요", "Output folder is in use by another run",
        "T-007"),
     # -- disk free-space check before a run (api/app/preflight_space.py, T-186) -------------------
-    _e("DISK_SPACE_INSUFFICIENT", 507, 1, "output", "http", "active",
-       "출력 위치의 여유 공간이 예상 출력 크기보다 작아 런을 시작하지 않았습니다",
-       "여유 공간이 넉넉한 출력 위치를 지정하거나, 위험을 감수하고 시작하려면 allow_low_disk_space를 켜세요",
-       "Not enough free disk space for the run output", "T-186"),
+    # WB-9 P1-1: advice in the 202 body (``preflight_space``), never a refusal until T-079 adds a confirm step.
+    _e("DISK_SPACE_INSUFFICIENT", None, None, "output", "body", "active",
+       "출력 위치의 여유 공간이 최대 출력 크기(원시 이미지의 선택 파티션 크기)보다 작습니다(런은 시작됨, 경고만)",
+       "여유 공간이 넉넉한 출력 위치를 지정하세요. 실제 출력은 할당된 데이터만큼이라 더 작을 수 있습니다",
+       "Free disk space is below the upper bound of the run output", "T-186"),
     _e("DISK_SPACE_LOW", None, None, "output", "body", "active",
        "출력 위치의 여유 공간이 빠듯합니다(예상 출력 크기의 오차 범위 안)",
        "가능하면 여유 공간이 더 큰 출력 위치를 지정하세요", "Free disk space is tight for the run output", "T-186"),

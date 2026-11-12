@@ -8,7 +8,9 @@ tool category, whether this run found local evidence and which server-side recor
 no legal wording is generated (legal review item, plan §3.4).
 
 Honesty (R8 T-189): browser AI-service visits (``browser-ai-usage`` rows of the browser kinds) count as
-local chatbot evidence ("방문 기록"); the read-budget skipped files (the ``rapidtriage-ai-agent-skipped.json``
+local "방문 기록" evidence of the catalog category of the visited service (WB-9 P1-6: a chatbot host is
+chatbot evidence, an IDE agent's site is IDE-agent evidence; gateways, provider sites and hosts no catalog
+tool claims go on a separate "AI 관련 사이트 방문(분류 없음)" line); the read-budget skipped files (the ``rapidtriage-ai-agent-skipped.json``
 sidecar), per-session message/tool-call caps and cut messages are stated on a "수집 한계" line; periods carry
 the time zone their stamps actually hold; and a metadata-only run says what was still collected.
 """
@@ -20,6 +22,7 @@ import re
 from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from .ai_catalog.catalog import load_catalog
 from .ai_catalog.labels import CATEGORY_LABELS_KO
@@ -131,12 +134,46 @@ def period_text(first: str, last: str) -> str:
     return f"`{first}` ~ `{last}` (시간대: {' / '.join(zones)})"
 
 
+def _host_covered(host: str, domain: str) -> bool:
+    return host == domain or host.endswith("." + domain)
+
+
+def visit_category(service: str, host: str = "") -> str:
+    """Catalog category of a browser AI visit (``""`` = unclassified), WB-9 P1-6.
+
+    A visit counts for a category only when a catalog tool whose label is the visit's service label
+    claims the host (or, for rows without a host, when the label names tools of one category only).
+    Gateways / provider hosts (``openrouter.ai``, Helicone …), vendor sites shared by several tools
+    (``openai.com`` "OpenAI", ``cursor.com``) and hosts no tool lists (``huggingface.co``) stay
+    unclassified: a visit there says nothing about which kind of AI tool was used."""
+    catalog = load_catalog()
+    host = host.strip().lower()
+    named = [tool for tool in catalog.tools if tool.label == service and tool.category in CATEGORY_ORDER]
+    if host:
+        if any(_host_covered(host, domain) for domain, _label in catalog.infrastructure_domains):
+            return ""
+        named = [tool for tool in named if any(_host_covered(host, domain) for domain in tool.domains)]
+    categories = {tool.category for tool in named}
+    return next(iter(categories)) if len(categories) == 1 else ""
+
+
+def _visit_host(item: Mapping[str, object]) -> str:
+    host = str(item.get("domain") or "")
+    if host:
+        return host
+    try:
+        return urlsplit(str(item.get("url") or "")).hostname or ""
+    except ValueError:
+        return ""
+
+
 def _browser_ai_visits(output_dir: Path) -> dict[str, object]:
     """AI-service visits recorded in browser history (``browser-ai-usage`` rows), read only."""
     from .artifact_profiles import iter_payload_records
 
     profiles = urls = visits = 0
     services: Counter[str] = Counter()
+    service_categories: dict[str, str] = {}
     first = last = ""
     for kind, artifact_type in BROWSER_AI_SOURCES:
         payload, path = _payload(output_dir, kind)
@@ -156,6 +193,10 @@ def _browser_ai_visits(output_dir: Path) -> dict[str, object]:
                     service = str(item.get("ai_service") or "").strip()
                     if service:
                         services[service] += 1
+                        category = visit_category(service, _visit_host(item))
+                        # One service label on several hosts: a classified host wins.
+                        if category or service not in service_categories:
+                            service_categories[service] = category
                     stamp = str(item.get("last_visited_at") or "")
                     if len(stamp) >= 10:
                         first = stamp if not first or stamp < first else first
@@ -167,6 +208,7 @@ def _browser_ai_visits(output_dir: Path) -> dict[str, object]:
         "urls": urls,
         "visits": visits,
         "services": dict(sorted(services.items())),
+        "service_categories": dict(sorted(service_categories.items())),
         "first_visit": first,
         "last_visit": last,
     }
@@ -344,17 +386,23 @@ def ai_usage_summary(output_dir: Path | str | None) -> dict[str, object]:
 def _categories(
     names: Mapping[str, list[str]], evidence: Mapping[str, set[str]], browser: Mapping[str, object]
 ) -> dict[str, dict[str, object]]:
-    """Per-category tools / evidence kinds; browser AI-service visits are chatbot evidence ("visit")."""
+    """Per-category tools / evidence kinds; a browser AI-service visit is "visit" evidence of the visited
+    service's catalog category (:func:`visit_category`), unclassified visits of none (WB-9 P1-6)."""
+    mapping = browser.get("service_categories") if isinstance(browser.get("service_categories"), Mapping) else {}
     out: dict[str, dict[str, object]] = {}
     for category in CATEGORY_ORDER:
         kinds = set(evidence.get(category) or ())
-        visit_services: list[str] = []
-        if category == "chatbot" and (_int(browser.get("urls")) or 0) > 0:
+        visit_services = sorted(str(name) for name, value in mapping.items() if value == category)  # type: ignore[union-attr]
+        if visit_services:
             kinds.add("visit")
-            services = browser.get("services") if isinstance(browser.get("services"), Mapping) else {}
-            visit_services = sorted(str(name) for name in services)  # type: ignore[union-attr]
         out[category] = {"tools": sorted(names.get(category) or []), "evidence": sorted(kinds), "visit_services": visit_services}
     return out
+
+
+def unclassified_visit_services(browser: Mapping[str, object]) -> list[str]:
+    """Visited AI-related services with no tool category (gateways, provider sites, unlisted hosts)."""
+    mapping = browser.get("service_categories") if isinstance(browser.get("service_categories"), Mapping) else {}
+    return sorted(str(name) for name, value in mapping.items() if not value)  # type: ignore[union-attr]
 
 
 def _local_text(entry: Mapping[str, object]) -> str:
@@ -433,6 +481,12 @@ def ai_usage_section_lines(summary: Mapping[str, object], *, metadata: Mapping[s
             f" — {service_text or '서비스 미상'}; 마지막 방문 시각 범위 {period_text(first, last) if first else '시각 없음'}"
             " — 방문 기록만으로는 대화 내용·입력값을 알 수 없음"
         )
+        unclassified = unclassified_visit_services(browser)  # type: ignore[arg-type]
+        if unclassified:
+            lines.append(
+                f"- AI 관련 사이트 방문(분류 없음): {', '.join(unclassified)} — 게이트웨이·제공사·미분류 사이트라 "
+                "어느 도구 분류의 사용 증거로도 세지 않음"
+            )
     if not summary.get("collected"):
         lines.append("")
     else:
@@ -571,9 +625,11 @@ def ai_usage_gaps(summary: Mapping[str, object]) -> dict[str, object]:
                 "server_evidence_needed": server_evidence_list(category),
             }
         )
+    browser = summary.get("browser_ai") if isinstance(summary.get("browser_ai"), Mapping) else {}
     return {
         "collected": bool(summary.get("collected")),
         "tools": tools_out,
         "categories": category_rows,
+        "unclassified_visit_services": unclassified_visit_services(browser),  # type: ignore[arg-type]
         "note": "로컬 증거가 없다는 것은 사용하지 않았다는 뜻이 아님(부재 ≠ 미사용)",
     }
