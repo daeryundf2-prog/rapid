@@ -2,7 +2,12 @@ import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GridRow } from "../../contracts/collection";
 import { mockFetch } from "../case/testUtils";
-import { artifactRecordIndex, resetFullDetailsCache, rowNeedsFullDetails, useFullArtifactRow } from "./fullRow";
+import {
+  artifactRecordIndex,
+  resetFullDetailsCache,
+  rowNeedsFullDetails,
+  useFullArtifactRow,
+} from "./fullRow";
 
 function gridRow(fields: Record<string, unknown>, locator = "/artifacts/7"): GridRow {
   return {
@@ -48,7 +53,9 @@ describe("full artifact row for the viewer (compact grid rows)", () => {
     const row = gridRow({ details: { size: 1 }, detailsOmitted: ["raw"] });
     const { result } = renderHook(() => useFullArtifactRow("r1", row));
     expect(result.current).toBe(row); // compact row until the full one arrives
-    await waitFor(() => expect(result.current?.fields.details).toEqual({ size: 1, raw: { header: "FILE0" } }));
+    await waitFor(() =>
+      expect(result.current?.fields.details).toEqual({ size: 1, raw: { header: "FILE0" } }),
+    );
     expect(result.current?.fields.detailsOmitted).toBeUndefined();
     expect(result.current?.reviewStatus).toBe("relevant");
     expect(calls).toHaveLength(1);
