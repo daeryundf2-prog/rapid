@@ -101,6 +101,23 @@ def mtime_key(row: object):
     return None if value == TIME_NONE else value
 
 
+def is_copy_time(row: object) -> bool:
+    """R8 T-173: an acquisition copy's own time (no NTFS join here) is not an evidence time."""
+    return isinstance(row, dict) and row.get("modified_at_origin") == "acquisition-copy" and not row.get("fs_modified_at")
+
+
+def expected_mtime_order(rows: Sequence[object], descending: bool) -> list[int]:
+    """Evidence times first, then copy times (each by time in the asked order), then no time."""
+    order = expected_order(rows, mtime_key, descending)
+    timed = [position for position in order if mtime_key(rows[position]) is not None]
+    untimed = [position for position in order if mtime_key(rows[position]) is None]
+    return [p for p in timed if not is_copy_time(rows[p])] + [p for p in timed if is_copy_time(rows[p])] + untimed
+
+
+def expected_key_order(rows: Sequence[object], key: str, reader, descending: bool) -> list[int]:
+    return expected_mtime_order(rows, descending) if key == "mtime" else expected_order(rows, reader, descending)
+
+
 class FilesSortIndexTests(unittest.TestCase):
     def setUp(self) -> None:
         MATCH_CACHE.clear()
@@ -120,7 +137,7 @@ class FilesSortIndexTests(unittest.TestCase):
         for key, reader in (("name", name_key), ("path", path_key), ("size", size_key), ("mtime", mtime_key)):
             for descending in (False, True):
                 order, rank = files_sort_order(rows, run_id="r", collection="candidates", files_stamp=("s",), sort=FilesSort(key, descending))
-                self.assertEqual(list(order), expected_order(rows, reader, descending), (key, descending))
+                self.assertEqual(list(order), expected_key_order(rows, key, reader, descending), (key, descending))
                 self.assertTrue(all(rank[position] == place for place, position in enumerate(order)))
 
     def test_ctime_uses_the_ntfs_join_and_is_empty_without_it(self) -> None:
@@ -148,8 +165,9 @@ class FilesSortIndexTests(unittest.TestCase):
             return ("join", 2), lambda field, positions: [si.get(position, TIME_NONE) for position in positions]
 
         order, _ = files_sort_order(rows, run_id="r", collection="candidates", files_stamp=("s",), sort=FilesSort("mtime", False), ntfs_join=join)
-        # row 0: $SI 2010 (joined); row 2: no $SI -> its copy time 2019; row 1: 2020.
-        self.assertEqual(list(order), [0, 2, 1])
+        # row 0: $SI 2010 (joined); row 1: 2020; row 2: no $SI -> its copy time 2019, which is not
+        # an evidence time and follows every evidence time (R8 T-173).
+        self.assertEqual(list(order), [0, 1, 2])
 
     def test_text_filter_and_composition(self) -> None:
         rows = make_rows(random.Random(11), 800)
@@ -226,7 +244,7 @@ class FilesSortApiTests(unittest.TestCase):
     def test_every_sort_key_pages_through_the_whole_order(self) -> None:
         for key, reader in (("name", name_key), ("path", path_key), ("size", size_key), ("mtime", mtime_key)):
             for order in ("asc", "desc"):
-                self.assertEqual(self.all_pages(sort=key, order=order), expected_order(self.rows, reader, order == "desc"), (key, order))
+                self.assertEqual(self.all_pages(sort=key, order=order), expected_key_order(self.rows, key, reader, order == "desc"), (key, order))
         page = self.page(sort="size", order="desc", limit=5)
         self.assertEqual(page["sort"]["status"], "ready")
         self.assertEqual(page["sort"]["key"], "size")
@@ -249,7 +267,7 @@ class FilesSortApiTests(unittest.TestCase):
         page = self.page(q="desktop", **{"from": "2015-01-01"}, sort="mtime", order="desc", limit=1000)
         indexes = [row["record_index"] for row in page["candidates"]]
         self.assertTrue(indexes)
-        times = [mtime_key(self.rows[index]) for index in indexes]
+        times = [(not is_copy_time(self.rows[index]), mtime_key(self.rows[index])) for index in indexes]
         self.assertEqual(times, sorted(times, reverse=True))
 
     def test_unknown_sort_is_ignored_and_limit_zero_is_refused(self) -> None:

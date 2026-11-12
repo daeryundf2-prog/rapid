@@ -28,6 +28,7 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 
 from .artifact_filter import nfc_fold
+from .files_recovered import files_row_recovered
 from .row_conditions import (
     CONTENT_TYPES,
     DEFAULT_OFFHOURS,
@@ -176,6 +177,8 @@ class _TimeOverlay:
     # Pending acquisition copies that got their NTFS ``$SI`` time / fell back to their copy time.
     ntfs: int = 0
     copies: int = 0
+    # Positions (ascending) of the pending copies whose time is their own copy time.
+    copy_positions: array | None = None
 
 
 class FilesColumns:
@@ -272,15 +275,18 @@ class FilesColumns:
         values = resolve(pending) if resolve is not None else None
         merged = array("q", base)
         joined = copies = 0
+        copy_positions = array("L")
         for offset, position in enumerate(pending):
             value = values[offset] if values is not None else TIME_NONE
             if MIN_US <= value <= MAX_US and value not in PLACEHOLDER_US:
                 joined += 1
             else:
                 value = files_copy_time_us(rows[position])
-                copies += value != TIME_NONE
+                if value != TIME_NONE:
+                    copies += 1
+                    copy_positions.append(position)
             merged[position] = value
-        overlay = _TimeOverlay(stamp, merged, joined, copies)
+        overlay = _TimeOverlay(stamp, merged, joined, copies, copy_positions)
         with self._lock:
             self._overlay = overlay
         return overlay
@@ -711,6 +717,31 @@ def _sort_values(
     return list(created), [value != TIME_NONE for value in created]
 
 
+def _row_has_copy_time(row: object) -> bool:
+    """An acquisition copy whose 수정 time is its copy time: no ``fs_modified_at`` and no joined
+    ``ntfs.si_modified_at`` on the row (rows still waiting for the join are the overlay's)."""
+    if not isinstance(row, Mapping) or row.get("modified_at_origin") != "acquisition-copy":
+        return False
+    if _time_value_us(row.get("fs_modified_at")) != TIME_NONE:
+        return False
+    ntfs = row.get("ntfs")
+    if not isinstance(ntfs, Mapping):
+        return False  # pending: decided by the NTFS join overlay
+    return _time_value_us(ntfs.get("si_modified_at")) == TIME_NONE
+
+
+def _mtime_tie_columns(
+    rows: Sequence[object], columns: FilesColumns, join_stamp: tuple[object, ...] | None, ntfs: NtfsFieldTimes | None
+) -> tuple[list[bool], list[bool]]:
+    """``(copy_time, recovered)`` of every row for ``sort=mtime``."""
+    copy_time = [_row_has_copy_time(row) for row in rows]
+    if join_stamp is not None:
+        resolve = (lambda positions: ntfs("si_modified_at", positions)) if ntfs is not None else None
+        for position in columns._joined(rows, join_stamp, resolve).copy_positions or ():
+            copy_time[position] = True
+    return copy_time, [files_row_recovered(row) for row in rows]
+
+
 def files_sort_order(
     rows: Sequence[object],
     *,
@@ -737,8 +768,16 @@ def files_sort_order(
         return found
     values, present = _sort_values(rows, sort.key, resolver, columns, join_stamp)
     with_value = [position for position in range(len(rows)) if present[position]]
+    if sort.key == "mtime":
+        copy_time, recovered = _mtime_tie_columns(rows, columns, join_stamp, resolver)
+        # Ties of the same time: allocated rows before recovered ones, in both orders.
+        with_value.sort(key=recovered.__getitem__)
     # Python's sort is stable with reverse=True too: equal values keep list order.
     with_value.sort(key=values.__getitem__, reverse=sort.descending)
+    if sort.key == "mtime":
+        # R8 T-173: a copy time (when the analysis PC wrote the extracted file) is not an
+        # evidence time -- those rows follow every row with an evidence time in both orders.
+        with_value.sort(key=copy_time.__getitem__)
     order = array("L", with_value)
     order.extend(position for position in range(len(rows)) if not present[position])
     rank = array("L", bytes(order.itemsize * len(order)))
