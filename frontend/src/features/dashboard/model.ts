@@ -7,7 +7,7 @@ import type { ReviewCounts, SavedSearch } from "../../api/caseDb";
 import type { ExportEntry, StepsSummary } from "../../api/dashboard";
 import type { CanonicalCounts, RunTree } from "../../api/runs";
 import type { ReviewStatus } from "../../contracts/collection";
-import { formatElapsed } from "../../shell/StatusBar";
+import { formatElapsed } from "../../shell/statusBarOutcome";
 import { runEvidenceTimezone } from "../../state/hooks";
 import { currentRun } from "../../state/slices/runs";
 import { useAppStore } from "../../state/store";

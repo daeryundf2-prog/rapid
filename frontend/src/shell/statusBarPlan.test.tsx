@@ -8,7 +8,8 @@ import type { RunWithProgress } from "../api/runsProgress";
 import { caseCommands } from "../commands/builtin";
 import { registerCommands, resetCommandRegistry } from "../commands/registry";
 import { resetAppStore, useAppStore } from "../state/store";
-import { planProgressText, progressText, StatusBar, staleText } from "./StatusBar";
+import { StatusBar } from "./StatusBar";
+import { planProgressText, progressText, staleText } from "./statusBarOutcome";
 
 const RUN = "run-abcdef12";
 

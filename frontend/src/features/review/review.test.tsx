@@ -1,10 +1,10 @@
 // AXIOM adoption E3 (plan §3.3): tag manager, digit tag keys, propagation, classic split,
-// media blur persistence, baseline compare bars, selection CSV.
+// media blur persistence, baseline compare bars, selection CSV. The T-144 tag author/history
+// checks live in tagAuthor.test.tsx.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CaseTag } from "../../api/reviewTools";
 import { CLASSIC_COLLAPSE_REASON, collapseViewerPane, collapseViewerReason } from "../../commands/builtin";
 import { NO_RUN_REASON } from "../../commands/reasons";
 import { getCommand, registerCommands, resetCommandRegistry, runCommand } from "../../commands/registry";
@@ -43,12 +43,12 @@ import {
   propagateReason,
   propagateTagsByHash,
 } from "./gridTools";
-import { changedLabel, tagsChanged } from "./NotePanel";
 import { visibleTagNodes } from "./ReviewTagNodes";
 import { registerRowSource, resetRowSources } from "./rowSource";
 import { draftReason, SYSTEM_TAG_REASON, TagManagerDialog } from "./TagManagerDialog";
 import { resetTagKeyFlights, unboundKeyReason } from "./tagKeys";
 import { loadCaseTags, resetCaseTagStore, sortTags } from "./tagStore";
+import { caseRoutes, SYSTEM, tag } from "./tagTestData";
 import {
   CLASSIC_LAYOUT_KEY,
   CLASSIC_SPLIT_KEY,
@@ -64,37 +64,6 @@ vi.mock("../../a11y", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../a11y")>()),
   announce: announceMock,
 }));
-
-function tag(partial: Partial<CaseTag> & { id: number; name: string }): CaseTag {
-  return {
-    case_id: "run-r1",
-    kind: "user",
-    color_token: "tag-5",
-    shortcut: null,
-    description: "",
-    created_by: "검사관 A",
-    created_at: "2026-10-17T00:00:00+00:00",
-    updated_at: "2026-10-17T00:00:00+00:00",
-    deleted_at: null,
-    deleted_by: null,
-    count: 0,
-    ...partial,
-  };
-}
-
-const SYSTEM: CaseTag[] = [
-  tag({ id: 1, name: "북마크", kind: "system", color_token: "tag-3" }),
-  ...[1, 2, 3, 4, 5].map((n) => tag({ id: n + 1, name: `우선순위 ${n}`, kind: "system", shortcut: n })),
-];
-
-function caseRoutes(tags: CaseTag[], extra: Record<string, unknown> = {}) {
-  return {
-    "GET /api/runs/r1/review-counts": { run_id: "r1", case_id: "run-r1", exists: true, by_status: {} },
-    "GET /api/cases/run-r1/tags": { case_id: "run-r1", exists: true, tags },
-    "POST /api/runs/r1/case-db/ensure": { database: "D:/out/rapidtriage-case.db", case_id: "run-r1" },
-    ...extra,
-  };
-}
 
 const target = (locator: string): ViewerTarget => ({
   ref: { collection: "files", locator },
@@ -118,38 +87,6 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
-});
-
-describe("tag manager author field and tag history (T-144)", () => {
-  it("the 작성자 field never shows web-ui: empty value, placeholder 담당자 이름, legacy web-ui author hidden", async () => {
-    mockFetch(caseRoutes([...SYSTEM, tag({ id: 9, name: "옛 태그", created_by: "web-ui" })]));
-    renderWithQuery(<TagManagerDialog runId="r1" onClose={vi.fn()} />);
-    const dialog = await screen.findByRole("dialog", { name: "태그 관리" });
-    await waitFor(() => expect(within(dialog).getAllByTestId("tag-row")).toHaveLength(7));
-    const field = within(dialog).getByLabelText("작성자 (태그·메모에 기록)") as HTMLInputElement;
-    expect(field.value).toBe("");
-    expect(field.placeholder).toBe("담당자 이름");
-    expect(dialog.textContent).not.toContain("web-ui");
-    // A typed name is kept for the next tag / memo.
-    fireEvent.change(field, { target: { value: " 김 수사관 " } });
-    fireEvent.blur(field);
-    expect(window.localStorage.getItem("rapidtriage.reviewer")).toContain("김 수사관");
-  });
-
-  it("history never reads 태그 없음 → 없음 when the tag set did not change", () => {
-    const entry = {
-      changed_fields: ["note", "tags"],
-      tags_before: [] as string[],
-      tags_after: [] as string[],
-    } as unknown as Parameters<typeof tagsChanged>[0];
-    expect(tagsChanged(entry)).toBe(false);
-    expect(changedLabel(entry)).toBe("메모");
-    const same = { ...entry, tags_before: ["b", "a"], tags_after: ["a", "b"] };
-    expect(tagsChanged(same)).toBe(false);
-    const real = { ...entry, tags_before: [], tags_after: ["북마크"] };
-    expect(tagsChanged(real)).toBe(true);
-    expect(changedLabel(real)).toBe("메모, 태그");
-  });
 });
 
 describe("tag manager dialog", () => {

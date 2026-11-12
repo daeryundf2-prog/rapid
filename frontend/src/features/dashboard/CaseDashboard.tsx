@@ -29,12 +29,12 @@ import {
   CaseInfoCard,
   EvidenceCard,
   NoCaseLink,
-  NotesCard,
   useCaseIntakeData,
   WarningsCard,
   warningCounts,
   warningCountsText,
 } from "./caseCards";
+import { NotesCard } from "./caseMemo";
 import { disclosureItems, runWarnings } from "./disclosures";
 import { categoryBars, keywordRows, reviewSummary, stageRows } from "./model";
 import { ScopeBand } from "./scopeBand";
