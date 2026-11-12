@@ -13,7 +13,7 @@ import {
   runTimeIsImport,
 } from "../../api/runs";
 import { RUN_MODE_LABEL } from "../../app/collections";
-import { formatElapsed } from "../../shell/StatusBar";
+import { formatElapsed } from "../../shell/statusBarOutcome";
 import { formatRunTime } from "../../utils/time";
 
 /** "2026-10-17 20:18" (or "가져옴 2026-10-17 08:52" when only the import time is known); "" when none. */

@@ -27,7 +27,7 @@ import { StatusBadge, statusLabel } from "../../components/Badge";
 import { chipToneOf, ToneChip } from "../../components/ToneChip";
 import { Icon } from "../../icons";
 import { serializeRoute } from "../../router";
-import { formatElapsed, progressText as runProgressText, staleText } from "../../shell/StatusBar";
+import { formatElapsed, progressText as runProgressText, staleText } from "../../shell/statusBarOutcome";
 import { useRoute, useRuns, useTimezone } from "../../state/hooks";
 import { isRunActive } from "../../state/slices/runs";
 import { useAppStore } from "../../state/store";

@@ -7,7 +7,8 @@ import type { RunScope, StepsSummary } from "../api/dashboard";
 import type { RunWithProgress } from "../api/runsProgress";
 import { mockFetch, renderWithQuery } from "../features/case/testUtils";
 import { resetAppStore, useAppStore } from "../state/store";
-import { runIdentityText, runOutcome, StatusBar } from "./StatusBar";
+import { StatusBar } from "./StatusBar";
+import { runIdentityText, runOutcome } from "./statusBarOutcome";
 
 const RUN_ID = "run-c2c2c2c2c2";
 

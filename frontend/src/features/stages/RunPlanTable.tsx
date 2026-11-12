@@ -29,7 +29,7 @@ import { FINISHED_TASK_REASON, NO_QUEUED_REASON, NOT_RUNNING_REASON } from "../.
 import { CANCEL_ALL_CONFIRM, confirmAction } from "../../commands/reasons";
 import { StatusBadge, statusLabel } from "../../components/Badge";
 import { Icon } from "../../icons";
-import { formatElapsed } from "../../shell/StatusBar";
+import { formatElapsed } from "../../shell/statusBarOutcome";
 import { useTimezone } from "../../state/hooks";
 import { useAppStore } from "../../state/store";
 import { formatTimestamp } from "../../utils/time";
