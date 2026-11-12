@@ -147,7 +147,9 @@ export function filesHandler(total: number): Handler {
     const sortKey = url.searchParams.get("sort");
     const order = url.searchParams.get("order") === "desc" ? "desc" : "asc";
     const q = url.searchParams.get("q")?.trim().toLowerCase() ?? "";
-    if (!sortKey && !q) {
+    // Fixture mtimes fall with the index, so the default `mtime desc` order (T-173) IS the list
+    // order: answer it by slicing, not by building and sorting every row (281,595 in the scale test).
+    if (!q && (!sortKey || (sortKey === "mtime" && order === "desc"))) {
       return jsonResponse({
         candidates: fileCandidates(offset, Math.min(offset + limit, total)),
         total,
