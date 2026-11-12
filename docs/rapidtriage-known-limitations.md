@@ -53,6 +53,8 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 - **하지 않는 것**: ADS 스트림·재분석 지점 대상·암호화 볼륨은 펼치지 않는다(실행 경고, `core/e01.py:2268-2271`). 비할당 영역은 훑지 않는다(처리 범위의 비할당 축이 `measured: false`, `api/app/run_scope.py:353`). 외부 엔진의 보완 단계(긴 경로 `icat` 복구·ADS 복구·`fls` 목록, 위 Evidence Handling 절)는 네이티브 경로에 없다.
 - **`$MFT` 사본**: `$MFT`(0번 레코드)를 `_e01/_system/MFT.bin`으로 따로 떠 둔다(`core/e01_native.py:694-703`). 처리 범위 계산(아래)과 기준 도구 대조 스크립트가 이 사본을 읽는다.
 - **읽기 오류**: 파일을 열거나 읽다 실패하면 그 파일은 만들지 않고(반쯤 쓴 파일은 지운다) `errors`를 하나 올린다. 삭제 레코드에서 난 오류는 `deleted_read_errors`로도 센다(`core/e01_native.py:487-516, 619-623`). 어떤 파일이 실패했는지 목록은 남지 않고 건수만 남는다.
+- **추출 중 결과 폴더가 참(T-352)**: 엔진은 쓰기 실패의 종류(디스크 가득 참 등)를 기록하지 않고 `errors`만 올린 뒤 계속한다. 엔진을 고치지 않고 할 수 있는 판정은 런 쪽에서 한다: 추출이 오류를 1건 이상 남겼고 그 직후 결과 폴더 볼륨의 여유가 64 MB 미만이면 `OUTPUT_DISK_FULL`(추출하지 못한 파일 n개)로 실패시킨다(`extraction_disk_full_error`, `core/run/disk_full.py:233`). 여유가 그보다 크게 남은 채로 실패한 쓰기(다른 프로세스가 공간을 비운 경우 등)는 일반 읽기 오류와 구분되지 않는다. 추출 단계 체크포인트는 완료로 남으므로 이어서 처리는 추출을 다시 하지 않는다 — 메시지가 새 결과 폴더로 다시 처리하라고 안내한다. 엔진에서 ENOSPC를 다시 올리는 수정은 소유자 승인 과제다.
+- **가득 참 정리 범위(T-352)**: 단계가 디스크 가득 참으로 실패하면 이 런이 쓴 `rapidtriage-*` 임시 파일(`.tmp`·`.partial`)과 닫히지 않은 `rapidtriage-*.json(l)`만, 결과 폴더 맨 위와 `artifacts`·`carving` 폴더에서, 런 시작 뒤 바뀐 것만 지운다. 추출된 증거 사본(`_e01`·`_disk_image`·`_archive_image`·`_virtual_disk`·`docs-extract`·`files-extract`·`extract`·`mobile-inner`·`incremental-delta-scope`)은 오류가 그 안의 파일을 가리켜도 들어가지 않는다(`EXTRACTED_TREE_NAMES`, `core/run/disk_full.py:45`). 지운 경로는 진행 파일의 `error.removed_files`와 처리 문제 줄에 남는다. 여유는 정리 전에 잰다. 꼭 필요한 양은 알 수 없어 적지 않는다.
 
 ### 처리 범위: 네 축 (T-023)
 

@@ -583,6 +583,12 @@ def run_triage_mode(
             output_dir=output_dir,
             e01_partition_start_sector=e01_partition_start_sector,
         )
+        if image_result is not None:
+            # T-352 review P1-2: the native engine counts a file it could not write as an error and
+            # goes on; errors on a (nearly) full result volume are a full disk, not a finished tree.
+            extraction_full = extraction_disk_full_error(output_dir, image_result.to_dict())
+            if extraction_full is not None:
+                raise extraction_full
         progress.set_run_root(str(input_root.root_path))
         if image_result is None:
             progress.task_finished("image-extract", status="skipped", reason=REASON_FOLDER_INPUT)
@@ -648,6 +654,8 @@ def run_triage_mode(
         control_watcher.stop()
         # T-352: a full output volume is its own failure (OUTPUT_DISK_FULL); half-written files go.
         stage = str(progress.snapshot().get("stage") or "")
+        # The heartbeat renames its own temp file into place: stop it before any cleanup (P2-4).
+        progress.stop_heartbeat()
         failure = classify_step_exception(exc, stage=stage, output_dir=output_dir, since_epoch=run_started_epoch)
         progress.fail(failure)
         if failure is not exc:

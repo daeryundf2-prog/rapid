@@ -22,7 +22,7 @@
 | `OUTPUT_DIR_BUSY` | 409 | 1 | http | reserved (T-007) | 같은 출력 폴더를 쓰는 런이 대기·실행 중입니다 | 그 런이 끝나기를 기다리거나 다른 출력 폴더를 지정하세요 | Output folder is in use by another run |
 | `DISK_SPACE_INSUFFICIENT` | — | — | body | active (T-186) | 출력 위치의 여유 공간이 최대 출력 크기(원시 이미지의 선택 파티션 크기)보다 작습니다(런은 시작됨, 경고만) | 여유 공간이 넉넉한 출력 위치를 지정하세요. 실제 출력은 할당된 데이터만큼이라 더 작을 수 있습니다 | Free disk space is below the upper bound of the run output |
 | `DISK_SPACE_LOW` | — | — | body | active (T-186) | 출력 위치의 여유 공간이 빠듯합니다(예상 출력 크기의 오차 범위 안) | 가능하면 여유 공간이 더 큰 출력 위치를 지정하세요 | Free disk space is tight for the run output |
-| `OUTPUT_DISK_FULL` | — | 1 | body | active (T-352) | 처리 중 결과 폴더의 여유 공간이 부족해 단계가 실패했습니다(반쯤 쓴 파일은 지움) | 결과 폴더의 공간을 비운 뒤 이어서 처리하세요(완료된 산출물은 그대로 씀) | Output disk filled up during processing |
+| `OUTPUT_DISK_FULL` | — | 1 | body | active (T-352) | 처리 중 결과 폴더의 여유 공간이 부족해 단계가 실패했습니다(이 런이 쓰다 만 결과 파일만 지움, 추출된 증거 사본은 그대로 둠) | 결과 폴더의 공간을 비운 뒤 이어서 처리하세요(완료된 산출물은 그대로 씀). 추출 중에 찼으면 새 결과 폴더로 다시 처리하세요 | Output disk filled up during processing |
 
 ## 경로·접근 제한 (`path`)
 
