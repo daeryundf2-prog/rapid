@@ -41,6 +41,6 @@ def report_scope_notes(case_payload: Mapping[str, object], submission_manifest: 
         max_items = options.get("max_items") if isinstance(options, Mapping) else None
         notes.append(
             f"- 주의: 보고서 포함 후보 {candidates}건 중 {max_items}건만 해시 산출함(상한, "
-            f"제외 {manifest_summary.get('max_items_skipped_count')}건은 6장에 'max-items'로 표기)."
+            f"제외 {manifest_summary.get('max_items_skipped_count')}건은 해시 산출 제외 목록에 '최대 항목 수 초과'로 표기)."
         )
     return notes

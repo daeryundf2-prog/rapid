@@ -47,6 +47,7 @@ def build_case_report_markdown(
             case_payload=case_payload,
             submission_manifest=submission_manifest,
             metadata=metadata,
+            report_context=report_context,
         )
     technical = template == "technical-appendix"
     case_title = report_items.md_inline(case_title)
