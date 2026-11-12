@@ -32,6 +32,11 @@ const child = spawn(
       RAPIDTRIAGE_STATE_PATH: join(stateDir, "runs.json"),
       // Never open the user's browser (web.py would open a #token= URL on loopback hosts).
       RAPIDTRIAGE_NO_BROWSER: "1",
+      // R8 RI-04 confines POST /api/sample-case/run to the server's sample root (default
+      // ~/.rapidtriage; anything else is 403 PATH_OUTSIDE_ALLOWED_ROOT). The specs create their
+      // sample folders with mkdtemp(os.tmpdir()), so this isolated test server uses the system temp
+      // folder as its root — never the user's home.
+      RAPIDTRIAGE_SAMPLE_ROOT: tmpdir(),
     },
   },
 );
