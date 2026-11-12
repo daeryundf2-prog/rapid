@@ -76,7 +76,7 @@ test("entity chips, masked rows, one audited reveal and a field keyword in the t
   await expect(dialog.getByText("결과 1건")).toBeVisible();
 
   // Q-B3: reveal (reason once per session) -> the value once
-  const row = dialog.locator(".entity-rows > li").filter({ hasText: "개인정보목록.txt" });
+  const row = dialog.getByTestId("entity-row").filter({ hasText: "개인정보목록.txt" });
   await row
     .locator("li")
     .filter({ hasText: "주민등록번호" })

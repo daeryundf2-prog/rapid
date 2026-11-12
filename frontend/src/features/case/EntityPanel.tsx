@@ -287,9 +287,9 @@ export function EntityPanel({ runId, onClose }: { runId: string; onClose: () => 
           </table>
         ))}
         {revealError && <ErrorText>{revealError}</ErrorText>}
-        <ul className="entity-rows">
+        <ul className="entity-rows" data-testid="entity-rows">
           {rows.map((row) => (
-            <li key={`${row.collection}:${row.kind}:${row.locator}`}>
+            <li key={`${row.collection}:${row.kind}:${row.locator}`} data-testid="entity-row">
               <div className="entity-row-title">{row.title || row.path}</div>
               {row.snippet?.text && <div className="entity-row-snippet">{row.snippet.text}</div>}
               {(row.entities ?? []).length > 0 && (

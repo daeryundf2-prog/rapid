@@ -150,17 +150,19 @@ test("Q-AI10 grid: session columns read in Korean; the session's 메타 links op
   await shot(page, "ai-session-meta");
   await links.getByRole("link", { name: "대화 보기" }).click();
   await expect(page).toHaveURL(/view=chat/);
-  const thread = page.locator(".chat-thread");
+  const thread = page.getByTestId("chat-thread");
   await expect(thread).toBeVisible({ timeout: 30_000 });
   // Role bubbles (사용자 on the right), a folded tool call, a file-touch link.
-  await expect(thread.locator(".chat-sender", { hasText: "사용자" }).first()).toBeVisible();
-  await expect(thread.locator(".chat-row.is-out").first()).toBeVisible();
+  await expect(thread.getByTestId("chat-sender").filter({ hasText: "사용자" }).first()).toBeVisible();
+  await expect(thread.locator('[data-testid="chat-message"][data-direction="out"]').first()).toBeVisible();
   const call = thread.getByTestId("ai-tool-call").first();
   await expect(call).toBeVisible();
   await expect(call.getByRole("button")).toHaveAttribute("aria-expanded", "false");
   await call.getByRole("button").click();
   await expect(call.getByRole("button")).toHaveAttribute("aria-expanded", "true");
-  await expect(call.locator(".chat-tool-command, .chat-tool-target").first()).toBeVisible();
+  await expect(
+    call.getByTestId("ai-tool-command").or(call.getByTestId("ai-tool-target")).first(),
+  ).toBeVisible();
   const touch = thread.getByTestId("ai-file-touch").first();
   await expect(touch.getByRole("link")).toHaveAttribute("href", /explore\/files\?path=/);
   await shot(page, "ai-conversation");
