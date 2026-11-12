@@ -1,25 +1,38 @@
 name: RapidTriage CI
 
+# Trigger/matrix policy (R8 CI-green decision default; owner can revert):
+# - Pull requests are the gate: ubuntu + windows on Python 3.12, plus frontend/contract/Rust jobs.
+#   Feature-branch pushes no longer start a second, identical run next to the PR run.
+# - The full matrix (ubuntu/windows/macos x 3.11/3.12) runs on push to main, nightly, and on
+#   manual dispatch (`gh workflow run "RapidTriage CI" --ref <branch>`), so macOS and 3.11
+#   coverage is kept but no longer blocks every PR behind the macOS runner queue.
+# - A newer push to the same PR cancels the superseded PR run; main/nightly runs are never cancelled.
 on:
   push:
     branches:
-      - "**"
+      - main
   pull_request:
+  schedule:
+    - cron: "23 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
     name: Python test and release checks
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-          - macos-latest
-        python-version:
-          - "3.11"
-          - "3.12"
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest", "windows-latest"]' || '["ubuntu-latest", "windows-latest", "macos-latest"]') }}
+        python-version: ${{ fromJSON(github.event_name == 'pull_request' && '["3.12"]' || '["3.11", "3.12"]') }}
 
     steps:
       - name: Checkout
@@ -91,6 +104,7 @@ jobs:
   frontend:
     name: Frontend checks
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -115,28 +129,40 @@ jobs:
         run: npm ci
 
       - name: Generate schema types
+        id: schemas
         working-directory: frontend
         run: npm run gen:schemas
 
-      - name: Lint and typecheck
+      # Each check below reports its own result: a lint failure no longer hides
+      # typecheck/vitest/build/e2e (they never ran in CI while lint was red).
+      - name: Lint
+        if: ${{ !cancelled() && steps.schemas.outcome == 'success' }}
         working-directory: frontend
-        run: |
-          npm run lint
-          npm run typecheck
+        run: npm run lint
+
+      - name: Typecheck
+        if: ${{ !cancelled() && steps.schemas.outcome == 'success' }}
+        working-directory: frontend
+        run: npm run typecheck
 
       - name: Unit tests
+        if: ${{ !cancelled() && steps.schemas.outcome == 'success' }}
         working-directory: frontend
         run: npm test
 
       - name: Build
+        if: ${{ !cancelled() && steps.schemas.outcome == 'success' }}
         working-directory: frontend
         run: npm run build
 
       - name: Install Playwright browsers
+        id: playwright
+        if: ${{ !cancelled() && steps.schemas.outcome == 'success' }}
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
       - name: E2E tests
+        if: ${{ !cancelled() && steps.playwright.outcome == 'success' }}
         working-directory: frontend
         run: npm run e2e
 

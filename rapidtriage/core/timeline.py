@@ -2028,7 +2028,9 @@ def build_artifact_summary(artifact_type: str, artifact_path: str, context: Mapp
         return f"{label} {path}".strip()
     if context.get("entry_name"):
         return str(context["entry_name"])
-    label = Path(artifact_path).name or artifact_path or artifact_type
+    # Evidence paths are usually Windows paths even when the analysis host is POSIX, so take the
+    # last component on either separator instead of Path(...).name (keeps a backslash path whole).
+    label = re.split(r"[\\/]", artifact_path.rstrip("\\/"))[-1] or artifact_path or artifact_type
     return f"{artifact_type} {label}"
 
 

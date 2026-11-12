@@ -49,6 +49,22 @@ _SYSTEM_PROFILES = frozenset({"public", "default", "default user", "all users", 
 # --- paths -----------------------------------------------------------------------------------
 
 
+def _dir_identity(path: Path) -> str:
+    """Identity of a directory for de-duplication. On case-insensitive file systems (macOS APFS,
+    evidence mounted from NTFS/exFAT) ``Users`` and ``users`` name the same folder, and neither
+    ``resolve()`` nor ``normcase`` (identity on POSIX) folds that, so prefer device + inode."""
+    try:
+        stat = path.stat()
+    except OSError:
+        stat = None
+    if stat is not None and stat.st_ino:
+        return f"inode:{stat.st_dev}:{stat.st_ino}"
+    try:
+        return os.path.normcase(str(path.resolve()))
+    except OSError:
+        return os.path.normcase(str(path))
+
+
 def profile_homes(roots: Sequence[Path]) -> list[tuple[Path, str]]:
     """``(home, account_key)`` for every user profile below the evidence roots.
 
@@ -59,7 +75,7 @@ def profile_homes(roots: Sequence[Path]) -> list[tuple[Path, str]]:
     out: list[tuple[Path, str]] = []
 
     def add(home: Path, account: str) -> None:
-        key = os.path.normcase(str(home))
+        key = _dir_identity(home)
         if key in seen or not home.is_dir():
             return
         seen.add(key)
@@ -493,10 +509,7 @@ def iter_profiles(roots: Sequence[object], os_hint: str = "") -> list[EvidencePr
 
     def add(profile: EvidenceProfile) -> None:
         # one Found per home and adapter even when overlapping roots name the same folder twice
-        try:
-            key = os.path.normcase(str(profile.home.resolve()))
-        except OSError:
-            key = os.path.normcase(str(profile.home))
+        key = _dir_identity(profile.home)
         if key not in seen:
             seen.add(key)
             out.append(profile)

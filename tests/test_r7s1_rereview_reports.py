@@ -58,7 +58,11 @@ class ReportWritesTests(unittest.TestCase):
         written = self.client.post(f"/api/runs/{self.run_id}/submission-manifest", params={"max_items": 100})
         self.assertEqual(written.status_code, 200, written.text)
         body = written.json()
-        self.assertEqual(body["written"], [str(manifest_path), str(audit_path)])
+        # The server reports canonical (resolved) paths; the temp dir itself may be a symlink
+        # (macOS /var -> /private/var) or an 8.3 short name (Windows RUNNER~1), so compare resolved.
+        self.assertEqual(
+            [Path(path).resolve() for path in body["written"]], [manifest_path.resolve(), audit_path.resolve()]
+        )
         self.assertEqual(body["download_url"], f"/api/runs/{self.run_id}/submission-manifest/saved")
         self.assertEqual(body["manifest"]["command"], "submission-manifest")
         stamps = {path: (path.stat().st_mtime_ns, path.read_bytes()) for path in (manifest_path, audit_path)}
