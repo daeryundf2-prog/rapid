@@ -8,15 +8,19 @@ import { isRunActive } from "../state/slices/runs";
 
 const n = (value: number) => value.toLocaleString("ko-KR");
 
+/**
+ * The console's one duration format (run rows, steps, status bar, 접수 cards): "MM:SS", and
+ * "HH:MM:SS" from an hour on — every part two digits, so "02:23:02" and "01:06" read alike
+ * (verify WB-10: the hour was unpadded, "2:23:02"). Whole seconds, floored.
+ */
 export function formatElapsed(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "";
   const total = Math.floor(ms / 1000);
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
-  const mm = String(m).padStart(2, "0");
-  const ss = String(s).padStart(2, "0");
-  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
 }
 
 /** Heartbeat age after which a running run reads "응답 없음" (the server's `stale` threshold). */

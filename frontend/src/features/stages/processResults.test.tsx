@@ -267,7 +267,7 @@ describe("process layout helpers", () => {
 
   it("step durations read elapsed_seconds and sum to the steps' total", () => {
     expect(stepElapsedText({ elapsed_seconds: 61.4 })).toBe("01:01");
-    expect(stepElapsedText({ elapsed_s: "3600" })).toBe("1:00:00");
+    expect(stepElapsedText({ elapsed_s: "3600" })).toBe("01:00:00");
     expect(stepElapsedText({})).toBe("");
     expect(stepsElapsedMs(SUMMARY.steps)).toBe(2_041_500);
     expect(stepsElapsedMs([{}])).toBeNull();
