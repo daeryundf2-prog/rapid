@@ -623,6 +623,7 @@ export const A11Y_NAME_TABLE: readonly A11yNameRow[] = [
   ["checkbox", "serial", "alias", "source"],
   ["checkbox", "tags", "alias", "source"],
   ["checkbox", "volume_serial", "alias", "source"],
+  ["checkbox", "모든 명령", "alias", "source"],
   ["checkbox", "하위 폴더 포함", "alias", "source"],
   ["columnheader", "tags", "alias", "source"],
   ["columnheader", "날짜 및 시각", "keep", "source"],

@@ -51,17 +51,43 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
   return role !== null && INTERACTIVE_ROLES.has(role);
 }
 
+/** US-layout shifted digit row (Shift+1 = "!"), for the physical-key fallback below. */
+const SHIFTED_DIGITS = ")!@#$%^&*(";
+
+/**
+ * The character a physical key (KeyboardEvent.code) types on a US layout, or null outside the
+ * fallback range. The range is deliberately narrow (r8 contracts, T-035): letters (`Key*`), the
+ * digit row (`Digit*`), `Slash` and `Backquote` — the keys KEY_MAP binds without a modifier.
+ */
+export function physicalKeyChar(code: string | undefined, shift: boolean): string | null {
+  if (!code) return null;
+  const letter = /^Key([A-Z])$/.exec(code);
+  if (letter?.[1]) return letter[1];
+  const digit = /^Digit(\d)$/.exec(code);
+  if (digit?.[1]) return shift ? (SHIFTED_DIGITS[Number(digit[1])] ?? null) : digit[1];
+  if (code === "Slash") return shift ? "?" : "/";
+  if (code === "Backquote") return shift ? "~" : "`";
+  return null;
+}
+
+/** A key value an IME produced instead of the Latin character: "Process" or a non-ASCII single character (jamo). */
+function isImeKey(key: string): boolean {
+  return key === "Process" || (key.length === 1 && !/^[\x20-\x7e]$/.test(key));
+}
+
 /** Normalise a KeyboardEvent to the registry's shortcut notation; null for bare modifiers / IME. */
 export function eventToShortcut(
   event: Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "isComposing">,
 ): string | null {
+  // Mid-composition keys belong to the IME (a Hangul syllable being built), never to a shortcut.
   if (event.isComposing) return null;
   let key = event.key;
   if (!key || MODIFIER_KEYS.has(key)) return null;
-  // Korean (or any non-Latin) layout: letters arrive as jamo / "Process"; fall back to the physical key.
-  const physical = /^Key([A-Z])$/.exec(event.code ?? "");
-  if (physical?.[1] && (key === "Process" || (key.length === 1 && !/^[\x20-\x7e]$/.test(key)))) {
-    key = physical[1];
+  // Korean (or any non-Latin) layout: keys arrive as jamo / "Process"; fall back to the physical
+  // key (Key*, Digit*, Slash, Backquote) so R·X·I·B·J·K·T·F, 1–9, "/", "?" and "`" still work.
+  if (isImeKey(key)) {
+    const physical = physicalKeyChar(event.code, event.shiftKey);
+    if (physical) key = physical;
   }
   if (key === "Process") return null;
   // Alt+Shift+1 arrives as key "!" (layout-dependent): with a command modifier, name the digit row by its physical key.
@@ -105,6 +131,9 @@ const MODAL_SAFE_SHORTCUTS: ReadonlySet<string> = new Set(["Escape", "Ctrl+K"]);
  */
 export function dispatchShortcut(event: KeyboardEvent): boolean {
   if (event.defaultPrevented) return false;
+  // keyCode 229 = the IME owns this key. In a text field it starts a composition (isComposing is
+  // still false on that first key), so no shortcut — not even a modified one — fires there.
+  if (event.keyCode === 229 && isTextEntry(event.target)) return false;
   const shortcut = eventToShortcut(event);
   if (!shortcut) return false;
   const command = commandForShortcut(shortcut);
