@@ -353,7 +353,7 @@ describe("검토 / 보고 stages (Q-IA-5)", () => {
         }),
     });
     renderWithClient(<ReviewPanel />);
-    const statuses = await screen.findByRole("list", { name: "리뷰 상태" });
+    const statuses = await screen.findByRole("list", { name: "검토 상태" });
     await waitFor(() =>
       expect(within(statuses).getByRole("link", { name: /관련 있음/ }).textContent).toContain("2"),
     );

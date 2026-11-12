@@ -1,4 +1,7 @@
+import { createElement } from "react";
 import { fetchReviewRows, type RawRow } from "../../../api/collections";
+import type { GridRow } from "../../../contracts/collection";
+import { artifactTypeLabel } from "../../filters/typeLabels";
 import type { CollectionDef } from "../types";
 import {
   col,
@@ -6,12 +9,14 @@ import {
   isRecord,
   makeRef,
   makeRow,
+  REVIEW_LABELS,
   sha256Of,
   str,
   strOrNull,
   TIME_COLUMN_MIN,
   toReviewStatus,
 } from "./common";
+import { reviewStatusCell } from "./StatusCells";
 
 const COLLECTION_LABELS: Record<string, string> = {
   files: "파일",
@@ -42,6 +47,37 @@ export function reviewTargetFallback(targetType: string, targetId: string, index
   return /^\d+$/.test(targetId) ? `${label} #${targetId}` : `${label} ${index + 1}`;
 }
 
+/** An internal type id ("prefetch-file", "windows_prefetch", "evtx.record") followed by ":". */
+const TYPE_ID_PREFIX = /^([a-z0-9]+(?:[-_.][a-z0-9]+)+)\s*:\s*/i;
+
+/**
+ * The 요약 of a review row without the internal type-id prefix (T-176, GAP-090): "prefetch-file:
+ * CHROME.EXE" → "CHROME.EXE". A summary that is only the type id reads as the type's Korean name.
+ * Drive letters ("C:\\…") and URLs ("https://…") keep their colon (no hyphen / underscore id).
+ */
+export function reviewSummary(text: string | null, kind?: string | null): string | null {
+  const raw = (text ?? "").trim();
+  if (!raw) return null;
+  const typeId = (kind ?? "").trim();
+  if (typeId && raw.toLowerCase() === typeId.toLowerCase()) return artifactTypeLabel(typeId) ?? null;
+  let rest = raw;
+  if (typeId && rest.toLowerCase().startsWith(`${typeId.toLowerCase()}:`)) {
+    rest = rest.slice(typeId.length + 1).trim();
+  } else {
+    rest = rest.replace(TYPE_ID_PREFIX, "").trim();
+  }
+  if (rest) return rest;
+  return typeId ? (artifactTypeLabel(typeId) ?? null) : null;
+}
+
+/** The row is marked for the report: the include flag, or the include-only review status. */
+export function inReport(row: GridRow): boolean {
+  return row.fields.includeInReport === true || row.reviewStatus === "include-in-report";
+}
+
+/** Marker shown in the 보고서 column (T-176): never in the 검토 verdict chip slot. */
+export const REPORT_MARKER = "보고서 포함";
+
 /**
  * A case-DB review mark (GET /review-map). The ref carries the case-db id and
  * `fields.targetType`, so re-marking on the board posts the row id directly;
@@ -61,9 +97,9 @@ function mapCaseDbMark(raw: RawRow, index: number) {
     ref,
     {
       title:
-        strOrNull(raw.label) ??
-        strOrNull(raw.title) ??
-        strOrNull(raw.preview) ??
+        reviewSummary(strOrNull(raw.label), strOrNull(raw.target_kind)) ??
+        reviewSummary(strOrNull(raw.title), strOrNull(raw.target_kind)) ??
+        reviewSummary(strOrNull(raw.preview), strOrNull(raw.target_kind)) ??
         reviewTargetFallback(targetType, targetId, index),
       sourcePath: strOrNull(raw.path),
       timestamp: strOrNull(raw.timestamp) ?? strOrNull(raw.updated_at),
@@ -92,7 +128,7 @@ function mapBookmark(raw: RawRow, index: number) {
   return makeRow(
     makeRef("review", `bookmark:${id}`),
     {
-      title: strOrNull(raw.summary) ?? strOrNull(snapshot.summary) ?? id,
+      title: reviewSummary(strOrNull(raw.summary)) ?? reviewSummary(strOrNull(snapshot.summary)) ?? id,
       sourcePath: strOrNull(snapshot.path),
       timestamp: strOrNull(snapshot.timestamp) ?? strOrNull(raw.updated_at),
       sha256: sha256Of(snapshot.hash),
@@ -112,18 +148,33 @@ function mapBookmark(raw: RawRow, index: number) {
 
 export const reviewCollection: CollectionDef = {
   id: "review",
-  label: "리뷰보드",
+  label: "검토 목록",
   source: "whole",
   fetch: (runId, _query, signal) => fetchReviewRows(runId, signal),
   mapRow: (raw, index) => (raw._store === "case-db" ? mapCaseDbMark(raw, index) : mapBookmark(raw, index)),
   columns: [
-    col.review(),
+    {
+      // The verdict slot holds the judgement only; 보고서 포함 is its own marker (T-176).
+      ...col.review(),
+      value: (r) => (r.reviewStatus === "include-in-report" ? null : r.reviewStatus),
+      format: (r) =>
+        r.reviewStatus && r.reviewStatus !== "include-in-report" ? REVIEW_LABELS[r.reviewStatus] : "",
+      render: (r) => (r.reviewStatus === "include-in-report" ? null : reviewStatusCell(r)),
+    },
     col.title("요약", 340),
     col.field("tags", "태그", 160, ["analysis", "compact"], (r) => r.tags.join(", ")),
     col.field("note", "메모", 260, ["analysis"], (r) => fieldStr(r, "note")),
-    col.field("report", "보고서", 80, ["analysis", "compact"], (r) =>
-      r.fields.includeInReport ? "포함" : "",
-    ),
+    col.field("report", "보고서", 104, ["analysis", "compact"], (r) => (inReport(r) ? REPORT_MARKER : ""), {
+      format: (r) => (inReport(r) ? REPORT_MARKER : ""),
+      render: (r) =>
+        inReport(r)
+          ? createElement(
+              "span",
+              { className: "grid-tag-chip", "data-testid": "review-report-marker" },
+              REPORT_MARKER,
+            )
+          : null,
+    }),
     // 시각 never narrower than its 15 characters + padding (review #9: no clipped seconds).
     col.timestamp(TIME_COLUMN_MIN, ["analysis", "source"]),
     col.path(420, ["source"]),
