@@ -24,6 +24,7 @@ import { evidenceZoneOption, tzOffsetLabel } from "../utils/time";
 import { Slot } from "./slots";
 import {
   formatElapsed,
+  OUTCOME_UNKNOWN,
   progressText,
   type RunOutcome,
   runIdentityText,
@@ -125,10 +126,12 @@ function RunProgress({
         부분
       </ToneChip>
     );
-  } else if (finishedOk && outcomePending) {
+  } else if (finishedOk) {
+    // Still loading, or unknown (the dashboard request failed / the server sent no scope or
+    // steps): a neutral chip, never the green run-status 완료 that reads as a full outcome.
     chip = (
       <ToneChip tone="" testId="status-outcome">
-        범위 확인 중
+        {outcomePending ? "범위 확인 중" : OUTCOME_UNKNOWN}
       </ToneChip>
     );
   } else {
@@ -191,8 +194,9 @@ function RunProgress({
             <span>{formatElapsed(now - started)} 경과</span>
           </>
         ) : null}
-        {/* Once the outcome is known, "오류 0" is dropped (the chip and the failed-step count say it). */}
-        {!known || errors > 0 ? (
+        {/* A finished run drops "오류 0" (the chip and the failed-step count say it; an unknown
+            outcome must not read as "no errors"). */}
+        {(!known && !finishedOk) || errors > 0 ? (
           <>
             <StatusSep />
             <span className={errors > 0 ? "status-errors" : undefined}>오류 {errors}</span>

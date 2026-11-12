@@ -170,10 +170,27 @@ describe("status bar outcome (T-174)", () => {
     expect(screen.getByTestId("status-run").textContent).not.toContain("오류 0");
   });
 
-  it("an older server without scope/steps keeps the run status chip", async () => {
+  it("an older server without scope/steps reads 범위 확인 불가, never 완료 · 오류 0", async () => {
     renderBar({ scope: null, steps: null }, { cases: [] });
-    await waitFor(() => expect(screen.queryByText("범위 확인 중")).toBeNull());
-    expect(screen.getByTestId("status-run").textContent).toContain("완료");
+    const chip = await screen.findByText("범위 확인 불가");
+    expect(chip.getAttribute("data-tone")).not.toBe("ok");
+    const bar = screen.getByTestId("status-run").textContent ?? "";
+    expect(bar).not.toContain("완료");
+    expect(bar).not.toContain("오류 0");
     expect(screen.getByTestId("status-run-name").textContent).toBe("laptop.E01");
+  });
+
+  it("a failed dashboard request reads 범위 확인 불가, not a green 완료", async () => {
+    mockFetch({ "GET /api/cases": { cases: [] } });
+    act(() => {
+      resetAppStore({ route: { runId: RUN_ID, collection: "intake" } });
+      useAppStore.getState().setRuns([RUN]);
+    });
+    renderWithQuery(<StatusBar />);
+    const chip = await screen.findByText("범위 확인 불가");
+    expect(chip.getAttribute("data-tone")).not.toBe("ok");
+    const bar = screen.getByTestId("status-run").textContent ?? "";
+    expect(bar).not.toContain("완료");
+    expect(bar).not.toContain("오류 0");
   });
 });
