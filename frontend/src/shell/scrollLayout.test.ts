@@ -46,6 +46,31 @@ describe("C1 tree panel scrolls its list, not the frame", () => {
     expect(rule(tree, ".evidence-tree-foot")["border-top"]).toContain("var(--line-subtle)");
   });
 
+  it("T-015: the list never scrolls sideways and counts never sit under the scrollbar", () => {
+    // One column as wide as the client box: an `auto` track grew to the widest nowrap label, so
+    // the counts slid under the scrollbar (visual audit #9, shots/21-tree-expanded.png).
+    expect(rule(tree, '.evidence-tree > ul[role="tree"]')).toMatchObject({
+      "overflow-x": "hidden",
+      "grid-template-columns": "minmax(0, 1fr)",
+    });
+    expect(rule(tree, ".case-tree-item")["min-width"]).toBe("0");
+    expect(rule(tree, ".case-tree-label")).toMatchObject({
+      "min-width": "0",
+      overflow: "hidden",
+      "text-overflow": "ellipsis",
+      "white-space": "nowrap",
+    });
+    expect(rule(tree, ".case-tree-item .badge")).toMatchObject({ flex: "none", "min-width": "7ch" });
+  });
+
+  it("T-015: no italics, and section headers are not smaller than their children", () => {
+    expect(tree).not.toMatch(/font-style\s*:\s*italic/);
+    expect(rule(tree, ".case-tree-item.is-dimmed:not(.selected)")["font-style"]).toBeUndefined();
+    expect(rule(tree, '.case-tree-item[aria-level="1"]')["font-size"]).toBe(
+      rule(tree, ".case-tree-item")["font-size"],
+    );
+  });
+
   it("pane frames clip (focus cannot scroll them) and stage panels fill below the heading", () => {
     expect(rule(css("app/shell.css"), ".pane-frame").overflow).toBe("clip");
     const panel = rule(css("features/stages/stages.css"), ".stage-panel");

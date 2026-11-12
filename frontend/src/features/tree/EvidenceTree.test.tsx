@@ -410,6 +410,10 @@ describe("결과 없는 계열 숨김 (viewer-families U-F7)", () => {
     const hiddenDomain = item("위치·여행");
     expect(hiddenDomain.classList.contains("is-dimmed")).toBe(true);
     expect(hiddenDomain.getAttribute("aria-description")).toMatch(/^결과 없음: /);
+    // T-015: the count slot of a shown empty family reads "자료 없음" (not a dimmed 0 / "—"); the
+    // accessible name keeps its count form.
+    for (const li of added) expect(li.querySelector(":scope > .badge")?.textContent).toBe("자료 없음");
+    expect(hiddenDomain.getAttribute("aria-label")).not.toContain("자료 없음");
     expect(window.localStorage.getItem(SHOW_EMPTY_KEY)).toBe("1");
     expect(useTreePrefs.getState().showEmpty).toBe(true);
   });
