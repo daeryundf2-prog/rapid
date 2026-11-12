@@ -361,6 +361,7 @@ export type A11yNameRow = readonly [
  */
 // biome-ignore format: generated table, one row per line
 export const A11Y_NAME_TABLE: readonly A11yNameRow[] = [
+  ["(label)", "/AI 사용 기록/", "alias", "pattern"],
   ["(label)", "/AI 사용 절 포함/", "alias", "pattern"],
   ["(label)", "/AI 읽기 예산/", "alias", "pattern"],
   ["(label)", "/^출력 폴더/", "alias", "pattern"],
@@ -379,6 +380,7 @@ export const A11Y_NAME_TABLE: readonly A11yNameRow[] = [
   ["(label)", "cell", "alias", "source"],
   ["(label)", "clip.mp4 재생", "alias", "dynamic"],
   ["(label)", "clip2.mp4 재생", "alias", "dynamic"],
+  ["(label)", "감정인 (선택)", "alias", "source"],
   ["(label)", "개인정보", "alias", "source"],
   ["(label)", "검사관", "keep", "source"],
   ["(label)", "검색 방식", "alias", "source"],
@@ -388,6 +390,7 @@ export const A11Y_NAME_TABLE: readonly A11yNameRow[] = [
   ["(label)", "디스크 이미지", "alias", "source"],
   ["(label)", "모드", "keep", "source"],
   ["(label)", "문서", "alias", "source"],
+  ["(label)", "보고서 양식", "alias", "source"],
   ["(label)", "보고서 형식", "alias", "source"],
   ["(label)", "사건 번호", "keep", "source"],
   ["(label)", "사건명", "keep", "source"],
@@ -618,6 +621,7 @@ export const A11Y_NAME_TABLE: readonly A11yNameRow[] = [
   ["button", "특이사항 A 1건, B 1건: 로그 삭제, RDP 활성화", "alias", "dynamic"],
   ["button", "특이사항 A 이상 조건 제거", "keep", "dynamic"],
   ["button", "하 태그 태그 삭제", "alias", "dynamic"],
+  ["button", "하 태그 태그 편집", "alias", "dynamic"],
   ["button", "행 메뉴", "keep", "source"],
   ["button", "허용 루트 목록", "alias", "source"],
   ["button", "현재 건수를 기준선으로 저장…", "keep", "source"],
@@ -776,6 +780,7 @@ export const A11Y_NAME_TABLE: readonly A11yNameRow[] = [
   ["menuitem", "경로 복사", "alias", "source"],
   ["menuitem", "관련 있음 표시", "alias", "source"],
   ["menuitem", "더 보기", "keep", "source"],
+  ["menuitem", "원본 보기", "alias", "source"],
   ["menuitem", "인용 복사", "keep", "source"],
   ["menuitem", "태그…", "alias", "dynamic"],
   ["menuitemcheckbox", "북마크", "alias", "source"],
