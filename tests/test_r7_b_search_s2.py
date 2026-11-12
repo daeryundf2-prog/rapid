@@ -23,7 +23,9 @@ try:
     from rapidtriage.api.app.search_index_service import SEARCH_HISTORY
 
     HAS_FASTAPI = True
-except ImportError:  # pragma: no cover
+except (ImportError, RuntimeError):  # pragma: no cover
+    # starlette.testclient raises RuntimeError (not ImportError) when httpx is missing. The E2E
+    # entity-search spec imports build_entity_run from here in a `.[web]`-only environment.
     HAS_FASTAPI = False
 
 from rapidtriage.core.case_db import open_case_database
