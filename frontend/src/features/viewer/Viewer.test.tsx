@@ -115,6 +115,8 @@ describe("Viewer — empty state and toolbar", () => {
     expect(tool("viewer.mark.relevant").getAttribute("aria-disabled")).toBe("true");
     // r8 T-086: only usable modes are tabs — with no row there are none.
     expect(screen.queryAllByRole("tab")).toHaveLength(0);
+    // …and no empty tablist (e2e a11y rule "tablist-empty").
+    expect(screen.queryByRole("tablist")).toBeNull();
   });
 
   it("registers the toolbar actions as commands that report disabledReason", async () => {
