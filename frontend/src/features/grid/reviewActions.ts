@@ -330,6 +330,29 @@ export function onReviewApplied(listener: ReviewListener): () => void {
 }
 
 /**
+ * A case-DB write this tab is about to send (T-131): the rows and the mark, or `rows: null` for a
+ * write whose rows the tab does not list (tag propagation, tag rename/delete). The review map uses
+ * it to tell this tab's own changes from another window's.
+ */
+export interface ReviewWrite {
+  runId: string;
+  rows: readonly GridRow[] | null;
+  mark: ReviewMarkBody | null;
+}
+
+type ReviewWriteListener = (write: ReviewWrite) => void;
+const writeListeners = new Set<ReviewWriteListener>();
+
+export function onReviewWrite(listener: ReviewWriteListener): () => void {
+  writeListeners.add(listener);
+  return () => writeListeners.delete(listener);
+}
+
+function emitReviewWrite(write: ReviewWrite): void {
+  for (const listener of writeListeners) listener(write);
+}
+
+/**
  * Apply a review mark to rows. The run's case DB is the canonical store:
  * ensure it once per run, then POST /api/case-db/review-batch with each row's
  * case-db id or run-output locator (the server resolves locators to rows). Only
@@ -457,6 +480,8 @@ async function applyBody(
     // The review author (AXIOM E3) rides on every mark: the typed name, else the case's 담당자,
     // else "" (the server keeps its own attribution; never the old "web-ui" default, T-036).
     const authored: ReviewMarkBody = { ...mark, reviewer: currentReviewer(runId) };
+    // Before the request: a review-map refetch racing it must already know this write is ours.
+    emitReviewWrite({ runId, rows, mark });
     await postReviewBatch(handle, targets as ReviewBatchTarget[], authored, runId);
     store = "case-db";
   } else {
@@ -493,6 +518,8 @@ export function ensureRunCaseDb(runId: string): Promise<CaseDbHandle | null> {
 
 /** Tell the listeners (review-map / review-counts invalidation) that marks of the run changed. */
 export function notifyReviewApplied(runId: string): void {
+  // Rows this tab does not list changed (tag propagation, tag edits): not another window's change.
+  emitReviewWrite({ runId, rows: null, mark: null });
   for (const listener of listeners) listener(runId, "case-db");
 }
 

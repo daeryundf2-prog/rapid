@@ -16,7 +16,7 @@ import {
   listCaseTags,
   updateCaseTag,
 } from "../../api/reviewTools";
-import { ensureRunCaseDb, onReviewApplied } from "../grid/reviewActions";
+import { ensureRunCaseDb, notifyReviewApplied, onReviewApplied } from "../grid/reviewActions";
 import { currentReviewer } from "./author";
 
 export type TagLoadStatus = "idle" | "loading" | "ready" | "error";
@@ -138,6 +138,8 @@ export async function saveTagChanges(
 ): Promise<CaseTag> {
   const handle = await tagHandle(runId);
   const { tag } = await updateCaseTag(runId, handle.case_id, tagId, { ...input, actor: currentReviewer() });
+  // A rename rewrites the marks' tag names: this tab's own change (T-131), and the map refetches.
+  if (input.name !== undefined) notifyReviewApplied(runId);
   await loadCaseTags(runId, { force: true });
   return tag;
 }
@@ -145,6 +147,7 @@ export async function saveTagChanges(
 export async function removeTag(runId: string, tagId: number): Promise<number> {
   const handle = await tagHandle(runId);
   const result = await deleteCaseTag(runId, handle.case_id, tagId, currentReviewer());
+  if ((result.removed_from_marks ?? 0) > 0) notifyReviewApplied(runId);
   await loadCaseTags(runId, { force: true });
   return result.removed_from_marks ?? 0;
 }
