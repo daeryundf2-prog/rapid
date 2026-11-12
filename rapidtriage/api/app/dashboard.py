@@ -5,7 +5,8 @@
 * evidence source — image name/size and the partition rows the image stage
   recorded (``rapidtriage-e01.json`` ``partition_selection.partition_browser_rows``);
 * export history — case report formats, reviewer bundle, submission manifest,
-  validation package and row extracts already written under the output dir.
+  validation package and row extracts already written under the output dir;
+* processing scope — four axes from the extraction stats (``run_scope.py``, T-023).
 
 Nothing here parses evidence or changes recovery behaviour; it only reads
 files the run (or earlier console actions) already produced.
@@ -33,6 +34,7 @@ from .helpers import (
     get_output_path,
     job_output_dir,
 )
+from .run_scope import build_run_scope
 
 CASE_NOTES_FILE_NAME = "rapidtriage-case-notes.json"
 CASE_NOTES_PROFILE = "rapidtriage-case-notes-v1"
@@ -340,4 +342,6 @@ def build_run_dashboard(store: RunJobStore, run_id: str, job: RunJob) -> dict[st
         },
         "evidence_source": build_evidence_source(store, run_id, job),
         "exports": build_export_history(store, run_id, job),
+        # T-023: processing scope on four axes (partitions/allocated/deleted/unallocated).
+        "scope": build_run_scope(job.summary, job_output_dir(job)),
     }
