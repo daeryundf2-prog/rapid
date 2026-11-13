@@ -13,7 +13,7 @@ import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from ...core.e01 import discover_e01_segments, ewf_segment_number
+from ...core.e01_recorded_hash import discover_segment_files, ewf_segment_index
 from ...core.hash_cache import compute_hashes_fresh
 
 #: ``summary.source.type`` values whose ``source_path`` is an image/container file and whose
@@ -80,7 +80,7 @@ def build_run_validation_source_integrity(
             result["limitations"] = [
                 "source hashes are computed only when the validation package is generated (POST)"
             ]
-        if ewf_segment_number(root) is not None:
+        if ewf_segment_index(root) is not None:
             result["kind"] = "e01"
             result["scope"] = "container-segments"
             result["segments"] = build_container_segment_hashes(
@@ -113,10 +113,10 @@ def build_run_validation_source_integrity(
 def ewf_segment_set_warnings(selected: Path, segments: Sequence[Mapping[str, object]]) -> list[str]:
     """Gaps in the discovered EWF set, and same-named siblings the discovery did not list.
 
-    Segment discovery (``core.e01.discover_e01_segments``, engine code) matches only two-digit
-    ``.E01-.E99`` / ``.Ex01-.Ex99`` suffixes with a case-sensitive stem, so ``.EAA…`` segments of
-    a 100+ segment set are not listed. The package names those siblings instead of claiming the
-    listed segments are the whole container."""
+    The segment list comes from ``core.e01_recorded_hash.discover_segment_files`` (the whole set,
+    past ``.E99`` -- review WB-10/11 P1-5), the same discovery as the evidence hash. Same-named
+    siblings it still did not list (other family, unexpected suffix) are named instead of claiming
+    the listed segments are the whole container."""
     warnings: list[str] = []
     numbers = sorted(int(n) for row in segments if isinstance(n := row.get("segment_number"), int))
     if numbers:
@@ -166,8 +166,9 @@ def build_container_segment_hashes(
     ``selected_hashes`` (the selected segment's digests just read) avoids reading it twice."""
     selected_resolved = selected.resolve()
     rows: list[dict[str, object]] = []
-    for segment in discover_e01_segments(selected):
-        row: dict[str, object] = {"name": segment.name, "path": str(segment), "segment_number": ewf_segment_number(segment)}
+    segments, _gaps = discover_segment_files(selected)
+    for segment in segments:
+        row: dict[str, object] = {"name": segment.name, "path": str(segment), "segment_number": ewf_segment_index(segment)}
         if segment.is_file():
             row["size"] = segment.stat().st_size
             if not compute_hashes:

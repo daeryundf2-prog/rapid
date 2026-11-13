@@ -31,6 +31,8 @@ from ...artifacts.windows.filesystem import (
     NTFS_LOGFILE_SCAN_LIMIT,
     USN_RECORD_SCAN_LIMIT,
 )
+from ...core.e01 import discover_e01_segments, is_e01_path
+from ...core.e01_recorded_hash import discover_segment_files
 from ...core.submission import evidence_relative_roots
 from .run_scope import _image_source, build_run_scope
 from .run_steps_summary import classify_step_status
@@ -48,6 +50,7 @@ LIMIT_REASONS = {
     "e01-extract-cap": "E01 추출 상한 도달 (전수 아님)",
     "e01-read-error": "E01 읽기 오류 (내용 미추출)",
     "e01-depth-cap": "E01 폴더 깊이 상한으로 건너뜀",
+    "e01-segment-cap": "E01 세그먼트 일부만 열어 처리함",
     "ntfs-parse-cap": "NTFS 기록 분석 상한 도달 ($MFT·USN·$LogFile)",
     "undisclosed-cap": "도달 여부가 기록되지 않는 상한",
 }
@@ -146,6 +149,39 @@ def e01_limit_items(summary: Mapping[str, Any], run_dir: Path | None) -> list[di
             "건너뛰었습니다(할당 영역 축).",
         ))
     return items
+
+
+def _source_image_path(summary: Mapping[str, Any]) -> Path | None:
+    source = summary.get("source")
+    for value in (source.get("source_path") if isinstance(source, Mapping) else None, summary.get("root")):
+        if isinstance(value, str) and value:
+            path = Path(value)
+            if is_e01_path(path):
+                return path
+    return None
+
+
+def e01_segment_coverage_items(summary: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Review WB-10/11 P1-5: the engine opens two-digit segments only (``discover_e01_segments``,
+    ``.E01``-``.E99``) while the evidence hash covers the whole set (``discover_segment_files``).
+    When the set has more segments than the engine opened, say so -- the engine is not changed."""
+    path = _source_image_path(summary)
+    if path is None:
+        return []
+    try:
+        if not path.is_file():
+            return []
+        full, _gaps = discover_segment_files(path)
+        opened = discover_e01_segments(path)
+    except OSError:
+        return []
+    if len(full) <= len(opened):
+        return []
+    return [_item(
+        "e01-segment-cap", "e01", "warning",
+        f"엔진은 E01–E99까지만 열어 처리함 — 세그먼트 {count_text(len(full))}개 중 {count_text(len(opened))}개. "
+        "나머지 세그먼트의 내용은 이 런의 결과에 없습니다(증거 해시는 전체 세그먼트를 다룸).",
+    )]
 
 
 # --- NTFS system files ----------------------------------------------------------------------
@@ -284,6 +320,7 @@ def engine_limit_items(
     output_summary: OutputSummary,
 ) -> list[dict[str, Any]]:
     return [
+        *e01_segment_coverage_items(summary),
         *e01_limit_items(summary, run_dir),
         *ntfs_limit_items(summary, run_dir, output_summary),
         *undisclosed_cap_items(summary),
