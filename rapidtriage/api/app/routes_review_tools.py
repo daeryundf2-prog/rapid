@@ -48,7 +48,9 @@ from ...core.case_db import (
 from ...core.case_db.helpers import normalize_path_for_db
 from ...core.case_db.review_schema import COLOR_TOKEN_LABELS, COLOR_TOKENS
 from ...core.case_db.write_lock import (
+    CaseDatabaseBatchPartialError,
     CaseDatabaseLockedError,
+    case_db_batch_partial_detail,
     case_db_locked_detail,
     retry_when_locked,
 )
@@ -95,6 +97,8 @@ class HistogramBaselineCreateRequest(BaseModel):
 def review_tool_http_error(exc: CaseDatabaseError) -> HTTPException:
     if isinstance(exc, CaseDatabaseLockedError):
         return HTTPException(status_code=409, detail=case_db_locked_detail(exc))
+    if isinstance(exc, CaseDatabaseBatchPartialError):
+        return HTTPException(status_code=409, detail=case_db_batch_partial_detail(exc))
     status = exc.status if isinstance(exc, ReviewToolError) else 400
     message = str(exc)
     if message.startswith("case not found:"):

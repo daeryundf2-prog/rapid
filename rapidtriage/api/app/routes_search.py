@@ -25,6 +25,7 @@ from .helpers import (
     resolve_allowed_source_file,
     run_not_finished_message,
 )
+from .routes_media import reject_credential_archive_member
 from .runops import (
     attach_search_result_source_actions,
     build_archived_source_search,
@@ -57,6 +58,8 @@ def build_search_router(
         archive_request = parse_source_preview_archive_request(path)
         if archive_request:
             source_path = resolve_allowed_source_file(store, run_id, archive_request["archive_path"], **row_ref)
+            # Same archive-member credential judgment as source-preview (review WB-10/11 P2-8).
+            reject_credential_archive_member(source_path, archive_request["entry_name"])
             return build_archived_source_search(
                 source_path,
                 archive_request["entry_name"],

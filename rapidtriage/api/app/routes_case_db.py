@@ -20,7 +20,12 @@ from ...core.case_db import (
 )
 from ...core.case_db.base import normalize_identifier
 from ...core.case_db.review import saved_search_to_dict
-from ...core.case_db.write_lock import CaseDatabaseLockedError, case_db_locked_detail
+from ...core.case_db.write_lock import (
+    CaseDatabaseBatchPartialError,
+    CaseDatabaseLockedError,
+    case_db_batch_partial_detail,
+    case_db_locked_detail,
+)
 from ...core.jobs import (
     RunJobStore,
     run_output_dir,
@@ -501,6 +506,8 @@ def build_case_db_router(
             )
         except CaseDatabaseLockedError as exc:
             raise HTTPException(status_code=409, detail=case_db_locked_detail(exc)) from exc
+        except CaseDatabaseBatchPartialError as exc:
+            raise HTTPException(status_code=409, detail=case_db_batch_partial_detail(exc)) from exc
         except CaseDatabaseError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
