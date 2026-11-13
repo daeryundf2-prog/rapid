@@ -255,11 +255,16 @@ def scope_lines(scope: Mapping[str, object] | None) -> list[str]:
 # --- reproducibility ------------------------------------------------------------------------
 
 
-def catalog_versions(run_summary: Mapping[str, object]) -> list[str]:
+def catalog_versions(run_summary: Mapping[str, object], *, technical: bool = False) -> list[str]:
+    """``<step>: <version>`` per step with a catalog version: the Korean step name and the version
+    as a code span; the raw step id only in the technical template (WB-8 P2-15)."""
     found: list[str] = []
     for step in run_summary.get("steps") or []:
         if isinstance(step, Mapping) and step.get("catalog_version") not in (None, ""):
-            text = md_inline(f"{step.get('name')}: {step.get('catalog_version')}")
+            if technical:
+                text = md_inline(f"{step.get('name')}: {step.get('catalog_version')}")
+            else:
+                text = f"{step_name_ko(step.get('name'))}: {md_code(step.get('catalog_version'))}"
             if text not in found:
                 found.append(text)
     return found
@@ -270,8 +275,9 @@ def reproducibility_lines(
     report_context: Mapping[str, object],
     *,
     display_label: str,
+    technical: bool = False,
 ) -> list[str]:
-    versions = catalog_versions(run_summary)
+    versions = catalog_versions(run_summary, technical=technical)
     steps = _mapping(report_context.get("steps"))
     lines = [
         f"- 도구 버전: {PRODUCT_NAME} {__version__}",

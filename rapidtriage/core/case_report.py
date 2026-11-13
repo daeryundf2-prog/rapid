@@ -98,7 +98,9 @@ def build_case_report_markdown(
             f"- 분석 모드: {run_mode_ko(run_summary.get('mode'))}"
             + (f" ({report_items.md_code(run_summary.get('mode', ''))})" if technical else ""),
             *report_items.subject_lines(run_summary, technical=technical),
-            *report_items.reproducibility_lines(run_summary, report_context, display_label=display_label),
+            *report_items.reproducibility_lines(
+                run_summary, report_context, display_label=display_label, technical=technical
+            ),
             report_items.conditions_line(submission_manifest, case_payload),
             "",
             scope,

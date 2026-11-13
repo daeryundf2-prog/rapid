@@ -175,7 +175,7 @@ class KoreanExpertReportTests(unittest.TestCase):
 
     def test_only_report_included_bookmarks_listed(self) -> None:
         markdown = _report()
-        self.assertIn("| 삭제된 문서 복구 | artifact | 관련 있음 | (작성자 미지정) | 삭제복구 | 사건 연관 문서 |", markdown)
+        self.assertIn("| 삭제된 문서 복구 | 아티팩트 | 관련 있음 | (작성자 미지정) | 삭제복구 | 사건 연관 문서 |", markdown)
         self.assertNotIn("무관한 캐시 파일", markdown)
 
     # T-026 ① two tables ------------------------------------------------------------------------
@@ -198,6 +198,70 @@ class KoreanExpertReportTests(unittest.TestCase):
         submitted = _section(markdown, "### 2.2", "## 3.")
         self.assertIn(f"| 1 | `Users/kim/doc.docx` | `{ITEM_SHA}` |", submitted)
         self.assertNotIn(SEGMENT_SHA[0], submitted)
+
+    def test_incomplete_segment_set_is_never_plain_computed(self) -> None:
+        """Review WB-10/11 P1-4: the incomplete-set facts the server computes reach section 2.1."""
+        record = {**_e01_record(), "segment_set_incomplete": True, "segment_count": 2, "segment_gaps": [3, 5],
+                  "hash_message": "세그먼트 집합 불완전 — 컨테이너 해시는 있는 세그먼트만"}
+        evidence = _section(_report(evidence_records=[record]), "### 2.1 감정 대상 증거", "### 2.2")
+        self.assertIn(
+            "- E-01 해시 결과: 세그먼트 집합 불완전 — 있는 세그먼트 2개만 해시함(컨테이너 전체의 해시 아님), "
+            "빠진 세그먼트 번호 3, 5",
+            evidence,
+        )
+        self.assertNotIn("해시 결과: 계산 완료", evidence)
+        self.assertIn("- E-01 세그먼트 수: 2개", evidence)
+        self.assertIn("- E-01 해시 처리 메시지: 세그먼트 집합 불완전 — 컨테이너 해시는 있는 세그먼트만", evidence)
+        no_gap = {**record, "segment_gaps": []}
+        evidence = _section(_report(evidence_records=[no_gap]), "### 2.1 감정 대상 증거", "### 2.2")
+        self.assertIn("마지막 세그먼트 없음 또는 번호 미상", evidence)
+
+    def test_recorded_compare_and_container_hash_are_printed(self) -> None:
+        for compare, text in (
+            ("equals", "입력한 기대 해시가 이미지에 기록된 취득 해시와 같음"),
+            ("differs", "입력한 기대 해시가 이미지에 기록된 취득 해시와 다름 — 취득 기록·이미지 확인 필요"),
+            ("not-comparable", "이미지에 같은 종류의 취득 해시가 없어 비교하지 못함"),
+        ):
+            record = {**_e01_record(), "hash_status": "matched", "recorded_compare": compare}
+            evidence = _section(_report(evidence_records=[record]), "### 2.1 감정 대상 증거", "### 2.2")
+            self.assertIn(f"- E-01 기록된 취득 해시 대조: {text}", evidence)
+        self.assertIn(f"- E-01 컨테이너 SHA-256(세그먼트 파일을 순서대로 이은 바이트): `{'99' * 32}`", evidence)
+        self.assertIn("- E-01 해시 결과: 계산 완료 — 입력한 기대 해시와 일치", evidence)
+
+    def test_many_segments_table_is_bounded(self) -> None:
+        segments = [
+            {"name": f"disk.E{index:02d}", "segment_number": index, "size_bytes": 10, "sha256": f"{index:064x}"}
+            for index in range(1, 61)
+        ]
+        record = {**_e01_record(), "segments": segments, "segment_count": 60}
+        evidence = _section(_report(evidence_records=[record]), "### 2.1 감정 대상 증거", "### 2.2")
+        self.assertEqual(len([line for line in evidence.splitlines() if line.startswith("| E-01 |")]), 20)
+        self.assertIn("- E-01 세그먼트 수: 60개 (표에는 앞 20개만 적음)", evidence)
+
+    def test_no_raw_identifiers_in_body(self) -> None:
+        """Acceptance ⑥: no English id tokens outside code spans anywhere in the 감정서."""
+        summary = {
+            **_run_summary(),
+            "steps": [
+                *_run_summary()["steps"],
+                {"name": "triage-flags", "status": "completed", "catalog_version": "2026.11.1"},
+                {"name": "artifacts-ai-agent", "status": "completed", "catalog_version": "ai-catalog-3"},
+            ],
+        }
+        case = _case_payload()
+        case["bookmarks"][0]["reference"] = {"command": "artifacts"}
+        case["bookmarks"].append({"bookmark_id": "b4", "summary": "USB 기록", "source": "artifacts_windows-registry",
+                                  "review": {"status": "relevant", "include_in_report": True}})
+        record = {**_e01_record(), "hash_scope": "some-new-scope", "segment_set_incomplete": True,
+                  "segment_gaps": [2], "recorded_compare": "not-comparable"}
+        markdown = build_korean_expert_report(
+            run_summary=summary, case_payload=case, submission_manifest=_manifest(),
+            metadata={"evidence_records": [record]},
+        )
+        body = re.sub(r"`[^`\n]*`", "", markdown)
+        self.assertEqual(re.findall(r"[a-z]+(?:[-_][a-z]+)+", body), [])
+        self.assertIn("- 규칙·분류 카탈로그 버전: 특이사항: `2026.11.1`", markdown)
+        self.assertIn("| USB 기록 | 아티팩트: ", markdown)
 
     def test_single_file_record_and_unhashed_records(self) -> None:
         single = {**_e01_record(), "evidence_number": "E-02", "display_name": "usb.dd", "segments": [],

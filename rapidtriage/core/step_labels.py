@@ -62,3 +62,29 @@ def step_name_ko(name: object) -> str:
         domain = KIND_DOMAIN_KO.get(key[len("artifacts-") :])
         return f"아티팩트 수집: {domain}" if domain else "아티팩트 수집: 기타 종류"
     return "기타 단계"
+
+
+#: Korean names of a bookmark's source collection (``core.case.CASE_SOURCE_ROWS`` commands and
+#: ``api.app.search.normalize_bookmark_source`` values) for report "출처" columns (T-026).
+SOURCE_NAME_KO = {
+    "files": "파일 목록",
+    "docs": "문서 검색",
+    "artifacts": "아티팩트",
+    "artifact": "아티팩트",
+    "timeline": "타임라인",
+    "indicators": "지표 요약",
+    "compare": "비교",
+}
+
+
+def source_name_ko(source: object) -> str:
+    """Korean name of a bookmark source; ``artifacts_<kind>`` / ``artifacts:<kind>`` -> the kind's
+    domain; ``기타 출처`` for an unknown id (never the raw id)."""
+    key = str(source or "").strip().lower()
+    if key in SOURCE_NAME_KO:
+        return SOURCE_NAME_KO[key]
+    for prefix in ("artifacts_", "artifacts:"):
+        if key.startswith(prefix):
+            domain = KIND_DOMAIN_KO.get(key[len(prefix) :].strip())
+            return f"아티팩트: {domain}" if domain else "아티팩트: 기타 종류"
+    return "기타 출처" if key else ""
