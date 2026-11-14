@@ -20,7 +20,7 @@ export const CaseEditDialog = lazyView("케이스 정보", () =>
 export const AddEvidenceDialog = lazyView("증거 추가", () =>
   import("./CaseDialogs").then((m) => m.AddEvidenceDialog),
 );
-export const AddRunDialog = lazyView("런 추가", () => import("./CaseDialogs").then((m) => m.AddRunDialog));
+export const AddRunDialog = lazyView("처리 추가", () => import("./CaseDialogs").then((m) => m.AddRunDialog));
 export const ProblemsDialog = lazyView("문제 목록", () =>
   import("./CaseDialogs").then((m) => m.ProblemsDialog),
 );
