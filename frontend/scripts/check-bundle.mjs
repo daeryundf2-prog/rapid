@@ -45,7 +45,7 @@ const committedDir = join(frontendRoot, "..", "rapidtriage", "web", "static", "v
 const BUDGET = {
   initialJs: 1_000_000,
   js: 1_738_000,
-  data: 285_200,
+  data: 291_400, // T-045 (2026-11-14): families gained tier/card/section keys -> 285,646 B; +2%
   css: 155_764,
   font: 274_821,
 };
