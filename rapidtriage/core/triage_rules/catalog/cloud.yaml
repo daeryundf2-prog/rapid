@@ -1,6 +1,9 @@
 # Triage catalogue: cloud (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
 families:
 - id: cloud
+  tier: 1
+  card: exfil
+  section: cloud
   label: 클라우드
   types:
   - cloud-activity
@@ -93,6 +96,9 @@ families:
 # Google Drive (DriveFS), Naver MYBOX, iCloud for Windows. Three families (r2 console fix m1):
 # accounts (client · account · sync folder · tenant · account id), files/events, inventory.
 - id: cloud-sync-account
+  tier: 2
+  card: exfil
+  section: cloud-accounts
   label: 클라우드 동기화 계정
   types:
   - cloud-sync-account
@@ -137,6 +143,9 @@ families:
   rules:
   - cloud.sync_folder_outside_user_profile
 - id: cloud-sync
+  tier: 1
+  card: exfil
+  section: cloud-sync
   label: 클라우드 동기화 파일·이벤트
   types:
   - cloud-sync-file
@@ -229,6 +238,9 @@ families:
   rules:
   - cloud.bulk_upload
 - id: cloud-sync-inventory
+  tier: 3
+  card: null
+  section: cloud-inventory
   label: 클라우드 동기화 클라이언트 인벤토리
   types:
   - cloud-sync-inventory

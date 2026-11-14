@@ -1,6 +1,9 @@
 # Triage catalogue: registry (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
 families:
 - id: registry
+  tier: 3
+  card: null
+  section: registry
   label: 레지스트리
   types: []
   prefixes:
@@ -85,6 +88,9 @@ families:
   - registry.typedpaths_unc
   - accounts.task_mismatch
 - id: persistence
+  tier: 2
+  card: null
+  section: compromise
   label: 자동 실행
   types:
   - registry-persistence-entry
@@ -141,6 +147,9 @@ families:
   - registry.run_user_path
   - registry.persistence_lastwrite_window
 - id: service
+  tier: 3
+  card: null
+  section: services
   label: 서비스
   types:
   - windows-service-config
@@ -202,6 +211,9 @@ families:
   - accounts.service_suspicious
   - antiforensics.tool_present
 - id: timezone
+  tier: 2
+  card: null
+  section: system-context
   label: 표준 시간대
   types:
   - windows-timezone
@@ -244,6 +256,9 @@ families:
     format: path
   rules: []
 - id: system-info
+  tier: 2
+  card: null
+  section: system-context
   label: 시스템 정보
   types:
   - windows-control-set
@@ -353,6 +368,9 @@ families:
   - accounts.profile_anomaly
   - antiforensics.tool_present
 - id: mounted-device
+  tier: 2
+  card: exfil
+  section: usb
   label: 마운트된 장치
   types:
   - windows-mounted-device
@@ -418,6 +436,9 @@ families:
   rules:
   - registry.usb_serial_cross
 - id: shellbag
+  tier: 2
+  card: documents
+  section: shellbags
   label: 셸백
   types: []
   prefixes:
@@ -499,6 +520,9 @@ families:
   rules:
   - registry.shellbag_removable_network
 - id: network-profile
+  tier: 2
+  card: null
+  section: system-context
   label: 네트워크 프로필(NetworkList)
   types:
   - registry-network-profile
@@ -560,6 +584,9 @@ families:
     ts_kind: last-written
   rules: []
 - id: network-share
+  tier: 1
+  card: exfil
+  section: network-shares
   label: 네트워크 공유·매핑 드라이브
   types:
   - registry-network-share
@@ -612,6 +639,9 @@ families:
     format: path
   rules: []
 - id: wlan-profile-registry
+  tier: 2
+  card: null
+  section: system-context
   label: 무선 연결 이력(레지스트리)
   types:
   - registry-wlan-profile
@@ -661,6 +691,9 @@ families:
     format: path
   rules: []
 - id: office-mru
+  tier: 1
+  card: documents
+  section: office-mru
   label: Office 최근 파일(MRU)
   types:
   - registry-office-mru
@@ -709,6 +742,9 @@ families:
     format: path
   rules: []
 - id: known-dll
+  tier: 3
+  card: null
+  section: known-dll
   label: 알려진 DLL(KnownDLLs)
   types:
   - registry-known-dll
@@ -747,6 +783,9 @@ families:
     format: path
   rules: []
 - id: default-browser
+  tier: 2
+  card: null
+  section: system-context
   label: 기본 브라우저
   types:
   - registry-default-browser
@@ -781,6 +820,9 @@ families:
     format: path
   rules: []
 - id: install-state
+  tier: 2
+  card: programs
+  section: installed
   label: 설치 상태(App Paths·MSI)
   types:
   - registry-install-state
@@ -840,6 +882,9 @@ families:
   - antiforensics.tool_present
 # --- R5 L2: logon banner, Office identities and Backstage cache --------------------------------
 - id: logon-banner
+  tier: 3
+  card: null
+  section: system-context
   label: 로그온 배너(법적 고지)
   types:
   - registry-logon-banner
@@ -873,6 +918,9 @@ families:
     label: 참고
   rules: []
 - id: office-identity
+  tier: 2
+  card: accounts
+  section: office-identity
   label: Office 연결 계정
   types:
   - office-identity
@@ -918,6 +966,9 @@ families:
     format: path
   rules: []
 - id: office-backstage
+  tier: 2
+  card: documents
+  section: office-backstage
   label: Office Backstage 캐시
   types:
   - office-backstage-item

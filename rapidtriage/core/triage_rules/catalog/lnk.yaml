@@ -1,6 +1,9 @@
 # Triage catalogue: lnk (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
 families:
 - id: shortcut
+  tier: 1
+  card: documents
+  section: recent-files
   label: 바로 가기(LNK)
   types:
   - recent-shortcut
@@ -133,6 +136,9 @@ families:
   - lnk.timestamp_anomaly
   - usb.cross_match
 - id: jumplist
+  tier: 1
+  card: documents
+  section: jumplists
   label: 점프 목록
   types:
   - jumplist-entry

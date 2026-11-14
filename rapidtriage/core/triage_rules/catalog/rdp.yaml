@@ -1,6 +1,9 @@
 # Triage catalogue: rdp (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
 families:
 - id: rdp
+  tier: 1
+  card: exfil
+  section: remote
   label: 원격 데스크톱
   types: []
   prefixes:
@@ -45,6 +48,9 @@ families:
   rules: []
 # --- R5 L2: SSH / PuTTY / WinSCP (OpenSSH files, ProgramData\ssh, WinSCP.ini, NTUSER) ---------
 - id: ssh-known-host
+  tier: 2
+  card: exfil
+  section: ssh
   label: SSH 알려진 호스트
   types:
   - ssh-known-host
@@ -102,6 +108,9 @@ families:
     format: path
   rules: []
 - id: ssh-authorized-key
+  tier: 2
+  card: exfil
+  section: ssh
   label: SSH 허용 공개키
   types:
   - ssh-authorized-key
@@ -140,6 +149,9 @@ families:
     format: number
   rules: []
 - id: ssh-client-session
+  tier: 1
+  card: exfil
+  section: ssh
   label: SSH·파일 전송 접속 세션
   types:
   - ssh-client-session
@@ -214,6 +226,9 @@ families:
     label: 참고
   rules: []
 - id: ssh-key-file
+  tier: 2
+  card: exfil
+  section: ssh
   label: SSH 키 파일
   types:
   - ssh-key-file
@@ -266,6 +281,9 @@ families:
     label: 해석 상태
   rules: []
 - id: ssh-server-config
+  tier: 3
+  card: null
+  section: ssh-config
   label: OpenSSH 서버 설정
   types:
   - ssh-server-config

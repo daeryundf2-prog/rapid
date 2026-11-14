@@ -1,6 +1,9 @@
 # Triage catalogue: documents (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
 families:
 - id: document
+  tier: 1
+  card: documents
+  section: metadata
   label: 문서 메타데이터
   types:
   - document-metadata-risk

@@ -2,6 +2,9 @@
 # The tool signature list lives in the rule params below (one entry per tool, each with its source URL).
 families:
 - id: antiforensics
+  tier: 2
+  card: deleted
+  section: anti-forensics
   label: 안티 포렌식(BitLocker 복구 키 파일)
   types:
   - bitlocker-recovery-key-file
@@ -62,6 +65,9 @@ families:
   - antiforensics.wiper_run_after_incident
 # --- R5 L2: virtual machines, crypto wallet presence (no keys/seeds), McAfee detection logs ------
 - id: vm-config
+  tier: 2
+  card: null
+  section: system-context
   label: 가상 머신 구성
   types:
   - vm-config
@@ -130,6 +136,9 @@ families:
   rules:
   - antiforensics.vm_present
 - id: crypto-wallet
+  tier: 2
+  card: programs
+  section: crypto-wallets
   label: 암호화폐 지갑(존재만)
   types:
   - crypto-wallet-presence
@@ -196,6 +205,9 @@ families:
   rules:
   - antiforensics.crypto_wallet_present
 - id: av-detection-log
+  tier: 2
+  card: null
+  section: compromise
   label: 백신 탐지 로그
   types:
   - av-detection-log
@@ -277,6 +289,9 @@ families:
 # R6 S2 lane A (plan r6-followups-2026-10-19 §2.3 갈래 A): AhnLab product folders, log candidates and
 # quarantine folders (counts only, contents never opened). Inventory layer; no rule reads it.
 - id: av-product-presence
+  tier: 2
+  card: null
+  section: system-context
   label: 백신 제품 흔적
   types:
   - av-product-presence

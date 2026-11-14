@@ -44,6 +44,9 @@ tearDownModule = quiet_media_checks.tearDownModule
 GOOD_RULE = """
 families:
 - id: fam
+  tier: 2
+  card: documents
+  section: fam
   label: 계열
   core_columns:
   - key: a

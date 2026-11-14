@@ -1,6 +1,9 @@
 # Triage catalogue: ntfs (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
 families:
 - id: mft
+  tier: 3
+  card: null
+  section: mft
   label: MFT/USN 메타
   types:
   - mft-record
@@ -72,6 +75,9 @@ families:
   - ntfs.deletion_trace
   - ntfs.mass_change
 - id: ntfs-timestamp-mismatch
+  tier: 2
+  card: deleted
+  section: timestamp-mismatch
   label: NTFS 타임스탬프 불일치
   types:
   - ntfs-timestamp-mismatch
@@ -145,6 +151,9 @@ families:
   - ntfs.si_before_fn
   - ntfs.zero_subsecond
 - id: ntfs-logfile-transaction
+  tier: 3
+  card: null
+  section: logfile
   label: $LogFile 트랜잭션
   types:
   - ntfs-logfile-transaction
@@ -193,6 +202,9 @@ families:
     format: mono
   rules: []
 - id: zone
+  tier: 2
+  card: web
+  section: zone-identifier
   label: 다운로드 출처 표식 (Zone.Identifier)
   types:
   - zone-identifier
@@ -249,6 +261,9 @@ families:
   - ntfs.ads_executable
   - ntfs.zone_identifier
 - id: recycle
+  tier: 1
+  card: deleted
+  section: recycle-bin
   label: 휴지통
   types:
   - recycle-bin-entry
@@ -283,6 +298,9 @@ families:
   rules:
   - ntfs.deletion_trace
 - id: file
+  tier: 3
+  card: null
+  section: files
   label: 파일
   types: []
   core_columns:
@@ -355,6 +373,9 @@ families:
   - archives.ext_mismatch_container
 # --- R5 L2: NTFS volume information ($Boot VBR + $Volume record); VSN pivots with LNK/Prefetch ----
 - id: ntfs-volume-information
+  tier: 3
+  card: null
+  section: volume
   label: NTFS 볼륨 정보
   types:
   - ntfs-volume-information
