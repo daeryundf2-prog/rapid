@@ -82,10 +82,14 @@ describe("wizard model", () => {
     expect(
       validateEvidenceDraft({ ...file, verifyHash: true, expectedHash: "a".repeat(32) }, [file]),
     ).toEqual({});
-    // E01: container bytes are not the media hash — an expected value is neither checked nor sent.
+    // E01 (T-181/T-129): an expected value is checked like any other and sent; the server compares
+    // it with the acquisition hash recorded in the image (the media is not re-hashed).
     const e01 = { ...a, verifyHash: true, expectedHash: "xyz" };
-    expect(validateEvidenceDraft(e01, [e01])).toEqual({});
-    expect(evidenceBody(e01).expected_hash).toBe("");
+    expect(validateEvidenceDraft(e01, [e01]).expectedHash).toContain("MD5");
+    const e01Md5 = { ...a, verifyHash: true, expectedHash: ` ${"b".repeat(32)} ` };
+    expect(validateEvidenceDraft(e01Md5, [e01Md5])).toEqual({});
+    expect(evidenceBody(e01Md5).expected_hash).toBe("b".repeat(32));
+    expect(evidenceBody({ ...e01Md5, verifyHash: false }).expected_hash).toBe("");
     expect(evidenceBody({ ...file, verifyHash: true, expectedHash: " ab " }).expected_hash).toBe("ab");
     expect(evidenceListReason([])).toBe("증거를 하나 이상 추가하세요.");
     expect(evidenceListReason([{ ...a, path: "" }])).toBe("증거 E-01: 증거 경로를 입력하세요.");
@@ -100,7 +104,7 @@ describe("run option summary", () => {
     const sent = Object.keys(body).filter((key) => !["wait", "evidence_citation_id"].includes(key));
     expect(rows.map((row) => row.key).sort()).toEqual(sent.sort());
     const byKey = Object.fromEntries(rows.map((row) => [row.key, row.value]));
-    expect(byKey.mode).toBe("침해사고 (hacking)");
+    expect(byKey.mode).toBe("침해사고");
     expect(byKey.max_file_count).toBe("500개");
     expect(byKey.known_good_hash_feeds).toBe("D:/kg.txt");
     expect(byKey.read_only).toBe("예");
@@ -127,6 +131,7 @@ describe("CaseWizard (Q-X1)", () => {
       },
       "POST /api/cases/case-1/runs": { run: { run_id: "run-new01", status: "queued" }, snapshot: {} },
       "POST /api/cases/evidence-check": { ok: true, problem: "", runnable: true, run_blocked_reason: "" },
+      "POST /api/cases/output-check": { ok: true, problem: "", code: "" },
     });
     const onClose = vi.fn();
     const onNotice = vi.fn();
@@ -151,6 +156,7 @@ describe("CaseWizard (Q-X1)", () => {
     expect(screen.getByTestId("wizard-step-info")).toBeTruthy();
     fill("사건 번호", "2026-고단-1234");
     fill("검사관", "홍길동");
+    fill("케이스 폴더", "D:\\cases\\2026");
     fireEvent.click(screen.getByTestId("wizard-next"));
 
     // Step 2: two evidence items, then delete the second one.
@@ -162,6 +168,12 @@ describe("CaseWizard (Q-X1)", () => {
     fill("증거 경로", "D:\\ev\\a.E01", items[0] as HTMLElement);
     expect(within(items[0] as HTMLElement).getByRole("switch", { name: /^해시 검증/ })).toBeTruthy();
     fireEvent.click(within(items[0] as HTMLElement).getByRole("switch"));
+    // E01 expected hash (T-129): offered, labelled as the recorded acquisition hash comparison.
+    const hashInput = within(items[0] as HTMLElement).getByLabelText(/이미지에 기록된 취득 해시와 대조/);
+    expect(document.getElementById(hashInput.getAttribute("aria-describedby") ?? "")?.textContent).toContain(
+      "매체(디스크) 해시는 다시 계산하지 않습니다",
+    );
+    fireEvent.change(hashInput, { target: { value: "c".repeat(32) } });
     fill("증거 경로", "D:\\ev\\b.E01", items[1] as HTMLElement);
     fireEvent.click(screen.getByRole("button", { name: "증거 E-02 삭제" }));
     expect(within(step2).getAllByTestId("wizard-evidence")).toHaveLength(1);
@@ -186,16 +198,32 @@ describe("CaseWizard (Q-X1)", () => {
 
     const posts = calls.filter((call) => call.method === "POST");
     // 다음 on the evidence step pre-checked the path before anything was saved.
+    // R7: the case folder is checked against the evidence paths before the case exists.
     expect(posts.map((call) => call.url)).toEqual([
       "/api/cases/evidence-check",
+      "/api/cases/output-check",
       "/api/cases",
       "/api/cases/case-1/evidence",
       "/api/cases/case-1/runs",
     ]);
     expect(posts[0]?.body).toEqual({ path: "D:\\ev\\a.E01", source_type: "e01" });
-    expect(posts[1]?.body).toMatchObject({ case_number: "2026-고단-1234", examiner: "홍길동" });
-    expect(posts[2]?.body).toMatchObject({ evidence_number: "E-01", source_type: "e01", verify_hash: true });
-    expect(posts[3]?.body).toEqual(caseRunBody(DEFAULT_RUN_FORM, "C-EVID-000001"));
+    expect(posts[1]?.body).toEqual({
+      path: "D:\\cases\\2026",
+      kind: "case_root",
+      evidence_paths: ["D:\\ev\\a.E01"],
+    });
+    expect(posts[2]?.body).toMatchObject({
+      case_number: "2026-고단-1234",
+      examiner: "홍길동",
+      case_root: "D:\\cases\\2026",
+    });
+    expect(posts[3]?.body).toMatchObject({
+      evidence_number: "E-01",
+      source_type: "e01",
+      verify_hash: true,
+      expected_hash: "c".repeat(32),
+    });
+    expect(posts[4]?.body).toEqual(caseRunBody(DEFAULT_RUN_FORM, "C-EVID-000001"));
     expect(onNotice).toHaveBeenCalledWith("케이스 2026-고단-1234를 만들고 런 1개를 시작했습니다.");
     expect(window.location.hash).toBe("#/case/run-new01/intake");
   });
@@ -212,6 +240,7 @@ describe("CaseWizard (Q-X1)", () => {
     });
     renderWithQuery(<CaseWizard runIsActive={false} onClose={vi.fn()} />);
     fill("사건 번호", "9");
+    fill("케이스 폴더", "D:\\cases\\9");
     fireEvent.click(screen.getByTestId("wizard-next"));
     await screen.findByTestId("wizard-step-evidence");
     fill("증거 경로", "D:\\x.E01");
@@ -284,11 +313,15 @@ describe("case switcher (케이스 › 증거 › 런)", () => {
       .getAllByText(/^증거 E-/)
       .map((node) => node.textContent);
     expect(evidence).toEqual(["증거 E-2 · a", "증거 E-10 · z"]);
-    const current = screen.getByRole("button", { name: "가-1 › E-2 › a.E01 · 실행 중" });
+    expect(screen.getByRole("dialog", { name: "케이스 열기" })).toBeTruthy();
+    const current = screen.getByRole("button", { name: /^가-1 › E-2 › a\.E01 · 실행 중 · / });
     expect(current.getAttribute("aria-current")).toBe("true");
     const loose = screen.getByRole("list", { name: "케이스 없는 런 목록" });
-    expect(within(loose).getByRole("button", { name: "old · 완료" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "나-2 › E-01 › b.E01 · 완료" }));
+    expect(within(loose).getByRole("button", { name: /^old · 완료 · / })).toBeTruthy();
+    // Delete is in each row's ⋯ menu, not a button on every row (C-L1).
+    expect(screen.queryByRole("button", { name: /삭제$/ })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /런 메뉴$/ }).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: /^나-2 › E-01 › b\.E01 · 완료 · / }));
     expect(window.location.hash).toContain("run-b");
   });
 });
@@ -303,7 +336,7 @@ describe("case link: commands and citation prefix", () => {
     useCaseLinks.getState().setLink("r1", null);
     expect(find("case.edit")?.disabledReason?.(ctx)).toBe("케이스에 연결되지 않은 런입니다");
     expect(find("case.link")?.disabledReason?.(ctx)).toBeUndefined();
-    expect(find("case.link")?.disabledReason?.({ ...ctx, runId: null })).toBe("열린 케이스가 없습니다");
+    expect(find("case.link")?.disabledReason?.({ ...ctx, runId: null })).toBe("케이스를 먼저 선택하세요");
     useCaseLinks.getState().setLink("r1", {
       caseId: "c1",
       caseNumber: "2026-1",

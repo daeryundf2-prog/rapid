@@ -4,6 +4,8 @@
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+  /* The toolbar adapts to its pane's width, not the window's (plan r7 §3.2 L2, C-D3). */
+  container: filterbar / inline-size;
   height: 32px;
   padding: 1px var(--space-3) 2px;
   background: var(--bg-panel);
@@ -20,12 +22,47 @@
   min-width: 0;
 }
 
+/* A narrow pane (< 640px, e.g. 1024 with the viewer open): icon-only buttons, named by aria-label. */
+@container filterbar (max-width: 639.98px) {
+  .filter-btn-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .filter-trigger-applied {
+    max-width: 120px;
+  }
+
+  .filter-search {
+    flex-basis: 120px;
+  }
+}
+
 .filter-row-end {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
   margin-left: auto;
   flex: none;
+}
+
+/* Phone-width windows (scroll review C2): the line wraps once — the result count, view switch
+   and column menu go to a second row instead of past the pane's right edge. */
+@media (max-width: 639.98px) {
+  .filter-bar {
+    height: auto;
+  }
+
+  .filter-row {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 28px;
+    row-gap: 2px;
+  }
 }
 
 .filter-result {
@@ -102,10 +139,21 @@
   width: 120px;
 }
 
+/* Toolbar buttons never wrap their label onto a second line (C-D3: "조건 저장" beside the viewer). */
 .filter-trigger {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: var(--space-1);
+  white-space: nowrap;
+}
+
+.filter-row .grid-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  white-space: nowrap;
 }
 
 .filter-trigger[aria-expanded="true"] {
@@ -185,7 +233,11 @@
   min-width: 0;
   flex: 0 1 auto;
   overflow-x: auto;
-  scrollbar-width: none;
+  overflow-y: hidden;
+  /* A thin visible bar (scroll review C6): hidden, the chips past the edge were unreachable by
+     mouse. A vertical wheel also scrolls it sideways (chipStripWheel). */
+  scrollbar-width: thin;
+  overscroll-behavior-x: contain;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -290,6 +342,31 @@
 
 .filter-segment {
   align-self: flex-start;
+}
+
+/* R-6: the anchor ("증거 기준") once above the presets; the segment never overflows the popover. */
+.filter-preset-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  max-width: 100%;
+}
+
+.filter-preset-caption {
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+}
+
+.segmented.filter-preset-segment {
+  max-width: 100%;
+  flex-wrap: wrap;
+  height: auto;
+}
+
+.segmented.filter-preset-segment > button {
+  height: calc(var(--control-h) - 6px);
+  white-space: nowrap;
 }
 
 /* 상태: a 2×2 segmented block. */

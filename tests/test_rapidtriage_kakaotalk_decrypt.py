@@ -42,6 +42,10 @@ except ImportError:  # pragma: no cover - optional KakaoTalk post-patch dependen
 
 @unittest.skipIf(shutil.which("openssl") is None, "OpenSSL is required for KakaoTalk decrypt tests")
 class RapidTriageKakaoTalkDecryptTests(unittest.TestCase):
+    def _outside_output(self, name: str) -> Path:
+        """An output path outside the evidence folder (R7: no output inside the evidence)."""
+        return Path(self.enterContext(tempfile.TemporaryDirectory())) / name
+
     def test_parser_exposes_kakaotalk_decrypt_command(self) -> None:
         parser = build_parser()
         commands = parser._subparsers._group_actions[0].choices
@@ -62,7 +66,7 @@ class RapidTriageKakaoTalkDecryptTests(unittest.TestCase):
             key, iv = derive_kakaotalk_key_iv("sample-pragma", "12345")
             plaintext = build_sqlite_chat_database(root / "plain.sqlite")
             source.write_bytes(encrypt_pagewise(plaintext, key=key, iv=iv))
-            output = root / "decrypt.json"
+            output = self._outside_output("decrypt.json")
 
             exit_code = main(
                 [
@@ -109,7 +113,7 @@ class RapidTriageKakaoTalkDecryptTests(unittest.TestCase):
             source.parent.mkdir(parents=True)
             key, iv = derive_kakaotalk_key_iv("sample-pragma", "12345")
             source.write_bytes(encrypt_pagewise(build_sqlite_chat_database(root / "plain.sqlite"), key=key, iv=iv))
-            output = root / "decrypt-auto-userid.json"
+            output = self._outside_output("decrypt-auto-userid.json")
 
             exit_code = main(
                 [
@@ -145,7 +149,7 @@ class RapidTriageKakaoTalkDecryptTests(unittest.TestCase):
             source.parent.mkdir(parents=True)
             key, iv = derive_kakaotalk_key_iv("sample-pragma", "12345")
             source.write_bytes(encrypt_pagewise(build_sqlite_chat_database(root / "plain.sqlite"), key=key, iv=iv))
-            output = root / "decrypt-candidate-userids.json"
+            output = self._outside_output("decrypt-candidate-userids.json")
 
             exit_code = main(
                 [
@@ -182,7 +186,7 @@ class RapidTriageKakaoTalkDecryptTests(unittest.TestCase):
             source.parent.mkdir(parents=True)
             key, iv = derive_kakaotalk_key_iv_from_pk("sample-pragma12345", repeat_to_512=False)
             source.write_bytes(encrypt_pagewise(build_sqlite_chat_database(root / "plain.sqlite"), key=key, iv=iv))
-            output = root / "decrypt-direct-md5-candidate.json"
+            output = self._outside_output("decrypt-direct-md5-candidate.json")
 
             exit_code = main(
                 [
@@ -217,7 +221,7 @@ class RapidTriageKakaoTalkDecryptTests(unittest.TestCase):
             source = root / "chat_data" / "chatLogs_46.edb"
             source.parent.mkdir(parents=True)
             source.write_bytes(b"\x00" * PAGE_SIZE)
-            output = root / "decrypt-dev-id-classification.json"
+            output = self._outside_output("decrypt-dev-id-classification.json")
 
             exit_code = main(["kakaotalk-decrypt", str(root), "--output", str(output)])
 
@@ -239,7 +243,7 @@ class RapidTriageKakaoTalkDecryptTests(unittest.TestCase):
             source.write_bytes(encrypt_pagewise(build_sqlite_chat_database(root / "plain.sqlite"), key=key, iv=iv))
             memory = root / "KakaoTalk-process-memory.raw"
             memory.write_bytes(b"noise\x00" + (pragma + uid).encode("ascii") + b"\x00tail")
-            output = root / "decrypt-memory-pk.json"
+            output = self._outside_output("decrypt-memory-pk.json")
 
             exit_code = main(["kakaotalk-decrypt", str(root), "--output", str(output)])
 
@@ -269,8 +273,8 @@ class RapidTriageKakaoTalkDecryptTests(unittest.TestCase):
                 + b"TalkChatDB::_InternalOpen PRAGMA kdf_iter sqlcipher_export "
                 + sqlcipher_key_literal
             )
-            output = root / "memory-carve.json"
-            message_csv = root / "memory-messages.csv"
+            output = self._outside_output("memory-carve.json")
+            message_csv = output.with_name("memory-messages.csv")
 
             exit_code = main(
                 [
@@ -342,7 +346,7 @@ class RapidTriageKakaoTalkDecryptTests(unittest.TestCase):
             source = root / "chat_data" / "chatLogs_77.edb"
             source.parent.mkdir(parents=True)
             source.write_bytes(b"\x00" * PAGE_SIZE)
-            output = root / "decrypt.json"
+            output = self._outside_output("decrypt.json")
 
             exit_code = main(["kakaotalk-decrypt", str(root), "--output", str(output)])
 
@@ -368,7 +372,7 @@ class RapidTriageKakaoTalkDecryptTests(unittest.TestCase):
             )
             key, iv = derive_kakaotalk_key_iv(pragma, "12345")
             source.write_bytes(encrypt_pagewise(build_sqlite_chat_database(root / "plain.sqlite"), key=key, iv=iv))
-            output = root / "decrypt-deviceinfo.json"
+            output = self._outside_output("decrypt-deviceinfo.json")
 
             exit_code = main(
                 [
@@ -417,7 +421,7 @@ class RapidTriageKakaoTalkDecryptTests(unittest.TestCase):
             )
             key, iv = derive_kakaotalk_key_iv(sha512_pragma, "12345")
             source.write_bytes(encrypt_pagewise(build_sqlite_chat_database(root / "plain.sqlite"), key=key, iv=iv))
-            output = root / "decrypt-deviceinfo-sha512.json"
+            output = self._outside_output("decrypt-deviceinfo-sha512.json")
 
             exit_code = main(
                 [

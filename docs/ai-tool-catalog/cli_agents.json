@@ -1,0 +1,2518 @@
+[
+  {
+    "name": "Claude Code",
+    "vendor": "Anthropic",
+    "aliases": [
+      "claude",
+      "claude-code"
+    ],
+    "binaries": [
+      "claude",
+      "claude.exe"
+    ],
+    "install": {
+      "npm": "@anthropic-ai/claude-code",
+      "other": "native installer (claude.ai/install.sh / install.ps1), brew cask claude-code, winget Anthropic.ClaudeCode",
+      "conf": "unverified (package names from prior knowledge)"
+    },
+    "api_domains": [
+      {
+        "v": "api.anthropic.com, claude.ai, console.anthropic.com",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [
+      {
+        "name": "CLAUDE_CONFIG_DIR",
+        "effect": "relocates ~/.claude data (settings, session history, plugins)",
+        "conf": "official-doc",
+        "src": "https://code.claude.com/docs/en/settings"
+      },
+      {
+        "name": "CLAUDE_CODE_TMPDIR",
+        "effect": "moves temp tree (scratchpad, pasted images)",
+        "conf": "official-doc",
+        "src": "https://code.claude.com/docs/en/claude-directory"
+      },
+      {
+        "name": "CLAUDE_CODE_SKIP_PROMPT_HISTORY",
+        "effect": "skips writing transcripts and prompt history",
+        "conf": "official-doc",
+        "src": "https://code.claude.com/docs/en/claude-directory"
+      }
+    ],
+    "paths": [
+      {
+        "kind": "session_log",
+        "win": "%USERPROFILE%\\.claude\\projects\\<encoded-cwd>\\<session>.jsonl",
+        "mac": "~/.claude/projects/<encoded-cwd>/<session>.jsonl",
+        "linux": "~/.claude/projects/<encoded-cwd>/<session>.jsonl",
+        "format": "JSONL; per-line fields sessionId, cwd, version, gitBranch, message.model, uuid, parentUuid, isSidechain; contains system prompt, tool defs, tool results. Also <session>.orphaned-*.jsonl and .jsonl.superseded-*",
+        "conf": "official-doc",
+        "src": "https://code.claude.com/docs/en/claude-directory"
+      },
+      {
+        "kind": "subagent_log",
+        "win": "%USERPROFILE%\\.claude\\projects\\<proj>\\<session>\\subagents\\agent-<agentId>.jsonl (+ .meta.json: agentType, description, toolUseId)",
+        "mac": "same under ~/.claude",
+        "linux": "same under ~/.claude",
+        "format": "JSONL; workflows under subagents/workflows/wf_<id>/ incl journal.jsonl",
+        "conf": "official-doc (subagents dir) / third-party (agent-*.meta.json, workflows)",
+        "src": "https://code.claude.com/docs/en/claude-directory ; https://cdn.jsdelivr.net/npm/oh-my-opencode@4.18.2/dist/skills/coding-agent-sessions/references/claude.md"
+      },
+      {
+        "kind": "tool_output_spill",
+        "win": "%USERPROFILE%\\.claude\\projects\\<proj>\\<session>\\tool-results\\",
+        "mac": "~/.claude/projects/<proj>/<session>/tool-results/",
+        "linux": "same",
+        "format": "txt / images",
+        "conf": "official-doc",
+        "src": "https://code.claude.com/docs/en/claude-directory"
+      },
+      {
+        "kind": "prompt_history",
+        "win": "%USERPROFILE%\\.claude\\history.jsonl",
+        "mac": "~/.claude/history.jsonl",
+        "linux": "~/.claude/history.jsonl",
+        "format": "JSONL prompts with timestamp and project path; kept until deleted",
+        "conf": "official-doc",
+        "src": "https://code.claude.com/docs/en/claude-directory"
+      },
+      {
+        "kind": "file_snapshots",
+        "win": "%USERPROFILE%\\.claude\\file-history\\<session>\\",
+        "mac": "~/.claude/file-history/<session>/",
+        "linux": "same",
+        "format": "pre-edit file copies (100 most recent checkpoints)",
+        "conf": "official-doc",
+        "src": "https://code.claude.com/docs/en/claude-directory"
+      },
+      {
+        "kind": "other_artifacts",
+        "win": "%USERPROFILE%\\.claude\\{plans,debug,paste-cache,image-cache,uploads,session-env,tasks,shell-snapshots,backups,sessions,usage-data,stats-cache.json,policy-limits.json,remote-settings.json,cache\\changelog.md}",
+        "mac": "~/.claude/...",
+        "linux": "~/.claude/...",
+        "format": "various; todos/, statsig/, logs/ are legacy (older versions)",
+        "conf": "official-doc",
+        "src": "https://code.claude.com/docs/en/claude-directory"
+      },
+      {
+        "kind": "legacy_transcripts",
+        "win": "%USERPROFILE%\\.claude\\transcripts\\ses_*.jsonl, pre-compact-session-histories\\*.jsonl",
+        "mac": "~/.claude/transcripts/",
+        "linux": "~/.claude/transcripts/",
+        "format": "JSONL exports (written by a third-party plugin ecosystem, not core docs)",
+        "conf": "third-party",
+        "src": "https://cdn.jsdelivr.net/npm/oh-my-opencode@4.18.2/dist/skills/coding-agent-sessions/references/claude.md"
+      },
+      {
+        "kind": "config_global",
+        "win": "%USERPROFILE%\\.claude\\settings.json ; %USERPROFILE%\\.claude.json (account, MCP servers, per-project trust/state)",
+        "mac": "~/.claude/settings.json ; ~/.claude.json",
+        "linux": "same",
+        "format": "JSON",
+        "conf": "official-doc",
+        "src": "https://code.claude.com/docs/en/settings"
+      },
+      {
+        "kind": "config_project",
+        "win": ".claude\\settings.json, .claude\\settings.local.json, CLAUDE.md, CLAUDE.local.md, .mcp.json",
+        "mac": "same (project-relative)",
+        "linux": "same",
+        "format": "JSON / Markdown",
+        "conf": "official-doc",
+        "src": "https://code.claude.com/docs/en/claude-directory"
+      },
+      {
+        "kind": "credentials",
+        "win": "%USERPROFILE%\\.claude\\.credentials.json",
+        "mac": "unknown in docs (macOS Keychain per prior knowledge)",
+        "linux": "~/.claude/.credentials.json",
+        "format": "JSON OAuth tokens, plaintext file",
+        "conf": "official-doc (file name); unverified (keychain on mac)",
+        "src": "https://code.claude.com/docs/en/claude-directory"
+      },
+      {
+        "kind": "scratchpad_temp",
+        "win": "%TEMP%\\claude\\<project>\\<session-id>\\scratchpad\\",
+        "mac": "/private/tmp/claude-<uid>/<project>/<session-id>/scratchpad/",
+        "linux": "/tmp/claude-<uid>/<project>/<session-id>/scratchpad/ (or $TMPDIR)",
+        "format": "arbitrary files; <project> = cwd with non-alphanumerics replaced by '-'",
+        "conf": "official-doc",
+        "src": "https://code.claude.com/docs/en/claude-directory"
+      },
+      {
+        "kind": "managed_settings",
+        "win": "unknown (see managed-settings docs)",
+        "mac": "unknown",
+        "linux": "unknown",
+        "format": "managed-settings.json",
+        "conf": "unverified",
+        "src": "https://code.claude.com/docs/en/managed-settings.md"
+      }
+    ],
+    "retention": {
+      "v": "Transcripts and listed paths deleted when older than cleanupPeriodDays (default 30, min 1) at startup sweep; history.jsonl, stats-cache.json, .credentials.json are kept until deleted; `claude purge` removes per-project state; Desktop/Cowork transcripts kept unless desktopSessionCleanupPeriodDays set",
+      "conf": "official-doc",
+      "src": "https://code.claude.com/docs/en/claude-directory"
+    },
+    "forensic_notes": "Plaintext transcripts include secrets that passed through tools. Corrupt ~/.claude.json copied to ~/.claude/backups/.claude.json.corrupted.<ts>.",
+    "local_verification": {
+      "verified_on": "Windows 11; Claude Code client versions seen in files: 2.1.293 / 2.1.295 / 2.1.304 / 2.1.308",
+      "confidence": "verified-on-test-pc",
+      "source": "schema probe on this PC, 2026-10-27 (structure only; message bodies not opened)",
+      "layout": {
+        "session_file": "~/.claude/projects/<cwd-slug>/<sessionId>.jsonl (depth 0)",
+        "subagent_files": "~/.claude/projects/<cwd-slug>/<sessionId>/subagents/agent-*.jsonl (and deeper nesting). On this PC 995 of 1,023 jsonl files were subagent files",
+        "cwd_slug": "project path with separators replaced by '-' (e.g. C--Users-HP-...)",
+        "sidecars": {
+          "~/.claude/history.jsonl": "keys: display, pastedContents, project, sessionId, timestamp (prompt history; pasted content stored inline)",
+          "~/.claude/sessions/": "<pid>.json + <pid>.<hash>.key (live-session markers)",
+          "~/.claude/file-history/": "per-session directories (file snapshots)",
+          "~/.claude/shell-snapshots/": "*.sh shell environment snapshots",
+          "~/.claude/session-env/": "per-session directories",
+          "~/.claude/.last-cleanup": "marker of retention cleanup"
+        }
+      },
+      "record_envelope_keys": [
+        "type",
+        "uuid",
+        "parentUuid",
+        "sessionId",
+        "timestamp",
+        "version",
+        "cwd",
+        "gitBranch",
+        "entrypoint",
+        "userType",
+        "isSidechain",
+        "isMeta",
+        "requestId",
+        "promptId",
+        "permissionMode",
+        "slug",
+        "agentId (subagent files)",
+        "attributionSkill / attributionMcpServer / attributionMcpTool",
+        "toolUseResult",
+        "sourceToolAssistantUUID"
+      ],
+      "record_type_values_seen": [
+        "assistant",
+        "user",
+        "attachment",
+        "queue-operation",
+        "last-prompt",
+        "custom-title",
+        "agent-name",
+        "mode",
+        "system",
+        "file-history-snapshot",
+        "api-request",
+        "api-request-blob",
+        "atis-latch"
+      ],
+      "message_keys": [
+        "message.role",
+        "message.model",
+        "message.id",
+        "message.type",
+        "message.content (str or list)",
+        "message.stop_reason",
+        "message.usage.{input_tokens, cache_creation_input_tokens, cache_read_input_tokens, cache_creation.*, inference_geo}"
+      ],
+      "content_block_types_seen": [
+        "text",
+        "thinking",
+        "tool_use (id, name, input, caller)",
+        "tool_result (tool_use_id, content)",
+        "image (base64 source)",
+        "tool_reference"
+      ],
+      "forensic_notes": [
+        "tool_use.input holds executed commands/paths (e.g. input.command); tool_result and toolUseResult hold outputs -> highest-value evidence of what the agent actually did",
+        "timestamp is an ISO string per record; sessionId matches the filename for top-level sessions",
+        "images are embedded as base64 in tool_result content",
+        "attachment records carry reminders and MCP server state (failed / pending / needsAuth MCP server lists) -> MCP usage evidence",
+        "Parser must tolerate unknown record types; new types appear between client versions"
+      ]
+    }
+  },
+  {
+    "name": "OpenAI Codex CLI",
+    "vendor": "OpenAI",
+    "aliases": [
+      "codex",
+      "codex-cli"
+    ],
+    "binaries": [
+      "codex",
+      "codex.exe"
+    ],
+    "install": {
+      "npm": "@openai/codex",
+      "other": "brew install codex, GitHub release binaries",
+      "conf": "unverified (prior knowledge)"
+    },
+    "api_domains": [
+      {
+        "v": "api.openai.com, chatgpt.com (ChatGPT sign-in backend), auth.openai.com",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [
+      {
+        "name": "CODEX_HOME",
+        "effect": "state dir, default ~/.codex",
+        "conf": "official-doc",
+        "src": "https://learn.chatgpt.com/docs/config-file/config-advanced"
+      }
+    ],
+    "paths": [
+      {
+        "kind": "config",
+        "win": "%USERPROFILE%\\.codex\\config.toml",
+        "mac": "~/.codex/config.toml",
+        "linux": "~/.codex/config.toml",
+        "format": "TOML",
+        "conf": "official-doc",
+        "src": "https://learn.chatgpt.com/docs/config-file/config-advanced"
+      },
+      {
+        "kind": "credentials",
+        "win": "%USERPROFILE%\\.codex\\auth.json (only when file-based credential storage is used; otherwise OS keyring)",
+        "mac": "~/.codex/auth.json or Keychain",
+        "linux": "~/.codex/auth.json or keyring",
+        "format": "JSON",
+        "conf": "official-doc",
+        "src": "https://learn.chatgpt.com/docs/config-file/config-advanced"
+      },
+      {
+        "kind": "prompt_history",
+        "win": "%USERPROFILE%\\.codex\\history.jsonl",
+        "mac": "~/.codex/history.jsonl",
+        "linux": "~/.codex/history.jsonl",
+        "format": "JSONL; persistence on by default, [history] persistence=\"none\" disables, history.max_bytes caps size and drops oldest",
+        "conf": "official-doc",
+        "src": "https://learn.chatgpt.com/docs/config-file/config-advanced"
+      },
+      {
+        "kind": "session_log",
+        "win": "%USERPROFILE%\\.codex\\sessions\\**\\rollout-*.jsonl",
+        "mac": "~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl",
+        "linux": "same",
+        "format": "JSONL; first line type=session_meta with payload id, cwd, model_provider, forked_from_id, source.subagent.thread_spawn",
+        "conf": "third-party (date-dir layout from prior knowledge: unverified)",
+        "src": "https://cdn.jsdelivr.net/npm/oh-my-opencode@4.18.2/dist/skills/coding-agent-sessions/references/codex.md"
+      },
+      {
+        "kind": "state_db",
+        "win": "%USERPROFILE%\\.codex\\state_*.sqlite",
+        "mac": "~/.codex/state_*.sqlite",
+        "linux": "~/.codex/state_*.sqlite",
+        "format": "SQLite; tables threads (source, agent_nickname, agent_role, model, first_user_message, tokens_used), thread_spawn_edges (parent_thread_id, child_thread_id, status)",
+        "conf": "third-party",
+        "src": "https://cdn.jsdelivr.net/npm/oh-my-opencode@4.18.2/dist/skills/coding-agent-sessions/references/codex.md"
+      },
+      {
+        "kind": "logs",
+        "win": "unknown (docs say logs/caches live under CODEX_HOME, no names)",
+        "mac": "unknown",
+        "linux": "unknown",
+        "format": "unknown",
+        "conf": "official-doc (existence only)",
+        "src": "https://learn.chatgpt.com/docs/config-file/config-advanced"
+      },
+      {
+        "kind": "archived_rollouts",
+        "win": "unknown",
+        "mac": "unknown",
+        "linux": "unknown",
+        "format": "JSONL",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "No time-based retention documented; history size-cap only",
+      "conf": "official-doc",
+      "src": "https://learn.chatgpt.com/docs/config-file/config-advanced"
+    },
+    "local_verification": {
+      "verified_on": "Windows 11, Codex desktop app (MSIX OpenAI.Codex_2p2nqsd0c76g0); migration tables present in files",
+      "confidence": "verified-on-test-pc",
+      "source": "schema probe on this PC, 2026-10-27 (structure only; message bodies not opened)",
+      "layout_note": "On this PC ~/.codex/sessions and archived_sessions contain 0 JSONL files; evidence lives in ~/.codex/sqlite/*. threads.rollout_path column exists but the referenced rollout files were not found in the sessions folders -> do not assume JSONL rollouts exist",
+      "databases": {
+        "state_5.sqlite": {
+          "tables": {
+            "threads": [
+              "id",
+              "rollout_path",
+              "created_at",
+              "updated_at",
+              "source",
+              "model_provider",
+              "cwd",
+              "title",
+              "sandbox_policy",
+              "approval_mode",
+              "tokens_used",
+              "has_user_event",
+              "archived",
+              "archived_at",
+              "git_sha",
+              "git_branch",
+              "git_origin_url",
+              "cli_version",
+              "first_user_message",
+              "agent_nickname",
+              "agent_role",
+              "memory_mode",
+              "model",
+              "reasoning_effort",
+              "agent_path",
+              "created_at_ms",
+              "updated_at_ms",
+              "thread_source",
+              "preview"
+            ],
+            "thread_spawn_edges": [
+              "parent_thread_id",
+              "child_thread_id",
+              "status"
+            ],
+            "thread_dynamic_tools": [
+              "thread_id",
+              "position",
+              "name",
+              "description",
+              "input_schema",
+              "defer_loading",
+              "namespace"
+            ],
+            "agent_jobs / agent_job_items": "batch job definitions and rows",
+            "remote_control_enrollments": [
+              "websocket_url",
+              "account_id",
+              "app_server_client_name",
+              "server_id",
+              "environment_id",
+              "server_name",
+              "updated_at"
+            ],
+            "backfill_state, _sqlx_migrations": "bookkeeping"
+          },
+          "rows_seen": {
+            "threads": 22,
+            "thread_spawn_edges": 12
+          }
+        },
+        "codex-dev.db": {
+          "tables": {
+            "local_thread_catalog": [
+              "host_id",
+              "thread_id",
+              "display_title",
+              "source_created_at",
+              "source_updated_at",
+              "cwd",
+              "source_kind",
+              "source_detail",
+              "model_provider",
+              "git_branch",
+              "thread_source",
+              "project_id",
+              "conversation_origin",
+              "chatgpt_async_status"
+            ],
+            "automations": [
+              "id",
+              "name",
+              "prompt",
+              "status",
+              "rrule",
+              "model",
+              "cwds",
+              "..."
+            ],
+            "automation_runs": [
+              "thread_id",
+              "thread_title",
+              "source_cwd",
+              "archived_user_message",
+              "archived_assistant_message",
+              "..."
+            ],
+            "thread_timeline_ledger": [
+              "host_id",
+              "thread_id",
+              "sequence",
+              "record_id",
+              "payload_json"
+            ],
+            "inbox_items": [
+              "id",
+              "title",
+              "description",
+              "thread_id"
+            ],
+            "codex_schema_migrations": [
+              "app_version",
+              "build_flavor",
+              "build_commit"
+            ]
+          },
+          "rows_seen": {
+            "local_thread_catalog": 41,
+            "automations": 0,
+            "thread_timeline_ledger": 0
+          }
+        },
+        "logs_2.sqlite": {
+          "tables": {
+            "logs": [
+              "id",
+              "ts",
+              "ts_nanos",
+              "level",
+              "target",
+              "feedback_log_body",
+              "module_path",
+              "file",
+              "line",
+              "thread_id",
+              "process_uuid",
+              "estimated_bytes"
+            ]
+          },
+          "rows_seen": 32904,
+          "size": "114.7MB (+WAL) - largest artifact; feedback_log_body may contain request/response text (not opened)"
+        },
+        "memories_1.sqlite": {
+          "tables": {
+            "stage1_outputs": [
+              "thread_id",
+              "raw_memory",
+              "rollout_summary",
+              "rollout_slug",
+              "generated_at",
+              "usage_count"
+            ],
+            "jobs": [
+              "kind",
+              "job_key",
+              "status",
+              "..."
+            ]
+          },
+          "rows_seen": {
+            "stage1_outputs": 2,
+            "jobs": 10
+          }
+        },
+        "goals_1.sqlite": {
+          "tables": {
+            "thread_goals": [
+              "thread_id",
+              "goal_id",
+              "objective",
+              "status",
+              "token_budget",
+              "tokens_used",
+              "time_used_seconds"
+            ]
+          },
+          "rows_seen": 1
+        }
+      },
+      "forensic_notes": [
+        "SQLite uses WAL (-wal/-shm sidecars hold recent rows not yet checkpointed): acquire each db together with its -wal and -shm",
+        "threads gives a session inventory (cwd, git origin/branch/sha, model, tokens, cli_version, timestamps) even when message bodies are elsewhere",
+        "thread_spawn_edges reconstructs parent/child sub-agent trees",
+        "App also leaves other dirs: attachments/, browser/, computer-use/, mcp-oauth-locks/, memories/, plugins/, skills/, .sandbox*/ (names only seen)"
+      ]
+    },
+    "local_verification_extra": {
+      "source": "schema/structure probe on this PC, 2026-10-27 (names, counts, column/key names only; content, emails, account ids and credentials not recorded)",
+      "~/.codex/memories/": "MEMORY.md, memory_summary.md, raw_memories.md, rollout_summaries/*.md (one per past thread, file name = date + slug of the task topic), skills/*.md, extensions/; the folder is itself a git repository (.git) -> memory edits have commit history",
+      "~/.codex/attachments/": "pasted-text-attachments.json (keys: attachmentPaths, pendingRemovalPaths, textExcerptsByPath.<path>) + <uuid>/pasted-text.txt files - pasted content is stored as separate files",
+      "~/.codex/{browser,computer-use,mcp-oauth-locks,plugins,skills,agents,ambient-suggestions,process_manager,node_repl,runtime,.sandbox*}": "present (names only); .sandbox-secrets and mcp-oauth-locks are sensitive",
+      "MSIX": "app package OpenAI.Codex_2p2nqsd0c76g0 and %LOCALAPPDATA%\\OpenAI\\Codex exist",
+      "confidence": "verified-on-test-pc"
+    }
+  },
+  {
+    "name": "Gemini CLI",
+    "vendor": "Google",
+    "aliases": [
+      "gemini"
+    ],
+    "binaries": [
+      "gemini",
+      "gemini.cmd"
+    ],
+    "install": {
+      "npm": "@google/gemini-cli",
+      "other": "brew gemini-cli, npx",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "generativelanguage.googleapis.com, cloudcode-pa.googleapis.com, aiplatform.googleapis.com, oauth2.googleapis.com",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [
+      {
+        "name": "GEMINI_CLI_HOME",
+        "effect": "possible home override (not confirmed in sources)",
+        "conf": "unverified"
+      }
+    ],
+    "paths": [
+      {
+        "kind": "session_log",
+        "win": "%USERPROFILE%\\.gemini\\tmp\\<project_hash>\\chats\\",
+        "mac": "~/.gemini/tmp/<project_hash>/chats/",
+        "linux": "same",
+        "format": "per-session files; includes prompts, responses, tool IO, token stats, reasoning summaries; exact schema unknown (JSON/JSONL not confirmed)",
+        "conf": "official-doc (location); unknown (format)",
+        "src": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/session-management.md"
+      },
+      {
+        "kind": "config",
+        "win": "%USERPROFILE%\\.gemini\\settings.json ; project .gemini\\settings.json ; system /etc/gemini-cli/settings.json (Windows system path unknown)",
+        "mac": "~/.gemini/settings.json",
+        "linux": "~/.gemini/settings.json",
+        "format": "JSON",
+        "conf": "third-party",
+        "src": "https://inventivehq.com/knowledge-base/gemini/where-configuration-files-are-stored"
+      },
+      {
+        "kind": "credentials",
+        "win": "%USERPROFILE%\\.gemini\\oauth_creds.json",
+        "mac": "~/.gemini/oauth_creds.json",
+        "linux": "~/.gemini/oauth_creds.json",
+        "format": "JSON OAuth tokens",
+        "conf": "third-party",
+        "src": "https://docs.roocode.com/providers/gemini-cli"
+      },
+      {
+        "kind": "other",
+        "win": "~\\.gemini\\{history\\,projects.json,installation_id,commands\\,tmp\\<hash>\\shell_history?}",
+        "mac": "same",
+        "linux": "same",
+        "format": "mixed",
+        "conf": "third-party (single-install capture)",
+        "src": "https://computingforgeeks.com/gemini-cli-cheat-sheet/"
+      }
+    ],
+    "retention": {
+      "v": "Auto-cleanup on by default, maxAge 30d, minRetention 1d, no max count; deleting a session also removes plans, task trackers, tool outputs, activity logs",
+      "conf": "official-doc",
+      "src": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/session-management.md"
+    }
+  },
+  {
+    "name": "Qwen Code",
+    "vendor": "Alibaba Qwen",
+    "aliases": [
+      "qwen",
+      "qwen-code"
+    ],
+    "binaries": [
+      "qwen"
+    ],
+    "install": {
+      "npm": "@qwen-code/qwen-code",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "dashscope.aliyuncs.com / dashscope-intl.aliyuncs.com, chat.qwen.ai (OAuth)",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [],
+    "paths": [
+      {
+        "kind": "session_log",
+        "win": "%USERPROFILE%\\.qwen\\projects\\<proj>\\chats\\",
+        "mac": "~/.qwen/projects/*/chats",
+        "linux": "~/.qwen/projects/*/chats",
+        "format": "unknown (likely JSONL)",
+        "conf": "third-party",
+        "src": "https://cdn.jsdelivr.net/npm/oh-my-opencode@4.18.2/dist/skills/coding-agent-sessions/references/all-platforms.md"
+      },
+      {
+        "kind": "config",
+        "win": "%USERPROFILE%\\.qwen\\settings.json ; project .qwen\\settings.json",
+        "mac": "~/.qwen/settings.json",
+        "linux": "~/.qwen/settings.json",
+        "format": "JSON",
+        "conf": "third-party",
+        "src": "https://www.mintlify.com/QwenLM/qwen-code/configuration/settings"
+      },
+      {
+        "kind": "credentials",
+        "win": "%USERPROFILE%\\.qwen\\oauth_creds.json (older) or %USERPROFILE%\\.qwen\\auth\\oauth-tokens.json (newer, encrypted)",
+        "mac": "same under ~",
+        "linux": "same under ~",
+        "format": "JSON; sources conflict by version",
+        "conf": "third-party",
+        "src": "https://docs.roocode.com/providers/qwen-code ; https://www.mintlify.com/QwenLM/qwen-code/authentication"
+      },
+      {
+        "kind": "shell_history",
+        "win": "%USERPROFILE%\\.qwen\\tmp\\<project_hash>\\shell_history",
+        "mac": "~/.qwen/tmp/<hash>/shell_history",
+        "linux": "same",
+        "format": "text",
+        "conf": "third-party",
+        "src": "https://www.developersdigest.tech/reference/qwen-code/config-files"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    },
+    "notes": "Fork of Gemini CLI; layout mirrors it."
+  },
+  {
+    "name": "Aider",
+    "vendor": "Aider-AI (Paul Gauthier)",
+    "aliases": [
+      "aider-chat",
+      "cecli (community fork)"
+    ],
+    "binaries": [
+      "aider",
+      "aider.exe"
+    ],
+    "install": {
+      "pip": "aider-chat",
+      "other": "aider-install (uv), pipx",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "uses user's LLM provider endpoints via litellm; analytics to posthog (us.i.posthog.com)",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [
+      {
+        "name": "AIDER_*",
+        "effect": "every option has AIDER_<OPTION> env var (e.g. AIDER_CHAT_HISTORY_FILE, AIDER_INPUT_HISTORY_FILE, AIDER_LLM_HISTORY_FILE, AIDER_MODEL)",
+        "conf": "official-doc",
+        "src": "https://aider.chat/docs/config/options.html"
+      }
+    ],
+    "paths": [
+      {
+        "kind": "chat_history",
+        "win": "<project-or-git-root>\\.aider.chat.history.md",
+        "mac": "<project>/.aider.chat.history.md",
+        "linux": "same",
+        "format": "Markdown transcript, appended",
+        "conf": "official-doc",
+        "src": "https://aider.chat/docs/config/options.html"
+      },
+      {
+        "kind": "input_history",
+        "win": "<project>\\.aider.input.history",
+        "mac": "<project>/.aider.input.history",
+        "linux": "same",
+        "format": "prompt_toolkit history text",
+        "conf": "official-doc (option exists; default name from prior knowledge)",
+        "src": "https://aider.chat/docs/config/options.html"
+      },
+      {
+        "kind": "llm_history",
+        "win": "<project>\\.aider.llm.history (only if --llm-history-file set)",
+        "mac": "same",
+        "linux": "same",
+        "format": "text log of raw LLM messages",
+        "conf": "official-doc (option)",
+        "src": "https://aider.chat/docs/config/options.html"
+      },
+      {
+        "kind": "config",
+        "win": "<project>\\.aider.conf.yml, ~\\.aider.conf.yml, .env",
+        "mac": "same",
+        "linux": "same",
+        "format": "YAML",
+        "conf": "official-doc",
+        "src": "https://aider.chat/docs/config/options.html"
+      },
+      {
+        "kind": "cache_and_analytics",
+        "win": "~\\.aider\\{analytics.json,installs.json,caches\\}; <project>\\.aider.tags.cache.v*",
+        "mac": "~/.aider/...",
+        "linux": "~/.aider/...",
+        "format": "JSON / diskcache SQLite",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "No auto-deletion; files accumulate in repo root (usually gitignored)",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "OpenCode",
+    "vendor": "SST / Anomaly (anomalyco)",
+    "aliases": [
+      "opencode-ai",
+      "sst/opencode",
+      "anomalyco/opencode"
+    ],
+    "binaries": [
+      "opencode",
+      "opencode.exe"
+    ],
+    "install": {
+      "npm": "opencode-ai",
+      "other": "curl install script, brew sst/tap/opencode, scoop, choco",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "opencode.ai, models.dev (model catalog), provider endpoints",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [
+      {
+        "name": "OPENCODE_CONFIG / OPENCODE_CONFIG_DIR / OPENCODE_CONFIG_CONTENT / OPENCODE_TUI_CONFIG",
+        "effect": "config location/inline override",
+        "conf": "official-doc",
+        "src": "https://raw.githubusercontent.com/sst/opencode/dev/packages/web/src/content/docs/config.mdx"
+      },
+      {
+        "name": "OPENCODE_DB",
+        "effect": "overrides SQLite DB path",
+        "conf": "third-party",
+        "src": "https://forums.basehub.com/anomalyco/opencode/15"
+      },
+      {
+        "name": "XDG_DATA_HOME",
+        "effect": "base of ~/.local/share/opencode (assumed XDG)",
+        "conf": "unverified"
+      }
+    ],
+    "paths": [
+      {
+        "kind": "config",
+        "win": "~\\.config\\opencode\\opencode.json ; managed: %ProgramData%\\opencode",
+        "mac": "~/.config/opencode/opencode.json ; /Library/Application Support/opencode/",
+        "linux": "~/.config/opencode/opencode.json ; /etc/opencode/",
+        "format": "JSON(C)",
+        "conf": "official-doc (Windows user path assumed from ~)",
+        "src": "https://raw.githubusercontent.com/sst/opencode/dev/packages/web/src/content/docs/config.mdx"
+      },
+      {
+        "kind": "session_db",
+        "win": "unknown (use `opencode db path`)",
+        "mac": "~/.local/share/opencode/opencode.db",
+        "linux": "~/.local/share/opencode/opencode.db",
+        "format": "SQLite WAL; tables session(id,title,directory,time_created,time_updated,parent_id,agent), message, part, todo, share, permission, project, event",
+        "conf": "third-party",
+        "src": "https://cdn.jsdelivr.net/npm/oh-my-opencode@4.18.2/dist/skills/coding-agent-sessions/references/opencode.md"
+      },
+      {
+        "kind": "session_json_legacy",
+        "win": "unknown",
+        "mac": "~/.local/share/opencode/storage/{session/<project-hash>/ses_*.json,message/,part/}",
+        "linux": "same",
+        "format": "per-record JSON; session: id,parentID,title,directory,time.created/updated; message: sessionID,role,agent,model.providerID/modelID,path.cwd",
+        "conf": "third-party",
+        "src": "https://forums.basehub.com/anomalyco/opencode/15"
+      },
+      {
+        "kind": "credentials",
+        "win": "unknown",
+        "mac": "~/.local/share/opencode/auth.json (prior knowledge)",
+        "linux": "same",
+        "format": "JSON",
+        "conf": "unverified"
+      },
+      {
+        "kind": "logs",
+        "win": "unknown",
+        "mac": "~/.local/share/opencode/log/ (prior knowledge)",
+        "linux": "same",
+        "format": "text",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    },
+    "notes": "Charm's Crush began as a fork of an earlier OpenCode (Go); Kilo CLI is built on this OpenCode."
+  },
+  {
+    "name": "Goose",
+    "vendor": "Block (now AAIF/Linux Foundation, repo aaif-goose/goose)",
+    "aliases": [
+      "block/goose",
+      "goose-cli"
+    ],
+    "binaries": [
+      "goose",
+      "goose.exe"
+    ],
+    "install": {
+      "other": "brew install block-goose-cli, install script, Desktop app",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "provider endpoints chosen by user; unknown fixed domains",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [
+      {
+        "name": "GOOSE_PATH_ROOT",
+        "effect": "possible root override (not confirmed in fetched docs)",
+        "conf": "unverified"
+      }
+    ],
+    "paths": [
+      {
+        "kind": "config",
+        "win": "%APPDATA%\\Block\\goose\\config\\config.yaml",
+        "mac": "~/.config/goose/config.yaml",
+        "linux": "~/.config/goose/config.yaml",
+        "format": "YAML",
+        "conf": "official-doc",
+        "src": "https://goose-docs.ai/docs/guides/config-files"
+      },
+      {
+        "kind": "session_db",
+        "win": "%APPDATA%\\Block\\goose\\data\\sessions\\sessions.db",
+        "mac": "~/.local/share/goose/sessions/sessions.db",
+        "linux": "~/.local/share/goose/sessions/sessions.db",
+        "format": "SQLite (schema unknown)",
+        "conf": "official-doc",
+        "src": "https://goose-docs.ai/docs/guides/logs"
+      },
+      {
+        "kind": "logs_cli_server",
+        "win": "%APPDATA%\\Block\\goose\\data\\logs\\{cli,server}\\",
+        "mac": "~/.local/state/goose/logs/{cli,server}/",
+        "linux": "same",
+        "format": "text, date subdirs",
+        "conf": "official-doc",
+        "src": "https://goose-docs.ai/docs/guides/logs"
+      },
+      {
+        "kind": "llm_request_log",
+        "win": "%APPDATA%\\Block\\goose\\data\\logs\\llm_request.*.jsonl",
+        "mac": "~/.local/state/goose/logs/llm_request.*.jsonl",
+        "linux": "same",
+        "format": "JSONL",
+        "conf": "official-doc",
+        "src": "https://goose-docs.ai/docs/guides/logs"
+      },
+      {
+        "kind": "desktop_log",
+        "win": "%APPDATA%\\Block\\goose\\logs\\main.log",
+        "mac": "~/Library/Application Support/Goose/logs/main.log",
+        "linux": "unknown",
+        "format": "text",
+        "conf": "official-doc",
+        "src": "https://goose-docs.ai/docs/guides/logs"
+      },
+      {
+        "kind": "credentials",
+        "win": "unknown (keyring / secrets.yaml fallback per prior knowledge)",
+        "mac": "unknown",
+        "linux": "unknown",
+        "format": "unknown",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "CLI and server logs deleted after 2 weeks; llm_request logs keep 10 most recent; sessions no auto-delete documented",
+      "conf": "official-doc",
+      "src": "https://goose-docs.ai/docs/guides/logs"
+    }
+  },
+  {
+    "name": "Crush",
+    "vendor": "Charm (charmbracelet)",
+    "aliases": [
+      "charmbracelet/crush"
+    ],
+    "binaries": [
+      "crush",
+      "crush.exe"
+    ],
+    "install": {
+      "npm": "@charmland/crush",
+      "other": "brew charmbracelet/tap/crush, winget charmbracelet.crush, scoop (Charm bucket), go install github.com/charmbracelet/crush@latest, apt/yum Charm repo, AUR crush-bin",
+      "conf": "official-doc",
+      "src": "https://raw.githubusercontent.com/charmbracelet/crush/main/README.md"
+    },
+    "api_domains": [
+      {
+        "v": "provider endpoints; Catwalk provider catalog (CATWALK_URL); metrics endpoint unknown",
+        "conf": "official-doc (existence)"
+      }
+    ],
+    "env_vars": [
+      {
+        "name": "CRUSH_GLOBAL_CONFIG",
+        "effect": "overrides config location",
+        "conf": "official-doc",
+        "src": "https://raw.githubusercontent.com/charmbracelet/crush/main/README.md"
+      },
+      {
+        "name": "CRUSH_GLOBAL_DATA",
+        "effect": "overrides data location",
+        "conf": "official-doc",
+        "src": "same"
+      },
+      {
+        "name": "XDG_CONFIG_HOME",
+        "effect": "shifts config dir",
+        "conf": "official-doc",
+        "src": "same"
+      },
+      {
+        "name": "CRUSH_DISABLE_METRICS / DO_NOT_TRACK",
+        "effect": "telemetry opt-out",
+        "conf": "official-doc",
+        "src": "same"
+      }
+    ],
+    "paths": [
+      {
+        "kind": "config",
+        "win": "%USERPROFILE%\\.config\\crush\\crushrc (newer README); older JSON crush.json",
+        "mac": "~/.config/crush/crushrc",
+        "linux": "~/.config/crush/crushrc",
+        "format": "crushrc (new) or JSON (deprecated); project ./.crushrc, ./crushrc",
+        "conf": "official-doc (README at fetch time; older releases used crush.json)",
+        "src": "https://raw.githubusercontent.com/charmbracelet/crush/main/README.md"
+      },
+      {
+        "kind": "data_state",
+        "win": "%LOCALAPPDATA%\\crush\\crush.json",
+        "mac": "~/.local/share/crush/crush.json",
+        "linux": "~/.local/share/crush/crush.json",
+        "format": "JSON state",
+        "conf": "official-doc",
+        "src": "same"
+      },
+      {
+        "kind": "logs",
+        "win": ".\\.crush\\logs\\crush.log (project-relative)",
+        "mac": "./.crush/logs/crush.log",
+        "linux": "./.crush/logs/crush.log",
+        "format": "text",
+        "conf": "official-doc",
+        "src": "same"
+      },
+      {
+        "kind": "session_db",
+        "win": "<project>\\.crush\\crush.db",
+        "mac": "<project>/.crush/crush.db",
+        "linux": "same",
+        "format": "SQLite (sessions/messages)",
+        "conf": "unverified (README fetched does not mention crush.db; prior knowledge of earlier versions)"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "Amp",
+    "vendor": "Sourcegraph (spun out as Amp Inc.)",
+    "aliases": [
+      "ampcode",
+      "Sourcegraph Amp"
+    ],
+    "binaries": [
+      "amp"
+    ],
+    "install": {
+      "npm": "@sourcegraph/amp",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "ampcode.com",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [
+      {
+        "name": "AMP_API_KEY",
+        "effect": "non-interactive auth",
+        "conf": "third-party",
+        "src": "https://www.verdent.ai/guides/agents/amp-coding-agent"
+      }
+    ],
+    "paths": [
+      {
+        "kind": "thread_store",
+        "win": "unknown",
+        "mac": "~/.local/share/amp/threads/T-*.json",
+        "linux": "~/.local/share/amp/threads/T-*.json",
+        "format": "JSON per thread (schema unknown)",
+        "conf": "third-party",
+        "src": "https://cdn.jsdelivr.net/npm/oh-my-opencode@4.18.2/dist/skills/coding-agent-sessions/references/all-platforms.md"
+      },
+      {
+        "kind": "config",
+        "win": "unknown",
+        "mac": "~/.config/amp/settings.json ; .amp/settings.json",
+        "linux": "same",
+        "format": "JSON",
+        "conf": "third-party",
+        "src": "https://www.verdent.ai/guides/agents/amp-coding-agent"
+      },
+      {
+        "kind": "credentials",
+        "win": "unknown",
+        "mac": "~/.local/share/amp/secrets.json (prior knowledge)",
+        "linux": "same",
+        "format": "JSON",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "unknown (threads also stored server-side)",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "Droid (Factory)",
+    "vendor": "Factory AI",
+    "aliases": [
+      "Factory CLI",
+      "droid"
+    ],
+    "binaries": [
+      "droid",
+      "droid.exe"
+    ],
+    "install": {
+      "other": "curl -fsSL https://app.factory.ai/cli | sh ; Windows PowerShell installer; npm droid (unverified)",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "app.factory.ai, api.factory.ai",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [
+      {
+        "name": "FACTORY_API_KEY",
+        "effect": "auth",
+        "conf": "unverified"
+      }
+    ],
+    "paths": [
+      {
+        "kind": "config",
+        "win": "%USERPROFILE%\\.factory\\settings.json (+ settings.local.json at user and project level)",
+        "mac": "~/.factory/settings.json",
+        "linux": "~/.factory/settings.json",
+        "format": "JSON",
+        "conf": "official-doc",
+        "src": "https://docs.factory.ai/droid-cli/settings"
+      },
+      {
+        "kind": "session_log",
+        "win": "unknown",
+        "mac": "~/.factory/sessions/*/*.jsonl",
+        "linux": "same",
+        "format": "JSONL",
+        "conf": "third-party",
+        "src": "https://cdn.jsdelivr.net/npm/oh-my-opencode@4.18.2/dist/skills/coding-agent-sessions/references/all-platforms.md"
+      },
+      {
+        "kind": "credentials",
+        "win": "unknown",
+        "mac": "~/.factory/auth.v2.file, auth.v2.key, auth.encrypted",
+        "linux": "same",
+        "format": "encrypted blob + key",
+        "conf": "third-party",
+        "src": "https://github.com/hqman/droid-switch"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "Cursor CLI / cursor-agent",
+    "vendor": "Anysphere",
+    "aliases": [
+      "cursor-agent",
+      "agent"
+    ],
+    "binaries": [
+      "cursor-agent",
+      "agent"
+    ],
+    "install": {
+      "other": "curl https://cursor.com/install -fsS | bash ; Windows PowerShell installer",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "api2.cursor.sh, cursor.com",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [
+      {
+        "name": "CURSOR_CONFIG_DIR",
+        "effect": "alternate config dir",
+        "conf": "third-party (search snippet of official docs)",
+        "src": "https://cursor.com/docs/cli/reference/configuration"
+      }
+    ],
+    "paths": [
+      {
+        "kind": "config",
+        "win": "%USERPROFILE%\\.cursor\\cli-config.json",
+        "mac": "~/.cursor/cli-config.json",
+        "linux": "~/.cursor/cli-config.json",
+        "format": "JSON",
+        "conf": "official-doc",
+        "src": "https://cursor.com/docs/cli/reference/configuration"
+      },
+      {
+        "kind": "chat_store",
+        "win": "%USERPROFILE%\\.cursor\\chats\\*\\*\\store.db",
+        "mac": "~/.cursor/chats/*/*/store.db",
+        "linux": "same",
+        "format": "SQLite (schema unknown)",
+        "conf": "third-party",
+        "src": "https://cdn.jsdelivr.net/npm/oh-my-opencode@4.18.2/dist/skills/coding-agent-sessions/references/all-platforms.md"
+      },
+      {
+        "kind": "prompt_history",
+        "win": "unknown (forum says %APPDATA%\\Cursor\\prompt_history.json for IDE)",
+        "mac": "~/.cursor/prompt_history.json",
+        "linux": "unknown",
+        "format": "JSON",
+        "conf": "third-party",
+        "src": "https://forum.cursor.com/t/a-bug-on-cursor-agent-cli/161598"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "GitHub Copilot CLI",
+    "vendor": "GitHub / Microsoft",
+    "aliases": [
+      "copilot",
+      "gh copilot (old extension, retired)"
+    ],
+    "binaries": [
+      "copilot",
+      "copilot.exe"
+    ],
+    "install": {
+      "npm": "@github/copilot",
+      "other": "winget GitHub.Copilot, brew copilot-cli",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "api.githubcopilot.com, github.com",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [
+      {
+        "name": "COPILOT_HOME",
+        "effect": "changes config location (default ~/.copilot)",
+        "conf": "official-doc",
+        "src": "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/configure-copilot-cli"
+      }
+    ],
+    "paths": [
+      {
+        "kind": "config",
+        "win": "%USERPROFILE%\\.copilot\\config.json (trustedFolders array)",
+        "mac": "~/.copilot/config.json",
+        "linux": "~/.copilot/config.json",
+        "format": "JSON",
+        "conf": "official-doc",
+        "src": "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/configure-copilot-cli"
+      },
+      {
+        "kind": "session_log",
+        "win": "%USERPROFILE%\\.copilot\\session-state\\<session-id>\\events.jsonl (+ workspace.yaml, plan.md, checkpoints\\, files\\)",
+        "mac": "~/.copilot/session-state/<session-id>/",
+        "linux": "same",
+        "format": "JSONL events, schema undocumented; legacy dir history-session-state/",
+        "conf": "official-doc (location) / third-party (schema caveat)",
+        "src": "https://docs.rs/toolpath-copilot"
+      },
+      {
+        "kind": "logs",
+        "win": "%USERPROFILE%\\.copilot\\logs\\",
+        "mac": "~/.copilot/logs/",
+        "linux": "~/.copilot/logs/",
+        "format": "text session logs",
+        "conf": "official-doc (via search summary of config-dir reference)",
+        "src": "https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    },
+    "local_verification": {
+      "source": "schema/structure probe on this PC, 2026-10-27 (names, counts, column/key names only; content, emails, account ids and credentials not recorded)",
+      "~/.copilot/config.json": "small config",
+      "~/.copilot/logs/process-<n>-<n>.log": "per-process logs (one 704-byte log on this PC) - session transcripts were not found there",
+      "confidence": "verified-on-test-pc",
+      "gap": "no session store found under ~/.copilot on this PC (possibly unused)"
+    }
+  },
+  {
+    "name": "Pi (pi-coding-agent) / Senpi",
+    "vendor": "Mario Zechner (badlogic/pi-mono)",
+    "aliases": [
+      "pi",
+      "senpi",
+      "oh-my-pi (fork)"
+    ],
+    "binaries": [
+      "pi"
+    ],
+    "install": {
+      "npm": "@mariozechner/pi-coding-agent",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "user-chosen provider endpoints",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [],
+    "paths": [
+      {
+        "kind": "session_log",
+        "win": "unknown (assumed %USERPROFILE%\\.pi\\agent\\sessions\\<encoded-cwd>\\)",
+        "mac": "~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl (senpi: ~/.senpi/agent/sessions/)",
+        "linux": "same",
+        "format": "JSONL; types session{id,timestamp,cwd}, model_change{provider,modelId}, thinking_level_change, message (usage.input/output/cacheRead/cacheWrite/totalTokens/cost.total), custom",
+        "conf": "third-party",
+        "src": "https://cdn.jsdelivr.net/npm/oh-my-opencode@4.18.2/dist/skills/coding-agent-sessions/references/senpi.md"
+      },
+      {
+        "kind": "config_and_auth",
+        "win": "unknown",
+        "mac": "~/.pi/agent/{settings.json,models.json,auth.json}",
+        "linux": "same",
+        "format": "JSON",
+        "conf": "third-party (senpi variant)",
+        "src": "same"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "Kimi CLI / Kimi Code",
+    "vendor": "Moonshot AI",
+    "aliases": [
+      "kimi-cli",
+      "kimi-code"
+    ],
+    "binaries": [
+      "kimi"
+    ],
+    "install": {
+      "pip": "kimi-cli (uv tool install kimi-cli)",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "api.kimi.com, api.moonshot.cn / api.moonshot.ai",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [
+      {
+        "name": "KIMI_SHARE_DIR",
+        "effect": "older layout data dir (~/.kimi)",
+        "conf": "official-doc",
+        "src": "https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/data-locations.html"
+      },
+      {
+        "name": "KIMI_CODE_HOME",
+        "effect": "newer layout data dir (~/.kimi-code)",
+        "conf": "official-doc",
+        "src": "https://www.kimi.com/en/help/kimi-code/cli-data-locations"
+      }
+    ],
+    "paths": [
+      {
+        "kind": "session_log_old",
+        "win": "%USERPROFILE%\\.kimi\\sessions\\<work-dir-hash>\\<session-id>\\{context.jsonl,wire.jsonl,state.json}",
+        "mac": "~/.kimi/sessions/...",
+        "linux": "same",
+        "format": "JSONL",
+        "conf": "official-doc (paths) ",
+        "src": "https://www.kimi.com/code/docs/en/kimi-code-cli/guides/sessions.html"
+      },
+      {
+        "kind": "session_log_new",
+        "win": "%USERPROFILE%\\.kimi-code\\sessions\\<cwd>\\...\\agents\\main\\wire.jsonl ; session_index.jsonl",
+        "mac": "~/.kimi-code/sessions/",
+        "linux": "same",
+        "format": "JSONL; subagents agents/<id>/wire.jsonl",
+        "conf": "official-doc (via search summary)",
+        "src": "https://www.kimi.com/en/help/kimi-code/cli-data-locations"
+      },
+      {
+        "kind": "config",
+        "win": "%USERPROFILE%\\.kimi\\config.toml",
+        "mac": "~/.kimi/config.toml",
+        "linux": "same",
+        "format": "TOML",
+        "conf": "official-doc",
+        "src": "https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/configuration-files.html"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "OpenHands CLI",
+    "vendor": "All Hands AI / OpenHands",
+    "aliases": [
+      "OpenDevin (former name)",
+      "openhands"
+    ],
+    "binaries": [
+      "openhands"
+    ],
+    "install": {
+      "pip": "openhands-ai / uv tool install openhands",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "user LLM provider; app.all-hands.dev for cloud",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [],
+    "paths": [
+      {
+        "kind": "conversations",
+        "win": "%USERPROFILE%\\.openhands\\conversations\\<id>\\",
+        "mac": "~/.openhands/conversations/<id>/",
+        "linux": "same",
+        "format": "conversation.json (CLI doc) or base_state.json + events/ numbered files (SDK doc); docs disagree",
+        "conf": "official-doc (conflicting)",
+        "src": "https://docs.openhands.dev/openhands/usage/cli/resume"
+      },
+      {
+        "kind": "settings",
+        "win": "%USERPROFILE%\\.openhands\\{settings.json | agent_settings.json}",
+        "mac": "~/.openhands/",
+        "linux": "same",
+        "format": "JSON",
+        "conf": "third-party",
+        "src": "https://glukhov.org/ja/ai-devtools/openhands/"
+      }
+    ],
+    "retention": {
+      "v": "unknown (no auto-delete documented)",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "Kilo Code CLI",
+    "vendor": "Kilo-Org",
+    "aliases": [
+      "kilocode",
+      "kilo"
+    ],
+    "binaries": [
+      "kilo",
+      "kilocode"
+    ],
+    "install": {
+      "npm": "@kilocode/cli",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "api.kilo.ai / kilocode.ai",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [],
+    "paths": [
+      {
+        "kind": "vscode_extension_tasks",
+        "win": "%APPDATA%\\Code\\User\\globalStorage\\kilocode.kilo-code\\tasks\\<taskId>\\",
+        "mac": "~/Library/Application Support/Code/User/globalStorage/<ext-id>/tasks/",
+        "linux": "~/.config/Code/User/globalStorage/<ext-id>/tasks/",
+        "format": "api_conversation_history.json, ui_messages.json (Cline lineage)",
+        "conf": "third-party (pattern); unverified (filenames)",
+        "src": "https://cdn.jsdelivr.net/npm/oh-my-opencode@4.18.2/dist/skills/coding-agent-sessions/references/all-platforms.md"
+      },
+      {
+        "kind": "cli_storage",
+        "win": "unknown (newer CLI is an OpenCode fork, so likely opencode-style data dir)",
+        "mac": "unknown",
+        "linux": "unknown",
+        "format": "unknown",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "Roo Code (CLI)",
+    "vendor": "Roo Code Inc",
+    "aliases": [
+      "roo-code",
+      "Roo Cline"
+    ],
+    "binaries": [
+      "roo"
+    ],
+    "install": {
+      "other": "VS Code extension RooVeterinaryInc.roo-cline; CLI install script",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "unknown",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [],
+    "paths": [
+      {
+        "kind": "tasks",
+        "win": "%APPDATA%\\Code\\User\\globalStorage\\rooveterinaryinc.roo-cline\\tasks\\<taskId>\\",
+        "mac": "~/Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks/",
+        "linux": "~/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks/",
+        "format": "JSON (api_conversation_history.json, ui_messages.json)",
+        "conf": "third-party (pattern) / unverified (ext id, filenames)",
+        "src": "https://cdn.jsdelivr.net/npm/oh-my-opencode@4.18.2/dist/skills/coding-agent-sessions/references/all-platforms.md"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "Cline CLI",
+    "vendor": "Cline Bot Inc",
+    "aliases": [
+      "claude-dev (old name)",
+      "cline"
+    ],
+    "binaries": [
+      "cline"
+    ],
+    "install": {
+      "npm": "cline",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "api.cline.bot",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [
+      {
+        "name": "CLINE_DIR",
+        "effect": "possible data dir override",
+        "conf": "unverified"
+      }
+    ],
+    "paths": [
+      {
+        "kind": "vscode_extension_tasks",
+        "win": "%APPDATA%\\Code\\User\\globalStorage\\saoudrizwan.claude-dev\\tasks\\<taskId>\\",
+        "mac": "~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks/",
+        "linux": "~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks/",
+        "format": "JSON (api_conversation_history.json, ui_messages.json, task_metadata.json)",
+        "conf": "third-party (pattern) / unverified (ext id, filenames)",
+        "src": "https://cdn.jsdelivr.net/npm/oh-my-opencode@4.18.2/dist/skills/coding-agent-sessions/references/all-platforms.md"
+      },
+      {
+        "kind": "cli_data",
+        "win": "unknown (~/.cline/data per prior knowledge)",
+        "mac": "unknown",
+        "linux": "unknown",
+        "format": "unknown",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "Codebuff",
+    "vendor": "Codebuff (formerly Manicode)",
+    "aliases": [
+      "manicode"
+    ],
+    "binaries": [
+      "codebuff"
+    ],
+    "install": {
+      "npm": "codebuff",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "codebuff.com",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [],
+    "paths": [
+      {
+        "kind": "chat_log",
+        "win": "unknown",
+        "mac": "~/.config/manicode*/projects/*/chats/*/chat-messages.json",
+        "linux": "same",
+        "format": "JSON",
+        "conf": "third-party",
+        "src": "https://cdn.jsdelivr.net/npm/oh-my-opencode@4.18.2/dist/skills/coding-agent-sessions/references/all-platforms.md"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "Kiro CLI (ex Amazon Q Developer CLI)",
+    "vendor": "AWS",
+    "aliases": [
+      "q",
+      "Amazon Q Developer CLI",
+      "kiro-cli"
+    ],
+    "binaries": [
+      "kiro-cli",
+      "q"
+    ],
+    "install": {
+      "other": "AWS installer; repo aws/amazon-q-developer-cli",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "unknown (q.us-east-1.amazonaws.com per prior knowledge)",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [],
+    "paths": [
+      {
+        "kind": "session_log",
+        "win": "unknown",
+        "mac": "~/.kiro/sessions/cli/*.json plus paired *.jsonl prompt events",
+        "linux": "same",
+        "format": "JSON + JSONL",
+        "conf": "third-party",
+        "src": "https://cdn.jsdelivr.net/npm/oh-my-opencode@4.18.2/dist/skills/coding-agent-sessions/references/all-platforms.md"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "Continue CLI",
+    "vendor": "Continue.dev",
+    "aliases": [
+      "cn"
+    ],
+    "binaries": [
+      "cn"
+    ],
+    "install": {
+      "npm": "@continuedev/cli",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "api.continue.dev",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [
+      {
+        "name": "CONTINUE_GLOBAL_DIR",
+        "effect": "relocates ~/.continue",
+        "conf": "unverified"
+      }
+    ],
+    "paths": [
+      {
+        "kind": "config_sessions",
+        "win": "unknown (~/.continue/{config.yaml,sessions/*.json} per prior knowledge)",
+        "mac": "unknown",
+        "linux": "unknown",
+        "format": "YAML / JSON",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "Auggie (Augment CLI)",
+    "vendor": "Augment Code",
+    "aliases": [
+      "auggie"
+    ],
+    "binaries": [
+      "auggie"
+    ],
+    "install": {
+      "npm": "@augmentcode/auggie",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "augmentcode.com tenant URLs",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [
+      {
+        "name": "AUGMENT_SESSION_AUTH / AUGMENT_API_TOKEN",
+        "effect": "auth",
+        "conf": "unverified"
+      }
+    ],
+    "paths": [
+      {
+        "kind": "data",
+        "win": "unknown (~/.augment/{session,settings.json} per prior knowledge)",
+        "mac": "unknown",
+        "linux": "unknown",
+        "format": "unknown",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "Plandex",
+    "vendor": "Plandex AI (project sunset 2025)",
+    "aliases": [
+      "plandex-ai"
+    ],
+    "binaries": [
+      "plandex",
+      "pdx"
+    ],
+    "install": {
+      "other": "curl -sL https://plandex.ai/install.sh | bash; server via Docker",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "Plandex Cloud (discontinued); self-hosted server",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [
+      {
+        "name": "PLANDEX_ENV, PLANDEX_SKIP_UPGRADE",
+        "effect": "misc",
+        "conf": "unverified"
+      }
+    ],
+    "paths": [
+      {
+        "kind": "client_home",
+        "win": "unknown (~/.plandex-home-v2 per prior knowledge); project .plandex-v2/",
+        "mac": "unknown",
+        "linux": "unknown",
+        "format": "JSON, server-side Postgres + file store",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "Warp agent (Warp terminal Agent Mode)",
+    "vendor": "Warp",
+    "aliases": [
+      "Warp AI",
+      "Warp Agent Mode"
+    ],
+    "binaries": [
+      "warp-terminal",
+      "warp.exe"
+    ],
+    "install": {
+      "other": "winget Warp.Warp, brew cask warp, deb/rpm",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "app.warp.dev, rtc.app.warp.dev",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [],
+    "paths": [
+      {
+        "kind": "local_db",
+        "win": "unknown (%LOCALAPPDATA%\\warp\\Warp\\data\\warp.sqlite per prior knowledge)",
+        "mac": "unknown (~/Library/Application Support/dev.warp.Warp-Stable/warp.sqlite per prior knowledge)",
+        "linux": "unknown (~/.local/state/warp-terminal/warp.sqlite per prior knowledge)",
+        "format": "SQLite incl. AI queries/blocks",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "Mistral Vibe",
+    "vendor": "Mistral AI",
+    "aliases": [
+      "mistral-vibe",
+      "vibe"
+    ],
+    "binaries": [
+      "vibe"
+    ],
+    "install": {
+      "pip": "mistral-vibe",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "api.mistral.ai",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [
+      {
+        "name": "VIBE_HOME",
+        "effect": "possible relocation of ~/.vibe",
+        "conf": "unverified"
+      }
+    ],
+    "paths": [
+      {
+        "kind": "data",
+        "win": "unknown (~/.vibe/{config.toml,logs/session/} per prior knowledge)",
+        "mac": "unknown",
+        "linux": "unknown",
+        "format": "unknown",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "iFlow CLI",
+    "vendor": "Alibaba/iFlow",
+    "aliases": [
+      "iflow"
+    ],
+    "binaries": [
+      "iflow"
+    ],
+    "install": {
+      "npm": "@iflow-ai/iflow-cli",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "iflow.cn, apis.iflow.cn",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [],
+    "paths": [
+      {
+        "kind": "data",
+        "win": "unknown (~/.iflow/{settings.json,oauth_creds.json,projects/} per prior knowledge; Gemini CLI fork)",
+        "mac": "unknown",
+        "linux": "unknown",
+        "format": "unknown",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "Hermes Agent",
+    "vendor": "Nous Research",
+    "aliases": [
+      "hermes-agent"
+    ],
+    "binaries": [
+      "hermes"
+    ],
+    "install": {
+      "other": "install script from NousResearch/hermes-agent",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "unknown",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [
+      {
+        "name": "HERMES_HOME",
+        "effect": "possible",
+        "conf": "unverified"
+      }
+    ],
+    "paths": [
+      {
+        "kind": "data",
+        "win": "unknown",
+        "mac": "unknown (~/.hermes/ per prior knowledge)",
+        "linux": "unknown",
+        "format": "SQLite probed by third-party finder; schema unknown",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "OpenClaw",
+    "vendor": "community (Peter Steinberger)",
+    "aliases": [
+      "Clawdbot",
+      "Moltbot"
+    ],
+    "binaries": [
+      "openclaw"
+    ],
+    "install": {
+      "npm": "openclaw",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "unknown",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [],
+    "paths": [
+      {
+        "kind": "sessions",
+        "win": "unknown",
+        "mac": "~/.openclaw/agents/*/sessions ; ~/.openclaw/session-backups",
+        "linux": "same",
+        "format": "unknown (likely JSONL)",
+        "conf": "third-party",
+        "src": "https://cdn.jsdelivr.net/npm/oh-my-opencode@4.18.2/dist/skills/coding-agent-sessions/references/all-platforms.md"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    },
+    "notes": "General personal-agent more than a coding CLI; included because the finder lists it."
+  },
+  {
+    "name": "gptme",
+    "vendor": "gptme (Erik Bjareholt)",
+    "aliases": [],
+    "binaries": [
+      "gptme"
+    ],
+    "install": {
+      "pip": "gptme",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "user provider",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [],
+    "paths": [
+      {
+        "kind": "logs",
+        "win": "unknown",
+        "mac": "unknown (~/.local/share/gptme/logs/<name>/conversation.jsonl per prior knowledge)",
+        "linux": "unknown",
+        "format": "JSONL",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "Open Interpreter",
+    "vendor": "Open Interpreter",
+    "aliases": [
+      "interpreter"
+    ],
+    "binaries": [
+      "interpreter"
+    ],
+    "install": {
+      "pip": "open-interpreter",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "user provider",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [],
+    "paths": [
+      {
+        "kind": "conversations_config",
+        "win": "unknown (platformdirs user_data_dir/open-interpreter per prior knowledge)",
+        "mac": "unknown",
+        "linux": "unknown",
+        "format": "JSON conversations",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "SWE-agent / mini-swe-agent",
+    "vendor": "Princeton/Stanford",
+    "aliases": [
+      "SWE-agent"
+    ],
+    "binaries": [
+      "sweagent",
+      "mini"
+    ],
+    "install": {
+      "pip": "sweagent / mini-swe-agent",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "user provider via litellm",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [],
+    "paths": [
+      {
+        "kind": "trajectories",
+        "win": "unknown (trajectories/<user>/<run>/*.traj JSON in cwd per prior knowledge)",
+        "mac": "unknown",
+        "linux": "unknown",
+        "format": "JSON .traj",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "no auto-delete assumed",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "Trae Agent",
+    "vendor": "ByteDance",
+    "aliases": [
+      "trae-agent"
+    ],
+    "binaries": [
+      "trae-cli"
+    ],
+    "install": {
+      "other": "uv from GitHub bytedance/trae-agent",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "user provider",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [],
+    "paths": [
+      {
+        "kind": "trajectory",
+        "win": "unknown (trajectory_*.json in cwd per prior knowledge)",
+        "mac": "unknown",
+        "linux": "unknown",
+        "format": "JSON",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "smolagents (CLI: smolagent / webagent)",
+    "vendor": "Hugging Face",
+    "aliases": [],
+    "binaries": [
+      "smolagent",
+      "webagent"
+    ],
+    "install": {
+      "pip": "smolagents",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "router.huggingface.co / user provider",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [
+      {
+        "name": "HF_HOME",
+        "effect": "HF token/cache (~/.cache/huggingface)",
+        "conf": "unverified"
+      }
+    ],
+    "paths": [
+      {
+        "kind": "local_store",
+        "win": "unknown",
+        "mac": "unknown",
+        "linux": "unknown",
+        "format": "library; no standard session store (HF token at ~/.cache/huggingface/token)",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "n/a",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "gpt-engineer",
+    "vendor": "gpt-engineer-org",
+    "aliases": [
+      "gpte"
+    ],
+    "binaries": [
+      "gpte",
+      "gpt-engineer"
+    ],
+    "install": {
+      "pip": "gpt-engineer",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "api.openai.com / user provider",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [],
+    "paths": [
+      {
+        "kind": "project_artifacts",
+        "win": "unknown (<project>\\prompt, .gpteng\\, memory\\logs\\ per prior knowledge)",
+        "mac": "unknown",
+        "linux": "unknown",
+        "format": "text/JSON",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "Mentat CLI",
+    "vendor": "AbanteAI / mentat.ai",
+    "aliases": [
+      "mentat"
+    ],
+    "binaries": [
+      "mentat"
+    ],
+    "install": {
+      "pip": "mentat",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "unknown",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [],
+    "paths": [
+      {
+        "kind": "all",
+        "win": "unknown",
+        "mac": "unknown",
+        "linux": "unknown",
+        "format": "unknown",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "Junie CLI",
+    "vendor": "JetBrains",
+    "aliases": [
+      "junie"
+    ],
+    "binaries": [
+      "junie"
+    ],
+    "install": {
+      "other": "junie.jetbrains.com installer",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "unknown",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [],
+    "paths": [
+      {
+        "kind": "all",
+        "win": "unknown",
+        "mac": "unknown",
+        "linux": "unknown",
+        "format": "unknown",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "Letta Code",
+    "vendor": "Letta",
+    "aliases": [
+      "letta-code"
+    ],
+    "binaries": [
+      "letta"
+    ],
+    "install": {
+      "npm": "@letta-ai/letta-code",
+      "conf": "unverified"
+    },
+    "api_domains": [
+      {
+        "v": "api.letta.com",
+        "conf": "unverified"
+      }
+    ],
+    "env_vars": [],
+    "paths": [
+      {
+        "kind": "all",
+        "win": "unknown",
+        "mac": "unknown (~/.letta/ per prior knowledge)",
+        "linux": "unknown",
+        "format": "unknown; state largely server-side",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    }
+  },
+  {
+    "name": "ZCode (Z.ai coding agent; ~/.zcode)",
+    "vendor": "unknown - folder layout and provider config point to Z.ai/GLM models (identity not confirmed from vendor docs)",
+    "category": "cli_agent + desktop/bot runtime",
+    "confidence": "verified-on-test-pc (structure only); vendor attribution unverified",
+    "source": "schema/structure probe on this PC, 2026-10-27 (names, counts, column/key names only; content, emails, account ids and credentials not recorded)",
+    "found_because": "discovered by generic scan of home dot-folders - it was NOT in the researched catalog",
+    "paths": {
+      "~/.zcode/cli/db/db.sqlite": "34.8MB main SQLite (+ -wal/-shm)",
+      "~/.zcode/cli/rollout/*.jsonl": "3 files, 161MB total (model I/O rollouts)",
+      "~/.zcode/cli/log/*.jsonl": "5 daily structured logs",
+      "~/.zcode/v2/tasks-index.sqlite": "task index (+ -wal/-shm)",
+      "~/.zcode/v2/{config.json,bot-config.v3.json,bot-state.v3.json,coding-plan-cache.json}": "provider/model config (contains API key fields: never export values), messaging-bot config/state",
+      "~/.zcode/v2/credentials.json, certs/*.key, *.pem": "sensitive - existence and mtime only",
+      "~/.zcode/v2/logs/<date>.log": "9 logs, 18.9MB"
+    },
+    "db_schema_cli_db_sqlite": {
+      "session": [
+        "id",
+        "project_id",
+        "workspace_id",
+        "parent_id",
+        "slug",
+        "directory",
+        "path",
+        "title",
+        "version",
+        "share_url",
+        "summary_additions",
+        "summary_deletions",
+        "summary_files",
+        "time_created",
+        "time_updated",
+        "time_archived",
+        "task_type",
+        "trace_id"
+      ],
+      "message": [
+        "id",
+        "session_id",
+        "time_created",
+        "time_updated",
+        "data(TEXT/JSON)",
+        "sequence"
+      ],
+      "part": [
+        "id",
+        "message_id",
+        "session_id",
+        "time_created",
+        "time_updated",
+        "data(TEXT/JSON)",
+        "sequence"
+      ],
+      "session_entry / session_input": "typed entries and queued inputs (kind, delivery, payload, status)",
+      "input_history": [
+        "id",
+        "project_id",
+        "session_id",
+        "text",
+        "kind",
+        "time_created",
+        "attachments"
+      ],
+      "model_usage": [
+        "logical_request_id",
+        "session_id",
+        "turn_id",
+        "trace_id",
+        "provider_id",
+        "model_id",
+        "agent",
+        "mode",
+        "task_type",
+        "status",
+        "started_at",
+        "completed_at",
+        "duration_ms",
+        "input_tokens",
+        "output_tokens",
+        "reasoning_tokens",
+        "..."
+      ],
+      "tool_usage": [
+        "session_id",
+        "turn_id",
+        "tool_call_id",
+        "tool_name",
+        "side_effect_scope",
+        "read_only",
+        "destructive",
+        "approval_status",
+        "status",
+        "started_at",
+        "completed_at",
+        "exit_code",
+        "output_bytes",
+        "stdout_bytes",
+        "stderr_bytes",
+        "..."
+      ],
+      "turn_usage": "per-turn timing and token counters",
+      "todo": [
+        "session_id",
+        "content",
+        "status",
+        "priority",
+        "position"
+      ],
+      "dwf_* / workflow_* tables": "workflow/automation engine tables (runs, nodes, events, definitions) - empty on this PC",
+      "session_task_link": [
+        "parent_session_id",
+        "child_session_id",
+        "role",
+        "depth",
+        "agent_type",
+        "model",
+        "status"
+      ],
+      "rows_seen": {
+        "session": 12,
+        "message": 2642,
+        "part": 8100,
+        "model_usage": 2377,
+        "tool_usage": 2404,
+        "turn_usage": 47,
+        "input_history": 52,
+        "session_entry": 257,
+        "todo": 35
+      }
+    },
+    "tasks_index_schema": {
+      "tasks": [
+        "workspace_path",
+        "task_id",
+        "title",
+        "task_status",
+        "provider",
+        "mode",
+        "model",
+        "forked_from_task_id",
+        "created_at",
+        "updated_at",
+        "archived",
+        "deleted",
+        "meta_json",
+        "searchable_text"
+      ],
+      "automations": "cron-style scheduled agent prompts",
+      "off_peak_tasks": "queued tasks incl. prompt, status, files_changed",
+      "rows_seen": {
+        "tasks": 8
+      }
+    },
+    "rollout_jsonl_keys": "model-io-sess_<uuid>.jsonl: attempt, completedAt, durationMs, model.{modelId,providerId,variant}, querySource, request.body.{model,max_tokens,reasoning_effort,stream,tool_choice,tools}, request.headers.{user-agent,http-referer,x-client-*}, response... (full raw requests/responses -> highest evidence value; bodies not opened)",
+    "forensic_notes": [
+      "Another tool that keeps full session text in SQLite (message/part JSON) AND raw request/response rollouts - rapid must handle both",
+      "tool_usage records executed tools with exit codes and destructive flags: direct evidence of what the agent did",
+      "provider config shows a free GLM model routed through a custom baseURL (relay-style) - check baseURL host against the relay list in infrastructure.json"
+    ]
+  },
+  {
+    "name": "Other listed CLI agents (not researched)",
+    "vendor": "various",
+    "aliases": [
+      "Grok Build (xAI)",
+      "Grok CLI",
+      "Deep Agents Code (LangChain)",
+      "Command Code",
+      "Ante (Antigma)",
+      "pool (Poolside)",
+      "Cortex Code CLI (Snowflake)",
+      "Tabnine CLI",
+      "Devin CLI",
+      "Muse Code (Meta)",
+      "Claw Code",
+      "Free Code",
+      "Claurst",
+      "Every Code",
+      "ForgeCode",
+      "Neovate Code",
+      "Kode CLI",
+      "Nanocoder",
+      "RA.Aid",
+      "VT Code",
+      "Groq Code CLI",
+      "AutoCodeRover",
+      "Agentless",
+      "Smol Developer",
+      "Devon",
+      "OB-1",
+      "Yaw",
+      "Codewhale",
+      "Reasonix",
+      "MiMo Code",
+      "Prime Agent",
+      "jcode",
+      "Tau (HF)"
+    ],
+    "binaries": [],
+    "install": {
+      "conf": "unverified"
+    },
+    "api_domains": [],
+    "env_vars": [],
+    "paths": [
+      {
+        "kind": "all",
+        "win": "unknown",
+        "mac": "unknown",
+        "linux": "unknown",
+        "format": "unknown",
+        "conf": "unverified"
+      }
+    ],
+    "retention": {
+      "v": "unknown",
+      "conf": "unverified"
+    },
+    "notes": "Names taken from awesome-cli-coding-agents list (https://github.com/bradAGI/awesome-cli-coding-agents); no fingerprint data collected."
+  }
+]

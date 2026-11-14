@@ -61,7 +61,7 @@ class RemoteModeFlagTests(unittest.TestCase):
         with _clean_token_env():
             with patch.dict(sys.modules, {"uvicorn": _fake_uvicorn(captured)}):
                 with contextlib.redirect_stderr(stderr):
-                    result = run_web_server("0.0.0.0", 8899, remote=True, auth_token="remote-token")
+                    result = run_web_server("0.0.0.0", 8899, remote=True, auth_token="remote-token", allow_plain_http=True)
             self.assertEqual(result, 0)
             self.assertEqual(captured["kwargs"]["host"], "0.0.0.0")
             self.assertEqual(os.environ.get("RAPIDTRIAGE_AUTH_TOKEN"), "remote-token")
@@ -76,7 +76,7 @@ class RemoteModeFlagTests(unittest.TestCase):
         with _clean_token_env(RAPIDTRIAGE_TOKEN="env-remote-token"):
             with patch.dict(sys.modules, {"uvicorn": _fake_uvicorn(captured)}):
                 with contextlib.redirect_stderr(io.StringIO()):
-                    result = run_web_server("0.0.0.0", 8899, remote=True)
+                    result = run_web_server("0.0.0.0", 8899, remote=True, allow_plain_http=True)
             self.assertEqual(result, 0)
             self.assertEqual(os.environ.get("RAPIDTRIAGE_AUTH_TOKEN"), "env-remote-token")
 
@@ -99,7 +99,7 @@ class RemoteModeFlagTests(unittest.TestCase):
         captured: dict[str, object] = {}
         with _clean_token_env():
             with patch.dict(sys.modules, {"uvicorn": _fake_uvicorn(captured)}):
-                result = run_web_server("127.0.0.1", 8899, remote=True, auth_token="t")
+                result = run_web_server("127.0.0.1", 8899, remote=True, auth_token="t", allow_plain_http=True)
             self.assertEqual(result, 0)
 
 

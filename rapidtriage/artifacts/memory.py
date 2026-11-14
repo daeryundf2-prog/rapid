@@ -11,6 +11,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from urllib.parse import parse_qsl, unquote_plus, urlparse
 
+from ..core.ai_catalog import domains as ai_catalog_domains
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 from ._walk import iter_evidence_paths
@@ -84,16 +85,9 @@ PRIVATE_BROWSING_TERMS = (
     "off the record",
     "guest profile",
 )
-AI_SERVICE_DOMAINS = {
-    "chatgpt.com": "ChatGPT",
-    "chat.openai.com": "ChatGPT",
-    "claude.ai": "Claude",
-    "gemini.google.com": "Gemini",
-    "bard.google.com": "Gemini",
-    "perplexity.ai": "Perplexity",
-    "copilot.microsoft.com": "Microsoft Copilot",
-    "poe.com": "Poe",
-}
+# R7 stage 3.5: generated from the AI tool catalog (rapidtriage/core/ai_catalog) — the 8 legacy
+# domains first (same order and labels), then every catalog AI host not already covered.
+AI_SERVICE_DOMAINS: dict[str, str] = dict(ai_catalog_domains(legacy="memory"))
 SEARCH_QUERY_PARAM_NAMES = {"q", "query", "search", "search_query", "text", "prompt", "p"}
 SEARCH_ENGINE_DOMAINS = (
     "google.",

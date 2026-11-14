@@ -8,8 +8,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
+from .cli_constants import (
+    DEFAULT_BROWSER_STRESS_RECORD_COUNT,
+)
+
 BROWSER_LARGE_RESULT_STRESS_VERSION = "browser-large-result-stress-harness-v1"
-DEFAULT_BROWSER_STRESS_RECORD_COUNT = 100_000
 DEFAULT_ROW_FILTER_TEXT_LIMIT = 900
 DEFAULT_BROWSER_STRESS_TIMEOUT_MS = 30_000
 

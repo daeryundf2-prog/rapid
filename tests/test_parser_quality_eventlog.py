@@ -453,6 +453,21 @@ class NativeEvtxDecodeTests(unittest.TestCase):
         self.assertEqual(len(events), 1)
         return events[0]
 
+    def test_record_id_is_the_binxml_event_record_id_not_the_record_header_id(self) -> None:
+        """Windows T1 finding 2026-08-30 (re-checked R6 S4): ``record_id`` must be the BinXML
+        ``EventRecordID`` that EvtxECmd reports, not the physical record header identifier."""
+        writer = EvtxWriter()
+        writer.build_chunk([logon_event(653881, filetime(BASE_TIME, 4109), user="alice", logon_id=0x1A2B)])
+        chunk = writer.chunks[0]
+        self.assertEqual(chunk[512:516], b"**\x00\x00")
+        struct.pack_into("<Q", chunk, 512 + 8, 42)  # header id differs from the BinXML value
+        with tempfile.TemporaryDirectory() as tmp:
+            rows, _ = collect(write_evtx(Path(tmp) / "One.evtx", writer))
+        (details,) = events_of(rows)
+        self.assertEqual(details["evtx_binxml_status"], "decoded")
+        self.assertEqual(details["record_id"], "653881")
+        self.assertEqual(details["binxml_system_fields"]["EventRecordID"], "653881")
+
     def test_decodes_4624_eventdata_with_korean_strings_and_sid(self) -> None:
         details = self._single(logon_event(653881, filetime(BASE_TIME, 4109), user="홍길동", logon_id=0x1A2B))
         self.assertEqual(details["evtx_binxml_status"], "decoded")

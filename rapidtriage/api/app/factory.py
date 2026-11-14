@@ -3,23 +3,43 @@ from __future__ import annotations
 import os
 import re
 import secrets
+import sqlite3
 from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
-from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from ...core.case_db import open_case_database
-from ...core.crash import write_crash_report
+from ...core.case_db.write_lock import (
+    CaseDatabaseBatchPartialError,
+    CaseDatabaseLockedError,
+    case_db_batch_partial_detail,
+    case_db_locked_detail,
+    is_lock_error,
+    raised_in_case_db_code,
+)
 from ...core.jobs import RunJobStore, default_job_store
+from ...core.readonly_runs import (
+    RUN_READ_ONLY,
+    RUN_READ_ONLY_MESSAGE,
+    ReadOnlyRunWriteError,
+    install_write_guard,
+    readonly_reason_for,
+)
 from .analyses import ANALYSIS_RUNNER, COMPLETION_HOOKS
 from .case_workspace import CaseWorkspace
 from .constants import MUTATING_METHODS
+from .errors import (
+    crash_response,
+    error_response,
+    install_error_envelope,
+    validation_errors_detail,
+)
 from .helpers import (
     allowed_api_hosts,
     request_host,
@@ -27,15 +47,28 @@ from .helpers import (
     resolve_case_db_path,
     truthy_env,
 )
+from .readonly_mode import (
+    SERVER_READ_ONLY,
+    ServerReadOnlyHolds,
+    server_read_only_detail,
+    server_read_only_enabled,
+    server_read_only_refusal,
+)
 from .routes_analyses import build_analyses_router, korean_body_errors
 from .routes_case_db import build_case_db_router
 from .routes_cases import CASE_FIELD_LABELS, build_cases_router
 from .routes_derived import build_derived_router
 from .routes_explorers import build_explorers_router
+from .routes_families import build_families_router
 from .routes_flags import build_flags_router
 from .routes_ioc import build_ioc_router
 from .routes_media import build_media_router
-from .routes_meta import build_meta_router
+from .routes_meta import (
+    BROWSE_REMOTE_ENV,
+    BROWSE_ROOTS_ENV,
+    build_meta_router,
+    configured_browse_roots,
+)
 from .routes_reports import build_reports_router
 from .routes_review_tools import build_review_tools_router
 from .routes_run_plan import build_run_plan_router
@@ -43,6 +76,7 @@ from .routes_runs import build_runs_router
 from .routes_search import build_search_router
 from .routes_search_index import build_search_index_router
 from .search_index_service import (
+    READ_ONLY_INDEX,
     auto_build_on_completion,
     auto_incremental_after_analysis,
 )
@@ -71,6 +105,57 @@ REVIEW_BATCH_FIELD_LABELS = {
     "shortcut": "단축키(shortcut)",
     "description": "설명(description)",
 }
+# ``/api/runs/{run_id}/…`` — the run a request acts on (D37 read-only gate).
+RUN_SCOPED_PATH = re.compile(r"/api/runs/(?P<run_id>[^/]+)(?P<rest>/.*)?")
+# Allowlist (contract D.10): the only state-changing requests a read-only run still answers.
+# Queries sent as POST bodies (they write nothing; the write guard refuses any lazy write they
+# would make) and removing the run from the list (``DELETE /api/runs/{run_id}``; the folder stays).
+READ_ONLY_RUN_QUERY_POSTS = frozenset({"/search/count", "/search/query", "/search/entities", "/search/hashes"})
+# Refusals with their own sentence (T-134): asking a read-only run for a search index.
+READ_ONLY_RUN_MESSAGES = {"/search/index/build": READ_ONLY_INDEX}
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+# ``sqlite3.OperationalError`` text for a write on a ``PRAGMA query_only`` connection.
+SQLITE_READONLY_MESSAGE = "attempt to write a readonly database"
+
+
+def _readonly_run_reason(store: RunJobStore, run_id: str | None) -> str | None:
+    if not run_id:
+        return None
+    try:
+        return store.get(run_id).readonly_reason or None
+    except KeyError:
+        return None
+
+
+def read_only_run_refusal(
+    store: RunJobStore, method: str, path: str, query_run_id: str | None = None
+) -> JSONResponse | None:
+    """409 ``RUN_READ_ONLY`` for a state-changing request on a read-only run (D37), else ``None``.
+
+    The run is the ``{run_id}`` of an ``/api/runs/{run_id}/…`` path or, for any other ``/api``
+    path, the ``run_id`` query parameter (``/api/cases/{case_id}/tags?run_id=…`` and the other
+    review-tool writes find the run's case DB through it).
+    """
+    if method in SAFE_METHODS:
+        return None
+    match = RUN_SCOPED_PATH.fullmatch(path)
+    if match is not None:
+        reason = _readonly_run_reason(store, match.group("run_id"))
+        rest = match.group("rest") or ""
+        if reason is None:
+            return None
+        if (method == "DELETE" and rest in {"", "/"}) or (method == "POST" and rest in READ_ONLY_RUN_QUERY_POSTS):
+            return None
+    elif path.startswith("/api/"):
+        reason = _readonly_run_reason(store, query_run_id)
+        if reason is None:
+            return None
+    else:
+        return None
+    message = READ_ONLY_RUN_MESSAGES.get(match.group("rest") or "", RUN_READ_ONLY_MESSAGE) if match else RUN_READ_ONLY_MESSAGE
+    return error_response(409, {"code": RUN_READ_ONLY, "message": message, "readonly_reason": reason})
+
+
 # Case intake routes (AXIOM adoption E1): every validation error in Korean.
 CASE_INTAKE_PATH = re.compile(r"/api/cases(/.*)?|/api/runs/[^/]+/(problems|processing-snapshot)")
 
@@ -93,8 +178,17 @@ def create_app(
     case_db_roots: Iterable[str | Path] | None = None,
     auto_search_index: bool = False,
     cases_db_path: str | Path | None = None,
+    browse_remote: bool | None = None,
+    browse_roots: Iterable[str | Path] | None = None,
+    read_only: bool | None = None,
 ) -> FastAPI:
     store = job_store or default_job_store
+    # T-112: ``rapidtriage web --read-only`` (``RAPIDTRIAGE_READ_ONLY``) — the whole server refuses
+    # writes and holds every run folder it knows read-only.
+    server_read_only = server_read_only_enabled(read_only)
+    read_only_holds = ServerReadOnlyHolds(store) if server_read_only else None
+    # D37: nothing is ever written into a read-only run folder, whichever writer tries.
+    install_write_guard()
     # Workspace case DB (cases, evidence, notes, processing snapshots); opened on first use.
     case_workspace = CaseWorkspace(store, Path(cases_db_path) if cases_db_path else None)
     # Identifies this app's analyses in the process-wide runner.
@@ -105,10 +199,16 @@ def create_app(
         yield
         # Shutdown: cancel this app's running analyses at their next unit, drop its queued ones.
         ANALYSIS_RUNNER.shutdown(owner=analysis_owner)
+        if read_only_holds is not None:
+            read_only_holds.release()
+        # D37: release the read-only folders the store holds (the registry is process-wide).
+        store.close()
 
     api = FastAPI(title="rapidtriage local API", version="0.2.0", lifespan=lifespan)
     api.state.analysis_owner = analysis_owner
     api.state.case_workspace = case_workspace
+    api.state.server_read_only = server_read_only
+    api.state.server_read_only_holds = read_only_holds
     if auto_search_index:
         # Search index (plan search §0 결정 1): full build when a run completes, incremental
         # update when another analysis completes. The served app (module-level ``app``)
@@ -119,22 +219,61 @@ def create_app(
         if auto_incremental_after_analysis not in COMPLETION_HOOKS:
             COMPLETION_HOOKS.append(auto_incremental_after_analysis)
 
+    @api.exception_handler(ReadOnlyRunWriteError)
+    async def read_only_run_write(_request: Request, exc: ReadOnlyRunWriteError):
+        if exc.reason == SERVER_READ_ONLY:
+            return error_response(409, server_read_only_detail())
+        return error_response(409, exc.to_detail())
+
+    @api.exception_handler(CaseDatabaseBatchPartialError)
+    async def case_db_batch_partial(_request: Request, exc: CaseDatabaseBatchPartialError):
+        """A chunked batch that failed after earlier chunks were saved: 409 with both counts (P2-15)."""
+        return error_response(409, case_db_batch_partial_detail(exc))
+
+    @api.exception_handler(CaseDatabaseLockedError)
+    async def case_db_locked(_request: Request, exc: CaseDatabaseLockedError):
+        """A case-DB write still locked after its retries is 409 ``CASE_DB_LOCKED`` on any URL (WB-9 P2-16)."""
+        return error_response(409, case_db_locked_detail(exc))
+
+    @api.exception_handler(sqlite3.OperationalError)
+    async def read_only_run_sqlite_write(request: Request, exc: sqlite3.OperationalError):
+        """A SQLite write refused by the guard's ``PRAGMA query_only`` (D37) is 409 ``RUN_READ_ONLY``.
+
+        Only for a request about a read-only run. On a case-DB route (``/api/case-db/*``,
+        ``/api/cases/*``) -- or from case-DB code under any URL, e.g. ``/api/runs/…`` (WB-9 P2-16) -- a
+        write refused by another writer's lock (``database is locked``) is 409 ``CASE_DB_LOCKED`` with a
+        Korean message; any other SQLite error keeps the crash path.
+        """
+        if is_lock_error(exc) and (
+            raised_in_case_db_code(exc) or request.url.path.startswith(("/api/case-db/", "/api/cases/"))
+        ):
+            return error_response(409, case_db_locked_detail())
+        reason = None
+        if str(exc) == SQLITE_READONLY_MESSAGE:
+            match = RUN_SCOPED_PATH.fullmatch(request.url.path)
+            reason = _readonly_run_reason(store, match.group("run_id") if match else request.query_params.get("run_id"))
+            if reason is None and server_read_only:
+                reason = SERVER_READ_ONLY
+        if reason is None:
+            raise exc
+        if reason == SERVER_READ_ONLY:
+            return error_response(409, server_read_only_detail())
+        return error_response(409, {"code": RUN_READ_ONLY, "message": RUN_READ_ONLY_MESSAGE, "readonly_reason": reason})
+
     @api.exception_handler(RequestValidationError)
     async def korean_analysis_body_errors(request: Request, exc: RequestValidationError):
         """Malformed ``POST /analyses`` bodies get Korean 422 messages; other routes keep FastAPI's."""
         if REVIEW_TOOL_BODY_PATH.fullmatch(request.url.path):
-            return JSONResponse(status_code=422, content={"detail": korean_body_errors(exc.errors(), REVIEW_BATCH_FIELD_LABELS)})
+            return error_response(422, korean_body_errors(exc.errors(), REVIEW_BATCH_FIELD_LABELS))
         if request.method == "POST" and ANALYSIS_POST_PATH.fullmatch(request.url.path):
-            return JSONResponse(status_code=422, content={"detail": korean_body_errors(exc.errors())})
+            return error_response(422, korean_body_errors(exc.errors()))
         if CASE_INTAKE_PATH.fullmatch(request.url.path):
-            return JSONResponse(
-                status_code=422, content={"detail": korean_body_errors(exc.errors(), CASE_FIELD_LABELS)}
-            )
+            return error_response(422, korean_body_errors(exc.errors(), CASE_FIELD_LABELS))
         try:
-            return await request_validation_exception_handler(request, exc)
+            return error_response(422, validation_errors_detail(exc))
         except UnicodeEncodeError:
             # A lone surrogate in the body (valid JSON escape, invalid text) must stay a 422, not a 500.
-            return JSONResponse(status_code=422, content={"detail": _without_surrogates(jsonable_encoder(exc.errors()))})
+            return error_response(422, _without_surrogates(jsonable_encoder(exc.errors())))
     static_dir = Path(__file__).resolve().parent.parent.parent / "web" / "static"
     auth_disabled = truthy_env("RAPIDTRIAGE_DISABLE_AUTH") or require_auth is False
     if auth_disabled and (auth_token or os.environ.get("RAPIDTRIAGE_AUTH_TOKEN")):
@@ -151,7 +290,24 @@ def create_app(
 
     def open_request_case_database(raw_path: str | Path):
         database_path = resolve_case_db_path(store, raw_path, configured_case_db_roots)
+        reason = readonly_reason_for(database_path)
+        if reason is not None:
+            # D37: the case DB of a read-only run folder is never opened for writing (opening it
+            # initializes the schema). The ``/api/case-db/*`` routes name it in the body, so the
+            # path gate in ``read_only_run_refusal`` cannot see it.
+            raise ReadOnlyRunWriteError(str(database_path), reason)
+        if server_read_only and not Path(database_path).is_file():
+            # T-112: a read-only server never creates a case DB (opening one initializes it).
+            raise ReadOnlyRunWriteError(str(database_path), SERVER_READ_ONLY)
         return open_case_database(database_path)
+
+    def read_only_case_db_path(raw_path: str | Path) -> Path | None:
+        """The resolved case DB path when a read must not write to it (its run folder is read-only,
+        or the server is), else ``None``: list routes then read it through ``mode=ro``."""
+        database_path = Path(resolve_case_db_path(store, raw_path, configured_case_db_roots))
+        if server_read_only or readonly_reason_for(database_path) is not None:
+            return database_path
+        return None
 
     def resolve_request_catalog_path(raw_path: str | Path) -> Path:
         return resolve_case_catalog_path(store, raw_path, configured_case_db_roots)
@@ -163,59 +319,73 @@ def create_app(
                 host = request_host(request.headers.get("host"))
                 allowed_hosts = allowed_api_hosts()
                 if host and host not in allowed_hosts:
-                    return JSONResponse(status_code=403, content={"detail": "RapidTriage API host is not allowed"})
+                    return error_response(403, "RapidTriage API host is not allowed")
                 origin = request.headers.get("origin")
                 if origin and request.method.upper() in MUTATING_METHODS:
                     origin_host = request_host(origin.split("//", 1)[-1])
                     if origin_host and origin_host not in allowed_hosts:
-                        return JSONResponse(status_code=403, content={"detail": "RapidTriage API origin is not allowed"})
+                        return error_response(403, "RapidTriage API origin is not allowed")
             if expected_token and request.url.path.startswith("/api"):
                 if "token" in request.query_params:
-                    return JSONResponse(
-                        status_code=401,
-                        content={"detail": "query token authentication is disabled; use X-RapidTriage-Token header"},
-                    )
+                    return error_response(401, "query token authentication is disabled; use X-RapidTriage-Token header")
                 supplied = request.headers.get("X-RapidTriage-Token")
                 if supplied is None or not secrets.compare_digest(supplied, expected_token):
-                    return JSONResponse(status_code=401, content={"detail": "missing or invalid RapidTriage auth token"})
+                    return error_response(401, "missing or invalid RapidTriage auth token")
+            if read_only_holds is not None and request.url.path.startswith("/api"):
+                refusal = server_read_only_refusal(
+                    request.method.upper(), request.url.path, READ_ONLY_RUN_QUERY_POSTS
+                )
+                if refusal is not None:
+                    return refusal
+                read_only_holds.sync()
+            refusal = read_only_run_refusal(
+                store, request.method.upper(), request.url.path, request.query_params.get("run_id")
+            )
+            if refusal is not None:
+                return refusal
             return await call_next(request)
         except Exception as exc:
-            report = write_crash_report(
-                exc,
-                context={
-                    "component": "web-api",
-                    "method": request.method,
-                    "path": request.url.path,
-                },
-            )
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "detail": "internal RapidTriage error; local crash report written",
-                    "crash_id": report["crash_id"],
-                    "crash_report": report["path"],
-                },
-            )
+            # T-007: the body names the crash only by ``crash_id``; the report path is logged.
+            return crash_response(exc, request)
 
-    api.include_router(build_meta_router(store))
-    api.include_router(build_case_db_router(store, open_request_case_database, resolve_request_catalog_path))
+    # T-007 / D.7: error envelope for HTTPException and JSON error bodies, security headers on
+    # every response. Added after ``require_auth_token`` so both layers wrap its answers too.
+    install_error_envelope(api)
+
+    # T-031: a remote server (`rapidtriage web --remote` / non-loopback) browses only inside the
+    # `--browse-root` set (default: the run folders it knows + home); loopback lists the whole disk.
+    remote_browse = truthy_env(BROWSE_REMOTE_ENV) if browse_remote is None else browse_remote
+    configured_browse = (
+        configured_browse_roots(browse_roots)
+        if browse_roots is not None or os.environ.get(BROWSE_ROOTS_ENV) is not None
+        else None
+    )
+    api.state.browse_remote = remote_browse
+    api.include_router(
+        build_meta_router(store, browse_remote_mode=remote_browse, browse_roots=configured_browse)
+    )
+    api.include_router(
+        build_case_db_router(store, open_request_case_database, resolve_request_catalog_path, read_only_case_db_path)
+    )
     api.include_router(build_runs_router(store))
     api.include_router(build_run_plan_router(store))
     api.include_router(build_cases_router(store, case_workspace))
     api.include_router(build_flags_router(store))
     api.include_router(build_derived_router(store))
+    api.include_router(build_families_router(store))  # R7 갈래 A 계열·중복·예외
     api.include_router(build_explorers_router(store))
     api.include_router(build_analyses_router(store, owner=analysis_owner))
     api.include_router(build_ioc_router(store))
     api.include_router(build_media_router(store))
     api.include_router(build_search_router(store))
     api.include_router(build_search_index_router(store, owner=analysis_owner))
-    api.include_router(build_reports_router(store))
+    api.include_router(build_reports_router(store, case_workspace))
     api.include_router(
         build_review_tools_router(
             store,
             open_request_case_database,
             lambda raw_path: resolve_case_db_path(store, raw_path, configured_case_db_roots),
+            read_only_case_db_path,
         )
     )
 

@@ -7,12 +7,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .audit import compute_sha256
+from .cli_constants import (
+    DEFAULT_COLLECT_EXPORT_MAX_FILE_COUNT,
+    DEFAULT_COLLECT_EXPORT_MAX_TOTAL_BYTES,
+)
 from .input_root import InputRoot, resolve_input_root
 
 COLLECT_PLAN_VERSION = "1.0"
 MAX_MATCHES_PER_TARGET = 50
-DEFAULT_COLLECT_EXPORT_MAX_FILE_COUNT = 5000
-DEFAULT_COLLECT_EXPORT_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024
 BROAD_DIRECTORY_LABELS = {
     "Windows user profiles",
     "Registry hive directory",

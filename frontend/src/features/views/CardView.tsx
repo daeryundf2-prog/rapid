@@ -2,7 +2,7 @@
 /**
  * 행(카드) 보기 (r4 §2.3, AXIOM 행 보기): a virtualised list of row cards — title (the row's
  * representative value), 유형 — 계열 subtitle, key time and source path, the date right-aligned
- * in bold, 특이사항 / 리뷰 / 태그 chips, and inline actions (인용 · 원본 열기 · 북마크) that show
+ * in bold, 특이사항 / 검토 / 태그 chips, and inline actions (인용 · 원본 열기 · 북마크) that show
  * on hover and keyboard focus.
  *
  * A11y: `role="list"` of `role="listitem"` cards (aria-setsize / aria-posinset, since only the
@@ -22,13 +22,16 @@ import { announce } from "../../a11y";
 import type { GridRow } from "../../contracts/collection";
 import { encodeRowRef } from "../../contracts/rowRef";
 import { useTimezone } from "../../state/hooks";
+import { evidencePathOf } from "../../utils/pathDisplay";
 import { formatGridTime } from "../../utils/time";
+import { timestampKindLabel } from "../../utils/timeKinds";
 import { kindLabel } from "../derived/tables";
 import { artifactTypeLabel } from "../filters/typeLabels";
 import { familyForType } from "../flags/catalog";
 import { GRADE_NAME, rowFlags } from "../flags/flags";
 import { useSelection, useViewerTarget } from "../grid/adapter";
 import { REVIEW_LABELS } from "../grid/columns/common";
+import { rowSummaryFacts } from "../grid/columns/families";
 import { buildViewerTarget, citationText, copyText } from "../grid/gridCommands";
 import { applyReviewAction, optimisticPatch, storeNotice } from "../grid/reviewActions";
 import { registerRowSource } from "../review/rowSource";
@@ -37,6 +40,7 @@ import { SelectionBar } from "./SelectionBar";
 import { useAutoLoad, useViewRows } from "./useViewRows";
 import { EmptyState, ErrorState, LoadingCard } from "./ViewState";
 import "./cardMap.css";
+import { useWriteBlock } from "../../shell/readOnly";
 
 export const CARD_HEIGHT = 104;
 /** Rows paged in automatically while the list scrolls (then "더 불러오기"). */
@@ -78,13 +82,35 @@ export interface CardModel {
   chips: Array<{ id: string; label: string; tone: "flag" | "review" | "tag"; grade?: string }>;
 }
 
+/**
+ * A timeline event type no label table names (`artifact-<type>-<time kind>`) never shows its raw
+ * id on a card (E01 QA D6): "아티팩트 이벤트 · <시각 종류>" when the time kind is known.
+ */
+export function unknownEventTypeLabel(type: string): string {
+  if (!type.startsWith("artifact-")) return type;
+  const rest = type.slice("artifact-".length);
+  for (let cut = rest.indexOf("-"); cut > 0; cut = rest.indexOf("-", cut + 1)) {
+    const kind = rest.slice(cut + 1);
+    const label = timestampKindLabel(kind);
+    if (label && label !== kind) return `아티팩트 이벤트 · ${label}`;
+  }
+  return "아티팩트 이벤트";
+}
+
 /** The text of one card (pure; tested). */
 export function cardModel(row: GridRow, tz: string): CardModel {
   const type = row.artifactType ?? "";
-  const typeText = type ? (artifactTypeLabel(type) ?? type) : "";
+  const typeText = type ? (artifactTypeLabel(type) ?? unknownEventTypeLabel(type)) : "";
   const family = familyForType(type)?.label ?? (row.ref.kind ? kindLabel(row.ref.kind) : "");
   const subtitle = [typeText, family && family !== typeText ? family : ""].filter(Boolean).join(" — ");
-  const time = row.timestamp ? formatGridTime(row.timestamp, tz) : "";
+  // C-V3: a row whose title is only its container file ("History") is titled by its family's main
+  // fact (the visited URL, the executable …), and a row without a timestamp shows its family's
+  // time fact, so the card's first line is the item itself.
+  const container = (row.sourcePath ?? "").split(/[\\/]/).pop() ?? "";
+  const summary = rowSummaryFacts(row);
+  const lead = summary.facts.find((fact) => fact.value && fact.value !== container)?.value ?? "";
+  const ownTitle = row.title && row.title !== container ? row.title : "";
+  const time = row.timestamp ? formatGridTime(row.timestamp, tz) : (summary.time?.value ?? "");
   const [date = "", clock = ""] = time.split(" ");
   const chips: CardModel["chips"] = [];
   for (const flag of rowFlags(row).slice(0, MAX_CHIPS)) {
@@ -99,12 +125,13 @@ export function cardModel(row: GridRow, tz: string): CardModel {
     chips.push({ id: `review:${row.reviewStatus}`, label: REVIEW_LABELS[row.reviewStatus], tone: "review" });
   for (const tag of row.tags.slice(0, MAX_CHIPS)) chips.push({ id: `tag:${tag}`, label: tag, tone: "tag" });
   return {
-    title: row.title || (row.sourcePath ?? "").split(/[\\/]/).pop() || "(제목 없음)",
+    title: ownTitle || lead || row.title || container || "(제목 없음)",
     subtitle,
     time,
     date,
     clock,
-    path: row.sourcePath ?? "",
+    // The in-evidence path, never the result folder (T-171, IS-128).
+    path: evidencePathOf(row.sourcePath).path ?? "",
     chips,
   };
 }
@@ -141,6 +168,7 @@ const Card = memo(function Card({
   onOpen,
   onCite,
   onBookmark,
+  bookmarkReason,
 }: {
   row: GridRow;
   model: CardModel;
@@ -155,6 +183,8 @@ const Card = memo(function Card({
   onOpen: (index: number) => void;
   onCite: (row: GridRow) => void;
   onBookmark: (row: GridRow) => void;
+  /** T-348: why the bookmark cannot be written (read-only result). */
+  bookmarkReason?: string;
 }) {
   const actionTab = active ? 0 : -1;
   return (
@@ -233,7 +263,8 @@ const Card = memo(function Card({
             className="card-action"
             tabIndex={actionTab}
             aria-label={`${model.title} 북마크 태그`}
-            title="북마크 태그 (B)"
+            aria-disabled={bookmarkReason ? true : undefined}
+            title={bookmarkReason ?? "북마크 태그 (B)"}
             onClick={() => onBookmark(row)}
           >
             태그
@@ -368,8 +399,13 @@ export function CardView() {
     );
   };
 
+  const writeBlock = useWriteBlock("run"); // T-348
   const onBookmark = (row: GridRow) => {
     if (!runId) return;
+    if (writeBlock) {
+      announce(writeBlock);
+      return;
+    }
     const rollback = cq.patchRows([row.rowKey], optimisticPatch("bookmark"));
     applyReviewAction(runId, [row], "bookmark").then(
       (result) => announce(`북마크: ${result.applied}건 처리했습니다.${storeNotice(result)}`),
@@ -492,6 +528,7 @@ export function CardView() {
                 onOpen={onOpen}
                 onCite={onCite}
                 onBookmark={onBookmark}
+                bookmarkReason={writeBlock}
               />
             );
           })}

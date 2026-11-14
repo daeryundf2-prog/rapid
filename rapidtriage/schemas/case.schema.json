@@ -15,6 +15,16 @@
     "command": {
       "const": "case"
     },
+    "review_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "case_db_marks_truncated": { "type": "boolean" },
+        "case_db_marks_total": { "type": "integer" },
+        "case_db_mark_limit": { "type": "integer" },
+        "case_db_error": { "type": ["string", "null"] }
+      }
+    },
     "generated_at": {
       "type": "string",
       "format": "date-time"

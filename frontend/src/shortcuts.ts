@@ -51,17 +51,43 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
   return role !== null && INTERACTIVE_ROLES.has(role);
 }
 
+/** US-layout shifted digit row (Shift+1 = "!"), for the physical-key fallback below. */
+const SHIFTED_DIGITS = ")!@#$%^&*(";
+
+/**
+ * The character a physical key (KeyboardEvent.code) types on a US layout, or null outside the
+ * fallback range. The range is deliberately narrow (r8 contracts, T-035): letters (`Key*`), the
+ * digit row (`Digit*`), `Slash` and `Backquote` — the keys KEY_MAP binds without a modifier.
+ */
+export function physicalKeyChar(code: string | undefined, shift: boolean): string | null {
+  if (!code) return null;
+  const letter = /^Key([A-Z])$/.exec(code);
+  if (letter?.[1]) return letter[1];
+  const digit = /^Digit(\d)$/.exec(code);
+  if (digit?.[1]) return shift ? (SHIFTED_DIGITS[Number(digit[1])] ?? null) : digit[1];
+  if (code === "Slash") return shift ? "?" : "/";
+  if (code === "Backquote") return shift ? "~" : "`";
+  return null;
+}
+
+/** A key value an IME produced instead of the Latin character: "Process" or a non-ASCII single character (jamo). */
+function isImeKey(key: string): boolean {
+  return key === "Process" || (key.length === 1 && !/^[\x20-\x7e]$/.test(key));
+}
+
 /** Normalise a KeyboardEvent to the registry's shortcut notation; null for bare modifiers / IME. */
 export function eventToShortcut(
   event: Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "isComposing">,
 ): string | null {
+  // Mid-composition keys belong to the IME (a Hangul syllable being built), never to a shortcut.
   if (event.isComposing) return null;
   let key = event.key;
   if (!key || MODIFIER_KEYS.has(key)) return null;
-  // Korean (or any non-Latin) layout: letters arrive as jamo / "Process"; fall back to the physical key.
-  const physical = /^Key([A-Z])$/.exec(event.code ?? "");
-  if (physical?.[1] && (key === "Process" || (key.length === 1 && !/^[\x20-\x7e]$/.test(key)))) {
-    key = physical[1];
+  // Korean (or any non-Latin) layout: keys arrive as jamo / "Process"; fall back to the physical
+  // key (Key*, Digit*, Slash, Backquote) so R·X·I·B·J·K·T·F, 1–9, "/", "?" and "`" still work.
+  if (isImeKey(key)) {
+    const physical = physicalKeyChar(event.code, event.shiftKey);
+    if (physical) key = physical;
   }
   if (key === "Process") return null;
   // Alt+Shift+1 arrives as key "!" (layout-dependent): with a command modifier, name the digit row by its physical key.
@@ -99,12 +125,18 @@ function hasCommandModifier(shortcut: string): boolean {
  */
 const MODAL_SAFE_SHORTCUTS: ReadonlySet<string> = new Set(["Escape", "Ctrl+K"]);
 
+/** Modified keys a text field keeps for itself (Ctrl+Z undoes typing, not the last review mark). */
+const TEXT_FIELD_SHORTCUTS: ReadonlySet<string> = new Set([KEY_MAP.undoReview]);
+
 /**
  * Route one keydown to its command. Returns true when a command claimed the
  * key (the event is then preventDefault-ed).
  */
 export function dispatchShortcut(event: KeyboardEvent): boolean {
   if (event.defaultPrevented) return false;
+  // keyCode 229 = the IME owns this key. In a text field it starts a composition (isComposing is
+  // still false on that first key), so no shortcut — not even a modified one — fires there.
+  if (event.keyCode === 229 && isTextEntry(event.target)) return false;
   const shortcut = eventToShortcut(event);
   if (!shortcut) return false;
   const command = commandForShortcut(shortcut);
@@ -119,6 +151,7 @@ export function dispatchShortcut(event: KeyboardEvent): boolean {
   ) {
     return false;
   }
+  if (TEXT_FIELD_SHORTCUTS.has(shortcut) && isTextEntry(target)) return false;
   if (!modified && shortcut !== "Escape") {
     if (isTextEntry(target)) return false;
     if ((shortcut === "Enter" || shortcut === "Space") && isInteractiveTarget(target)) return false;
@@ -178,6 +211,11 @@ export const KEY_DESCRIPTIONS: Record<keyof typeof KEY_MAP, string> = {
   tagShortcuts: "태그 단축키 1–9 (태그 관리에서 지정, 기본 1–5 = 우선순위 1–5)",
   classicSplit: "클래식 분할 보기 (격자 위·세부 아래) 켜기/끄기",
   mediaBlur: "미디어 흐리게 켜기/끄기",
+  familyView: "계열 보기 (상위·형제·하위 항목)",
+  familyParent: "상위 항목으로",
+  markIncludeInReport: "보고서 포함 표시",
+  nextUnreviewed: "다음 미검토 행으로",
+  undoReview: "방금 한 표시 실행 취소",
 };
 
 /** Apple platform (review #14): only there does Ctrl+K read as the ⌘ glyph. */

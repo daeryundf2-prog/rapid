@@ -10,7 +10,7 @@ export const COLLECTION_NODES: ReadonlyArray<{ id: CollectionId; label: string; 
   { id: "artifacts", label: "아티팩트", icon: "layers" },
   { id: "timeline", label: "타임라인", icon: "clock" },
   { id: "indicators", label: "IOC/위험", icon: "shield" },
-  { id: "review", label: "리뷰보드", icon: "list" },
+  { id: "review", label: "검토 목록", icon: "list" },
   { id: "outputs", label: "산출물", icon: "package" },
   { id: "process", label: "처리", icon: "cpu" },
   { id: "derived", label: "통합 보기", icon: "link" },
@@ -35,6 +35,7 @@ export const RUN_MODE_LABEL: Record<string, string> = {
   seizure: "전수 수집",
   hacking: "침해사고",
   recovery: "복구",
+  quick: "빠른 선별",
 };
 
 /** Short display name of a run: last path segment of its evidence root. */

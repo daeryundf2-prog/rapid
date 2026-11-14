@@ -8,9 +8,16 @@ import json
 import random
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
+
+from tests import quiet_media_checks
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
+
 
 try:
     from fastapi.testclient import TestClient
@@ -484,7 +491,16 @@ class GeoIndexRunCompletionTests(unittest.TestCase):
             store = RunJobStore()
             run_id = store.import_completed_run(output_dir).run_id
             client = TestClient(create_app(store, auth_token=TOKEN), headers={"X-RapidTriage-Token": TOKEN})
-            payload = client.get(f"/api/runs/{run_id}/geo-clusters").json()
+            # The lookup waits GEO_INDEX_WAIT_SECONDS (1 s) for its background load, then answers
+            # "building" without geo_index_source -- the documented "ask again" contract. On a busy
+            # box reading + digest-checking the stored file can take longer than that (T-148 saw a
+            # KeyError here under an 8-worker run), so ask again like the UI does.
+            deadline = time.monotonic() + 120
+            while True:
+                payload = client.get(f"/api/runs/{run_id}/geo-clusters").json()
+                if payload["geo_index"] != "building" or time.monotonic() > deadline:
+                    break
+                time.sleep(0.2)
             # The stamp written with the run matches the finished outputs: no rebuild.
             self.assertEqual((payload["geo_index"], payload["geo_index_source"]), ("ready", "file"), payload)
 

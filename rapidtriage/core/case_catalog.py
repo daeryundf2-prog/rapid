@@ -7,6 +7,9 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from .case_db import normalize_identifier
+from .cli_constants import (
+    default_case_catalog_path,  # noqa: F401 - re-exported for existing importers
+)
 from .search import load_run_summary
 
 CATALOG_VERSION = 1
@@ -158,7 +161,3 @@ def build_run_record(summary: Mapping[str, object]) -> dict[str, object]:
         "added_at": now_iso(),
         "counts": summary.get("summary") if isinstance(summary.get("summary"), Mapping) else {},
     }
-
-
-def default_case_catalog_path() -> Path:
-    return Path.home() / ".rapidtriage" / "case-catalog.json"

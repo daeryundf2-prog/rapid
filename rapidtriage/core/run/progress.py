@@ -222,6 +222,10 @@ class RunProgress:
             self._write_plan_file_locked()
         self._deactivate()
 
+    def stop_heartbeat(self) -> None:
+        """Stop the heartbeat writer (before a failure cleanup touches the result folder)."""
+        self._stop_heartbeat()
+
     def fail(self, exc: BaseException) -> None:
         self._stop_heartbeat()
         with self._lock:
@@ -237,13 +241,19 @@ class RunProgress:
             if isinstance(code, str) and code:
                 # e.g. ``memory-cap`` for MemoryCapExceeded (fail-fast cap breach).
                 error["code"] = code
+            removed = getattr(exc, "removed_files", None)
+            if isinstance(removed, list):
+                # T-352: the run outputs a disk-full cleanup removed (relative to the result folder).
+                error["removed_files"] = [str(item) for item in removed]
+            disk_full = code == "OUTPUT_DISK_FULL"
             self._payload["error"] = error
             if self._plan is not None:
                 for task in iter_tasks(self._plan):
                     if task.get("status") == "running":
                         rows = int(task.get("rows_so_far") or 0)
                         task.update(
-                            status="partial" if rows else "failed",
+                            # A full disk fails the step outright: its half-written output was removed.
+                            status="partial" if rows and not disk_full else "failed",
                             finished_at=now,
                             message=str(exc)[:300],
                         )

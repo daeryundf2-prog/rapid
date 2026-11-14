@@ -53,8 +53,13 @@ from rapidtriage.core.case_db import (
     validation_warning_ux_core_accuracy_gates,
 )
 from rapidtriage.core.sample_case import run_sample_workflow
+from tests import quiet_media_checks
 from tests.test_rapidtriage_macos_artifacts import build_macos_fixture
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
+
 
 REQUIRED_TABLES = {
     "schema_info",
@@ -1736,7 +1741,9 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(updated["verification_status"], "verified")
             self.assertEqual(updated["tags"], ["credential"])
             self.assertEqual(updated["note"], "Initial review")
-            self.assertEqual(updated["reviewer"], "analyst-a")
+            # R8 T-036/T-180: the reviewer is the actor of this update, never inherited from the
+            # previous mark (an unnamed change is not attributed to analyst-a).
+            self.assertEqual(updated["reviewer"], "")
 
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
@@ -1944,7 +1951,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(report_package["manifest"]["item_number"], 22)
             self.assertEqual(len(report_package["manifest"]["manifest_hash"]), 64)
             self.assertEqual(len(report_package["hash_bundle_sha256"]), 64)
-            self.assertIn("# RapidForensic Case DB Report Export", report_package["markdown_document"])
+            self.assertIn("# RapidTriage Case DB Report Export", report_package["markdown_document"])
             self.assertIn("Report Candidates", report_package["markdown_document"])
             self.assertEqual(report_package["manifest"]["hash_bundle_sha256"], report_package["hash_bundle_sha256"])
             self.assertEqual(export["summary"]["report_generation_manifest_hash"], report_package["manifest"]["manifest_hash"])

@@ -11,6 +11,7 @@ from pathlib import Path
 from ...core.forensic_accuracy import build_accuracy_gate
 from .constants import (
     CHAT_APP_GAP_IDS,
+    MOBILE_AI_SERVICE_TOKENS,
 )
 
 
@@ -365,7 +366,7 @@ def app_risk_flags(app_name: str, package: str) -> list[str]:
     flags: list[str] = []
     if any(token in lowered for token in ("vpn", "proxy", "tor", "secure", "vault", "signal", "telegram")):
         flags.append("privacy-or-evasion-app")
-    if any(token in lowered for token in ("chatgpt", "claude", "gemini", "perplexity", "copilot")):
+    if any(token in lowered for token in MOBILE_AI_SERVICE_TOKENS):
         flags.append("ai-service-app")
     return flags
 
@@ -395,7 +396,7 @@ def media_risk_flags(media_path: str, mime_type: str) -> list[str]:
 def browser_risk_flags(url: str, title: str) -> list[str]:
     lowered = f"{url} {title}".lower()
     flags = ["mobile-browser-history"]
-    if any(token in lowered for token in ("chatgpt", "claude", "gemini", "perplexity", "copilot")):
+    if any(token in lowered for token in MOBILE_AI_SERVICE_TOKENS):
         flags.append("ai-service-usage")
     if any(token in lowered for token in ("login", "account", "password", "otp")):
         flags.append("credential-context")

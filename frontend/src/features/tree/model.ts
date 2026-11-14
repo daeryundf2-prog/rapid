@@ -2,6 +2,7 @@ import type { AnalysisState, AnalysisStatus } from "../../api/analyses";
 import type { ReviewCounts, SavedSearch } from "../../api/caseDb";
 import { filesInventoryCategory } from "../../api/collections";
 import type { EvidencePartition, EvidenceSource } from "../../api/dashboard";
+import type { IrregularSummary } from "../../api/families";
 import type { CanonicalCounts, RunSummary, RunTree, TreeNode } from "../../api/runs";
 import type {
   CollectionId,
@@ -11,9 +12,9 @@ import type {
 } from "../../contracts/collection";
 import { RECORD_FIELD_KEYS, recordFieldsKey } from "../../contracts/collection";
 import type { IconName } from "../../icons";
-import { CARVE_KINDS } from "../analysis/analysisForm";
 import {
   ANALYSIS_NODES,
+  CARVE_KINDS,
   isPartialResult,
   latestForNode,
   nodeStateIcon,
@@ -51,6 +52,10 @@ export type DomainRoute = RouteTail & {
   fields?: RecordFieldFilters;
   /** 파일 시스템 탐색기 folder (`dir=`; `""` = volume root). */
   dir?: string;
+  /** Search view query (`q=`, R7 lane B 해시 집합 nodes). */
+  q?: string;
+  /** 예외 항목 categories (R7 갈래 A, `irregular=`). */
+  irregular?: string[];
 };
 
 export interface TreeModelNode {
@@ -103,6 +108,13 @@ export interface TreeModelInput {
   evidence?: EvidenceSource;
   /** `GET /api/runs/{id}/analyses` (newest first); undefined while unknown. */
   analyses?: AnalysisState[];
+  /** `GET /api/runs/{id}/irregular/summary` (R7 갈래 A 예외 항목); undefined while unknown. */
+  irregular?: IrregularSummary;
+  /**
+   * Console-side facets of a kind's rows, `{kind: {key: rows}}` (AI 사용 › 도구·설치 views,
+   * `DomainTarget.rowFacet`); a kind absent = its facets are unknown ("—").
+   */
+  rowFacets?: Readonly<Record<string, Readonly<Record<string, number>>>>;
 }
 
 export const REVIEW_NODES: Array<{ status: ReviewStatus; label: string }> = [
@@ -262,8 +274,10 @@ export function evidenceNode(
   };
   if (!evidence) return root;
   const items = counts ? (counts.files ?? 0) + (counts.artifacts ?? 0) : undefined;
-  const partitions = evidence.partitions.map<TreeModelNode>((partition) => ({
-    id: `evidence:partition:${partition.number}`,
+  // Node (and tree.goto.* command) ids use the row position, never the partition number:
+  // GPT tables number from 0 and older servers could emit the same number twice (R7 S1).
+  const partitions = evidence.partitions.map<TreeModelNode>((partition, position) => ({
+    id: `evidence:partition:${position + 1}`,
     label: partitionLabel(partition),
     icon: "partition",
     marker: partition.selected ? "선택됨" : undefined,
@@ -536,7 +550,29 @@ export function emptyNodeReason(state: DomainCount): string | undefined {
 }
 
 /** Count / dimming of one domain node from `/tree`, the summary counts and the analysis jobs. */
+/** Why an 예외 항목 node has no rows. */
+export const NO_IRREGULAR_REASON = "이 목록에는 이 범주의 예외 항목이 없습니다";
+
+/**
+ * 예외 항목 node count (R7 갈래 A): the category's rows of the node's list (files candidates, the
+ * whole files list, artifacts) — exactly what `irregular=<id>` lists there; several categories:
+ * the list's rows in any of them (`unique_by_list`).
+ */
+export function irregularNodeCount(target: DomainTarget, summary: IrregularSummary | undefined): DomainCount {
+  // An older / partial payload (no category list) never breaks the tree: the count is unknown.
+  if (!summary || !Array.isArray(summary.categories)) return { count: undefined };
+  const list = target.collection === "files" ? (target.fileScope ? "inventory" : "candidates") : "artifacts";
+  const ids = (target.irregular ?? "").split(",").filter(Boolean);
+  const count =
+    ids.length === 1
+      ? (summary.categories.find((category) => category.id === ids[0])?.[list] ?? 0)
+      : summary.unique_by_list?.[list];
+  if (count === undefined) return { count: UNKNOWN_COUNT };
+  return count === 0 ? { count, disabledReason: NO_IRREGULAR_REASON } : { count };
+}
+
 export function domainNodeCount(target: DomainTarget, input: TreeModelInput): DomainCount {
+  if (target.irregular !== undefined) return irregularNodeCount(target, input.irregular);
   const tree = input.tree;
   const counts = input.summary?.summary?.counts;
   if (target.analysis) {
@@ -631,6 +667,14 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
     const liveState = liveKindState(kindNode);
     if (liveState?.live) return liveState;
     const zero = inventoryReason(kindNode, target.types) ?? zeroReason(kindNode);
+    if (target.rowFacet) {
+      // An empty kind has no rows to facet: its views are 0 (hidden), not "—" — an unknown view
+      // kept the AI 사용 domain listed on runs without AI rows (R7 gate).
+      if (kindNode.count === 0) return known(0, true, zero);
+      const facets = input.rowFacets?.[target.kind];
+      if (!facets) return { count: UNKNOWN_COUNT };
+      return known(facets[target.rowFacet] ?? 0, true, zero);
+    }
     if (target.channelGroup) {
       // 이벤트 로그 › 채널별: `/tree` channel_groups (absent on outputs written before R3).
       if (!kindNode.channel_groups) return { count: 0, disabledReason: NO_CHANNEL_COUNTS_REASON };
@@ -800,6 +844,8 @@ export function domainRoute(target: DomainTarget): DomainRoute {
   const route: DomainRoute = { collection: target.collection };
   if (target.kind) route.kind = target.kind;
   if (target.dir !== undefined) route.dir = target.dir;
+  if (target.q) route.q = target.q; // R7 lane B: search-view nodes (해시 집합)
+  if (target.irregular) route.irregular = target.irregular.split(",").filter(Boolean);
   if (target.fileScope) route.category = filesInventoryCategory(target.fileCategory);
   else if (target.fileCategory) route.category = target.fileCategory;
   if (target.types?.length) route.types = [...target.types];
@@ -1305,10 +1351,11 @@ export function buildTreeModel(input: TreeModelInput): TreeModelNode[] {
     noSelect: true,
     toggleOnly: true,
     children: [
-      dataNode("files", "전체 파일", counts?.files, "이 런에는 파일 목록이 없습니다", loaded),
+      // R7 L3 (C-T1): one "파일 목록" and one "폴더 탐색기" in the whole tree.
+      dataNode("files", "파일 목록", counts?.files, "이 런에는 파일 목록이 없습니다", loaded),
       explorerViewNode(
         "fs-explorer",
-        "파일 시스템",
+        "폴더 탐색기",
         { collection: "files", dir: "" },
         counts?.files,
         "이 런에는 파일 목록이 없습니다",

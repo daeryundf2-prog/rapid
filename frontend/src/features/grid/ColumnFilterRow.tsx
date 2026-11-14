@@ -17,9 +17,10 @@ import {
   joinTimeRange,
   splitTimeRange,
 } from "../filters/columnFilters";
+import { GRID_FILTER_DEBOUNCE_MS } from "./gridUtils";
 import type { ColumnSpec } from "./types";
 
-export const COLUMN_FILTER_DEBOUNCE_MS = 300;
+export const COLUMN_FILTER_DEBOUNCE_MS = GRID_FILTER_DEBOUNCE_MS;
 
 interface InputProps {
   label: string;

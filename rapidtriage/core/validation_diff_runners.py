@@ -9,7 +9,10 @@ import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-VERSION_PROBE_TIMEOUT_SECONDS = 3.0
+from .cli_constants import (
+    VERSION_PROBE_TIMEOUT_SECONDS,
+)
+
 VERSION_PROBE_ARGUMENTS: tuple[tuple[str, ...], ...] = (
     ("--version",),
     ("-V",),

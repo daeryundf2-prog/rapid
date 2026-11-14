@@ -23,11 +23,14 @@ import {
   type RegistryValues,
 } from "../../api/explorers";
 import { Icon } from "../../icons";
-import { useRoute } from "../../state/hooks";
+import { useRoute, useTimezone } from "../../state/hooks";
+import { formatTimestamp } from "../../utils/time";
+import { currentTimezone } from "../grid/columns/common";
 import { writeClipboard } from "../viewer/commands";
 import { errorText } from "../viewer/useAsync";
 import { type ExplorerChildPage, ExplorerTree, type ExplorerTreeItem } from "./ExplorerTree";
 import "./explorers.css";
+import { typeDisplayLabel } from "../grid/valueLabels";
 
 export const REGISTRY_TREE_PAGE = 200;
 const SEP = "\u0000";
@@ -43,13 +46,29 @@ function splitId(id: string): { hive: string; key: string } {
   return at < 0 ? { hive: id, key: "" } : { hive: id.slice(0, at), key: id.slice(at + 1) };
 }
 
+/**
+ * R-10: the citation line as shown — hive path › key path › 마지막 기록 (console time zone) ›
+ * 셀 오프셋 0x… (decimal) — instead of the server's raw ISO text (still the copy text / tooltip).
+ */
+export function citationDisplay(citation: RegistryValues["citation"], timezone: string): string {
+  const parts = [citation.hive_path, citation.key_path].filter(Boolean);
+  if (citation.last_written_at)
+    parts.push(`마지막 기록 ${formatTimestamp(citation.last_written_at, timezone)}`);
+  if (typeof citation.cell_offset === "number" && citation.cell_offset >= 0) {
+    parts.push(
+      `셀 오프셋 0x${citation.cell_offset.toString(16).toUpperCase()} (${citation.cell_offset.toLocaleString("ko-KR")})`,
+    );
+  }
+  return parts.length ? parts.join(" › ") : citation.text;
+}
+
 export function keyItem(hive: string, key: RegistryKey): ExplorerTreeItem {
   const values = key.value_count ?? 0;
   return {
     id: keyId(hive, key.key_path),
     label: key.name,
     badge: key.child_count ? n(key.child_count) : undefined,
-    description: `하위 키 ${n(key.child_count)}개, 값 ${n(values)}개${key.last_written_at ? `, 마지막 기록 ${key.last_written_at}` : ""}`,
+    description: `하위 키 ${n(key.child_count)}개, 값 ${n(values)}개${key.last_written_at ? `, 마지막 기록 ${formatTimestamp(key.last_written_at, currentTimezone())}` : ""}`,
     hasChildren: key.has_children,
     icon: "key",
     title: key.key_path,
@@ -158,11 +177,15 @@ function LinkedRows({ data, onJump }: { data: RegistryValues; onJump: (row: Regi
               type="button"
               className="view-link"
               onClick={() => onJump(row)}
-              aria-label={`${row.label} 행 열기 (${row.artifact_type})`}
+              aria-label={`${row.label} 행 열기 (${typeDisplayLabel(row.artifact_type)})`}
             >
               {row.label}
             </button>
-            <span className="explorer-muted"> {row.artifact_type}</span>
+            {/* The row's type by its Korean name (C-E3); the raw type id is the tooltip. */}
+            <span className="explorer-muted" title={row.artifact_type}>
+              {" "}
+              {typeDisplayLabel(row.artifact_type)}
+            </span>
           </li>
         ))}
       </ul>
@@ -171,6 +194,7 @@ function LinkedRows({ data, onJump }: { data: RegistryValues; onJump: (row: Regi
 }
 
 function KeyDetails({ runId, hive, keyPath }: { runId: string; hive: RegistryHive; keyPath: string }) {
+  const { timezone } = useTimezone();
   const { navigate } = useRoute();
   const [copied, setCopied] = useState("");
   const values = useQuery({
@@ -219,7 +243,9 @@ function KeyDetails({ runId, hive, keyPath }: { runId: string; hive: RegistryHiv
         </div>
         <div>
           <dt>마지막 기록</dt>
-          <dd>{data.key.last_written_at ?? "알 수 없음"}</dd>
+          <dd title={data.key.last_written_at ?? undefined}>
+            {data.key.last_written_at ? formatTimestamp(data.key.last_written_at, timezone) : "알 수 없음"}
+          </dd>
         </div>
         <div>
           <dt>값</dt>
@@ -258,8 +284,13 @@ function KeyDetails({ runId, hive, keyPath }: { runId: string; hive: RegistryHiv
         </DisabledReason>
         {copied ? <span className="explorer-muted">{copied}</span> : null}
       </div>
-      <p className="explorer-citation explorer-mono" title="인용">
-        {data.citation.text}
+      {/* R-10: the shown line reads the time in the console zone; 인용 복사 keeps the server text. */}
+      <p
+        className="explorer-citation explorer-mono"
+        title={data.citation.text}
+        data-testid="registry-citation"
+      >
+        {citationDisplay(data.citation, timezone)}
       </p>
       {data.values_status === "names-only" ? <p className="explorer-note">{data.reason}</p> : null}
       <ValueTable data={data} />

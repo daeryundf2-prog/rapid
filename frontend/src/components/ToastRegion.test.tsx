@@ -64,4 +64,33 @@ describe("toast stack (visual-polish U-V7)", () => {
     act(() => useAppStore.getState().showNotice("명령: 케이스를 먼저 선택하세요"));
     expect(screen.getByTestId("toast").textContent).toContain("케이스를 먼저 선택하세요");
   });
+
+  it("a 실행 취소 button names its key, runs once and closes its toast (r8 T-036)", () => {
+    const run = vi.fn();
+    render(<ToastRegion />);
+    act(() =>
+      useAppStore.getState().showNotice("제외: 2건 처리했습니다.", "info", {
+        action: { label: "실행 취소", run, key: "review-undo", shortcut: "Ctrl+Z" },
+      }),
+    );
+    const button = screen.getByTestId("toast-action");
+    expect(button.textContent).toBe("실행 취소");
+    expect(button.getAttribute("aria-keyshortcuts")).toBe("Control+Z");
+    expect(button.getAttribute("title")).toBe("실행 취소 (Ctrl+Z)");
+    fireEvent.click(button);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("toast")).toBeNull();
+  });
+
+  it("dismissActionKey drops only the toasts carrying that action", () => {
+    render(<ToastRegion />);
+    act(() => {
+      pushToast("저장했습니다", "info");
+      pushToast("관련: 1건 처리했습니다.", "info", {
+        action: { label: "실행 취소", run: () => {}, key: "k" },
+      });
+    });
+    act(() => useToastStore.getState().dismissActionKey("k"));
+    expect(screen.getAllByTestId("toast").map((t) => t.textContent)).toEqual(["저장했습니다"]);
+  });
 });

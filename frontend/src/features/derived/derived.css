@@ -118,9 +118,12 @@
   border-bottom: 1px solid var(--line-subtle);
 }
 
+/* The value table on top, the 원본 행 panel split below it (plan r7 §3.2 L2, C-X1): the table keeps
+   the pane's full width instead of being squeezed beside the panel. */
 .derived-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 32%);
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 3fr) minmax(120px, 2fr);
   flex: 1;
   min-height: 0;
 }
@@ -131,9 +134,20 @@
   overflow: auto;
 }
 
+/* Columns never squeeze below their minimum: a narrow pane scrolls the table sideways (C-X1). */
 .derived-grid {
   display: grid;
+  min-width: max-content;
   font-size: var(--fs-body);
+}
+
+.derived-more {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
 }
 
 /* Each row spans the grid's columns (CSS subgrid keeps the cells aligned with the header). */
@@ -205,7 +219,7 @@
   min-height: 0;
   overflow: auto;
   padding: var(--space-2) var(--space-3);
-  border-left: 1px solid var(--line-subtle);
+  border-top: 1px solid var(--line-subtle);
   background: var(--bg-panel);
 }
 
@@ -249,19 +263,6 @@
   background: var(--bg-hover);
 }
 
-@media (max-width: 900px) {
-  .derived-body {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) auto;
-  }
-
-  .derived-rows {
-    border-left: none;
-    border-top: 1px solid var(--line-subtle);
-    max-height: 40%;
-  }
-}
-
 /* Empty / loading states: the title and hint sit directly in the pane. */
 .derived-pane > .derived-title,
 .derived-pane > .derived-hint,
@@ -272,6 +273,12 @@
 /* 연결 그래프 라이트 (r4 §2.3): wider value panel, plain SVG nodes / edges. Tokens only. */
 .derived-body[data-graph] {
   grid-template-columns: minmax(0, 0.9fr) minmax(360px, 1.1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.derived-body[data-graph] > .derived-rows {
+  border-top: none;
+  border-left: 1px solid var(--line-subtle);
 }
 
 .segmented.derived-mode {
@@ -279,15 +286,36 @@
 }
 
 .derived-graph {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
   min-height: 0;
 }
 
+/* The graph scrolls in its own box below its two hint lines (scroll review). */
 .derived-graph-scroll {
+  flex: 1 1 auto;
   overflow: auto;
+  overscroll-behavior: contain;
   min-height: 0;
+}
+
+/* Stacked below 900px (scroll review): values above, the row / graph panel below, in fixed
+   3:2 tracks (an auto track ignored the panel's 40% cap). After the [data-graph] rule so the
+   graph mode stacks too instead of squeezing the value list to a ~110px column. */
+@media (max-width: 900px) {
+  .derived-body,
+  .derived-body[data-graph] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 3fr) minmax(0, 2fr);
+  }
+
+  .derived-rows,
+  .derived-body[data-graph] > .derived-rows {
+    border-left: none;
+    border-top: 1px solid var(--line-subtle);
+  }
 }
 
 .derived-graph-svg {

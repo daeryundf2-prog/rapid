@@ -62,6 +62,15 @@ export const TIMESTAMP_KIND_LABELS: Readonly<Record<string, string>> = {
   "fn-accessed": "FN 접근",
   "fn-mft-modified": "FN MFT 변경",
   "file-modified": "파일 수정",
+  // Timeline/grid readability C4 / C8: kinds of a real Windows run that read raw before.
+  "file-last-modified": "파일 수정(실행 아님)",
+  "last-written-mru-head": "키 마지막 기록(MRU 첫 항목)",
+  "last-execution": "마지막 실행",
+  "last-access": "마지막 접근",
+  "exif-datetime-original": "EXIF 촬영",
+  "typed-url-time": "주소 직접 입력",
+  "mp4-mvhd-creation": "MP4 생성 기록",
+  shutdown: "시스템 종료",
   "volume-created": "볼륨 생성",
   "usn-change": "USN 변경",
   "hive-last-written": "하이브 마지막 기록",
@@ -156,6 +165,12 @@ export const TIMESTAMP_KIND_LABELS: Readonly<Record<string, string>> = {
   "call-start": "통화 시작",
   "photo-taken": "사진 촬영",
   "photo-synced": "사진 동기화",
+  // R7 AI 사용 (갈래 B rows, core/timeline.py ai block): account switch, retention cleanup marker,
+  // AI-attributed commit, execution-trace match of an AI tool.
+  switched: "계정 전환",
+  cleanup: "보존 정리",
+  committed: "AI 기여 커밋",
+  executed: "실행",
 };
 
 /**

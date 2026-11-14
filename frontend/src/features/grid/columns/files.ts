@@ -1,4 +1,6 @@
 import { fetchFilesPage } from "../../../api/collections";
+import type { CollectionQuery } from "../../../contracts/collection";
+import { evidencePathOf } from "../../../utils/pathDisplay";
 import { formatGridTime } from "../../../utils/time";
 import { parseFlags } from "../../flags/flags";
 import type { CollectionDef, ColumnSpec } from "../types";
@@ -25,6 +27,9 @@ import {
   signatureCell,
 } from "./FileCells";
 import { flagsColumn } from "./families";
+import { familyDedupColumns, familyDedupFields } from "./familyDedup";
+import { type PathCellOptions, pathCell, pathCellText, pathCellTooltip, recoveredNameCell } from "./PathCell";
+import { gridTimeText, TIME_COLUMN_WIDTH } from "./TimelineCells";
 
 /** Shown on the NTFS columns while no NTFS-meta analysis has been joined (plan U-P1-3). */
 export const NTFS_EMPTY_HINT = "NTFS 메타 분석을 실행하면 채워집니다";
@@ -82,15 +87,91 @@ function ntfsOf(row: { fields: Record<string, unknown> }): Record<string, unknow
   return isRecord(row.fields.ntfs) ? row.fields.ntfs : {};
 }
 
+/** Time columns hold "YYYY-MM-DD HH:MM:SS" whole (C-D6): never narrower than this. */
+/** files 시각 columns (수정 · NTFS times): the one fixed 176px 시각 width (T-175). */
+export const FILES_TIME_WIDTH = TIME_COLUMN_WIDTH;
+
+/**
+ * Sort keys `GET /files` orders the WHOLE list by (files column index, plan r7 §3.2 L2):
+ * 이름 · 경로 · 크기 · 수정 · NTFS 생성, plus 특이사항 (`sort=flags`, grade first).
+ */
+export const FILES_SERVER_SORT_KEYS: ReadonlySet<string> = new Set([
+  "name",
+  "path",
+  "size",
+  "mtime",
+  "ctime",
+  "flags",
+]);
+
+/** The server sort of a files query (`sort=` / `order=`), or undefined for a client-only key. */
+export function filesServerSort(query: CollectionQuery): CollectionQuery["sort"] {
+  return query.sort && FILES_SERVER_SORT_KEYS.has(query.sort.key) ? query.sort : undefined;
+}
+
+/**
+ * Default order of the files list when the examiner picked none (r8 C.9.1, T-173): 수정 newest
+ * first on the server's evidence-time column. The server's list order is newest HOST mtime
+ * first, where recovered copies written during the run (`_deleted_mft`, carved) can lead; its
+ * `mtime` sort reads the evidence time (filesystem / listing / NTFS $SI) and puts copy times with
+ * no evidence time last, so the first screen is files with evidence times.
+ */
+export const FILES_DEFAULT_SORT: NonNullable<CollectionQuery["sort"]> = { key: "mtime", order: "desc" };
+
+/**
+ * The sort a files page is fetched with: the examiner's server sort, else FILES_DEFAULT_SORT —
+ * also under a client-only key (its loaded rows sort in the browser), so every page of one query
+ * key comes from the same server order.
+ */
+export function filesFetchSort(query: CollectionQuery): NonNullable<CollectionQuery["sort"]> {
+  return filesServerSort(query) ?? FILES_DEFAULT_SORT;
+}
+
+/** Image evidence kinds (core/run/source.py source types) and image file extensions. */
+const IMAGE_SOURCE_TYPES = new Set([
+  "e01",
+  "raw-image",
+  "archive-image",
+  "virtual-disk",
+  "image",
+  "disk-image",
+]);
+const IMAGE_EXTENSION = /\.(e01|ex01|l01|dd|raw|img|001|vhdx?|vmdk|aff4?|iso|dmg)$/i;
+
+/**
+ * True when the run's input is a disk image (E01 · raw · VHD …): only then can an NTFS-meta
+ * analysis fill the NTFS columns, so only then do their headers offer "실행" (C-D12). A folder
+ * input (or an unknown one) gets no link — its NTFS columns are plain and hide when empty.
+ */
+export function runInputIsImage(run: unknown): boolean {
+  if (!isRecord(run)) return false;
+  const summary = isRecord(run.summary) ? run.summary : {};
+  const source = isRecord(summary.source) ? summary.source : isRecord(run.source) ? run.source : {};
+  const type = str(source.type).toLowerCase();
+  if (type) return IMAGE_SOURCE_TYPES.has(type);
+  const request = isRecord(run.request) ? run.request : {};
+  const kind = str(request.input_kind).toLowerCase();
+  if (kind) return IMAGE_SOURCE_TYPES.has(kind) || kind.includes("image");
+  return IMAGE_EXTENSION.test(str(request.root ?? run.root).trim());
+}
+
 function ntfsTime(id: string, header: string, key: string): ColumnSpec {
-  return col.field(id, header, 170, ["source"], (r) => strOrNull(ntfsOf(r)[key]), {
+  return col.field(id, header, FILES_TIME_WIDTH, ["source"], (r) => strOrNull(ntfsOf(r)[key]), {
     format: (r) => {
+      const value = ntfsOf(r)[key];
+      return typeof value === "string" || typeof value === "number"
+        ? gridTimeText(value, currentTimezone())
+        : "";
+    },
+    // The zone is in the tooltip's full reading; the fixed cell holds "YYYY-MM-DD HH:MM:SS" (T-175).
+    tooltip: (r) => {
       const value = ntfsOf(r)[key];
       return typeof value === "string" || typeof value === "number"
         ? formatGridTime(value, currentTimezone())
         : "";
     },
     filterKind: "time",
+    minWidth: FILES_TIME_WIDTH,
     emptyHint: ntfsHint,
   });
 }
@@ -193,6 +274,53 @@ export function deletionStateOf(raw: Record<string, unknown>): DeletionState | n
   return flag === null ? null : flag ? "deleted" : "allocated";
 }
 
+/** `recovery.candidate_kind` values of a recovered (not a live, allocated) file (files.schema). */
+const RECOVERED_KINDS: ReadonlySet<string> = new Set([
+  "deleted-entry",
+  "orphan-record",
+  "carved",
+  "partial-corrupt",
+]);
+/** Kinds whose original location is unknown: a carved run of bytes, an orphaned MFT record. */
+const LOCATION_UNKNOWN_KINDS: ReadonlySet<string> = new Set(["orphan-record", "carved"]);
+
+export interface FileRecovery {
+  /** A recovered item (deleted entry, carved, orphan, partial) or one in a recovery pseudo folder. */
+  recovered: boolean;
+  /** Its original location is unknown: show "원래 위치 알 수 없음", not a pseudo folder. */
+  locationUnknown: boolean;
+}
+
+/**
+ * Whether a files row is a recovered item (r8 C.9.1, IS-128 / GAP-335): `recovery.candidate_kind`
+ * other than `existing`, or a path under a recovery pseudo folder (`_deleted_mft`,
+ * `$OrphanFiles`), which also means its original location is unknown.
+ */
+export function fileRecoveryOf(raw: Record<string, unknown>, path: string | null): FileRecovery {
+  const recovery = isRecord(raw.recovery) ? raw.recovery : {};
+  const kind = str(recovery.candidate_kind).toLowerCase();
+  const pseudo = evidencePathOf(path).locationUnknown;
+  return {
+    recovered: pseudo || RECOVERED_KINDS.has(kind),
+    locationUnknown: pseudo || LOCATION_UNKNOWN_KINDS.has(kind),
+  };
+}
+
+/** Volume letter of a files row, when the server names one (none does yet: rooted at "\\"). */
+function volumeOf(raw: Record<string, unknown>): string | null {
+  return strOrNull(raw.volume_letter) ?? strOrNull(raw.drive_letter);
+}
+
+/** 경로 cell options of a mapped files row (folder only: the 이름 column names the file). */
+export function filesPathOptions(row: { fields: Record<string, unknown> }): PathCellOptions {
+  return {
+    folderOnly: true,
+    recovered: row.fields.recovered === true,
+    locationUnknown: row.fields.locationUnknown === true,
+    volume: strOrNull(row.fields.volume),
+  };
+}
+
 /** How a row was matched to its NTFS / inventory record (`match_method`) → Korean. */
 export const MATCH_METHOD_LABELS: Readonly<Record<string, string>> = {
   "relative-path": "상대 경로",
@@ -275,6 +403,9 @@ export const FILES_PRIORITY = [
   "review",
   "path",
   "ntfsCreated",
+  // R7 갈래 A: 중복 · 계열 last (hidden first; hidden while no loaded row has a value).
+  "dedup",
+  "family",
 ] as const;
 
 export const filesCollection: CollectionDef = {
@@ -290,6 +421,9 @@ export const filesCollection: CollectionDef = {
       query.ref.category || undefined,
       { ids: query.flags, grade: query.flagGrade, conditions: query.rowConditions },
       { dir: query.ref.dir, recursive: query.ref.recursive, special: query.ref.special },
+      // Server sort + name/path text filter over the whole list (plan r7 §3.2 L2, C-D1).
+      // No sort picked: the default puts live, allocated files first (T-173).
+      { sort: filesFetchSort(query), q: query.text?.trim() || undefined },
     ),
   widthPriority: () => FILES_PRIORITY,
   mapRow: (raw, position, ctx) => {
@@ -307,6 +441,7 @@ export const filesCollection: CollectionDef = {
     const deletion = deletionStateOf(raw);
     const deleted = deletion === "deleted" ? true : deletion === "allocated" ? false : null;
     const signature = fileSignatureOf(raw);
+    const recovered = fileRecoveryOf(raw, path);
     const categories = Array.isArray(raw.categories) ? raw.categories.map(str).filter(Boolean) : [];
     return makeRow(
       makeRef("files", `/${inventoryOnly ? "inventory" : "candidates"}/${index}`),
@@ -336,6 +471,10 @@ export const filesCollection: CollectionDef = {
         siModified: strOrNull(ntfs?.si_modified_at),
         attributes: Array.isArray(ntfs?.attributes) ? joinList(ntfs?.attributes) : str(ntfs?.attributes),
         recovery: str(recovery.candidate_kind),
+        // 경로 = the path inside the evidence (r8 C.9.1): recovered marker / unknown location.
+        recovered: recovered.recovered,
+        locationUnknown: recovered.locationUnknown,
+        volume: volumeOf(raw),
         knownGood: str(raw.known_good_status),
         // NTFS provenance (plan analysis-workbench-p1 §3.3): null until an NTFS-meta analysis is joined.
         ntfs: isRecord(raw.ntfs) ? raw.ntfs : null,
@@ -348,46 +487,60 @@ export const filesCollection: CollectionDef = {
         isDirectory: isDirectoryRaw(raw, path),
         ...recoveryFields(raw.recovery),
         ...(Array.isArray(raw.flags) ? { flags: raw.flags, flagList: parseFlags(raw.flags) } : {}),
+        // 계열 · 중복 (R7 갈래 A): the listing's annotations once the run's derivation exists.
+        ...familyDedupFields(raw),
       },
     );
   },
   // Default layout (visual-polish S4): 이름 · 경로 · 크기 · 수정 · NTFS 생성 · 선별. Default width =
   // minimum width; 이름 takes the slack and a narrow grid hides columns by FILES_PRIORITY.
   columns: [
-    { ...col.title("이름", 220), minWidth: 220 },
+    {
+      ...col.title("이름", 220),
+      minWidth: 220,
+      sortKey: "name",
+      // T-171: the 복구 marker rides on the name too, so it shows when 경로 is hidden.
+      render: (r) =>
+        recoveredNameCell(r.title, { ...filesPathOptions(r), folderOnly: false, path: r.sourcePath }),
+    },
     // 특이사항 (U-F4): hidden while no loaded row carries a flag (FILES_PRIORITY empty-column rule).
     flagsColumn(["analysis", "compact"]),
-    col.path(200, ["analysis", "source"]),
+    {
+      ...col.path(200, ["analysis", "source"]),
+      sortKey: "path",
+      // The in-evidence folder (r8 C.9.1): never the result folder, recovered items marked.
+      value: (r) => pathCellText(r.sourcePath, { ...filesPathOptions(r), folderOnly: false }),
+      format: (r) => pathCellText(r.sourcePath, filesPathOptions(r)) ?? "",
+      tooltip: (r) => pathCellTooltip(r.sourcePath, filesPathOptions(r)),
+      render: (r) => pathCell(r.sourcePath, filesPathOptions(r)),
+    },
     col.field("size", "크기", 80, ["analysis", "compact"], (r) => (r.fields.size as number | null) ?? null, {
       align: "right",
       minWidth: 80,
+      sortKey: "size",
       format: (r) => formatBytes(r.fields.size),
     }),
     {
       id: "timestamp",
       header: "수정",
-      width: 150,
-      minWidth: 150,
+      width: FILES_TIME_WIDTH,
+      minWidth: FILES_TIME_WIDTH,
+      sortKey: "mtime",
       presets: ["analysis", "compact"],
       filterKind: "time",
       value: (r) => strOrNull(r.fields.modifiedAt),
-      format: (r) => {
-        const value = strOrNull(r.fields.modifiedAt);
-        return value ? formatGridTime(value, currentTimezone()) : "";
-      },
+      format: (r) => gridTimeText(strOrNull(r.fields.modifiedAt), currentTimezone()),
       tooltip: (r) => modifiedTooltip(r),
-      render: (r) => {
-        const value = strOrNull(r.fields.modifiedAt);
-        return modifiedCell(r, value ? formatGridTime(value, currentTimezone()) : "");
-      },
+      render: (r) => modifiedCell(r, gridTimeText(strOrNull(r.fields.modifiedAt), currentTimezone())),
     },
     {
       ...ntfsTime("ntfsCreated", "NTFS 생성", "created_at"),
-      width: 150,
-      minWidth: 150,
+      sortKey: "ctime",
       presets: ["analysis", "source"],
     },
     { ...col.review(), width: 88, minWidth: 88 },
+    // 중복 · 계열 (R7 갈래 A): default, hidden while no loaded row has a value.
+    ...familyDedupColumns(),
     col.field("extension", "확장자", 80, ["compact"], (r) => fieldStr(r, "extension")),
     col.field("categories", "분류", 160, ["compact"], (r) => fieldStr(r, "categories")),
     col.field("recovery", "복구 유형", 100, ["source"], (r) => fieldStr(r, "recovery")),

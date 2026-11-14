@@ -15,20 +15,33 @@ import {
   type CaseEvidence,
   type CaseRunBody,
   checkEvidence,
+  checkOutputFolder,
   createCase,
   createCaseRun,
   koCompare,
   listEvidence,
 } from "../../api/cases";
 import { ApiError } from "../../api/client";
+import { useWriteBlock } from "../../shell/readOnly";
 import { navigate } from "../tree/adapter";
+import { AiRunOptionsField } from "./AiRunOptionsField";
 import { ErrorText } from "./ErrorText";
 import { EvidenceFields } from "./EvidenceFields";
 import { Modal } from "./Modal";
+import { showPreflightSpace } from "./preflightSpace";
 import { ReasonButton } from "./ReasonButton";
 import { RunOptionsFields } from "./RunOptionsFields";
 import { RunPlanGroupsField } from "./RunPlanGroupsField";
-import { buildRunBody, DEFAULT_RUN_FORM, firstRunFormError, type RunForm, validateRunForm } from "./runForm";
+import {
+  buildRunBody,
+  DEFAULT_RUN_FORM,
+  firstRunFormError,
+  type OutputFieldSpec,
+  outputOverlapReason,
+  outputRequiredReason,
+  type RunForm,
+  validateRunForm,
+} from "./runForm";
 import { summarizeRunRequest } from "./runSummary";
 import {
   CASE_TYPE_SUGGESTIONS,
@@ -59,6 +72,41 @@ function messageOf(error: unknown): string {
 export function caseRunBody(form: RunForm, evidenceCitationId: string): CaseRunBody {
   const { root: _root, ...rest } = buildRunBody({ ...form, root: "-" });
   return { ...rest, evidence_citation_id: evidenceCitationId };
+}
+
+/**
+ * 출력 폴더 of the wizard (E01 QA D4): with a 케이스 폴더 the runs default to a run folder under it;
+ * without one the output folder entered here BECOMES the case folder (so 케이스 정보 shows it and
+ * every evidence gets its own run folder under it) and is required when a run will start.
+ */
+export function wizardOutputSpec(caseRoot: string, runCount: number): OutputFieldSpec {
+  if (caseRoot.trim()) {
+    return {
+      label: "출력 폴더 (비우면 케이스 폴더 아래)",
+      hint: `비우면 케이스 폴더(${caseRoot.trim()}) 아래에 증거별 런 폴더를 만듭니다.`,
+      required: false,
+    };
+  }
+  return {
+    label: "출력 폴더 (케이스 폴더)",
+    hint: "케이스 폴더를 지정하지 않아 이 폴더가 케이스 폴더가 됩니다. 증거마다 그 아래 런 폴더를 만들며, 원본 증거 옆이나 증거 폴더 안에는 쓰지 않습니다.",
+    required: runCount > 0,
+  };
+}
+
+/**
+ * What the wizard sends (E01 QA D4): without a 케이스 폴더 the output folder is saved as the case
+ * folder and the runs carry no output folder (the server makes one run folder per evidence under it).
+ */
+export function wizardPlan(
+  info: CaseInfoForm,
+  runForm: RunForm,
+): { caseInfo: CaseInfoForm; runForm: RunForm } {
+  if (info.caseRoot.trim() || !runForm.outputDir.trim()) return { caseInfo: info, runForm };
+  return {
+    caseInfo: { ...info, caseRoot: runForm.outputDir.trim() },
+    runForm: { ...runForm, outputDir: "" },
+  };
 }
 
 /** Run-form errors that matter for a case run (the evidence supplies the path). */
@@ -92,6 +140,10 @@ export function adoptableEvidence(rows: CaseEvidence[], draft: EvidenceDraft): C
   return rows.find((row) => samePathText(row.path, draft.path)) ?? null;
 }
 
+/** 사건 유형 choices (C-L2): the listed types, then 기타 with its own text field. */
+const CASE_TYPE_CHOICES = CASE_TYPE_SUGGESTIONS.filter((type) => type !== "기타");
+const CASE_TYPE_OTHER = "__other__";
+
 const INPUT_TYPES_WITHOUT_ENTER = new Set(["checkbox", "radio", "button", "submit", "reset", "file"]);
 
 interface Progress {
@@ -103,7 +155,6 @@ interface Progress {
 
 const CASE_FIELDS: Array<{ key: keyof CaseInfoForm; label: string; max: number; hint?: string }> = [
   { key: "name", label: "사건명", max: 200 },
-  { key: "caseType", label: "사건 유형", max: 100 },
   { key: "examiner", label: "검사관", max: 200, hint: "메모·태그의 기본 작성자" },
   { key: "requester", label: "의뢰처", max: 200 },
   { key: "organization", label: "소속", max: 200 },
@@ -131,6 +182,8 @@ export function CaseWizard({
   const [checking, setChecking] = useState(false);
   const [checks, setChecks] = useState<Record<string, DraftCheck>>({});
   const [error, setError] = useState("");
+  // 사건 유형 "기타": the free-text field is shown (also for a typed value that is not a listed type).
+  const [caseTypeOther, setCaseTypeOther] = useState(false);
   const [progress, setProgress] = useState<Progress>({
     caseId: null,
     caseNumber: "",
@@ -161,7 +214,25 @@ export function CaseWizard({
     : undefined;
   const toRun = runnableDrafts(sortedDrafts, freshChecks);
   const registerOnly = sortedDrafts.filter((draft) => freshChecks[draft.key]?.runnable === false);
-  const submitReason = busy
+  const outputSpec = wizardOutputSpec(info.caseRoot, toRun.length);
+  const plan = wizardPlan(info, runForm);
+  // R7: no write inside the evidence. The case folder may hold evidence but never sit inside one;
+  // an explicit run output folder may do neither. The server re-checks both before the case exists.
+  const evidencePaths = drafts.map((draft) => draft.path);
+  const caseRootProblem = outputOverlapReason(plan.caseInfo.caseRoot, evidencePaths, {
+    allowEvidenceInside: true,
+  });
+  const runOutputProblem = toRun.length
+    ? outputOverlapReason(plan.runForm.outputDir, evidencePaths)
+    : undefined;
+  // Without a 케이스 폴더 the 출력 폴더 field becomes it: its problem is the case-folder one.
+  const outputFieldProblem = info.caseRoot.trim() ? runOutputProblem : caseRootProblem;
+  const caseRootFieldProblem = info.caseRoot.trim() ? caseRootProblem : undefined;
+  // Several runs into one explicit folder only when it is a per-run folder (a case folder is shared).
+  const explicitOutput = info.caseRoot.trim() ? runForm.outputDir : "";
+  // T-348: a read-only result / server says why instead of answering with a 409.
+  const writeBlock = useWriteBlock("server");
+  const submitReasonOwn = busy
     ? "처리 중입니다"
     : runIsActive && toRun.length > 0
       ? "실행 중 런이 있습니다"
@@ -170,10 +241,19 @@ export function CaseWizard({
         uncheckedReason ??
         checkProblem ??
         runReason ??
-        outputDirReason(runForm.outputDir, toRun.length));
+        outputRequiredReason(outputSpec, runForm.outputDir) ??
+        outputFieldProblem ??
+        (caseRootFieldProblem ? `케이스 폴더: ${caseRootFieldProblem}` : undefined) ??
+        outputDirReason(explicitOutput, toRun.length));
+  const submitReason = writeBlock ?? submitReasonOwn;
   const caseLocked = Boolean(progress.caseId);
-  const previewBody = caseRunBody(runForm, "");
-  const summary = summarizeRunRequest(previewBody as unknown as Record<string, unknown>);
+  const previewBody = caseRunBody(plan.runForm, "");
+  const plannedRoot = plan.caseInfo.caseRoot.trim();
+  const summary = summarizeRunRequest(previewBody as unknown as Record<string, unknown>).map((row) =>
+    row.key === "output_dir" && !previewBody.output_dir && plannedRoot
+      ? { ...row, value: `${plannedRoot} 아래 증거별 런 폴더 (케이스 폴더)` }
+      : row,
+  );
   const stepTitleId = `${baseId}-step-title`;
   const stepTitle = useRef<HTMLHeadingElement>(null);
   const shownStep = useRef(step);
@@ -186,16 +266,35 @@ export function CaseWizard({
   const setRun = <K extends keyof RunForm>(key: K, value: RunForm[K]) =>
     setRunForm((f) => ({ ...f, [key]: value }));
   const setField = (key: keyof CaseInfoForm, value: string) => setInfo((f) => ({ ...f, [key]: value }));
+  // A failure belongs to the paths it was about: editing them clears it (E01 QA D5, not sticky).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the edited paths only trigger the reset
+  useEffect(() => setError(""), [runForm.outputDir, info.caseRoot]);
 
   const submit = async () => {
     if (submitReason) return;
     setBusy(true);
     setError("");
     const state: Progress = { ...progress, evidence: { ...progress.evidence }, runs: { ...progress.runs } };
-    let stage = "케이스 만들기";
+    let stage = "출력 폴더 확인";
     try {
+      // E01 QA D5: the output folder is checked by the server's own rules BEFORE the case exists,
+      // so a refused path never leaves an orphan case behind.
+      const outputPath = toRun.length ? runForm.outputDir.trim() : "";
+      const caseRootPath = plan.caseInfo.caseRoot.trim();
+      const evidence = drafts.map((draft) => draft.path);
+      if (outputPath) {
+        // Without a 케이스 폴더 this folder becomes it (a case folder may hold the evidence).
+        const kind = info.caseRoot.trim() ? "output_dir" : "case_root";
+        const check = await checkOutputFolder(outputPath, kind, evidence);
+        if (!check.ok) throw new Error(check.problem || "출력 폴더를 쓸 수 없습니다");
+      }
+      if (caseRootPath && caseRootPath !== outputPath) {
+        const check = await checkOutputFolder(caseRootPath, "case_root", evidence);
+        if (!check.ok) throw new Error(`케이스 폴더: ${check.problem || "쓸 수 없습니다"}`);
+      }
+      stage = "케이스 만들기";
       if (!state.caseId) {
-        const created = await createCase(caseBody(info));
+        const created = await createCase(caseBody(plan.caseInfo));
         state.caseId = created.case_id;
         state.caseNumber = created.case_number;
         setProgress({ ...state });
@@ -226,8 +325,12 @@ export function CaseWizard({
       for (const draft of toRun) {
         if (state.runs[draft.key]) continue;
         stage = `증거 ${draft.evidenceNumber.trim()} 런 시작`;
-        const result = await createCaseRun(caseId, caseRunBody(runForm, state.evidence[draft.key] as string));
+        const result = await createCaseRun(
+          caseId,
+          caseRunBody(plan.runForm, state.evidence[draft.key] as string),
+        );
         state.runs[draft.key] = result.run.run_id;
+        showPreflightSpace(result);
         setProgress({ ...state, runs: { ...state.runs } });
       }
       void queryClient.invalidateQueries({ queryKey: ["runs"] });
@@ -310,6 +413,7 @@ export function CaseWizard({
           <ReasonButton
             className="button primary"
             reason={nextReason}
+            quietReason
             onClick={next}
             data-testid="wizard-next"
           >
@@ -319,6 +423,7 @@ export function CaseWizard({
           <ReasonButton
             className="button primary"
             reason={submitReason}
+            quietReason
             onClick={() => void submit()}
             data-testid="wizard-submit"
           >
@@ -406,7 +511,6 @@ export function CaseWizard({
                   value={info[field.key]}
                   maxLength={field.max}
                   disabled={caseLocked}
-                  list={field.key === "caseType" ? `${baseId}-types` : undefined}
                   aria-describedby={field.hint ? `${baseId}-${field.key}-hint` : undefined}
                   onChange={(e) => setField(field.key, e.target.value)}
                 />
@@ -417,11 +521,43 @@ export function CaseWizard({
                 ) : null}
               </div>
             ))}
-            <datalist id={`${baseId}-types`}>
-              {CASE_TYPE_SUGGESTIONS.map((type) => (
-                <option key={type} value={type} />
-              ))}
-            </datalist>
+            <div className="case-field">
+              <label htmlFor={`${baseId}-caseType`}>사건 유형</label>
+              <select
+                id={`${baseId}-caseType`}
+                value={
+                  caseTypeOther || (info.caseType !== "" && !CASE_TYPE_CHOICES.includes(info.caseType))
+                    ? CASE_TYPE_OTHER
+                    : info.caseType
+                }
+                disabled={caseLocked}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setCaseTypeOther(value === CASE_TYPE_OTHER);
+                  setField("caseType", value === CASE_TYPE_OTHER ? "" : value);
+                }}
+              >
+                <option value="">선택 안 함</option>
+                {CASE_TYPE_CHOICES.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+                <option value={CASE_TYPE_OTHER}>기타 (직접 입력)</option>
+              </select>
+              {caseTypeOther || (info.caseType !== "" && !CASE_TYPE_CHOICES.includes(info.caseType)) ? (
+                <input
+                  id={`${baseId}-caseType-other`}
+                  type="text"
+                  aria-label="사건 유형 (기타, 직접 입력)"
+                  value={info.caseType}
+                  maxLength={100}
+                  disabled={caseLocked}
+                  placeholder="사건 유형을 입력하세요"
+                  onChange={(e) => setField("caseType", e.target.value)}
+                />
+              ) : null}
+            </div>
             <div className="case-field">
               <label htmlFor={`${baseId}-description`}>설명</label>
               <textarea
@@ -447,7 +583,7 @@ export function CaseWizard({
               />
               <p id={`${baseId}-root-hint`} className={infoErrors.caseRoot ? "case-error" : "case-reason"}>
                 {infoErrors.caseRoot ??
-                  "지정하면 런 출력이 이 폴더 아래 증거 번호별로 만들어집니다. 비우면 폴더 증거는 그 폴더 안에, 파일 증거는 파일 옆에 만듭니다 (그 위치에 쓸 수 있어야 합니다)."}
+                  "지정하면 런 출력이 이 폴더 아래 증거 번호별로 만들어집니다. 비우면 처리 옵션 단계에서 출력 폴더를 지정해야 하며, 그 폴더가 케이스 폴더가 됩니다 (원본 증거 옆에는 쓰지 않습니다)."}
               </p>
             </div>
           </section>
@@ -522,15 +658,27 @@ export function CaseWizard({
               advanced={advanced}
               onAdvancedChange={setAdvanced}
               idPrefix={`${baseId}-run`}
+              output={outputSpec}
+              outputError={outputFieldProblem}
             />
+            {caseRootFieldProblem ? (
+              <p className="case-error" role="alert" data-testid="wizard-case-root-problem">
+                케이스 폴더: {caseRootFieldProblem}
+              </p>
+            ) : null}
             <RunPlanGroupsField
               form={runForm}
               onChange={(skipGroups) => setRun("skipGroups", skipGroups)}
               idPrefix={`${baseId}-run`}
             />
-            {outputDirReason(runForm.outputDir, toRun.length) ? (
+            <AiRunOptionsField
+              form={runForm}
+              onChange={(patch) => setRunForm((f) => ({ ...f, ...patch }))}
+              idPrefix={`${baseId}-run`}
+            />
+            {outputDirReason(explicitOutput, toRun.length) ? (
               <p className="case-error" data-testid="wizard-output-dir-problem">
-                {outputDirReason(runForm.outputDir, toRun.length)}
+                {outputDirReason(explicitOutput, toRun.length)}
               </p>
             ) : null}
             {registerOnly.length ? (
@@ -552,6 +700,10 @@ export function CaseWizard({
                   <dd>{info.caseType.trim()}</dd>
                 </>
               ) : null}
+              <dt>케이스 폴더</dt>
+              <dd className="mono break-all" data-testid="wizard-case-root">
+                {plannedRoot || (toRun.length ? "— (출력 폴더를 지정하세요)" : "—")}
+              </dd>
               {info.examiner.trim() ? (
                 <>
                   <dt>검사관</dt>

@@ -7,6 +7,7 @@ and_expr:= unary (["AND"] unary)*          (whitespace = AND)
 unary   := ("NOT" | "-") unary | atom
 atom    := "(" query ")" | field ":" value | value      (a value without a field = kw)
 value   := "phrase" | /regex/i? | [a .. b] | (v1, v2, ...) | token
+pre     := "pre:" ( "(" word+ ")" | "phrase" ) "/" n        (ordered proximity, R7 lane B)
 ```
 
 A regex is ``re:/…/i?`` (or ``re:<pattern>``); a bare ``/…/`` is a regex only
@@ -32,7 +33,12 @@ from .regex_guard import (
     analyze_regex,
     required_literal,
 )
-from .textutil import nfc
+from .textutil import is_bigram_term, nfc
+
+# Short keywords the indexes cannot serve (R7 S2): 3+ characters use the trigram index,
+# 2 non-ASCII characters the bigram table (index v3); the rest scan every row's text.
+SHORT_ONE_WARNING = "1자 검색어는 색인을 쓰지 못해 전체 본문을 훑습니다(느릴 수 있음)"
+SHORT_TWO_WARNING = "영문·숫자·기호가 든 2자 검색어는 색인을 쓰지 못해 전체 본문을 훑습니다(느릴 수 있음)"
 
 MAX_QUERY_CHARS = 4000
 MAX_CLAUSES = 64
@@ -53,12 +59,14 @@ S1_FIELDS = frozenset(
         "eventid", "provider", "channel",
     }
 )
-S2_FIELDS = frozenset(
-    {"list", "ip", "host", "url", "email", "iocset", "user", "logon", "phone", "rrn", "card", "account", "regkey", "regval", "regdata", "regtype"}
-)
+# R7 lane B (index v5): entities, lists, languages, ordered proximity.
+ENTITY_QUERY_FIELDS = frozenset({"rrn", "corpno", "card", "bizno", "phone", "account", "passport", "email", "ip", "host"})
+S2_DONE_FIELDS = ENTITY_QUERY_FIELDS | {"list", "lang", "pre"}
+# Still S2 (not implemented): a 400 names the stage.
+S2_FIELDS = frozenset({"url", "iocset", "user", "logon", "regkey", "regval", "regdata", "regtype"})
 S3_FIELDS = frozenset({"geo", "camera", "taken", "phash", "similar"})
-KNOWN_FIELDS = S1_FIELDS | S2_FIELDS | S3_FIELDS
-TEXT_FIELDS = frozenset({"kw", "word", "re", "near"})
+KNOWN_FIELDS = S1_FIELDS | S2_DONE_FIELDS | S2_FIELDS | S3_FIELDS
+TEXT_FIELDS = frozenset({"kw", "word", "re", "near", "pre"})
 BOOL_FIELDS = frozenset({"afterhours", "deleted", "mismatch", "archive", "bookmark"})
 # Fields whose value is a directive for the result (not a row filter that NOT/OR could invert).
 DIRECTIVE_FIELDS = frozenset({"gap"})
@@ -73,6 +81,8 @@ CHIPS = {
     "archive": "path", "under": "path", "author": "path", "savedby": "path", "template": "path",
     "review": "review", "tag": "review", "note": "review", "bookmark": "review",
     "eventid": "event", "provider": "event", "channel": "event",
+    "pre": "keyword", "list": "keyword", "lang": "scope",
+    **{name: "entity" for name in ENTITY_QUERY_FIELDS},
 }
 FIELD_LABELS = {
     "kw": "키워드", "word": "단어", "re": "정규식", "near": "근접", "time": "시간", "around": "전후", "tskind": "시각 종류",
@@ -80,8 +90,11 @@ FIELD_LABELS = {
     "gap": "빈 구간", "hash": "해시", "md5": "MD5", "sha1": "SHA-1", "sha256": "SHA-256", "hashset": "해시 세트",
     "path": "경로", "ext": "확장자", "extset": "확장자 묶음", "size": "크기", "deleted": "삭제됨", "mismatch": "시그니처 불일치",
     "archive": "압축 내부", "under": "폴더 아래", "author": "작성자", "savedby": "마지막 저장자", "template": "템플릿",
-    "review": "리뷰 상태", "tag": "태그", "note": "메모", "bookmark": "북마크", "analysis": "분석",
+    "review": "검토 상태", "tag": "태그", "note": "메모", "bookmark": "북마크", "analysis": "분석",
     "eventid": "이벤트 ID", "provider": "제공자", "channel": "채널",
+    "pre": "순서 근접", "list": "검색 목록", "lang": "언어",
+    "rrn": "주민등록번호", "corpno": "법인등록번호", "card": "카드번호", "bizno": "사업자등록번호", "phone": "전화번호",
+    "account": "계좌번호", "passport": "여권번호", "email": "이메일", "ip": "IP 주소", "host": "호스트",
 }
 
 _FIELD_NAME_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_][A-Za-z0-9_.-]*)?")
@@ -106,7 +119,7 @@ class QueryError(ValueError):
 
 @dataclass
 class Value:
-    kind: str  # token | phrase | regex | range | list
+    kind: str  # token | phrase | regex | range | list | pre (``items`` = words, ``text`` = distance)
     text: str = ""
     flags: str = ""
     low: str = ""
@@ -123,6 +136,8 @@ class Value:
             return f"[{self.low} .. {self.high}]"
         if self.kind == "list":
             return "(" + ", ".join(item.display() for item in self.items) + ")"
+        if self.kind == "pre":
+            return "(" + " ".join(item.text for item in self.items) + f")/{self.text}"
         return self.text
 
 
@@ -177,6 +192,8 @@ class ParsedQuery:
 
 
 def op_of(term: Term) -> str:
+    if term.value.kind == "pre":
+        return "pre"
     if term.field == "re" or term.value.kind == "regex":
         return "regex"
     if term.value.kind == "range":
@@ -195,6 +212,8 @@ def value_payload(value: Value) -> object:
         return [value_payload(item) for item in value.items]
     if value.kind == "regex":
         return {"pattern": value.text, "flags": value.flags}
+    if value.kind == "pre":
+        return {"words": [item.text for item in value.items], "distance": int(value.text)}
     return value.text
 
 
@@ -330,6 +349,8 @@ class _Parser:
                     raise self.error(f"{name}: 뒤에 값이 없습니다", start)
                 if field_name == "re":
                     return self.term("re", self.parse_re_value(), start)
+                if field_name == "pre":
+                    return self.term("pre", self.parse_pre_value(), start)
                 value = self.parse_value(allow_list=True)
                 return self.term(field_name, value, start)
         if char == "/":
@@ -352,6 +373,35 @@ class _Parser:
             return value
         token = self.parse_token(start)
         return Value("regex", text=token.text, pos=token.pos)
+
+    def parse_pre_value(self) -> Value:
+        """``(w1 w2 …)/n`` or ``"w1 w2"/n``: words in order, each within ``n`` words of the previous."""
+        start = self.i
+        if self.text[self.i] == "(":
+            end = self.text.find(")", self.i)
+            if end < 0:
+                raise self.error("닫는 괄호가 없습니다", start)
+            words = [word for word in re.split(r"[\s,]+", self.text[self.i + 1 : end]) if word]
+            self.i = end + 1
+        elif self.text[self.i] == '"':
+            words = self.parse_phrase().text.split()
+        else:
+            raise self.error("pre: 값은 (단어1 단어2)/거리 형식이어야 합니다(예: pre:(계약 해지)/3)", start)
+        if self.i >= len(self.text) or self.text[self.i] != "/":
+            raise self.error("pre: 단어 목록 뒤에 /거리(단어 수)가 필요합니다(예: pre:(계약 해지)/3)", start)
+        self.i += 1
+        digits_start = self.i
+        while self.i < len(self.text) and self.text[self.i].isdigit():
+            self.i += 1
+        digits = self.text[digits_start:self.i]
+        if not digits or not self.at_boundary(self.i):
+            raise self.error("pre: 거리는 단어 수(0~100 정수)여야 합니다", digits_start)
+        distance = int(digits)
+        if distance > 100:
+            raise self.error("pre: 거리는 0~100 단어여야 합니다", digits_start)
+        if not 2 <= len(words) <= 8:
+            raise self.error("pre: 단어는 2~8개여야 합니다", start)
+        return Value("pre", text=str(distance), items=[Value("token", text=word, pos=start + 1) for word in words], pos=start + 1)
 
     def try_bare_regex(self) -> Value | None:
         """A bare ``/…/`` (or ``/…/i``) without whitespace or an inner ``/``; else ``None`` (a keyword)."""
@@ -545,10 +595,13 @@ def _validate_terms(terms: list[tuple[Term, bool]], warnings: list[str]) -> None
                 warnings.append(message)
         if name in TEXT_FIELDS and name != "re" and value.kind in {"token", "phrase"}:
             text = nfc(value.text).strip()
-            if 0 < len(text) < 3:
-                message = "2자 이하 검색어는 느립니다"
-                if message not in warnings:
-                    warnings.append(message)
+            message = ""
+            if len(text) == 1:
+                message = SHORT_ONE_WARNING
+            elif len(text) == 2 and not is_bigram_term(text):
+                message = SHORT_TWO_WARNING
+            if message and message not in warnings:
+                warnings.append(message)
         if name in BOOL_FIELDS and value.kind == "token" and value.text.lower() not in {"true", "false", "yes", "no", "1", "0"}:
             raise QueryError(f"{name}: 값은 true 또는 false여야 합니다", value.pos or term.pos)
 

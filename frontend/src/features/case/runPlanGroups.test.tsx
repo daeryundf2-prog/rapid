@@ -160,7 +160,7 @@ describe("RunDialog 처리 그룹", () => {
       document.getElementById(checkbox("카빙").getAttribute("aria-describedby") as string)?.textContent,
     ).toContain(CARVE_GATED_REASON);
     expect(checkbox("이벤트 로그").checked).toBe(true);
-    expect(fieldset.textContent).toContain("(태스크 2)");
+    expect(fieldset.textContent).toContain("(세부 처리 2개)");
     expect(screen.getByTestId("run-plan-groups-count").textContent).toBe("5개 그룹 중 4개 실행");
 
     // 전부 해제 → every choosable group off; 전부 선택 → all on (gated 카빙 stays off); then a choice.
@@ -176,6 +176,7 @@ describe("RunDialog 처리 그룹", () => {
     fireEvent.click(checkbox("보고서")); // disabled: no effect
 
     fireEvent.change(screen.getByLabelText(/증거 경로/), { target: { value: "D:/case/img.E01" } });
+    fireEvent.change(screen.getByLabelText(/^출력 폴더/), { target: { value: "D:/out/run1" } });
     fireEvent.click(screen.getByRole("button", { name: "실행" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     const post = calls.find((c) => c.method === "POST");
@@ -250,6 +251,7 @@ describe("RunDialog 처리 그룹", () => {
     await waitFor(() => expect(extract().disabled).toBe(true));
     expect(screen.getByTestId("run-plan-groups-count").textContent).toBe("3개 그룹 중 2개 실행");
     fireEvent.change(screen.getByLabelText(/증거 경로/), { target: { value: "D:/case/img.E01" } });
+    fireEvent.change(screen.getByLabelText(/^출력 폴더/), { target: { value: "D:/out/run1" } });
     fireEvent.click(screen.getByRole("button", { name: "실행" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(calls.find((c) => c.method === "POST")?.body).not.toHaveProperty("skip_groups");
@@ -261,6 +263,7 @@ describe("RunDialog 처리 그룹", () => {
     renderWithQuery(<RunDialog runIsActive={false} onClose={onClose} />);
     expect(await screen.findByTestId("run-plan-groups-error")).toBeTruthy();
     fireEvent.change(screen.getByLabelText(/증거 경로/), { target: { value: "D:/case/img.E01" } });
+    fireEvent.change(screen.getByLabelText(/^출력 폴더/), { target: { value: "D:/out/run1" } });
     fireEvent.click(screen.getByRole("button", { name: "실행" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(calls.find((c) => c.method === "POST")?.body).not.toHaveProperty("skip_groups");
@@ -283,6 +286,10 @@ describe("CaseWizard step 3 처리 그룹", () => {
     const onClose = vi.fn();
     renderWithQuery(<CaseWizard runIsActive={false} onClose={onClose} />);
     fireEvent.change(screen.getByLabelText("사건 번호", { exact: false }), { target: { value: "2026-1" } });
+    // E01 QA D4: a run needs a case folder (or an explicit output folder).
+    fireEvent.change(screen.getByLabelText("케이스 폴더", { exact: false }), {
+      target: { value: "D:\\cases\\2026-1" },
+    });
     fireEvent.click(screen.getByTestId("wizard-next"));
     await screen.findByTestId("wizard-step-evidence");
     fireEvent.change(screen.getByLabelText("증거 경로", { exact: false }), {

@@ -2,12 +2,16 @@
 
 * ``GET  /api/runs/{run}/search/index``         -- status ``none|building|ready|stale``
 * ``POST /api/runs/{run}/search/index/build``   -- 202 AnalysisState (kind ``search-index``)
-* ``POST /api/runs/{run}/search/query``         -- one result page (§3.2 response shape)
+* ``POST /api/runs/{run}/search/query``         -- one result page (§3.2 response shape); with
+  ``keywords`` instead of ``q`` the console's global search: v1 ``GET /search`` hits (R7 P2)
 * ``POST /api/runs/{run}/search/count``         -- per-term totals (budgeted, resumable by ``offset``)
 * ``POST /api/runs/{run}/search/hashes``        -- hash list / hash set lookup
 * ``GET|POST|PUT|DELETE /api/runs/{run}/search/saved[/{id}]`` -- saved searches (case DB)
 * ``GET  /api/runs/{run}/search/history``       -- ``<run>/search/history.sqlite`` (last 500)
-* ``GET|POST|DELETE /api/hash-sets[/{id}]``     -- hash-set store
+* ``POST /api/runs/{run}/search/entities``      -- entity kinds / masked values / languages (R7 lane B)
+* ``POST /api/runs/{run}/search/entities/reveal`` -- one personal value of one row, audited (``entity_reveal``)
+* ``GET|POST|DELETE /api/runs/{run}/search/lists[/{id}]`` -- keyword / IOC lists for ``list:<id>``
+* ``GET|POST|DELETE /api/hash-sets[/{id}]``     -- hash-set store (``category``: known-good / known-bad / custom)
 
 Queries (meta read, staleness, the query itself) run in a worker thread; a
 watcher sets the engine's cancel event when the client disconnects (checked
@@ -37,11 +41,14 @@ from ...core.jobs import RunJobStore
 from ...core.search_index.build import read_index_meta, stale_reasons
 from ...core.search_index.engine import (
     DEFAULT_BUDGET_SECONDS,
+    MAX_POSITION,
     PAGE_MAX,
     Budget,
     QueryRequest,
+    SearchList,
     SearchOptions,
     run_count,
+    run_entity_summary,
     run_hashes,
     run_query,
 )
@@ -51,28 +58,47 @@ from ...core.search_index.hashsets import (
     HashSetError,
     create_hash_set,
     delete_hash_set,
+    hash_set_ids_by_category,
     hash_set_path,
     list_hash_sets,
     read_hash_set,
     read_hash_values,
 )
+from ...core.search_index.hits import (
+    MAX_CONSOLE_KEYWORDS,
+    attach_console_hits,
+    console_keywords,
+    console_query,
+)
+from ...core.search_index.lists import (
+    MAX_LIST_BYTES,
+    SearchListError,
+    create_list,
+    delete_list,
+    list_detail,
+    list_lists,
+    read_list,
+)
+from ...core.search_index.patterns import KINDS, mask_sensitive
 from ...core.search_index.query import QueryError
 from ...core.search_index.schema import INDEX_FILE_NAME
 from ...core.search_index.textutil import normalize_hash
 from .analyses import ANALYSIS_RUNNER, public_state
+from .entity_reveal import reveal_value
 from .search_index_service import (
     CORRUPT_INDEX,
-    NO_INDEX,
     QUERY_LIMITER,
     SEARCH_HISTORY,
     QuerySlot,
     ReviewMarks,
+    artifact_summaries,
     completed_run,
     create_saved,
     delete_saved,
     get_saved,
     index_status,
     list_saved,
+    no_index_message,
     record_saved_count,
     search_history,
     submit_build,
@@ -109,6 +135,14 @@ class SearchOptionsBody(_Body):
 class PageBody(_Body):
     cursor: str | None = Field(default=None, max_length=4096)
     limit: int = Field(default=100, ge=1, le=PAGE_MAX)
+    offset: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "keywords 검색: 이 쪽 앞의 적중 수. 번호(search_result_id)는 서버가 커서의 위치로 매기며, "
+            "위치가 없는 이전 커서에만 이 값을 쓴다(최대 1,000,000, 넘으면 422)"
+        ),
+    )
 
 
 class HistogramBody(_Body):
@@ -122,7 +156,15 @@ class IndexBuildBody(_Body):
 
 class SearchQueryBody(_Body):
     # The parser enforces the 4,000-character limit with a Korean 400.
-    q: str = Field(..., max_length=100_000)
+    q: str = Field(default="", max_length=100_000)
+    # The 32-keyword cap is checked in the route (a Korean 422, R7 S3 confirmation), not by pydantic.
+    keywords: list[str] | None = Field(
+        default=None,
+        description=(
+            f"콘솔 전체 검색(q 대신, 최대 {MAX_CONSOLE_KEYWORDS}개 -- 넘으면 422): 키워드 중 하나라도 들어 있는 행(v1 exact와 같은 정규화). "
+            "응답은 rows 대신 matches(v1 GET /search 적중 모양)이고 검색 기록에 남지 않는다"
+        ),
+    )
     options: SearchOptionsBody = Field(default_factory=SearchOptionsBody)
     page: PageBody = Field(default_factory=PageBody)
     sort: Literal["relevance", "ts", "-ts", "path"] = "relevance"
@@ -171,9 +213,35 @@ class SavedUpdateBody(_Body):
 
 class HashSetJsonBody(_Body):
     name: str = Field(..., min_length=1, max_length=200)
-    label: Literal["known-good", "known-bad", "custom"] = "custom"
+    label: Literal["known-good", "known-bad", "custom"] | None = Field(default=None, description="category의 이전 이름(둘 다 주면 category)")
+    category: Literal["known-good", "known-bad", "custom"] | None = Field(
+        default=None, description="해시 세트 범주. 비우면 NSRL RDS 파일은 known-good, 그 밖은 custom"
+    )
     lines: str = Field(..., min_length=1)
     filename: str = Field(default="", max_length=200)
+
+
+class EntitySummaryBody(_Body):
+    q: str = Field(default="", max_length=100_000, description="비우면 색인 전체, 주면 그 질의의 결과 행만")
+    kind: Literal["rrn", "corpno", "card", "bizno", "phone", "account", "passport", "email", "ip", "host"] | None = None
+    value_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$", description="이 값이 있는 행(최대 limit개)도 돌려준다")
+    limit: int = Field(default=50, ge=1, le=PAGE_MAX)
+    options: SearchOptionsBody = Field(default_factory=SearchOptionsBody)
+
+
+class EntityRevealBody(_Body):
+    collection: Literal["files", "docs", "artifacts", "indicators", "analysis"]
+    kind: str = Field(default="", max_length=200)
+    locator: str = Field(..., min_length=1, max_length=512)
+    value_sha256: str = Field(..., pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(default="", max_length=500, description="공개 사유(감사 기록에 남는다, 개인정보 번호는 가려서 저장)")
+
+
+class SearchListBody(_Body):
+    name: str = Field(..., min_length=1, max_length=200)
+    kind: Literal["keyword", "ioc"] = "keyword"
+    text: str = Field(..., min_length=1, max_length=MAX_LIST_BYTES, description="한 줄에 한 항목(# 주석). 키워드·/정규식/·해시·IP/CIDR·이메일·호스트")
+    id: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$", description="list:<id>로 쓸 id(비우면 자동)")
 
 
 def query_error(exc: QueryError) -> JSONResponse:
@@ -229,13 +297,30 @@ async def run_cancellable(request: Request, work: Callable[[threading.Event], di
             slot.release()
 
 
+def list_resolver(output_dir: Path) -> Callable[[str], SearchList | None]:
+    """``list:<id>``: a run search list or a built-in keyword pack."""
+
+    def resolve(list_id: str) -> SearchList | None:
+        payload = read_list(output_dir, list_id)
+        if payload is None:
+            return None
+        items = payload.get("items") if isinstance(payload.get("items"), list) else []
+        return SearchList(str(payload.get("id") or list_id), str(payload.get("name") or list_id), [str(item) for item in items])
+
+    return resolve
+
+
+def search_list_error(exc: SearchListError) -> HTTPException:
+    return HTTPException(status_code=exc.status, detail=str(exc))
+
+
 def load_meta(index_path: Path) -> dict[str, object]:
     """Index meta or 404 (no index) / 409 (unreadable); a short lock is retried (never a false 404)."""
     meta, unreadable = read_index_meta(index_path)
     if meta is None:
         if unreadable is not None:
             raise HTTPException(status_code=409, detail=CORRUPT_INDEX.format(reason=unreadable))
-        raise HTTPException(status_code=404, detail=NO_INDEX)
+        raise HTTPException(status_code=404, detail=no_index_message(index_path.parent))
     return meta
 
 
@@ -278,8 +363,24 @@ def build_search_index_router(store: RunJobStore, *, owner: object | None = None
         job, output_dir = completed_run(store, run_id)
         index_path = output_dir / INDEX_FILE_NAME
         marks = ReviewMarks(job, run_id)
+        keywords: list[str] | None = None
+        q = body.q
+        if body.page.offset > MAX_POSITION:
+            raise HTTPException(status_code=422, detail=f"page.offset은 {MAX_POSITION:,} 이하여야 합니다")
+        if body.keywords is not None:
+            if len(body.keywords) > MAX_CONSOLE_KEYWORDS:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"검색어는 {MAX_CONSOLE_KEYWORDS}개까지 사용할 수 있습니다 (받은 수: {len(body.keywords)})",
+                )
+            if body.q.strip():
+                raise HTTPException(status_code=400, detail="q와 keywords 중 하나만 주세요")
+            keywords = console_keywords(body.keywords)
+            if not keywords:
+                raise HTTPException(status_code=400, detail="검색어를 입력하세요")
+            q = console_query(keywords)
         query_request = QueryRequest(
-            q=body.q,
+            q=q,
             options=body.options.to_options(),
             cursor=body.page.cursor,
             limit=body.page.limit,
@@ -303,11 +404,29 @@ def build_search_index_router(store: RunJobStore, *, owner: object | None = None
                 query_request,
                 budget=Budget(DEFAULT_BUDGET_SECONDS, cancel),
                 review_provider=marks.load,
-                review_lookup=marks.overlay,
+                # Console hits: the grid overlays review marks from the review map itself.
+                review_lookup=marks.overlay if keywords is None else None,
                 hashset_resolver=hash_set_path,
                 stale=stale,
+                category_resolver=hash_set_ids_by_category,
+                list_resolver=list_resolver(output_dir),
             )
             marks.apply_truncation(result, uses_review=bool(result.pop("uses_review", False)))
+            if keywords is not None:
+                # Server-side numbering (R7 S2 review #11): the page position the cursor carries;
+                # the client's offset only for a cursor of an older server.
+                page_info = result.get("page") if isinstance(result.get("page"), dict) else {}
+                position = page_info.get("position")
+                offset = int(position) if isinstance(position, int) else body.page.offset
+                attach_console_hits(
+                    result,
+                    keywords,
+                    summary=job.summary or {},
+                    run_id=run_id,
+                    offset=offset,
+                    # v1's artifact titles (R7 S2 confirmation #10): this page's records only.
+                    artifact_summaries=lambda keys: artifact_summaries(job, run_id, keys),
+                )
             return result
 
         slot = QUERY_LIMITER.acquire(run_id)
@@ -316,12 +435,17 @@ def build_search_index_router(store: RunJobStore, *, owner: object | None = None
         except QueryError as exc:
             return query_error(exc)
         page = result["page"] if isinstance(result.get("page"), dict) else {}
+        if keywords is not None:
+            # The console's global search is not an analyst query: like v1, no history entry
+            # (nothing is written into the run folder).
+            return {"run_id": run_id, "keywords": [mask_sensitive(keyword) for keyword in keywords], "backend": "index", **result}
         if not body.page.cursor:
-            # One history entry per search (not per page), written off the event loop.
+            # One history entry per search (not per page), written off the event loop. A typed
+            # personal number is kept only as its mask (R7 lane B).
             SEARCH_HISTORY.record(
                 output_dir,
                 {
-                    "q": body.q,
+                    "q": mask_sensitive(body.q),
                     "options": body.options.model_dump(),
                     "sort": body.sort,
                     "view": body.view,
@@ -360,6 +484,8 @@ def build_search_index_router(store: RunJobStore, *, owner: object | None = None
                 budget=Budget(DEFAULT_BUDGET_SECONDS, cancel),
                 review_provider=marks.load,
                 hashset_resolver=hash_set_path,
+                category_resolver=hash_set_ids_by_category,
+                list_resolver=list_resolver(output_dir),
             )
 
         slot = QUERY_LIMITER.acquire(run_id)
@@ -368,6 +494,82 @@ def build_search_index_router(store: RunJobStore, *, owner: object | None = None
         except QueryError as exc:
             return query_error(exc)
         return {"run_id": run_id, **result}
+
+    # -- entities (R7 lane B) -------------------------------------------------------
+
+    @router.post("/api/runs/{run_id}/search/entities")
+    async def search_entities(run_id: str, body: EntitySummaryBody, request: Request) -> Any:
+        """Entity kinds, masked values and languages (whole index or the rows of ``q``); masks and SHA-256 only."""
+        job, output_dir = completed_run(store, run_id)
+        index_path = output_dir / INDEX_FILE_NAME
+        marks = ReviewMarks(job, run_id)
+
+        def work(cancel: threading.Event) -> dict[str, object]:
+            return run_entity_summary(
+                index_path,
+                load_meta(index_path),
+                q=body.q,
+                kind=body.kind,
+                value_sha256=body.value_sha256,
+                limit=body.limit,
+                options=body.options.to_options(),
+                budget=Budget(DEFAULT_BUDGET_SECONDS, cancel),
+                review_provider=marks.load,
+                hashset_resolver=hash_set_path,
+                category_resolver=hash_set_ids_by_category,
+                list_resolver=list_resolver(output_dir),
+            )
+
+        slot = QUERY_LIMITER.acquire(run_id)
+        try:
+            result = await run_cancellable(request, work, slot)
+        except QueryError as exc:
+            if exc.status in {404, 408, 409}:
+                return JSONResponse(status_code=exc.status, content={"detail": exc.detail})
+            return query_error(exc)
+        return {"run_id": run_id, "kinds_known": list(KINDS), **result}
+
+    @router.post("/api/runs/{run_id}/search/entities/reveal")
+    def reveal_entity_value(run_id: str, body: EntityRevealBody) -> JSONResponse:
+        """One personal value of one row: 1 audit event (``search.entity.reveal``), then the value once.
+        403 when ``RAPIDTRIAGE_PII_REVEAL=off``; 409 without a case DB (no audit, no value)."""
+        job, output_dir = completed_run(store, run_id)
+        payload = reveal_value(
+            job, run_id, output_dir,
+            collection=body.collection, kind=body.kind, locator=body.locator, value_sha256=body.value_sha256, reason=body.reason,
+        )
+        return JSONResponse(content=payload, headers={"Cache-Control": "no-store"})
+
+    # -- search lists (list:<id>) -----------------------------------------------------
+
+    @router.get("/api/runs/{run_id}/search/lists")
+    def get_search_lists(run_id: str) -> dict[str, object]:
+        _job, output_dir = completed_run(store, run_id)
+        return {"run_id": run_id, "lists": list_lists(output_dir)}
+
+    @router.post("/api/runs/{run_id}/search/lists", status_code=201)
+    def create_search_list(run_id: str, body: SearchListBody) -> dict[str, object]:
+        _job, output_dir = completed_run(store, run_id)
+        try:
+            return create_list(output_dir, name=body.name, kind=body.kind, text=body.text, list_id=body.id)
+        except SearchListError as exc:
+            raise search_list_error(exc) from exc
+
+    @router.get("/api/runs/{run_id}/search/lists/{list_id}")
+    def get_search_list(run_id: str, list_id: str) -> dict[str, object]:
+        _job, output_dir = completed_run(store, run_id)
+        try:
+            return list_detail(output_dir, list_id)
+        except SearchListError as exc:
+            raise search_list_error(exc) from exc
+
+    @router.delete("/api/runs/{run_id}/search/lists/{list_id}", status_code=204)
+    def delete_search_list(run_id: str, list_id: str) -> None:
+        _job, output_dir = completed_run(store, run_id)
+        try:
+            delete_list(output_dir, list_id)
+        except SearchListError as exc:
+            raise search_list_error(exc) from exc
 
     @router.post("/api/runs/{run_id}/search/hashes")
     async def search_hashes(run_id: str, body: HashesBody, request: Request) -> dict[str, object]:
@@ -480,7 +682,7 @@ def build_search_index_router(store: RunJobStore, *, owner: object | None = None
             "requestBody": {
                 "content": {
                     "application/json": {"schema": HashSetJsonBody.model_json_schema()},
-                    "multipart/form-data": {"schema": {"type": "object", "properties": {"file": {"type": "string", "format": "binary"}, "name": {"type": "string"}, "label": {"type": "string", "enum": list(LABELS)}}}},
+                    "multipart/form-data": {"schema": {"type": "object", "properties": {"file": {"type": "string", "format": "binary"}, "name": {"type": "string"}, "label": {"type": "string", "enum": list(LABELS)}, "category": {"type": "string", "enum": list(LABELS)}}}},
                     "text/plain": {"schema": {"type": "string"}},
                     "text/csv": {"schema": {"type": "string"}},
                 }
@@ -490,10 +692,13 @@ def build_search_index_router(store: RunJobStore, *, owner: object | None = None
     async def upload_hash_set(
         request: Request,
         name: str | None = Query(default=None, max_length=200),
-        label: str = Query(default="custom", max_length=16),
+        label: str | None = Query(default=None, max_length=16),
+        category: str | None = Query(default=None, max_length=16, description="known-good|known-bad|custom (비우면 NSRL은 known-good, 그 밖은 custom)"),
         filename: str = Query(default="", max_length=200),
     ) -> dict[str, object]:
-        """``{name, label, lines}`` JSON, ``multipart/form-data`` (``file`` + ``name``/``label``) or a raw text/CSV body (``?name=&label=&filename=``); <= 50 MB."""
+        """``{name, category, lines}`` JSON, ``multipart/form-data`` (``file`` + ``name``/``category``) or a raw text/CSV body
+        (``?name=&category=&filename=``); <= 50 MB. ``label`` is the former name of ``category``."""
+        label = category or label
         declared = request.headers.get("content-length")
         if declared and declared.isdigit() and int(declared) > MAX_UPLOAD_BYTES + 64 * 1024:
             raise HTTPException(status_code=413, detail="해시 세트 파일이 너무 큽니다(최대 50 MB)")
@@ -512,14 +717,17 @@ def build_search_index_router(store: RunJobStore, *, owner: object | None = None
                 body = HashSetJsonBody.model_validate(json.loads(raw.decode("utf-8")))
             except (ValueError, UnicodeDecodeError) as exc:
                 raise HTTPException(status_code=400, detail=f"요청 본문이 올바른 해시 세트 JSON이 아닙니다: {exc}") from exc
-            name, label, filename, data = body.name, body.label, body.filename, body.lines.encode("utf-8")
+            name, label, filename, data = body.name, body.category or body.label, body.filename, body.lines.encode("utf-8")
         elif content_type.startswith("multipart/form-data"):
             fields = _parse_multipart(raw, content_type)
             if "file" not in fields:
                 raise HTTPException(status_code=400, detail="multipart 본문에 file 항목이 없습니다")
             data, filename = fields["file"]
             name = (fields.get("name", (b"", ""))[0].decode("utf-8", "replace").strip() or name or filename or "").strip()
-            label = fields.get("label", (label.encode("utf-8"), ""))[0].decode("utf-8", "replace").strip() or label
+            for key in ("label", "category"):
+                value = fields.get(key, (b"", ""))[0].decode("utf-8", "replace").strip()
+                if value:
+                    label = value
         else:
             data = raw
         try:

@@ -1,10 +1,10 @@
 // AXIOM adoption E3 (plan §3.3): tag manager, digit tag keys, propagation, classic split,
-// media blur persistence, baseline compare bars, selection CSV.
+// media blur persistence, baseline compare bars, selection CSV. The T-144 tag author/history
+// checks live in tagAuthor.test.tsx.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CaseTag } from "../../api/reviewTools";
 import { CLASSIC_COLLAPSE_REASON, collapseViewerPane, collapseViewerReason } from "../../commands/builtin";
 import { NO_RUN_REASON } from "../../commands/reasons";
 import { getCommand, registerCommands, resetCommandRegistry, runCommand } from "../../commands/registry";
@@ -48,6 +48,7 @@ import { registerRowSource, resetRowSources } from "./rowSource";
 import { draftReason, SYSTEM_TAG_REASON, TagManagerDialog } from "./TagManagerDialog";
 import { resetTagKeyFlights, unboundKeyReason } from "./tagKeys";
 import { loadCaseTags, resetCaseTagStore, sortTags } from "./tagStore";
+import { caseRoutes, SYSTEM, tag } from "./tagTestData";
 import {
   CLASSIC_LAYOUT_KEY,
   CLASSIC_SPLIT_KEY,
@@ -63,37 +64,6 @@ vi.mock("../../a11y", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../a11y")>()),
   announce: announceMock,
 }));
-
-function tag(partial: Partial<CaseTag> & { id: number; name: string }): CaseTag {
-  return {
-    case_id: "run-r1",
-    kind: "user",
-    color_token: "tag-5",
-    shortcut: null,
-    description: "",
-    created_by: "검사관 A",
-    created_at: "2026-10-17T00:00:00+00:00",
-    updated_at: "2026-10-17T00:00:00+00:00",
-    deleted_at: null,
-    deleted_by: null,
-    count: 0,
-    ...partial,
-  };
-}
-
-const SYSTEM: CaseTag[] = [
-  tag({ id: 1, name: "북마크", kind: "system", color_token: "tag-3" }),
-  ...[1, 2, 3, 4, 5].map((n) => tag({ id: n + 1, name: `우선순위 ${n}`, kind: "system", shortcut: n })),
-];
-
-function caseRoutes(tags: CaseTag[], extra: Record<string, unknown> = {}) {
-  return {
-    "GET /api/runs/r1/review-counts": { run_id: "r1", case_id: "run-r1", exists: true, by_status: {} },
-    "GET /api/cases/run-r1/tags": { case_id: "run-r1", exists: true, tags },
-    "POST /api/runs/r1/case-db/ensure": { database: "D:/out/rapidtriage-case.db", case_id: "run-r1" },
-    ...extra,
-  };
-}
 
 const target = (locator: string): ViewerTarget => ({
   ref: { collection: "files", locator },
@@ -163,7 +133,7 @@ describe("tag manager dialog", () => {
       name: "DLP 유출 후보",
       color_token: "tag-7",
       shortcut: 7,
-      created_by: "web-ui",
+      created_by: "",
     });
     await waitFor(() => expect(announceMock).toHaveBeenCalledWith("태그 'DLP 유출 후보'을(를) 만들었습니다"));
 
@@ -173,6 +143,30 @@ describe("tag manager dialog", () => {
     view.unmount();
     expect(document.activeElement).toBe(opener);
     opener.remove();
+  });
+
+  it("tag delete confirms with the danger button, starts on 취소, Esc cancels only the confirmation (T-034)", async () => {
+    const { calls } = mockFetch(caseRoutes([...SYSTEM, tag({ id: 9, name: "하 태그", count: 2 })]));
+    const onClose = vi.fn();
+    renderWithQuery(<TagManagerDialog runId="r1" onClose={onClose} />);
+    const dialog = await screen.findByRole("dialog", { name: "태그 관리" });
+    await waitFor(() => expect(within(dialog).getAllByTestId("tag-row")).toHaveLength(7));
+    const opener = within(dialog).getByRole("button", { name: "하 태그 태그 삭제" });
+    opener.focus();
+    fireEvent.click(opener);
+    const confirm = within(dialog).getByRole("group", { name: "태그 삭제 확인" });
+    // Says exactly what happens: rows lose the tag, rows and evidence stay, the record stays.
+    expect(confirm.textContent).toContain("2개 행에서 태그만 빠지고, 행과 원본 증거는 그대로 남습니다");
+    expect(confirm.textContent).toContain("삭제 표시로 남습니다");
+    expect(document.activeElement).toBe(within(confirm).getByTestId("tag-delete-confirm-cancel"));
+    const ok = within(confirm).getByRole("button", { name: "삭제" });
+    expect(ok.className).toContain("danger");
+    expect(ok.className).not.toContain("primary");
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Escape" });
+    expect(within(dialog).queryByRole("group", { name: "태그 삭제 확인" })).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+    expect(calls.some((call) => call.method === "DELETE")).toBe(false);
   });
 
   it("draft validation is Korean and case-insensitive", () => {
@@ -371,9 +365,10 @@ describe("같은 해시 행에 태그 전파", () => {
     });
 
     const [all, ...each] = propagationItems({ ...viewerRow, tags: ["같은 사진", "북마크"] }, "r1");
-    expect(all?.label).toBe("같은 해시 행에 태그 전파: 사용자 태그 전부 (같은 사진)");
+    expect(all?.label).toBe("같은 해시 행에 태그 전파 (같은 사진)");
     expect(all?.disabledReason).toBeUndefined();
-    expect(each.map((item) => item.label)).toEqual(["'같은 사진'만 전파", "'북마크'만 전파 (시스템 태그)"]);
+    // One user tag = the default entry itself (C-W8): only the system tag gets its own entry.
+    expect(each.map((item) => item.label)).toEqual(["'북마크'만 전파 (시스템 태그)"]);
     all?.onSelect();
     await waitFor(() => expect(batches(calls)).toHaveLength(2));
     expect(batches(calls)[1]).toMatchObject({
@@ -419,6 +414,22 @@ describe("같은 해시 행에 태그 전파", () => {
     );
     const row = makeRow(makeRef("files", "/candidates/4"), { title: "a.jpg", tags: ["같은 사진"] });
     await expect(propagateTagsByHash("r1", [row])).rejects.toThrow("전파 상한 10,000건");
+  });
+
+  it("says how many empty same-hash rows were left out (T-183 skipped_empty)", async () => {
+    mockFetch(
+      caseRoutes([...SYSTEM, tag({ id: 40, name: "같은 사진" })], {
+        "POST /api/case-db/review-batch": {
+          ...PROPAGATED,
+          propagation: { ...PROPAGATED.propagation, hashless_targets: 2, skipped_empty: 1234 },
+        },
+      }),
+    );
+    const row = makeRow(makeRef("files", "/candidates/4"), { title: "a.jpg", tags: ["같은 사진"] });
+    await expect(propagateTagsByHash("r1", [row])).resolves.toBe(
+      "같은 해시 행 23건에 태그 '같은 사진'을(를) 전파했습니다" +
+        " (해시가 없는 행 2건은 그 행에만 적용 · 빈 파일(0바이트) 1,234건은 전파하지 않음)",
+    );
   });
 });
 

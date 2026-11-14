@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 from fastapi import HTTPException
 
+from ...core.credential_files import credential_file_reason
 from ...core.forensic_accuracy import build_accuracy_gate
 from .constants import (
     EMAIL_ATTACHMENT_EXPORT_MAX_BYTES,
@@ -660,7 +661,10 @@ def build_email_attachment_package(
     hashes = compute_hashes_for_bytes(payload)
     content_b64 = ""
     content_status = "not-requested"
-    if include_content:
+    if include_content and credential_file_reason(part.get_filename() or "", sniff=False):
+        # An attached credential / secret file (``id_rsa``, ``.credentials.json`` …) never returns its bytes.
+        content_status = "withheld-credential-file"
+    elif include_content:
         if len(payload) > EMAIL_ATTACHMENT_EXPORT_MAX_BYTES:
             content_status = "too-large"
         else:

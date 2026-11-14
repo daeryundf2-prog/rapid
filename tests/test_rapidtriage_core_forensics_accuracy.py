@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import tempfile
 import unittest
@@ -12,6 +14,13 @@ from rapidtriage.core.forensic_accuracy import (
     build_core_forensics_accuracy_profiles,
     build_core_forensics_known_answer_template,
 )
+
+
+def _quiet_main(argv: list[str]) -> int:
+    """Run the CLI with ``--json`` output captured: each validation / commercial-readiness call
+    prints the full 120-item report (~10 MB per module run, T-148). The tests read the files."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        return main(argv)
 
 
 class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
@@ -347,7 +356,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
     def test_validation_package_includes_core_accuracy_profiles(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output = Path(tmp_dir) / "validation"
-            exit_code = main(["validation", "--output-dir", str(output), "--json"])
+            exit_code = _quiet_main(["validation", "--output-dir", str(output), "--json"])
 
             self.assertEqual(exit_code, 0)
             payload = json.loads((output / "rapidtriage-validation-package.json").read_text(encoding="utf-8"))
@@ -401,7 +410,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             )
             output = root / "validation"
 
-            exit_code = main(
+            exit_code = _quiet_main(
                 [
                     "validation",
                     "--output-dir",
@@ -431,7 +440,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             output = Path(tmp_dir) / "validation"
             manifest = Path("docs/validation/rapidtriage-core-forensics-006-010-known-answer.json")
 
-            exit_code = main(
+            exit_code = _quiet_main(
                 [
                     "validation",
                     "--output-dir",
@@ -450,7 +459,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             self.assertTrue(all(dataset["evidence_paths_present"] for dataset in known_answer["datasets"]))
 
             readiness = Path(tmp_dir) / "readiness"
-            readiness_exit = main(
+            readiness_exit = _quiet_main(
                 [
                     "commercial-readiness",
                     "--validation-package",
@@ -481,7 +490,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             output = Path(tmp_dir) / "validation"
             manifest = Path("docs/validation/rapidtriage-core-forensics-001-005-known-answer.json")
 
-            exit_code = main(
+            exit_code = _quiet_main(
                 [
                     "validation",
                     "--output-dir",
@@ -500,7 +509,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             self.assertTrue(all(dataset["evidence_paths_present"] for dataset in known_answer["datasets"]))
 
             readiness = Path(tmp_dir) / "readiness"
-            readiness_exit = main(
+            readiness_exit = _quiet_main(
                 [
                     "commercial-readiness",
                     "--validation-package",
@@ -531,7 +540,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             output = Path(tmp_dir) / "validation"
             manifest = Path("docs/validation/rapidtriage-core-forensics-011-015-known-answer.json")
 
-            exit_code = main(
+            exit_code = _quiet_main(
                 [
                     "validation",
                     "--output-dir",
@@ -550,7 +559,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             self.assertTrue(all(dataset["evidence_paths_present"] for dataset in known_answer["datasets"]))
 
             readiness = Path(tmp_dir) / "readiness"
-            readiness_exit = main(
+            readiness_exit = _quiet_main(
                 [
                     "commercial-readiness",
                     "--validation-package",
@@ -581,7 +590,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             output = Path(tmp_dir) / "validation"
             manifest = Path("docs/validation/rapidtriage-core-forensics-016-020-known-answer.json")
 
-            exit_code = main(
+            exit_code = _quiet_main(
                 [
                     "validation",
                     "--output-dir",
@@ -600,7 +609,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             self.assertTrue(all(dataset["evidence_paths_present"] for dataset in known_answer["datasets"]))
 
             readiness = Path(tmp_dir) / "readiness"
-            readiness_exit = main(
+            readiness_exit = _quiet_main(
                 [
                     "commercial-readiness",
                     "--validation-package",
@@ -631,7 +640,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             output = Path(tmp_dir) / "validation"
             manifest = Path("docs/validation/rapidtriage-core-forensics-021-025-known-answer.json")
 
-            exit_code = main(
+            exit_code = _quiet_main(
                 [
                     "validation",
                     "--output-dir",
@@ -650,7 +659,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             self.assertTrue(all(dataset["evidence_paths_present"] for dataset in known_answer["datasets"]))
 
             readiness = Path(tmp_dir) / "readiness"
-            readiness_exit = main(
+            readiness_exit = _quiet_main(
                 [
                     "commercial-readiness",
                     "--validation-package",
@@ -681,7 +690,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             output = Path(tmp_dir) / "validation"
             manifest = Path("docs/validation/rapidtriage-core-forensics-026-030-known-answer.json")
 
-            exit_code = main(
+            exit_code = _quiet_main(
                 [
                     "validation",
                     "--output-dir",
@@ -700,7 +709,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             self.assertTrue(all(dataset["evidence_paths_present"] for dataset in known_answer["datasets"]))
 
             readiness = Path(tmp_dir) / "readiness"
-            readiness_exit = main(
+            readiness_exit = _quiet_main(
                 [
                     "commercial-readiness",
                     "--validation-package",
@@ -731,7 +740,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             output = Path(tmp_dir) / "validation"
             manifest = Path("docs/validation/rapidtriage-core-forensics-031-040-known-answer.json")
 
-            exit_code = main(
+            exit_code = _quiet_main(
                 [
                     "validation",
                     "--output-dir",
@@ -777,7 +786,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             self.assertEqual(len(legal_matrix["matrix_hash"]), 64)
 
             readiness = Path(tmp_dir) / "readiness"
-            readiness_exit = main(
+            readiness_exit = _quiet_main(
                 [
                     "commercial-readiness",
                     "--validation-package",
@@ -808,7 +817,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             output = Path(tmp_dir) / "validation"
             manifest = Path("docs/validation/rapidtriage-core-forensics-041-050-known-answer.json")
 
-            exit_code = main(
+            exit_code = _quiet_main(
                 [
                     "validation",
                     "--output-dir",
@@ -827,7 +836,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             self.assertTrue(all(dataset["evidence_paths_present"] for dataset in known_answer["datasets"]))
 
             readiness = Path(tmp_dir) / "readiness"
-            readiness_exit = main(
+            readiness_exit = _quiet_main(
                 [
                     "commercial-readiness",
                     "--validation-package",
@@ -858,7 +867,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             output = Path(tmp_dir) / "validation"
             manifest = Path("docs/validation/rapidtriage-core-forensics-051-060-known-answer.json")
 
-            exit_code = main(
+            exit_code = _quiet_main(
                 [
                     "validation",
                     "--output-dir",
@@ -877,7 +886,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             self.assertTrue(all(dataset["evidence_paths_present"] for dataset in known_answer["datasets"]))
 
             readiness = Path(tmp_dir) / "readiness"
-            readiness_exit = main(
+            readiness_exit = _quiet_main(
                 [
                     "commercial-readiness",
                     "--validation-package",
@@ -908,7 +917,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             output = Path(tmp_dir) / "validation"
             manifest = Path("docs/validation/rapidtriage-core-forensics-061-070-known-answer.json")
 
-            exit_code = main(
+            exit_code = _quiet_main(
                 [
                     "validation",
                     "--output-dir",
@@ -927,7 +936,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             self.assertTrue(all(dataset["evidence_paths_present"] for dataset in known_answer["datasets"]))
 
             readiness = Path(tmp_dir) / "readiness"
-            readiness_exit = main(
+            readiness_exit = _quiet_main(
                 [
                     "commercial-readiness",
                     "--validation-package",
@@ -958,7 +967,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             output = Path(tmp_dir) / "validation"
             manifest = Path("docs/validation/rapidtriage-core-forensics-071-080-known-answer.json")
 
-            exit_code = main(
+            exit_code = _quiet_main(
                 [
                     "validation",
                     "--output-dir",
@@ -977,7 +986,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             self.assertTrue(all(dataset["evidence_paths_present"] for dataset in known_answer["datasets"]))
 
             readiness = Path(tmp_dir) / "readiness"
-            readiness_exit = main(
+            readiness_exit = _quiet_main(
                 [
                     "commercial-readiness",
                     "--validation-package",
@@ -1008,7 +1017,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             output = Path(tmp_dir) / "validation"
             manifest = Path("docs/validation/rapidtriage-core-forensics-081-090-known-answer.json")
 
-            exit_code = main(
+            exit_code = _quiet_main(
                 [
                     "validation",
                     "--output-dir",
@@ -1027,7 +1036,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             self.assertTrue(all(dataset["evidence_paths_present"] for dataset in known_answer["datasets"]))
 
             readiness = Path(tmp_dir) / "readiness"
-            readiness_exit = main(
+            readiness_exit = _quiet_main(
                 [
                     "commercial-readiness",
                     "--validation-package",
@@ -1058,7 +1067,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             output = Path(tmp_dir) / "validation"
             manifest = Path("docs/validation/rapidtriage-core-forensics-091-100-known-answer.json")
 
-            exit_code = main(
+            exit_code = _quiet_main(
                 [
                     "validation",
                     "--output-dir",
@@ -1077,7 +1086,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             self.assertTrue(all(dataset["evidence_paths_present"] for dataset in known_answer["datasets"]))
 
             readiness = Path(tmp_dir) / "readiness"
-            readiness_exit = main(
+            readiness_exit = _quiet_main(
                 [
                     "commercial-readiness",
                     "--validation-package",
@@ -1108,7 +1117,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             output = Path(tmp_dir) / "validation"
             manifest = Path("docs/validation/rapidtriage-core-forensics-101-120-known-answer.json")
 
-            exit_code = main(
+            exit_code = _quiet_main(
                 [
                     "validation",
                     "--output-dir",
@@ -1127,7 +1136,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             self.assertTrue(all(dataset["evidence_paths_present"] for dataset in known_answer["datasets"]))
 
             readiness = Path(tmp_dir) / "readiness"
-            readiness_exit = main(
+            readiness_exit = _quiet_main(
                 [
                     "commercial-readiness",
                     "--validation-package",

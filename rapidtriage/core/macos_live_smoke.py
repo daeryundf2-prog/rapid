@@ -18,13 +18,15 @@ from ..artifacts.macos import (
 )
 from .benchmark import DEFAULT_BENCHMARK_KEYWORD, run_benchmark
 from .benchmark_fts import run_sqlite_fts_benchmark
+from .cli_constants import (
+    DEFAULT_MACOS_SMOKE_BENCHMARK_FILES,
+    DEFAULT_MACOS_SMOKE_FTS_RECORDS,
+)
 from .collect_plan import build_collect_plan
 from .docs import write_result
 from .large_case_readiness import build_large_case_readiness_report
 
 MACOS_LIVE_SMOKE_VERSION = "macos-live-smoke-v1"
-DEFAULT_MACOS_SMOKE_BENCHMARK_FILES = 150
-DEFAULT_MACOS_SMOKE_FTS_RECORDS = 2_000
 DEFAULT_MACOS_SMOKE_KEYWORD = DEFAULT_BENCHMARK_KEYWORD
 MACOS_LIVE_SOURCE_HASH_MAX_BYTES = 256 * 1024 * 1024
 

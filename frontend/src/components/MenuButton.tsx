@@ -3,12 +3,26 @@
  * Enter/Space activate, Esc and Tab close and return focus to the trigger. A disabled item
  * stays focusable with aria-disabled + its reason as description, and activating it says the
  * reason (`onDisabled`) instead of doing nothing.
+ *
+ * The list is portalled into document.body and fixed to the trigger (plan r8 T-014): no pane's
+ * `overflow: clip` cuts it, and `placePopover` flips it to the other side / shifts it sideways
+ * so it stays inside the viewport. It follows the trigger on resize and scroll.
  */
 
-import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 import { useEscape } from "../a11y/focus";
 import { Icon, type IconName } from "../icons";
 import { keyLabel } from "../shortcuts";
+import { placePopover } from "./Popover";
 import "./popover.css";
 
 export interface MenuItem {
@@ -29,7 +43,7 @@ export interface MenuItem {
   onSelect: () => void;
   /** Rule above the item. */
   separator?: boolean;
-  /** Section heading above the item (e.g. "리뷰", "원본"); implies a rule unless it is first. */
+  /** Section heading above the item (e.g. "검토", "원본"); implies a rule unless it is first. */
   section?: string;
 }
 
@@ -72,6 +86,38 @@ export function MenuButton({
   };
 
   useEscape(() => close(true), open);
+
+  // Place before paint (no flash at 0,0) and keep following the trigger. Styles are written to
+  // the node directly so the first item can take focus in the same commit.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const trigger = triggerRef.current;
+      const menu = menuRef.current;
+      if (!trigger || !menu) return;
+      const next = placePopover(
+        trigger.getBoundingClientRect(),
+        { width: menu.offsetWidth, height: menu.scrollHeight },
+        { width: window.innerWidth, height: window.innerHeight },
+        align,
+        placement,
+      );
+      menu.style.top = `${next.top}px`;
+      menu.style.left = `${next.left}px`;
+      menu.style.maxHeight = `${next.maxHeight}px`;
+      menu.dataset.placement = next.above ? "above" : "below";
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(place);
+    if (observer && menuRef.current) observer.observe(menuRef.current);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+      observer?.disconnect();
+    };
+  }, [open, align, placement]);
 
   useEffect(() => {
     if (!open) return;
@@ -147,88 +193,91 @@ export function MenuButton({
       >
         {children}
       </button>
-      {open ? (
-        <div
-          ref={menuRef}
-          id={menuId}
-          role="menu"
-          aria-label={label}
-          className={`popover menu popover-${align}${placement === "above" ? " popover-above" : ""}`}
-          onKeyDown={onMenuKeyDown}
-        >
-          {items.map((item, index) => {
-            const reasonId = `${reasonPrefix}-${index}`;
-            const common = {
-              type: "button" as const,
-              "aria-disabled": item.disabledReason ? true : undefined,
-              "aria-keyshortcuts": item.shortcut ? item.shortcut.replace("Ctrl", "Control") : undefined,
-              "aria-describedby": item.disabledReason ? reasonId : undefined,
-              "data-disabled-reason": item.disabledReason || undefined,
-              "data-command": item.command,
-              "data-status": item.status,
-              tabIndex: -1,
-              className: "menu-item",
-              onClick: () => {
-                if (item.disabledReason) {
-                  onDisabled?.(item.disabledReason);
-                  return;
-                }
-                close(true);
-                item.onSelect();
-              },
-            };
-            const content = (
-              <>
-                <span className="menu-item-lead" aria-hidden="true">
-                  {item.status ? (
-                    <span className="status-dot" data-status={item.status} />
-                  ) : item.icon ? (
-                    <Icon name={item.icon} />
-                  ) : null}
-                </span>
-                <span className="menu-item-text">
-                  <span className="menu-item-label">{item.label}</span>
-                  {item.disabledReason ? (
-                    <span className="menu-item-reason" aria-hidden="true">
-                      {item.disabledReason}
+      {open && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              ref={menuRef}
+              id={menuId}
+              role="menu"
+              aria-label={label}
+              className={`popover menu popover-portal popover-${align}`}
+              onKeyDown={onMenuKeyDown}
+            >
+              {items.map((item, index) => {
+                const reasonId = `${reasonPrefix}-${index}`;
+                const common = {
+                  type: "button" as const,
+                  "aria-disabled": item.disabledReason ? true : undefined,
+                  "aria-keyshortcuts": item.shortcut ? item.shortcut.replace("Ctrl", "Control") : undefined,
+                  "aria-describedby": item.disabledReason ? reasonId : undefined,
+                  "data-disabled-reason": item.disabledReason || undefined,
+                  "data-command": item.command,
+                  "data-status": item.status,
+                  tabIndex: -1,
+                  className: "menu-item",
+                  onClick: () => {
+                    if (item.disabledReason) {
+                      onDisabled?.(item.disabledReason);
+                      return;
+                    }
+                    close(true);
+                    item.onSelect();
+                  },
+                };
+                const content = (
+                  <>
+                    <span className="menu-item-lead" aria-hidden="true">
+                      {item.status ? (
+                        <span className="status-dot" data-status={item.status} />
+                      ) : item.icon ? (
+                        <Icon name={item.icon} />
+                      ) : null}
                     </span>
-                  ) : null}
-                </span>
-                {item.checked ? <Icon name="check" className="menu-item-check" /> : null}
-                {item.shortcut ? (
-                  <span className="menu-item-kbd" aria-hidden="true">
-                    {keyLabel(item.shortcut)}
-                  </span>
-                ) : null}
-              </>
-            );
-            return (
-              <div key={item.id} className="menu-row" role="none">
-                {(item.separator || item.section) && index > 0 ? <hr className="menu-sep" /> : null}
-                {item.section ? (
-                  <div className="menu-heading" aria-hidden="true">
-                    {item.section}
+                    <span className="menu-item-text">
+                      <span className="menu-item-label">{item.label}</span>
+                      {item.disabledReason ? (
+                        <span className="menu-item-reason" aria-hidden="true">
+                          {item.disabledReason}
+                        </span>
+                      ) : null}
+                    </span>
+                    {item.checked ? <Icon name="check" className="menu-item-check" /> : null}
+                    {item.shortcut ? (
+                      <span className="menu-item-kbd" aria-hidden="true">
+                        {keyLabel(item.shortcut)}
+                      </span>
+                    ) : null}
+                  </>
+                );
+                return (
+                  <div key={item.id} className="menu-row" role="none">
+                    {(item.separator || item.section) && index > 0 ? <hr className="menu-sep" /> : null}
+                    {item.section ? (
+                      <div className="menu-heading" aria-hidden="true">
+                        {item.section}
+                      </div>
+                    ) : null}
+                    {item.checked === undefined ? (
+                      <button role="menuitem" {...common}>
+                        {content}
+                      </button>
+                    ) : (
+                      <button role="menuitemcheckbox" aria-checked={item.checked} {...common}>
+                        {content}
+                      </button>
+                    )}
+                    {item.disabledReason ? (
+                      <span id={reasonId} hidden>
+                        {item.disabledReason}
+                      </span>
+                    ) : null}
                   </div>
-                ) : null}
-                {item.checked === undefined ? (
-                  <button role="menuitem" {...common}>
-                    {content}
-                  </button>
-                ) : (
-                  <button role="menuitemcheckbox" aria-checked={item.checked} {...common}>
-                    {content}
-                  </button>
-                )}
-                {item.disabledReason ? (
-                  <span id={reasonId} hidden>
-                    {item.disabledReason}
-                  </span>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-      ) : null}
+                );
+              })}
+            </div>,
+            document.body,
+          )
+        : null}
     </span>
   );
 }

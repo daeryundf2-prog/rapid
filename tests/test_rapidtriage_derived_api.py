@@ -116,12 +116,12 @@ class DerivedApiTests(unittest.TestCase):
     def test_meta_tree_and_first_page(self) -> None:
         self.build()
         meta = self.get("/derived")
-        self.assertEqual([table["table"] for table in meta["tables"]], ["people", "devices", "paths", "attachments", "credentials", "urls"])
+        self.assertEqual([table["table"] for table in meta["tables"]], ["people", "devices", "paths", "attachments", "credentials", "urls", "ai_usage", "ai_projects"])
         people_meta = meta["tables"][0]
         self.assertEqual((people_meta["label"], people_meta["rows"]), ("사람 식별자", 7))
         node = next(node for node in self.get("/tree")["nodes"] if node["id"] == "derived")
         self.assertEqual(node["label"], "통합 보기")
-        self.assertEqual([child["id"] for child in node["children"]], [f"derived:{t}" for t in ("people", "devices", "paths", "attachments", "credentials", "urls")])
+        self.assertEqual([child["id"] for child in node["children"]], [f"derived:{t}" for t in ("people", "devices", "paths", "attachments", "credentials", "urls", "ai_usage", "ai_projects")])
         self.assertEqual(node["children"][0]["count"], 7)
         page = self.get("/derived/people")
         self.assertEqual((page["total"], page["matched"], page["sort"], page["next_cursor"]), (7, 7, "count", None))

@@ -23,6 +23,16 @@ from xml.etree import ElementTree as ET
 from ..artifacts import all_providers, collect_cached
 from ..artifacts.windows.antiforensics import redact_recovery_key_text
 from ..artifacts.windows.system_extras import redact_secret_store_text
+from .clock import now_local_iso
+from .credential_files import (
+    BODY_WITHHELD,
+    CREDENTIAL_EXTRACTION_METHOD,
+    CredentialFileLog,
+    credential_file_reason,
+    credential_index_text,
+    credential_withheld_reason_text,
+    redact_credential_text,
+)
 from .doc_text import (
     OLE_SIGNATURE,
     DocumentText,
@@ -135,7 +145,14 @@ class ManifestProgress(Protocol):
     def provider_finished(self, kind: str, *, status: str, artifact_count: int, **extra: object) -> None: ...
 
 
-def scan_document_candidates(root: InputRoot | Path, limit: int = 0) -> list[DocumentCandidate]:
+def scan_document_candidates(
+    root: InputRoot | Path,
+    limit: int = 0,
+    *,
+    credential_log: CredentialFileLog | None = None,
+) -> list[DocumentCandidate]:
+    """Document candidates under ``root``; ``credential_log`` (when given) also receives a
+    ``credential-file`` row for every credential file walked, whatever its extension."""
     input_root = resolve_input_root(root)
     origin = file_time_origin_for_input_kind(input_root.kind)
     candidates: list[DocumentCandidate] = []
@@ -144,6 +161,10 @@ def scan_document_candidates(root: InputRoot | Path, limit: int = 0) -> list[Doc
         for name in files:
             path = Path(dirpath) / name
             suffix = path.suffix.lower()
+            if credential_log is not None:
+                reason = credential_file_reason(path, name=name, directory=dirpath)
+                if reason:
+                    credential_log.add(path, reason)
             if suffix not in SUPPORTED_DOC_EXTS:
                 continue
             try:
@@ -330,7 +351,7 @@ def build_manifest(
         # provider order deterministic regardless of completion order.
         provider_rows = list(executor.map(collect_row, providers))
     return {
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "root": str(input_root.root_path),
         "platform": platform.platform(),
         "keywords": list(keywords),
@@ -429,7 +450,8 @@ def run_docs_search(
     persist step's case DB so documents are not extracted twice)."""
     input_root = resolve_input_root(root, kind=input_kind)
     normalized = [normalize_search_text(item) for item in keywords]
-    candidates = scan_document_candidates(input_root, limit=limit)
+    credential_log = CredentialFileLog()
+    candidates = scan_document_candidates(input_root, limit=limit, credential_log=credential_log)
     matches: list[DocumentMatch] = []
     text_by_path: dict[str, str] = {}
     extraction_errors: list[dict[str, object]] = []
@@ -485,7 +507,7 @@ def run_docs_search(
     payload = {
         "command": "docs",
         "root": str(input_root.root_path),
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "summary": {
             "candidate_count": len(candidates),
             "match_count": len(matches),
@@ -508,6 +530,10 @@ def run_docs_search(
         "candidates": [item.to_dict() for item in candidates],
         "results": [item.to_dict() for item in matches],
     }
+    if credential_log.count:
+        # Credential / secret files (core/credential_files.py): name and path only, body never collected.
+        payload["summary"]["credential_files"] = credential_log.disclosure()
+        payload["credential_files"] = credential_log.rows
     if extraction_errors:
         payload["summary"]["extraction_error_count"] = len(extraction_errors)
         payload["summary"]["skipped_document_count"] = len(extraction_errors)
@@ -604,7 +630,7 @@ def build_docs_index(
         "command": "docs-index",
         "version": DOCS_INDEX_VERSION,
         "root": str(input_root.root_path),
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "strategy": "processed-text-inverted-index",
         "analyzer": {
             "case_fold": True,
@@ -829,7 +855,7 @@ def search_docs_index_payload(
     output_core = {
         "command": "docs-index-search",
         "profile_version": "docs-index-query-v1",
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "root": index_payload.get("root"),
         "index_strategy": index_payload.get("strategy"),
         "index_version": index_payload.get("version"),
@@ -871,11 +897,20 @@ def extract_document_text(
     ``core.doc_text``; the other kinds wrap :func:`extract_text`. An OOXML
     file that is an OLE container is an encrypted Office document.
     """
+    reason = credential_file_reason(path)
+    if reason:
+        # Credential / secret files: only the name and path reach the docs output, index and case DB.
+        return DocumentText(
+            credential_index_text(path),
+            status=BODY_WITHHELD,
+            method=CREDENTIAL_EXTRACTION_METHOD,
+            reason=credential_withheld_reason_text(reason),
+        )
     result = _extract_document_text(path, kind, max_input_bytes=max_input_bytes)
     # BitLocker recovery passwords are masked by content (checksum-validated), whatever the
     # file name, before the text reaches the docs output, the docs index or the case DB.
     # R5 L2: wallet/credential stores and private keys are withheld, saved-password lines masked.
-    redacted = redact_secret_store_text(path, redact_recovery_key_text(path.name, result.text))
+    redacted = redact_credential_text(path, redact_secret_store_text(path, redact_recovery_key_text(path.name, result.text)))
     return result if redacted == result.text else replace(result, text=redacted)
 
 
@@ -915,7 +950,11 @@ def extract_text(
     max_pdf_stream_decompressed_bytes: int = MAX_PDF_STREAM_DECOMPRESSED_BYTES,
 ) -> str:
     """Plain text of a document; checksum-valid BitLocker recovery passwords are masked
-    whatever the file name (:func:`~rapidtriage.artifacts.windows.antiforensics.redact_recovery_key_text`)."""
+    whatever the file name (:func:`~rapidtriage.artifacts.windows.antiforensics.redact_recovery_key_text`);
+    a credential file (:func:`~rapidtriage.core.credential_files.credential_file_reason`) yields its
+    name and path only."""
+    if credential_file_reason(path):
+        return credential_index_text(path)
     text = _extract_text(
         path,
         kind,
@@ -925,7 +964,7 @@ def extract_text(
         max_archive_member_count=max_archive_member_count,
         max_pdf_stream_decompressed_bytes=max_pdf_stream_decompressed_bytes,
     )
-    return redact_secret_store_text(path, redact_recovery_key_text(path.name, text))
+    return redact_credential_text(path, redact_secret_store_text(path, redact_recovery_key_text(path.name, text)))
 
 
 def _extract_text(

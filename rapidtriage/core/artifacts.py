@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import datetime as dt
 import json
 import threading
 import time
@@ -22,6 +21,7 @@ from .artifact_store import (
     artifact_record_contract_summary,
     attach_artifact_record_contracts,
 )
+from .clock import now_local_iso
 from .eventlog_channels import EVENTLOG_KIND, ChannelCounter
 from .input_root import InputRoot, resolve_input_root
 from .json_safe import json_default
@@ -138,7 +138,7 @@ def run_artifact_collection(
     payload = {
         "command": "artifacts",
         "kind": collector_kind,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "root": str(input_root.root_path),
         "provider": {
             "name": str(collector.name),
@@ -562,7 +562,7 @@ def stream_artifact_collection(
     payload: dict[str, object] = {
         "command": "artifacts",
         "kind": collector_kind,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "root": str(input_root.root_path),
         "provider": provider,
         "summary": {

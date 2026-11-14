@@ -31,7 +31,7 @@ export const STAGE_DEFS: Record<Stage, StageDef> = {
     icon: "inbox",
     shortcut: "Alt+1",
     home: "intake",
-    panelLabel: "탐색 트리",
+    panelLabel: "접수 패널",
   },
   process: {
     id: "process",
@@ -103,7 +103,12 @@ export function openStage(stage: Stage): void {
   store.navigate(next);
   // Focus the new stage's panel heading (tabindex=-1 h1) and say the stage name once.
   announce(`단계: ${STAGE_DEFS[stage].label}`, { hold: true });
-  const focusHeading = () => document.getElementById(STAGE_HEADING_ID)?.focus();
+  // The left panel can be folded or a closed drawer (scroll review C2): then focus the page.
+  const focusHeading = () => {
+    const heading = document.getElementById(STAGE_HEADING_ID);
+    if (heading && !heading.closest("[hidden]")) heading.focus();
+    else document.getElementById("main")?.focus();
+  };
   if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(focusHeading);
   else focusHeading();
 }

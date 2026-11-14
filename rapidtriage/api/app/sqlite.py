@@ -50,6 +50,7 @@ from .viewer_core import (
     viewer_workflow_commercial_uplift_evidence,
     viewer_workflow_reportability_decision,
 )
+from .viewer_hint import SQLITE_HINT_TABLE_LIMIT
 
 
 def first_sqlite_table_name(source_path: Path) -> str:
@@ -123,6 +124,9 @@ def build_sqlite_preview(source_path: Path, *, run_id: str | None = None) -> dic
             "database_metadata": database_metadata,
             "sidecar_state_profile": database_metadata.get("sidecar_state_profile", {}),
             "tables": previews,
+            # Every table name (the preview above stops at SQLITE_PREVIEW_TABLE_LIMIT): the viewer
+            # can still open a table past the limit (viewer_hint, r7 L4).
+            "table_names": tables[:SQLITE_HINT_TABLE_LIMIT],
             "table_profiles": build_sqlite_table_profiles(previews),
             "table_page_profile": table_page_profile,
             "sqlite_preview_manifest": sqlite_manifest,
@@ -977,8 +981,10 @@ def build_sqlite_table_page(
     where_contains: str | None,
     order_by: str | None,
     descending: bool,
+    locate_rowid: int | None = None,
 ) -> dict[str, object]:
     provenance: dict[str, object] = {}
+    located: dict[str, object] | None = None
     try:
         with open_sqlite_snapshot(source_path, provenance=provenance) as connection:
             tables = set(list_sqlite_tables(connection))
@@ -1005,6 +1011,22 @@ def build_sqlite_table_page(
                     raise HTTPException(status_code=400, detail="order_by is not a column in the selected table")
                 order_sql = f" ORDER BY {quote_sqlite_identifier(order_by)} {'DESC' if descending else 'ASC'}"
             select_clause = ", ".join(quote_sqlite_identifier(column) for column in selected_columns)
+            if locate_rowid is not None and not where_sql and not order_sql:
+                # Viewer jump (r7 L4, C-W1): the page holding this rowid in the table's natural
+                # (rowid) order — the order the unfiltered page query reads in.
+                try:
+                    before_row = connection.execute(
+                        f"SELECT COUNT(*) AS count FROM {quoted_table} WHERE rowid < ?", (locate_rowid,)
+                    ).fetchone()
+                    exists_row = connection.execute(
+                        f"SELECT 1 FROM {quoted_table} WHERE rowid = ? LIMIT 1", (locate_rowid,)
+                    ).fetchone()
+                except sqlite3.DatabaseError:
+                    before_row, exists_row = None, None
+                if before_row is not None:
+                    index = int(before_row["count"] or 0)
+                    offset = (index // limit) * limit
+                    located = {"rowid": locate_rowid, "found": exists_row is not None, "row_number": index + 1}
             count_row = connection.execute(f"SELECT COUNT(*) AS count FROM {quoted_table}{where_sql}", params).fetchone()
             total = int(count_row["count"] or 0)
             page_params = [*params, limit, offset]
@@ -1115,6 +1137,7 @@ def build_sqlite_table_page(
             "has_next": has_next,
             "next_offset": next_offset if has_next else None,
             "max_page_rows": SQLITE_TABLE_PAGE_MAX_ROWS,
+            "located": located,
         },
         "where": {
             "column": where_column or "",

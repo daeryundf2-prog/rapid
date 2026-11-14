@@ -541,6 +541,7 @@ class StepWarningTests(unittest.TestCase):
                                                    "files_extract_manifest", "timeline", "timeline_report", "indicators")}
         outputs["artifacts_eventlog"] = Path("e.json")
         outputs["artifacts_synthetic-media"] = Path("s.json")
+        outputs["artifacts_email"] = Path("m.json")
         rows = build_step_rows(
             manifest_payload={"providers": [1]},
             docs_payload={"summary": {"candidate_count": 1, "match_count": 1}},
@@ -550,6 +551,7 @@ class StepWarningTests(unittest.TestCase):
             artifact_payloads={
                 "eventlog": {"summary": {"artifact_count": 0, "collection_status": "partial", "collection_notes": ["EVTX 없음"]}},
                 "synthetic-media": {"summary": {"artifact_count": 1, "collection_status": "skipped", "skip_reasons": {"의존성 없음": 1}}},
+                "email": {"summary": {"artifact_count": 0, "parser_error_count": 2}},
             },
             timeline_payload={"summary": {"event_count": 1}},
             indicators_payload={"summary": {"indicator_count": 2, "truncated": True}},
@@ -561,6 +563,9 @@ class StepWarningTests(unittest.TestCase):
         self.assertEqual(by_name["indicators"]["warning_level"], "warning")
         self.assertEqual(by_name["artifacts-eventlog"]["warning_level"], "warning")
         self.assertIn("eventlog: EVTX 없음", by_name["artifacts-eventlog"]["warning_messages"])
+        # R-7: the step notes are Korean ("<kind>: …" lets the console name the kind).
+        self.assertIn("eventlog: 수집된 행 없음", by_name["artifacts-eventlog"]["warning_messages"])
+        self.assertEqual(by_name["artifacts-email"]["warning_messages"], ["email: 파서 오류 2건 (해당 수집기만 격리됨)"])
         self.assertEqual(by_name["artifacts-synthetic-media"]["status"], "skipped")
         apply_silent_failure_verdicts(rows, {"checks": [{"id": "artifact-yield-eventlog", "level": "failed", "message": "m", "detail": "d"}]})
         self.assertEqual(by_name["artifacts-eventlog"]["warning_level"], "failed")

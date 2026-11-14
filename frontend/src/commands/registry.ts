@@ -6,13 +6,20 @@
  *
  * Shortcuts: a command's `shortcut` must be one of the canonical keys in
  * KEY_MAP (U5) and no two commands may hold the same key; registering a
- * conflicting or non-canonical shortcut throws.
+ * conflicting or non-canonical shortcut throws; a duplicate id is skipped with a warning.
  */
 
 import { useMemo, useSyncExternalStore } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { announce } from "../a11y";
 import { type Command, type CommandContext, type CommandGroup, KEY_MAP } from "../contracts/command";
+import {
+  commandReadOnlyReason,
+  commandWriteScope,
+  readOnlyErrorSentence,
+  readOnlyReasonOf,
+  useReadOnlyStore,
+} from "../shell/readOnly";
 import { currentRun, isRunActive, runRetryInFlight } from "../state/slices/runs";
 import { type AppState, useAppStore } from "../state/store";
 
@@ -103,10 +110,36 @@ export function getCommandsSnapshot(): readonly Command[] {
   return snapshot;
 }
 
-/** Register a command; returns its unregister function. Throws on id or shortcut conflicts. */
+const NOOP = (): void => {};
+
+/**
+ * T-348: a command that writes (`shell/readOnly.ts` `commandWriteScope`) is disabled with the
+ * read-only sentence while the open result (or the server) is read-only — in the palette, on its
+ * key, in menus and on every button that asks `disabledReason`.
+ */
+const gated = new WeakSet<Command>();
+
+export function withReadOnlyGate(command: Command): Command {
+  if (gated.has(command) || !commandWriteScope(command.id)) return command;
+  const own = command.disabledReason;
+  const wrapped: Command = {
+    ...command,
+    disabledReason: (ctx) => commandReadOnlyReason(command.id) ?? own?.(ctx),
+  };
+  gated.add(wrapped);
+  return wrapped;
+}
+
+/**
+ * Register a command; returns its unregister function. A duplicate id is skipped with a
+ * console warning (data-driven ids such as tree nodes must never blank the console); the
+ * first registration keeps the id. Non-canonical or conflicting shortcuts still throw —
+ * those are static programming errors the tests catch.
+ */
 export function registerCommand(command: Command): () => void {
   if (commands.has(command.id)) {
-    throw new CommandRegistrationError(`명령 id 중복: ${command.id}`);
+    console.warn(`[commands] 명령 id 중복 — 건너뜀: ${command.id}`);
+    return NOOP;
   }
   let key: string | undefined;
   if (command.shortcut) {
@@ -120,7 +153,7 @@ export function registerCommand(command: Command): () => void {
     }
     shortcutOwners.set(key, command.id);
   }
-  const stored: Command = key ? { ...command, shortcut: key } : command;
+  const stored: Command = withReadOnlyGate(key ? { ...command, shortcut: key } : command);
   commands.set(command.id, stored);
   emit();
   return () => {
@@ -237,6 +270,13 @@ export async function runCommand(id: string, options: RunCommandOptions = {}): P
     await command.run(ctx);
     return { ok: true };
   } catch (error) {
+    const readOnly = readOnlyErrorSentence(error);
+    if (readOnly) {
+      // A 409 RUN_READ_ONLY (the band was not current yet): the read-only sentence, not a failure.
+      store.showNotice(readOnly);
+      announce(readOnly);
+      return { ok: false, reason: readOnly };
+    }
     const message = `${command.label} 실패: ${errorText(error)}`;
     store.showNotice(message, "error");
     announce(message, { politeness: "assertive" });
@@ -248,6 +288,8 @@ export async function runCommand(id: string, options: RunCommandOptions = {}): P
 
 /** Live command context (re-renders when route, selection, viewer or run state changes). */
 export function useCommandContext(): CommandContext {
+  // T-348: re-render command views when the result / server turns read-only (gated reasons).
+  useReadOnlyStore((s) => readOnlyReasonOf(s, "run"));
   return useAppStore(useShallow(commandContextFrom));
 }
 

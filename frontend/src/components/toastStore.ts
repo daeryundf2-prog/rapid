@@ -8,10 +8,30 @@ import { create } from "zustand";
  */
 export type ToastTone = "info" | "ok" | "warn" | "error";
 
+/** A link / button in a toast (r7 L4: "열기" on a written file). */
+export interface ToastAction {
+  label: string;
+  /** Opens in a new tab (a read-only file URL). */
+  href?: string;
+  run?: () => void;
+  /** Names the action's kind (e.g. "review-undo"): `dismissActionKey` drops a stale button. */
+  key?: string;
+  /** The key that does the same thing (KEY_MAP notation, e.g. "Ctrl+Z"): aria-keyshortcuts + title. */
+  shortcut?: string;
+}
+
 export interface ToastItem {
   id: number;
   text: string;
   tone: ToastTone;
+  /** Second line, e.g. the path a write went to (monospace, selectable). */
+  detail?: string;
+  action?: ToastAction;
+}
+
+export interface ToastOptions {
+  detail?: string;
+  action?: ToastAction;
 }
 
 /** At most this many toasts are stacked; the oldest goes first. */
@@ -21,30 +41,55 @@ export const TOAST_MS = 6000;
 
 interface ToastState {
   toasts: ToastItem[];
-  push: (text: string, tone?: ToastTone) => number;
+  push: (text: string, tone?: ToastTone, options?: ToastOptions) => number;
   dismiss: (id: number) => void;
+  /** Close the newest toast (global Esc when no dialog is open); false when there was none. */
+  dismissNewest: () => boolean;
+  /** Drop error toasts (a stage change: the error belonged to the page that was left). */
+  clearErrors: () => void;
+  /** Drop the toasts whose action has this `key` (a newer mark makes an older "실행 취소" stale). */
+  dismissActionKey: (key: string) => void;
   clear: () => void;
 }
 
 let seq = 0;
 
-export const useToastStore = create<ToastState>((set) => ({
+export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
-  push: (text, tone = "info") => {
+  push: (text, tone = "info", options = {}) => {
     const id = ++seq;
     const clean = text.trim();
     if (!clean) return id;
+    const item: ToastItem = { id, text: clean, tone };
+    if (options.detail) item.detail = options.detail;
+    if (options.action) item.action = options.action;
     set((s) => ({
       // The same sentence again replaces the old toast instead of stacking a copy.
-      toasts: [...s.toasts.filter((t) => t.text !== clean), { id, text: clean, tone }].slice(-TOAST_MAX),
+      toasts: [...s.toasts.filter((t) => t.text !== clean), item].slice(-TOAST_MAX),
     }));
     return id;
   },
   dismiss: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+  dismissNewest: () => {
+    const newest = get().toasts.at(-1);
+    if (!newest) return false;
+    get().dismiss(newest.id);
+    return true;
+  },
+  clearErrors: () => {
+    if (get().toasts.some((t) => t.tone === "error")) {
+      set((s) => ({ toasts: s.toasts.filter((t) => t.tone !== "error") }));
+    }
+  },
+  dismissActionKey: (key) => {
+    if (get().toasts.some((t) => t.action?.key === key)) {
+      set((s) => ({ toasts: s.toasts.filter((t) => t.action?.key !== key) }));
+    }
+  },
   clear: () => set({ toasts: [] }),
 }));
 
 /** Push a toast from anywhere (non-React code included). */
-export function pushToast(text: string, tone: ToastTone = "info"): number {
-  return useToastStore.getState().push(text, tone);
+export function pushToast(text: string, tone: ToastTone = "info", options?: ToastOptions): number {
+  return useToastStore.getState().push(text, tone, options);
 }

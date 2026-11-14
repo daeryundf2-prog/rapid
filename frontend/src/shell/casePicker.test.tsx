@@ -1,10 +1,17 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { RunListItem } from "../api/runs";
+import { DELETE_RUN_LABEL, useCaseDialogs } from "../features/case/dialogs";
 import { isMacPlatform, keyLabel } from "../shortcuts";
 import { resetAppStore, useAppStore } from "../state/store";
 import { CasePickerCombobox } from "./CasePickerCombobox";
-import { casePickerOptions, moveActiveIndex, shortDateTime } from "./casePicker";
+import {
+  casePickerOptions,
+  moveActiveIndex,
+  RUN_ACTIVE_DELETE_REASON,
+  runDeleteReason,
+  shortDateTime,
+} from "./casePicker";
 
 const runs: RunListItem[] = [
   {
@@ -27,10 +34,10 @@ describe("case picker model (review #5)", () => {
     const options = casePickerOptions(runs);
     expect(options.map((o) => o.runId)).toEqual(["new22222", "mid33333", "old11111"]);
     expect(options[0]).toMatchObject({ name: "beta", mode: "침해사고", status: "failed", tone: "danger" });
-    expect(options[1]).toMatchObject({ name: "mid33333", mode: "케이스", tone: "info" });
+    expect(options[1]).toMatchObject({ name: "mid33333", mode: "모드 없음", tone: "info" });
     expect(options[2]?.tone).toBe("ok");
     expect(options[0]?.date).toBe(shortDateTime("2026-10-12T09:00:00Z"));
-    expect(shortDateTime("2026-10-12T09:00:00Z")).toMatch(/^2026-10-1\d \d\d:\d\d$/);
+    expect(shortDateTime("2026-10-12T09:00:00Z", "Asia/Seoul")).toBe("2026-10-12 18:00");
     expect(shortDateTime(undefined)).toBe("");
   });
 
@@ -59,7 +66,7 @@ describe("case combobox (review #5)", () => {
 
   const open = () => {
     fireEvent.click(screen.getByTestId("case-picker"));
-    return screen.getByRole("combobox", { name: "케이스 검색" });
+    return screen.getByRole("combobox", { name: "런 검색" });
   };
 
   it("opens a popover with search on top; ↓ / ↑ move, Enter opens the case", () => {
@@ -69,7 +76,7 @@ describe("case combobox (review #5)", () => {
     const search = open();
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(document.activeElement).toBe(search);
-    const list = screen.getByRole("listbox", { name: "케이스" });
+    const list = screen.getByRole("listbox", { name: "런" });
     const options = within(list).getAllByRole("option");
     expect(options.map((o) => o.querySelector(".case-picker-option-name")?.textContent)).toEqual([
       "beta",
@@ -96,7 +103,7 @@ describe("case combobox (review #5)", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(document.activeElement).toBe(trigger);
     fireEvent.keyDown(trigger, { key: "a" });
-    const typed = screen.getByRole("combobox", { name: "케이스 검색" }) as HTMLInputElement;
+    const typed = screen.getByRole("combobox", { name: "런 검색" }) as HTMLInputElement;
     expect(typed.value).toBe("a");
     const names = within(screen.getByRole("listbox"))
       .getAllByRole("option")
@@ -112,6 +119,41 @@ describe("case combobox (review #5)", () => {
     const current = screen.getByRole("option", { current: true });
     expect(current.getAttribute("aria-selected")).toBe("true");
     expect(current.querySelector(".status-dot.ok")?.getAttribute("aria-label")).toBe("완료");
+  });
+
+  it("deletes a run from the picker row through the T-034 confirm, never directly (r8 verify F3)", () => {
+    useCaseDialogs.getState().close();
+    render(<CasePickerCombobox />);
+    const trigger = screen.getByTestId("case-picker");
+    const search = open();
+    // Keyboard: the labelled button under the list acts on the active row (beta, failed).
+    const button = screen.getByRole("button", { name: `beta ${DELETE_RUN_LABEL}` });
+    expect(button.getAttribute("aria-disabled")).toBeNull();
+    // A running run cannot be deleted: the button says why and does nothing.
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    const running = screen.getByRole("button", { name: `mid33333 ${DELETE_RUN_LABEL}` });
+    expect(running.getAttribute("aria-disabled")).toBe("true");
+    expect(running.getAttribute("title")).toBe(RUN_ACTIVE_DELETE_REASON);
+    fireEvent.click(running);
+    expect(useCaseDialogs.getState().open).toBeNull();
+    fireEvent.keyDown(search, { key: "ArrowUp" });
+    fireEvent.click(screen.getByRole("button", { name: `beta ${DELETE_RUN_LABEL}` }));
+    expect(useCaseDialogs.getState()).toMatchObject({ open: "delete", deleteRunId: "new22222" });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    // Pointer: each deletable row has an aria-hidden trash icon (the running row has none).
+    useCaseDialogs.getState().close();
+    open();
+    const rowIcons = screen.getAllByTestId("case-picker-row-delete");
+    expect(rowIcons).toHaveLength(2);
+    expect(rowIcons.every((icon) => icon.getAttribute("aria-hidden") === "true")).toBe(true);
+    fireEvent.click(rowIcons[1] as HTMLElement);
+    expect(useCaseDialogs.getState()).toMatchObject({ open: "delete", deleteRunId: "old11111" });
+    // The row click did not also open the run.
+    expect(useAppStore.getState().route.runId).not.toBe("old11111");
+    expect(runDeleteReason("queued")).toBe(RUN_ACTIVE_DELETE_REASON);
+    expect(runDeleteReason("completed")).toBeUndefined();
+    useCaseDialogs.getState().close();
   });
 });
 

@@ -10,6 +10,7 @@ from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
+from ... import __version__
 from ..artifact_profiles import iter_artifact_output_row_views
 from ..artifact_store import read_jsonl_artifacts, validate_artifact_record
 from ..json_stream import JsonStreamError, iter_array_items
@@ -22,6 +23,7 @@ from ..review_reporting_controls import build_review_reporting_contract
 from ..search import load_run_summary
 from ..submission_qc_controls import build_submission_qc_contract
 from ..textnorm import normalize_nfc
+from . import write_lock
 from .base import (
     CaseDatabaseError,
     CaseRecord,
@@ -146,6 +148,15 @@ from .search import (
 from .trusted_diffs import (
     build_forensic_integrity_matrix,
 )
+from .write_lock import (
+    CaseDatabaseBatchPartialError,
+    CaseDatabaseLockedError,
+    retry_when_locked,
+)
+
+#: Rows per review-batch transaction (WB-9 P2-15): one chunk holds the write lock ~0.7 s (500 rows,
+#: measured on a synthetic DB; 2,000 rows took 3.5 s, close to the 5 s busy timeout of other windows).
+REVIEW_BATCH_CHUNK_ROWS = 500
 
 __all__ = [
     "CaseDatabase",
@@ -262,12 +273,21 @@ class CaseDatabase:
         self._hash_record_count = 0
 
     @contextmanager
-    def connect(self) -> Iterator[sqlite3.Connection]:
+    def connect(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
+        """One connection = one transaction (committed on success, rolled back on error).
+
+        Every connection waits ``write_lock.BUSY_TIMEOUT_MS`` for another writer (R8 T-131: two
+        windows on one case DB). ``write=True`` opens it with ``BEGIN IMMEDIATE``: a read-modify-write
+        (a review mark reads the mark, then writes it and its history) is serialized against other
+        writers instead of racing on a stale read. Such writes run under ``retry_when_locked``.
+        """
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(self.path)
+        busy_ms = write_lock.BUSY_TIMEOUT_MS
+        connection = sqlite3.connect(self.path, timeout=busy_ms / 1000)
         connection.row_factory = sqlite3.Row
         # SQL functions of the compressed artifact layout (view/triggers).
         register_case_db_functions(connection)
+        connection.execute(f"PRAGMA busy_timeout = {int(busy_ms)}")
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA temp_store = MEMORY")
         connection.execute("PRAGMA cache_size = -262144" if self.bulk_load else "PRAGMA cache_size = -65536")
@@ -279,6 +299,12 @@ class CaseDatabase:
                 connection.execute("PRAGMA journal_mode = WAL")
         except sqlite3.DatabaseError:
             pass
+        if write and not self.bulk_load:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+            except BaseException:
+                connection.close()
+                raise
         try:
             yield connection
             try:
@@ -980,191 +1006,278 @@ class CaseDatabase:
         priority: str | None = None,
         due_at: str | None = None,
         source_citation_package: Mapping[str, object] | None = None,
+        actor_source: str | None = None,
+        add_tags: Iterable[str] | None = None,
     ) -> dict[str, object]:
+        """Create or update one review mark (+ history and a ``review.marked`` audit row).
+
+        ``reviewer`` is the actor of THIS action: an empty or missing name never inherits the
+        previous mark's reviewer (that would attribute the change to another examiner); the mark
+        then has no reviewer and the audit/history actor is ``local-user``. ``actor_source`` says
+        where the name came from (``client-supplied`` / ``server-env`` / ``local-default``); by
+        default ``client-supplied`` for a non-empty name, else ``local-default`` (R8 T-036/T-180).
+
+        ``add_tags`` are appended to ``tags`` (or, when ``tags`` is omitted, to the row's current
+        tags) inside the write transaction, so two windows adding different tags both keep theirs.
+
+        Concurrent writers (R8 T-131): reading the mark and writing it, its history and audit rows
+        is one ``BEGIN IMMEDIATE`` transaction, so two windows marking the same row both land (two
+        history rows, the later write current); a lasting lock is retried before it is an error.
+        """
+        fields = dict(status=status, verification_status=verification_status, tags=tags, note=note,
+                      include_in_report=include_in_report, reviewer=reviewer, assignee=assignee, priority=priority,
+                      due_at=due_at, source_citation_package=source_citation_package, actor_source=actor_source,
+                      add_tags=add_tags)
+        return self._write_review_marks(case_id, [(target_type, target_id)], fields)[0]
+
+    def _write_review_marks(
+        self, case_id: str, targets: list[tuple[str, str]], fields: dict[str, object]
+    ) -> list[dict[str, object]]:
+        """Up to :data:`REVIEW_BATCH_CHUNK_ROWS` targets per ``BEGIN IMMEDIATE`` transaction, each retried as
+        a whole on a lasting lock, so a select-all batch never holds the lock for its whole length (WB-9
+        P2-15). Every target is checked before the first write, so a missing one still writes nothing; a
+        lock lasting past the retries on a later chunk raises ``CaseDatabaseLockedError`` with
+        ``applied_rows`` (earlier chunks stay saved). Marks are read back after the commits (P2-1)."""
         normalized_case_id = normalize_identifier(case_id, fallback="case")
-        timestamp = now_iso()
+        for key in ("tags", "add_tags"):  # a generator must survive a retry
+            if fields.get(key) is not None:
+                fields[key] = list(fields[key])  # type: ignore[call-overload]
+
+        chunks = [targets[start:start + REVIEW_BATCH_CHUNK_ROWS] for start in range(0, len(targets), REVIEW_BATCH_CHUNK_ROWS)]
+        if len(chunks) > 1:
+            with self.connect() as connection:
+                for target_type, target_id in targets:
+                    table = REVIEW_TARGET_TABLES.get(target_type)
+                    if table and connection.execute(f"SELECT 1 FROM {table} WHERE id = ? LIMIT 1", (target_id,)).fetchone() is None:
+                        raise CaseDatabaseError(f"review target not found: {target_type}:{target_id} in case {normalized_case_id}")
+
+        def write(chunk: list[tuple[str, str]]) -> None:
+            with self.connect(write=True) as connection:
+                apply_schema(connection)
+                if not connection.in_transaction and not self.bulk_load:  # a migration committed the lock away (P2-5)
+                    connection.execute("BEGIN IMMEDIATE")
+                if connection.execute(
+                    "SELECT 1 FROM case_record WHERE case_id = ?", (normalized_case_id,)
+                ).fetchone() is None:
+                    raise CaseDatabaseError(f"case not found: {normalized_case_id}")
+                for target_type, target_id in chunk:
+                    self._write_review_mark(connection, normalized_case_id, target_type, target_id, **fields)
+
+        for index, chunk in enumerate(chunks):
+            try:
+                retry_when_locked(lambda chunk=chunk: write(chunk))  # type: ignore[misc]
+            except CaseDatabaseLockedError as exc:
+                exc.applied_rows, exc.total_rows = index * REVIEW_BATCH_CHUNK_ROWS, len(targets)
+                raise
+            except Exception as exc:
+                if index == 0:
+                    raise  # nothing was committed: the plain error is the whole truth
+                # Review WB-10/11 P2-15: any other error after a commit still reports what was saved.
+                raise CaseDatabaseBatchPartialError(
+                    exc, applied_rows=index * REVIEW_BATCH_CHUNK_ROWS, total_rows=len(targets)
+                ) from exc
         with self.connect() as connection:
-            apply_schema(connection)
-            if connection.execute("SELECT 1 FROM case_record WHERE case_id = ?", (normalized_case_id,)).fetchone() is None:
-                raise CaseDatabaseError(f"case not found: {normalized_case_id}")
-            target_missing = connection.execute(
-                f"SELECT 1 FROM {REVIEW_TARGET_TABLES[target_type]} WHERE id = ? LIMIT 1",
-                (target_id,),
-            ).fetchone() is None if target_type in REVIEW_TARGET_TABLES else False
-            if target_missing:
-                raise CaseDatabaseError(
-                    f"review target not found: {target_type}:{target_id} in case {normalized_case_id}; "
-                    "run 'rapidtriage case-search' to find the exact target id before marking a review"
-                )
-            existing = connection.execute(
-                """
-                SELECT * FROM review_mark
-                WHERE case_id = ? AND target_type = ? AND target_id = ?
-                LIMIT 1
-                """,
-                (normalized_case_id, target_type, target_id),
-            ).fetchone()
-            previous_review = review_mark_to_dict(existing) if existing is not None else {}
-            effective_status = str(status if status is not None else previous_review.get("status", "unreviewed"))
-            effective_verification = str(
-                verification_status
-                if verification_status is not None
-                else previous_review.get("verification_status", "unverified")
-            )
-            effective_tags = normalize_tags(
-                tags if tags is not None else previous_review.get("tags", [])
-            )
-            effective_note = str(note if note is not None else previous_review.get("note", ""))
-            effective_include = bool(
-                include_in_report
-                if include_in_report is not None
-                else previous_review.get("include_in_report", False)
-            )
-            effective_reviewer = str(reviewer if reviewer is not None else previous_review.get("reviewer", ""))
-            effective_assignee = str(assignee if assignee is not None else previous_review.get("assignee", ""))
-            effective_priority = normalize_review_priority(
-                str(priority if priority is not None else previous_review.get("priority", "normal"))
-            )
-            effective_due_at = str(due_at if due_at is not None else previous_review.get("due_at", ""))
-            effective_source_citation_package = normalize_source_citation_package(
-                source_citation_package
-                if source_citation_package is not None
-                else previous_review.get("source_citation_package", {})
-            )
-            tags_json = json.dumps(effective_tags, ensure_ascii=False)
-            source_citation_package_json = json.dumps(
-                effective_source_citation_package,
-                ensure_ascii=False,
-                sort_keys=True,
-            )
-            if existing is None:
-                citation_id = next_citation_id_for_connection(connection, normalized_case_id, "review")
+            rows = [
                 connection.execute(
-                    """
-                    INSERT INTO review_mark (
-                        citation_id, case_id, target_type, target_id, status,
-                        verification_status, tags_json, note, include_in_report,
-                        reviewer, assignee, priority, due_at, source_citation_package_json,
-                        created_at, updated_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        citation_id,
-                        normalized_case_id,
-                        target_type,
-                        target_id,
-                        effective_status,
-                        effective_verification,
-                        tags_json,
-                        effective_note,
-                        1 if effective_include else 0,
-                        effective_reviewer,
-                        effective_assignee,
-                        effective_priority,
-                        effective_due_at,
-                        source_citation_package_json,
-                        timestamp,
-                        timestamp,
-                    ),
-                )
-            else:
-                citation_id = str(existing["citation_id"])
-                connection.execute(
-                    """
-                    UPDATE review_mark
-                    SET status = ?, verification_status = ?, tags_json = ?, note = ?,
-                        include_in_report = ?, reviewer = ?, assignee = ?, priority = ?,
-                        due_at = ?, source_citation_package_json = ?, updated_at = ?
-                    WHERE id = ?
-                    """,
-                    (
-                        effective_status,
-                        effective_verification,
-                        tags_json,
-                        effective_note,
-                        1 if effective_include else 0,
-                        effective_reviewer,
-                        effective_assignee,
-                        effective_priority,
-                        effective_due_at,
-                        source_citation_package_json,
-                        timestamp,
-                        existing["id"],
-                    ),
-                )
-            # Review tags (AXIOM E3): the canonical case_tag ids; tags_json keeps the canonical names.
-            mark_tag_ids = sync_review_mark_tag_ids(
-                connection, normalized_case_id, citation_id, effective_tags, actor=effective_reviewer or "local-user"
+                    "SELECT * FROM review_mark WHERE case_id = ? AND target_type = ? AND target_id = ? LIMIT 1",
+                    (normalized_case_id, target_type, target_id),
+                ).fetchone()
+                for target_type, target_id in targets
+            ]
+        return [review_mark_to_dict(row) for row in rows if row is not None]
+
+    def _write_review_mark(
+        self, connection: sqlite3.Connection, normalized_case_id: str, target_type: str, target_id: str, *,
+        status: str | None, verification_status: str | None, tags: Iterable[str] | None, note: str | None,
+        include_in_report: bool | None, reviewer: str | None, assignee: str | None, priority: str | None,
+        due_at: str | None, source_citation_package: Mapping[str, object] | None, actor_source: str | None,
+        add_tags: Iterable[str] | None,
+    ) -> None:
+        """One mark inside the caller's write transaction; the time is taken under the lock (P2-2)."""
+        timestamp = now_iso()
+        target_missing = connection.execute(
+            f"SELECT 1 FROM {REVIEW_TARGET_TABLES[target_type]} WHERE id = ? LIMIT 1",
+            (target_id,),
+        ).fetchone() is None if target_type in REVIEW_TARGET_TABLES else False
+        if target_missing:
+            raise CaseDatabaseError(
+                f"review target not found: {target_type}:{target_id} in case {normalized_case_id}; "
+                "run 'rapidtriage case-search' to find the exact target id before marking a review"
             )
-            effective_tags = tag_names_for_ids(connection, mark_tag_ids)
-            current_review = {
-                "citation_id": citation_id,
-                "case_id": normalized_case_id,
-                "target_type": target_type,
-                "target_id": target_id,
-                "status": effective_status,
-                "verification_status": effective_verification,
-                "tags": effective_tags,
-                "note": effective_note,
-                "include_in_report": effective_include,
-                "reviewer": effective_reviewer,
-                "assignee": effective_assignee,
-                "priority": effective_priority,
-                "due_at": effective_due_at,
-                "source_citation_package": effective_source_citation_package,
-                "source_citation_package_hash": source_citation_package_hash(effective_source_citation_package),
-                "updated_at": timestamp,
-            }
-            insert_review_history(
-                connection,
-                case_id=normalized_case_id,
-                review_citation_id=citation_id,
-                target_type=target_type,
-                target_id=target_id,
-                previous_review=previous_review,
-                current_review=current_review,
-                actor=effective_reviewer or "local-user",
-                changed_at=timestamp,
-            )
+        existing = connection.execute(
+            """
+            SELECT * FROM review_mark
+            WHERE case_id = ? AND target_type = ? AND target_id = ?
+            LIMIT 1
+            """,
+            (normalized_case_id, target_type, target_id),
+        ).fetchone()
+        previous_review = review_mark_to_dict(existing) if existing is not None else {}
+        effective_status = str(status if status is not None else previous_review.get("status", "unreviewed"))
+        effective_verification = str(
+            verification_status
+            if verification_status is not None
+            else previous_review.get("verification_status", "unverified")
+        )
+        merged_tags = [str(tag) for tag in (tags if tags is not None else previous_review.get("tags", []))]
+        merged_tags += [str(tag) for tag in add_tags or [] if str(tag) not in merged_tags]
+        effective_tags = normalize_tags(merged_tags)
+        effective_note = str(note if note is not None else previous_review.get("note", ""))
+        effective_include = bool(
+            include_in_report
+            if include_in_report is not None
+            else previous_review.get("include_in_report", False)
+        )
+        effective_reviewer = str(reviewer or "").strip()
+        effective_actor_source = (
+            actor_source if actor_source and effective_reviewer else ("client-supplied" if effective_reviewer else "local-default")
+        )
+        effective_assignee = str(assignee if assignee is not None else previous_review.get("assignee", ""))
+        effective_priority = normalize_review_priority(
+            str(priority if priority is not None else previous_review.get("priority", "normal"))
+        )
+        effective_due_at = str(due_at if due_at is not None else previous_review.get("due_at", ""))
+        effective_source_citation_package = normalize_source_citation_package(
+            source_citation_package
+            if source_citation_package is not None
+            else previous_review.get("source_citation_package", {})
+        )
+        tags_json = json.dumps(effective_tags, ensure_ascii=False)
+        source_citation_package_json = json.dumps(
+            effective_source_citation_package,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        if existing is None:
+            citation_id = next_citation_id_for_connection(connection, normalized_case_id, "review")
             connection.execute(
                 """
-                INSERT INTO audit_event (
-                    citation_id, case_id, actor, action, target_type, target_id,
-                    timestamp, tool_name, tool_version, params_json, result, error
+                INSERT INTO review_mark (
+                    citation_id, case_id, target_type, target_id, status,
+                    verification_status, tags_json, note, include_in_report,
+                    reviewer, assignee, priority, due_at, source_citation_package_json,
+                    created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    next_citation_id_for_connection(connection, normalized_case_id, "audit"),
+                    citation_id,
                     normalized_case_id,
-                    effective_reviewer or "local-user",
-                    "review.marked",
                     target_type,
                     target_id,
+                    effective_status,
+                    effective_verification,
+                    tags_json,
+                    effective_note,
+                    1 if effective_include else 0,
+                    effective_reviewer,
+                    effective_assignee,
+                    effective_priority,
+                    effective_due_at,
+                    source_citation_package_json,
                     timestamp,
-                    "rapidtriage",
-                    "",
-                    json.dumps(
-                        {
-                            "status": effective_status,
-                            "verification_status": effective_verification,
-                            "tags": effective_tags,
-                            "include_in_report": effective_include,
-                            "assignee": effective_assignee,
-                            "priority": effective_priority,
-                            "due_at": effective_due_at,
-                            "source_citation_package_hash": source_citation_package_hash(effective_source_citation_package),
-                            "source_citation_package_attached": bool(effective_source_citation_package),
-                        },
-                        ensure_ascii=False,
-                        sort_keys=True,
-                    ),
-                    "ok",
-                    "",
+                    timestamp,
                 ),
             )
-        return self.get_review_mark(normalized_case_id, target_type=target_type, target_id=target_id)
+        else:
+            citation_id = str(existing["citation_id"])
+            connection.execute(
+                """
+                UPDATE review_mark
+                SET status = ?, verification_status = ?, tags_json = ?, note = ?,
+                    include_in_report = ?, reviewer = ?, assignee = ?, priority = ?,
+                    due_at = ?, source_citation_package_json = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    effective_status,
+                    effective_verification,
+                    tags_json,
+                    effective_note,
+                    1 if effective_include else 0,
+                    effective_reviewer,
+                    effective_assignee,
+                    effective_priority,
+                    effective_due_at,
+                    source_citation_package_json,
+                    timestamp,
+                    existing["id"],
+                ),
+            )
+        # Review tags (AXIOM E3): the canonical case_tag ids; tags_json keeps the canonical names.
+        mark_tag_ids = sync_review_mark_tag_ids(
+            connection, normalized_case_id, citation_id, effective_tags, actor=effective_reviewer or "local-user"
+        )
+        effective_tags = tag_names_for_ids(connection, mark_tag_ids)
+        current_review = {
+            "citation_id": citation_id,
+            "case_id": normalized_case_id,
+            "target_type": target_type,
+            "target_id": target_id,
+            "status": effective_status,
+            "verification_status": effective_verification,
+            "tags": effective_tags,
+            "note": effective_note,
+            "include_in_report": effective_include,
+            "reviewer": effective_reviewer,
+            "assignee": effective_assignee,
+            "priority": effective_priority,
+            "due_at": effective_due_at,
+            "source_citation_package": effective_source_citation_package,
+            "source_citation_package_hash": source_citation_package_hash(effective_source_citation_package),
+            "updated_at": timestamp,
+        }
+        insert_review_history(
+            connection,
+            case_id=normalized_case_id,
+            review_citation_id=citation_id,
+            target_type=target_type,
+            target_id=target_id,
+            previous_review=previous_review,
+            current_review=current_review,
+            actor=effective_reviewer or "local-user",
+            changed_at=timestamp,
+        )
+        connection.execute(
+            """
+            INSERT INTO audit_event (
+                citation_id, case_id, actor, action, target_type, target_id,
+                timestamp, tool_name, tool_version, params_json, result, error
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                next_citation_id_for_connection(connection, normalized_case_id, "audit"),
+                normalized_case_id,
+                effective_reviewer or "local-user",
+                "review.marked",
+                target_type,
+                target_id,
+                timestamp,
+                "rapidtriage",
+                __version__,
+                json.dumps(
+                    {
+                        "status": effective_status,
+                        "verification_status": effective_verification,
+                        "tags": effective_tags,
+                        "include_in_report": effective_include,
+                        "assignee": effective_assignee,
+                        "priority": effective_priority,
+                        "due_at": effective_due_at,
+                        "source_citation_package_hash": source_citation_package_hash(effective_source_citation_package),
+                        "source_citation_package_attached": bool(effective_source_citation_package),
+                        # R8 T-180: where the actor name came from (never an authenticated
+                        # identity); an empty one is "local-user" / "local-default".
+                        "actor_source": effective_actor_source,
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                "ok",
+                "",
+            ),
+        )
 
     def mark_reviews_batch(
         self,
@@ -1180,35 +1293,32 @@ class CaseDatabase:
         assignee: str | None = None,
         priority: str | None = None,
         due_at: str | None = None,
+        actor_source: str | None = None,
+        add_tags: Iterable[str] | None = None,
+        keep_omitted_tags: bool = False,
     ) -> dict[str, object]:
-        marks: list[dict[str, object]] = []
+        """Mark every target in one transaction: all rows are written or none (a lock or a missing
+        target leaves the case DB unchanged). Omitted ``tags`` clear the rows' tags unless
+        ``keep_omitted_tags``; ``add_tags`` merge inside the transaction (see :meth:`mark_review`)."""
+        pairs: list[tuple[str, str]] = []
         for target in targets:
             target_type = str(target.get("target_type") or "").strip()
             target_id = str(target.get("target_id") or "").strip()
             if not target_type or not target_id:
                 raise CaseDatabaseError("every batch target requires target_type and target_id")
-            marks.append(
-                self.mark_review(
-                    case_id=case_id,
-                    target_type=target_type,
-                    target_id=target_id,
-                    status=status,
-                    verification_status=verification_status,
-                    tags=tags or [],
-                    note=note,
-                    include_in_report=include_in_report,
-                    reviewer=reviewer,
-                    assignee=assignee,
-                    priority=priority,
-                    due_at=due_at,
-                )
-            )
+            pairs.append((target_type, target_id))
+        fields = dict(status=status, verification_status=verification_status,
+                      tags=tags if tags is not None or keep_omitted_tags else [], note=note,
+                      include_in_report=include_in_report, reviewer=reviewer, assignee=assignee, priority=priority,
+                      due_at=due_at, source_citation_package=None, actor_source=actor_source, add_tags=add_tags)
+        marks = self._write_review_marks(case_id, pairs, fields) if pairs else []
         return {
             "command": "case-review-batch",
             "generated_at": now_iso(),
             "database": str(self.path),
             "case_id": normalize_identifier(case_id, fallback="case"),
             "updated_count": len(marks),
+            "transactions": max(1, -(-len(pairs) // REVIEW_BATCH_CHUNK_ROWS)),
             "marks": marks,
         }
 

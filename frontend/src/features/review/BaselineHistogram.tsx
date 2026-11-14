@@ -24,6 +24,7 @@ import { ReasonButton } from "../case/ReasonButton";
 import { currentReviewer } from "./author";
 import { tagHandle } from "./tagStore";
 import "./review.css";
+import { useWriteBlock } from "../../shell/readOnly";
 
 const collator = new Intl.Collator("ko", { numeric: true });
 const baselineKey = (runId: string) => `rapidtriage.histBaseline.${runId}`;
@@ -228,13 +229,16 @@ export function BaselineHistogram({ runId, children }: { runId: string; children
     }
   };
 
-  const saveReason = !name.trim()
+  // T-348: a read-only result / server says why instead of answering with a 409.
+  const writeBlock = useWriteBlock("run");
+  const saveReasonOwn = !name.trim()
     ? "기준선 이름을 입력하세요"
     : known.some((item) => item.name === name.replace(/\s+/g, " ").trim())
       ? "같은 이름의 기준선이 이미 있습니다"
       : busy
         ? "저장하는 중입니다"
         : undefined;
+  const saveReason = writeBlock ?? saveReasonOwn;
 
   return (
     <div className="hist-baseline" data-testid="hist-baseline">

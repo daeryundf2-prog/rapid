@@ -46,30 +46,33 @@ function HelpDialog() {
             <Icon name="close" />
           </button>
         </div>
-        <table className="help-table">
-          <caption className="visually-hidden">단축키와 동작</caption>
-          <thead>
-            <tr>
-              <th scope="col">키</th>
-              <th scope="col">동작</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              // A key nothing is bound to right now is dimmed; its description says what it does.
-              <tr
-                key={row.name}
-                className={row.commands.length ? undefined : "muted"}
-                title={row.commands.length ? undefined : "해당 화면이 열려 있을 때 동작합니다"}
-              >
-                <td>
-                  <kbd>{keyLabel(row.shortcut)}</kbd>
-                </td>
-                <td>{row.description}</td>
+        {/* The table scrolls inside the dialog body (a <table> itself never scrolls). */}
+        <div className="help-body" data-testid="help-body">
+          <table className="help-table">
+            <caption className="visually-hidden">단축키와 동작</caption>
+            <thead>
+              <tr>
+                <th scope="col">키</th>
+                <th scope="col">동작</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                // A key nothing is bound to right now is dimmed; its description says what it does.
+                <tr
+                  key={row.name}
+                  className={row.commands.length ? undefined : "muted"}
+                  title={row.commands.length ? undefined : "해당 화면이 열려 있을 때 동작합니다"}
+                >
+                  <td>
+                    <kbd>{keyLabel(row.shortcut)}</kbd>
+                  </td>
+                  <td>{row.description}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         <p className="help-foot">
           모든 동작은 <kbd>{keyLabel("Ctrl+K")}</kbd> 명령 팔레트에서도 찾을 수 있습니다.
         </p>

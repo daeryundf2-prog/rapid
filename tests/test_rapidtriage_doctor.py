@@ -145,3 +145,31 @@ class RapidTriageDoctorTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["command"], "doctor")
         self.assertNotIn("web-port", {check["name"] for check in payload["checks"]})
+
+
+class DoctorMessageKeyTests(unittest.TestCase):
+    """R7 L3 (C-G16): every check names its wording so the console can show it in Korean."""
+
+    def test_every_check_carries_a_message_key(self) -> None:
+        keys: set[str] = set()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            static_dir = Path(tmp_dir) / "static"
+            make_static_assets(static_dir)
+            for resolver in (lambda _name: None, lambda name: f"/usr/bin/{name}"):
+                payload = run_doctor(
+                    static_dir=static_dir,
+                    app_data_dir=Path(tmp_dir) / "app-data",
+                    tool_resolver=resolver,
+                    include_port_check=True,
+                    port=0,
+                    write_probe=False,
+                )
+                for check in payload["checks"]:
+                    key = check.get("message_key")
+                    self.assertIsInstance(key, str, check["name"])
+                    self.assertRegex(key, r"^[a-z0-9-]+\.[a-z0-9-]+$", check["name"])
+                    keys.add(key)
+        self.assertIn("app-data-dir.probe-skipped", keys)
+        self.assertIn("tesseract.available", keys)
+        self.assertIn("tesseract.missing", keys)
+        self.assertIn("web-port.available", keys)

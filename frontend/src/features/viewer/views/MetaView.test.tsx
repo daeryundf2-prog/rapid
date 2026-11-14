@@ -4,6 +4,7 @@ import type { GridRow } from "../../../contracts/collection";
 import { EMPTY_CATALOG_FOR_TESTS, setCatalog } from "../../flags/catalog";
 import { useGridLocalStore } from "../../grid/adapter";
 import { evidenceInfo, timelineWindowHash } from "../evidenceInfo";
+import { koreanFieldLabel } from "../fieldSheets";
 import { MetaView } from "./MetaView";
 
 afterEach(cleanup);
@@ -43,13 +44,13 @@ describe("MetaView record values", () => {
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     show({
       source_hashes: { md5: "m".repeat(32), sha1: "s".repeat(40), sha256: "a".repeat(64) },
-      browser_validation_checks: { history_rows_present: true, schema: "v3" },
+      browser_profile_state: { history_rows_present: true, schema: "v3" },
       event_tags: ["a", "b"],
     });
     const text = document.body.textContent ?? "";
     expect(text).not.toContain('{"md5"');
     expect(text).not.toContain('{"history_rows_present"');
-    // Unknown nested keys read humanised, the raw key on the term (data-key / tooltip).
+    // Nested keys: Korean when every word reads Korean, else the raw key in mono (data-key / tooltip).
     expect(document.querySelector('dt[data-key="history_rows_present"]')).toBeTruthy();
     expect(text).toContain("a, b");
     fireEvent.click(screen.getByRole("button", { name: "source_hashes.sha256 복사" }));
@@ -66,12 +67,14 @@ describe("MetaView record values", () => {
 describe("MetaView nested labels and value readings (visual-polish B2 #5)", () => {
   it("labels keys inside expanded groups and reads booleans / enums in Korean, recursively", () => {
     show({
-      cloud_validation_matrix: {
+      cloud_service_state: {
         status: "validation-required",
         cloud_family: "microsoft-365",
         service: "exchange",
-        blockers: [{ blocker_id: "b-1", severity: "high", passed: false }],
-        nested: { inner: { report_grade_ready: true } },
+        checks: [{ severity: "high", passed: false }],
+        nested: { inner: { enabled: true } },
+        blockers: [{ blocker_id: "b-1" }],
+        required_tools: ["x"],
       },
       commercial_grade_ready: false,
     });
@@ -79,11 +82,12 @@ describe("MetaView nested labels and value readings (visual-polish B2 #5)", () =
     expect(dts).toContain("상태");
     expect(dts).toContain("클라우드 계열");
     expect(dts).toContain("서비스");
-    expect(dts).toContain("차단 요인");
     expect(dts).toContain("심각도");
     // Recursion: a group inside a group, and items inside a folded list, keep labels.
-    expect(dts).toContain("보고서 등급 준비됨");
-    expect(dts).toContain("차단 요인 ID");
+    expect(dts).toContain(koreanFieldLabel("enabled") ?? "enabled");
+    // R7 L3 (C-W3): the tool's QA keys are not shown at any depth.
+    for (const qa of ["차단 요인", "차단 요인 ID", "필요 도구", "상용 등급 준비됨"])
+      expect(dts).not.toContain(qa);
     const status = document.querySelector('[data-raw="validation-required"]');
     expect(status?.textContent).toBe("검증 필요");
     expect(status?.getAttribute("title")).toBe("validation-required");
@@ -98,11 +102,17 @@ describe("MetaView nested labels and value readings (visual-polish B2 #5)", () =
 });
 
 describe("MetaView label collisions (review B2-8)", () => {
-  it("shows the raw key next to labels two fields share, as visible text", () => {
+  it("tells apart labels two fields share by a number, never by the raw key (R7 L3)", () => {
     show({ details: { application_name: "a.exe", app_name: "b.exe" } });
-    const dts = Array.from(document.querySelectorAll("dt")).map((dt) => dt.textContent);
-    expect(dts).toContain("앱 이름 (application_name)");
-    expect(dts).toContain("앱 이름 (app_name)");
+    const dts = Array.from(document.querySelectorAll("dt"));
+    const names = dts.map((dt) => dt.textContent);
+    expect(names).toContain("앱 이름");
+    expect(names).toContain("앱 이름 (2)");
+    expect(names.join(" ")).not.toMatch(/application_name|app_name/);
+    // The raw keys stay the tooltips.
+    expect(dts.find((dt) => dt.textContent === "앱 이름 (2)")?.getAttribute("title")).toMatch(
+      /app(lication)?_name/,
+    );
   });
 });
 
@@ -258,14 +268,16 @@ describe("MetaView long values and 열로 표시 (artifact-columns U-C1/U-C3)", 
       route: { ...s.route, collection: { id: "artifacts", kind: "eventlog" } },
     }));
     showArtifact({ volume_label: "SYS", nested: { a: 1 } });
-    const button = screen.getByRole("button", { name: "volume_label 열로 표시" });
+    // The button names the field by its shown label, never the raw key (C-W4).
+    const label = koreanFieldLabel("volume_label") ?? "volume_label";
+    const button = screen.getByRole("button", { name: `${label} 열로 표시` });
     expect(button.getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(button);
     expect(useGridLocalStore.getState().route.cols).toEqual(["details.volume_label"]);
     expect(window.localStorage.getItem("rapidtriage.grid.fieldColumns.artifacts.eventlog")).toBe(
       JSON.stringify(["details.volume_label"]),
     );
-    const pressed = screen.getByRole("button", { name: "volume_label 열에서 제거" });
+    const pressed = screen.getByRole("button", { name: `${label} 열에서 제거` });
     expect(document.activeElement).toBe(pressed); // focus stays on the toggle
     expect(pressed.getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(pressed);
@@ -281,7 +293,7 @@ describe("MetaView long values and 열로 표시 (artifact-columns U-C1/U-C3)", 
       visibleColumnIds: ["title", "review", "timestamp"],
     }));
     showArtifact({ level: 4 });
-    const button = screen.getByRole("button", { name: "level(레벨) 열로 표시" });
+    const button = screen.getByRole("button", { name: "레벨 열로 표시" });
     expect(button.getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(button);
     expect(useGridLocalStore.getState().route.cols).toEqual(["details.level"]);
@@ -432,15 +444,17 @@ describe("MetaView evidence-first record (viewer redesign)", () => {
     expect(table.textContent).toContain("TargetLogonId");
     // ±5분 next to the record time.
     expect(screen.getByRole("button", { name: "생성 시각 타임라인 ±5분" })).toBeTruthy();
-    // Unknown keys are visible (기타 필드), governance is folded at the very bottom.
-    expect(screen.getByRole("region", { name: "레코드 기타 필드" }).textContent).toContain("kept");
-    const governance = screen.getByTestId("record-governance") as HTMLDetailsElement;
-    expect(governance.open).toBe(false);
-    expect(governance.textContent).toContain("내부 검증 정보(증거 아님)");
+    // R7 L3: a key with no Korean name is folded under 기타 필드 (raw key, mono); the tool's own
+    // QA keys (상용 등급 · 차단 요인 · 검증 필요 …) are not in the examiner view at all (C-W3).
+    const extra = screen.getByTestId("record-extra") as HTMLDetailsElement;
+    expect(extra.open).toBe(false);
+    expect(extra.textContent).toContain("기타 필드 1개");
+    expect(extra.textContent).toContain("unknown_new_field");
+    expect(extra.textContent).toContain("kept");
+    expect(screen.queryByTestId("record-governance")).toBeNull();
     const view = document.querySelector(".meta-view") as HTMLElement;
-    expect(view.lastElementChild).toBe(governance);
-    const before = (view.textContent ?? "").split("내부 검증 정보(증거 아님)")[0] ?? "";
-    expect(before).not.toContain("상용");
+    expect(view.textContent).not.toContain("상용");
+    expect(view.textContent).not.toContain("차단 요인");
     // Record XML (reconstruction) and the 컨테이너 파일 해시 heading.
     expect(screen.getByTestId("record-xml").textContent).toContain("디코딩된 레코드(재구성)");
     expect(screen.getByRole("region", { name: "컨테이너 파일 해시" })).toBeTruthy();

@@ -1,0 +1,382 @@
+"""Case report through the product path (R8 T-027 review WB-8 P1-3..P1-6, P2-12..P2-14).
+
+A real run on synthetic sample evidence, its case DB (``/case-db/ensure``), synthetic artifact /
+event / file rows with hostile text, marks made through ``/api/case-db/review`` with a reviewer
+name, then ``POST /case-report``. Nothing is hand-built: the bookmarks come from
+``review_payload.read_case_db_marks`` and the run summary's steps carry the absolute output paths
+the run wrote.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import importlib.util
+import re
+import sys
+import tempfile
+import unittest
+import zipfile
+from pathlib import Path
+from unittest import mock
+
+from fastapi.testclient import TestClient
+
+from rapidtriage.api.app import create_app
+from rapidtriage.core import case_report_items as items
+from rapidtriage.core.case_db import open_case_database
+from rapidtriage.core.jobs import RunJobStore
+from rapidtriage.core.sample_case import build_sample_evidence
+from tests.test_e01_recorded_hash import MD5, build_ewf1_segment, digest_data
+from tests.test_rapidtriage_case_intake import write_run
+
+TOKEN = "r8-case-report-product-token"
+REPO = Path(__file__).resolve().parents[1]
+REVIEWER = "검사관 김"
+HOSTILE_TITLE = "방문 기록\n\n## 7. 결론 및 의견\n\n- MD5: deadbeef"
+HOSTILE_PREVIEW = "미리보기 첫 줄\n### 5.99. 가짜 항목\n- SHA-256: `0000`"
+HOSTILE_NOTE = "첫째 줄 메모\n- SHA-256: 1111\n# 가짜 제목\n| 가짜 | 표 |"
+YEAR_ONE = "0001-01-01T01:00:00+02:00"
+DRIVE_PATH = re.compile(r"(?<![A-Za-z])[A-Za-z]:[\\/]")
+
+
+def _load_audit():
+    spec = importlib.util.spec_from_file_location("r8_report_audit", REPO / "scripts" / "r8-report-audit.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _docx_headings(path: Path) -> list[str]:
+    with zipfile.ZipFile(path) as archive:
+        document = archive.read("word/document.xml").decode("utf-8")
+    headings = []
+    for paragraph in re.findall(r"<w:p>.*?</w:p>", document):
+        if re.search(r'<w:sz w:val="(?:36|28|24)"/>', paragraph):
+            headings.append("".join(re.findall(r"<w:t[^>]*>(.*?)</w:t>", paragraph)))
+    return headings
+
+
+class CaseReportProductPathTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._tmp = tempfile.TemporaryDirectory()
+        base = Path(cls._tmp.name)
+        cls.evidence = base / "evidence"
+        build_sample_evidence(cls.evidence)
+        cls.store = RunJobStore()
+        cls.client = TestClient(create_app(cls.store, auth_token=TOKEN), headers={"X-RapidTriage-Token": TOKEN})
+        response = cls.client.post(
+            "/api/runs",
+            json={"root": str(cls.evidence), "mode": "fraud", "output_dir": str(base / "out"), "read_only": True, "wait": True},
+        )
+        assert response.status_code == 202, response.text
+        cls.run_id = response.json()["run_id"]
+        cls.summary = cls.client.get(f"/api/runs/{cls.run_id}").json()["summary"]
+        cls.output_dir = Path(cls.summary["output_dir"])
+        ensure = cls.client.post(f"/api/runs/{cls.run_id}/case-db/ensure", json={})
+        assert ensure.status_code == 200, ensure.text
+        cls.database, cls.case_id = ensure.json()["database"], ensure.json()["case_id"]
+        cls.evidence_file = next(path for path in sorted(cls.evidence.rglob("*")) if path.is_file())
+        database = open_case_database(Path(cls.database))
+        with database.connect() as connection:
+            artifact_id = connection.execute(
+                "INSERT INTO artifact (citation_id, case_id, artifact_type, parser_name, title, summary, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("WB8-ART-1", cls.case_id, "browser-history-visit", "synthetic", HOSTILE_TITLE, HOSTILE_PREVIEW, "2026-01-01T00:00:00+00:00"),
+            ).lastrowid
+            event_id = connection.execute(
+                "INSERT INTO event (citation_id, case_id, event_type, timestamp, description, source) VALUES (?, ?, ?, ?, ?, ?)",
+                ("WB8-EVT-1", cls.case_id, "synthetic-event", YEAR_ONE, "연도 1 이벤트", "synthetic"),
+            ).lastrowid
+            file_id = connection.execute(
+                "INSERT INTO file_record (citation_id, case_id, path, extension, size_bytes) VALUES (?, ?, ?, ?, ?)",
+                ("WB8-FILE-1", cls.case_id, str(cls.evidence_file), cls.evidence_file.suffix, cls.evidence_file.stat().st_size),
+            ).lastrowid
+        marks = (
+            ("artifact", artifact_id, {"note": HOSTILE_NOTE, "tags": ["태그\n## 가짜 태그"]}),
+            ("event", event_id, {}),
+            ("file_record", file_id, {"note": "한 줄 메모"}),
+        )
+        for target_type, target_id, extra in marks:
+            marked = cls.client.post(
+                "/api/case-db/review",
+                json={
+                    "database": cls.database,
+                    "case_id": cls.case_id,
+                    "target_type": target_type,
+                    "target_id": str(target_id),
+                    "status": "relevant",
+                    "include_in_report": True,
+                    "reviewer": REVIEWER,
+                    **extra,
+                },
+            )
+            assert marked.status_code == 200, marked.text
+        cls.reports = {
+            template: cls.client.post(f"/api/runs/{cls.run_id}/case-report", json={"template": template})
+            for template in ("legal-handoff", "technical-appendix", "korean-expert")
+        }
+        # The last POST overwrote the exports; write the default template again for the export checks.
+        cls.default_exports = cls.client.post(f"/api/runs/{cls.run_id}/case-report", json={}).json()["exports"]
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.client.close()
+        cls._tmp.cleanup()
+
+    def markdown(self, template: str = "legal-handoff") -> str:
+        response = self.reports[template]
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()["markdown"]
+
+    def item_section(self, markdown: str, needle: str) -> str:
+        body = markdown.split("## 5.", 1)[1].split("## 6.", 1)[0]
+        return next(block for block in body.split("\n### ") if needle in block)
+
+    # P1-3 -------------------------------------------------------------------------------------
+
+    def test_reviewer_and_row_preview_come_from_the_case_db(self) -> None:
+        markdown = self.markdown()
+        self.assertEqual(markdown.count(f"- 검토자: {REVIEWER}"), 3)
+        self.assertNotIn("(작성자 미지정)", markdown.split("## 5.", 1)[1])
+        artifact = self.item_section(markdown, "방문 기록")
+        preview = re.search(r"^- 내용 미리보기: (.*)$", artifact, flags=re.MULTILINE).group(1)
+        self.assertTrue(preview.startswith("미리보기 첫 줄 "), preview)
+        self.assertNotIn("방문 기록", preview)
+        # A file record's "preview" is its path: not content, and the analysis PC's path.
+        file_item = self.item_section(markdown, self.evidence_file.name)
+        self.assertIn("- 내용 미리보기: 기록 없음", file_item)
+
+    # P1-4 -------------------------------------------------------------------------------------
+
+    def test_default_report_has_no_analysis_pc_paths(self) -> None:
+        absolute_outputs = [step["output"] for step in self.summary["steps"] if Path(str(step.get("output") or "")).is_absolute()]
+        self.assertTrue(absolute_outputs, "precondition: the run stores absolute step outputs")
+        markdown = self.markdown()
+        for needle in (str(self.output_dir), str(self.evidence), self.output_dir.as_posix(), self.evidence.as_posix()):
+            self.assertNotIn(needle, markdown)
+        self.assertIsNone(DRIVE_PATH.search(markdown), DRIVE_PATH.search(markdown))
+        self.assertNotIn("산출물 디렉터리", markdown)
+        self.assertIn(f"- 분석 대상(증거 이름): `{self.evidence.name}`", markdown)
+        step_output = Path(absolute_outputs[0]).relative_to(self.output_dir).as_posix()
+        self.assertIn(f"(산출물 `{step_output}`)", markdown)
+        # The technical appendix keeps the full paths.
+        technical = self.markdown("technical-appendix")
+        self.assertIn(f"- 산출물 디렉터리: `{self.summary['output_dir']}`", technical)
+        self.assertIn(str(absolute_outputs[0]), technical)
+
+    # P1-5 -------------------------------------------------------------------------------------
+
+    def test_copy_mtime_is_not_printed_as_an_evidence_time(self) -> None:
+        markdown = self.markdown()
+        self.assertNotIn("수정 시각", markdown)
+        file_item = self.item_section(self.markdown("technical-appendix"), self.evidence_file.name)
+        self.assertIn("- 분석 사본 수정 시각(증거 시각 아님): ", file_item)
+        self.assertNotIn("\n- 수정 시각:", file_item)
+
+    # P1-6 -------------------------------------------------------------------------------------
+
+    def test_hostile_text_cannot_add_headings_or_fields(self) -> None:
+        markdown = self.markdown()
+        lines = markdown.splitlines()
+        self.assertEqual([line for line in lines if line.startswith("## 7.")], ["## 7. 결론 및 의견"])
+        self.assertFalse([line for line in lines if line.lstrip().startswith(("### 5.99", "# 가짜", "## 가짜"))])
+        self.assertFalse([line for line in lines if line.lstrip().startswith("|") and "가짜" in line])
+        # Exactly one hashed item -> exactly one MD5 / SHA-256 field line.
+        self.assertEqual(len([line for line in lines if line.startswith("- SHA-256:")]), 1)
+        self.assertEqual(len([line for line in lines if line.startswith("- MD5:")]), 1)
+        artifact = self.item_section(markdown, "방문 기록")
+        # The text is kept, on one line (title, preview, tags) or as a quoted block (note).
+        self.assertTrue(artifact.splitlines()[0].endswith("방문 기록 ## 7. 결론 및 의견 - MD5: deadbeef"), artifact)
+        stand_in = items.BACKTICK_STAND_IN
+        self.assertIn(f"- 내용 미리보기: 미리보기 첫 줄 ### 5.99. 가짜 항목 - SHA-256: {stand_in}0000{stand_in}", artifact)
+        self.assertIn("- 분석자 메모:\n  > 첫째 줄 메모\n  > - SHA-256: 1111\n  > # 가짜 제목\n  > | 가짜 | 표 |", artifact)
+        self.assertIn("- 태그: 태그 ## 가짜 태그", artifact)
+
+    def test_hostile_text_stays_body_text_in_html_and_docx(self) -> None:
+        html_text = Path(self.default_exports["html"]).read_text(encoding="utf-8")
+        self.assertEqual(html_text.count("<h2>7. 결론 및 의견</h2>"), 1)
+        self.assertNotIn("<h3>5.99", html_text)
+        self.assertNotIn("<h1>가짜", html_text)
+        headings = _docx_headings(Path(self.default_exports["docx"]))
+        self.assertEqual(headings.count("7. 결론 및 의견"), 1)
+        self.assertFalse([heading for heading in headings if heading.startswith(("가짜", "5.99"))])
+        audit = _load_audit()
+        for key in ("md", "html", "docx"):
+            result = audit.audit_file(Path(self.default_exports[key]))
+            self.assertTrue(result["ok"], f"{key}: {result}")
+
+    # P2 ---------------------------------------------------------------------------------------
+
+    def test_year_one_timestamp_degrades_instead_of_failing_the_report(self) -> None:
+        event = self.item_section(self.markdown(), "연도 1 이벤트")
+        self.assertIn(f"- 증거 시각: {YEAR_ONE} (표시 범위를 벗어난 시각이라 기록값 그대로 표시)", event)
+
+    def test_mark_cap_replaces_nothing_hidden(self) -> None:
+        self.assertIn("숨긴 항목 없음.", self.markdown())
+        with mock.patch("rapidtriage.api.app.review_payload.MAX_CASE_DB_MARKS", 2):
+            response = self.client.post(f"/api/runs/{self.run_id}/case-report", json={})
+        self.assertEqual(response.status_code, 200, response.text)
+        capped = response.json()["markdown"]
+        self.assertNotIn("숨긴 항목 없음", capped)
+        self.assertIn("케이스 DB 표시 3건 중 2건만 읽음(상한) — 나머지 표시는 이 보고서에 없음.", capped)
+
+
+    # T-026 / WB-8 follow-up: the 감정서 names evidence, never the analysis PC's folders ------------
+
+    def test_expert_report_has_no_analysis_pc_paths(self) -> None:
+        absolute_outputs = [step["output"] for step in self.summary["steps"] if Path(str(step.get("output") or "")).is_absolute()]
+        markdown = self.markdown("korean-expert")
+        for needle in (str(self.output_dir), str(self.evidence), self.output_dir.as_posix(), self.evidence.as_posix()):
+            self.assertNotIn(needle, markdown)
+        self.assertIsNone(DRIVE_PATH.search(markdown), DRIVE_PATH.search(markdown))
+        for token in ("output=", "산출물 디렉터리", "분석 대상 루트", "validation_required", "읽기 전용으로 처리하였으며"):
+            self.assertNotIn(token, markdown)
+        self.assertIn(f"- 분석 대상(증거 이름): `{self.evidence.name}`", markdown)
+        step_output = Path(absolute_outputs[0]).relative_to(self.output_dir).as_posix()
+        self.assertIn(f"(산출물 `{step_output}`)", markdown)
+        # A run without a case: no evidence record, one line saying so; the file mark's copy hash
+        # is in the submission table with its path inside the evidence.
+        evidence = markdown.split("### 2.1 감정 대상 증거", 1)[1].split("### 2.2", 1)[0]
+        self.assertEqual(evidence.strip(), "- 원본 증거 해시 미기록 — 사건 화면에서 해시 계산 후 다시 내보내기")
+        relative = self.evidence_file.relative_to(self.evidence).as_posix()
+        self.assertRegex(markdown, rf"\| 1 \| `{re.escape(relative)}` \| `[0-9a-f]{{64}}` \|")
+        self.assertIn("- 인계 인수 시각: 미기재", markdown)
+        self.assertIn("- 검토 완료 항목 수(미검토 제외): 3", markdown)
+        # Step ids, the mode and the template id are not printed (WB-8 P2-15): Korean labels only.
+        for step in self.summary["steps"]:
+            self.assertNotIn(f"`{step['name']}`", markdown)
+        self.assertIn("- 분석 모드: 문서·부정 조사", markdown)
+        self.assertNotIn("korean-expert", markdown)
+
+    def test_expert_report_hostile_text_and_audit(self) -> None:
+        markdown = self.markdown("korean-expert")
+        lines = markdown.splitlines()
+        self.assertEqual([line for line in lines if line.startswith("## 7.")], ["## 7. 결론"])
+        self.assertFalse([line for line in lines if line.lstrip().startswith(("### 5.99", "# 가짜", "## 가짜", "- SHA-256", "- MD5"))])
+        result = _load_audit().audit_text(markdown)
+        self.assertTrue(result["ok"], result)
+
+    # WB-10 (verify T-027 S2): the default report names steps and kinds in Korean ---------------
+
+    def test_default_report_has_no_step_or_kind_ids(self) -> None:
+        markdown = self.markdown()
+        procedure = markdown.split("## 3. 분석 절차 요약", 1)[1].split("## 4.", 1)[0]
+        step_names = [str(step["name"]) for step in self.summary["steps"]]
+        self.assertTrue(any(name.startswith("artifacts-") for name in step_names), step_names)
+        self.assertIn("- 아티팩트 수집: ", procedure)
+        for name in step_names:
+            self.assertNotIn(f"`{name}`", markdown)
+            self.assertNotIn(f"- {name}:", procedure)
+        # Output file names stay as secondary detail only, never as the step's name.
+        self.assertIsNone(re.search(r"^- `", procedure, flags=re.MULTILINE), procedure)
+        body = re.sub(r" \(산출물 `[^`]*`\)", "", markdown)
+        self.assertNotIn("artifacts-", body)
+        self.assertNotIn("ai-agent", body)
+        self.assertIn("- 분석 모드: 문서·부정 조사", markdown)
+        self.assertNotIn("`fraud`", markdown)
+        # The technical appendix keeps the ids next to the Korean names.
+        technical = self.markdown("technical-appendix")
+        artifacts_step = next(name for name in step_names if name.startswith("artifacts-"))
+        self.assertIn(f"(`{artifacts_step}`)", technical)
+
+    def test_expert_review_table_has_a_reviewer_column(self) -> None:
+        markdown = self.markdown("korean-expert")
+        table = markdown.split("### 4.1 보고 포함 심사 항목", 1)[1].split("\n## ", 1)[0]
+        rows = [line for line in table.splitlines() if line.startswith("|")]
+        self.assertEqual(rows[0], "| 항목 | 출처 | 상태 | 검토자 | 태그 | 비고 |")
+        body = rows[2:]
+        self.assertEqual(len(body), 3, table)
+        for row in body:
+            self.assertEqual(row.split(" | ")[3], REVIEWER, row)
+
+
+class ExpertReportCaseEvidenceTests(unittest.TestCase):
+    """T-026 through the product path with a case: a synthetic two-segment E01 added to a case with
+    hash verification, the run linked to it, ``POST /case-report`` with the 감정서 template. The
+    "감정 대상 증거" table carries the per-segment SHA-256 the case screen computed (QA-175)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._tmp = tempfile.TemporaryDirectory()
+        base = Path(cls._tmp.name)
+        evidence = base / "evidence"
+        evidence.mkdir()
+        cls.segments = (evidence / "disk.E01", evidence / "disk.E02")
+        cls.segments[0].write_bytes(build_ewf1_segment([("header", b"h"), ("next", b"")]))
+        cls.segments[1].write_bytes(build_ewf1_segment([("digest", digest_data()), ("done", b"")], segment_number=2))
+        cls.store = RunJobStore()
+        app = create_app(cls.store, auth_token=TOKEN, cases_db_path=base / "ws" / "rapidtriage-cases.db")
+        cls.client = TestClient(app, headers={"X-RapidTriage-Token": TOKEN})
+        cls.run_dir = base / "run-Client-Kim"
+        write_run(cls.run_dir, cls.segments[0])
+        cls.run_id = cls.store.import_completed_run(cls.run_dir).run_id
+        case_id = cls.client.post("/api/cases", json={"case_number": "2026-T026"}).json()["case"]["case_id"]
+        added = cls.client.post(
+            f"/api/cases/{case_id}/evidence",
+            json={"evidence_number": "E-01", "source_type": "e01", "path": str(cls.segments[0]),
+                  "verify_hash": True, "expected_hash": MD5.hex()},
+        )
+        assert added.status_code == 201, added.text
+        app.state.case_workspace.join_hash_jobs()
+        linked = cls.client.post(
+            f"/api/cases/{case_id}/runs/link",
+            json={"run_id": cls.run_id, "evidence_citation_id": added.json()["evidence"]["citation_id"]},
+        )
+        assert linked.status_code == 201, linked.text
+        cls.response = cls.client.post(f"/api/runs/{cls.run_id}/case-report", json={"template": "korean-expert"})
+        cls.md5 = MD5.hex()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.client.close()
+        cls._tmp.cleanup()
+
+    def test_evidence_table_has_segment_hashes(self) -> None:
+        self.assertEqual(self.response.status_code, 200, self.response.text)
+        markdown = self.response.json()["markdown"]
+        evidence = markdown.split("### 2.1 감정 대상 증거", 1)[1].split("### 2.2", 1)[0]
+        for segment in self.segments:
+            digest = hashlib.sha256(segment.read_bytes()).hexdigest()
+            self.assertIn(f"| E-01 | `{segment.name}` | {segment.stat().st_size:,} 바이트 | `{digest}` |", evidence)
+        self.assertIn("- E-01 해시 대상: E01 컨테이너 세그먼트 파일의 바이트(디스크 매체 내용의 해시가 아님)", evidence)
+        self.assertIn(f"- E-01 기록된 취득 해시: MD5 `{self.md5}`", evidence)
+        self.assertNotIn("원본 증거 해시 미기록", evidence)
+        self.assertIsNone(DRIVE_PATH.search(markdown), DRIVE_PATH.search(markdown))
+        self.assertNotIn("Client-Kim", markdown)
+
+    def test_exports_pass_the_report_audit(self) -> None:
+        exports = self.response.json()["exports"]
+        audit = _load_audit()
+        for key in ("md", "html", "docx"):
+            result = audit.audit_file(Path(exports[key]))
+            self.assertTrue(result["ok"], f"{key}: {result}")
+
+
+class DisplayZoneTests(unittest.TestCase):
+    def test_registry_zone_states_standard_time_only(self) -> None:
+        summary = {"disclosures": {"timezone": {"evidence_timezone": {"name": "Pacific Standard Time", "bias_minutes": 480}}}}
+        offset, label = items.display_timezone(summary)
+        self.assertEqual(offset, -480)
+        self.assertIn("UTC-08:00 (증거 시스템 시간대, Pacific Standard Time)", label)
+        self.assertIn("일광 절약 시간(서머타임)은 반영하지 않음", label)
+
+    def test_year_one_with_negative_offset(self) -> None:
+        self.assertEqual(
+            items.format_evidence_time("0001-01-01T00:00:00Z", -480),
+            "0001-01-01T00:00:00Z (표시 범위를 벗어난 시각이라 기록값 그대로 표시)",
+        )
+
+    def test_sanitizers(self) -> None:
+        self.assertEqual(items.md_inline("a\n\n## b\r\n- c\x00`d`"), f"a ## b - c{items.BACKTICK_STAND_IN}d{items.BACKTICK_STAND_IN}")
+        self.assertEqual(items.md_cell("x | y\nz"), "x \\| y z")
+        self.assertEqual(items.md_block_lines("one\n\n# two"), ["  > one", "  > # two"])
+        self.assertEqual(items.output_relative_name("C:\\cases\\Client\\out\\a\\b.json", "C:\\cases\\Client\\out"), "a/b.json")
+        self.assertEqual(items.output_relative_name("D:/elsewhere/x.json", "C:\\out"), "x.json")
+        self.assertEqual(items.output_relative_name("rapidtriage-files.json", "C:\\out"), "rapidtriage-files.json")
+
+
+if __name__ == "__main__":
+    unittest.main()

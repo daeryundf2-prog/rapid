@@ -52,20 +52,23 @@ describe("api", () => {
     expect(headers["X-RapidTriage-Token"]).toBe("abc123");
   });
 
-  it("throws ApiError with status and detail on failure", async () => {
+  it("throws ApiError with status and detail on failure (old body: English detail → Korean message)", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        new Response('{"detail": "missing or invalid RapidTriage auth token"}', {
-          status: 401,
-          headers: { "content-type": "application/json" },
-        }),
+      vi.fn(
+        async () =>
+          new Response('{"detail": "missing or invalid RapidTriage auth token"}', {
+            status: 401,
+            headers: { "content-type": "application/json" },
+          }),
       ),
     );
     await expect(api("/api/runs")).rejects.toMatchObject({
       name: "ApiError",
       status: 401,
-      message: "missing or invalid RapidTriage auth token",
+      code: "UNAUTHORIZED",
+      message: "인증 토큰이 없거나 맞지 않습니다",
+      detail: "missing or invalid RapidTriage auth token",
     });
     await expect(api("/api/runs")).rejects.toBeInstanceOf(ApiError);
   });
@@ -93,5 +96,35 @@ describe("422 details (D1 /flags/row, review follow-up)", () => {
     expect((error as Error).message).toBe("알 수 없는 kind입니다: zzz");
     expect((error as InstanceType<typeof ApiError>).status).toBe(422);
     vi.unstubAllGlobals();
+  });
+});
+
+describe("empty success bodies (E01 QA D1: run delete 204)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("resolves a 204 with a JSON content type instead of throwing a JSON parse error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 204, headers: { "content-type": "application/json" } })),
+    );
+    await expect(api("/api/runs/r1", { method: "DELETE" })).resolves.toBeUndefined();
+  });
+
+  it("resolves an empty 200 JSON body to undefined", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("", { status: 200, headers: { "content-type": "application/json" } })),
+    );
+    await expect(api("/api/x")).resolves.toBeUndefined();
+  });
+
+  it("still parses a JSON body", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () => new Response('{"a":1}', { status: 200, headers: { "content-type": "application/json" } }),
+      ),
+    );
+    await expect(api("/api/x")).resolves.toEqual({ a: 1 });
   });
 });

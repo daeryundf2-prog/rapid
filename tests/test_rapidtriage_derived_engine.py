@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import tempfile
 import unittest
@@ -28,7 +29,11 @@ from rapidtriage.core.derived.normalize import (
     phone_e164,
     url_host,
 )
-from rapidtriage.core.derived.stage import DERIVED_ANALYSIS_KIND, run_derived_stage
+from rapidtriage.core.derived.stage import (
+    DERIVED_ANALYSIS_KIND,
+    RUN_STAGE_ANALYSIS_PREFIX,
+    run_derived_stage,
+)
 from rapidtriage.core.derived.url_classes import (
     UrlClassError,
     load_url_classes,
@@ -57,6 +62,9 @@ NO_IDENTIFIER_FAMILIES = frozenset(
         "timezone",  # one registry value
         "web-upload-candidate",  # restates its source row (r2 console fix m3)
         "messenger-error",  # store read failures (r2 console fix m2)
+        "ai-message",  # AI agent message bodies (masked text; identifiers live on the session row)
+        "ai-mcp-server",  # MCP server name / masked command or URL (not an account, path or visit)
+        "ai-code",  # AI code attribution / usage counters (commit ids, line counts)
         "email-client-error",  # mail client store read failures (r5 L1)
         "ntfs-logfile-transaction",  # LSN / op codes; file names are bare candidates, not paths (R3 §3.3)
         "logon-banner",  # caption/text of a legal notice (R5 L2)
@@ -178,8 +186,11 @@ class CatalogSemanticTests(unittest.TestCase):
         # + r3 O1 (10) + r3 O3 (ntfs-timestamp-mismatch, ntfs-logfile-transaction, carved-file)
         # + R5 L3 (11: location-url-candidate, browser-analytics-cookie, carved-url-candidate, 6 p2p, 2 android-backup)
         # + R5 L2 (15: startup, banner, Office x2, SSH x5, VM, wallet, AV, wallpaper, credential stores, NTFS volume)
-        # + R6 S2 lane A (1: av-product-presence).
-        self.assertEqual(len(catalog.families), 120)
+        # + R6 S2 lane A (1: av-product-presence)
+        # + timeline/grid readability C8 (2: shimcache, amcache-file)
+        # + R7 AI lane C (9: ai-tool, ai-session, ai-message, ai-tool-call, ai-file-touch, ai-mcp-server,
+        #   ai-config, ai-account, ai-code).
+        self.assertEqual(len(catalog.families), 131)
         for family in catalog.families:
             columns = [*family["core_columns"], *(family.get("aux_columns") or [])]
             tagged = [column for column in columns if column.get("semantic")]
@@ -200,7 +211,7 @@ class CatalogSemanticTests(unittest.TestCase):
 
     def test_validator_rejects_bad_tags(self) -> None:
         def family(column: dict[str, object]) -> list[tuple[str, bytes]]:
-            document = {"families": [{"id": "x", "label": "X", "core_columns": [{"key": "a", "label": "A", **column}]}]}
+            document = {"families": [{"id": "x", "label": "X", "tier": 3, "card": None, "section": "x", "core_columns": [{"key": "a", "label": "A", **column}]}]}
             return [("x.yaml", json.dumps(document).encode("utf-8"))]
 
         for column, message in (
@@ -293,7 +304,7 @@ class R2ConsoleCatalogTests(unittest.TestCase):
 
     def test_value_labels_validator_is_korean(self) -> None:
         def family(column: dict[str, object]) -> list[tuple[str, bytes]]:
-            document = {"families": [{"id": "x", "label": "X", "core_columns": [{"key": "a", "label": "A", **column}]}]}
+            document = {"families": [{"id": "x", "label": "X", "tier": 3, "card": None, "section": "x", "core_columns": [{"key": "a", "label": "A", **column}]}]}
             return [("x.yaml", json.dumps(document).encode("utf-8"))]
 
         for labels in ({}, ["a"], {"a": ""}, {"": "가"}, {"a": 1}):
@@ -552,6 +563,40 @@ class StageTests(unittest.TestCase):
             self.assertNotIn("SECRET", message)
             self.assertFalse((run_dir / "analyses" / str(failed["analysis_id"]) / "analysis.json").exists())
             self.assertTrue((run_dir / "analyses" / str(second["analysis_id"]) / "analysis.json").exists())
+
+    def test_back_to_back_stage_runs_get_distinct_ids(self) -> None:
+        # Same-tick runs used to share a µs-timestamp id -> FileExistsError [WinError 183].
+        frozen = dt.datetime(2026, 10, 27, 1, 2, 3, 456789, tzinfo=dt.timezone.utc)
+        with tempfile.TemporaryDirectory() as temp, patch("rapidtriage.core.triage_rules.stage.dt") as fake_dt:
+            fake_dt.datetime.now.return_value = frozen
+            fake_dt.timezone = dt.timezone
+            run_dir = Path(temp)
+            ids = []
+            for _ in range(5):
+                step = run_derived_stage(run_dir, artifact_outputs={})
+                self.assertEqual(step["status"], "completed", step)
+                ids.append(str(step["analysis_id"]))
+        self.assertEqual(len(set(ids)), 5)
+        for analysis_id in ids:
+            self.assertRegex(analysis_id, rf"^{RUN_STAGE_ANALYSIS_PREFIX}-20261027T010203456789-[0-9a-f]{{8}}$")
+            self.assertLessEqual(len(analysis_id), 64)
+
+    def test_taken_generation_name_gets_a_fresh_suffix(self) -> None:
+        # mkdir(exist_ok=False) on a taken name retries with a new id instead of failing the step.
+        taken = f"{RUN_STAGE_ANALYSIS_PREFIX}-20261027T010203456789-aaaaaaaa"
+        fresh = f"{RUN_STAGE_ANALYSIS_PREFIX}-20261027T010203456789-bbbbbbbb"
+        with tempfile.TemporaryDirectory() as temp, patch(
+            "rapidtriage.core.derived.stage.new_run_stage_analysis_id", side_effect=[taken, fresh]
+        ):
+            run_dir = Path(temp)
+            (run_dir / "analyses" / taken).mkdir(parents=True)
+            (run_dir / "analyses" / taken / "marker.txt").write_text("x", encoding="utf-8")
+            step = run_derived_stage(run_dir, artifact_outputs={})
+            self.assertEqual(step["status"], "completed", step)
+            self.assertEqual(step["analysis_id"], fresh)
+            self.assertEqual(step["output"], str(run_dir / "analyses" / fresh))
+            self.assertTrue((run_dir / "analyses" / fresh / "analysis.json").is_file())
+            self.assertFalse((run_dir / "analyses" / taken / "analysis.json").exists())
 
 
 if __name__ == "__main__":

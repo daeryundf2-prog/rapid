@@ -1,0 +1,2590 @@
+[
+  {
+    "name": "ChatGPT",
+    "vendor": "OpenAI",
+    "category": "chatbot",
+    "aliases": [
+      "ChatGPT Desktop",
+      "chat.openai.com (old domain)"
+    ],
+    "variants": [
+      "web",
+      "Windows desktop (Microsoft Store/winget/direct)",
+      "macOS desktop",
+      "iOS",
+      "Android"
+    ],
+    "paths": {
+      "windows": {
+        "value": "Windows app local path: unknown. Study confirms disk, Prefetch, registry and RAM traces survive app deletion; exported data (HTML/JSON) holds extra timestamps.",
+        "confidence": "third-party",
+        "sources": [
+          "https://www.arxiv.org/html/2505.23938v1"
+        ]
+      },
+      "macos": {
+        "value": "~/Library/Application Support/com.openai.chat/ ; 2024: conversations-<uuid> plaintext, later encrypted; folder conversations-v2-<accountID> reported unreadable",
+        "confidence": "third-party",
+        "sources": [
+          "https://heise.de/-9789679",
+          "https://community.openai.com/t/since-the-local-data-is-now-encrypted-is-there-any-way-to-get-the-uuid-or-url-of-the-most-recent-chat/943908"
+        ]
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "Package com.openai.chatgpt (unverified); data path unknown. Magnet: JSON, protobuf and log files in mobile apps",
+        "confidence": "third-party",
+        "sources": [
+          "https://www.magnetforensics.com/resources/forensic-analysis-of-chatgpt/"
+        ]
+      },
+      "ios": {
+        "value": "2023 test (iOS 16.5, v1.2023.23): container com.openai.chat; Application Support/conversations/*.json (one JSON per conversation); deleted conversation left no artifact; Safari History.db has chat.openai.com URLs",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/"
+        ]
+      }
+    },
+    "storage_format": {
+      "value": "JSON (iOS 2023 plaintext); macOS later encrypted; Windows unknown",
+      "confidence": "third-party",
+      "sources": [
+        "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+        "https://community.openai.com/t/since-the-local-data-is-now-encrypted-is-there-any-way-to-get-the-uuid-or-url-of-the-most-recent-chat/943908"
+      ]
+    },
+    "domains": {
+      "value": [
+        "chatgpt.com",
+        "chat.openai.com",
+        "api.openai.com",
+        "cdn.oaistatic.com",
+        "files.oaiusercontent.com"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "ChatGPT.exe",
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ]
+    },
+    "install_artifacts": {
+      "value": "Distributed via Microsoft Store, winget, openai.com/chatgpt/download; MSIX family name unknown (recollection OpenAI.ChatGPT-Desktop_2p2nqsd0c76g0, unverified)",
+      "confidence": "third-party",
+      "sources": [
+        "https://www.arxiv.org/html/2505.23938v1"
+      ]
+    },
+    "local_vs_server": {
+      "value": "Server holds full history; local remnants in cache/RAM/registry. Windows RAM held content after uninstall.",
+      "confidence": "third-party",
+      "sources": [
+        "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+        "https://www.arxiv.org/html/2505.23938v1"
+      ]
+    },
+    "retention_export_audit": {
+      "value": "Deleted chats hidden immediately, purged within 30 days; Temporary Chat up to 30 days safety copy; archiving does not change retention; account export via Settings > Data controls; Enterprise Compliance API/admin retention not fetched",
+      "confidence": "official-doc",
+      "sources": [
+        "https://help.openai.com/en/articles/8809935-how-to-delete-and-archive-chats-in-chatgpt"
+      ]
+    },
+    "notes": "macOS 2024 plaintext flaw patched via encryption."
+  },
+  {
+    "name": "Claude",
+    "vendor": "Anthropic",
+    "category": "chatbot",
+    "aliases": [
+      "Claude Desktop",
+      "Claude Cowork",
+      "Claude 3P (third-party inference mode)"
+    ],
+    "variants": [
+      "web claude.ai",
+      "Windows/macOS/Linux Electron desktop",
+      "iOS",
+      "Android"
+    ],
+    "paths": {
+      "windows": {
+        "value": "3P mode (official): %LOCALAPPDATA%\\Claude-3p\\ (earlier %APPDATA%\\Claude-3p\\): ant-did, configLibrary\\, local-agent-mode-sessions\\ (local_<uuid>.json, audit.jsonl HMAC-chained), claude-code-sessions\\, IndexedDB\\, Local Storage\\, Session Storage\\, vm_bundles\\, logs main.log/cowork_vm_node.log/claude.ai-web.log/mcp.log; user outputs ~/Claude/; Code transcripts ~/.claude/projects/. Standard mode: %APPDATA%\\Claude\\ (Cache_Data, Code Cache, GPUCache, logs, local-agent-mode-sessions)",
+        "confidence": "official-doc",
+        "sources": [
+          "https://claude.com/docs/third-party/claude-desktop/data-storage",
+          "https://brycewatson.com/blog/09-cowork-session-schema"
+        ],
+        "note": "standard-mode path is third-party only; IndexedDB there is claude.ai web storage, not session data"
+      },
+      "macos": {
+        "value": "3P: ~/Library/Application Support/Claude-3p/ ; logs ~/Library/Logs/Claude-3p/ ; standard mode path unverified",
+        "confidence": "official-doc",
+        "sources": [
+          "https://claude.com/docs/third-party/claude-desktop/data-storage"
+        ]
+      },
+      "linux": {
+        "value": "3P: ~/.config/Claude-3p/ ; standard unknown",
+        "confidence": "official-doc",
+        "sources": [
+          "https://claude.com/docs/third-party/claude-desktop/data-storage"
+        ]
+      },
+      "android": {
+        "value": "Package com.anthropic.claude (unverified); data unknown",
+        "confidence": "unverified",
+        "sources": [
+          "model-knowledge (not verified in this session)"
+        ]
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "JSON sessions + audit.jsonl, Markdown memory, Chromium LevelDB, Electron caches, text logs. 3P conversations not encrypted at rest; tokens via DPAPI/Keychain",
+      "confidence": "official-doc",
+      "sources": [
+        "https://claude.com/docs/third-party/claude-desktop/data-storage"
+      ]
+    },
+    "domains": {
+      "value": [
+        "claude.ai",
+        "api.anthropic.com",
+        "claude.com",
+        "anthropic.com"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "Claude.exe; Claude Code runtime; Cowork VM processes",
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ]
+    },
+    "install_artifacts": {
+      "value": "MSIX/installer id unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "3P mode: conversations local only (except SSH hosts). Consumer claude.ai: server history; local browser caches only.",
+      "confidence": "official-doc",
+      "sources": [
+        "https://claude.com/docs/third-party/claude-desktop/data-storage"
+      ]
+    },
+    "retention_export_audit": {
+      "value": "Consumer: deleted chats purged from backend within 30 days; incognito chats; training opt-in retention up to 5y; flagged up to 2y/7y; export via Settings>Privacy. 3P: chat/cowork/codeSessionRetentionDays 1-3650, sessionRetentionHold, OpenTelemetry export with enduser.id",
+      "confidence": "official-doc",
+      "sources": [
+        "https://privacy.claude.com/en/articles/10023548-how-long-do-you-store-my-data",
+        "https://claude.com/docs/third-party/claude-desktop/data-storage"
+      ]
+    },
+    "notes": "",
+    "local_verification_desktop": {
+      "verified_on": "Windows 11, Claude desktop (MSIX package Claude_pzs8sxrjxfjjc)",
+      "confidence": "verified-on-test-pc",
+      "source": "schema/structure probe on this PC, 2026-10-27 (names, counts, column/key names only; message bodies, URLs, titles and credentials not read)",
+      "important": "The live data directory is %LOCALAPPDATA%\\Claude-Data\\claude_pzs8sxrjxfjjc\\ (README.txt in Claude-Data). %APPDATA%\\Claude holds only a marker file; %LOCALAPPDATA%\\Packages\\Claude_pzs8sxrjxfjjc holds MSIX settings/virtualised stubs",
+      "layout": {
+        "%LOCALAPPDATA%\\Claude-Data\\claude_pzs8sxrjxfjjc\\": {
+          "claude-code-sessions/<accountUuid>/local_<uuid>.json": "desktop 'Code tab' session metadata (24 json files). keys: cliSessionId, cwd, originCwd, model, effort, permissionMode, createdAt, lastActivityAt, lastFocusedAt, completedTurns, isArchived, cliBinaryPin.{version,wrapper}, postTurnSummary.*, envScopeId, gitAnchors*. cliSessionId links to ~/.claude/projects/*/<sessionId>.jsonl",
+          "claude-code/<version>/": "bundled Claude Code CLI binaries (2.1.304, 2.1.308) -> evidence of CLI versions run",
+          "local-agent-mode-sessions/<uuid>/": "cowork / local agent mode sessions (3) + skills-plugin",
+          "scratch-workspaces/<uuid>/<uuid>/scratch-<date>-<id>/": "per-session scratch working folders (this is where sessions started without a project folder live)",
+          "git-shadow/, git-worktrees.json": "worktree bookkeeping; git-worktrees.json records origin repo paths/urls per project",
+          "claude_desktop_config.json": "preferences incl. per-account flags (bypassPermissionsGate, scheduled tasks, cowork browser tools); no mcpServers on this PC. Contains account UUIDs - treat as identifiers",
+          "config.json, window-state.json, ccd-session-presets.json, ant-device-registry.json (account id -> device), ant-did, cowork-enabled-cli-ops.json, extensions-blocklist.json": "UI/config/identity",
+          "plan-usage-history.json": "usage samples: version, samples[].{org,t,u.fh}",
+          "buddy-tokens.json, ssh-remote-server-state.json(tokens)": "sensitive - existence/mtime only",
+          "IndexedDB\\https_claude.ai_0.indexeddb.{leveldb,blob}\\": "claude.ai web-app IndexedDB (leveldb ~2.1MB)",
+          "Local Storage\\leveldb\\, Session Storage\\": "web storage",
+          "Cache\\Cache_Data\\": "1,918 files, 281MB (Chromium simple cache, f_<hex> names)",
+          "Network\\Cookies, Trust Tokens, TransportSecurity": "sensitive",
+          "Code Cache, GPUCache, Dawn*, Crashpad, Partitions\\cowork-file-preview": "Chromium/Electron caches"
+        },
+        "%LOCALAPPDATA%\\Claude\\logs\\": {
+          "main.log (+main1.log, main2.log rotated)": "~34k lines each, 2.7MB / 10MB / 10MB; dated lines (YYYY-MM-DD prefix)",
+          "claude.ai-web.log, cowork_vm_node.log, in-app-browser.log, mcp.log, ssh.log, chrome-native-host.log": "feature-specific logs"
+        },
+        "%APPDATA%\\Claude-NativeHost\\": "chrome-native-host.exe + com.anthropic.claude_browser_extension.json (native messaging manifest for the Claude browser extension -> evidence that the Chrome extension is installed)",
+        "%LOCALAPPDATA%\\Claude-3p, %LOCALAPPDATA%\\claude-cli-nodejs\\Cache": "3p data dir (empty) and CLI cache"
+      },
+      "forensic_notes": [
+        "Chat conversations for claude.ai are server-side; locally only IndexedDB/cache fragments exist. The desktop Code-tab sessions reference CLI sessions (cliSessionId) whose transcripts are in ~/.claude/projects",
+        "Packaged (MSIX) apps may redirect %APPDATA%/%LOCALAPPDATA% writes - collect from Claude-Data AND the Packages folder",
+        "Logs rotate by size (main.log -> main1.log -> main2.log); acquire all"
+      ]
+    }
+  },
+  {
+    "name": "Gemini",
+    "vendor": "Google",
+    "category": "chatbot",
+    "aliases": [
+      "Bard (renamed Feb 2024)",
+      "Gemini Apps"
+    ],
+    "variants": [
+      "web gemini.google.com",
+      "Android app",
+      "iOS",
+      "Chrome side panel"
+    ],
+    "paths": {
+      "windows": {
+        "value": "Chrome: %LocalAppData%\\Google\\Chrome\\User Data\\Default\\IndexedDB\\https_gemini.google.com_0.indexeddb.leveldb ; Service Worker\\ScriptCache ; Sync Data\\LevelDB",
+        "confidence": "third-party",
+        "sources": [
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ]
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "Package com.google.android.apps.bard (unverified); data unknown",
+        "confidence": "unverified",
+        "sources": [
+          "model-knowledge (not verified in this session)"
+        ]
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "LevelDB IndexedDB (web)",
+      "confidence": "third-party",
+      "sources": [
+        "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+      ]
+    },
+    "domains": {
+      "value": [
+        "gemini.google.com",
+        "bard.google.com",
+        "generativelanguage.googleapis.com",
+        "myactivity.google.com"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "chrome.exe/msedge.exe (web)",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "Server-side account activity; local browser remnants",
+      "confidence": "official-doc",
+      "sources": [
+        "https://support.google.com/gemini/answer/13278892"
+      ]
+    },
+    "retention_export_audit": {
+      "value": "Auto-delete default 18 months (3/36 selectable); activity off still saved up to 72 hours; Takeout export and Workspace Vault unverified",
+      "confidence": "official-doc",
+      "sources": [
+        "https://support.google.com/gemini/answer/13278892"
+      ]
+    },
+    "notes": ""
+  },
+  {
+    "name": "Microsoft Copilot",
+    "vendor": "Microsoft",
+    "category": "chatbot",
+    "aliases": [
+      "Bing Chat (renamed 2023)",
+      "Windows Copilot",
+      "Copilot app"
+    ],
+    "variants": [
+      "web",
+      "Windows app (MSIX)",
+      "Edge side panel",
+      "iOS",
+      "Android"
+    ],
+    "paths": {
+      "windows": {
+        "value": "Edge: %LocalAppData%\\Microsoft\\Edge\\User Data\\Default\\IndexedDB ; Service Worker\\CacheStorage ; Local Storage\\leveldb ; legacy WebCacheV01.dat (Container_n, keywords copilot/sydney). Standalone app MSIX LocalState: unknown",
+        "confidence": "third-party",
+        "sources": [
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ]
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "Package com.microsoft.copilot (unverified); data unknown",
+        "confidence": "unverified",
+        "sources": [
+          "model-knowledge (not verified in this session)"
+        ]
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "LevelDB IndexedDB, ESE WebCacheV01.dat",
+      "confidence": "third-party",
+      "sources": [
+        "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+      ]
+    },
+    "domains": {
+      "value": [
+        "copilot.microsoft.com",
+        "bing.com/chat",
+        "sydney.bing.com (historic)"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "msedge.exe; Copilot app process name unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "MSIX 'Microsoft chat provider for Copilot in Windows' can be auto-installed by Edge >=123.0.2420.65 and appears in Installed apps without being run (do not infer use)",
+      "confidence": "official-doc",
+      "sources": [
+        "https://www.bleepingcomputer.com/news/microsoft/microsoft-copilot-app-on-windows-server-mistakenly-added-by-edge/"
+      ]
+    },
+    "local_vs_server": {
+      "value": "Server-side history plus Edge remnants",
+      "confidence": "unverified",
+      "sources": [
+        "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+      ]
+    },
+    "retention_export_audit": {
+      "value": "Privacy dashboard / Purview audit not verified",
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ]
+    },
+    "notes": "Windows Recall (CoreAIPlatform) is a separate feature."
+  },
+  {
+    "name": "Perplexity",
+    "vendor": "Perplexity AI",
+    "category": "chatbot",
+    "aliases": [
+      "Perplexity Ask",
+      "Comet (separate browser)"
+    ],
+    "variants": [
+      "web",
+      "Windows app (Store/direct)",
+      "macOS",
+      "iOS",
+      "Android"
+    ],
+    "paths": {
+      "windows": {
+        "value": "Windows app exists (Store/perplexity.ai); local path unknown. ionsec TRACE.AI.Browser collector covers browser artifacts",
+        "confidence": "third-party",
+        "sources": [
+          "https://github.com/ionsec/trace"
+        ]
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "ai.perplexity.app.android (footnote only)",
+        "confidence": "unverified",
+        "sources": [
+          "https://alternativeto.net/news/2025/3/perplexity-launches-official-desktop-app-for-windows/"
+        ]
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "perplexity.ai",
+        "www.perplexity.ai"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "Store package id unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": ""
+  },
+  {
+    "name": "Grok",
+    "vendor": "xAI",
+    "category": "chatbot",
+    "aliases": [
+      "Grok on X"
+    ],
+    "variants": [
+      "web grok.com",
+      "X integration",
+      "iOS",
+      "Android"
+    ],
+    "paths": {
+      "windows": {
+        "value": "No vendor-specific path known. Generic browser artifacts for origin grok.com. Browser-profile artifacts apply: Chrome %LocalAppData%\\Google\\Chrome\\User Data\\<Profile>\\ ; Edge %LocalAppData%\\Microsoft\\Edge\\User Data\\<Profile>\\ ; subfolders IndexedDB, Local Storage\\leveldb, Session Storage, Service Worker, Cache\\Cache_Data, History.",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ],
+        "note": "generic Chromium layout; origin-specific content not verified"
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "ai.x.grok",
+        "confidence": "unverified",
+        "sources": [
+          "model-knowledge (not verified in this session)"
+        ]
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "grok.com",
+        "x.com/i/grok",
+        "api.x.ai"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": ""
+  },
+  {
+    "name": "DeepSeek",
+    "vendor": "DeepSeek",
+    "category": "chatbot",
+    "aliases": [
+      "DeepSeek Chat"
+    ],
+    "variants": [
+      "web chat.deepseek.com",
+      "iOS",
+      "Android"
+    ],
+    "paths": {
+      "windows": {
+        "value": "Chrome web: %LocalAppData%\\Google\\Chrome\\User Data\\Default\\Cache\\Cache_Data\\* ; network gator.volces.com/list, apmplus.volces.com/monitor_web/collect",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2025/04/09/forensic-analysis-and-security-implications-of-deepseek/"
+        ]
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "/data/data/com.deepseek.chat/databases/deepseek_chat_<User_ID>.db (chat_session_list, unencrypted), deepseek_chat.db (app_user_info: ID/email/phone), files/mmkv/*, files/apminsight/*, files/Vlog/APMPlus/*; deleted chats not recovered",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2025/04/09/forensic-analysis-and-security-implications-of-deepseek/"
+        ]
+      },
+      "ios": {
+        "value": "<container>/Documents/<User_ID>.db, Documents/deepseek_chat.db, Library/Caches/com.deepseek.chat/{Cache.db,fsCachedData/*}, Library/Cookies/Cookies.binarycookies, Library/Heimdallr; bundle DeepSeek Chat.app; deleted chat final response persisted in fsCachedData",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2025/04/09/forensic-analysis-and-security-implications-of-deepseek/"
+        ]
+      }
+    },
+    "storage_format": {
+      "value": ".db files (engine not stated), MMKV, binarycookies, Cache.db",
+      "confidence": "third-party",
+      "sources": [
+        "https://blogs.dsu.edu/digforce/2025/04/09/forensic-analysis-and-security-implications-of-deepseek/"
+      ]
+    },
+    "domains": {
+      "value": [
+        "chat.deepseek.com",
+        "deepseek.com",
+        "volces.com",
+        "intercom.io",
+        "fengkongcloud.com",
+        "portal101.cn"
+      ],
+      "confidence": "third-party",
+      "sources": [
+        "https://blogs.dsu.edu/digforce/2025/04/09/forensic-analysis-and-security-implications-of-deepseek/"
+      ]
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "Package/bundle com.deepseek.chat",
+      "confidence": "third-party",
+      "sources": [
+        "https://blogs.dsu.edu/digforce/2025/04/09/forensic-analysis-and-security-implications-of-deepseek/"
+      ]
+    },
+    "local_vs_server": {
+      "value": "Local chat DB on mobile; server holds copy",
+      "confidence": "third-party",
+      "sources": [
+        "https://blogs.dsu.edu/digforce/2025/04/09/forensic-analysis-and-security-implications-of-deepseek/"
+      ]
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": ""
+  },
+  {
+    "name": "Kimi",
+    "vendor": "Moonshot AI",
+    "category": "chatbot",
+    "aliases": [
+      "Kimi Chat",
+      "Kimi 智能助手"
+    ],
+    "variants": [
+      "web",
+      "iOS",
+      "Android"
+    ],
+    "paths": {
+      "windows": {
+        "value": "No vendor-specific path known. Generic browser artifacts for origin kimi.com. Browser-profile artifacts apply: Chrome %LocalAppData%\\Google\\Chrome\\User Data\\<Profile>\\ ; Edge %LocalAppData%\\Microsoft\\Edge\\User Data\\<Profile>\\ ; subfolders IndexedDB, Local Storage\\leveldb, Session Storage, Service Worker, Cache\\Cache_Data, History.",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ],
+        "note": "generic Chromium layout; origin-specific content not verified"
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "com.moonshot.kimichat; data unknown",
+        "confidence": "third-party",
+        "sources": [
+          "https://en.wikipedia.org/wiki/Kimi_(chatbot)"
+        ]
+      },
+      "ios": {
+        "value": "Bundle com.moonshot.kimichat, App Store id 6474233312; data unknown",
+        "confidence": "third-party",
+        "sources": [
+          "https://scout.appaloosa.io/en/apps/ios/com.moonshot.kimichat/3.1.0"
+        ]
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "kimi.com",
+        "kimi.moonshot.cn",
+        "api.moonshot.cn"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": ""
+  },
+  {
+    "name": "Qwen",
+    "vendor": "Alibaba Cloud",
+    "category": "chatbot",
+    "aliases": [
+      "Tongyi Qianwen",
+      "通义千问",
+      "Qwen Chat"
+    ],
+    "variants": [
+      "web",
+      "iOS",
+      "Android"
+    ],
+    "paths": {
+      "windows": {
+        "value": "No vendor-specific path known. Generic browser artifacts for origin chat.qwen.ai. Browser-profile artifacts apply: Chrome %LocalAppData%\\Google\\Chrome\\User Data\\<Profile>\\ ; Edge %LocalAppData%\\Microsoft\\Edge\\User Data\\<Profile>\\ ; subfolders IndexedDB, Local Storage\\leveldb, Session Storage, Service Worker, Cache\\Cache_Data, History.",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ],
+        "note": "generic Chromium layout; origin-specific content not verified"
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "chat.qwen.ai",
+        "tongyi.aliyun.com"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Paths for desktop/mobile variants not found in research; only generic browser artifacts apply."
+  },
+  {
+    "name": "Mistral Le Chat",
+    "vendor": "Mistral AI",
+    "category": "chatbot",
+    "aliases": [
+      "Le Chat"
+    ],
+    "variants": [
+      "web",
+      "iOS",
+      "Android"
+    ],
+    "paths": {
+      "windows": {
+        "value": "No vendor-specific path known. Generic browser artifacts for origin chat.mistral.ai. Browser-profile artifacts apply: Chrome %LocalAppData%\\Google\\Chrome\\User Data\\<Profile>\\ ; Edge %LocalAppData%\\Microsoft\\Edge\\User Data\\<Profile>\\ ; subfolders IndexedDB, Local Storage\\leveldb, Session Storage, Service Worker, Cache\\Cache_Data, History.",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ],
+        "note": "generic Chromium layout; origin-specific content not verified"
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "chat.mistral.ai"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Paths for desktop/mobile variants not found in research; only generic browser artifacts apply."
+  },
+  {
+    "name": "Meta AI",
+    "vendor": "Meta",
+    "category": "chatbot",
+    "aliases": [
+      "Meta AI app",
+      "assistant inside WhatsApp/Messenger/Instagram"
+    ],
+    "variants": [
+      "web",
+      "iOS",
+      "Android",
+      "embedded"
+    ],
+    "paths": {
+      "windows": {
+        "value": "No vendor-specific path known. Generic browser artifacts for origin meta.ai. Browser-profile artifacts apply: Chrome %LocalAppData%\\Google\\Chrome\\User Data\\<Profile>\\ ; Edge %LocalAppData%\\Microsoft\\Edge\\User Data\\<Profile>\\ ; subfolders IndexedDB, Local Storage\\leveldb, Session Storage, Service Worker, Cache\\Cache_Data, History.",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ],
+        "note": "generic Chromium layout; origin-specific content not verified"
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "meta.ai"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Paths for desktop/mobile variants not found in research; only generic browser artifacts apply."
+  },
+  {
+    "name": "Poe",
+    "vendor": "Quora",
+    "category": "chatbot",
+    "aliases": [
+      "Poe by Quora"
+    ],
+    "variants": [
+      "web",
+      "iOS",
+      "Android"
+    ],
+    "paths": {
+      "windows": {
+        "value": "No vendor-specific path known. Generic browser artifacts for origin poe.com. Browser-profile artifacts apply: Chrome %LocalAppData%\\Google\\Chrome\\User Data\\<Profile>\\ ; Edge %LocalAppData%\\Microsoft\\Edge\\User Data\\<Profile>\\ ; subfolders IndexedDB, Local Storage\\leveldb, Session Storage, Service Worker, Cache\\Cache_Data, History.",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ],
+        "note": "generic Chromium layout; origin-specific content not verified"
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "poe.com"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Paths for desktop/mobile variants not found in research; only generic browser artifacts apply."
+  },
+  {
+    "name": "Character.AI",
+    "vendor": "Character Technologies",
+    "category": "chatbot",
+    "aliases": [
+      "c.ai"
+    ],
+    "variants": [
+      "web",
+      "iOS",
+      "Android"
+    ],
+    "paths": {
+      "windows": {
+        "value": "No vendor-specific path known. Generic browser artifacts for origin character.ai. Browser-profile artifacts apply: Chrome %LocalAppData%\\Google\\Chrome\\User Data\\<Profile>\\ ; Edge %LocalAppData%\\Microsoft\\Edge\\User Data\\<Profile>\\ ; subfolders IndexedDB, Local Storage\\leveldb, Session Storage, Service Worker, Cache\\Cache_Data, History.",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ],
+        "note": "generic Chromium layout; origin-specific content not verified"
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "character.ai"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Paths for desktop/mobile variants not found in research; only generic browser artifacts apply."
+  },
+  {
+    "name": "Notion AI",
+    "vendor": "Notion Labs",
+    "category": "chatbot",
+    "aliases": [
+      "Notion Q&A"
+    ],
+    "variants": [
+      "inside Notion web/Electron desktop/mobile"
+    ],
+    "paths": {
+      "windows": {
+        "value": "No vendor-specific path known. Generic browser artifacts for origin notion.so. Browser-profile artifacts apply: Chrome %LocalAppData%\\Google\\Chrome\\User Data\\<Profile>\\ ; Edge %LocalAppData%\\Microsoft\\Edge\\User Data\\<Profile>\\ ; subfolders IndexedDB, Local Storage\\leveldb, Session Storage, Service Worker, Cache\\Cache_Data, History.",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ],
+        "note": "generic Chromium layout; origin-specific content not verified"
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "notion.so"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Paths for desktop/mobile variants not found in research; only generic browser artifacts apply."
+  },
+  {
+    "name": "NotebookLM",
+    "vendor": "Google",
+    "category": "chatbot",
+    "aliases": [
+      "Google NotebookLM"
+    ],
+    "variants": [
+      "web",
+      "iOS",
+      "Android"
+    ],
+    "paths": {
+      "windows": {
+        "value": "No vendor-specific path known. Generic browser artifacts for origin notebooklm.google.com. Browser-profile artifacts apply: Chrome %LocalAppData%\\Google\\Chrome\\User Data\\<Profile>\\ ; Edge %LocalAppData%\\Microsoft\\Edge\\User Data\\<Profile>\\ ; subfolders IndexedDB, Local Storage\\leveldb, Session Storage, Service Worker, Cache\\Cache_Data, History.",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ],
+        "note": "generic Chromium layout; origin-specific content not verified"
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "notebooklm.google.com"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Paths for desktop/mobile variants not found in research; only generic browser artifacts apply."
+  },
+  {
+    "name": "Manus",
+    "vendor": "Manus AI",
+    "category": "chatbot",
+    "aliases": [
+      "Manus agent"
+    ],
+    "variants": [
+      "web",
+      "mobile"
+    ],
+    "paths": {
+      "windows": {
+        "value": "No vendor-specific path known. Generic browser artifacts for origin manus.im. Browser-profile artifacts apply: Chrome %LocalAppData%\\Google\\Chrome\\User Data\\<Profile>\\ ; Edge %LocalAppData%\\Microsoft\\Edge\\User Data\\<Profile>\\ ; subfolders IndexedDB, Local Storage\\leveldb, Session Storage, Service Worker, Cache\\Cache_Data, History.",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ],
+        "note": "generic Chromium layout; origin-specific content not verified"
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "manus.im"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Paths for desktop/mobile variants not found in research; only generic browser artifacts apply."
+  },
+  {
+    "name": "Genspark",
+    "vendor": "Genspark",
+    "category": "chatbot",
+    "aliases": [
+      "Genspark Super Agent"
+    ],
+    "variants": [
+      "web",
+      "mobile"
+    ],
+    "paths": {
+      "windows": {
+        "value": "No vendor-specific path known. Generic browser artifacts for origin genspark.ai. Browser-profile artifacts apply: Chrome %LocalAppData%\\Google\\Chrome\\User Data\\<Profile>\\ ; Edge %LocalAppData%\\Microsoft\\Edge\\User Data\\<Profile>\\ ; subfolders IndexedDB, Local Storage\\leveldb, Session Storage, Service Worker, Cache\\Cache_Data, History.",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ],
+        "note": "generic Chromium layout; origin-specific content not verified"
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "genspark.ai"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Paths for desktop/mobile variants not found in research; only generic browser artifacts apply."
+  },
+  {
+    "name": "Felo",
+    "vendor": "Felo Inc",
+    "category": "chatbot",
+    "aliases": [
+      "Felo Search"
+    ],
+    "variants": [
+      "web",
+      "mobile"
+    ],
+    "paths": {
+      "windows": {
+        "value": "No vendor-specific path known. Generic browser artifacts for origin felo.ai. Browser-profile artifacts apply: Chrome %LocalAppData%\\Google\\Chrome\\User Data\\<Profile>\\ ; Edge %LocalAppData%\\Microsoft\\Edge\\User Data\\<Profile>\\ ; subfolders IndexedDB, Local Storage\\leveldb, Session Storage, Service Worker, Cache\\Cache_Data, History.",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ],
+        "note": "generic Chromium layout; origin-specific content not verified"
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "felo.ai"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Paths for desktop/mobile variants not found in research; only generic browser artifacts apply."
+  },
+  {
+    "name": "You.com",
+    "vendor": "You.com",
+    "category": "chatbot",
+    "aliases": [
+      "YouChat"
+    ],
+    "variants": [
+      "web",
+      "mobile"
+    ],
+    "paths": {
+      "windows": {
+        "value": "No vendor-specific path known. Generic browser artifacts for origin you.com. Browser-profile artifacts apply: Chrome %LocalAppData%\\Google\\Chrome\\User Data\\<Profile>\\ ; Edge %LocalAppData%\\Microsoft\\Edge\\User Data\\<Profile>\\ ; subfolders IndexedDB, Local Storage\\leveldb, Session Storage, Service Worker, Cache\\Cache_Data, History.",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ],
+        "note": "generic Chromium layout; origin-specific content not verified"
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "you.com"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Paths for desktop/mobile variants not found in research; only generic browser artifacts apply."
+  },
+  {
+    "name": "Doubao",
+    "vendor": "ByteDance",
+    "category": "chatbot",
+    "aliases": [
+      "豆包"
+    ],
+    "variants": [
+      "web",
+      "desktop",
+      "iOS",
+      "Android"
+    ],
+    "paths": {
+      "windows": {
+        "value": "No vendor-specific path known. Generic browser artifacts for origin doubao.com. Browser-profile artifacts apply: Chrome %LocalAppData%\\Google\\Chrome\\User Data\\<Profile>\\ ; Edge %LocalAppData%\\Microsoft\\Edge\\User Data\\<Profile>\\ ; subfolders IndexedDB, Local Storage\\leveldb, Session Storage, Service Worker, Cache\\Cache_Data, History.",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ],
+        "note": "generic Chromium layout; origin-specific content not verified"
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "doubao.com"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Paths for desktop/mobile variants not found in research; only generic browser artifacts apply."
+  },
+  {
+    "name": "Ernie Bot",
+    "vendor": "Baidu",
+    "category": "chatbot",
+    "aliases": [
+      "文心一言",
+      "Yiyan"
+    ],
+    "variants": [
+      "web",
+      "mobile"
+    ],
+    "paths": {
+      "windows": {
+        "value": "No vendor-specific path known. Generic browser artifacts for origin yiyan.baidu.com. Browser-profile artifacts apply: Chrome %LocalAppData%\\Google\\Chrome\\User Data\\<Profile>\\ ; Edge %LocalAppData%\\Microsoft\\Edge\\User Data\\<Profile>\\ ; subfolders IndexedDB, Local Storage\\leveldb, Session Storage, Service Worker, Cache\\Cache_Data, History.",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ],
+        "note": "generic Chromium layout; origin-specific content not verified"
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "yiyan.baidu.com"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Paths for desktop/mobile variants not found in research; only generic browser artifacts apply."
+  },
+  {
+    "name": "Pi",
+    "vendor": "Inflection AI",
+    "category": "chatbot",
+    "aliases": [
+      "Pi.ai"
+    ],
+    "variants": [
+      "web",
+      "iOS",
+      "Android"
+    ],
+    "paths": {
+      "windows": {
+        "value": "No vendor-specific path known. Generic browser artifacts for origin pi.ai. Browser-profile artifacts apply: Chrome %LocalAppData%\\Google\\Chrome\\User Data\\<Profile>\\ ; Edge %LocalAppData%\\Microsoft\\Edge\\User Data\\<Profile>\\ ; subfolders IndexedDB, Local Storage\\leveldb, Session Storage, Service Worker, Cache\\Cache_Data, History.",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ],
+        "note": "generic Chromium layout; origin-specific content not verified"
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "pi.ai"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Paths for desktop/mobile variants not found in research; only generic browser artifacts apply."
+  },
+  {
+    "name": "Brave Leo",
+    "vendor": "Brave Software",
+    "category": "chatbot",
+    "aliases": [
+      "Leo AI"
+    ],
+    "variants": [
+      "inside Brave browser"
+    ],
+    "paths": {
+      "windows": {
+        "value": "No vendor-specific path known. Generic browser artifacts for origin brave.com. Browser-profile artifacts apply: Chrome %LocalAppData%\\Google\\Chrome\\User Data\\<Profile>\\ ; Edge %LocalAppData%\\Microsoft\\Edge\\User Data\\<Profile>\\ ; subfolders IndexedDB, Local Storage\\leveldb, Session Storage, Service Worker, Cache\\Cache_Data, History.",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ],
+        "note": "generic Chromium layout; origin-specific content not verified"
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "brave.com"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Paths for desktop/mobile variants not found in research; only generic browser artifacts apply."
+  },
+  {
+    "name": "Duck.ai",
+    "vendor": "DuckDuckGo",
+    "category": "chatbot",
+    "aliases": [
+      "DuckDuckGo AI Chat"
+    ],
+    "variants": [
+      "web"
+    ],
+    "paths": {
+      "windows": {
+        "value": "No vendor-specific path known. Generic browser artifacts for origin duck.ai. Browser-profile artifacts apply: Chrome %LocalAppData%\\Google\\Chrome\\User Data\\<Profile>\\ ; Edge %LocalAppData%\\Microsoft\\Edge\\User Data\\<Profile>\\ ; subfolders IndexedDB, Local Storage\\leveldb, Session Storage, Service Worker, Cache\\Cache_Data, History.",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ],
+        "note": "generic Chromium layout; origin-specific content not verified"
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "duck.ai"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Paths for desktop/mobile variants not found in research; only generic browser artifacts apply."
+  },
+  {
+    "name": "Z.ai / GLM",
+    "vendor": "Zhipu AI",
+    "category": "chatbot",
+    "aliases": [
+      "ChatGLM",
+      "智谱清言"
+    ],
+    "variants": [
+      "web",
+      "mobile"
+    ],
+    "paths": {
+      "windows": {
+        "value": "No vendor-specific path known. Generic browser artifacts for origin chat.z.ai. Browser-profile artifacts apply: Chrome %LocalAppData%\\Google\\Chrome\\User Data\\<Profile>\\ ; Edge %LocalAppData%\\Microsoft\\Edge\\User Data\\<Profile>\\ ; subfolders IndexedDB, Local Storage\\leveldb, Session Storage, Service Worker, Cache\\Cache_Data, History.",
+        "confidence": "third-party",
+        "sources": [
+          "https://blogs.dsu.edu/digforce/2023/06/23/forensic-analysis-of-chatgpt-for-mobile-devices/",
+          "https://andreafortuna.org/2026/07/28/browser-ai-forensics/"
+        ],
+        "note": "generic Chromium layout; origin-specific content not verified"
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "chat.z.ai",
+        "chatglm.cn"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Paths for desktop/mobile variants not found in research; only generic browser artifacts apply."
+  },
+  {
+    "name": "CLOVA X",
+    "vendor": "Naver",
+    "category": "chatbot",
+    "aliases": [
+      "클로바X",
+      "HyperCLOVA X"
+    ],
+    "variants": [
+      "web",
+      "iOS",
+      "Android"
+    ],
+    "paths": {
+      "windows": {
+        "value": "unknown (no Korean-language DFIR source found)",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "clova-x.naver.com"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Korean search found no artifact write-ups; name/vendor/domain only; status/renames unverified; verify on a test device."
+  },
+  {
+    "name": "Wrtn",
+    "vendor": "Wrtn Technologies",
+    "category": "chatbot",
+    "aliases": [
+      "뤼튼",
+      "wrtn.ai"
+    ],
+    "variants": [
+      "web",
+      "iOS",
+      "Android"
+    ],
+    "paths": {
+      "windows": {
+        "value": "unknown (no Korean-language DFIR source found)",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "wrtn.ai"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Korean search found no artifact write-ups; name/vendor/domain only; status/renames unverified; verify on a test device."
+  },
+  {
+    "name": "Kanana",
+    "vendor": "Kakao",
+    "category": "chatbot",
+    "aliases": [
+      "카나나"
+    ],
+    "variants": [
+      "app",
+      "KakaoTalk-integrated"
+    ],
+    "paths": {
+      "windows": {
+        "value": "unknown (no Korean-language DFIR source found)",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "kanana.kakao.com"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Korean search found no artifact write-ups; name/vendor/domain only; status/renames unverified; verify on a test device."
+  },
+  {
+    "name": "Zeta",
+    "vendor": "Scatter Lab",
+    "category": "chatbot",
+    "aliases": [
+      "제타",
+      "Zeta AI"
+    ],
+    "variants": [
+      "web",
+      "iOS",
+      "Android"
+    ],
+    "paths": {
+      "windows": {
+        "value": "unknown (no Korean-language DFIR source found)",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "zeta-ai.io"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Korean search found no artifact write-ups; name/vendor/domain only; status/renames unverified; verify on a test device."
+  },
+  {
+    "name": "A. (에이닷)",
+    "vendor": "SK Telecom",
+    "category": "chatbot",
+    "aliases": [
+      "에이닷",
+      "A dot"
+    ],
+    "variants": [
+      "iOS",
+      "Android"
+    ],
+    "paths": {
+      "windows": {
+        "value": "unknown (no Korean-language DFIR source found)",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "unknown"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Korean search found no artifact write-ups; name/vendor/domain only; status/renames unverified; verify on a test device."
+  },
+  {
+    "name": "Liner",
+    "vendor": "Liner",
+    "category": "chatbot",
+    "aliases": [
+      "라이너"
+    ],
+    "variants": [
+      "web",
+      "extension",
+      "mobile"
+    ],
+    "paths": {
+      "windows": {
+        "value": "unknown (no Korean-language DFIR source found)",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "macos": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "linux": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "android": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      },
+      "ios": {
+        "value": "unknown",
+        "confidence": "unverified",
+        "sources": []
+      }
+    },
+    "storage_format": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "domains": {
+      "value": [
+        "getliner.com"
+      ],
+      "confidence": "unverified",
+      "sources": [
+        "model-knowledge (not verified in this session)"
+      ],
+      "note": "public product hostnames from model knowledge"
+    },
+    "process_names": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "install_artifacts": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "local_vs_server": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "retention_export_audit": {
+      "value": "unknown",
+      "confidence": "unverified",
+      "sources": []
+    },
+    "notes": "Korean search found no artifact write-ups; name/vendor/domain only; status/renames unverified; verify on a test device."
+  }
+]

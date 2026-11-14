@@ -21,7 +21,7 @@ import logging
 import os
 import sqlite3
 import threading
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
@@ -32,6 +32,8 @@ from fastapi import HTTPException
 from ...core.case_db.base import now_iso
 from ...core.case_db.database import CaseDatabase, next_citation_id_for_connection
 from ...core.jobs import RunJob, RunJobStore, run_output_dir
+from ...core.readonly_runs import RUN_READ_ONLY, may_persist, readonly_reason_for
+from ...core.search_hits import base_locator
 from ...core.search_index.build import (
     SEARCH_INDEX_KIND,
     SWAP_FAILED_STATUS,
@@ -56,6 +58,8 @@ CORRUPT_INDEX = "검색 색인을 읽을 수 없습니다({reason}). 처리 단�
 NOT_COMPLETED = "완료된 런이 아닙니다"
 NO_INDEX = "검색 색인이 없습니다. 처리 단계에서 색인을 만드세요"
 INDEX_BUSY = "이미 색인을 만드는 중입니다"
+# D37 / T-134: a read-only run folder gets no index file (build refused, missing index explained).
+READ_ONLY_INDEX = "읽기 전용 결과라 색인을 만들 수 없습니다 — 결과 폴더를 증거 밖으로 옮긴 뒤 다시 가져오세요"
 TOO_MANY = "검색이 너무 많이 실행 중입니다"
 NO_CASE_DB = "케이스 DB가 없습니다. 먼저 케이스 DB를 만드세요(POST /api/runs/{run}/case-db/ensure)"
 DUPLICATE_SAVED = "같은 이름의 저장 검색이 있습니다"
@@ -94,6 +98,19 @@ def search_index_available(job: RunJob) -> bool:
     """One ``stat`` (``GET /api/runs`` rows)."""
     path = index_path_of(job)
     return bool(path is not None and path.is_file())
+
+
+def read_only_index_refusal(output_dir: Path | None) -> dict[str, str] | None:
+    """409 detail refusing an index build into a read-only run folder (D37), else ``None``."""
+    reason = readonly_reason_for(output_dir)
+    if reason is None:
+        return None
+    return {"code": RUN_READ_ONLY, "message": READ_ONLY_INDEX, "readonly_reason": reason}
+
+
+def no_index_message(output_dir: Path | None) -> str:
+    """404 text for a run without an index: a read-only run cannot get one (T-134)."""
+    return NO_INDEX if may_persist(output_dir) else READ_ONLY_INDEX
 
 
 def latest_build(output_dir: Path) -> dict[str, object] | None:
@@ -186,6 +203,9 @@ def _failed_swap(latest: Mapping[str, object] | None, meta: Mapping[str, object]
 
 def submit_build(store: RunJobStore, run_id: str, options: Mapping[str, object], *, owner: object | None) -> dict[str, object]:
     scope = run_scope(store, run_id)  # 409 unless completed/failed
+    refusal = read_only_index_refusal(scope.output_dir)
+    if refusal is not None:
+        raise HTTPException(status_code=409, detail=refusal)
     latest = latest_build(scope.output_dir)
     if latest is not None and latest.get("status") in ACTIVE_STATUSES:
         raise HTTPException(status_code=409, detail=INDEX_BUSY)
@@ -215,7 +235,7 @@ def auto_incremental_after_analysis(context: Any) -> None:
     if not auto_index_enabled() or spec is None or spec.kind == SEARCH_INDEX_KIND:
         return
     scope = context.scope
-    if not (scope.output_dir / INDEX_FILE_NAME).is_file():
+    if not may_persist(scope.output_dir) or not (scope.output_dir / INDEX_FILE_NAME).is_file():
         return
     latest = latest_build(scope.output_dir)
     if latest is not None and latest.get("status") in ACTIVE_STATUSES:
@@ -310,11 +330,19 @@ def run_case(job: RunJob, run_id: str) -> tuple[Path, str]:
     return canonical_run_case(job.summary, run_id)
 
 
+def _case_db_ro_uri(database: Path) -> str:
+    """``mode=ro`` URI of the run's case DB; ``immutable`` in a read-only folder, where a plain
+    ``mode=ro`` open of a WAL case DB would create ``-wal`` / ``-shm`` next to it (T-348)."""
+    from .run_review import read_only_sqlite_uri
+
+    return read_only_sqlite_uri(database.resolve())
+
+
 def _case_exists(database: Path, case_id: str) -> bool:
     if not database.is_file():
         return False
     try:
-        connection = sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True)
+        connection = sqlite3.connect(_case_db_ro_uri(database), uri=True)
     except sqlite3.Error:
         return False
     try:
@@ -323,6 +351,29 @@ def _case_exists(database: Path, case_id: str) -> bool:
         return False
     finally:
         connection.close()
+
+
+def artifact_summaries(job: RunJob, run_id: str, keys: Sequence[tuple[str, str]]) -> dict[tuple[str, str], str]:
+    """The case DB's stored ``artifact_summary`` of one page of console-search artifact rows
+    (``{(kind, locator): summary}``; empty without a case DB): v1's hit titles (R7 S2 confirmation #10)."""
+    from .run_review import RunLocatorIndex
+
+    if job.summary is None or not keys:
+        return {}
+    database, case_id = run_case(job, run_id)
+    if not database.is_file():
+        return {}
+    outputs = job.summary.get("outputs")
+    try:
+        connection = sqlite3.connect(_case_db_ro_uri(database), uri=True)
+        try:
+            index = RunLocatorIndex(connection, case_id, outputs if isinstance(outputs, dict) else {}, output_dir=run_output_dir(job.summary))
+            return index.artifact_summaries(keys)
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        LOGGER.warning("artifact summaries unavailable for %s: %s", run_id, exc)
+        return {}
 
 
 class ReviewMarks:
@@ -346,7 +397,7 @@ class ReviewMarks:
             return None
         outputs = self.job.summary.get("outputs")
         try:
-            connection = sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True)
+            connection = sqlite3.connect(_case_db_ro_uri(database), uri=True)
             connection.row_factory = sqlite3.Row
             try:
                 entries, truncated = review_map_entries(
@@ -369,7 +420,7 @@ class ReviewMarks:
         """Never silently wrong: past ``REVIEW_MARK_LIMIT`` marks the response says so."""
         if not self.truncated:
             return
-        message = f"리뷰 표시가 {REVIEW_MARK_LIMIT:,}건을 넘어 최근 {REVIEW_MARK_LIMIT:,}건만 반영했습니다"
+        message = f"검토 표시가 {REVIEW_MARK_LIMIT:,}건을 넘어 최근 {REVIEW_MARK_LIMIT:,}건만 반영했습니다"
         query = result.get("query") if isinstance(result.get("query"), dict) else {}
         parsed = query.get("parsed") if isinstance(query.get("parsed"), dict) else {}
         warnings = parsed.get("warnings")
@@ -385,7 +436,9 @@ class ReviewMarks:
             return
         by_key = {(str(mark.get("collection") or ""), str(mark.get("kind") or ""), str(mark.get("locator") or "")): mark for mark in marks}
         for row in rows:
-            mark = by_key.get((str(row.get("collection") or ""), str(row.get("kind") or ""), str(row.get("locator") or "")))
+            collection, kind, locator = str(row.get("collection") or ""), str(row.get("kind") or ""), str(row.get("locator") or "")
+            # An archive entry row shows the mark of its archive record.
+            mark = by_key.get((collection, kind, locator)) or by_key.get((collection, kind, base_locator(locator)))
             if mark is not None:
                 row["review"] = {
                     "status": mark.get("status"),
@@ -427,6 +480,8 @@ class SearchHistory:
         return self._executor.submit(guarded)
 
     def record(self, output_dir: Path, params: Mapping[str, object], *, truncated: bool) -> None:
+        if not may_persist(output_dir):
+            return  # D37 read-only run folder: no history file
         entry = (
             now_iso(),
             str(params.get("q") or ""),
@@ -455,6 +510,8 @@ class SearchHistory:
             self._write(output_dir, entries)
 
     def _write(self, output_dir: Path, entries: list[tuple[str, str, str, str]]) -> None:
+        if not may_persist(output_dir):
+            return  # D37: also checked here, not only by ``record`` (a folder can turn read-only meanwhile)
         path = self.path_for(output_dir)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -572,7 +629,7 @@ def _case_connection(job: RunJob, run_id: str, *, write: bool) -> Iterator[tuple
         with CaseDatabase(database).connect() as connection:
             yield connection, case_id
         return
-    connection = sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True)
+    connection = sqlite3.connect(_case_db_ro_uri(database), uri=True)
     connection.row_factory = sqlite3.Row
     try:
         yield connection, case_id
@@ -700,6 +757,8 @@ def delete_saved(job: RunJob, run_id: str, saved_id: int) -> None:
 
 def record_saved_count(job: RunJob, run_id: str, saved_id: int, total: int, exact: bool) -> None:
     """After a query run from a saved search: remember its count (tree badge)."""
+    if not may_persist(job.output_dir()):
+        return  # D37 read-only run folder: the case DB is not updated
     try:
         current = get_saved(job, run_id, saved_id)
     except HTTPException:

@@ -1,13 +1,21 @@
 import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Popover } from "../components/Popover";
+import { DELETE_RUN_LABEL, useCaseDialogs } from "../features/case/dialogs";
+import { ReasonButton } from "../features/case/ReasonButton";
 import { Icon } from "../icons";
-import { useRoute, useRuns } from "../state/hooks";
-import { type CaseOption, casePickerOptions, caseStatusLabel, moveActiveIndex } from "./casePicker";
+import { useRoute, useRuns, useTimezone } from "../state/hooks";
+import {
+  type CaseOption,
+  casePickerOptions,
+  caseStatusLabel,
+  moveActiveIndex,
+  runDeleteReason,
+} from "./casePicker";
 
 /**
- * Top-bar case picker (review #5): a button that opens a 420px popover with a search field on
- * top (role=combobox) and the cases as a listbox — two lines per case (name; mode · date ·
- * run id) with a status dot on the right, most recent first. ↓/↑ move, Enter opens, Esc
+ * Top-bar run picker (review #5, R7 C-G5): "런: 이름 · 모드" opens a 420px popover with a search
+ * field on top (role=combobox) and the runs as a listbox — two lines per run (name; the run chip
+ * `모드 · 시작 시각 · 소요 · id8`) with a status dot on the right, newest start first. ↓/↑ move, Enter opens, Esc
  * closes and returns to the trigger; typing a character on the closed trigger opens the
  * picker with that character as the search (typeahead).
  */
@@ -22,9 +30,10 @@ export function CasePickerCombobox() {
   const listId = useId();
   const optionPrefix = useId();
 
-  const options = useMemo(() => casePickerOptions(runs, query), [runs, query]);
+  const { timezone } = useTimezone();
+  const options = useMemo(() => casePickerOptions(runs, query, timezone), [runs, query, timezone]);
   const current = runs.find((run) => run.run_id === route.runId);
-  const currentOption = current ? casePickerOptions([current])[0] : undefined;
+  const currentOption = current ? casePickerOptions([current], "", timezone)[0] : undefined;
   const activeIndex = active >= options.length ? options.length - 1 : active;
   const activeOption = activeIndex >= 0 ? options[activeIndex] : undefined;
 
@@ -44,6 +53,15 @@ export function CasePickerCombobox() {
     navigate({ runId: option.runId, collection: "intake" });
     close();
     triggerRef.current?.focus();
+  };
+  // Run delete from the picker row (r8 verify F3): the T-034 confirm dialog (starts on 취소), never a
+  // direct delete. Focus goes back to the trigger first, so the dialog returns there on close.
+  const confirmDelete = useCaseDialogs((s) => s.confirmDelete);
+  const requestDelete = (option: CaseOption) => {
+    if (runDeleteReason(option.status)) return;
+    close();
+    triggerRef.current?.focus();
+    confirmDelete(option.runId);
   };
 
   const onInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -65,8 +83,8 @@ export function CasePickerCombobox() {
   const label = currentOption
     ? `${currentOption.name} · ${currentOption.mode}`
     : runs.length
-      ? "케이스 선택…"
-      : "케이스 없음";
+      ? "런 선택…"
+      : "런 없음";
 
   return (
     <div className="case-picker popover-anchor">
@@ -75,7 +93,7 @@ export function CasePickerCombobox() {
         type="button"
         className="case-picker-trigger"
         data-testid="case-picker"
-        aria-label={`케이스: ${label}`}
+        aria-label={`런: ${label}`}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? popoverId : undefined}
@@ -111,19 +129,19 @@ export function CasePickerCombobox() {
         open={open}
         onClose={close}
         triggerRef={triggerRef}
-        label="케이스 선택"
+        label="런 선택"
         className="case-picker-popover"
       >
         <input
           type="search"
           role="combobox"
           className="case-picker-search"
-          aria-label="케이스 검색"
+          aria-label="런 검색"
           aria-expanded="true"
           aria-controls={listId}
           aria-autocomplete="list"
           aria-activedescendant={activeOption ? `${optionPrefix}-${activeOption.runId}` : undefined}
-          placeholder="케이스 이름·모드·런 ID"
+          placeholder="증거 이름·모드·런 ID"
           value={query}
           onChange={(event) => {
             setQuery(event.target.value);
@@ -131,9 +149,9 @@ export function CasePickerCombobox() {
           }}
           onKeyDown={onInputKeyDown}
         />
-        <div id={listId} role="listbox" aria-label="케이스" className="case-picker-list">
+        <div id={listId} role="listbox" aria-label="런" className="case-picker-list">
           {options.length === 0 ? (
-            <p className="case-picker-empty">{runs.length ? "일치하는 케이스가 없습니다." : "케이스 없음"}</p>
+            <p className="case-picker-empty">{runs.length ? "일치하는 런이 없습니다." : "런 없음"}</p>
           ) : (
             options.map((option, index) => (
               // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard is handled by the search combobox (aria-activedescendant)
@@ -150,10 +168,7 @@ export function CasePickerCombobox() {
               >
                 <span className="case-picker-option-text">
                   <span className="case-picker-option-name">{option.name}</span>
-                  <span className="case-picker-option-meta">
-                    {[option.mode, option.date].filter(Boolean).join(" · ")} ·{" "}
-                    <span className="mono">{option.runId}</span>
-                  </span>
+                  <span className="case-picker-option-meta">{option.chip}</span>
                 </span>
                 <span
                   className={`status-dot${option.tone ? ` ${option.tone}` : ""}`}
@@ -161,10 +176,41 @@ export function CasePickerCombobox() {
                   aria-label={caseStatusLabel(option.status)}
                   title={caseStatusLabel(option.status)}
                 />
+                {runDeleteReason(option.status) ? null : (
+                  // Pointer shortcut on the row; keyboard / screen readers use the 삭제 button under
+                  // the list (it acts on the active row) — a listbox option holds no controls.
+                  <span
+                    className="case-picker-option-delete"
+                    aria-hidden="true"
+                    title={`${option.name} ${DELETE_RUN_LABEL}`}
+                    data-testid="case-picker-row-delete"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      requestDelete(option);
+                    }}
+                  >
+                    <Icon name="trash" />
+                  </span>
+                )}
               </div>
             ))
           )}
         </div>
+        {activeOption ? (
+          <div className="case-picker-actions">
+            <ReasonButton
+              className="button case-picker-delete"
+              data-testid="case-picker-run-delete"
+              aria-label={`${activeOption.name} ${DELETE_RUN_LABEL}`}
+              reason={runDeleteReason(activeOption.status)}
+              quietReason
+              onClick={() => requestDelete(activeOption)}
+            >
+              <Icon name="trash" /> {DELETE_RUN_LABEL}
+            </ReasonButton>
+          </div>
+        ) : null}
       </Popover>
     </div>
   );

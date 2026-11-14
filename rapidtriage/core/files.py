@@ -12,14 +12,18 @@ import re
 import stat as stat_module
 import sys
 import threading
+import time
 import zipfile
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
+from .clock import now_local_iso
 from .extraction_failures import (
     ADS_SOURCE_ID,
+    E01_EXTRACT_DIR_NAME,
+    E01_LEGACY_EXTRACT_DIR_NAMES,
     FLS_LISTING_NAME,
     LONG_PATH_SOURCE_ID,
     ZERO_BYTE_SOURCE_ID,
@@ -41,6 +45,7 @@ from .hash_cache import (
 from .input_root import InputRoot, resolve_input_root
 from .models import FileCandidate
 from .recovery import (
+    CANDIDATE_KIND_DELETED_ENTRY,
     CANDIDATE_KIND_EXISTING,
     build_recovery_record,
     count_candidate_kinds,
@@ -723,6 +728,45 @@ def deletion_state_for(is_deleted: bool | None) -> str:
     return DELETION_STATE_UNKNOWN
 
 
+#: Folder of the native E01 engine's deleted-record sweep (``e01_native._sweep_deleted_mft_records``):
+#: every file under ``<extract root>/_deleted_mft/`` was dumped from an MFT record whose in-use flag
+#: is cleared, i.e. an unallocated (deleted) file. The engine encodes that only in the folder name.
+NATIVE_DELETED_MFT_DIR = "_deleted_mft"
+
+
+def native_deleted_sweep_root(root: Path) -> bool:
+    """True when ``root`` is an E01 extraction root holding the native deleted-record sweep."""
+    return root.name in (E01_EXTRACT_DIR_NAME, *E01_LEGACY_EXTRACT_DIR_NAMES) and (root / NATIVE_DELETED_MFT_DIR).is_dir()
+
+
+def mark_native_deleted_record(candidate: FileCandidate) -> None:
+    """E01 QA D18: propagate the engine's "unallocated MFT record" knowledge to the file row.
+
+    Only a row whose deletion state is still unknown is changed (an image listing that already
+    said allocated / deleted wins). Derivation only -- the recovery engine is not touched.
+    """
+    if candidate.is_deleted is not None:
+        return
+    first = candidate.relative_path.replace("\\", "/").split("/", 1)[0]
+    if first != NATIVE_DELETED_MFT_DIR:
+        return
+    candidate.is_deleted = True
+    record_name = candidate.name.split("-", 1)[0]
+    candidate.recovery = build_recovery_record(
+        CANDIDATE_KIND_DELETED_ENTRY,
+        subtype="native-mft-unallocated-record",
+        confidence="medium",
+        deletion_state="deleted",
+        source_id="e01-native-deleted-mft-sweep",
+        source_path=candidate.path,
+        source_record_id=record_name if record_name.isdigit() else None,
+        limitation=(
+            "Recovered from an MFT record whose in-use flag is cleared (native deleted-record sweep); "
+            "content may be overwritten by later allocations. Validate with a trusted tool."
+        ),
+    )
+
+
 def sync_deletion_state(candidate: FileCandidate) -> None:
     if isinstance(candidate.recovery, dict):
         candidate.recovery["deletion_state"] = deletion_state_for(candidate.is_deleted)
@@ -820,7 +864,7 @@ def run_files_scan(
     payload = {
         "command": "files",
         "root": str(input_root.root_path),
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "filters": {
             "categories": list(selected_categories),
             "name_contains": normalized_name_filters,
@@ -981,6 +1025,7 @@ def scan_file_candidates(
     # E01 extraction roots carry sidecars (inode map, long-path/zero-byte/ADS
     # recoveries) written by the extraction gap stage; plain folders do not.
     extraction_stage = extraction_stage_for_root(root)
+    native_deleted_sweep = native_deleted_sweep_root(root)
     inode_index = load_extraction_inode_index(root) if extraction_stage is not None else {}
     listing_times = load_listing_time_index(root) if extraction_stage is not None else {}
     on_disk_keys: set[str] | None = set() if extraction_stage is not None else None
@@ -1024,6 +1069,8 @@ def scan_file_candidates(
             listing = listing_times.get(inode) if inode is not None else None
             if listing:
                 apply_listing_times(record, listing)
+        if native_deleted_sweep:
+            mark_native_deleted_record(record)
         inventory.append(file_inventory_record(record, reason=reason))
 
     def classify_and_build(path: Path, entry_stat: os.stat_result, relative_key: str = "") -> FileCandidate | None:
@@ -1092,6 +1139,8 @@ def scan_file_candidates(
                             listing = listing_times.get(inode)
                             if listing:
                                 apply_listing_times(candidate, listing)
+                    if native_deleted_sweep:
+                        mark_native_deleted_record(candidate)
                     candidates.append(candidate)
                     if limit and len(candidates) >= limit:
                         limit_reached = True
@@ -1386,7 +1435,7 @@ def build_known_good_index_payload(paths: Sequence[str | Path]) -> dict[str, obj
     core = {
         "command": "known-good-index",
         "profile_version": "known-good-index-v1",
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "summary": summary,
         "feed_paths": [str(path) for path in known_good_index.get("feed_paths", [])],
         "feed_summaries": known_good_index.get("feed_summaries", []),
@@ -2622,6 +2671,15 @@ def build_duplicate_content_groups(
     return groups
 
 
+# Character similarity (difflib) is quadratic in the text length: one pair of dissimilar 140 KB
+# JSONL outputs whose character mix passed ``quick_ratio`` took ~2 minutes (R7 gate: a run whose
+# output folder sits inside the scanned root). The ratio compares the first FUZZY_RATIO_MAX_CHARS
+# characters of each text, and all ratio work of one scan stops after FUZZY_RATIO_BUDGET_SECONDS
+# (remaining pairs are decided by token overlap alone; disclosed as ``ratio_pairs_skipped``).
+FUZZY_RATIO_MAX_CHARS = 8192
+FUZZY_RATIO_BUDGET_SECONDS = 10.0
+
+
 def build_fuzzy_text_duplicate_groups(
     candidates: Sequence[FileCandidate],
     *,
@@ -2629,6 +2687,7 @@ def build_fuzzy_text_duplicate_groups(
     max_text_bytes: int = 256 * 1024,
     min_similarity: float = 0.82,
     stats: dict[str, object] | None = None,
+    ratio_budget_seconds: float = FUZZY_RATIO_BUDGET_SECONDS,
 ) -> list[dict[str, object]]:
     # Pairwise comparison is O(n^2): the first ``max_files`` eligible text
     # files are compared and the remainder is disclosed via ``stats``.
@@ -2658,17 +2717,27 @@ def build_fuzzy_text_duplicate_groups(
             }
         )
     adjacency: dict[int, set[int]] = {index: set() for index in range(len(text_items))}
+    ratio_seconds = 0.0
+    ratio_skipped = 0
     for left_index, left in enumerate(text_items):
         for right_index in range(left_index + 1, len(text_items)):
             right = text_items[right_index]
             token_score = jaccard_similarity(left["tokens"], right["tokens"])
             if token_score < min_similarity:
-                matcher = difflib.SequenceMatcher(None, left["normalized"], right["normalized"])
-                if matcher.real_quick_ratio() < min_similarity:
+                if ratio_seconds >= ratio_budget_seconds:
+                    ratio_skipped += 1
                     continue
-                if matcher.quick_ratio() < min_similarity:
-                    continue
-                if matcher.ratio() < min_similarity:
+                started = time.perf_counter()
+                matcher = difflib.SequenceMatcher(
+                    None, left["normalized"][:FUZZY_RATIO_MAX_CHARS], right["normalized"][:FUZZY_RATIO_MAX_CHARS]
+                )
+                similar = (
+                    matcher.real_quick_ratio() >= min_similarity
+                    and matcher.quick_ratio() >= min_similarity
+                    and matcher.ratio() >= min_similarity
+                )
+                ratio_seconds += time.perf_counter() - started
+                if not similar:
                     continue
             adjacency[left_index].add(right_index)
             adjacency[right_index].add(left_index)
@@ -2725,7 +2794,9 @@ def build_fuzzy_text_duplicate_groups(
                 "eligible_text_file_count": eligible,
                 "compared_text_file_count": len(text_items),
                 "max_files": max_files,
-                "truncated": eligible > max_files,
+                "ratio_max_chars": FUZZY_RATIO_MAX_CHARS,
+                "ratio_pairs_skipped": ratio_skipped,
+                "truncated": eligible > max_files or ratio_skipped > 0,
             }
         )
     return groups

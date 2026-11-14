@@ -79,7 +79,7 @@ test("Q-X5: 사람 식별자 → 원본 행(2개 이상 계열) → 계열 표�
   await first.focus();
   await page.keyboard.press("Enter");
   const panel = page.getByTestId("derived-rows");
-  const samples = panel.locator("button.derived-sample");
+  const samples = panel.getByRole("button", { name: / — 원본 행 열기$/ });
   await expect(samples.first()).toBeFocused();
   const labels = await samples.allTextContents();
   const families = new Set(labels.map((label) => label.split(" · ")[0]));
@@ -154,7 +154,12 @@ test("Q-X12: 통합 보기 controls are named, chips toggle, search writes q=", 
   // Enter on a value moves focus into its original rows.
   await firstValue.focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByTestId("derived-rows").locator("button.derived-sample").first()).toBeFocused();
+  await expect(
+    page
+      .getByTestId("derived-rows")
+      .getByRole("button", { name: / — 원본 행 열기$/ })
+      .first(),
+  ).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(firstValue).toBeFocused();
 

@@ -1,6 +1,9 @@
 # Triage catalogue: other (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
 families:
 - id: defender
+  tier: 2
+  card: null
+  section: compromise
   label: Defender 로그
   types: []
   prefixes:
@@ -33,6 +36,9 @@ families:
   aux_columns: []
   rules: []
 - id: system-log
+  tier: 2
+  card: null
+  section: system-context
   label: 시스템 로그
   types:
   - firewall-log
@@ -67,6 +73,9 @@ families:
   aux_columns: []
   rules: []
 - id: crash-dump
+  tier: 3
+  card: null
+  section: crash-dumps
   label: 크래시 덤프
   types:
   - crash-dump-indicators
@@ -121,6 +130,9 @@ families:
     ts_kind: created
   rules: []
 - id: string-candidate
+  tier: 3
+  card: null
+  section: strings
   label: 문자열 후보
   types: []
   suffixes:
@@ -167,6 +179,9 @@ families:
   aux_columns: []
   rules: []
 - id: summary
+  tier: 3
+  card: null
+  section: summaries
   label: 요약(집계)
   types: []
   suffixes:
@@ -219,6 +234,9 @@ families:
   aux_columns: []
   rules: []
 - id: timeline
+  tier: 2
+  card: timeline
+  section: events
   label: 타임라인 이벤트
   types: []
   core_columns:
@@ -244,6 +262,9 @@ families:
   aux_columns: []
   rules: []
 - id: indicator
+  tier: 2
+  card: findings
+  section: indicators
   label: 지표
   types: []
   core_columns:
@@ -282,6 +303,9 @@ families:
   aux_columns: []
   rules: []
 - id: carved-file
+  tier: 1
+  card: deleted
+  section: carved
   label: 카빙 복구 파일
   types:
   - carve-row
@@ -352,6 +376,9 @@ families:
     format: path
   rules: []
 - id: generic
+  tier: 3
+  card: null
+  section: records
   label: 레코드
   types: []
   core_columns:
@@ -406,6 +433,9 @@ families:
   - generic.timestamp_out_of_range
 # --- R5 L2: desktop wallpaper, stored-credential presence (policy: no DPAPI, no blob contents) ---
 - id: desktop-wallpaper
+  tier: 2
+  card: null
+  section: system-context
   label: 바탕 화면 배경
   types:
   - desktop-wallpaper
@@ -466,6 +496,9 @@ families:
     format: path
   rules: []
 - id: credential-store-presence
+  tier: 2
+  card: accounts
+  section: credential-stores
   label: 저장된 자격 증명(존재만)
   types:
   - credential-store-presence

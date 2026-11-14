@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import hashlib
 import json
@@ -12,6 +13,7 @@ import time
 from collections import Counter
 from collections.abc import (
     Callable,
+    Collection,
     Iterator,
     Mapping,
     Sequence,
@@ -26,6 +28,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ...artifacts import all_providers, clear_collect_cache
+from ...artifacts.ai_agents.run_indirect import AI_KIND, append_ai_indirect_rows
 from ..archive_image import (
     ArchiveImageExtractionError,
     ArchiveImageExtractionResult,
@@ -111,6 +114,7 @@ from ..input_root import (
     derive_child_input_root,
     resolve_input_root,
 )
+from ..output_guard import check_output_outside_evidence
 from ..reporting import (
     build_run_report_context,
     render_run_markdown_report,
@@ -126,6 +130,7 @@ from ..timeline import (
     run_timeline,
     write_timeline_result,
 )
+from ..triage_rules.ai import ai_rule_params
 from ..triage_rules.stage import run_triage_stage
 from ..virtual_disk import (
     VirtualDiskExtractionError,
@@ -147,10 +152,12 @@ from .persist import (
     DOCS_TEXT_SPOOL_NAME,
     DocumentTextSpool,
     build_run_case_db,
+    build_run_families,
     build_run_geo_index,
     skipped_case_db_record,
 )
 from .plan import (
+    KINDS_ONLY_SKIPPED_GROUPS,
     PLAN_FILE_NAME,
     REASON_FOLDER_INPUT,
     PlanTargetError,
@@ -449,8 +456,14 @@ def run_triage_mode(
     skip_tasks: Sequence[str] = (),
     actor: str = "cli",
     control_since: str | None = None,
+    artifact_kinds: Sequence[str] = (),
 ) -> dict[str, object]:
     """Run every triage stage for ``root`` into ``output_dir``.
+
+    ``artifact_kinds`` (``--artifact-kinds``) makes a kind-only run: the artifacts stage runs only
+    those kinds, every other provider and the tree-walking docs/files/carve/extract stages are
+    skipped, and the unskippable fingerprint stage is ``sampled`` (no run-wide evidence path
+    snapshot, no content hash). The summary records ``run_scope`` and a disclosure note.
 
     ``case_db`` (default on) makes the ``persist`` stage build the run-local
     search index ``<output_dir>/rapidtriage-case.db``.
@@ -471,6 +484,7 @@ def run_triage_mode(
     the run process started watching (default: when this call started).
     """
     control_since = control_since or utc_now()
+    run_started_epoch = time.time() - 2.0  # mtime granularity margin (T-352 partial-file cleanup)
     normalized_mode = mode.lower()
     if normalized_mode not in SUPPORTED_RUN_MODES:
         supported = ", ".join(SUPPORTED_RUN_MODES)
@@ -495,8 +509,19 @@ def run_triage_mode(
         skip_groups=skip_groups,
         skip_tasks=skip_tasks,
         actor=actor,
+        artifact_kinds=artifact_kinds,
     )
+    kinds_only = [str(kind) for kind in plan["options"].get("artifact_kinds") or []]
+    if kinds_only:
+        profile = replace(profile, artifacts_kinds=tuple(kinds_only))
     output_dir = output_dir.expanduser().resolve()
+    # Forensic integrity (R7): the run never writes into (or over) the evidence. Checked before
+    # the output folder is created, so a refused run leaves no file behind.
+    if isinstance(root, InputRoot):
+        evidence_paths: list[Path | str] = [root.root_path, root.source_path]
+    else:
+        evidence_paths = [root]
+    check_output_outside_evidence(output_dir, evidence_paths)
     output_dir.mkdir(parents=True, exist_ok=True)
     # A resumed run reuses stage outputs (manifest/docs/files/timeline/...)
     # only when the previous run's plan finished ``complete``: after a
@@ -558,17 +583,28 @@ def run_triage_mode(
             output_dir=output_dir,
             e01_partition_start_sector=e01_partition_start_sector,
         )
+        if image_result is not None:
+            # T-352 review P1-2: the native engine counts a file it could not write as an error and
+            # goes on; errors on a (nearly) full result volume are a full disk, not a finished tree.
+            extraction_full = extraction_disk_full_error(output_dir, image_result.to_dict())
+            if extraction_full is not None:
+                raise extraction_full
         progress.set_run_root(str(input_root.root_path))
         if image_result is None:
             progress.task_finished("image-extract", status="skipped", reason=REASON_FOLDER_INPUT)
         progress.complete_stage("prepare")
         # Every provider walks the same evidence tree; the run-scoped path
         # cache makes each tree walk happen once per run (see core/files.py).
-        enable_evidence_path_cache()
+        # A kind-only run keeps it off: its first user (the fingerprint) would
+        # enumerate the whole tree that the few selected providers never need.
+        path_cache_enabled = not kinds_only
+        if path_cache_enabled:
+            enable_evidence_path_cache()
         # R6 S2: this run's own adb copy folder is the only ``mobile-inner`` pruned from walks.
         own_inner_dir = output_dir / MOBILE_INNER_DIR_NAME
         register_tool_output_dir(own_inner_dir)
         register_run_output_dir(output_dir)
+        deferred_ai_output = DeferredAiOutput()
         try:
             summary_payload = _run_triage_stages(
                 input_root,
@@ -599,14 +635,31 @@ def run_triage_mode(
                 stage_reuse_blocked=stage_reuse_blocked,
                 skip_groups=plan["options"]["skip_groups"],
                 skip_tasks=plan["options"]["skip_tasks"],
+                artifact_kinds=kinds_only,
+                deferred_ai_output=deferred_ai_output,
             )
+        except BaseException:
+            # A stage after the artifacts failed before the ai-agent output was completed: the
+            # provider's own payload is written now, so every finished provider output persists (I4).
+            # (A write error here must not mask the stage error the caller sees.)
+            with contextlib.suppress(Exception):
+                deferred_ai_output.flush()
+            raise
         finally:
             unregister_tool_output_dir(own_inner_dir)
             unregister_run_output_dir(output_dir)
-            disable_evidence_path_cache()
+            if path_cache_enabled:
+                disable_evidence_path_cache()
     except BaseException as exc:
         control_watcher.stop()
-        progress.fail(exc)
+        # T-352: a full output volume is its own failure (OUTPUT_DISK_FULL); half-written files go.
+        stage = str(progress.snapshot().get("stage") or "")
+        # The heartbeat renames its own temp file into place: stop it before any cleanup (P2-4).
+        progress.stop_heartbeat()
+        failure = classify_step_exception(exc, stage=stage, output_dir=output_dir, since_epoch=run_started_epoch)
+        progress.fail(failure)
+        if failure is not exc:
+            raise failure from exc
         raise
     control_watcher.stop()
     # The status follows plan.outcome (a cancel_all after the report stage started is rejected).
@@ -725,8 +778,11 @@ def _run_triage_stages(
     stage_reuse_blocked: bool = False,
     skip_groups: Sequence[str] = (),
     skip_tasks: Sequence[str] = (),
+    artifact_kinds: Sequence[str] = (),
+    deferred_ai_output: DeferredAiOutput | None = None,
 ) -> dict[str, object]:
     """Run every stage after the input root is prepared (see run_triage_mode)."""
+    deferred_ai_output = deferred_ai_output if deferred_ai_output is not None else DeferredAiOutput()
 
     def finish_stage(stage: str, details: Mapping[str, object] | None = None) -> None:
         record_memory_cap(stage)
@@ -786,10 +842,21 @@ def _run_triage_stages(
         write_result(image_result.to_dict(), virtual_disk_metadata_path)
 
     # Per-file content hashing is only needed for --resume reuse decisions;
-    # non-resume runs fingerprint on path+size+mtime metadata only.
-    if resume:
-        progress.task_set_message("fingerprint", "이어서 실행 지문 계산 중 (파일 내용 해시, 파일당 16 MB 상한)")
-    current_fingerprint = build_run_input_fingerprint(scan_root, hash_contents=resume)
+    # non-resume runs fingerprint on path+size+mtime metadata only. A kind-only
+    # run (--artifact-kinds) samples: metadata of the first files a lazy walk
+    # yields, never content (the full-tree walk cost 45 min on a home folder).
+    if artifact_kinds:
+        fingerprint_mode = FINGERPRINT_MODE_SAMPLED
+        progress.task_set_message("fingerprint", "종류 제한 실행: 입력 지문 표본 계산 중 (내용 해시 없음)")
+        current_fingerprint = build_run_input_fingerprint(
+            scan_root, hash_contents=False, max_files=KINDS_ONLY_FINGERPRINT_MAX_FILES
+        )
+    else:
+        fingerprint_mode = FINGERPRINT_MODE_CONTENT if resume else FINGERPRINT_MODE_METADATA
+        if resume:
+            progress.task_set_message("fingerprint", "이어서 실행 지문 계산 중 (파일 내용 해시, 파일당 16 MB 상한)")
+        current_fingerprint = build_run_input_fingerprint(scan_root, hash_contents=resume)
+    current_fingerprint["fingerprint_mode"] = fingerprint_mode
     finish_stage("fingerprint")
     previous_fingerprint = (
         load_reusable_json(
@@ -913,6 +980,9 @@ def _run_triage_stages(
         progress=progress,
         memory_check=record_memory_cap,
         collector_options=collector_options,
+        # The ai-agent output is completed after the files stage (run-level indirect rows) and
+        # written once there: the artifact files are never rewritten (I4).
+        deferred_write_kinds=(AI_KIND,),
     )
     write_result(artifact_scheduler_manifest, scheduler_path)
     for kind in profile.artifacts_kinds:
@@ -945,6 +1015,7 @@ def _run_triage_stages(
         )
         artifact_outputs[kind] = artifact_path
         artifact_payloads[kind] = artifact_payload
+    deferred_ai_output.arm(artifact_results, artifact_payloads, artifact_outputs)
     parser_crash_ledger = build_parser_crash_isolation_ledger(
         artifact_payloads=artifact_payloads,
         scheduler_manifest=artifact_scheduler_manifest,
@@ -1115,6 +1186,17 @@ def _run_triage_stages(
     )
     files_payload["scan_scope_root"] = str(scan_input_root.root_path)
     finish_stage("files")
+    # R7 AI 갈래 C: execution traces (other kinds' rows) + git trailers (files inventory) into the ai-agent output.
+    append_ai_indirect_rows(
+        artifacts_dir,
+        artifact_payloads,
+        artifact_outputs,
+        files_payload=files_payload,
+        manifest_payload=manifest_payload,
+        manifest_path=manifest_path,
+        manifest_summary=manifest_summary,
+    )
+    deferred_ai_output.flush()
 
     carve_payload: dict[str, object] | None = None
     carve_output_path = output_dir / "carving" / "rapidtriage-carve.json"
@@ -1341,6 +1423,7 @@ def _run_triage_stages(
         )
     # 위치 행 색인 (r6 §3.3 갈래 C): the map view's located-row index, written with the run.
     geo_index_record = build_run_geo_index(output_dir, artifact_outputs, artifact_payloads)
+    families_record = build_run_families(output_dir, provisional_outputs)  # R7 갈래 A 계열·중복·예외
     finish_stage(
         "persist",
         {
@@ -1353,6 +1436,11 @@ def _run_triage_stages(
                 key: geo_index_record[key]
                 for key in ("status", "located", "truncated", "elapsed_seconds", "error", "reason")
                 if key in geo_index_record
+            },
+            "families": {
+                key: families_record[key]
+                for key in ("status", "edges", "dedup_items", "irregular", "elapsed_seconds", "error", "reason")
+                if key in families_record
             },
         },
     )
@@ -1368,6 +1456,7 @@ def _run_triage_stages(
         artifact_payloads=artifact_payloads,
         files_path=files_path,
         files_payload=files_payload,
+        params=ai_rule_params(collector_options),  # R7 AI: org_email_domain / evidence_roots run options
     )
     finish_stage(
         "triage-flags",
@@ -1464,6 +1553,12 @@ def _run_triage_stages(
         if columnar_artifacts_sidecar.get("jsonl_path"):
             outputs["columnar_artifacts_jsonl"] = Path(str(columnar_artifacts_sidecar["jsonl_path"]))
     final_plan = progress.finalize_plan()
+    run_scope = {
+        "artifact_kinds": list(artifact_kinds),
+        "kinds_only": bool(artifact_kinds),
+        "fingerprint_mode": fingerprint_mode,
+        "skipped_stage_groups": list(KINDS_ONLY_SKIPPED_GROUPS) if artifact_kinds else [],
+    }
     summary_payload = build_run_summary(
         root=input_root.root_path,
         output_dir=output_dir,
@@ -1519,6 +1614,18 @@ def _run_triage_stages(
         extra_steps=[*planned_out_steps, triage_step, derived_step],
         plan=final_plan,
     )
+    summary_payload["run_scope"] = run_scope
+    summary_payload["fingerprint_mode"] = fingerprint_mode
+    if artifact_kinds:
+        disclosures = summary_payload.get("disclosures")
+        if isinstance(disclosures, dict):
+            notes = disclosures.setdefault("collection_notes", {})
+            if isinstance(notes, dict):
+                notes["run-scope"] = [
+                    f"종류 제한 실행(--artifact-kinds {','.join(artifact_kinds)}): 다른 수집기와 "
+                    f"{'/'.join(KINDS_ONLY_SKIPPED_GROUPS)} 단계는 실행하지 않았고, 입력 지문은 표본"
+                    f"(fingerprint_mode: sampled, 앞쪽 최대 {KINDS_ONLY_FINGERPRINT_MAX_FILES}개 파일의 경로·크기·수정 시각, 내용 해시 없음)입니다."
+                ]
     audit_output = output_dir / "rapidtriage-run-audit.json"
     summary_payload["audit"] = str(audit_output)
     summary_payload["search_backend"] = str(case_db_record["search_backend"])
@@ -1576,6 +1683,8 @@ def _run_triage_stages(
             "reused_outputs": sorted(reused_outputs),
             "skip_groups": list(skip_groups),
             "skip_tasks": list(skip_tasks),
+            "artifact_kinds": list(artifact_kinds),
+            "fingerprint_mode": fingerprint_mode,
             "plan_control": plan_control_requests(final_plan),
             "plan_outcome": (final_plan or {}).get("outcome"),
             "image_source": str(image_result.source_path) if image_result else None,
@@ -1795,6 +1904,48 @@ def load_reusable_artifact_payload(artifact_path: Path) -> dict[str, object] | N
     return payload
 
 
+class DeferredAiOutput:
+    """The ``ai-agent`` output the artifact stage leaves unwritten (``deferred_write_kinds``),
+    written exactly once: after the run-level indirect rows completed it (:meth:`flush` after
+    ``append_ai_indirect_rows``), or with the provider's own payload when a later stage fails first
+    (:meth:`flush` from ``run_triage_mode``'s error path). Flushing twice writes nothing more."""
+
+    def __init__(self) -> None:
+        self._pending: tuple[Mapping[str, tuple[dict[str, object], Path, bool, bool]], Mapping[str, dict[str, object]], Mapping[str, Path]] | None = None
+
+    def arm(
+        self,
+        artifact_results: Mapping[str, tuple[dict[str, object], Path, bool, bool]],
+        artifact_payloads: Mapping[str, dict[str, object]],
+        artifact_outputs: Mapping[str, Path],
+    ) -> None:
+        self._pending = (artifact_results, artifact_payloads, artifact_outputs)
+
+    def flush(self) -> None:
+        pending, self._pending = self._pending, None
+        if pending is not None:
+            write_deferred_ai_output(*pending)
+
+
+def write_deferred_ai_output(
+    artifact_results: Mapping[str, tuple[dict[str, object], Path, bool, bool]],
+    artifact_payloads: Mapping[str, dict[str, object]],
+    artifact_outputs: Mapping[str, Path],
+) -> None:
+    """Write the ``ai-agent`` output once, after the run-level indirect rows completed it
+    (``collect_artifact_stages(deferred_write_kinds=...)`` left it unwritten). A reused output is
+    already on disk and is rewritten only when the indirect step replaced its payload. Stage
+    checkpoints re-read output size from disk when written (``write_run_checkpoints``)."""
+    result = artifact_results.get(AI_KIND)
+    payload = artifact_payloads.get(AI_KIND)
+    path = artifact_outputs.get(AI_KIND)
+    if result is None or payload is None or path is None:
+        return
+    if result[2] and payload is result[0]:
+        return
+    write_result(payload, path)
+
+
 def collect_artifact_stages(
     input_root: InputRoot,
     kinds: Sequence[str],
@@ -1806,6 +1957,7 @@ def collect_artifact_stages(
     progress: RunProgress | None = None,
     memory_check: Callable[[str], None] | None = None,
     collector_options: Mapping[str, Mapping[str, object]] | None = None,
+    deferred_write_kinds: Collection[str] = (),
 ) -> tuple[dict[str, tuple[dict[str, object], Path, bool, bool]], dict[str, object]]:
     """Collect artifact kinds on the bounded worker pool.
 
@@ -1817,7 +1969,10 @@ def collect_artifact_stages(
     payloads are already on disk and are not rewritten. ``progress``
     (optional) receives queued/running/terminal state per kind;
     ``memory_check`` runs after every provider and fails the run fast when
-    it raises (memory cap).
+    it raises (memory cap). Kinds in ``deferred_write_kinds`` keep their
+    rows in the JSONL but their ``.json`` summary is left to the caller, which
+    completes the payload later and writes it once (``ai-agent``: run-level
+    indirect rows after the files stage).
     """
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     results: dict[str, tuple[dict[str, object], Path, bool, bool]] = {}
@@ -1832,6 +1987,10 @@ def collect_artifact_stages(
     mobile_options = dict(options_by_kind.get("mobile-export") or {})
     mobile_options.setdefault("inner_dir", artifacts_dir.parent / MOBILE_INNER_DIR_NAME)
     options_by_kind["mobile-export"] = mobile_options
+    # R7: files the ai-agent adapters left out for the read budget are listed next to its output.
+    ai_options = dict(options_by_kind.get("ai-agent") or {})
+    ai_options.setdefault("output_dir", artifacts_dir)
+    options_by_kind["ai-agent"] = ai_options
     for kind in kinds:
         artifact_path = artifacts_dir / f"rapidtriage-artifacts-{kind}.json"
         reusable = load_reusable_artifact_payload(artifact_path) if (resume or delta is not None) else None
@@ -1884,7 +2043,8 @@ def collect_artifact_stages(
         )
         merged = finalize_artifact_payload(merged, records_path=artifact_records_path(artifact_path))
         results[kind] = (merged, artifact_path, False, True)
-        write_result(merged, artifact_path)
+        if kind not in deferred_write_kinds:
+            write_result(merged, artifact_path)
         if progress is not None:
             progress.provider_finished(
                 kind,
@@ -1967,8 +2127,10 @@ def collect_artifact_stages(
         results[kind] = (payload, artifact_path, False, False)
         # Persist each provider the moment it finishes (I4); the run does not
         # rewrite these files later. A cancelled provider's output holds the
-        # rows written before the cancel (``cancelled-partial``).
-        write_result(payload, artifact_path)
+        # rows written before the cancel (``cancelled-partial``). Deferred
+        # kinds are written once by the caller after completing the payload.
+        if kind not in deferred_write_kinds:
+            write_result(payload, artifact_path)
         cancelled = artifact_payload_cancelled(payload)
         if progress is not None:
             count = artifact_payload_count(payload)

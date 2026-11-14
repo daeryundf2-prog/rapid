@@ -2,6 +2,7 @@ import unittest
 
 from rapidtriage.artifacts.url_redaction import (
     REDACTED_VALUE,
+    redact_secret_text,
     redact_text_urls,
     redact_url,
     redact_url_fields,
@@ -46,6 +47,27 @@ class UrlRedactionTests(unittest.TestCase):
         self.assertTrue(changed)
         self.assertEqual(values[1], "no url")
         self.assertNotIn("sid=1", values[0])
+
+    def test_secret_text_for_timeline_summaries(self) -> None:
+        """UX-round review (c): free text hides credential pairs in and outside URLs."""
+        hidden = REDACTED_VALUE
+        cases = {
+            "https://a.blob.core.windows.net/c?sv=1&sharedAccessToken=sas&x=1": f"https://a.blob.core.windows.net/c?sv=1&sharedAccessToken={hidden}&x=1",
+            "https://login/cb?code=1&state=xyz": f"https://login/cb?code={hidden}&state={hidden}",
+            "net use /user:a password=hunter2": f"net use /user:a password={hidden}",
+            'app.exe --api_key="abc def" next': f"app.exe --api_key={hidden} next",
+            "x /Password=s3 y": f"x /Password={hidden} y",
+            "msg url=https://a/b?token=zz&a=1": f"msg url=https://a/b?token={hidden}&a=1",
+            "https://u:p@host/a": f"https://{hidden}@host/a",
+            # Prose pairs that are not credentials stay readable.
+            "service state=running key=HKLM\\X code=0x5": "service state=running key=HKLM\\X code=0x5",
+        }
+        for raw, expected in cases.items():
+            self.assertEqual(redact_secret_text(raw), expected, raw)
+        self.assertEqual(redact_secret_text(f"password={hidden}"), f"password={hidden}")
+        self.assertIsNone(redact_secret_text(None))
+        # The URL helper the parsers use is unchanged: state stays a plain query value there.
+        self.assertEqual(redact_url("https://login/cb?state=xyz"), "https://login/cb?state=xyz")
 
 
 if __name__ == "__main__":

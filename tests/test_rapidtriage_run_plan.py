@@ -47,7 +47,12 @@ from rapidtriage.core.run.progress import (
     load_run_progress_view,
     read_run_progress,
 )
+from tests import quiet_media_checks
 from tests.test_rapidtriage_run import build_run_fixture
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
+
 
 try:
     from fastapi.testclient import TestClient
@@ -520,7 +525,8 @@ class JobStoreTests(unittest.TestCase):
     def test_canceled_spelling_and_restart_interrupted(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             state = Path(tmp) / "runs.json"
-            request = RunRequest(root=tmp, mode="hacking", output_dir=str(Path(tmp) / "out"))
+            # R7: evidence and output are siblings (an output inside the evidence is refused).
+            request = RunRequest(root=str(Path(tmp) / "evidence"), mode="hacking", output_dir=str(Path(tmp) / "out"))
             records = [
                 {**RunJob(run_id="old1", request=request, status="canceled").to_record(), "status": "canceled"},
                 {**RunJob(run_id="run1", request=request, status="running").to_record()},
@@ -687,7 +693,7 @@ class RunPlanCliTests(unittest.TestCase):
         plan = json.loads(out)
         self.assertEqual(find_task(plan, "email")["status"], "skipped")
         code, out = self.run_cli("run", ".", "--mode", "hacking", "--print-plan")
-        self.assertIn("그룹 25 / 태스크", out)
+        self.assertIn("그룹 26 / 태스크", out)
         self.assertEqual(self.run_cli("run", ".", "--mode", "hacking", "--print-plan", "--skip-group", "report")[0], 2)
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp)

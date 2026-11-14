@@ -3,7 +3,7 @@
  * cases → evidence → runs, processing snapshots, problems by reason, case notes.
  */
 
-import { api } from "./client";
+import { ApiError, api } from "./client";
 import type { RunCreateBody, RunJob } from "./runs";
 
 const enc = encodeURIComponent;
@@ -22,6 +22,15 @@ export interface CaseRunBrief {
   captured_at?: string;
 }
 
+export interface EvidenceHashSegment {
+  name: string;
+  segment_number: number | null;
+  size_bytes: number | null;
+  md5: string;
+  sha1: string;
+  sha256: string;
+}
+
 export interface CaseEvidence {
   citation_id: string;
   case_id: string;
@@ -36,6 +45,19 @@ export interface CaseEvidence {
   hash_status_label: string;
   hash_message: string;
   hashes: Partial<Record<"md5" | "sha1" | "sha256", string>>;
+  /** T-129: `ewf-container-segment-bytes` (E01/Ex01) or `file-bytes`; "" until the hash finished. */
+  hash_scope?: string;
+  /** T-129: per-segment digests of the container bytes (one row for a single file). */
+  hash_segments?: EvidenceHashSegment[];
+  /** T-181: acquisition hash recorded in the image (never recomputed); null for non-EWF evidence. */
+  hash_recorded?: { md5: string; sha1: string; reason: string; incomplete?: boolean } | null;
+  /** WB-9 P1-5: server-side comparison of the input with the image's recorded acquisition hash (E01). */
+  hash_recorded_compare?: "" | "equals" | "differs" | "not-comparable";
+  /** WB-9 P1-3: the segment set is known to be incomplete (missing last segment or a gap). */
+  hash_set_incomplete?: boolean;
+  /** WB-9 P1-4: segments the container hash covered, and the missing segment numbers. */
+  hash_segment_count?: number | null;
+  hash_segment_gaps?: number[];
   added_at: string | null;
   runs: CaseRunBrief[];
   /** The run gate: folders always run; a file only when an adapter reads it directly (else 등록만). */
@@ -236,6 +258,37 @@ export async function checkEvidence(path: string, sourceType: EvidenceType): Pro
   };
 }
 
+export interface OutputCheck {
+  ok: boolean;
+  problem: string;
+  /** Stable reason code (R7: `OUTPUT_INSIDE_EVIDENCE` / `EVIDENCE_INSIDE_OUTPUT`), "" otherwise. */
+  code?: string;
+}
+
+/**
+ * `POST /api/cases/output-check` (E01 QA D5): the server's own path rules for a run output folder
+ * or a case folder, asked BEFORE the case is created so a bad path never leaves an orphan case.
+ * A server without the endpoint (404) is "unverified": the create call keeps its own check.
+ */
+export async function checkOutputFolder(
+  path: string,
+  kind: "output_dir" | "case_root",
+  evidencePaths: readonly string[] = [],
+): Promise<OutputCheck> {
+  const evidence = evidencePaths.map((item) => item.trim()).filter(Boolean);
+  try {
+    const raw = await api<Partial<OutputCheck>>("/api/cases/output-check", {
+      method: "POST",
+      // R7: the server also refuses a folder inside / around these evidence paths.
+      body: JSON.stringify(evidence.length ? { path, kind, evidence_paths: evidence } : { path, kind }),
+    });
+    return { ok: raw?.ok !== false, problem: raw?.problem ?? "", code: raw?.code ?? "" };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return { ok: true, problem: "" };
+    throw error;
+  }
+}
+
 /** `POST /api/cases/{id}/evidence/{eid}/hash`: hash a file evidence item (again). */
 export async function rehashEvidence(caseId: string, citationId: string, actor = ""): Promise<CaseEvidence> {
   const query = actor ? `?actor=${enc(actor)}` : "";
@@ -254,6 +307,8 @@ export interface CaseRunResult {
   snapshot: { run_id: string; snapshot: ProcessingSnapshotBody };
   snapshot_file: string | null;
   snapshot_file_error: string | null;
+  /** T-186: disk free-space advice for this run start (null for a dry run). */
+  preflight_space?: RunJob["preflight_space"];
 }
 
 export function createCaseRun(caseId: string, body: CaseRunBody): Promise<CaseRunResult> {

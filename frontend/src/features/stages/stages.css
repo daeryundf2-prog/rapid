@@ -5,6 +5,15 @@
   background: var(--bg-panel);
   border-right: 1px solid var(--line-subtle);
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 탐색 패널 toggle (scroll review C2) at the foot of the rail, apart from the stages. */
+.stage-rail-item.stage-rail-tree {
+  flex: none;
+  margin-top: auto;
+  border-top: 1px solid var(--line-subtle);
 }
 
 .stage-rail ul {
@@ -72,8 +81,13 @@
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-2);
+  /* Below the stage heading in the left panel: fill what is left and scroll there (scroll
+     review C1); `height: 100%` overflowed the panel by the heading's height. */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  height: 100%;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   color: var(--text);
 }
 
@@ -121,6 +135,41 @@
 
 .stage-link .badge {
   margin-left: auto;
+}
+
+/* r7 L4: stage links that are buttons (보고 panel kinds, 접수 shortcuts) look like the anchors. */
+button.stage-link {
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-table-aux);
+  text-align: left;
+  cursor: pointer;
+}
+
+.intake-link > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.intake-link-hint {
+  color: var(--text-muted);
+  font-size: var(--fs-caption, 11px);
+}
+
+.review-empty-guide p {
+  margin: 0 0 var(--space-1, 4px);
+}
+
+.review-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1, 4px) var(--space-3, 12px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .stage-link .badge ~ .badge {
@@ -176,9 +225,10 @@
   align-items: center;
   column-gap: var(--space-2);
   row-gap: var(--space-1);
-  /* Every card is the same 58px (review #11): one title line, one ellipsized meta line. */
+  /* 58px is the floor (review #11), not a cap (T-016): a two-line title ("NTFS 메타 (MFT/USN)")
+     grows the card instead of overlapping the ellipsized meta line below it. */
   box-sizing: border-box;
-  height: 58px;
+  min-height: 58px;
   padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
   border: 1px solid var(--line-subtle);
   border-radius: var(--radius);
@@ -207,8 +257,12 @@
   min-width: 0;
   overflow: hidden;
   line-height: 20px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* r7 L4 (C-A3): two lines before the ellipsis — "볼륨 섀도우 탐색" etc. no longer cut at one line. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
 }
 
 .process-card-link:hover .process-card-title {
@@ -268,13 +322,16 @@
   margin-block: var(--space-2);
 }
 
-.process-plan-disclosures > summary {
+/* …and the folded read-only plan of a finished run (R7 C-G1). */
+.process-plan-disclosures > summary,
+.process-plan-record > summary {
   color: var(--text-muted);
   font-size: var(--fs-table-aux);
   cursor: pointer;
 }
 
-.process-plan-disclosures[open] > summary {
+.process-plan-disclosures[open] > summary,
+.process-plan-record[open] > summary {
   margin-block-end: var(--space-2);
 }
 
@@ -348,6 +405,10 @@
 .analysis-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  /* T-016: the selected card spans the whole row; without dense packing the cards before it left
+     an empty cell at the end of their row. Rows stay equal-height tracks (no masonry). */
+  grid-auto-flow: row dense;
+  align-items: stretch;
   gap: var(--space-2);
 }
 
@@ -417,6 +478,7 @@
 }
 
 .stage-heading {
+  flex: none;
   margin: 0;
   padding: var(--space-2) var(--space-2) 0;
   font-size: var(--fs-table-aux);
@@ -454,6 +516,19 @@
 
 .process-run-note {
   color: var(--text-muted);
+}
+
+/* Results layout of a finished run (R7 C-G1): the "계획 기록 없음(이전 형식)" note and the folded
+   read-only plan record. */
+.run-plan-legacy {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-inline-start: 3px solid var(--text-muted);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
 }
 
 .run-plan-table tr[role="row"]:focus-visible {

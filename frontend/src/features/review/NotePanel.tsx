@@ -10,15 +10,17 @@ import { useId, useState } from "react";
 import { announce } from "../../a11y";
 import { getReviewHistory, type ReviewHistoryEntry } from "../../api/reviewTools";
 import { useTimezone } from "../../state/hooks";
+import { evidencePathOf } from "../../utils/pathDisplay";
 import { formatTimestamp } from "../../utils/time";
 import { ErrorText } from "../case/ErrorText";
 import { Modal } from "../case/Modal";
 import { ReasonButton } from "../case/ReasonButton";
 import { applyNote, reviewLocatorTarget, storeNotice } from "../grid/reviewActions";
 import { noteKey, setSessionNote } from "../grid/sessionNotes";
-import { currentReviewer, DEFAULT_REVIEWER, setReviewer } from "./author";
+import { currentReviewer, reviewerPlaceholder, setReviewer, typedReviewer } from "./author";
 import type { NotePanelTarget } from "./uiStore";
 import "./review.css";
+import { useWriteBlock } from "../../shell/readOnly";
 
 const FIELD_LABELS: Record<string, string> = {
   note: "메모",
@@ -40,10 +42,21 @@ const STATUS_LABELS: Record<string, string> = {
   excluded: "제외",
 };
 
+/**
+ * True when the entry's tag set really changed (T-144): an entry may list "tags" with the same
+ * set before and after (both empty included), which must not read "태그: 없음 → 없음".
+ */
+export function tagsChanged(entry: ReviewHistoryEntry): boolean {
+  if (!entry.changed_fields.includes("tags")) return false;
+  const before = [...(entry.tags_before ?? [])].sort().join("|");
+  const after = [...(entry.tags_after ?? [])].sort().join("|");
+  return before !== after;
+}
+
 /** "메모, 태그" — the changed fields of a history entry in Korean (unknown names kept). */
 export function changedLabel(entry: ReviewHistoryEntry): string {
   const names = entry.changed_fields
-    .filter((field) => field !== "reviewer")
+    .filter((field) => field !== "reviewer" && (field !== "tags" || tagsChanged(entry)))
     .map((field) => FIELD_LABELS[field] ?? field);
   return names.length ? names.join(", ") : "변경 없음";
 }
@@ -51,7 +64,7 @@ export function changedLabel(entry: ReviewHistoryEntry): string {
 function HistoryItem({ entry, timezone }: { entry: ReviewHistoryEntry; timezone: string }) {
   const when = formatTimestamp(entry.changed_at, timezone);
   const noteChanged = entry.changed_fields.includes("note");
-  const tagsChanged = entry.changed_fields.includes("tags");
+  const tagLine = tagsChanged(entry);
   const statusChanged = entry.changed_fields.includes("status");
   return (
     <li className="note-history-item" data-testid="note-history-item">
@@ -69,7 +82,7 @@ function HistoryItem({ entry, timezone }: { entry: ReviewHistoryEntry; timezone:
           <span>{entry.note_after || "(메모 지움)"}</span>
         </p>
       ) : null}
-      {tagsChanged ? (
+      {tagLine ? (
         <p className="note-history-body">
           태그: {entry.tags_before.join(", ") || "없음"} → {entry.tags_after.join(", ") || "없음"}
         </p>
@@ -101,9 +114,7 @@ export function NotePanel({ target, onClose }: { target: NotePanelTarget; onClos
   const lastNote = entries.find((entry) => entry.changed_fields.includes("note"));
   const current = typeof row.fields.note === "string" ? row.fields.note : (lastNote?.note_after ?? "");
   const [text, setText] = useState(current);
-  const [author, setAuthor] = useState(() =>
-    currentReviewer() === DEFAULT_REVIEWER ? "" : currentReviewer(),
-  );
+  const [author, setAuthor] = useState(typedReviewer);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const noteId = useId();
@@ -116,7 +127,8 @@ export function NotePanel({ target, onClose }: { target: NotePanelTarget; onClos
     try {
       const result = await applyNote(runId, [row], text);
       setSessionNote(noteKey(runId, row.ref), text.trim());
-      announce(`메모를 저장했습니다 (작성자 ${currentReviewer()}).${storeNotice(result)}`);
+      const signer = currentReviewer(runId);
+      announce(`메모를 저장했습니다${signer ? ` (작성자 ${signer})` : ""}.${storeNotice(result)}`);
       await queryClient.invalidateQueries({ queryKey: ["review-history", runId, row.rowKey] });
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
@@ -125,7 +137,9 @@ export function NotePanel({ target, onClose }: { target: NotePanelTarget; onClos
     }
   };
 
-  const reason = !locator
+  // T-348: a read-only result / server says why instead of answering with a 409.
+  const writeBlock = useWriteBlock("run");
+  const reasonOwn = !locator
     ? "출처 위치를 알 수 없는 행에는 메모를 남길 수 없습니다"
     : !text.trim()
       ? "메모 내용을 입력하세요"
@@ -134,10 +148,11 @@ export function NotePanel({ target, onClose }: { target: NotePanelTarget; onClos
         : busy
           ? "저장하는 중입니다"
           : undefined;
+  const reason = writeBlock ?? reasonOwn;
 
   return (
     <Modal
-      title={`메모·이력 — ${row.title || row.sourcePath || row.rowKey}`}
+      title={`메모·이력 — ${row.title || evidencePathOf(row.sourcePath).path || row.rowKey}`}
       wide
       onClose={onClose}
       footer={
@@ -167,7 +182,7 @@ export function NotePanel({ target, onClose }: { target: NotePanelTarget; onClos
               id={authorId}
               type="text"
               value={author}
-              placeholder={DEFAULT_REVIEWER}
+              placeholder={reviewerPlaceholder(runId)}
               maxLength={60}
               onChange={(event) => setAuthor(event.target.value)}
             />

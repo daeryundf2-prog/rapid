@@ -21,13 +21,18 @@ from ..core.kakaotalk import (
         run_kakaotalk_userdir_bruteforce,
         run_kakaotalk_windows_collect,
 )
-from .helpers import write_kakaotalk_message_residue_csv
+from .helpers import refuse_output_inside_evidence, write_kakaotalk_message_residue_csv
 
 
 def handle_kakaotalk_decrypt(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
         root = Path(args.root).expanduser().resolve()
         output = Path(args.output).expanduser().resolve()
         decrypted_dir = Path(args.decrypted_dir).expanduser().resolve() if args.decrypted_dir else None
+        refuse_output_inside_evidence(parser, output, [root])
+        refuse_output_inside_evidence(parser, audit_path_for(output), [root])
+        if args.write_decrypted:
+            effective_decrypted = decrypted_dir or output.parent / f"{output.stem}-decrypted"
+            refuse_output_inside_evidence(parser, effective_decrypted, [root])
         try:
             payload = run_kakaotalk_decrypt(
                 root,
@@ -250,6 +255,10 @@ def handle_kakaotalk_memory_carve(args: argparse.Namespace, parser: argparse.Arg
         output = Path(args.output).expanduser().resolve()
         carve_dir = Path(args.carve_dir).expanduser().resolve() if args.carve_dir else None
         message_csv = Path(args.message_csv).expanduser().resolve() if args.message_csv else None
+        for target in (output, audit_path_for(output), message_csv):
+            refuse_output_inside_evidence(parser, target, [root])
+        if args.write_carves:
+            refuse_output_inside_evidence(parser, carve_dir or output.parent / f"{output.stem}-carves", [root])
         try:
             payload = run_kakaotalk_memory_carve(
                 root,

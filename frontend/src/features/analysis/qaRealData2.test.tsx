@@ -110,7 +110,7 @@ describe("BLOCKER: 실행 of kinds without a snapshot field after a completed di
 describe("2. processing plan steps in Korean", () => {
   it("maps step ids and warning levels; unknown ones still read as Korean", async () => {
     expect(stepNameLabel("silent-failure-detector")).toBe("누락 위험 점검");
-    expect(stepNameLabel("artifacts-browser")).toBe("아티팩트 수집: browser");
+    expect(stepNameLabel("artifacts-browser")).toBe("아티팩트 수집: 브라우저");
     expect(stepStatusLabel("warning")).toBe("경고");
     expect(stepStatusLabel("failed_isolated")).toBe("일부 실패(격리됨)");
     expect(stepStatusLabel("weird-warn-level")).toBe("경고");
@@ -272,7 +272,7 @@ describe("8. cross-case dialog groups the runs", () => {
     installFetch({ "/analyses": () => jsonResponse({ analyses: [] }) });
     renderWithClient(<AnalysisDialog kind="cross-case" runId={RUN} onClose={() => {}} />);
     const group = within(screen.getByRole("dialog")).getByRole("group", { name: "비교할 케이스" });
-    expect(within(group).getByTestId("cross-case-current").textContent).toMatch(/현재 케이스.*case1/);
+    expect(within(group).getByTestId("cross-case-current").textContent).toMatch(/현재 런.*case1/);
     expect(within(group).getAllByRole("checkbox")).toHaveLength(1);
     const more = within(group).getByRole("button", { name: "사용할 수 없는 런 5개 보기" });
     expect(more.getAttribute("aria-expanded")).toBe("false");

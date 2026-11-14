@@ -51,6 +51,12 @@ PROPAGATION_CAP = 10_000
 HASH_COLUMNS = ("hash_md5", "hash_sha1", "hash_sha256")
 _HASH_KEYS = {"md5": "hash_md5", "sha1": "hash_sha1", "sha256": "hash_sha256"}
 _HASH_LENGTHS = {"hash_md5": 32, "hash_sha1": 40, "hash_sha256": 64}
+# Digests of the empty byte string: every zero-byte file shares them, so they never propagate (T-183).
+EMPTY_FILE_HASHES = {
+    "hash_md5": "d41d8cd98f00b204e9800998ecf8427e",
+    "hash_sha1": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+    "hash_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+}
 # Review-target tables that carry ``evidence_source_id`` (the run a row belongs to).
 _SOURCE_TABLES = {
     "file_record": "file_record",
@@ -213,14 +219,18 @@ def _rewrite_mark_names(connection: sqlite3.Connection, case_id: str, tag_id: in
 # --- tags -----------------------------------------------------------------------
 
 
-def list_case_tags(connection: sqlite3.Connection, case_id: str, *, include_deleted: bool = False) -> list[dict[str, object]]:
+def list_case_tags(
+    connection: sqlite3.Connection, case_id: str, *, include_deleted: bool = False, ensure: bool = True
+) -> list[dict[str, object]]:
     """Live tags of a case with their mark counts.
 
     The first read of a case creates its missing system tags (북마크, 우선순위 1-5) -- an
     explicit, write-safe migration (see ``ensure_system_tags``) on a case DB that already
     exists; the API never opens a new DB file for a read (routes_review_tools.py).
+    ``ensure=False`` (a ``mode=ro`` connection to a read-only case DB) lists what is stored.
     """
-    ensure_system_tags(connection, case_id)
+    if ensure:
+        ensure_system_tags(connection, case_id)
     counts = _tag_counts(connection, case_id)
     where = "" if include_deleted else " AND deleted_at = ''"
     rows = connection.execute(f"SELECT * FROM case_tag WHERE case_id = ?{where} ORDER BY id", (case_id,)).fetchall()
@@ -646,12 +656,17 @@ def hash_propagation_targets(
     runs' files. Refuses (Korean, 422) when the targets or the result exceed ``cap`` rows.
     Hash and source lists are bound as one JSON parameter each (``json_each``), so the SQL
     never exceeds SQLite's variable limit however many hashes the targets carry.
+
+    Empty files never propagate (T-183): empty-file digests and a zero-byte target's hashes are not
+    searched, zero-byte rows are never added; ``skipped_empty`` counts the in-scope non-target rows
+    the guard left out (rows with a target's empty digest + zero-byte rows matching its hashes).
     """
     if len(targets) > cap:
         raise ReviewToolError(
             f"한 번에 {cap:,}행까지 태그를 적용할 수 있습니다 (요청 {len(targets):,}행). 선택을 줄이세요.", status=422
         )
     wanted: dict[str, set[str]] = {column: set() for column in HASH_COLUMNS}
+    empty: dict[str, set[str]] = {column: set() for column in HASH_COLUMNS}
     hashless = 0
     sources: set[int] = set()
     for target in targets:
@@ -659,8 +674,11 @@ def hash_propagation_targets(
         hashes = target_hashes(connection, target_type, target_id)
         if not hashes:
             hashless += 1
+        zero_byte = target_type == "file_record" and target_id.isdigit() and bool(
+            _file_ids(connection, "id = ? AND size_bytes = 0", (int(target_id),))
+        )
         for column, value in hashes.items():
-            wanted[column].add(value)
+            (empty if zero_byte or value == EMPTY_FILE_HASHES[column] else wanted)[column].add(value)
         table = _SOURCE_TABLES.get(target_type)
         if table and target_id.isdigit():
             row = connection.execute(f"SELECT evidence_source_id FROM {table} WHERE id = ?", (int(target_id),)).fetchone()
@@ -668,31 +686,32 @@ def hash_propagation_targets(
                 sources.add(int(row[0]))
     if not sources and evidence_source_id is not None:
         sources.add(evidence_source_id)
-    if any(wanted.values()) and not sources:
+    scope_known = True
+    if (any(wanted.values()) or any(empty.values())) and not sources:
         distinct = int(
             connection.execute(
                 "SELECT COUNT(DISTINCT coalesce(evidence_source_id, -1)) FROM file_record WHERE case_id = ?", (case_id,)
             ).fetchone()[0]
         )
-        if distinct > 1:
+        scope_known = distinct <= 1
+        if not scope_known and any(wanted.values()):
             raise ReviewToolError(
                 "선택한 행이 어느 런(증거)에 속하는지 알 수 없어 같은 해시 전파를 하지 않았습니다. "
                 "런(run_id)을 지정하거나 런에 속한 행을 고르세요.",
                 status=422,
             )
-    clauses: list[str] = []
-    params: list[object] = [case_id]
+    scope_params: list[object] = [case_id]
     scope = ""
     if sources:
         scope = " AND evidence_source_id IN (SELECT value FROM json_each(?))"
-        params.append(json.dumps(sorted(sources)))
-    for column, values in wanted.items():
-        if values:
-            clauses.append(f"lower({column}) IN (SELECT value FROM json_each(?))")
-            params.append(json.dumps(sorted(values)))
+        scope_params.append(json.dumps(sorted(sources)))
+    any_hash, hash_params = _hash_filter(wanted)
+    params = [*scope_params, *hash_params]
     matched: list[int] = []
-    if clauses:
-        where = f"case_id = ?{scope} AND ({' OR '.join(clauses)})"
+    skipped: set[int] = set()
+    if any_hash:
+        skipped |= _file_ids(connection, f"case_id = ?{scope} AND size_bytes = 0 AND ({any_hash})", params)
+        where = f"case_id = ?{scope} AND coalesce(size_bytes, -1) != 0 AND ({any_hash})"
         total = int(connection.execute(f"SELECT COUNT(*) FROM file_record WHERE {where}", params).fetchone()[0])
         if total > cap:
             raise ReviewToolError(
@@ -700,8 +719,12 @@ def hash_propagation_targets(
                 status=422,
             )
         matched = [int(row[0]) for row in connection.execute(f"SELECT id FROM file_record WHERE {where} ORDER BY id", params)]
+    empty_hash, empty_params = _hash_filter(empty)
+    if empty_hash and scope_known:  # an empty-only selection in a multi-run case is not refused, nor counted
+        skipped |= _file_ids(connection, f"case_id = ?{scope} AND ({empty_hash})", [*scope_params, *empty_params])
     out = [dict(target) for target in targets]
     seen = {(item["target_type"], item["target_id"]) for item in out}
+    skipped_empty = sum(1 for file_id in skipped if ("file_record", str(file_id)) not in seen)
     added = 0
     for file_id in matched:
         key = ("file_record", str(file_id))
@@ -719,8 +742,20 @@ def hash_propagation_targets(
         "matched_file_rows": len(matched),
         "added_rows": added,
         "hashless_targets": hashless,
+        "skipped_empty": skipped_empty,
         "cap": cap,
     }
+
+
+def _hash_filter(by_column: Mapping[str, set[str]]) -> tuple[str, list[object]]:
+    """``lower(col) IN json_each(?) OR …`` over the columns with values ("" for none) + JSON params."""
+    columns = [column for column, values in by_column.items() if values]
+    sql = " OR ".join(f"lower({column}) IN (SELECT value FROM json_each(?))" for column in columns)
+    return sql, [json.dumps(sorted(by_column[column])) for column in columns]
+
+
+def _file_ids(connection: sqlite3.Connection, where: str, params: Sequence[object]) -> set[int]:
+    return {int(row[0]) for row in connection.execute(f"SELECT id FROM file_record WHERE {where}", params)}
 
 
 # --- history ------------------------------------------------------------------------

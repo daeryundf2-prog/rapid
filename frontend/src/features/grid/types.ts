@@ -108,6 +108,12 @@ export interface CollectionDef {
    * lowest-priority ones are hidden (열 menu: "폭 부족으로 숨김 — 표시"). Undefined = no hiding.
    */
   widthPriority?: (ref: CollectionRef, types?: readonly string[]) => readonly string[] | undefined;
+  /**
+   * Default columns never hidden for having no value in the loaded rows (a catalogue family's core
+   * columns: one page of Application events has no account, the next page may — P1). They still
+   * give way to a narrow grid by `widthPriority`.
+   */
+  keepWhenEmpty?: (ref: CollectionRef, types?: readonly string[]) => readonly string[];
   /** Map one raw API row to the normalised GridRow. `index` is the global row index. */
   mapRow: (raw: RawRow, index: number, ctx: MapContext) => GridRow;
   /** "paged" = server offset/limit; "whole" = one response, paged on the client. */

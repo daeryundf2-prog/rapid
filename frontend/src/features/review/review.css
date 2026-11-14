@@ -143,19 +143,24 @@
   display: none;
 }
 
+/* Classic split (grid above, viewer below): the same 8px handle turned on its side (C3). */
 .resize-handle.resize-handle-rows {
+  flex: 0 0 8px;
   width: auto;
-  height: 4px;
+  height: 8px;
+  cursor: row-resize;
+}
+
+.resize-handle.resize-handle-rows::before {
+  inset: 50% 0 auto;
+  width: auto;
+  height: 1px;
+  transform: translateY(-50%);
 }
 
 .resize-handle.resize-handle-rows::after {
-  inset: 1px 0;
-}
-
-:root[data-theme="light"] .resize-handle.resize-handle-rows::after {
-  inset: 0 0 auto;
-  width: auto;
-  height: 1px;
+  width: 32px;
+  height: 4px;
 }
 
 /* --- media blur (examiner protection) ----------------------------------------- */

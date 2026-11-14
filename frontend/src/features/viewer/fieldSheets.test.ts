@@ -6,6 +6,7 @@ import {
   fieldLabel,
   humanizeKey,
   isGovernanceKey,
+  koreanFieldLabel,
   recordIdentifier,
   recordLayout,
   sheetForType,
@@ -81,14 +82,20 @@ describe("field sheets: every family", () => {
     }
   });
 
-  it("never hides unknown keys: they are listed under 기타 필드 with a humanised label", () => {
+  it("never hides unknown keys: Korean-labelled ones are 추가 필드, the rest 기타 필드 under the raw key", () => {
     const layout = recordLayout(
       artifact("eventlog-event", { event_id: "4624", danger_type_name: "x", visit_total_count: 3 }),
     );
     const other = layout.other.map((entry) => entry.key);
-    expect(other).toContain("danger_type_name");
     expect(other).toContain("visit_total_count");
     expect(layout.other.find((e) => e.key === "visit_total_count")?.label).toBe("방문 합계 건수");
+    // R7 L3: no half-translated label ("danger 종류 이름") — the key is listed as written.
+    expect(other).not.toContain("danger_type_name");
+    expect(layout.extra.map((entry) => [entry.key, entry.label])).toEqual([
+      ["danger_type_name", "danger_type_name"],
+    ]);
+    expect(koreanFieldLabel("danger_type_name")).toBeNull();
+    expect(koreanFieldLabel("visit_total_count")).toBe("방문 합계 건수");
     expect(humanizeKey("last_visit_at")).toBe("마지막 방문 시각");
     expect(humanizeKey("payload_sha256")).toBe("payload SHA-256");
     expect(fieldLabel("source_path")).toBe("원본 경로");

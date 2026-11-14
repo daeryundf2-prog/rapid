@@ -5,6 +5,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import zipfile
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
@@ -18,6 +19,13 @@ from ...core.case import (
 )
 from ...core.evidence import identify_evidence
 from ...core.forensic_accuracy import build_accuracy_gate
+from ...core.import_roots import (
+    IMPORT_ROOT_UNVERIFIED_MESSAGE,
+    IMPORT_SOURCE_ROOT_UNVERIFIED,
+    imported_run_roots,
+    is_imported_summary,
+)
+from ...core.import_roots import refusal_text as import_root_refusal_text
 from ...core.jobs import (
     RunJob,
     RunJobStore,
@@ -80,6 +88,20 @@ def resolve_request_reviewer(explicit: str | None) -> str | None:
         return explicit.strip()
     env_value = os.environ.get("RAPIDTRIAGE_REVIEWER", "").strip()
     return env_value or None
+
+
+def resolve_request_actor(explicit: str | None) -> tuple[str | None, str]:
+    """``(reviewer, actor_source)`` of one review action (R8 T-036/T-180).
+
+    ``client-supplied`` for a name the request sent, ``server-env`` for ``RAPIDTRIAGE_REVIEWER``,
+    ``(None, "local-default")`` when neither is set: the case DB then records ``local-user`` and
+    never the previous mark's reviewer."""
+    if explicit and explicit.strip():
+        return explicit.strip(), "client-supplied"
+    env_value = os.environ.get("RAPIDTRIAGE_REVIEWER", "").strip()
+    if env_value:
+        return env_value, "server-env"
+    return None, "local-default"
 
 
 def get_job(store: RunJobStore, run_id: str):
@@ -227,6 +249,20 @@ def get_output_path(store: RunJobStore, run_id: str, output_name: str) -> Path:
         raise HTTPException(status_code=404, detail=str(exc))
 
 
+#: Zip comment of an extract zip written under the credential policy (R8 T-347). A zip without it
+#: was written before credential files were dropped from extract zips and is never served again.
+EXTRACT_ZIP_POLICY_MARKER = b"rapidtriage-credential-policy=r8-ri03-v1"
+
+
+def extract_zip_has_policy(archive: Path) -> bool:
+    """``True`` when ``archive`` is a zip carrying :data:`EXTRACT_ZIP_POLICY_MARKER`."""
+    try:
+        with zipfile.ZipFile(archive) as bundle:
+            return bundle.comment == EXTRACT_ZIP_POLICY_MARKER
+    except (OSError, zipfile.BadZipFile):
+        return False
+
+
 SOURCE_NOT_FOUND_MESSAGE = "허용된 증거 루트에서 원본 파일을 찾을 수 없습니다"
 SOURCE_OUTSIDE_MESSAGE = "원본 파일이 허용된 증거 루트 밖에 있습니다"
 
@@ -265,6 +301,9 @@ def resolve_allowed_source_file(
             store, run_id, raw_path, analysis_id=analysis_id, locator=locator or "", allow_directory=allow_directory
         )
     diagnostics = source_path_resolution_diagnostics(raw_path, allowed_roots)
+    unverified = unverified_import_root_error(job.summary, raw_path, diagnostics)
+    if unverified is not None:
+        raise unverified
     if scoped_candidates:
         raise HTTPException(
             status_code=404,
@@ -283,6 +322,38 @@ def resolve_allowed_source_file(
     )
 
 
+def unverified_import_root_error(
+    summary: Mapping[str, object], raw_path: str, diagnostics: object = None
+) -> HTTPException | None:
+    """403 ``IMPORT_SOURCE_ROOT_UNVERIFIED`` when ``raw_path`` lies under an imported run's claimed
+    evidence root that was not accepted (T-350); ``None`` otherwise."""
+    if not is_imported_summary(summary):
+        return None
+    refused = imported_run_roots(summary).refused
+    if not refused:
+        return None
+    try:
+        requested = Path(raw_path).expanduser()
+        requested = requested.resolve() if requested.is_absolute() else None
+    except (OSError, RuntimeError, ValueError):
+        requested = None
+    hit = next(
+        ((root, reason) for root, reason in refused if requested is None or is_relative_to(requested, root)),
+        None,
+    )
+    if hit is None:
+        return None
+    root, reason = hit
+    detail: dict[str, object] = {
+        "code": IMPORT_SOURCE_ROOT_UNVERIFIED,
+        "message": f"{IMPORT_ROOT_UNVERIFIED_MESSAGE}: 가져온 결과의 증거 경로 {root} — {import_root_refusal_text(reason)}",
+        "import_root_reason": reason,
+    }
+    if diagnostics is not None:
+        detail["source_path_resolution"] = diagnostics
+    return HTTPException(status_code=403, detail=detail)
+
+
 def parse_source_preview_archive_request(raw_path: str) -> dict[str, str] | None:
     try:
         return parse_archived_source_request(raw_path)
@@ -291,6 +362,12 @@ def parse_source_preview_archive_request(raw_path: str) -> dict[str, str] | None
 
 
 def allowed_source_roots(summary: dict[str, object]) -> list[Path]:
+    """Folders the source routes may read for a run.
+
+    An imported run (T-350) never takes its roots from the summary text: only the result folder
+    and the evidence root its own input fingerprint verifies (``core/import_roots.py``)."""
+    if is_imported_summary(summary):
+        return imported_run_roots(summary).allowed
     roots: list[Path] = []
     for key in ("root", "scan_scope_root", "output_dir"):
         value = summary.get(key)
@@ -495,15 +572,24 @@ def is_probably_binary(source_path: Path, *, sample_size: int = 4096) -> bool:
     return control / len(sample) > 0.08
 
 
-def is_sqlite_candidate(path: Path, suffix: str | None = None) -> bool:
+def sqlite_detection(path: Path, suffix: str | None = None) -> str | None:
+    """How a file is known to be SQLite: ``"extension"`` (a SQLite extension and the header) or
+    ``"magic-bytes"`` (the 16-byte ``SQLite format 3`` + NUL header alone — Chromium ``History``/``Cookies``/
+    ``Login Data`` and other extension-less browser profile databases); ``None`` = not SQLite.
+    Only the 16-byte header is read."""
     normalized_suffix = suffix if suffix is not None else path.suffix.lower()
-    if normalized_suffix not in SQLITE_PREVIEW_EXTS:
-        return False
     try:
         with path.open("rb") as handle:
-            return handle.read(len(SQLITE_HEADER)) == SQLITE_HEADER
+            header = handle.read(len(SQLITE_HEADER))
     except OSError:
-        return False
+        return None
+    if header != SQLITE_HEADER:
+        return None
+    return "extension" if normalized_suffix in SQLITE_PREVIEW_EXTS else "magic-bytes"
+
+
+def is_sqlite_candidate(path: Path, suffix: str | None = None) -> bool:
+    return sqlite_detection(path, suffix) is not None
 
 
 def is_image_preview_candidate(path: Path) -> bool:

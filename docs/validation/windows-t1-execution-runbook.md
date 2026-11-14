@@ -6,6 +6,14 @@ Scope: External Windows T1 minimal E01/Ex01 evidence execution
 
 This runbook prepares the operator workflow for a future external Windows run. It does not create E01/Ex01 images, run trusted forensic tools, or complete review signoff.
 
+## 현재 상태 (R6 S4, 2026-10-21)
+
+- 이 런북은 여전히 **준비만 됨, 실행 안 됨**이다. E01/Ex01 취득, 신뢰/참조 도구 내보내기, 실제 E01/Ex01에 대한 RapidForensic 실행, 검토 서명은 하지 않았다.
+- 필요한 운영자 입력의 정확한 목록과 상태는 `docs/validation/windows-t1-operator-inputs.md` 맨 위 "현재 상태" 표에 있다(사람 지정 `operator_name`·`reviewer_name`·`review_ticket`·검토 담당, 취득 도구와 Ex01 결정, 디스크 생성·E01/Ex01 취득·신뢰 도구 내보내기 승인, 라이선스·저장소 ACL, 취득 후 `ntfs_volume_id`와 결과 경로).
+- 2026-10-21 자동 재확인(취득 미실행): 이 호스트의 PATH에 `ewfacquire`·`ftkimager`·Sleuth Kit·Zimmerman 도구가 없다. Windows 11 Pro 25H2(10.0.26200.9711), Python 3.12.5, Korea Standard Time, `LongPathsEnabled=1`.
+- 2026-08-30 EVTX 레코드 식별자 불일치: 현재 native 파서는 BinXML `EventRecordID`를 `record_id`로 낸다(합성 EVTX 시험으로 고정). 운영자 호스트에서 EvtxECmd와 레코드 단위 diff를 현재 코드로 다시 돌려야 닫힌다.
+- Engineering Baseline과 Release Evidence는 따로 보고한다. Release Evidence는 실제 외부 E01/Ex01·Windows·신뢰/참조 도구·규모·검토 기록이 생길 때까지 차단이다.
+
 ## Purpose
 
 Produce a minimal, synthetic, Windows-generated NTFS T1 corpus outside Git and collect enough artifacts to evaluate RapidForensic against independent trusted/reference results.

@@ -10,6 +10,7 @@ import { create } from "zustand";
 import { announce } from "../../a11y";
 import { type AnalysisKind, type AnalysisState, isAnalysisActive, listAnalyses } from "../../api/analyses";
 import { ApiError } from "../../api/client";
+import { VISIBLE_ONLY_POLL } from "../../api/queryPolicy";
 import { kindLabel, STATUS_LABEL } from "./kinds";
 
 /** Poll interval while any job of the run is queued/running (plan §4: 1 s). */
@@ -80,7 +81,8 @@ export function useAnalyses(runId: string | null, options: UseAnalysesOptions = 
       ? (q: { state: { data?: AnalysisState[] } }) =>
           q.state.data?.some(isAnalysisActive) ? ANALYSIS_POLL_MS : false
       : false,
-    refetchIntervalInBackground: true,
+    // T-130: a hidden tab polls nothing (react-query skips interval fetches in the background).
+    ...VISIBLE_ONLY_POLL,
   });
   const unavailable =
     query.error instanceof ApiError && (query.error.status === 404 || query.error.status === 405);

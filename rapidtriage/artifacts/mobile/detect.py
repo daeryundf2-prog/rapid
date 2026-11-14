@@ -17,6 +17,7 @@ from .constants import (
     LOCATION_KEYS,
     MEDIA_KEYS,
     MESSAGE_KEYS,
+    MOBILE_AI_SERVICE_TOKENS,
     MOBILE_REPORT_GRADE_BLOCKERS,
     SCREEN_TIME_KEYS,
     VENDOR_HINTS,
@@ -185,7 +186,7 @@ def message_risk_flags(text: str, service: str) -> list[str]:
     flags: list[str] = []
     if any(token in lowered for token in ("password", "otp", "2fa", "인증", "비밀번호")):
         flags.append("credential-or-otp")
-    if any(token in lowered for token in ("chatgpt", "claude", "gemini", "perplexity", "copilot")):
+    if any(token in lowered for token in MOBILE_AI_SERVICE_TOKENS):
         flags.append("ai-service-conversation")
     if detect_chat_service({"service": service}, Path("")):
         flags.append("messenger-app-conversation")

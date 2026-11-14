@@ -12,6 +12,13 @@
       "artifacts": []
     },
     {
+      "name": "ai-agents",
+      "description": "AI usage records: catalog tool presence (paths, npm/pip/winget/MSIX/editor-extension installs, execution traces), credential-file presence without values, unknown AI tool candidates, local LLM model files and agent session adapters",
+      "target_platform": "any",
+      "supported": true,
+      "artifacts": []
+    },
+    {
       "name": "android-apk-artifacts",
       "description": "Android APK inventory, hashes, manifest metadata, permissions, and triage risk flags",
       "target_platform": "android",

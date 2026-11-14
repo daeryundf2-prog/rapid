@@ -38,6 +38,22 @@
       "description": "Report-facing limits: time origin, timezone, registry context, missing tools, caps, exclusions (parser-quality r1).",
       "additionalProperties": true
     },
+    "run_scope": {
+      "type": "object",
+      "description": "Collection scope of this run: --artifact-kinds kind-only selection, skipped stage groups and fingerprint mode.",
+      "additionalProperties": false,
+      "required": ["artifact_kinds", "kinds_only", "fingerprint_mode", "skipped_stage_groups"],
+      "properties": {
+        "artifact_kinds": {"type": "array", "items": {"type": "string"}},
+        "kinds_only": {"type": "boolean"},
+        "fingerprint_mode": {"type": "string"},
+        "skipped_stage_groups": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "fingerprint_mode": {
+      "type": "string",
+      "description": "How the input fingerprint was computed: content, metadata or sampled (kind-only runs)."
+    },
     "mode": {
       "enum": [
         "seizure",

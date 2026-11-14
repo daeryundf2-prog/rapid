@@ -10,6 +10,7 @@ import { ReportDialog } from "./ReportDialog";
 import { RunDialog } from "./RunDialog";
 import { buildRunBody, DEFAULT_RUN_FORM, validateRunForm } from "./runForm";
 import { mockFetch, renderWithQuery } from "./testUtils";
+import { WriteConfirmHost } from "./WriteConfirm";
 
 /** Field names of RunCreateRequest in rapidtriage/api/app/models.py. */
 const RUN_CREATE_FIELDS = [
@@ -115,6 +116,16 @@ describe("RunDialog", () => {
 
     fireEvent.change(screen.getByLabelText(/증거 경로/), { target: { value: "D:/case/img.E01" } });
     fireEvent.change(screen.getByLabelText("모드"), { target: { value: "hacking" } });
+    // R7: no automatic output folder; one inside the evidence is refused inline.
+    expect(submit.getAttribute("aria-disabled")).toBe("true");
+    expect(submit.getAttribute("title")).toBe("출력 폴더를 지정하세요 (증거 밖의 폴더)");
+    const output = screen.getByLabelText(/^출력 폴더/);
+    fireEvent.change(output, { target: { value: "d:\\CASE\\img.e01\\out" } });
+    expect(submit.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByTestId("output-dir-error").textContent).toContain("증거 경로 안");
+    expect(output.getAttribute("aria-invalid")).toBe("true");
+    fireEvent.change(output, { target: { value: "D:/out/run1" } });
+    expect(screen.queryByTestId("output-dir-error")).toBeNull();
     expect(submit.getAttribute("aria-disabled")).toBeNull();
     fireEvent.click(submit);
     await waitFor(() => expect(onClose).toHaveBeenCalled());
@@ -124,7 +135,7 @@ describe("RunDialog", () => {
       root: "D:/case/img.E01",
       mode: "hacking",
       input_kind: null,
-      output_dir: null,
+      output_dir: "D:/out/run1",
       dry_run: false,
       read_only: true,
       overwrite: false,
@@ -145,7 +156,7 @@ describe("RunDialog", () => {
     const submit = screen.getByRole("button", { name: "실행" });
     expect(submit.getAttribute("aria-disabled")).toBe("true");
     expect(submit.getAttribute("title")).toBe("실행 중 런이 있습니다");
-    expect(screen.getByRole("button", { name: "샘플 실행" }).getAttribute("title")).toBe(
+    expect(screen.getByRole("button", { name: "샘플 실행…" }).getAttribute("title")).toBe(
       "실행 중 런이 있습니다",
     );
   });
@@ -176,10 +187,19 @@ describe("RunDialog", () => {
     const { calls } = mockFetch({
       "POST /api/sample-case/run": { command: "sample-case.run", run: { run_id: "s1", status: "completed" } },
     });
-    renderWithQuery(<RunDialog runIsActive={false} onClose={() => undefined} />);
-    fireEvent.click(screen.getByRole("button", { name: "샘플 실행" }));
+    renderWithQuery(
+      <>
+        <RunDialog runIsActive={false} onClose={() => undefined} />
+        <WriteConfirmHost />
+      </>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "샘플 실행…" }));
+    // A write (r7 L4, C-G6): nothing is sent until the confirmation says where and is accepted.
+    await waitFor(() => expect(screen.getByTestId("write-confirm")).toBeTruthy());
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    fireEvent.click(screen.getByTestId("write-confirm-ok"));
     await waitFor(() => expect(window.location.hash).toBe("#/case/s1/intake"));
-    expect(calls.find((c) => c.method === "POST")?.body).toEqual({});
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ overwrite: true });
   });
 });
 
@@ -205,6 +225,25 @@ describe("DeleteCaseDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "삭제" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(calls[0]).toMatchObject({ method: "DELETE", url: "/api/runs/r9" });
+  });
+
+  it("closes, navigates home and shows no JSON error when the 204 carries a JSON content type (E01 QA D1)", async () => {
+    window.location.hash = "#/case/r9/intake";
+    mockFetch({
+      "DELETE /api/runs/r9": new Response(null, {
+        status: 204,
+        headers: { "content-type": "application/json" },
+      }),
+    });
+    const onClose = vi.fn();
+    const onNotice = vi.fn();
+    renderWithQuery(<DeleteCaseDialog runId="r9" currentRunId="r9" onClose={onClose} onNotice={onNotice} />);
+    expect(screen.getByText(/디스크에 그대로/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "삭제" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(window.location.hash).toBe("");
+    expect(onNotice.mock.calls[0]?.[0]).toContain("출력 폴더는 디스크에 남아");
+    expect(screen.queryByText(/JSON/)).toBeNull();
   });
 });
 
@@ -290,7 +329,7 @@ describe("ReportDialog / export commands", () => {
     expect(reason("export.reviewer-bundle")).toBe("보고 후보 0건 — 표시된 항목이 없습니다");
     expect(reason("export.submission-manifest")).toBe("보고 후보 0건 — 표시된 항목이 없습니다");
     expect(reason("export.validation-package")).toBeUndefined();
-    expect(reason("export.case-report", { runId: null })).toBe("열린 케이스가 없습니다");
+    expect(reason("export.case-report", { runId: null })).toBe("케이스를 먼저 선택하세요");
     expect(
       buildCaseCommands({ reportCandidates: 2 })
         .find((c) => c.id === "export.case-report")
@@ -315,6 +354,7 @@ describe("case / search commands", () => {
         "case.link",
         "case.run",
         "case.run.add",
+        "case.run.new",
         "case.sample",
         "case.switch",
         "export.case-report",
@@ -336,8 +376,10 @@ describe("case / search commands", () => {
   });
 
   it("delete and search options need an open case", () => {
-    expect(find("case.delete")?.disabledReason?.({ ...ctx, runId: null })).toBe("열린 케이스가 없습니다");
-    expect(find("search.options")?.disabledReason?.({ ...ctx, runId: null })).toBe("열린 케이스가 없습니다");
+    expect(find("case.delete")?.disabledReason?.({ ...ctx, runId: null })).toBe("케이스를 먼저 선택하세요");
+    expect(find("search.options")?.disabledReason?.({ ...ctx, runId: null })).toBe(
+      "케이스를 먼저 선택하세요",
+    );
     expect(find("search.save")?.disabledReason?.(ctx)).toBe("저장할 검색어가 없습니다");
   });
 

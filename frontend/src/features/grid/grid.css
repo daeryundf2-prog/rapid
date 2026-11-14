@@ -395,10 +395,13 @@
   text-overflow: ellipsis;
 }
 
-/* Acquisition-copy host time (files 수정): shown, but not as an evidence time. */
+/* Acquisition-copy host time (files 수정): shown, but not as an evidence time — a clock marker
+   named "증거 시각 아님", muted, never italic (r8 C.9.1, T-173). */
 .grid-cell-copytime {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   color: var(--text-muted);
-  font-style: italic;
 }
 
 .grid-header .grid-cell-select,
@@ -413,6 +416,28 @@
   position: relative;
 }
 
+/* A kept core column with no value on the loaded page (UX-round review): a quiet note, not a hint link. */
+.grid-hcell-novalue {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-inline-end: 4px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+  font-weight: 400;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The header label ellipsizes inside its sort button: a bare text node would keep its full width
+   and run over the "이 페이지 값 없음" note in a narrow column (r8 verify F6, 1280 + viewer). */
+.grid-sort-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The accent bar must stay on top of the sticky select cell, which covers the row's own edge. */
 .grid-row.is-selected > .grid-cell-select {
   box-shadow: inset 2px 0 0 var(--accent);
@@ -421,6 +446,7 @@
 .grid-sort {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
@@ -559,10 +585,16 @@
 
 /* Row menu + toasts ------------------------------------------------------ */
 
+/* Portalled to <body> (T-090): above the viewer / tree drawers like the other portalled menus,
+   capped by placePopover's max-height and scrolled; rows keep their content height. */
 .grid-menu {
   position: fixed;
-  z-index: 40;
+  z-index: 750;
   display: grid;
+  grid-auto-rows: max-content;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  max-width: min(420px, calc(100vw - 16px));
   min-width: 220px;
   padding: var(--space-1);
   background: var(--surface-3);
@@ -644,6 +676,33 @@
 
 .grid-sort[aria-disabled="true"] {
   cursor: not-allowed;
+}
+
+/* Range honesty (plan r7 §3.2 L2, 구조 D2): "불러온 N / 전체 M" on the 조건 줄, always. */
+.grid-scope-badge {
+  flex: none;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line-subtle);
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+/* A sort / filter over the loaded rows only says so above the grid. */
+.grid-scope-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  border-left: 3px solid var(--warn);
+  background: var(--surface-1);
+  color: var(--text);
+  font-size: var(--fs-table-aux);
 }
 
 .grid-sortstatus {
@@ -880,4 +939,10 @@
   font-size: var(--fs-table-aux);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* T-020 temporary partial-result band (T-089 replaces it with PartialBanner): amber, not an error. */
+.grid-partial-banner {
+  border-left-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, var(--surface-1));
 }

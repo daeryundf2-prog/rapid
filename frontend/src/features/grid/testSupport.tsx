@@ -4,6 +4,7 @@ import type { ReactElement, ReactNode } from "react";
 import { vi } from "vitest";
 import { useGridLocalStore } from "./adapter";
 import { resetCaseDbHandles } from "./reviewActions";
+import { resetRemoteChangeTracking } from "./reviewMap";
 
 export function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -33,7 +34,7 @@ export interface FetchCall {
   body: unknown;
 }
 
-type Handler = (url: URL, init: RequestInit | undefined) => Response | Promise<Response>;
+export type Handler = (url: URL, init: RequestInit | undefined) => Response | Promise<Response>;
 
 /** Replace global fetch with a router keyed by a path substring; records every call. */
 export function installFetch(routes: Record<string, Handler>): FetchCall[] {
@@ -49,6 +50,14 @@ export function installFetch(routes: Record<string, Handler>): FetchCall[] {
         !Object.keys(routes).some((k) => k.includes("review-map"))
       ) {
         return jsonResponse({ marks: [], exists: false, truncated: false });
+      }
+      // The run record (GET /api/runs/{id}: `case_db_ready`, r7 L4) is read before a first mark;
+      // unless a test routes it, it answers 404 (= ensure as before) and stays out of the calls.
+      if (
+        /^\/api\/runs\/[^/]+$/.test(url.pathname) &&
+        !Object.keys(routes).some((k) => url.pathname.includes(k))
+      ) {
+        return jsonResponse({ detail: "run record not mocked" }, 404);
       }
       calls.push({
         url: `${url.pathname}${url.search}`,
@@ -80,6 +89,7 @@ export function renderWithClient(ui: ReactElement) {
 
 export function resetGridStore(): void {
   resetCaseDbHandles();
+  resetRemoteChangeTracking();
   useGridLocalStore.setState({
     route: { runId: "run-1", collection: { id: "files" }, q: "", rowRef: null },
     selectedKeys: new Set<string>(),
@@ -109,27 +119,82 @@ export function mockLayout(width = 1000, height = 600): () => void {
 }
 
 /** Raw `files` API candidates `from..to-1`. */
+/** 수정 time of fixture file `index`: one second older per index, so the files list's default
+ * `mtime desc` order (T-173) is the list order. Noon UTC keeps every fixture on 2026-01-01. */
+const FILE_FIXTURE_EPOCH_MS = Date.UTC(2026, 0, 1, 12);
+export function fileFixtureTime(index: number): string {
+  return new Date(FILE_FIXTURE_EPOCH_MS - index * 1000).toISOString().replace(/\.000Z$/, "Z");
+}
+
 export function fileCandidates(from: number, to: number) {
   return Array.from({ length: Math.max(0, to - from) }, (_, i) => ({
     path: `C:/evidence/dir${(from + i) % 7}/file-${from + i}.txt`,
     name: `file-${from + i}.txt`,
     extension: ".txt",
     size: 1000 + (from + i),
-    modified_at: `2026-01-01T00:00:${String((from + i) % 60).padStart(2, "0")}Z`,
+    modified_at: fileFixtureTime(from + i),
     categories: ["document"],
   }));
 }
 
-/** Files endpoint serving `total` rows with offset/limit paging. */
+/**
+ * Files endpoint serving `total` rows with offset/limit paging; `sort=name|path|size|mtime` +
+ * `order=` and `q=` (name/path terms) over the whole list like the server's column index (plan
+ * r7 §3.2 L2): such pages carry `record_index`, `matched` and a ready `sort` descriptor.
+ */
 export function filesHandler(total: number): Handler {
   return (url) => {
     const offset = Number(url.searchParams.get("offset") ?? 0);
     const limit = Number(url.searchParams.get("limit") ?? 0);
+    const sortKey = url.searchParams.get("sort");
+    const order = url.searchParams.get("order") === "desc" ? "desc" : "asc";
+    const q = url.searchParams.get("q")?.trim().toLowerCase() ?? "";
+    // Fixture mtimes fall with the index, so the default `mtime desc` order (T-173) IS the list
+    // order: answer it by slicing, not by building and sorting every row (281,595 in the scale test).
+    if (!q && (!sortKey || (sortKey === "mtime" && order === "desc"))) {
+      return jsonResponse({
+        candidates: fileCandidates(offset, Math.min(offset + limit, total)),
+        total,
+        offset,
+        limit,
+      });
+    }
+    let all = fileCandidates(0, total).map((row, index) => ({ ...row, record_index: index }));
+    if (q) {
+      const terms = q.split(/\s+/);
+      all = all.filter((row) => terms.every((t) => `${row.name}\n${row.path}`.toLowerCase().includes(t)));
+    }
+    if (sortKey) {
+      const value = (row: (typeof all)[number]): string | number =>
+        sortKey === "size"
+          ? row.size
+          : sortKey === "mtime"
+            ? row.modified_at
+            : sortKey === "path"
+              ? row.path.toLowerCase()
+              : row.name.toLowerCase();
+      all = [...all].sort((a, b) => {
+        const av = value(a);
+        const bv = value(b);
+        const cmp = av < bv ? -1 : av > bv ? 1 : a.record_index - b.record_index;
+        return order === "desc" && av !== bv ? -cmp : cmp;
+      });
+    }
+    const page = all.slice(offset, offset + limit);
     return jsonResponse({
-      candidates: fileCandidates(offset, Math.min(offset + limit, total)),
-      total,
-      offset,
-      limit,
+      candidates: page,
+      matched: all.length,
+      pagination: {
+        offset,
+        limit,
+        returned: page.length,
+        total: all.length,
+        matched: all.length,
+        has_more: offset + page.length < all.length,
+        truncated: false,
+      },
+      ...(sortKey ? { sort: { key: sortKey, order, status: "ready", progress: 1 } } : {}),
+      ...(q ? { text_filter: { q, fields: ["name", "path"] } } : {}),
     });
   };
 }

@@ -291,7 +291,9 @@
 }
 
 .landing-case-name {
-  flex: 0 1 auto;
+  /* The name keeps its width (up to 45%); the longer run chip ellipsizes first (R7 C-L1). */
+  flex: 0 0 auto;
+  max-width: 45%;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -462,6 +464,46 @@
   margin: var(--space-1) 0 0;
 }
 
+/* 케이스 열기 run row (R7 C-L1): the run (name + chip `모드 · 시작 · 소요 · id8` + state) and a ⋯ menu. */
+.case-tree-run {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.case-tree-run > .case-run-open {
+  display: flex;
+  flex: 1 1 auto;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  height: auto;
+  min-height: 36px;
+  padding-block: var(--space-1);
+  text-align: start;
+}
+
+.case-run-text {
+  display: grid;
+  justify-items: start;
+  min-width: 0;
+  text-align: start;
+}
+
+.case-run-label,
+.case-run-chip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.case-run-chip {
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+  font-variant-numeric: tabular-nums;
+}
+
 .case-tree-heading {
   margin: var(--space-3) 0 var(--space-2);
   font-size: var(--fs-aux);
@@ -480,4 +522,88 @@
 .run-plan-groups-actions {
   justify-content: flex-start;
   align-items: center;
+}
+
+/* 개체·언어 검색 (R7 lane B, EntityPanel.tsx) */
+.entity-query {
+  display: grid;
+  gap: var(--space-2);
+}
+.entity-syntax {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-2) 0;
+}
+.entity-syntax > div {
+  display: contents;
+}
+.entity-syntax dd {
+  margin: 0;
+}
+.entity-summary h3 {
+  font-size: var(--fs-body);
+  margin: var(--space-3) 0 var(--space-1);
+}
+.entity-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.entity-chips .chip-note,
+.entity-values .chip-note {
+  color: var(--text-muted);
+}
+.entity-results {
+  margin-top: var(--space-3);
+}
+.entity-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.entity-rows > li {
+  border-top: 1px solid var(--line-subtle);
+  padding-top: var(--space-2);
+}
+.entity-row-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.entity-row-snippet {
+  overflow-wrap: anywhere;
+  max-height: 6em;
+  overflow: hidden;
+}
+.entity-values {
+  list-style: none;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+}
+.entity-kind {
+  color: var(--text-muted);
+}
+.entity-list-counts {
+  border-collapse: collapse;
+  margin: var(--space-2) 0;
+}
+.entity-list-counts th,
+.entity-list-counts td {
+  border-bottom: 1px solid var(--line-subtle);
+  padding: 2px var(--space-2);
+  text-align: left;
+}
+.entity-reveal-confirm {
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+  margin-top: var(--space-3);
 }

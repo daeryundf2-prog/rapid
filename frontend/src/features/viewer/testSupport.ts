@@ -21,8 +21,12 @@ export function installFetch(routes: Record<string, Handler>): FetchCall[] {
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), "http://localhost");
-      calls.push({ url, init });
       const name = url.pathname.split("/").pop() || "";
+      // GET /api/runs/{id} (case_db_ready, r7 L4) before a first mark: ambient 404 unless routed.
+      if (/^\/api\/runs\/[^/]+$/.test(url.pathname) && !routes[name]) {
+        return jsonResponse({ detail: "run record not mocked" }, 404);
+      }
+      calls.push({ url, init });
       const handler = routes[name];
       if (!handler) return jsonResponse({ detail: `no mock for ${name}` }, 404);
       const result = await handler(url, init);

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import hashlib
 import json
 from collections.abc import (
@@ -10,6 +9,7 @@ from collections.abc import (
     Sequence,
 )
 
+from ..clock import now_local_iso
 from ..forensic_accuracy import build_accuracy_gate
 from ..input_root import InputRoot
 from .constants import (
@@ -59,7 +59,7 @@ def isolated_parser_error_payload(kind: str, *, input_root: InputRoot, exc: Exce
         "kind": kind,
         "root": str(input_root.root_path),
         "input_kind": input_root.kind,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "summary": {
             "artifact_count": 0,
             "artifact_type_counts": {},

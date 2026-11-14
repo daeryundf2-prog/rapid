@@ -34,7 +34,8 @@ export const DEFAULT_SEARCH_OPTIONS: SearchOptions = {
   pathContains: "",
   fuzzyDistance: 1,
   proximityWindow: 0,
-  ocr: true,
+  // OCR sidecars are opt-in (R7): reading them costs every search 0.3-0.7 s on a real run.
+  ocr: false,
   hideKnownGood: false,
   keywordPacks: [],
   limit: 500,

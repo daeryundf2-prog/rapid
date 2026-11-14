@@ -10,17 +10,24 @@ import {
   type ReviewMarkBody,
 } from "../../api/collections";
 import { extractRows, type RunExtractResult } from "../../api/extract";
+import { getReviewHistory } from "../../api/reviewTools";
+import { getRun } from "../../api/runs";
+import { runCommand } from "../../commands/registry";
+import { type ToastAction, useToastStore } from "../../components/toastStore";
 import type { GridRow, ReviewStatus } from "../../contracts/collection";
+import { KEY_MAP } from "../../contracts/command";
 import type { MarkAction } from "../../contracts/viewer";
 import { useAppStore } from "../../state/store";
 import { currentReviewer } from "../review/author";
+import { currentRowSource } from "../review/rowSource";
 import { baseName, str } from "./columns/common";
 
 export type BatchAction = MarkAction | "tag" | "extract" | UnmarkAction;
 
 /**
- * Undo of a pressed review toggle: "clear-review" puts the status back to the case DB's
- * `unreviewed` (core/case.py REVIEW_STATUSES); "remove-from-report" clears include_in_report.
+ * Un-press of a review toggle: "clear-review" puts the status back to the row's previous state
+ * (r8 T-036 — the state before the pressed mark: this session's mark stack, else the row's case-DB
+ * history, else `unreviewed`); "remove-from-report" clears include_in_report.
  */
 export type UnmarkAction = "clear-review" | "remove-from-report";
 
@@ -46,8 +53,34 @@ export const MARK_LABELS: Record<BatchAction, string> = {
 /** Max rows per extract request (API limit). */
 export const EXTRACT_LIMIT = 500;
 
+/**
+ * Source-row locator a row carries explicitly (search hits: the API `locator`), as
+ * `fields.reviewCollection` / `reviewKind` / `reviewPointer`; null when the row has none.
+ */
+function carriedLocator(row: GridRow): { collection: string; kind: string; pointer: string } | null {
+  const collection = row.fields.reviewCollection;
+  const pointer = row.fields.reviewPointer;
+  if (
+    typeof collection !== "string" ||
+    !collection ||
+    typeof pointer !== "string" ||
+    !pointer.startsWith("/")
+  )
+    return null;
+  const kind = typeof row.fields.reviewKind === "string" ? row.fields.reviewKind : "";
+  if (collection === "artifacts" && !kind) return null;
+  return { collection, kind, pointer };
+}
+
 /** Bookmark API target (`source` alias + JSON pointer) for a grid row, or null when unknown. */
 export function bookmarkTarget(row: GridRow): { source: string; pointer: string } | null {
+  const carried = carriedLocator(row);
+  if (carried) {
+    return {
+      source: carried.collection === "artifacts" ? `artifacts:${carried.kind}` : carried.collection,
+      pointer: carried.pointer,
+    };
+  }
   const raw = row.fields.pointer ? str(row.fields.pointer) : row.ref.locator;
   // Search rows may carry "docs-index:/results/3"; the pointer is the part after the scheme.
   const pointer = raw.includes(":/") ? raw.slice(raw.indexOf(":/") + 1) : raw;
@@ -191,6 +224,10 @@ export interface ApplyResult {
   applied: number;
   extract?: RunExtractResult;
   store?: ReviewStore;
+  /** Rows the mark did not apply to (no source record), each with its reason. */
+  skipped?: SkippedRow[];
+  /** "clear-review" only: the status the first row went back to (its previous state). */
+  restored?: ReviewSnapshot;
 }
 
 /** Toast suffix that tells the analyst a mark went to the case.json fallback, not the case DB. */
@@ -203,13 +240,14 @@ export function storeNotice(result: ApplyResult): string {
 // ---- case DB handle (ensure once per run) ----------------------------------
 
 const caseDbHandles = new Map<string, Promise<CaseDbHandle | null>>();
-/** Runs whose ensure call has settled (the handle is known; marks apply without waiting). */
-const settledRuns = new Set<string>();
+/** Runs whose `/case-db/ensure` is in flight (only these say "케이스 DB 준비 중…"). */
+const preparingRuns = new Set<string>();
 
 /** Forget cached handles (tests; a run re-import). */
 export function resetCaseDbHandles(): void {
   caseDbHandles.clear();
-  settledRuns.clear();
+  preparingRuns.clear();
+  resetReviewUndo();
 }
 
 /** Shown while POST /case-db/ensure is still running (first import can take minutes). */
@@ -219,6 +257,24 @@ export const CASE_DB_PREPARING_NOTICE = "케이스 DB 준비 중… 완료되면
 function notifyPreparing(): void {
   announce(CASE_DB_PREPARING_NOTICE);
   useAppStore.getState().showNotice(CASE_DB_PREPARING_NOTICE);
+}
+
+/** The preparing toast goes once the case DB answered: one toast per mark, not two (review P2). */
+function clearPreparing(): void {
+  const toasts = useToastStore.getState();
+  for (const toast of toasts.toasts) if (toast.text === CASE_DB_PREPARING_NOTICE) toasts.dismiss(toast.id);
+}
+
+/**
+ * The handle the run itself reports (`GET /api/runs/{id}` `case_db_ready`, r7 L4 C-G13): an
+ * already-imported case DB needs no `/case-db/ensure` round trip and no "준비 중" toast. Any error
+ * (older server, network) falls back to ensure.
+ */
+function readyHandle(runId: string): Promise<CaseDbHandle | null> {
+  return getRun(runId).then(
+    (run) => (run.case_db_ready && run.case_db?.database && run.case_db.case_id ? run.case_db : null),
+    () => null,
+  );
 }
 
 function apiReason(error: ApiError): string {
@@ -233,21 +289,31 @@ function apiReason(error: ApiError): string {
 function caseDbHandle(runId: string): Promise<CaseDbHandle | null> {
   const cached = caseDbHandles.get(runId);
   if (cached) return cached;
-  const pending = ensureCaseDb(runId).then(
-    (handle) => {
-      settledRuns.add(runId);
-      return handle;
-    },
-    (error: unknown) => {
-      caseDbHandles.delete(runId);
-      if (error instanceof ApiError && error.status < 500 && error.status !== 401) {
-        // Same fallback as before (case.json bookmarks), but say why.
-        announce(`케이스 DB를 만들 수 없습니다(${apiReason(error)}). ${BOOKMARK_FALLBACK_NOTICE}`);
-        return null;
-      }
-      throw error;
-    },
-  );
+  const pending = readyHandle(runId)
+    .then((ready) => {
+      if (ready) return ready;
+      preparingRuns.add(runId);
+      notifyPreparing();
+      return ensureCaseDb(runId);
+    })
+    .then(
+      (handle) => {
+        preparingRuns.delete(runId);
+        clearPreparing();
+        return handle;
+      },
+      (error: unknown) => {
+        caseDbHandles.delete(runId);
+        preparingRuns.delete(runId);
+        clearPreparing();
+        if (error instanceof ApiError && error.status < 500 && error.status !== 401) {
+          // Same fallback as before (case.json bookmarks), but say why.
+          announce(`케이스 DB를 만들 수 없습니다(${apiReason(error)}). ${BOOKMARK_FALLBACK_NOTICE}`);
+          return null;
+        }
+        throw error;
+      },
+    );
   caseDbHandles.set(runId, pending);
   return pending;
 }
@@ -261,6 +327,29 @@ const listeners = new Set<ReviewListener>();
 export function onReviewApplied(listener: ReviewListener): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
+}
+
+/**
+ * A case-DB write this tab is about to send (T-131): the rows and the mark, or `rows: null` for a
+ * write whose rows the tab does not list (tag propagation, tag rename/delete). The review map uses
+ * it to tell this tab's own changes from another window's.
+ */
+export interface ReviewWrite {
+  runId: string;
+  rows: readonly GridRow[] | null;
+  mark: ReviewMarkBody | null;
+}
+
+type ReviewWriteListener = (write: ReviewWrite) => void;
+const writeListeners = new Set<ReviewWriteListener>();
+
+export function onReviewWrite(listener: ReviewWriteListener): () => void {
+  writeListeners.add(listener);
+  return () => writeListeners.delete(listener);
+}
+
+function emitReviewWrite(write: ReviewWrite): void {
+  for (const listener of writeListeners) listener(write);
 }
 
 /**
@@ -288,7 +377,23 @@ export async function applyReviewAction(
     const extract = await extractRows(runId, { rows: items });
     return { applied: extract.summary.extracted_count, extract };
   }
-  return applyBody(runId, rows, markBody(action, options.tag), caseDbMark(action, options.tag));
+  if (action === "clear-review") return clearToPrevious(runId, rows);
+  // Judgement marks are undoable: the rows' state before the mark is taken now (before the
+  // optimistic patch reaches the server) and kept as one unit for "실행 취소" / Ctrl+Z.
+  const before = UNDOABLE_ACTIONS.has(action) ? snapshotEntries(runId, rows) : null;
+  const result = await applyBody(runId, rows, markBody(action, options.tag), caseDbMark(action, options.tag));
+  if (before) {
+    const pushes = STATUS_MARKS.has(action);
+    for (const entry of before) {
+      rememberWritten(entry, afterMark(action, entry.before));
+      if (pushes) {
+        pushPrior(entry.key, entry.before);
+        entry.stack = "push";
+      }
+    }
+    recordUndo(runId, action, before);
+  }
+  return result;
 }
 
 /** Save one free-text note (X5) on every row; same store routing as review marks. */
@@ -318,24 +423,65 @@ function caseDbMark(action: BatchAction, tag?: string): ReviewMarkBody {
   }
 }
 
+/** A row a mark could not apply to, with the Korean reason shown to the analyst. */
+export interface SkippedRow {
+  row: GridRow;
+  reason: string;
+}
+
+/** Why a row has no review target (shown per row when a batch skips it). */
+export const NO_SOURCE_ROW_REASON = "출처 위치(원본 레코드)를 알 수 없는 행입니다";
+
+/** Rows a review mark can target (case-db id or run-output locator), and the rest with a reason. */
+export function partitionReviewRows(rows: GridRow[]): { targetable: GridRow[]; skipped: SkippedRow[] } {
+  const targetable: GridRow[] = [];
+  const skipped: SkippedRow[] = [];
+  for (const row of rows) {
+    if (reviewTargetOf(row)) targetable.push(row);
+    else skipped.push({ row, reason: NO_SOURCE_ROW_REASON });
+  }
+  return { targetable, skipped };
+}
+
+/** Toast suffix naming the skipped rows ("… 2건은 건너뜀: 제목1, 제목2"). */
+export function skippedNotice(skipped: readonly SkippedRow[]): string {
+  if (skipped.length === 0) return "";
+  const names = skipped
+    .slice(0, 3)
+    .map((item) => item.row.title || item.row.rowKey)
+    .join(", ");
+  const more = skipped.length > 3 ? ` 외 ${skipped.length - 3}건` : "";
+  return ` 출처 위치(원본 레코드)를 알 수 없는 ${skipped.length}건은 건너뛰었습니다: ${names}${more}.`;
+}
+
 async function applyBody(
   runId: string,
-  rows: GridRow[],
+  allRows: GridRow[],
   body: MarkPayload,
   mark: ReviewMarkBody,
 ): Promise<ApplyResult> {
+  // Rows without a source record (aggregates, derived rows) are skipped with a note; the
+  // mark still applies to every row that has one.
+  const { targetable: rows, skipped } = partitionReviewRows(allRows);
+  if (rows.length === 0) {
+    throw new Error(
+      `출처 위치를 알 수 없는 행이 ${allRows.length}건 있습니다(원본 레코드 없음, 집계·파생 행).`,
+    );
+  }
   const targets = rows.map(reviewTargetOf);
-  const unresolved = targets.filter((t) => t === null).length;
-  if (unresolved > 0) throw new Error(`출처 위치를 알 수 없는 행이 ${unresolved}건 있습니다.`);
   // Queue on the (shared, cached) ensure promise: a mark made while the case DB is still being
   // prepared is applied when it resolves, never dropped; the analyst hears that right away.
   const pending = caseDbHandle(runId);
-  if (!settledRuns.has(runId)) notifyPreparing();
+  // A mark queued behind an ensure still in flight hears the notice too.
+  if (preparingRuns.has(runId)) notifyPreparing();
   const handle = await pending;
   let store: ReviewStore;
   if (handle) {
-    // The configured review author (AXIOM E3) rides on every mark; "web-ui" when unset.
-    const authored: ReviewMarkBody = { ...mark, reviewer: currentReviewer() };
+    // The review author (AXIOM E3) rides on every mark: the typed name, else the case's 담당자,
+    // else "" (the server keeps its own attribution; never the old "web-ui" default, T-036).
+    const authored: ReviewMarkBody = { ...mark, reviewer: currentReviewer(runId) };
+    // Before the request: a review-map refetch racing it must already know this write is ours.
+    emitReviewWrite({ runId, rows, mark });
     await postReviewBatch(handle, targets as ReviewBatchTarget[], authored, runId);
     store = "case-db";
   } else {
@@ -355,7 +501,7 @@ async function applyBody(
     store = "bookmarks";
   }
   for (const listener of listeners) listener(runId, store);
-  return { applied: rows.length, store };
+  return skipped.length ? { applied: rows.length, store, skipped } : { applied: rows.length, store };
 }
 
 // ---- review tools (AXIOM E3) ---------------------------------------------
@@ -366,11 +512,423 @@ async function applyBody(
  */
 export function ensureRunCaseDb(runId: string): Promise<CaseDbHandle | null> {
   const pending = caseDbHandle(runId);
-  if (!settledRuns.has(runId)) notifyPreparing();
+  if (preparingRuns.has(runId)) notifyPreparing();
   return pending;
 }
 
 /** Tell the listeners (review-map / review-counts invalidation) that marks of the run changed. */
 export function notifyReviewApplied(runId: string): void {
+  // Rows this tab does not list changed (tag propagation, tag edits): not another window's change.
+  emitReviewWrite({ runId, rows: null, mark: null });
   for (const listener of listeners) listener(runId, "case-db");
+}
+
+// ---- previous state · 실행 취소 (r8 T-036) ----------------------------------
+
+/** A row's judgement as the case DB stores it: status (`unreviewed` when none) + report flag. */
+export interface ReviewSnapshot {
+  status: "unreviewed" | "relevant" | "needs-review" | "excluded";
+  include: boolean;
+}
+
+const STATUS_VALUES = new Set(["unreviewed", "relevant", "needs-review", "excluded"]);
+
+/** Marks that set a status (their un-press goes back to the state before them). */
+const STATUS_MARKS: ReadonlySet<BatchAction> = new Set(["relevant", "needs-review", "excluded"]);
+/** Judgement marks "실행 취소" / Ctrl+Z can take back (tags, notes and extracts are not judgements). */
+const UNDOABLE_ACTIONS: ReadonlySet<BatchAction> = new Set([
+  "relevant",
+  "needs-review",
+  "excluded",
+  "include-in-report",
+  "remove-from-report",
+]);
+
+/** Whether a mark is a judgement "실행 취소" can take back (an un-press included). */
+export function isUndoableAction(action: BatchAction): boolean {
+  return UNDOABLE_ACTIONS.has(action) || action === "clear-review";
+}
+
+/** The judgement a grid row shows (the review-map overlay already applied). */
+export function snapshotOf(row: GridRow): ReviewSnapshot {
+  const status = row.reviewStatus;
+  return {
+    status:
+      status === "relevant" || status === "needs-review" || status === "excluded" ? status : "unreviewed",
+    include: row.fields.includeInReport === true || status === "include-in-report",
+  };
+}
+
+/** A row's judgement and tags as one string: it changes whenever the list's row does (viewer chip). */
+export function judgementKey(row: GridRow | null): string {
+  if (!row) return "";
+  const { status, include } = snapshotOf(row);
+  return `${row.rowKey}|${status}|${include}|${row.tags.join(",")}`;
+}
+
+/**
+ * An un-press made outside the list (the viewer's status menu) patches the list's row too, so the
+ * list shows it and a later mark patches from there (T-036: 해제, then R, stayed 미검토).
+ */
+export function patchListAfterUnpress(rowKey: string, undo: UnmarkAction, result: ApplyResult): void {
+  const patch = result.restored ? optimisticRestore(result.restored) : optimisticPatch(undo);
+  currentRowSource()?.patchRows?.([rowKey], patch);
+}
+
+/** Optimistic row transform back to a stored judgement (un-press, 실행 취소). */
+export function optimisticRestore(snapshot: ReviewSnapshot): (row: GridRow) => GridRow {
+  return (row) => ({
+    ...row,
+    reviewStatus:
+      snapshot.status !== "unreviewed" ? snapshot.status : snapshot.include ? "include-in-report" : null,
+    fields: { ...row.fields, includeInReport: snapshot.include },
+  });
+}
+
+/** Per row (run + review target): the judgements before each status mark of this session. */
+const priorStacks = new Map<string, ReviewSnapshot[]>();
+const PRIOR_DEPTH = 20;
+
+function priorKey(runId: string, row: GridRow): string {
+  return `${runId}|${JSON.stringify(reviewTargetOf(row))}`;
+}
+
+function pushPrior(key: string, snapshot: ReviewSnapshot): void {
+  const stack = priorStacks.get(key) ?? [];
+  stack.push(snapshot);
+  if (stack.length > PRIOR_DEPTH) stack.shift();
+  priorStacks.set(key, stack);
+}
+
+function popPrior(key: string): ReviewSnapshot | undefined {
+  const stack = priorStacks.get(key);
+  const top = stack?.pop();
+  if (stack && stack.length === 0) priorStacks.delete(key);
+  return top;
+}
+
+/** The previous judgement this session knows for a row (no network; the optimistic un-press). */
+export function knownPrevious(runId: string, row: GridRow): ReviewSnapshot | undefined {
+  return priorStacks.get(priorKey(runId, row))?.at(-1);
+}
+
+/** Rows looked up in the case-DB history when this session has no previous state for them. */
+export const HISTORY_LOOKUP_MAX = 20;
+
+interface StatusChange {
+  before: string;
+  after: string;
+}
+
+/**
+ * The newest status change that was not taken back, from status changes listed newest first. A
+ * change that exactly reverses the older one next to it (an un-press: 제외 → 관련 after 관련 → 제외)
+ * cancels it, the way an undo cancels the mark it undoes; pairs nest. Without this, un-pressing
+ * after a reload alternates between the last two statuses and never reaches 미검토 (T-036).
+ */
+export function newestStandingChange(changes: readonly StatusChange[]): StatusChange | null {
+  const standing: StatusChange[] = [];
+  for (const change of changes) {
+    const newer = standing.at(-1);
+    if (newer && newer.before === change.after && newer.after === change.before) standing.pop();
+    else standing.push(change);
+  }
+  return standing[0] ?? null;
+}
+
+/**
+ * The status a row had before its current one, from the case-DB history (newest first): the
+ * `status_before` of the newest status change that was not taken back. Null when unknown (no case
+ * DB, no history, a row without a run-output locator, any error).
+ */
+async function historyPrevious(runId: string, row: GridRow): Promise<ReviewSnapshot["status"] | null> {
+  if (isCaseDbRow(row)) return null;
+  const target = reviewLocatorTarget(row);
+  if (!target) return null;
+  try {
+    const { entries } = await getReviewHistory(runId, target);
+    const changes = (entries ?? [])
+      .map((entry) => ({
+        before: entry.status_before || "unreviewed",
+        after: entry.status_after || "unreviewed",
+      }))
+      .filter((change) => change.before !== change.after);
+    const change = newestStandingChange(changes);
+    if (!change) return null;
+    return STATUS_VALUES.has(change.before) ? (change.before as ReviewSnapshot["status"]) : null;
+  } catch {
+    return null;
+  }
+}
+
+interface UndoEntry {
+  row: GridRow;
+  key: string;
+  before: ReviewSnapshot;
+  /** What the mark did to the row's previous-state stack (undone with it). */
+  stack: "push" | "pop" | "none";
+  popped?: ReviewSnapshot;
+}
+
+/**
+ * The judgement this tab last wrote per row (run + review target). A row object handed to a mark
+ * can lag behind (the viewer's row is not the grid's optimistic copy), so a mark made right after
+ * another one still takes the right "before" (QA-065: 관련 있음 → 제외 → 해제 = 관련 있음). Only while
+ * the row still shows what it showed when the write was made: a row that shows something else was
+ * changed elsewhere (the 검토 목록 holds the same item under another key, another tab, a refetch)
+ * and its own state wins over the stale write (T-036).
+ */
+const writtenStates = new Map<string, { seen: ReviewSnapshot; state: ReviewSnapshot }>();
+
+function sameSnapshot(a: ReviewSnapshot, b: ReviewSnapshot): boolean {
+  return a.status === b.status && a.include === b.include;
+}
+
+function rememberWritten(entry: { key: string; row: GridRow }, state: ReviewSnapshot): void {
+  writtenStates.set(entry.key, { seen: snapshotOf(entry.row), state });
+}
+
+/** A row's judgement as this tab knows it: its last write while the row lags, else the row. */
+function currentJudgement(key: string, row: GridRow): ReviewSnapshot {
+  const shown = snapshotOf(row);
+  const written = writtenStates.get(key);
+  return written && sameSnapshot(written.seen, shown) ? written.state : shown;
+}
+
+function afterMark(action: BatchAction, before: ReviewSnapshot): ReviewSnapshot {
+  switch (action) {
+    case "relevant":
+    case "needs-review":
+      return { status: action, include: before.include };
+    case "excluded":
+      return { status: "excluded", include: false };
+    case "include-in-report":
+      return { status: before.status, include: true };
+    case "remove-from-report":
+      return { status: before.status, include: false };
+    default:
+      return before;
+  }
+}
+
+function snapshotEntries(runId: string, rows: GridRow[]): UndoEntry[] {
+  return partitionReviewRows(rows).targetable.map((row) => {
+    const key = priorKey(runId, row);
+    return { row, key, before: currentJudgement(key, row), stack: "none" as const };
+  });
+}
+
+type SnapshotGroups = Map<string, { snapshot: ReviewSnapshot; withReport: boolean; rows: GridRow[] }>;
+
+/** `withReport`: the batch sends the report flag too (else the status only; the flag stays). */
+function addToGroup(groups: SnapshotGroups, snapshot: ReviewSnapshot, row: GridRow, withReport = true): void {
+  const key = withReport ? `${snapshot.status}|${snapshot.include}` : `${snapshot.status}|-`;
+  const group = groups.get(key) ?? { snapshot, withReport, rows: [] };
+  group.rows.push(row);
+  groups.set(key, group);
+}
+
+/** Apply each distinct judgement to its rows (one review-batch per group). */
+async function applySnapshots(runId: string, groups: SnapshotGroups): Promise<ApplyResult> {
+  let applied = 0;
+  let store: ReviewStore | undefined;
+  for (const { snapshot, withReport, rows } of groups.values()) {
+    const body: MarkPayload = { review_status: snapshot.status, status: snapshot.status };
+    const mark: ReviewMarkBody = { status: snapshot.status };
+    if (withReport) {
+      body.include_in_report = snapshot.include;
+      mark.include_in_report = snapshot.include;
+    }
+    const result = await applyBody(runId, rows, body, mark);
+    applied += result.applied;
+    store = result.store;
+  }
+  return store ? { applied, store } : { applied };
+}
+
+/**
+ * The report flag an un-press leaves (T-036): the flag from before the status mark only when that
+ * mark is what changed it (제외 clears it) and nothing changed it since; a later "보고서 포함" stays.
+ */
+function unpressedInclude(current: ReviewSnapshot, prior: ReviewSnapshot): boolean {
+  const leftByMark = current.status === "excluded" ? false : prior.include;
+  return current.include === leftByMark ? prior.include : current.include;
+}
+
+/**
+ * Un-press of a status toggle (GAP-024): every row goes back to its previous judgement — this
+ * session's stack (status; the report flag only when the un-pressed mark changed it), else its
+ * case-DB history (status), else `unreviewed`.
+ * Rows that go back to different states are posted as one batch per state; the whole un-press
+ * is one undo unit.
+ */
+async function clearToPrevious(runId: string, allRows: GridRow[]): Promise<ApplyResult> {
+  const { targetable, skipped } = partitionReviewRows(allRows);
+  if (targetable.length === 0) {
+    return applyBody(runId, allRows, markBody("clear-review"), caseDbMark("clear-review"));
+  }
+  const entries = snapshotEntries(runId, targetable);
+  const lookups = entries.filter((entry) => !priorStacks.get(entry.key)?.length);
+  const fromHistory = new Map<UndoEntry, ReviewSnapshot["status"] | null>();
+  if (lookups.length <= HISTORY_LOOKUP_MAX) {
+    const found = await Promise.all(lookups.map((entry) => historyPrevious(runId, entry.row)));
+    lookups.forEach((entry, at) => {
+      fromHistory.set(entry, found[at] ?? null);
+    });
+  }
+  const groups: SnapshotGroups = new Map();
+  const restored: { entry: UndoEntry; snapshot: ReviewSnapshot }[] = [];
+  let first: ReviewSnapshot | undefined;
+  for (const entry of entries) {
+    const known = priorStacks.get(entry.key)?.at(-1);
+    // History knows the status only: the report flag stays as it is.
+    const snapshot: ReviewSnapshot = known
+      ? { status: known.status, include: unpressedInclude(entry.before, known) }
+      : { status: fromHistory.get(entry) ?? "unreviewed", include: entry.before.include };
+    first ??= snapshot;
+    restored.push({ entry, snapshot });
+    // The flag is sent only where the un-press changes it (never a stale copy of it).
+    addToGroup(groups, snapshot, entry.row, snapshot.include !== entry.before.include);
+  }
+  const result = await applySnapshots(runId, groups);
+  for (const { entry, snapshot } of restored) rememberWritten(entry, snapshot);
+  for (const entry of entries) {
+    if (priorStacks.get(entry.key)?.length) {
+      entry.popped = popPrior(entry.key);
+      entry.stack = "pop";
+    }
+  }
+  recordUndo(runId, "clear-review", entries);
+  return {
+    ...result,
+    ...(skipped.length ? { skipped } : {}),
+    ...(first ? { restored: first } : {}),
+  };
+}
+
+/** One mark (n rows) as "실행 취소" takes it back: all rows together. */
+export interface UndoUnit {
+  runId: string;
+  action: BatchAction;
+  entries: UndoEntry[];
+}
+
+/** The undo stack lives in memory: a reload forgets it (UNDO_SCOPE_NOTICE says so). */
+const undoStack: UndoUnit[] = [];
+const UNDO_DEPTH = 20;
+
+export const UNDO_LABEL = "실행 취소";
+/** Why there is nothing to undo (the stack is per tab and is lost on reload). */
+export const UNDO_SCOPE_NOTICE = "방금 한 표시만 되돌릴 수 있습니다";
+export const UNDO_NOTHING_REASON = `되돌릴 표시가 없습니다. ${UNDO_SCOPE_NOTICE}(새로고침하면 지워집니다)`;
+/** `ToastAction.key` of the undo button (one at a time: a newer mark replaces the older button). */
+export const UNDO_TOAST_KEY = "review-undo";
+
+function recordUndo(runId: string, action: BatchAction, entries: UndoEntry[]): void {
+  if (entries.length === 0) return;
+  undoStack.push({ runId, action, entries });
+  if (undoStack.length > UNDO_DEPTH) undoStack.shift();
+  // The older undo button would take back a mark that is no longer the last one.
+  useToastStore.getState().dismissActionKey(UNDO_TOAST_KEY);
+}
+
+/** The newest undoable mark of `runId` (null when there is none). */
+export function lastUndo(runId: string | null): UndoUnit | null {
+  if (!runId) return null;
+  for (let at = undoStack.length - 1; at >= 0; at -= 1) {
+    const unit = undoStack[at];
+    if (unit?.runId === runId) return unit;
+  }
+  return null;
+}
+
+/** Forget the undo stack and the previous-state stacks (tests; a run re-import). */
+export function resetReviewUndo(): void {
+  undoStack.length = 0;
+  undoQueues.clear();
+  priorStacks.clear();
+  writtenStates.clear();
+}
+
+export interface UndoResult {
+  applied: number;
+  /** Label of the mark that was taken back ("제외", "선별 해제", …). */
+  label: string;
+  /** Row keys and the judgement each went back to (for the optimistic patch). */
+  rows: { rowKey: string; before: ReviewSnapshot }[];
+  store?: ReviewStore;
+}
+
+/** Per run: the undo write in flight (the next undo waits for it, in stack order). */
+const undoQueues = new Map<string, Promise<unknown>>();
+
+/**
+ * Take back the newest mark of `runId` as one unit (every row of a batch together): each row goes
+ * back to its judgement before the mark, through the same review-batch request. Throws
+ * UNDO_NOTHING_REASON when there is nothing to undo. The unit leaves the stack at once, so a second
+ * Ctrl+Z (or the toast button) before the first one's answer takes the next older unit, written
+ * after the first; on failure the unit goes back where it was (T-036).
+ */
+export function undoLastReview(runId: string | null): Promise<UndoResult> {
+  const unit = lastUndo(runId);
+  if (!unit || !runId) return Promise.reject(new Error(UNDO_NOTHING_REASON));
+  const at = undoStack.indexOf(unit);
+  undoStack.splice(at, 1);
+  useToastStore.getState().dismissActionKey(UNDO_TOAST_KEY);
+  // An earlier undo that failed fails this one too (its unit goes back on top, this one below it).
+  const write = (undoQueues.get(runId) ?? Promise.resolve()).then(() => writeUndo(runId, unit));
+  undoQueues.set(runId, write);
+  const settle = () => {
+    if (undoQueues.get(runId) === write) undoQueues.delete(runId);
+  };
+  return write.then(
+    (result) => {
+      settle();
+      return result;
+    },
+    (error: unknown) => {
+      settle();
+      undoStack.splice(Math.min(at, undoStack.length), 0, unit);
+      throw error;
+    },
+  );
+}
+
+async function writeUndo(runId: string, unit: UndoUnit): Promise<UndoResult> {
+  const groups: SnapshotGroups = new Map();
+  for (const entry of unit.entries) addToGroup(groups, entry.before, entry.row);
+  const result = await applySnapshots(runId, groups);
+  for (const entry of unit.entries) {
+    rememberWritten(entry, entry.before);
+    if (entry.stack === "push") popPrior(entry.key);
+    else if (entry.stack === "pop" && entry.popped) pushPrior(entry.key, entry.popped);
+  }
+  return {
+    applied: result.applied,
+    label: MARK_LABELS[unit.action],
+    rows: unit.entries.map((entry) => ({ rowKey: entry.row.rowKey, before: entry.before })),
+    ...(result.store ? { store: result.store } : {}),
+  };
+}
+
+/** Sentence after a successful undo. */
+export function undoneNotice(result: UndoResult): string {
+  return `${UNDO_LABEL}: ${result.label} ${result.applied}건을 이전 상태로 되돌렸습니다.`;
+}
+
+/** The shell command that undoes (Ctrl+Z, the toast button, the palette): commands/review.ts. */
+export const UNDO_COMMAND_ID = "review.undo";
+
+/**
+ * The "실행 취소" toast button for the newest mark of `runId` (undefined when there is none). It
+ * runs the same review.undo command as Ctrl+Z (optimistic patch, notice, errors announced).
+ */
+export function undoToastAction(runId: string | null): ToastAction | undefined {
+  if (!lastUndo(runId)) return undefined;
+  return {
+    label: UNDO_LABEL,
+    run: () => void runCommand(UNDO_COMMAND_ID),
+    key: UNDO_TOAST_KEY,
+    shortcut: KEY_MAP.undoReview,
+  };
 }

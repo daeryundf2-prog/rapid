@@ -6,8 +6,13 @@ import unittest
 from pathlib import Path
 
 from rapidtriage.cli import main
+from tests import quiet_media_checks
 from tests.schema_validation import validate
 from tests.test_rapidtriage_run import build_run_fixture
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCHEMAS_DIR = REPO_ROOT / "rapidtriage" / "schemas"
@@ -39,10 +44,10 @@ class RapidTriageSchemaValidationTests(unittest.TestCase):
             self.assertEqual(main(["files", str(root), "--output", str(files_path)]), 0)
             self.assertEqual(main(["artifacts", str(root), "--kind", "browser", "--output", str(artifacts_path)]), 0)
             self.assertEqual(
-                main(["run", str(root), "--mode", "fraud", "--output-dir", str(root / "run-output")]),
+                main(["run", str(root), "--mode", "fraud", "--output-dir", str(Path(tmp_dir) / "run-output")]),
                 0,
             )
-            self.assertEqual(main(["indicators", str(root / "run-output"), "--output", str(indicators_path)]), 0)
+            self.assertEqual(main(["indicators", str(Path(tmp_dir) / "run-output"), "--output", str(indicators_path)]), 0)
             self.assertEqual(main(["extract", str(files_path), str(extract_dir)]), 0)
             self.assertEqual(
                 main(

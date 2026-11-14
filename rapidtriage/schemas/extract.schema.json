@@ -74,7 +74,11 @@
         "required": ["original_path", "reason"],
         "properties": {
           "original_path": { "type": "string" },
-          "reason": { "type": "string" }
+          "reason": { "type": "string" },
+          "sha256": { "type": "string" },
+          "size": { "type": "integer" },
+          "credential_reason": { "type": "string" },
+          "coverage_status": { "const": "body-withheld" }
         }
       }
     }

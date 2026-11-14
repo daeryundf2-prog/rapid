@@ -52,7 +52,9 @@ __all__ = [
     "extract_xls_text",
     "hwp_para_text",
     "iter_hwp_records",
+    "language_hint",
     "printable_ratio",
+    "script_profile",
 ]
 
 OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
@@ -68,6 +70,10 @@ class DocumentText:
     encrypted: bool = False
     reason: str = ""
     warnings: list[str] = field(default_factory=list)
+    # R7 lane B: share of each writing system among the letters (``script_profile``) and the
+    # language it suggests (``language_hint``: ko/ja/zh/en/ru/mixed, "" for too little text).
+    script_profile: dict[str, float] = field(default_factory=dict)
+    language_hint: str = ""
 
     def as_metadata(self) -> dict[str, object]:
         meta: dict[str, object] = {
@@ -80,7 +86,92 @@ class DocumentText:
             meta["text_reason"] = self.reason
         if self.warnings:
             meta["text_warnings"] = list(self.warnings[:10])
+        if self.script_profile:
+            meta["script_profile"] = dict(self.script_profile)
+        if self.language_hint:
+            meta["language_hint"] = self.language_hint
         return meta
+
+
+# --- writing systems (R7 lane B) ------------------------------------------------
+
+# Character classes counted by ``script_profile`` (letters only: digits, punctuation and
+# spaces are not counted). ``han`` = CJK ideographs (한자/漢字), ``kana`` = hiragana+katakana.
+SCRIPT_RANGES: dict[str, tuple[tuple[int, int], ...]] = {
+    "hangul": ((0x1100, 0x11FF), (0x3130, 0x318F), (0xA960, 0xA97F), (0xAC00, 0xD7AF), (0xD7B0, 0xD7FF)),
+    "han": ((0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xF900, 0xFAFF)),
+    "kana": ((0x3040, 0x309F), (0x30A0, 0x30FF), (0x31F0, 0x31FF), (0xFF66, 0xFF9D)),
+    "latin": ((0x41, 0x5A), (0x61, 0x7A), (0xC0, 0x24F), (0xFF21, 0xFF3A), (0xFF41, 0xFF5A)),
+    "cyrillic": ((0x0400, 0x04FF),),
+}
+SCRIPT_CLASSES: dict[str, re.Pattern[str]] = {
+    name: re.compile("[" + "".join(f"{chr(low)}-{chr(high)}" for low, high in ranges) + "]") for name, ranges in SCRIPT_RANGES.items()
+}
+SCRIPT_MIN_LETTERS = 20
+# Characters of a body that ``script_profile`` samples (the writing-system mix of the first 256 Ki
+# characters stands for the document; the search index samples only 16 Ki).
+SCRIPT_SAMPLE_CHARS = 256 * 1024
+_LETTER_RE = re.compile(r"[^\W\d_]")
+# Addresses, URLs, paths and dotted names are not prose: their Latin letters would make a Korean
+# mail ("보낸 사람 kim@example.com") read as mixed.
+# Checked token by token (whitespace split + character tests, linear): the former regex
+# ``\S*[@/\\:]\S*|\S+\.\S+`` backtracked quadratically on long whitespace-free runs (a 1.5 MB
+# single-token file stalled the run pipeline). A token is non-prose when it holds @ / \ : or a dot
+# with a character on both sides; the whole token is dropped, exactly as the regex did.
+_NON_PROSE_CHARS = frozenset("@/\\:")
+
+
+def _is_non_prose(token: str) -> bool:
+    return not _NON_PROSE_CHARS.isdisjoint(token) or "." in token[1:-1]
+
+
+def _prose_only(text: str) -> str:
+    return " ".join(token for token in text.split() if not _is_non_prose(token))
+
+
+# A language needs this share of the letters (Japanese: kana + kanji with at least KANA_MIN kana).
+LANGUAGE_MIN_SHARE = 0.6
+KANA_MIN_SHARE = 0.15
+
+
+def script_profile(text: str) -> dict[str, float]:
+    """Share (0..1, 4 decimals) of each writing system among ``text``'s counted letters; ``{}`` when
+    fewer than ``SCRIPT_MIN_LETTERS`` letters. ``other`` = letters of any other script. Tokens that
+    are addresses, URLs, paths or dotted names are not counted. Only the first
+    ``SCRIPT_SAMPLE_CHARS`` characters are profiled (bounded cost on multi-MB bodies)."""
+    if not text:
+        return {}
+    text = _prose_only(text[:SCRIPT_SAMPLE_CHARS])
+    counts = {name: pattern.subn("", text)[1] for name, pattern in SCRIPT_CLASSES.items()}
+    other = _LETTER_RE.subn("", text)[1] - sum(counts.values())
+    counts["other"] = max(0, other)
+    total = sum(counts.values())
+    if total < SCRIPT_MIN_LETTERS:
+        return {}
+    return {name: round(count / total, 4) for name, count in counts.items()}
+
+
+def language_hint(profile: Mapping[str, float]) -> str:
+    """``ko``/``ja``/``zh``/``en``/``ru`` when one language's writing system holds at least
+    ``LANGUAGE_MIN_SHARE`` of the letters, ``mixed`` otherwise, ``""`` without a profile.
+
+    Japanese is kana + kanji with at least ``KANA_MIN_SHARE`` kana (kanji alone reads as Chinese);
+    Korean counts hangul + hanja (한자 in Korean text).
+    """
+    if not profile:
+        return ""
+    hangul, han, kana = profile.get("hangul", 0.0), profile.get("han", 0.0), profile.get("kana", 0.0)
+    if hangul >= KANA_MIN_SHARE and hangul + han >= LANGUAGE_MIN_SHARE and hangul > kana:
+        return "ko" if hangul >= LANGUAGE_MIN_SHARE or hangul >= han else "mixed"
+    if kana >= KANA_MIN_SHARE and kana + han >= LANGUAGE_MIN_SHARE:
+        return "ja"
+    if han >= LANGUAGE_MIN_SHARE and kana < 0.05 and hangul < 0.05:
+        return "zh"
+    if profile.get("latin", 0.0) >= LANGUAGE_MIN_SHARE:
+        return "en"
+    if profile.get("cyrillic", 0.0) >= LANGUAGE_MIN_SHARE:
+        return "ru"
+    return "mixed"
 
 
 # --- text hygiene -----------------------------------------------------------
@@ -232,6 +323,7 @@ def finalize(text: str, *, method: str, encrypted: bool = False, empty_reason: s
             warnings=list(warnings or []),
         )
     cleaned = clean_extracted_text(text)
+    profile = script_profile(cleaned)
     if encrypted:
         return DocumentText(
             cleaned,
@@ -240,10 +332,12 @@ def finalize(text: str, *, method: str, encrypted: bool = False, empty_reason: s
             encrypted=True,
             reason=empty_reason or "암호화/배포용 문서: 본문 복호화 불가",
             warnings=list(warnings or []),
+            script_profile=profile,
+            language_hint=language_hint(profile),
         )
     if not cleaned:
         return DocumentText("", status="no-text", method=method, reason=empty_reason or "추출 가능한 텍스트 없음", warnings=list(warnings or []))
-    return DocumentText(cleaned, status="ok", method=method, warnings=list(warnings or []))
+    return DocumentText(cleaned, status="ok", method=method, warnings=list(warnings or []), script_profile=profile, language_hint=language_hint(profile))
 
 
 # --- OLE2 / CFB reader --------------------------------------------------------

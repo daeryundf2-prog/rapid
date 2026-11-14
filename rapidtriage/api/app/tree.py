@@ -11,6 +11,7 @@ near the top of the pretty-printed output).
 from __future__ import annotations
 
 import json
+import re
 import threading
 from collections import OrderedDict
 from collections.abc import Mapping
@@ -49,6 +50,7 @@ from .jsonl_records import iter_artifact_records, jsonl_records_path
 from .triage_flags import kind_flag_counts, tree_flags_section
 
 SUMMARY_SCAN_BYTES = 65536
+_JSON_WHITESPACE = re.compile(r"[ \t\n\r]*")
 
 # Rows that are pivots/strings, not evidence records (W2 ``*-string-candidate``).
 NON_EVIDENCE_TYPE_SUFFIXES: tuple[str, ...] = ("-string-candidate",)
@@ -108,6 +110,7 @@ KIND_LABELS: dict[str, str] = {
     "windows-remote-access": "원격 접속",
     "browser": "브라우저",
     "p2p": "P2P·토렌트",
+    "ai-agent": "AI 사용 기록",
     "email": "이메일",
     "kakaotalk-windows": "카카오톡 (Windows)",
     "windows-messenger": "데스크톱 메신저 (Windows)",
@@ -136,7 +139,12 @@ KIND_LABELS: dict[str, str] = {
 # kind -> the record field counted per value and artifact_type
 # (``field_type_counts``; the console's per-browser / per-app nodes and the
 # ``browser=`` / ``service=`` filters of ``GET /artifacts``).
-FIELD_FACET_KINDS: dict[str, str] = {"browser": "browser", "windows-messenger": "service"}
+FIELD_FACET_KINDS: dict[str, tuple[str, ...]] = {
+    "browser": ("browser",),
+    "windows-messenger": ("service",),
+    # R7 AI: presence rows by trace source / install kind (갈래 D 도구·설치 views).
+    "ai-agent": ("install_kind", "source"),
+}
 # kind -> (inventory artifact_type, status field): rows counted by status with
 # their Korean ``reason`` (``inventory_notes``; why a typed node is empty —
 # PST tools switched off / missing, KakaoTalk key material missing).
@@ -162,11 +170,11 @@ def _file_signature(path: Path | None) -> tuple[object, ...]:
 
 def scan_kind_facets(payload: Mapping[str, object], payload_path: Path, kind: str) -> dict[str, Any]:
     """``field_type_counts`` / ``inventory_notes`` of one kind output (one bounded row scan)."""
-    field = FIELD_FACET_KINDS.get(kind)
+    fields = FIELD_FACET_KINDS.get(kind, ())
     note = INVENTORY_NOTE_KINDS.get(kind)
-    if field is None and note is None:
+    if not fields and note is None:
         return {}
-    by_value: dict[str, dict[str, int]] = {}
+    by_field: dict[str, dict[str, dict[str, int]]] = {field: {} for field in fields}
     notes: dict[str, dict[str, Any]] = {}
     truncated = False
     for scanned, (_index, row) in enumerate(iter_artifact_records(payload, payload_path=payload_path)):
@@ -174,10 +182,10 @@ def scan_kind_facets(payload: Mapping[str, object], payload_path: Path, kind: st
             truncated = True
             break
         artifact_type = str(row.get("artifact_type") or "")
-        if field is not None:
+        for field in fields:
             value = record_field_value(row, field)
             if value:
-                per_type = by_value.setdefault(value, {})
+                per_type = by_field[field].setdefault(value, {})
                 per_type[artifact_type] = per_type.get(artifact_type, 0) + 1
         if note is not None and artifact_type == note[0]:
             status = record_field_value(row, note[1]) or "unknown"
@@ -193,9 +201,10 @@ def scan_kind_facets(payload: Mapping[str, object], payload_path: Path, kind: st
             )
             entry["count"] += 1
     facets: dict[str, Any] = {}
-    if field is not None:
+    if fields:
         facets["field_type_counts"] = {
             field: {value: dict(sorted(types.items())) for value, types in sorted(by_value.items())}
+            for field, by_value in by_field.items()
         }
     if note is not None:
         facets["inventory_notes"] = sorted(notes.values(), key=lambda item: (-int(item["count"]), str(item["status"])))
@@ -245,8 +254,12 @@ def read_output_key(path: Path, key: str) -> Any:
         if marker >= 0:
             colon = head.find(":", marker)
             if colon >= 0:
+                # raw_decode does not skip whitespace: pretty-printed outputs put a space (or a
+                # newline) after the colon, which made every head scan miss and fall back to a
+                # full parse (302 MB rapidtriage-files.json: 3.3 s on the first /tree, R7 S1).
+                start = _JSON_WHITESPACE.match(head, colon + 1).end()
                 try:
-                    decoded, _ = json.JSONDecoder().raw_decode(head, colon + 1)
+                    decoded, _ = json.JSONDecoder().raw_decode(head, start)
                     return decoded
                 except json.JSONDecodeError:
                     pass
@@ -543,7 +556,7 @@ def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
     if derived_node is not None:
         nodes.append(derived_node)
 
-    # --- 문서 / 타임라인 / 지표 / 리뷰 선별 / 검증 이슈 -----------------------
+    # --- 문서 / 타임라인 / 지표 / 검토 목록 / 검증 이슈 -----------------------
     docs_count = int(counts.get("docs") or 0)
     document_candidates = int(counts.get("document_candidates") or 0)
     if docs_count or document_candidates:
@@ -589,7 +602,7 @@ def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
     nodes.append(tree_search_node(job, run_id))
 
     bookmark_count = _case_bookmark_count(store, run_id)
-    nodes.append(_node("review", "리뷰 선별", bookmark_count, collection="review"))
+    nodes.append(_node("review", "검토 목록", bookmark_count, collection="review"))
 
     issue_count = int(counts.get("validation_issues") or 0)
     nodes.append(_node("issues", "검증 이슈", issue_count, collection="issues"))

@@ -14,6 +14,8 @@ import "./tree.css";
 
 const DEFAULT_EXPANDED = ["evidence", "views", "search"];
 const TYPE_AHEAD_RESET_MS = 600;
+/** Count slot text of an empty family shown by "결과 없는 계열 표시" (T-015): words, not a dimmed 0. */
+const NO_DATA_TEXT = "자료 없음";
 
 function treeItemLabel(node: TreeModelNode): string {
   const label = node.marker ? `${node.label} (${node.marker})` : node.label;
@@ -58,6 +60,7 @@ export function EvidenceTree({ runId }: { runId: string }) {
   const [focusedId, setFocusedId] = useState<string>("views");
   const [blockedReason, setBlockedReason] = useState("");
   const refs = useRef(new Map<string, HTMLLIElement>());
+  const listRef = useRef<HTMLUListElement>(null);
   const typeAhead = useRef({ buffer: "", timer: 0 });
 
   // Tree search (트리 검색): matches ALL nodes, collapsed domains included; the matches and their
@@ -244,7 +247,7 @@ export function EvidenceTree({ runId }: { runId: string }) {
   }, [model, selectedId]);
 
   return (
-    <div className="case-tree" data-testid="evidence-tree">
+    <div className="case-tree evidence-tree" data-testid="evidence-tree">
       <LiveRunBanner live={liveTree} />
       <input
         type="search"
@@ -252,7 +255,12 @@ export function EvidenceTree({ runId }: { runId: string }) {
         aria-label="트리 검색"
         placeholder="트리 검색"
         value={search}
-        onChange={(event) => setSearch(event.target.value)}
+        onChange={(event) => {
+          setSearch(event.target.value);
+          // A new filter starts at the top of the list: an offset kept from the full tree showed
+          // the matches below a blank stretch (visual audit #11).
+          if (listRef.current) listRef.current.scrollTop = 0;
+        }}
         onKeyDown={(event) => {
           if (event.key === "Escape" && search) {
             event.preventDefault();
@@ -273,7 +281,7 @@ export function EvidenceTree({ runId }: { runId: string }) {
         <p className="case-tree-reason">일치하는 노드가 없습니다.</p>
       ) : null}
       {/* biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: ul is the ARIA tree container */}
-      <ul role="tree" aria-label="케이스 탐색 트리" onKeyDown={onKeyDown}>
+      <ul ref={listRef} role="tree" aria-label="케이스 탐색 트리" onKeyDown={onKeyDown}>
         {visible.map(({ node, level }, position) => {
           const hasChildren = Boolean(node.children?.length);
           const isOpen = expanded.has(node.id) || Boolean(searchView?.open.has(node.id));
@@ -352,57 +360,68 @@ export function EvidenceTree({ runId }: { runId: string }) {
                   </span>
                 ) : null;
               })()}
-              {/* Counts stay hidden until the first load settles (review #11): no "—" flicker. */}
-              {node.count !== undefined && !loading && (
-                <span
-                  className={`badge muted${node.strongCount && node.count !== 0 ? " strong" : ""}`}
-                  aria-hidden="true"
-                >
-                  {typeof node.count === "number" ? node.count.toLocaleString("ko-KR") : node.count}
+              {/* Counts stay hidden until the first load settles (review #11): no "—" flicker. An
+                  empty family shown by the toggle says "자료 없음" in the count slot (T-015). */}
+              {emptyReason && !loading ? (
+                <span className="badge muted" aria-hidden="true">
+                  {NO_DATA_TEXT}
                 </span>
+              ) : (
+                node.count !== undefined &&
+                !loading && (
+                  <span
+                    className={`badge muted${node.strongCount && node.count !== 0 ? " strong" : ""}`}
+                    aria-hidden="true"
+                  >
+                    {typeof node.count === "number" ? node.count.toLocaleString("ko-KR") : node.count}
+                  </span>
+                )
               )}
             </li>
           );
         })}
       </ul>
-      {loading ? (
-        // Not a live region: the shell's single polite region (announce()) carries status text,
-        // and a second polite region while the tree loads broke the one-region rule.
-        <p className="case-tree-loading">
-          <Icon name="spinner" className="spin" />
-          건수와 아티팩트 목록을 불러오는 중…
-        </p>
-      ) : null}
-      <p className="case-tree-reason">{blockedReason}</p>
-      {/* The count is final once `/tree` answered (before that, kinds look unknown, not empty). */}
-      {treeSettled && emptyView.hiddenCount > 0 ? (
-        <button
-          type="button"
-          className="case-tree-empty-toggle"
-          aria-pressed={showEmpty}
-          aria-keyshortcuts="T"
-          data-testid="tree-empty-toggle"
-          title={
-            showEmpty
-              ? "결과가 없거나 분석되지 않은 계열을 다시 숨깁니다 (T)"
-              : "결과가 없거나 분석되지 않은 계열을 흐리게 사유와 함께 표시합니다 (T)"
-          }
-          onClick={() => {
-            const next = !showEmpty;
-            setShowEmpty(next);
-            announce(
-              next
-                ? `결과 없는 계열 ${emptyView.hiddenCount}개를 표시합니다.`
-                : `결과 없는 계열 ${emptyView.hiddenCount}개를 숨겼습니다.`,
-            );
-          }}
-        >
-          <Icon name={showEmpty ? "eye" : "list"} />
-          <span>
-            결과 없는 계열 {emptyView.hiddenCount.toLocaleString("ko-KR")}개 {showEmpty ? "숨김" : "표시"}
-          </span>
-        </button>
-      ) : null}
+      {/* The foot stays pinned below the scrolling tree list (scroll review C1). */}
+      <div className="evidence-tree-foot">
+        {loading ? (
+          // Not a live region: the shell's single polite region (announce()) carries status text,
+          // and a second polite region while the tree loads broke the one-region rule.
+          <p className="case-tree-loading">
+            <Icon name="spinner" className="spin" />
+            건수와 아티팩트 목록을 불러오는 중…
+          </p>
+        ) : null}
+        <p className="case-tree-reason">{blockedReason}</p>
+        {/* The count is final once `/tree` answered (before that, kinds look unknown, not empty). */}
+        {treeSettled && emptyView.hiddenCount > 0 ? (
+          <button
+            type="button"
+            className="case-tree-empty-toggle"
+            aria-pressed={showEmpty}
+            aria-keyshortcuts="T"
+            data-testid="tree-empty-toggle"
+            title={
+              showEmpty
+                ? "결과가 없거나 분석되지 않은 계열을 다시 숨깁니다 (T)"
+                : "결과가 없거나 분석되지 않은 계열을 흐리게 사유와 함께 표시합니다 (T)"
+            }
+            onClick={() => {
+              const next = !showEmpty;
+              setShowEmpty(next);
+              announce(
+                next
+                  ? `결과 없는 계열 ${emptyView.hiddenCount}개를 표시합니다.`
+                  : `결과 없는 계열 ${emptyView.hiddenCount}개를 숨겼습니다.`,
+              );
+            }}
+          >
+            <Icon name={showEmpty ? "eye" : "list"} />
+            <span>
+              결과 없는 계열 {emptyView.hiddenCount.toLocaleString("ko-KR")}개 {showEmpty ? "숨김" : "표시"}
+            </span>
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

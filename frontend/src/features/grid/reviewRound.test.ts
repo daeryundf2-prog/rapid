@@ -110,7 +110,14 @@ describe("type dot colours (review #9)", () => {
 
 describe("보고 table names (review #9)", () => {
   it("reads raw output keys as Korean names", () => {
-    expect(outputDisplayName("artifacts_android-apk")).toBe("아티팩트: android-apk");
+    // C-P1: the kind's Korean family name + the file name (the raw key stays the tooltip).
+    const named = outputDisplayName(
+      "artifacts_windows-prefetch",
+      "D:/out/rapidtriage-artifacts-windows-prefetch.json",
+    );
+    expect(named).toMatch(/ — rapidtriage-artifacts-windows-prefetch\.json$/);
+    expect(named).not.toMatch(/artifacts_|windows-prefetch —/);
+    expect(outputDisplayName("artifacts_android-apk")).not.toContain("아티팩트: ");
     expect(outputDisplayName("carve_extract_manifest")).toBe("추출 매니페스트: carve");
     expect(outputDisplayName("docs_index")).toBe("문서 색인");
     expect(outputDisplayName("case_db")).toBe("케이스 DB");

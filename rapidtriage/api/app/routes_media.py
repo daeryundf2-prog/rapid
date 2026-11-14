@@ -12,7 +12,12 @@ from fastapi.responses import (
     Response,
 )
 
+from ...core.credential_files import (
+    credential_file_reason,
+    credential_withheld_reason_text,
+)
 from ...core.jobs import RunJobStore
+from ...core.readonly_runs import may_persist
 from ...core.sqlite_wal import SqliteWalPreviewError, build_sqlite_wal_preview
 from .analyses import AnalysisRowRef, analysis_row_ref
 from .constants import (
@@ -53,9 +58,18 @@ from .runops import (
 from .sqlite import (
     build_sqlite_table_page,
 )
-from .thumbnail import THUMBNAIL_DEFAULT_SIZE, THUMBNAIL_MAX_SIZE, cached_thumbnail
+from .thumbnail import (
+    THUMBNAIL_DEFAULT_SIZE,
+    THUMBNAIL_MAX_SIZE,
+    ThumbnailUnavailable,
+    cached_thumbnail,
+)
 
 THUMBNAIL_CACHE_CONTROL = "private, max-age=86400"
+#: Header of a thumbnail answered without a picture (r8 T-017/T-018 contract: HTTP 204 + this
+#: header = "no preview"; the console draws the type glyph and "미리보기 없음").
+THUMBNAIL_STATUS_HEADER = "X-RapidTriage-Thumbnail"
+THUMBNAIL_UNAVAILABLE = "unavailable"
 
 
 def stored_ocr_sidecar(store: RunJobStore, run_id: str, source_path: Path) -> dict[str, object] | None:
@@ -81,6 +95,43 @@ def stored_ocr_sidecar(store: RunJobStore, run_id: str, source_path: Path) -> di
     }
 
 
+#: ``detail.code`` of a refused credential / secret file (stable; the console shows ``message``).
+CREDENTIAL_FILE_WITHHELD = "CREDENTIAL_FILE_WITHHELD"
+
+
+def credential_file_http_error(reason: str) -> HTTPException:
+    """403 for a credential / secret file: Korean message + stable ``code`` + reason code."""
+    return HTTPException(
+        status_code=403,
+        detail={
+            "code": CREDENTIAL_FILE_WITHHELD,
+            "message": f"{credential_withheld_reason_text(reason)} — 원본 내려받기·미리보기를 제공하지 않습니다",
+            "credential_reason": reason,
+        },
+    )
+
+
+def reject_credential_source(source_path: Path) -> None:
+    """Credential / secret files (core/credential_files.py) never return their bytes, rows, thumbnails
+    or hashes from any source route: source-file, thumbnail, hex, SQLite, WAL, email attachment,
+    image gallery, media cue, OCR queue / translation and hashed metadata all refuse them the same
+    way (``/outputs/{name}/file`` and archive members too — T-347)."""
+    reason = credential_file_reason(source_path)
+    if reason:
+        raise credential_file_http_error(reason)
+
+
+def reject_credential_archive_member(archive_path: Path, entry_name: str) -> None:
+    """``archive.zip::member`` preview: the member name gets the same credential judgment, both on
+    its own (``.ssh/id_rsa``) and as if unpacked next to the archive (a ``*token*`` member of a zip
+    kept under ``~/.claude``). The member is never opened to sniff, so ``*.key`` counts as a key."""
+    reason = credential_file_reason(entry_name, sniff=False) or credential_file_reason(
+        f"{archive_path.parent.as_posix()}/{entry_name}", sniff=False
+    )
+    if reason:
+        raise credential_file_http_error(reason)
+
+
 def build_media_router(
     store: RunJobStore,
 ) -> APIRouter:
@@ -93,6 +144,7 @@ def build_media_router(
         row_ref: AnalysisRowRef = Depends(analysis_row_ref),
     ) -> FileResponse:
         source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
+        reject_credential_source(source_path)
         return FileResponse(source_path, filename=source_path.name)
 
 
@@ -104,13 +156,20 @@ def build_media_router(
         size: int = Query(THUMBNAIL_DEFAULT_SIZE, ge=16, le=THUMBNAIL_MAX_SIZE),
     ) -> Response:
         source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
+        reject_credential_source(source_path)
         if not is_image_preview_candidate(source_path):
             raise HTTPException(status_code=415, detail="source file is not a supported image")
         summary = get_job(store, run_id).summary or {}
         output_value = summary.get("output_dir")
         output_dir = Path(output_value) if isinstance(output_value, str) and output_value else None
-        cache_path, data = cached_thumbnail(source_path, size, output_dir)
+        if not may_persist(output_dir):
+            output_dir = None  # D37 read-only run folder: the thumbnail is answered from memory
         headers = {"Cache-Control": THUMBNAIL_CACHE_CONTROL}
+        try:
+            cache_path, data = cached_thumbnail(source_path, size, output_dir)
+        except ThumbnailUnavailable:
+            # An image-typed file that does not decode is "no preview", not an error (T-018).
+            return Response(status_code=204, headers={**headers, THUMBNAIL_STATUS_HEADER: THUMBNAIL_UNAVAILABLE})
         if cache_path is not None:
             return FileResponse(cache_path, media_type="image/jpeg", headers=headers)
         return Response(content=data or b"", media_type="image/jpeg", headers=headers)
@@ -125,6 +184,7 @@ def build_media_router(
         archive_request = parse_source_preview_archive_request(path)
         if archive_request:
             source_path = resolve_allowed_source_file(store, run_id, archive_request["archive_path"], **row_ref)
+            reject_credential_archive_member(source_path, archive_request["entry_name"])
             return build_archived_source_api_preview(run_id, source_path, archive_request["entry_name"])
         source_path = resolve_allowed_source_file(store, run_id, path, allow_directory=True, **row_ref)
         if source_path.is_dir():
@@ -149,6 +209,7 @@ def build_media_router(
         include_hashes: bool = False,
     ) -> dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
+        reject_credential_source(source_path)
         return build_hex_range_citation_package(
             run_id=run_id,
             source_path=source_path,
@@ -170,8 +231,12 @@ def build_media_router(
         where_contains: str | None = Query(default=None, min_length=1),
         order_by: str | None = Query(default=None, min_length=1),
         descending: bool = False,
+        locate_rowid: int | None = Query(default=None, ge=0),
     ) -> dict[str, object]:
+        """One table page; ``locate_rowid`` (no filter / order) opens the page holding that rowid
+        (``pagination.located``) — the viewer's jump to a parsed row (e.g. a browser history row)."""
         source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
+        reject_credential_source(source_path)
         if not is_sqlite_candidate(source_path):
             raise HTTPException(status_code=400, detail="source file is not a supported SQLite database")
         return build_sqlite_table_page(
@@ -184,6 +249,7 @@ def build_media_router(
             where_contains=where_contains,
             order_by=order_by,
             descending=descending,
+            locate_rowid=locate_rowid,
         )
 
 
@@ -195,6 +261,7 @@ def build_media_router(
         max_frames: int = Query(20, ge=1, le=100),
     ) -> dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
+        reject_credential_source(source_path)
         if not is_sqlite_candidate(source_path):
             raise HTTPException(status_code=400, detail="source file is not a supported SQLite database")
         try:
@@ -223,6 +290,7 @@ def build_media_router(
         include_content: bool = False,
     ) -> dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
+        reject_credential_source(source_path)
         suffix = source_path.suffix.lower()
         if suffix not in {".eml", ".mbox"}:
             raise HTTPException(status_code=400, detail="source file is not a supported EML/MBOX email preview")
@@ -246,6 +314,7 @@ def build_media_router(
         similarity_bucket: str | None = Query(default=None, min_length=1),
     ) -> dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
+        reject_credential_source(source_path)
         if not is_image_preview_candidate(source_path):
             raise HTTPException(status_code=400, detail="source file is not a supported image preview")
         return build_image_gallery_page(
@@ -267,6 +336,7 @@ def build_media_router(
         include_source_hashes: bool = False,
     ) -> dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
+        reject_credential_source(source_path)
         mime_type = mimetypes.guess_type(source_path.name)[0] or ""
         if not mime_type.startswith(("audio/", "video/")):
             raise HTTPException(status_code=400, detail="source file is not a supported audio/video preview")
@@ -288,6 +358,7 @@ def build_media_router(
         retry_failures: bool = False,
     ) -> dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
+        reject_credential_source(source_path)
         if not is_image_preview_candidate(source_path):
             raise HTTPException(status_code=400, detail="source file is not a supported image preview")
         return build_source_ocr_queue(
@@ -306,6 +377,7 @@ def build_media_router(
         include_text: bool = True,
     ) -> dict[str, object]:
         source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
+        reject_credential_source(source_path)
         if not is_image_preview_candidate(source_path):
             raise HTTPException(status_code=400, detail="source file is not a supported image preview")
         package = build_source_ocr_translation_package(
@@ -327,6 +399,15 @@ def build_media_router(
         source_path = resolve_allowed_source_file(store, run_id, path, allow_directory=True, **row_ref)
         if source_path.is_dir():
             return build_directory_metadata(source_path)
+        reason = credential_file_reason(source_path)
+        if reason:
+            # Name / size / times stay visible (the file is listed); its hashes are never computed
+            # (AI credential policy: no value, no hash).
+            payload = build_source_metadata(source_path, include_hashes=False)
+            payload["hash_status"] = "withheld"
+            payload["credential_reason"] = reason
+            payload["message"] = credential_withheld_reason_text(reason)
+            return payload
         return build_source_metadata(source_path, include_hashes=hash)
 
     return router

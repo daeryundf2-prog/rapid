@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 from fastapi import HTTPException
 
+from ... import __version__
 from ...core.audit import audit_path_for, write_audit_record
 from ...core.case import (
     CaseBookmarkError,
@@ -24,9 +25,16 @@ from ...core.case_report import (
     build_case_report_markdown,
     case_report_export_paths,
 )
+from ...core.credential_files import (
+    credential_file_reason,
+    credential_withheld_preview,
+    credential_withheld_reason_text,
+    redact_credential_text,
+)
 from ...core.docs import SUPPORTED_DOC_EXTS, TEXT_EXTS, extract_text
 from ...core.hash_cache import hash_cache_assessment
 from ...core.jobs import (
+    RunJob,
     RunJobStore,
     is_relative_to,
     run_output_dir,
@@ -43,7 +51,11 @@ from ...core.source_reader import (
 from ...core.source_reader import (
     build_archived_source_preview as build_archived_source_read_preview,
 )
-from ...core.submission import build_submission_manifest, compute_hashes
+from ...core.submission import (
+    build_submission_manifest,
+    compute_hashes,
+    evidence_relative_roots,
+)
 from .constants import (
     DEFAULT_INTERNAL_VALIDATION_PACKAGE,
     DOCUMENT_PREVIEW_MAX_BYTES,
@@ -73,9 +85,11 @@ from .helpers import (
     get_job,
     is_probably_binary,
     is_sqlite_candidate,
+    job_output_dir,
     model_to_dict,
     optional_int_for_api,
     run_not_finished_message,
+    sqlite_detection,
     stable_payload_sha256,
 )
 from .hex import (
@@ -97,6 +111,9 @@ from .previews import (
     build_xml_preview,
     write_json_file,
 )
+from .run_review import canonical_run_case
+from .run_scope import build_run_scope
+from .run_steps_summary import summarize_steps
 from .search import (
     snippet_around,
     source_search_citation,
@@ -110,6 +127,7 @@ from .sqlite import (
     search_sqlite_file,
     sqlite_row_review_note_citation,
 )
+from .validation_source import build_run_validation_source_integrity
 from .viewer_core import (
     archived_source_viewer_actions,
     build_run_validation_diff_inventory,
@@ -117,7 +135,6 @@ from .viewer_core import (
     build_run_validation_output_hashes,
     build_run_validation_parser_execution,
     build_run_validation_review_status,
-    build_run_validation_source_integrity,
     build_run_validation_warning_inventory,
     build_run_viewer_route_coverage,
     build_run_viewer_workflow_accuracy_gates,
@@ -142,6 +159,7 @@ from .viewer_core import (
     source_viewer_specialization_profile,
     stage10_viewer_item_number,
 )
+from .viewer_hint import sqlite_viewer_hint
 
 
 def build_run_viewer_workflow_validation(
@@ -608,6 +626,47 @@ def load_case_payload_or_empty(case_path: Path) -> dict[str, object]:
         raise HTTPException(status_code=409, detail=str(exc))
 
 
+def _run_review_payload(store: RunJobStore, run_id: str) -> dict[str, object]:
+    """Bookmark JSON + case DB review marks (E01 QA D2: console marks live in the case DB)."""
+    from .review_payload import (
+        load_run_review_payload,
+    )
+
+    return load_run_review_payload(store, run_id)
+
+
+def _validation_review_payload(
+    store: RunJobStore, run_id: str, summary: Mapping[str, object]
+) -> tuple[dict[str, object], str | None]:
+    """The merged review payload for the validation package (R8 T-028), and the case-JSON read
+    error when the bookmark JSON cannot be loaded (then the case DB marks alone are used)."""
+    try:
+        return _run_review_payload(store, run_id), None
+    except HTTPException as exc:
+        from .review_payload import read_case_db_marks, review_scope
+
+        marks = read_case_db_marks(summary, run_id)
+        payload: dict[str, object] = {"bookmarks": marks.bookmarks}
+        scope = review_scope(marks)
+        if scope is not None:
+            payload["review_scope"] = scope
+        return payload, str(exc.detail)
+
+
+def run_case_db_path(summary: Mapping[str, object] | None, run_id: str) -> Path | None:
+    """The run's canonical case DB (where console review marks live), or ``None`` without a summary."""
+    if not summary:
+        return None
+    database_path, _case_id = canonical_run_case(summary, run_id)
+    return database_path
+
+
+def _case_db_audit_input(store: RunJobStore, run_id: str) -> list[tuple[str, Path]]:
+    """``("case-db", path)`` for audit ``input_files`` (path + SHA-256 recorded when the file exists)."""
+    database_path = run_case_db_path(get_job(store, run_id).summary, run_id)
+    return [("case-db", database_path)] if database_path is not None else []
+
+
 def build_run_submission_manifest(
     store: RunJobStore,
     run_id: str,
@@ -618,14 +677,14 @@ def build_run_submission_manifest(
     job = get_job(store, run_id)
     if job.summary is None:
         raise HTTPException(status_code=409, detail=run_not_finished_message(job))
-    case_path = default_case_path(store, run_id)
-    case_payload = load_case_payload_or_empty(case_path)
+    case_payload = _run_review_payload(store, run_id)
     try:
         return build_submission_manifest(
             case_payload,
             allowed_roots=allowed_source_roots(job.summary),
             include_all=include_all,
             max_items=max_items,
+            evidence_roots=evidence_relative_roots(job.summary),
         )
     except OSError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -635,12 +694,14 @@ def build_run_case_report(
     store: RunJobStore,
     run_id: str,
     request: CaseReportCreateRequest,
+    *,
+    evidence_records: list[dict[str, object]] | None = None,
 ) -> str:
     job = get_job(store, run_id)
     if job.summary is None:
         raise HTTPException(status_code=409, detail=run_not_finished_message(job))
     case_path = default_case_path(store, run_id)
-    case_payload = load_case_payload_or_empty(case_path)
+    case_payload = _run_review_payload(store, run_id)
     manifest = build_run_submission_manifest(
         store,
         run_id,
@@ -658,15 +719,38 @@ def build_run_case_report(
     )
     # 접수 dashboard case notes fill an empty 분석자 / 범위 (explicit request fields win).
     metadata = apply_case_notes_to_report_metadata(dict(model_to_dict(request)), case_path.parent)
+    report_context = run_report_context(job)
+    metadata.update(run_report_metadata(report_context, evidence_records))
     return build_case_report_markdown(
         run_summary=job.summary,
         case_payload=case_payload,
         submission_manifest=manifest,
         metadata=metadata,
+        report_context=report_context,
     )
 
 
-def build_run_validation_package(store: RunJobStore, run_id: str) -> dict[str, object]:
+def run_report_context(job: RunJob) -> dict[str, object]:
+    """Four-axis processing scope (T-023) and step counts (T-021) for the case report (T-027);
+    computed here because the core report builder does not import the API layer."""
+    return {"scope": build_run_scope(job.summary, job_output_dir(job)), "steps": summarize_steps(job.summary)}
+
+
+def run_report_metadata(
+    report_context: Mapping[str, object], evidence_records: list[dict[str, object]] | None
+) -> dict[str, object]:
+    """Report metadata keys from the run (R8 T-182): ``tool_version``, ``evidence_records`` (the
+    case evidence rows' hash results, ``[]`` without a case) and ``processing_scope`` (T-023)."""
+    return {
+        "tool_version": __version__,
+        "evidence_records": list(evidence_records or []),
+        "processing_scope": report_context.get("scope"),
+    }
+
+
+def build_run_validation_package(store: RunJobStore, run_id: str, *, compute_source_hashes: bool = True) -> dict[str, object]:
+    """The run validation package. `compute_source_hashes=False` (read-only `GET`) lists the
+    source and its segments without re-reading them; generation (`POST`) reads every byte."""
     job = get_job(store, run_id)
     if job.summary is None:
         raise HTTPException(status_code=409, detail=run_not_finished_message(job))
@@ -674,9 +758,15 @@ def build_run_validation_package(store: RunJobStore, run_id: str) -> dict[str, o
     output_dir = run_output_dir(summary)
     case_path = default_case_path(store, run_id)
     generated_at = dt.datetime.now(dt.timezone.utc).isoformat()
-    source_integrity = build_run_validation_source_integrity(summary)
+    source_integrity = build_run_validation_source_integrity(summary, compute_hashes=compute_source_hashes)
     output_hashes = build_run_validation_output_hashes(summary, output_dir=output_dir)
-    review_status = build_run_validation_review_status(case_path)
+    review_payload, review_error = _validation_review_payload(store, run_id, summary)
+    review_status = build_run_validation_review_status(
+        case_path,
+        review_payload,
+        case_db_path=run_case_db_path(summary, run_id),
+        review_error=review_error,
+    )
     warning_inventory = build_run_validation_warning_inventory(summary)
     diff_inventory = build_run_validation_diff_inventory(summary)
     diff_attached = bool(diff_inventory.get("attached"))
@@ -888,7 +978,7 @@ def write_submission_audit(
         audit_path_for(manifest_path),
         command="submission-manifest",
         options={"include_all": include_all, "max_items": max_items},
-        input_files=[("case-json", case_path)],
+        input_files=[("case-json", case_path), *_case_db_audit_input(store, run_id)],
         output_files=[("submission-manifest", manifest_path)],
     )
 
@@ -899,6 +989,7 @@ def write_run_validation_package_audit(store: RunJobStore, run_id: str, package_
     case_path = default_case_path(store, run_id)
     if case_path.is_file():
         input_files.append(("case-json", case_path))
+    input_files.extend(_case_db_audit_input(store, run_id))
     write_audit_record(
         audit_path_for(package_path),
         command="run-validation-package",
@@ -921,7 +1012,7 @@ def write_case_report_audit(
         audit_path_for(report_path),
         command="case-report",
         options=model_to_dict(request),
-        input_files=[("case-json", case_path), ("submission-manifest", manifest_path)],
+        input_files=[("case-json", case_path), *_case_db_audit_input(store, run_id), ("submission-manifest", manifest_path)],
         output_files=[
             ("case-report", exports["md"]),
             ("case-report-html", exports["html"]),
@@ -1082,11 +1173,29 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
             "parser_version": SOURCE_VIEWER_VERSION,
         },
     }
+    credential_reason = credential_file_reason(source_path)
+    if credential_reason:
+        # Credential / secret file (core/credential_files.py): no text, table, hex or media preview.
+        payload.update(credential_withheld_preview(credential_reason))
+        payload["viewer_metadata"] = {
+            "source_format": suffix.lstrip(".") or "unknown",
+            "strategy": "credential-file",
+            "preview_status": "withheld",
+            "parser": "rapidtriage.source-viewer",
+            "parser_version": SOURCE_VIEWER_VERSION,
+        }
+        return payload
     if mime_type.startswith("image/"):
         payload.update(build_image_preview(source_path, image_url=str(payload["download_url"]), run_id=run_id))
         return payload
-    if is_sqlite_candidate(source_path, suffix):
+    sqlite_detected_by = sqlite_detection(source_path, suffix)
+    if sqlite_detected_by:
         payload.update(build_sqlite_preview(source_path, run_id=run_id))
+        if payload.get("preview_type") == "sqlite":
+            sqlite_payload = payload.get("sqlite")
+            names = sqlite_payload.get("table_names") if isinstance(sqlite_payload, dict) else None
+            # The console's tab choice (r7 L4): detected by the header, not the MIME type.
+            payload["viewer_hint"] = sqlite_viewer_hint(sqlite_detected_by, names if isinstance(names, list) else [])
         return payload
     if suffix in {".json", ".jsonl", ".ndjson"}:
         payload.update(build_json_preview(source_path, suffix))
@@ -1116,7 +1225,7 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
             return payload
     elif stat.st_size <= 2_000_000 and not is_probably_binary(source_path):
         try:
-            text = source_path.read_text(encoding="utf-8", errors="ignore")
+            text = redact_credential_text(source_path, source_path.read_text(encoding="utf-8", errors="ignore"))
         except UnicodeError as exc:
             payload["message"] = f"Text decoding failed: {exc}"
             return payload
@@ -1383,7 +1492,11 @@ def build_source_search(
     searchable = True
     message = "File search completed."
 
-    if mime_type.startswith("image/"):
+    credential_reason = credential_file_reason(source_path)
+    if credential_reason:
+        searchable = False
+        message = credential_withheld_reason_text(credential_reason)
+    elif mime_type.startswith("image/"):
         searchable = False
         message = "Image files are not text-searchable in the file viewer. Use OCR from the full evidence search."
     elif is_sqlite_candidate(source_path, suffix):

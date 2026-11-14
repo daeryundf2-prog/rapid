@@ -22,7 +22,9 @@ export type PreviewType =
   | "hex"
   | "binary"
   /** A directory (runops.build_directory_preview): no content preview. */
-  | "directory";
+  | "directory"
+  /** Credential / secret file (core/credential_files.credential_withheld_preview): no body at all. */
+  | "withheld";
 
 export interface HexRow {
   offset: number;
@@ -64,6 +66,17 @@ export interface SqliteSidecarStateProfile {
   detected_sidecars?: string[];
   source_path?: string;
   sidecars?: { wal?: SqliteSidecarInfo; shm?: SqliteSidecarInfo; rollback_journal?: SqliteSidecarInfo };
+}
+
+/** `viewer_hint` of the source preview (api/app/viewer_hint.py). */
+export interface ViewerHint {
+  mode: "sqlite" | string;
+  /** "magic-bytes" (header only, e.g. Chromium History) | "extension". */
+  detected_by?: string;
+  /** Every table name (the preview itself lists at most 8). */
+  sqlite_tables?: string[];
+  /** Parsed artifact type → the table its rows come from (browser-history → urls). */
+  row_tables?: Record<string, string>;
 }
 
 export interface SqlitePreviewPayload {
@@ -194,12 +207,18 @@ export interface SourcePreview {
   message?: string;
   /** Present only for `archive.zip::entry` previews. */
   container_path?: string;
+  /** `"body-withheld"` for a credential / secret file (with `credential_reason`, preview_type withheld). */
+  coverage_status?: string;
+  /** Reason code of a withheld credential file (`browser-credential-store`, `private-key`, …). */
+  credential_reason?: string;
   viewer_limitations?: string[];
   viewer_metadata?: { source_format?: string; strategy?: string; preview_status?: string; parser?: string };
   hex?: { rows?: HexRow[]; bytes_read?: number; truncated?: boolean };
   image_url?: string;
   image?: ImagePreviewPayload;
   sqlite?: SqlitePreviewPayload;
+  /** How the viewer tab was detected (r7 L4): SQLite by its header, browser-row tables. */
+  viewer_hint?: ViewerHint;
   email?: EmailPreviewPayload;
   media?: MediaPreviewPayload;
   json?: JsonPreviewPayload;
@@ -248,6 +267,8 @@ export interface SqliteTablePage {
     has_next: boolean;
     next_offset: number | null;
     max_page_rows: number;
+    /** `locate_rowid` answer: the page above holds this rowid (found) at row_number. */
+    located?: { rowid: number; found: boolean; row_number: number } | null;
   };
 }
 
@@ -400,9 +421,10 @@ export function fetchSqliteTable(
   offset: number,
   limit: number,
   signal?: AbortSignal,
+  locateRowid?: number,
 ): Promise<SqliteTablePage> {
   return api<SqliteTablePage>(
-    `${runBase(runId)}/source-sqlite-table?${query({ path, table, offset, limit })}`,
+    `${runBase(runId)}/source-sqlite-table?${query({ path, table, offset, limit, locate_rowid: locateRowid })}`,
     {
       signal,
     },
@@ -489,13 +511,18 @@ export function sourceThumbnailUrl(runId: string, path: string, size = THUMBNAIL
   return `${runBase(runId)}/source-thumbnail?${query({ path: fileApiPath(path), size })}`;
 }
 
+/**
+ * The thumbnail JPEG, or `null` when the server answers HTTP 204 (`X-RapidTriage-Thumbnail:
+ * unavailable`): an image-typed file that does not decode has "no preview" (r8 T-017/T-018).
+ */
 export async function fetchSourceThumbnailBlob(
   runId: string,
   path: string,
   size = THUMBNAIL_DEFAULT_SIZE,
   signal?: AbortSignal,
-): Promise<Blob> {
+): Promise<Blob | null> {
   const response = await apiResponse(sourceThumbnailUrl(runId, path, size), { signal });
+  if (response.status === 204) return null;
   return response.blob();
 }
 

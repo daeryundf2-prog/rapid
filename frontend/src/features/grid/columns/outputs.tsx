@@ -1,7 +1,9 @@
 import { fetchOutputRows } from "../../../api/collections";
 import { ToneChip } from "../../../components/ToneChip";
+import { kindLabel } from "../../derived/tables";
+import { familyForKind } from "../../flags/catalog";
 import type { CollectionDef } from "../types";
-import { col, formatBytes, makeRef, makeRow, strOrNull } from "./common";
+import { baseName, col, formatBytes, makeRef, makeRow, strOrNull } from "./common";
 
 const LIST_OUTPUTS = new Set(["manifest", "docs", "docs_index", "files", "timeline", "indicators"]);
 const REPORT_OUTPUTS = new Set(["report", "summary", "timeline_report"]);
@@ -35,12 +37,18 @@ const OUTPUT_NAMES: Record<string, string> = {
 };
 
 /**
- * 보고 table 이름 (review #9): "artifacts_android-apk" → "아티팩트: android-apk",
- * "carve_extract_manifest" → "추출 매니페스트: carve", known keys by name, else the raw key.
+ * 보고 table 이름 (review #9, C-P1): "artifacts_android-apk" → the kind's Korean family name and
+ * the file name ("Android 앱 — rapidtriage-artifacts-android-apk.json"; no path: the family name
+ * alone), "carve_extract_manifest" → "추출 매니페스트: carve", known keys by name, else the raw key.
  */
-export function outputDisplayName(name: string): string {
-  if (name.startsWith("artifacts_") && name.length > "artifacts_".length)
-    return `아티팩트: ${name.slice("artifacts_".length)}`;
+export function outputDisplayName(name: string, path?: string | null): string {
+  if (name.startsWith("artifacts_") && name.length > "artifacts_".length) {
+    const kind = name.slice("artifacts_".length);
+    const own = familyForKind(kind)?.label ?? kindLabel(kind);
+    const label = own === kind ? `아티팩트 ${kind}` : own;
+    const file = path ? baseName(path) : "";
+    return file ? `${label} — ${file}` : label;
+  }
   if (name.endsWith("_extract_manifest") && name.length > "_extract_manifest".length)
     return `추출 매니페스트: ${name.slice(0, -"_extract_manifest".length)}`;
   return OUTPUT_NAMES[name] ?? name;
@@ -71,7 +79,7 @@ export const outputsCollection: CollectionDef = {
   columns: [
     {
       ...col.title("이름", 260),
-      format: (r) => outputDisplayName(r.title),
+      format: (r) => outputDisplayName(r.title, r.sourcePath),
       tooltip: (r) => r.title,
     },
     col.field("kind", "종류", 100, ["analysis", "compact"], (r) => r.artifactType),

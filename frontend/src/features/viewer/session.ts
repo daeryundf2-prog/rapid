@@ -16,10 +16,38 @@ export interface ViewerSession {
   userMode: { key: string; mode: ViewerMode } | null;
   /** The URL `mode=` was already applied once (first target only). */
   restoredMode: boolean;
+  /**
+   * A tab asked for the next target of one row (R7 갈래 A: 계열 navigation opens the row in its
+   * 계열 tab): `runId|collection|kind|locator` → mode, applied once when that row shows.
+   */
+  pendingMode: { row: string; mode: ViewerMode } | null;
 }
 
 function fresh(): ViewerSession {
-  return { history: new TargetHistory(), rows: new Map(), userMode: null, restoredMode: false };
+  return {
+    history: new TargetHistory(),
+    rows: new Map(),
+    userMode: null,
+    restoredMode: false,
+    pendingMode: null,
+  };
+}
+
+/** `runId|collection|kind|locator` of a row (the target's sourcePath is not known yet). */
+export function pendingRowKey(
+  runId: string,
+  ref: { collection: string; kind?: string; locator: string },
+): string {
+  return [runId, ref.collection, ref.kind ?? "", ref.locator].join("|");
+}
+
+/** Open the next target of this row in `mode` (once; another row clears the request). */
+export function requestViewerMode(
+  runId: string,
+  ref: { collection: string; kind?: string; locator: string },
+  mode: ViewerMode,
+): void {
+  session.pendingMode = { row: pendingRowKey(runId, ref), mode };
 }
 
 let session = fresh();

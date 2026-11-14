@@ -5,6 +5,7 @@ import { ApiError } from "../api/client";
 import { RUNS_QUERY_KEY, useRunsPoll } from "../api/runsProgress";
 import { caseOpenCommands, registerBuiltinCommands } from "../commands/builtin";
 import { registerCommands } from "../commands/registry";
+import { RegionBoundary } from "../components/RegionBoundary";
 import { AnalysisFeature } from "../features/analysis/AnalysisFeature";
 import { CaseFeature } from "../features/case/CaseFeature";
 import { DerivedFeature } from "../features/derived/DerivedFeature";
@@ -16,6 +17,7 @@ import { installPopoutHost, popoutCommands } from "../features/viewer/popout/hos
 import { Layout } from "../shell/Layout";
 import { useShortcuts } from "../shortcuts";
 import { useRoute } from "../state/hooks";
+import { useDocumentTitle } from "./documentTitle";
 import { TokenGate } from "./TokenGate";
 
 /** Shell root: commands, key map, runs poller, token gate, layout. */
@@ -24,9 +26,11 @@ export function App() {
   const runsQuery = useRunsPoll();
   const { route } = useRoute();
   useShortcuts();
-  // Family catalogue (U-F3/U-F4): the bundled fallback until the server's loads.
+  // Family catalogue (U-F3/U-F4): the server's; the bundled fallback JSON only when it has none (T-116).
   useFamilyCatalogLoader(!runsQuery.isError);
   useReviewInvalidation();
+  // Tab title: 화면 · 사건 표시명 — RapidTriage, with (n%) / (!) for the run's state (T-169).
+  useDocumentTitle(route, runsQuery.data);
 
   useEffect(() => registerBuiltinCommands(queryClient), [queryClient]);
   useEffect(() => registerStageCommands(), []);
@@ -56,10 +60,19 @@ export function App() {
 
   return (
     <>
-      <Layout />
-      <CaseFeature runId={route.runId} />
-      <AnalysisFeature runId={route.runId} />
-      <DerivedFeature runId={route.runId} />
+      <RegionBoundary region="콘솔 화면">
+        <Layout />
+      </RegionBoundary>
+      {/* Case-level hooks (tree.goto.* commands, dialogs) fail on their own, not with the layout. */}
+      <RegionBoundary region="케이스 기능" floating>
+        <CaseFeature runId={route.runId} />
+      </RegionBoundary>
+      <RegionBoundary region="분석 기능" floating>
+        <AnalysisFeature runId={route.runId} />
+      </RegionBoundary>
+      <RegionBoundary region="파생 산출물 기능" floating>
+        <DerivedFeature runId={route.runId} />
+      </RegionBoundary>
       <LiveRegion />
     </>
   );

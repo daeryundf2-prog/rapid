@@ -19,6 +19,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { announce } from "../../a11y";
 import type { GridRow } from "../../contracts/collection";
 import { useTimezone } from "../../state/hooks";
+import { evidencePathOf } from "../../utils/pathDisplay";
 import { formatGridTime } from "../../utils/time";
 import { hasActiveFilters } from "../filters/filterModel";
 import { useFilterStore } from "../filters/filterStore";
@@ -340,8 +341,11 @@ export function MapView() {
                   <td className="mono num">{item.lat.toFixed(6)}</td>
                   <td className="mono num">{item.lon.toFixed(6)}</td>
                   <td>{time(item.time)}</td>
-                  <td className="mono map-path" title={item.row.sourcePath ?? item.row.title}>
-                    {item.row.sourcePath ?? item.row.title}
+                  <td
+                    className="mono map-path"
+                    title={evidencePathOf(item.row.sourcePath).path ?? item.row.title}
+                  >
+                    {evidencePathOf(item.row.sourcePath).path ?? item.row.title}
                   </td>
                   <td>
                     <button
