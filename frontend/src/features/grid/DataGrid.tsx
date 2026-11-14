@@ -8,10 +8,8 @@ import {
   type LegacyColumnDef,
   useLegacyTable,
 } from "@tanstack/react-table/legacy";
-import { defaultRangeExtractor, type Range, useVirtualizer } from "@tanstack/react-virtual";
 import {
   type CSSProperties,
-  memo,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   useCallback,
@@ -39,7 +37,7 @@ import { setColumnFilter } from "../filters/columnFilters";
 import type { FilterBarVariant } from "../filters/FilterBar";
 import { useFilterStore } from "../filters/filterStore";
 import { noteKindTypeCounts, useCatalog } from "../flags/catalog";
-import { flaggedRowsSummary, flagsColumnSparse, flagsHeaderHint } from "../flags/flags";
+import { flaggedPagesSummary, flagsColumnSparse, flagsHeaderHint } from "../flags/flags";
 import { flagsPartialNotice, flagsUnavailableReason, mergedKindNode, policyAbsences } from "../tree/model";
 import { useDensity, useGridLocalStore, useRoute, useSelection, useToast, useViewerTarget } from "./adapter";
 import { BatchBar, batchBarState } from "./BatchBar";
@@ -47,13 +45,14 @@ import { ColumnFilterRow } from "./ColumnFilterRow";
 import { collectionDef, lockedColumnId, presetColumnIds } from "./columns";
 import { analysisFamily } from "./columns/analysis";
 import { artifactTypeFamily, resolveArtifactFamily } from "./columns/artifacts";
-import { currentTimezone, fitMinWidth, growWeight, isRecord, REVIEW_LABELS } from "./columns/common";
+import { currentTimezone, fitMinWidth, growWeight } from "./columns/common";
 import { auxColumnIds } from "./columns/families";
 import {
   colsToKeys,
   effectiveFieldCols,
   fieldColumnId,
-  listKeysIn,
+  firstDetailKeyInPages,
+  listKeysInPages,
   promotedColumn,
   readStoredFieldColumns,
   toggleFieldCol,
@@ -68,6 +67,7 @@ import {
   timeBasisOf,
   timeConditionActive,
 } from "./filesTimeBasis";
+import { createVisibleStart, GridBody, type GridBodyHandle, SELECT_COL_WIDTH, VisiblePage } from "./GridBody";
 import { GridEmpty, type GridEmptyState } from "./GridEmpty";
 import {
   ColumnMenu,
@@ -83,8 +83,7 @@ import { buildViewerTarget, type GridCommandHost, runBatch, runNote, useGridComm
 import {
   type AutoHideReason,
   compareValues,
-  displayText,
-  emptyColumnIds,
+  emptyColumnIdsOfPages,
   fitColumnWidths,
   formatCount,
   indexFromRef,
@@ -105,6 +104,8 @@ import {
 } from "./useCollectionQuery";
 import "./grid.css";
 
+export { rowMark } from "./GridBody";
+
 interface RowValueReader {
   getValue: (id: string) => unknown;
 }
@@ -112,8 +113,6 @@ type SortingState = { id: string; desc: boolean }[];
 type VisibilityState = Record<string, boolean>;
 type ColumnSizingState = Record<string, number>;
 
-/** Checkbox 16 + gap 4 + row-menu button 20 + padding 2×8. */
-const SELECT_COL_WIDTH = 56;
 /** The column menu moved to the 조건 줄 (U-F1): the header keeps no room for it. */
 const HEAD_TOOLS_WIDTH = 0;
 /** The header row is 32px at every density (visual-polish U-V4); rows follow the density. */
@@ -178,44 +177,9 @@ function visibilityFor(columns: ColumnSpec[], preset: GridPreset): VisibilitySta
   return Object.fromEntries(columns.map((c) => [c.id, c.id === locked || visible.has(c.id)]));
 }
 
-interface RowViewProps {
-  row: GridRow | undefined;
-  index: number;
-  top: number;
-  height: number;
-  selected: boolean;
-  focused: boolean;
-  specs: ColumnSpec[];
-  widths: number[];
-  /** Sticky `left` offset per visible column (undefined = scrolls). */
-  lefts: (number | undefined)[];
-  onMenuButton: (index: number, target: HTMLElement) => void;
-  /** The row menu is open for this row (trigger aria-expanded). */
-  menuOpen: boolean;
-  /** Id of the row menu element (trigger aria-controls). */
-  menuId: string;
-  /** Checkbox click: toggle this row only (`range`: Shift held, extend from the anchor). */
-  onToggle: (index: number, checked: boolean, range: boolean) => void;
-  /** aria-rowindex of data row 0 (2, or 3 under the column filter row). */
-  ariaRowOffset: number;
-  /**
-   * What the cells read outside their props (display timezone · family catalogue version): rows
-   * are memoized, so a change here is what re-renders them (time cells, flag chips).
-   */
-  cellEpoch: string;
-}
-
-/** Review mark shown as the row stripe (U-F8): the review status, else a 북마크 tag. */
-export function rowMark(row: GridRow): { id: string; label: string } | null {
-  if (row.reviewStatus) return { id: row.reviewStatus, label: REVIEW_LABELS[row.reviewStatus] };
-  if (row.tags.some((tag) => tag === "북마크" || tag === "bookmark"))
-    return { id: "bookmark", label: "북마크" };
-  return null;
-}
-
 /**
  * The previous array while its items are the same (Object.is): the per-render column arrays
- * (specs · widths · sticky lefts) are rebuilt on every grid render (each scroll frame, each J/K),
+ * (specs · widths · sticky lefts) are rebuilt on every grid render (each J/K, each page load),
  * and a new identity would re-render every memoized row.
  */
 function useStableArray<T>(next: T[]): T[] {
@@ -226,107 +190,31 @@ function useStableArray<T>(next: T[]): T[] {
   return ref.current;
 }
 
-const RowView = memo(function RowView(props: RowViewProps) {
-  const { row, index, top, height, selected, focused, specs, widths, lefts } = props;
-  const style = { transform: `translateY(${top}px)`, height };
-  if (!row) {
-    return (
-      <div
-        role="row"
-        aria-rowindex={index + props.ariaRowOffset}
-        aria-busy="true"
-        className="grid-row grid-row-loading"
-        style={style}
-      >
-        <div role="gridcell" className="grid-cell grid-cell-select" style={{ width: SELECT_COL_WIDTH }} />
-        {specs.map((spec, i) => (
-          <div
-            key={spec.id}
-            role="gridcell"
-            className={`grid-cell${lefts[i] !== undefined ? " grid-cell-first" : ""}`}
-            style={{ width: widths[i], left: lefts[i] }}
-          >
-            <span className="grid-skeleton" aria-hidden="true" />
-          </div>
-        ))}
-      </div>
-    );
+/** Loaded rows by key, indexed on the first lookup (not on every page load). */
+function lazyRowIndex(rows: readonly GridRow[]): Pick<Map<string, GridRow>, "get" | "has"> {
+  let index: Map<string, GridRow> | null = null;
+  const built = () => {
+    index ??= new Map(rows.map((row) => [row.rowKey, row]));
+    return index;
+  };
+  return { get: (key) => built().get(key), has: (key) => built().has(key) };
+}
+
+const pageArtifactTypes = new WeakMap<readonly GridRow[], Set<string>>();
+
+/** Sorted distinct `artifactType` ("" for none) over the loaded pages, cached per page. */
+function artifactTypesOfPages(pages: readonly (readonly GridRow[])[]): string[] {
+  const all = new Set<string>();
+  for (const rows of pages) {
+    let types = pageArtifactTypes.get(rows);
+    if (!types) {
+      types = new Set(rows.map((row) => row.artifactType ?? ""));
+      pageArtifactTypes.set(rows, types);
+    }
+    for (const type of types) all.add(type);
   }
-  const mark = rowMark(row);
-  return (
-    <div
-      role="row"
-      aria-rowindex={index + props.ariaRowOffset}
-      aria-selected={selected}
-      tabIndex={focused ? 0 : -1}
-      data-index={index}
-      data-row-key={row.rowKey}
-      data-mark={mark?.id}
-      aria-description={mark ? `검토 표시: ${mark.label}` : undefined}
-      className={`grid-row${selected ? " is-selected" : ""}${focused ? " is-focused" : ""}`}
-      style={style}
-    >
-      <div role="gridcell" className="grid-cell grid-cell-select" style={{ width: SELECT_COL_WIDTH }}>
-        {/* U-F8: 6px review stripe on the sticky select cell (visible while scrolling sideways). */}
-        {mark ? <span className="grid-row-stripe" data-mark={mark.id} aria-hidden="true" /> : null}
-        <input
-          type="checkbox"
-          tabIndex={-1}
-          aria-label={`${row.title || "행"} 선택`}
-          checked={selected}
-          onChange={(event) =>
-            props.onToggle(
-              index,
-              event.target.checked,
-              (event.nativeEvent as MouseEvent | undefined)?.shiftKey === true,
-            )
-          }
-          // The checkbox never activates the row (row click = move the focused row only).
-          onClick={(event) => event.stopPropagation()}
-        />
-        <button
-          type="button"
-          tabIndex={-1}
-          className="grid-rowmenu-btn"
-          aria-label="행 메뉴"
-          aria-haspopup="menu"
-          aria-expanded={props.menuOpen}
-          aria-controls={props.menuOpen ? props.menuId : undefined}
-          onClick={(event) => {
-            event.stopPropagation();
-            props.onMenuButton(index, event.currentTarget);
-          }}
-        >
-          <Icon name="more" />
-        </button>
-      </div>
-      {specs.map((spec, i) => {
-        const text = displayText(spec, row);
-        return (
-          <div
-            key={spec.id}
-            role="gridcell"
-            data-col={spec.id}
-            className={`grid-cell${lefts[i] !== undefined ? " grid-cell-first" : ""}${spec.mono ? " is-mono" : ""}${spec.align === "right" ? " is-right" : ""}`}
-            style={{ width: widths[i], left: lefts[i] }}
-            title={spec.tooltip ? spec.tooltip(row) : text}
-          >
-            {spec.render ? (
-              spec.render(row)
-            ) : text ? (
-              <span className="grid-cell-text">{text}</span>
-            ) : (
-              // Empty value: a muted dash, never a blank cell (visual-polish B2 #2).
-              <span className="grid-cell-empty" aria-hidden="true">
-                —
-              </span>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-});
+  return [...all].sort();
+}
 
 export function DataGrid(props: DataGridProps = {}) {
   const route = useRoute();
@@ -403,10 +291,9 @@ export function DataGrid(props: DataGridProps = {}) {
     indexHintText && runId
       ? { ...indexHintText, href: serializeRoute({ runId, collection: "process", kind: "search-index" }) }
       : undefined;
+  const loadedPages = cq.loadedPages;
   const analysisRowTypesSig =
-    ref.id === "analysis" && ref.analysisId
-      ? [...new Set(cq.loadedRows.map((row) => row.artifactType ?? ""))].sort().join(",")
-      : "";
+    ref.id === "analysis" && ref.analysisId ? artifactTypesOfPages(loadedPages).join(",") : "";
   const analysisRowTypes = useMemo(
     () => (analysisRowTypesSig ? analysisRowTypesSig.split(",") : []),
     [analysisRowTypesSig],
@@ -428,8 +315,8 @@ export function DataGrid(props: DataGridProps = {}) {
   );
   // Promoted keys holding lists in the loaded rows: shown, but not server-sortable.
   const listSig = useMemo(
-    () => [...listKeysIn(cq.loadedRows, promotedKeys)].sort().join(","),
-    [cq.loadedRows, promotedKeys],
+    () => [...listKeysInPages(loadedPages, promotedKeys)].sort().join(","),
+    [loadedPages, promotedKeys],
   );
   // Columns with several candidate keys sort on the first candidate present in the loaded rows
   // (the one the cells show first), e.g. eventlog 메시지: message, else event_message.
@@ -437,16 +324,11 @@ export function DataGrid(props: DataGridProps = {}) {
     const picked: Record<string, string> = {};
     for (const column of baseColumns) {
       if (!column.sortCandidates) continue;
-      const key = column.sortCandidates.find((k) =>
-        cq.loadedRows.some((row) => {
-          const details = row.fields.details;
-          return isRecord(details) && details[k] !== undefined && details[k] !== null && details[k] !== "";
-        }),
-      );
+      const key = firstDetailKeyInPages(loadedPages, column.sortCandidates);
       if (key) picked[column.id] = key;
     }
     return JSON.stringify(picked);
-  }, [baseColumns, cq.loadedRows]);
+  }, [baseColumns, loadedPages]);
   const columns = useMemo(() => {
     const picked = JSON.parse(candidateSig) as Record<string, string>;
     const resolved = baseColumns.map((column) => {
@@ -498,7 +380,10 @@ export function DataGrid(props: DataGridProps = {}) {
    * focus, viewer and `row=` stay on it; it is re-found among the loaded rows when it is there,
    * and nothing else gets focus meanwhile. Any navigation by the analyst ends the hold.
    */
-  const [sortHold, setSortHold] = useState<string | null>(null);
+  // Each hold is its own object: a resolution still pending from an earlier hold (its effect runs
+  // after the next header click) never ends a newer hold on the same row.
+  const [sortHoldState, setSortHold] = useState<{ key: string } | null>(null);
+  const sortHold = sortHoldState?.key ?? null;
   const [menuAnchor, setMenuAnchor] = useState<Anchor>(null);
   /** Row index whose menu is open (trigger aria-expanded / aria-controls). */
   const [menuRow, setMenuRow] = useState<number | null>(null);
@@ -620,7 +505,6 @@ export function DataGrid(props: DataGridProps = {}) {
   const widthPriority = preset === "analysis" ? def.widthPriority?.(ref, filterTypes) : undefined;
   // Core columns of the grid's family are never hidden for one page without values (P1).
   const keepWhenEmptySig = (def.keepWhenEmpty?.(ref, filterTypes) ?? []).join("|");
-  const loadedRows = cq.loadedRows;
   // The NTFS columns' "실행" hint applies to image inputs only (C-D12): a folder input's empty
   // NTFS columns hide like any other empty column.
   const runRecord = useAppStore((s) => currentRun(s));
@@ -646,24 +530,27 @@ export function DataGrid(props: DataGridProps = {}) {
   const emptyIds = useMemo(() => {
     if (emptyCandidates.length === 0) return [];
     const keep = new Set(keepWhenEmptySig ? keepWhenEmptySig.split("|") : []);
-    return emptyColumnIds(orderedColumns, loadedRows, {
+    // Per loaded page (cached): a page load scans the new page only, not every loaded row again.
+    return emptyColumnIdsOfPages(orderedColumns, loadedPages, {
       candidates: emptyCandidates.filter((id) => !keep.has(id)),
       keep: keepShown,
       ignoreHints: ref.id === "files" && !inputIsImage,
     });
-  }, [emptyCandidates, keepWhenEmptySig, orderedColumns, loadedRows, keepShown, ref.id, inputIsImage]);
+  }, [emptyCandidates, keepWhenEmptySig, orderedColumns, loadedPages, keepShown, ref.id, inputIsImage]);
   // A core column kept although no loaded row has a value says so in its header (UX-round review):
   // the column stays (the next page may fill it), the blank is explained.
   const keptEmptyIds = useMemo(() => {
     if (!keepWhenEmptySig) return new Set<string>();
-    return new Set(emptyColumnIds(orderedColumns, loadedRows, { candidates: keepWhenEmptySig.split("|") }));
-  }, [keepWhenEmptySig, orderedColumns, loadedRows]);
+    return new Set(
+      emptyColumnIdsOfPages(orderedColumns, loadedPages, { candidates: keepWhenEmptySig.split("|") }),
+    );
+  }, [keepWhenEmptySig, orderedColumns, loadedPages]);
   // 특이사항 over the loaded rows (R-11): a sparse column keeps its 90px minimum, and its header
   // says how many loaded rows carry a flag (a click sorts them to the top, grade first).
   const hasFlagsColumn = orderedColumns.some((c) => c.id === "flags");
   const flagSummary = useMemo(
-    () => (hasFlagsColumn ? flaggedRowsSummary(loadedRows) : null),
-    [hasFlagsColumn, loadedRows],
+    () => (hasFlagsColumn ? flaggedPagesSummary(loadedPages) : null),
+    [hasFlagsColumn, loadedPages],
   );
   const flagHint = flagSummary ? flagsHeaderHint(flagSummary) : "";
   const flagsNarrow = flagSummary ? flagsColumnSparse(flagSummary) : false;
@@ -789,49 +676,12 @@ export function DataGrid(props: DataGridProps = {}) {
   const focusIdxRef = useRef(clampedFocus);
   focusIdxRef.current = clampedFocus;
 
-  // The extractor identity changes with the focused row so the virtualizer recomputes and keeps it mounted.
-  const rangeExtractor = useCallback(
-    (range: Range) => {
-      const base = defaultRangeExtractor(range);
-      if (clampedFocus >= 0 && !base.includes(clampedFocus))
-        return [...base, clampedFocus].sort((a, b) => a - b);
-      return base;
-    },
-    [clampedFocus],
-  );
-
-  const virtualizer = useVirtualizer({
-    count: displayCount,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => rowHeight,
-    overscan: 12,
-    rangeExtractor,
-    initialRect: { width: 1000, height: 600 },
-  });
-  // A new row height (density, AXIOM preset) drops the cached row sizes.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure only when the height changes
-  useEffect(() => {
-    virtualizer.measure();
-  }, [rowHeight]);
-  const virtualItems = virtualizer.getVirtualItems();
-  // `range` excludes the always-rendered focused row, so jumping (End) does not request every page in between.
-  const firstVisible = virtualizer.range?.startIndex ?? 0;
-  const lastVisible = virtualizer.range?.endIndex ?? 0;
-
-  // Random-access mode: request the server pages the viewport covers (+ prefetch next).
+  // The virtualized rows live in GridBody: scrolling re-renders it alone. The grid reaches its
+  // virtualizer through this handle (keyboard moves, deep links) and reads the first visible
+  // row through `visibleStart` (footer page number) without re-rendering on scroll.
+  const bodyRef = useRef<GridBodyHandle | null>(null);
+  const visibleStart = useMemo(() => createVisibleStart(), []);
   const { ensureRange, loadMore } = cq;
-  useEffect(() => {
-    if (!compactMode) ensureRange(firstVisible, lastVisible);
-  }, [compactMode, ensureRange, firstVisible, lastVisible]);
-
-  // Compact mode: near the end, after the user scrolled, pull the next page.
-  useEffect(() => {
-    if (!compactMode) return;
-    const scrolled = (scrollRef.current?.scrollTop ?? 0) > 0;
-    if (scrolled && lastVisible >= displayCount - 15 && cq.canLoadMore) {
-      loadMore();
-    }
-  }, [compactMode, lastVisible, displayCount, cq.canLoadMore, loadMore]);
 
   const displayFocusedRow = clampedFocus >= 0 ? getDisplayRow(clampedFocus) : undefined;
   // While a re-sort holds the focused row and it is not (yet) found, no row is focused.
@@ -852,7 +702,8 @@ export function DataGrid(props: DataGridProps = {}) {
   }, [sortHold, heldIndex]);
 
   // Rows by key for commands (selection may span pages and filters).
-  const rowsByKey = useMemo(() => new Map(cq.loadedRows.map((r) => [r.rowKey, r])), [cq.loadedRows]);
+  // Built on first use only (a selection / a command), never on every page load.
+  const rowsByKey = useMemo(() => lazyRowIndex(cq.loadedRows), [cq.loadedRows]);
 
   // Focused row -> store and viewer. Identity is published SYNCHRONOUSLY (never debounced) so a
   // mark pressed right after J/K applies to the new row; only the viewer's load may be debounced.
@@ -874,7 +725,8 @@ export function DataGrid(props: DataGridProps = {}) {
       // Same row under a new order: the store, viewer and URL already point at it.
       if (focusedRow?.rowKey === sortHold) {
         lastPublished.current = focusedRow;
-        setSortHold(null);
+        const resolved = sortHoldState;
+        setSortHold((current) => (current === resolved ? null : current));
       }
       return;
     }
@@ -889,7 +741,7 @@ export function DataGrid(props: DataGridProps = {}) {
       return;
     }
     if (lastPublished.current !== focusedRow) publishNow(focusedRow);
-  }, [focusedRow, runId, setFocused, publishNow, publishFocusedRow, sortHold]);
+  }, [focusedRow, runId, setFocused, publishNow, publishFocusedRow, sortHold, sortHoldState]);
 
   // Server-sorted deep link: the locator is the JSONL record_index, not the display position;
   // ask the server where that record sits in the sorted order (`locate=` → `sort.position`).
@@ -998,31 +850,9 @@ export function DataGrid(props: DataGridProps = {}) {
     if (row) {
       restoredRow.current = true;
       setFocusIdx(idx);
-      virtualizer.scrollToIndex(idx, { align: "center" });
+      bodyRef.current?.scrollToIndex(idx, "center");
     }
-  }, [
-    route.rowRef,
-    compactMode,
-    ensureRange,
-    cq.getRow,
-    virtualizer,
-    activeLocateKey,
-    located,
-    routeSort,
-    serverPath,
-  ]);
-
-  // Move DOM focus onto the focused row after keyboard navigation (rows are virtualized).
-  const itemSignature = `${firstVisible}-${lastVisible}-${clampedFocus}-${focusedRow ? 1 : 0}`;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the rendered window changes
-  useEffect(() => {
-    if (!wantDomFocus.current || clampedFocus < 0) return;
-    const el = scrollRef.current?.querySelector<HTMLElement>(`[data-index="${clampedFocus}"]`);
-    if (el) {
-      el.focus({ preventScroll: true });
-      wantDomFocus.current = false;
-    }
-  }, [itemSignature, displayCount]);
+  }, [route.rowRef, compactMode, ensureRange, cq.getRow, activeLocateKey, located, routeSort, serverPath]);
 
   const setSelectionKeys = selection.select;
   const rangeKeys = useCallback(
@@ -1053,18 +883,9 @@ export function DataGrid(props: DataGridProps = {}) {
       const nextRow = getDisplayRow(clamped);
       if (nextRow) publishNow(nextRow);
       if (!compactMode) ensureRange(clamped, clamped);
-      virtualizer.scrollToIndex(clamped, { align: "auto" });
+      bodyRef.current?.scrollToIndex(clamped, "auto");
     },
-    [
-      displayCount,
-      compactMode,
-      ensureRange,
-      rangeKeys,
-      setSelectionKeys,
-      virtualizer,
-      getDisplayRow,
-      publishNow,
-    ],
+    [displayCount, compactMode, ensureRange, rangeKeys, setSelectionKeys, getDisplayRow, publishNow],
   );
 
   const toggleAt = useCallback(
@@ -1090,8 +911,6 @@ export function DataGrid(props: DataGridProps = {}) {
     },
     [runId, publish, setRow, viewer],
   );
-
-  const pageRows = Math.max(1, virtualItems.length > 4 ? lastVisible - firstVisible - 12 : 10);
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
@@ -1130,8 +949,10 @@ export function DataGrid(props: DataGridProps = {}) {
     }
     if (key === "Home") return handled(() => moveFocus(0, event.shiftKey));
     if (key === "End") return handled(() => moveFocus(displayCount - 1, event.shiftKey));
-    if (key === "PageDown") return handled(() => moveFocus(index + pageRows, event.shiftKey));
-    if (key === "PageUp") return handled(() => moveFocus(index - pageRows, event.shiftKey));
+    if (key === "PageDown")
+      return handled(() => moveFocus(index + (bodyRef.current?.pageRows() ?? 10), event.shiftKey));
+    if (key === "PageUp")
+      return handled(() => moveFocus(index - (bodyRef.current?.pageRows() ?? 10), event.shiftKey));
     if (key === " " || key === "Spacebar") {
       return handled(() => toggleAt(index));
     }
@@ -1356,7 +1177,7 @@ export function DataGrid(props: DataGridProps = {}) {
   const cycleSort = (spec: ColumnSpec) => {
     const current = sortOf(spec);
     // Sorting never moves focus, the selection or the viewer (C-D2): hold the focused row.
-    if (focusedRow) setSortHold(focusedRow.rowKey);
+    if (focusedRow) setSortHold({ key: focusedRow.rowKey });
     if (serverSortable(spec) && spec.sortKey) {
       setSorting([]);
       setSortNotice(null);
@@ -1472,7 +1293,6 @@ export function DataGrid(props: DataGridProps = {}) {
         : `NTFS 메타: 조인하지 않음 — ${ntfsJoin.reason} (분석 ${analysis})`,
     });
   }
-  const currentPage = Math.min(cq.pageCount ?? 1, Math.floor(firstVisible / cq.pageSize) + 1);
 
   // Range honesty (plan r7 §3.2 L2, 구조 D2): a paged grid always says how many of the server's
   // rows are loaded, and — while a sort / filter runs over the loaded rows only — says that too.
@@ -1994,31 +1814,32 @@ export function DataGrid(props: DataGridProps = {}) {
                 />
               ) : null}
             </div>
-            <div role="rowgroup" className="grid-body" style={{ height: virtualizer.getTotalSize() }}>
-              {virtualItems.map((item) => {
-                const row = getDisplayRow(item.index);
-                return (
-                  <RowView
-                    key={row ? row.rowKey : `loading:${item.index}`}
-                    row={row}
-                    index={item.index}
-                    top={item.start}
-                    height={item.size}
-                    selected={!!row && selectedKeys.has(row.rowKey)}
-                    focused={item.index === clampedFocus && (sortHold === null || row?.rowKey === sortHold)}
-                    specs={specs}
-                    widths={widths}
-                    lefts={lefts}
-                    onMenuButton={onMenuButton}
-                    menuOpen={menuAnchor !== null && menuRow === item.index}
-                    menuId={menuId}
-                    onToggle={onToggleCheckbox}
-                    ariaRowOffset={headRows + 1}
-                    cellEpoch={cellEpoch}
-                  />
-                );
-              })}
-            </div>
+            <GridBody
+              scrollRef={scrollRef}
+              handleRef={bodyRef}
+              visibleStart={visibleStart}
+              count={displayCount}
+              rowHeight={rowHeight}
+              focusIdx={clampedFocus}
+              sortHold={sortHold}
+              focusReady={focusedRow !== undefined}
+              wantDomFocus={wantDomFocus}
+              getRow={getDisplayRow}
+              selectedKeys={selectedKeys}
+              specs={specs}
+              widths={widths}
+              lefts={lefts}
+              cellEpoch={cellEpoch}
+              ariaRowOffset={headRows + 1}
+              menuRow={menuAnchor !== null ? menuRow : null}
+              menuId={menuId}
+              onMenuButton={onMenuButton}
+              onToggle={onToggleCheckbox}
+              compactMode={compactMode}
+              ensureRange={ensureRange}
+              loadMore={loadMore}
+              canLoadMore={cq.canLoadMore}
+            />
           </div>
           {/* One state at a time (review #11): the error card replaces the empty state. */}
           {displayCount === 0 && !cq.isLoading && !cq.error ? (
@@ -2064,42 +1885,47 @@ export function DataGrid(props: DataGridProps = {}) {
         />
       </div>
 
-      <GridFooter
-        selectedCount={selectedKeys.size}
-        page={currentPage}
-        pageCount={cq.pageCount}
-        total={cq.total}
-        totalLowerBound={cq.totalLowerBound}
-        shown={displayCount}
-        backend={cq.backend}
-        elapsedMs={cq.elapsedMs}
-        truncated={cq.truncated}
-        filtering={needle !== "" || serverQuery !== ""}
-        serverSearch={serverQuery !== ""}
-        sorting={clientSorting}
-        loadedCount={cq.loadedCount}
-        canLoadMore={compactMode && cq.canLoadMore}
-        serverPathFilter={ref.id === "artifacts" ? serverPathFilter(q) : undefined}
-        scanned={cq.scanned}
-        onLoadMore={loadMore}
-        loading={cq.isFetching}
-        loadingText={displayCount === 0 && cq.isLoading ? loadingMessage : undefined}
-        scope={cq.category ? categoryScopeText(cq.category) : undefined}
-        truncatedText={ref.id === "search" ? SEARCH_TRUNCATED_NOTICE : undefined}
-        loadedSummary={
-          ref.id === "search" && cq.searchCancelled
-            ? SEARCH_CANCELLED_TEXT
-            : ref.id === "search" && cq.loadedCount > 0
-              ? searchLoadedText(cq.loadedCount, cq.total, cq.canLoadMore)
-              : undefined
-        }
-        indexHint={searchFooterIndexHint}
-        searchNote={
-          ref.id === "search"
-            ? searchWarningNote(cq.pageMeta?.searchWarnings, route.search?.keywordNote)
-            : undefined
-        }
-      />
+      {/* The page number follows the first visible row: on scroll only the footer re-renders. */}
+      <VisiblePage source={visibleStart} pageSize={cq.pageSize} pageCount={cq.pageCount}>
+        {(page) => (
+          <GridFooter
+            selectedCount={selectedKeys.size}
+            page={page}
+            pageCount={cq.pageCount}
+            total={cq.total}
+            totalLowerBound={cq.totalLowerBound}
+            shown={displayCount}
+            backend={cq.backend}
+            elapsedMs={cq.elapsedMs}
+            truncated={cq.truncated}
+            filtering={needle !== "" || serverQuery !== ""}
+            serverSearch={serverQuery !== ""}
+            sorting={clientSorting}
+            loadedCount={cq.loadedCount}
+            canLoadMore={compactMode && cq.canLoadMore}
+            serverPathFilter={ref.id === "artifacts" ? serverPathFilter(q) : undefined}
+            scanned={cq.scanned}
+            onLoadMore={loadMore}
+            loading={cq.isFetching}
+            loadingText={displayCount === 0 && cq.isLoading ? loadingMessage : undefined}
+            scope={cq.category ? categoryScopeText(cq.category) : undefined}
+            truncatedText={ref.id === "search" ? SEARCH_TRUNCATED_NOTICE : undefined}
+            loadedSummary={
+              ref.id === "search" && cq.searchCancelled
+                ? SEARCH_CANCELLED_TEXT
+                : ref.id === "search" && cq.loadedCount > 0
+                  ? searchLoadedText(cq.loadedCount, cq.total, cq.canLoadMore)
+                  : undefined
+            }
+            indexHint={searchFooterIndexHint}
+            searchNote={
+              ref.id === "search"
+                ? searchWarningNote(cq.pageMeta?.searchWarnings, route.search?.keywordNote)
+                : undefined
+            }
+          />
+        )}
+      </VisiblePage>
       {extractResult ? (
         <section className="grid-extract" role="status" aria-label="추출 결과">
           <strong>
