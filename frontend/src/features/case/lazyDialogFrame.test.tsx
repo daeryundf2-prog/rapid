@@ -20,7 +20,10 @@ describe("lazyDialog", () => {
     const Lazy = lazyDialog("환경 점검", () => new Promise<typeof Done>((res) => (resolve = res)));
     render(<Lazy onClose={() => undefined} />);
     const dialog = screen.getByRole("dialog", { name: "환경 점검" });
-    expect(dialog.querySelector("[role=status]")?.textContent).toContain("환경 점검 불러오는 중");
+    expect(dialog.querySelector("[data-testid=lazy-view-loading]")?.textContent).toContain(
+      "환경 점검 불러오는 중",
+    );
+    expect(dialog.querySelector("[role=status],[aria-live]")).toBeNull();
     await act(async () => resolve(Done));
     expect(await screen.findByRole("button", { name: "완료" })).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();

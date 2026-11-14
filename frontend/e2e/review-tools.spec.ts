@@ -12,6 +12,11 @@ import { TEST_IDS } from "../src/contracts/testIds";
 const TOKEN = "e2e-token";
 const HEADERS = { "X-RapidTriage-Token": TOKEN };
 
+// The tests share one run and build on each other's review state (E3 fixes reads the 증거 B mark
+// Q-X8 made). Serial: after a failure Playwright would restart the worker, re-run beforeAll on a
+// fresh run and fail the later tests for the wrong reason; serial skips them instead.
+test.describe.configure({ mode: "serial" });
+
 let runId = "";
 let caseId = "";
 
