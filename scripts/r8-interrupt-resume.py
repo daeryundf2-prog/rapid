@@ -322,6 +322,11 @@ class HarnessError(RuntimeError):
 
 def _port_free(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        if os.name != "nt":
+            # The killed server leaves the port in TIME_WAIT; uvicorn binds with SO_REUSEADDR, so the
+            # probe must too or it reports "busy" for a minute (CI 703f840, ubuntu). On Windows the
+            # option means "steal a live port", so it stays off there.
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind(("127.0.0.1", port))
         except OSError:
