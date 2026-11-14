@@ -262,10 +262,40 @@ export function emptyColumnIds(
     ignoreHints?: boolean;
   },
 ): string[] {
-  if (rows.length === 0) return [];
+  return emptyColumnIdsOfPages(columns, [rows], options);
+}
+
+/** Per loaded page (array identity) and column spec: does any row of the page show a value? */
+const pageColumnValues = new WeakMap<readonly GridRow[], WeakMap<ColumnSpec, boolean>>();
+
+function pageHasValue(rows: readonly GridRow[], column: ColumnSpec): boolean {
+  let byColumn = pageColumnValues.get(rows);
+  if (!byColumn) {
+    byColumn = new WeakMap();
+    pageColumnValues.set(rows, byColumn);
+  }
+  const cached = byColumn.get(column);
+  if (cached !== undefined) return cached;
+  const has = rows.some(
+    (row) => !(isEmptyValue(column.value(row)) && displayText(column, row).trim() === ""),
+  );
+  byColumn.set(column, has);
+  return has;
+}
+
+/**
+ * emptyColumnIds over the loaded rows in pages: each (page, column) answer is cached, so a newly
+ * loaded page scans that page's rows only (pages and column specs are immutable).
+ */
+export function emptyColumnIdsOfPages(
+  columns: readonly ColumnSpec[],
+  pages: readonly (readonly GridRow[])[],
+  options: Parameters<typeof emptyColumnIds>[2],
+): string[] {
+  if (!pages.some((rows) => rows.length > 0)) return [];
   const wanted = new Set(options.candidates);
   return columns
     .filter((c) => wanted.has(c.id) && !options.keep?.has(c.id) && (options.ignoreHints || !c.emptyHint))
-    .filter((c) => rows.every((row) => isEmptyValue(c.value(row)) && displayText(c, row).trim() === ""))
+    .filter((c) => !pages.some((rows) => pageHasValue(rows, c)))
     .map((c) => c.id);
 }

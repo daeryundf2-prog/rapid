@@ -28,7 +28,7 @@ import { collectionDef } from "./columns";
 import { promotedColumn } from "./columns/fieldColumns";
 import { filesServerSort } from "./columns/files";
 import { serverPathFilter } from "./gridUtils";
-import { overlayReview, useReviewMap } from "./reviewMap";
+import { overlayReview, type ReviewMap, useReviewMap } from "./reviewMap";
 import type { CollectionDef, ColumnSpec } from "./types";
 
 /** Server page size (plan: 250). */
@@ -98,6 +98,12 @@ export interface CollectionQueryResult {
   getRow: (index: number) => GridRow | undefined;
   /** Every loaded row in collection order (client filter/sort run over this). */
   loadedRows: GridRow[];
+  /**
+   * `loadedRows` in chunks whose array identity survives a page load (one chunk per loaded page;
+   * one chunk = `loadedRows` while client filters apply). Facts derived from the loaded rows are
+   * cached per chunk, so a new page costs that page's rows, not every loaded row again.
+   */
+  loadedPages: readonly (readonly GridRow[])[];
   /** Ask for the pages covering [start, end] (+ the next page, prefetched). */
   ensureRange: (start: number, end: number) => void;
   /** Ask for the first not-yet-loaded page after the loaded ones (compact/filter mode scrolling). */
@@ -179,6 +185,38 @@ export function categoryScopeText(category: NonNullable<CollectionQueryResult["c
 
 /** Row mapping is memoised per raw page object (pages are immutable in the query cache). */
 const mappedPages = new WeakMap<RawPage, GridRow[]>();
+/**
+ * Review-overlaid rows per mapped page and review map: a newly loaded page leaves the other
+ * pages' arrays (and their rows) as they were, so per-page derived data stays cached.
+ */
+const reviewedPages = new WeakMap<GridRow[], { map: ReviewMap; rows: GridRow[] }>();
+
+function reviewPage(rows: GridRow[], reviewMap: ReviewMap): GridRow[] {
+  const hit = reviewedPages.get(rows);
+  if (hit && hit.map === reviewMap) return hit.rows;
+  const out = rows.map((row) => overlayReview(row, reviewMap));
+  reviewedPages.set(rows, { map: reviewMap, rows: out });
+  return out;
+}
+
+/** Facts the filter bar's 유형 / 태그 menus read, per loaded page (merged across pages). */
+interface PageOptions {
+  types: Map<string, number>;
+  tags: Set<string>;
+}
+const pageOptions = new WeakMap<readonly GridRow[], PageOptions>();
+
+function optionsOfPage(rows: readonly GridRow[]): PageOptions {
+  const cached = pageOptions.get(rows);
+  if (cached) return cached;
+  const out: PageOptions = { types: new Map(), tags: new Set() };
+  for (const row of rows) {
+    if (row.artifactType) out.types.set(row.artifactType, (out.types.get(row.artifactType) ?? 0) + 1);
+    for (const tag of row.tags) out.tags.add(tag);
+  }
+  pageOptions.set(rows, out);
+  return out;
+}
 
 function mapPage(def: CollectionDef, page: RawPage, ref: CollectionQuery["ref"]): GridRow[] {
   const cached = mappedPages.get(page);
@@ -367,8 +405,7 @@ export function useCollectionQuery(
       const data = pageData[i];
       if (!data) return;
       const mapped = mapPage(def, data, rawQuery.ref);
-      const rows =
-        reviewMap && reviewMap.size > 0 ? mapped.map((row) => overlayReview(row, reviewMap)) : mapped;
+      const rows = reviewMap && reviewMap.size > 0 ? reviewPage(mapped, reviewMap) : mapped;
       map.set(p, def.source === "whole" ? statusFilter(rows, rawQuery.ref.status) : rows);
     });
     return map;
@@ -390,12 +427,26 @@ export function useCollectionQuery(
     [overlay, patched],
   );
 
-  const unfilteredRows = useMemo(() => {
+  // Patched pages per overlay: one optimistic mark re-maps every page once, later page loads
+  // leave the other pages' arrays alone.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new overlay starts a new cache
+  const overlaidPages = useMemo(() => new WeakMap<GridRow[], GridRow[]>(), [overlay]);
+  const unfilteredPages = useMemo(() => {
     const pages = [...mappedByPage.keys()].sort((a, b) => a - b);
-    const rows = pages.flatMap((p) => mappedByPage.get(p) ?? []);
-    if (overlay.size === 0) return rows;
-    return rows.map((row) => applyOverlay(row));
-  }, [mappedByPage, overlay, applyOverlay]);
+    return pages.map((p) => {
+      const rows = mappedByPage.get(p) ?? [];
+      if (overlay.size === 0) return rows;
+      const hit = overlaidPages.get(rows);
+      if (hit) return hit;
+      const out = rows.map((row) => applyOverlay(row));
+      overlaidPages.set(rows, out);
+      return out;
+    });
+  }, [mappedByPage, overlay, overlaidPages, applyOverlay]);
+  const unfilteredRows = useMemo(
+    () => (unfilteredPages.length === 1 ? (unfilteredPages[0] as GridRow[]) : unfilteredPages.flat()),
+    [unfilteredPages],
+  );
 
   // Client-side filters see loaded rows only; the grid then treats the result like a whole collection.
   const clientFilters = useMemo(() => clientOnlyFilters(filters, plan), [filters, plan]);
@@ -410,6 +461,10 @@ export function useCollectionQuery(
       ? applyColumnFilters(rows, clientFilters.columns, resolveColumn)
       : rows;
   }, [clientFiltering, unfilteredRows, clientFilters, resolveColumn, timezone]);
+  const loadedPages = useMemo(
+    () => (clientFiltering ? [loadedRows] : unfilteredPages),
+    [clientFiltering, loadedRows, unfilteredPages],
+  );
 
   const serverTotal =
     def.source === "whole" ? (firstData ? (mappedByPage.get(0)?.length ?? 0) : null) : total0;
@@ -500,18 +555,20 @@ export function useCollectionQuery(
     if (passive) return;
     // Server-known types first: a 유형 filter narrows the loaded rows to the picked types,
     // and the menu must still offer the others.
+    // Per loaded page (cached), merged: a new page adds its own rows' facts only.
     const types = new Set<string>(serverTypes);
     const tags = new Set<string>();
     const counts: Record<string, number> = {};
-    for (const row of unfilteredRows) {
-      if (row.artifactType) {
-        types.add(row.artifactType);
-        counts[row.artifactType] = (counts[row.artifactType] ?? 0) + 1;
+    for (const page of unfilteredPages) {
+      const facts = optionsOfPage(page);
+      for (const [type, n] of facts.types) {
+        types.add(type);
+        counts[type] = (counts[type] ?? 0) + n;
       }
-      for (const tag of row.tags) tags.add(tag);
+      for (const tag of facts.tags) tags.add(tag);
     }
     setOptions([...types].sort().slice(0, 200), [...tags].sort().slice(0, 200), counts);
-  }, [unfilteredRows, serverTypes, setOptions, passive]);
+  }, [unfilteredPages, serverTypes, setOptions, passive]);
 
   const categoryId = query.ref.id === "artifacts" && !query.ref.kind ? query.ref.category : undefined;
   const categoryKinds = firstData?.kinds?.length ?? null;
@@ -603,6 +660,7 @@ export function useCollectionQuery(
     loadedCount: unfilteredRows.length,
     getRow,
     loadedRows,
+    loadedPages,
     ensureRange,
     loadMore,
     isLoading: results[0]?.isLoading ?? false,

@@ -200,6 +200,47 @@ export function listKeysIn(rows: readonly GridRow[], keys: readonly string[]): S
   return out;
 }
 
+const pageDetailFacts = new WeakMap<readonly GridRow[], Map<string, boolean>>();
+
+/**
+ * Per loaded page (array identity, cached): does any row's `details[key]` hold a list
+ * (`list:` prefix) or a non-empty value (`set:` prefix)?
+ */
+function pageDetailFact(rows: readonly GridRow[], fact: "list" | "set", key: string): boolean {
+  let facts = pageDetailFacts.get(rows);
+  if (!facts) {
+    facts = new Map();
+    pageDetailFacts.set(rows, facts);
+  }
+  const id = `${fact}:${key}`;
+  const cached = facts.get(id);
+  if (cached !== undefined) return cached;
+  const has = rows.some((row) => {
+    const details = row.fields.details;
+    if (!isRecord(details)) return false;
+    const value = details[key];
+    return fact === "list" ? Array.isArray(value) : value !== undefined && value !== null && value !== "";
+  });
+  facts.set(id, has);
+  return has;
+}
+
+/** listKeysIn over loaded pages; each (page, key) answer is cached. */
+export function listKeysInPages(
+  pages: readonly (readonly GridRow[])[],
+  keys: readonly string[],
+): Set<string> {
+  return new Set(keys.filter((key) => pages.some((rows) => pageDetailFact(rows, "list", key))));
+}
+
+/** First of `keys` whose `details` value is set (not undefined / null / "") in some loaded row. */
+export function firstDetailKeyInPages(
+  pages: readonly (readonly GridRow[])[],
+  keys: readonly string[],
+): string | undefined {
+  return keys.find((key) => pages.some((rows) => pageDetailFact(rows, "set", key)));
+}
+
 /**
  * The union of scalar / scalar-array `details` keys over EVERY loaded row (all fetched
  * pages, any artifact type), most filled first; keys present only with empty values are

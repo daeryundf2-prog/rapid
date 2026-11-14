@@ -129,6 +129,28 @@ export function flaggedRowsSummary(rows: readonly Pick<GridRow, "fields">[]): Fl
   return { count, loaded: rows.length, grades: GRADES.filter((g) => seen.has(g)) };
 }
 
+const pageSummaries = new WeakMap<readonly Pick<GridRow, "fields">[], FlaggedRowsSummary>();
+
+/** flaggedRowsSummary over loaded pages, cached per page array (a new page scans its rows only). */
+export function flaggedPagesSummary(
+  pages: readonly (readonly Pick<GridRow, "fields">[])[],
+): FlaggedRowsSummary {
+  let count = 0;
+  let loaded = 0;
+  const seen = new Set<Grade>();
+  for (const rows of pages) {
+    let summary = pageSummaries.get(rows);
+    if (!summary) {
+      summary = flaggedRowsSummary(rows);
+      pageSummaries.set(rows, summary);
+    }
+    count += summary.count;
+    loaded += summary.loaded;
+    for (const grade of summary.grades) seen.add(grade);
+  }
+  return { count, loaded, grades: GRADES.filter((g) => seen.has(g)) };
+}
+
 /**
  * A 특이사항 column is sparse when at most one loaded row in ten is flagged: it keeps its 90px
  * minimum instead of the 170px default (R-11) — its header hint says where the flags are.
