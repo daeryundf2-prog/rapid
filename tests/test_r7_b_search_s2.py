@@ -15,6 +15,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests._timing import time_budget
+
 try:
     from fastapi.testclient import TestClient
 
@@ -337,7 +339,7 @@ class EntitySearchTests(unittest.TestCase):
         self.assertEqual(created["by_type"]["ip"], 5)
         started = time.monotonic()
         result = self.query("list:ioc-test")
-        self.assertLess(time.monotonic() - started, 5.0)
+        self.assertLess(time.monotonic() - started, time_budget(5.0))
         counts = {item["item"]: item["count"] for item in result["lists"][0]["items"]}
         self.assertEqual(counts["10.1.2.3"], 1)
         self.assertGreaterEqual(counts["10.0.0.0/8"], counts["10.1.2.3"])

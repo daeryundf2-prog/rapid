@@ -19,6 +19,7 @@ from rapidtriage.core.carving import (
     run_bounded_carving,
 )
 from tests import carving_r3_fixtures as fx
+from tests._timing import time_budget
 
 R3_KINDS = ("wav", "mp3", "m4a", "mp4", "docx", "xlsx", "pptx", "hwp", "hwpx", "eml", "pe", "evtx")
 
@@ -286,7 +287,7 @@ class R3CarvingReviewTests(unittest.TestCase):
             tracemalloc.stop()
             self.assertIsInstance(result, str)
             self.assertTrue(formats.is_silent(result), result)
-            self.assertLess(time.monotonic() - started, 2.0)
+            self.assertLess(time.monotonic() - started, time_budget(2.0))
             self.assertLess(peak, 16 * 1024 * 1024)
         duplicate = bytearray(fx.hwp() + b"\x00" * 2048)
         struct.pack_into("<I", duplicate, 0x2C, 2)
@@ -349,7 +350,7 @@ class R3CarvingReviewTests(unittest.TestCase):
         data = b"Received: from x\n" * (1024 * 1024 // 17)
         started = time.monotonic()
         entries, _stats = scan_entries(data, ("eml",))
-        self.assertLess(time.monotonic() - started, 5.0)
+        self.assertLess(time.monotonic() - started, time_budget(5.0))
         self.assertLessEqual(len(entries), 20)
         self.assertTrue(all(entry["rejected_reason"] == "eml-header-unterminated" for entry in entries))
         bad_pe = bytearray(fx.pe())

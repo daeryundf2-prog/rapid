@@ -48,6 +48,7 @@ from rapidtriage.core.artifacts import run_artifact_collection
 from rapidtriage.core.run import RUN_PROFILES, SUPPORTED_RUN_MODES
 from rapidtriage.core.triage_rules.catalog import load_catalog
 from tests import messenger_fixtures as fx
+from tests._timing import time_budget
 
 DATA_TYPES = ("chat-message", "chat-attachment", "chat-contact")
 
@@ -437,7 +438,7 @@ class HostileInputRegressionTests(unittest.TestCase):
         finally:
             _current, peak = tracemalloc.get_traced_memory()
             tracemalloc.stop()
-        self.assertLess(time.monotonic() - started, max_seconds)
+        self.assertLess(time.monotonic() - started, time_budget(max_seconds))
         self.assertLess(peak / 1e6, max_peak_mb)
         return result
 

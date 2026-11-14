@@ -11,6 +11,7 @@ from pathlib import Path
 
 from rapidtriage.core.doc_text import language_hint, script_profile
 from rapidtriage.core.docs import extract_document_text
+from tests._timing import time_budget
 from tests.test_parser_quality_core import build_hwp
 
 # Letters per script in one block (spaces/punctuation are not letters).
@@ -115,7 +116,7 @@ class ScriptProfileTests(unittest.TestCase):
         for body in ("A" * 2_000_000, "가" * 2_000_000, "a." * 1_000_000, "x@" * 1_000_000):
             started = time.perf_counter()
             script_profile(body)
-            self.assertLess(time.perf_counter() - started, 1.0, body[:4])
+            self.assertLess(time.perf_counter() - started, time_budget(1.0), body[:4])
         self.assertEqual(language_hint(script_profile("A" * 2_000_000)), "en")
         self.assertEqual(script_profile("a.b" * 10), {})
 

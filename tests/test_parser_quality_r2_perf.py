@@ -33,6 +33,7 @@ from rapidtriage.core.case_db.search import search_artifacts
 from rapidtriage.core.run.persist import build_run_case_db
 from rapidtriage.core.search_budget import SearchBudget
 from rapidtriage.core.search_fts import fts_unified_matches
+from tests._timing import time_budget
 
 NFD_NAME = unicodedata.normalize("NFD", "계약서")
 
@@ -243,7 +244,7 @@ class BulkPersistThroughputTests(unittest.TestCase):
             elapsed = time.perf_counter() - started
             self.assertEqual(record["status"], "completed", record.get("error"))
             self.assertEqual(record["counts"]["artifact_count"], self.ARTIFACTS)
-            self.assertLess(elapsed, self.BUDGET_SECONDS)
+            self.assertLess(elapsed, time_budget(self.BUDGET_SECONDS))
             database = CaseDatabase(out_dir / "rapidtriage-case.db")
             with database.connect() as connection:
                 for row_id in (1, 777, self.ARTIFACTS):
@@ -278,7 +279,7 @@ class SearchIndexEarlyExitTests(unittest.TestCase):
                 elapsed = time.perf_counter() - started
             self.assertEqual(records, [])
             self.assertEqual(resolve.call_count, 0)
-            self.assertLess(elapsed, 5.0)
+            self.assertLess(elapsed, time_budget(5.0))
             export = root / "exports" / "windows-search-export.csv"
             export.parent.mkdir()
             export.write_text("System.ItemPathDisplay,System.ItemName\nC:/Users/u/a.txt,a.txt\n", encoding="utf-8")
@@ -321,7 +322,7 @@ class SyntheticMediaTimingTests(unittest.TestCase):
             # bound stays only as a coarse backstop for a hang.
             self.assertLessEqual(which.call_count, 1)
             self.assertLess(cpu, 2.0)
-            self.assertLess(elapsed, 30.0)
+            self.assertLess(elapsed, time_budget(30.0))
             self.assertEqual(len(records), 1)
             details = records[0].details
             self.assertEqual(details["skip_reason"], synthetic_media.SYNTHETIC_MEDIA_SKIP_REASON)

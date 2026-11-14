@@ -30,6 +30,7 @@ from pathlib import Path
 from unittest import mock
 
 from rapidtriage.core.jobs import OutputJsonCache, RunJobStore
+from tests._timing import time_budget
 
 try:
     from fastapi.testclient import TestClient
@@ -205,7 +206,7 @@ class BackgroundThrottleTests(unittest.TestCase):
             waited = time.perf_counter() - started
             timeline_index.BACKGROUND_PAUSE_S = 0.0  # finish the rest quickly (restored by the patch)
             self.assertTrue(timeline_index.wait_for_background(60))
-        self.assertLess(waited, max(1.2, 4 * sync_seconds), (waited, sync_seconds))
+        self.assertLess(waited, max(time_budget(1.2), 4 * sync_seconds), (waited, sync_seconds))
         self.assertEqual(index.epoch_us, full.epoch_us)
         self.assertEqual(index.has_offset, full.has_offset)
         self.assertEqual(index.content_mask, full.content_mask)

@@ -24,6 +24,7 @@ from rapidtriage.core.files import register_run_output_dir, unregister_run_outpu
 from rapidtriage.core.jobs import RunJobStore
 from rapidtriage.core.ntfs_metadata import NTFSMetadataError, extract_ntfs_metadata
 from tests import r5_l2_fixtures as fx
+from tests._timing import time_budget
 from tests.test_r6_s2_unalloc_carve import PARTITION_SECTOR, VSN, build_ntfs_image
 from tests.test_rapidtriage_analyses import write_run
 
@@ -178,7 +179,7 @@ class VolumeRowAnalysisTests(unittest.TestCase):
     def run_analysis(self, options: dict[str, object] | None = None) -> dict[str, object]:
         created = self.client.post(f"/api/runs/{self.run_id}/analyses", json={"kind": "ntfs-meta", "options": options or {}})
         self.assertEqual(created.status_code, 202, created.text)
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + time_budget(30)
         while True:
             state = self.client.get(f"/api/runs/{self.run_id}/analyses/{created.json()['analysis_id']}").json()
             if state["status"] in analyses.TERMINAL_STATUSES and state.get("finished_at"):

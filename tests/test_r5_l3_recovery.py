@@ -24,6 +24,7 @@ from rapidtriage.core.url_carving import (
     scan_url_source,
     source_kind,
 )
+from tests._timing import time_budget
 
 try:
     from fastapi.testclient import TestClient
@@ -225,7 +226,7 @@ class UrlCarveAnalysisTests(unittest.TestCase):
             created = client.post(f"/api/runs/{run_id}/analyses", json={"kind": "url-carve", "options": {}})
             self.assertEqual(created.status_code, 202, created.text)
             analysis_id = created.json()["analysis_id"]
-            deadline = time.monotonic() + 20
+            deadline = time.monotonic() + time_budget(20)
             while True:
                 state = client.get(f"/api/runs/{run_id}/analyses/{analysis_id}").json()
                 if state["status"] in analyses.TERMINAL_STATUSES and state.get("finished_at"):

@@ -37,6 +37,7 @@ from rapidtriage.core.ai_catalog.labels import (
     label_ko,
 )
 from rapidtriage.core.run.constants import GENERAL_FORENSIC_ARTIFACT_KINDS
+from tests._timing import time_budget
 
 # Values written into credential files; no output row may ever contain them.
 SECRET_VALUES = (
@@ -420,7 +421,7 @@ class PerformanceTests(unittest.TestCase):
             rows = collect(root)
             elapsed = time.perf_counter() - started
             self.assertIn(("claude-code", "alice"), presence(rows))
-            self.assertLess(elapsed, 30.0)
+            self.assertLess(elapsed, time_budget(30.0))
 
 
 if __name__ == "__main__":

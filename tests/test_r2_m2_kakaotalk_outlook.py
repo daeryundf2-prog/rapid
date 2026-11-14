@@ -34,6 +34,7 @@ from rapidtriage.core.aes_cbc import aes_cbc_decrypt, aes_cbc_encrypt
 from rapidtriage.core.doc_text import _aes_cbc_decrypt
 from rapidtriage.core.kakaotalk import derive_pragma_candidates_from_deviceinfo
 from tests import quiet_media_checks
+from tests._timing import time_budget
 from tests.email_pst_fixtures import (
     ICS_THREE_EVENTS,
     PST_HEADER,
@@ -687,7 +688,7 @@ class R2FixEmailTests(unittest.TestCase):
             elapsed = time.monotonic() - started
         self.assertEqual(reason, "export-size-cap")
         self.assertNotEqual(completed.returncode, 0)
-        self.assertLess(elapsed, 45)
+        self.assertLess(elapsed, time_budget(45))
         self.assertLessEqual(len(completed.stdout), EMAIL_EXTERNAL_OUTPUT_TAIL_BYTES)
 
     def test_m9_wrapper_checks_free_space_and_export_size(self) -> None:

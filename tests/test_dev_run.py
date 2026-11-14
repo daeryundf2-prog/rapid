@@ -18,6 +18,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests._timing import time_budget
+
 REPO = Path(__file__).resolve().parents[1]
 RUN_PY = REPO / "scripts" / "dev" / "run.py"
 
@@ -87,7 +89,7 @@ class DevRunTests(unittest.TestCase):
         self.assertEqual(result["status"], "timeout")
         self.assertEqual(result["exit_code"], dev_run.EXIT_TIMEOUT)
         self.assertGreaterEqual(result["seconds"], 5)
-        self.assertLess(elapsed, 30)
+        self.assertLess(elapsed, time_budget(30))
         self.assertEqual(result["remaining"], [])
 
         _wait_for(self.tmp / "grand.pid", 1)

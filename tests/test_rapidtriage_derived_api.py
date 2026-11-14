@@ -8,6 +8,8 @@ import time
 import unittest
 from pathlib import Path
 
+from tests._timing import time_budget
+
 try:
     from fastapi.testclient import TestClient
 
@@ -303,7 +305,7 @@ class DerivedApiTests(unittest.TestCase):
         response = self.client.post(f"/api/runs/{self.run_id}/analyses", json={"kind": "derived", "options": {}})
         self.assertEqual(response.status_code, 202, response.text)
         analysis_id = response.json()["analysis_id"]
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + time_budget(30)
         while True:
             state = self.get(f"/analyses/{analysis_id}")
             if state["status"] in analyses.TERMINAL_STATUSES and state.get("finished_at"):

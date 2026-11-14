@@ -28,6 +28,7 @@ from rapidtriage.core.triage_rules.execution import (
     SuspiciousPath,
     prefetch_executable_path,
 )
+from tests._timing import time_budget
 from tests.xpress_huffman_encoder import compress, mam
 
 FILETIME_EPOCH = datetime(1601, 1, 1, tzinfo=timezone.utc)
@@ -403,7 +404,7 @@ class PrefetchReviewTests(unittest.TestCase):
 
         started = time.monotonic()
         decoded = decode_scca_structure(self.hostile_volumes(64, 200_000), 30)
-        self.assertLess(time.monotonic() - started, 5.0)
+        self.assertLess(time.monotonic() - started, time_budget(5.0))
         volumes = decoded["volumes"]
         self.assertEqual(len(volumes), 64)
         self.assertEqual(len(volumes[0]["directory_strings"]), MAX_PREFETCH_DIRECTORY_STRINGS)

@@ -9,6 +9,8 @@ import time
 import unittest
 from pathlib import Path
 
+from tests._timing import time_budget
+
 try:
     from fastapi.testclient import TestClient
 
@@ -216,7 +218,7 @@ class SqliteBudgetTests(unittest.TestCase):
         elapsed = time.monotonic() - started
         self.assertEqual(rows, [])
         self.assertEqual(scan.stopped, "budget")
-        self.assertLess(elapsed, 2.0)
+        self.assertLess(elapsed, time_budget(2.0))
         # Without a deadline the same connection still answers.
         guard.deadline = None
         self.assertEqual(connection.execute("SELECT 1").fetchone()[0], 1)

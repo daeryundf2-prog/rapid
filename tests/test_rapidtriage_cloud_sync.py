@@ -24,6 +24,7 @@ from rapidtriage.artifacts.cloud_sync import (
 )
 from rapidtriage.cli import main
 from rapidtriage.core.triage_rules import load_catalog
+from tests._timing import time_budget
 from tests.cloud_sync_fixtures import (
     BASE_MS,
     appdata_local,
@@ -468,7 +469,7 @@ class CloudSyncPipelineTests(unittest.TestCase):
             )
             self.assertEqual(kinds["upload"], 56)  # 55 files + the folder event (not counted by the rule)
             self.assertEqual(kinds["delete"], 1)
-        self.assertLess(elapsed, 120)
+        self.assertLess(elapsed, time_budget(120))
 
 
 class CloudSyncReviewRegressionTests(unittest.TestCase):
@@ -506,7 +507,7 @@ class CloudSyncReviewRegressionTests(unittest.TestCase):
         started = time.monotonic()
         for _ in range(50):
             segments, _top, cut = cloud_sync.chain_from_parent(0, parents, names)
-        self.assertLess(time.monotonic() - started, 2.0)
+        self.assertLess(time.monotonic() - started, time_budget(2.0))
         self.assertEqual(segments, [])
         self.assertTrue(cut)
 
