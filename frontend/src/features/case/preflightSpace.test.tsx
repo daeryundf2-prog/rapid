@@ -25,7 +25,7 @@ afterEach(() => {
 describe("preflightSpaceNotice", () => {
   it("warn and block become Korean notices with the level; ok and no check stay silent", () => {
     expect(preflightSpaceNotice(WARN)).toEqual({
-      text: `디스크 여유 주의(추정) — 런은 시작됨: ${WARN.message}`,
+      text: `디스크 여유 주의(추정) — 처리는 시작됨: ${WARN.message}`,
       tone: "warn",
     });
     const block = preflightSpaceNotice({ level: "block", code: "DISK_SPACE_INSUFFICIENT", message: "부족" });
@@ -41,7 +41,7 @@ describe("preflightSpaceNotice", () => {
       preflightSpaceNotice({ level: "unknown", code: null, message: "출력 폴더를 확인하지 못해…" }),
     ).toBeNull();
     const notice = preflightSpaceNotice({ level: "unknown", code: "DISK_SPACE_LOW", message: "추정 못 함" });
-    expect(notice?.text).toBe("디스크 여유 확인 못 함 — 런은 시작됨: 추정 못 함");
+    expect(notice?.text).toBe("디스크 여유 확인 못 함 — 처리는 시작됨: 추정 못 함");
   });
 
   it("showPreflightSpace pushes a non-blocking toast", () => {

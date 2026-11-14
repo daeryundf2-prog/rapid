@@ -32,7 +32,7 @@ export function preflightSpaceNotice(space: PreflightSpace | null | undefined): 
   if (level === "unknown" && !space.code) return null;
   const entry = LEVEL_TEXT[level];
   if (!entry) return null;
-  return { text: `${entry.label} — 런은 시작됨: ${message}`, tone: entry.tone };
+  return { text: `${entry.label} — 처리는 시작됨: ${message}`, tone: entry.tone };
 }
 
 /** Toast (and announce) the advice of a run-start response; nothing for `ok` / no check. */
