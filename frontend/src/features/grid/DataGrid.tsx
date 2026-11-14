@@ -47,7 +47,7 @@ import { ColumnFilterRow } from "./ColumnFilterRow";
 import { collectionDef, lockedColumnId, presetColumnIds } from "./columns";
 import { analysisFamily } from "./columns/analysis";
 import { artifactTypeFamily, resolveArtifactFamily } from "./columns/artifacts";
-import { fitMinWidth, growWeight, isRecord, REVIEW_LABELS } from "./columns/common";
+import { currentTimezone, fitMinWidth, growWeight, isRecord, REVIEW_LABELS } from "./columns/common";
 import { auxColumnIds } from "./columns/families";
 import {
   colsToKeys,
@@ -198,6 +198,11 @@ interface RowViewProps {
   onToggle: (index: number, checked: boolean, range: boolean) => void;
   /** aria-rowindex of data row 0 (2, or 3 under the column filter row). */
   ariaRowOffset: number;
+  /**
+   * What the cells read outside their props (display timezone · family catalogue version): rows
+   * are memoized, so a change here is what re-renders them (time cells, flag chips).
+   */
+  cellEpoch: string;
 }
 
 /** Review mark shown as the row stripe (U-F8): the review status, else a 북마크 tag. */
@@ -206,6 +211,19 @@ export function rowMark(row: GridRow): { id: string; label: string } | null {
   if (row.tags.some((tag) => tag === "북마크" || tag === "bookmark"))
     return { id: "bookmark", label: "북마크" };
   return null;
+}
+
+/**
+ * The previous array while its items are the same (Object.is): the per-render column arrays
+ * (specs · widths · sticky lefts) are rebuilt on every grid render (each scroll frame, each J/K),
+ * and a new identity would re-render every memoized row.
+ */
+function useStableArray<T>(next: T[]): T[] {
+  const ref = useRef(next);
+  const prev = ref.current;
+  if (prev !== next && (prev.length !== next.length || next.some((item, i) => !Object.is(item, prev[i]))))
+    ref.current = next;
+  return ref.current;
 }
 
 const RowView = memo(function RowView(props: RowViewProps) {
@@ -712,25 +730,29 @@ export function DataGrid(props: DataGridProps = {}) {
 
   const visibleColumns = table.getVisibleLeafColumns();
   const specById = useMemo(() => new Map(columns.map((c) => [c.id, c])), [columns]);
-  const specs = visibleColumns.map((c) => specById.get(c.id)).filter((c): c is ColumnSpec => !!c);
+  const specs = useStableArray(
+    visibleColumns.map((c) => specById.get(c.id)).filter((c): c is ColumnSpec => !!c),
+  );
   // 항목 flexes into the pane width; nothing shrinks (a narrow grid hides default columns by
   // priority instead, see autoHidden). Widths the user dragged stay as dragged.
   // Spare width goes to the long-text columns by weight (항목 · 경로 · URL · 대상 …, C-D7); a
   // column the user resized keeps its width.
-  const widths = fitColumnWidths(
-    visibleColumns.map((c) =>
-      c.id === "flags" && flagsNarrow && columnSizing.flags === undefined
-        ? (specById.get("flags")?.minWidth ?? c.getSize())
-        : c.getSize(),
+  const widths = useStableArray(
+    fitColumnWidths(
+      visibleColumns.map((c) =>
+        c.id === "flags" && flagsNarrow && columnSizing.flags === undefined
+          ? (specById.get("flags")?.minWidth ?? c.getSize())
+          : c.getSize(),
+      ),
+      {
+        grow: columnSizing.title === undefined ? specs.findIndex((s) => s.id === "title") : -1,
+        available: paneWidth - SELECT_COL_WIDTH - HEAD_TOOLS_WIDTH,
+        weights: specs.map((s) => (columnSizing[s.id] === undefined ? growWeight(s) : 0)),
+        // Too wide for the pane: shrink toward the same minimums the priority hiding counted
+        // (a width the user dragged stays as dragged).
+        mins: specs.map((s) => columnSizing[s.id] ?? fitMinWidth(s)),
+      },
     ),
-    {
-      grow: columnSizing.title === undefined ? specs.findIndex((s) => s.id === "title") : -1,
-      available: paneWidth - SELECT_COL_WIDTH - HEAD_TOOLS_WIDTH,
-      weights: specs.map((s) => (columnSizing[s.id] === undefined ? growWeight(s) : 0)),
-      // Too wide for the pane: shrink toward the same minimums the priority hiding counted
-      // (a width the user dragged stays as dragged).
-      mins: specs.map((s) => columnSizing[s.id] ?? fitMinWidth(s)),
-    },
   );
   // Publish the shown column ids (the meta tab's "기본 열에 이미 표시됩니다" checks them).
   const visibleSig = specs.map((s) => s.id).join("\n");
@@ -743,12 +765,14 @@ export function DataGrid(props: DataGridProps = {}) {
   const totalWidth = SELECT_COL_WIDTH + widths.reduce((sum, w) => sum + w, 0) + HEAD_TOOLS_WIDTH;
   // Sticky columns: the first data column, plus the title after a pinned AXIOM chip column.
   const stickyCount = preset === "axiom" && specs[0]?.id === AXIOM_PINNED && specs.length > 1 ? 2 : 1;
-  const lefts: (number | undefined)[] = [];
+  const leftsNow: (number | undefined)[] = [];
   let stickyLeft = SELECT_COL_WIDTH;
   widths.forEach((w, i) => {
-    lefts.push(i < stickyCount ? stickyLeft : undefined);
+    leftsNow.push(i < stickyCount ? stickyLeft : undefined);
     stickyLeft += w;
   });
+  const lefts = useStableArray(leftsNow);
+  const cellEpoch = `${currentTimezone()}|${catalog.version}`;
   const stickyWidth = widths.slice(0, stickyCount).reduce((sum, w) => sum + w, 0);
 
   const displayRows = compactMode ? table.getRowModel().rows.map((r) => r.original) : EMPTY_ROWS;
@@ -1187,22 +1211,27 @@ export function DataGrid(props: DataGridProps = {}) {
     setMenuAnchor({ x: rect.left, y: rect.bottom, top: rect.top });
   }, []);
 
-  const onToggleCheckbox = useCallback(
-    (index: number, checked: boolean, range: boolean) => {
-      if (range && anchorRef.current !== null) {
-        const keys = rangeKeys(anchorRef.current, index);
-        const next = new Set(selectedKeys);
-        for (const key of keys) {
-          if (checked) next.add(key);
-          else next.delete(key);
-        }
-        anchorRef.current = index;
-        setSelectionKeys([...next]);
-        return;
+  // Rows get one stable handler (the memoized rows must not all re-render when the selection
+  // changes); it runs the latest toggle, which reads the current selection.
+  const toggleCheckbox = (index: number, checked: boolean, range: boolean) => {
+    if (range && anchorRef.current !== null) {
+      const keys = rangeKeys(anchorRef.current, index);
+      const next = new Set(selectedKeys);
+      for (const key of keys) {
+        if (checked) next.add(key);
+        else next.delete(key);
       }
-      toggleAt(index, checked);
-    },
-    [toggleAt, rangeKeys, selectedKeys, setSelectionKeys],
+      anchorRef.current = index;
+      setSelectionKeys([...next]);
+      return;
+    }
+    toggleAt(index, checked);
+  };
+  const toggleCheckboxRef = useRef(toggleCheckbox);
+  toggleCheckboxRef.current = toggleCheckbox;
+  const onToggleCheckbox = useCallback(
+    (index: number, checked: boolean, range: boolean) => toggleCheckboxRef.current(index, checked, range),
+    [],
   );
 
   // `/` focuses the filter (not while typing somewhere else).
@@ -1985,6 +2014,7 @@ export function DataGrid(props: DataGridProps = {}) {
                     menuId={menuId}
                     onToggle={onToggleCheckbox}
                     ariaRowOffset={headRows + 1}
+                    cellEpoch={cellEpoch}
                   />
                 );
               })}
