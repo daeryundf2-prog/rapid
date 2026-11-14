@@ -5,6 +5,7 @@
  */
 
 import type { AnalysisKind } from "../../api/analyses";
+import { CARVE_KINDS } from "./kinds";
 
 const MB = 1024 * 1024;
 
@@ -52,29 +53,8 @@ export type FormValue = string | boolean | string[];
 export type AnalysisFormState = Record<string, FormValue>;
 export type AnalysisFormErrors = Record<string, string>;
 
-export const CARVE_KINDS: Choice[] = [
-  { id: "jpeg", label: "JPEG" },
-  { id: "png", label: "PNG" },
-  { id: "gif", label: "GIF" },
-  { id: "pdf", label: "PDF" },
-  { id: "zip", label: "ZIP" },
-  { id: "7z", label: "7z" },
-  { id: "rar", label: "RAR" },
-  { id: "sqlite", label: "SQLite" },
-  // R3 §3.3 (core/carving.py SIGNATURE_KINDS).
-  { id: "wav", label: "WAV 오디오" },
-  { id: "mp3", label: "MP3 오디오" },
-  { id: "m4a", label: "M4A 오디오" },
-  { id: "mp4", label: "MP4 동영상" },
-  { id: "docx", label: "Word(DOCX)" },
-  { id: "xlsx", label: "Excel(XLSX)" },
-  { id: "pptx", label: "PowerPoint(PPTX)" },
-  { id: "hwp", label: "한글(HWP)" },
-  { id: "hwpx", label: "한글(HWPX)" },
-  { id: "eml", label: "이메일(EML)" },
-  { id: "pe", label: "실행 파일(PE)" },
-  { id: "evtx", label: "이벤트 로그(EVTX)" },
-];
+// Lives in kinds.ts so the tree / filter model read it without this form module (T-116).
+export { CARVE_KINDS };
 
 export const VSC_STATUSES: Choice[] = [
   { id: "deleted", label: "삭제됨" },

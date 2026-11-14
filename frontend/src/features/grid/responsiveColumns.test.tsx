@@ -3,7 +3,8 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetArtifactCountsCache } from "../../api/collections";
 import { useAppStore } from "../../state/store";
-import { FALLBACK_CATALOG, setCatalog } from "../flags/catalog";
+import { setCatalog } from "../flags/catalog";
+import { FALLBACK_CATALOG } from "../flags/familiesFallback";
 import { flaggedRowsSummary, flagsColumnSparse, flagsHeaderHint } from "../flags/flags";
 import { useGridLocalStore } from "./adapter";
 import { DataGrid } from "./DataGrid";
