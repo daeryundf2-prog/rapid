@@ -385,7 +385,7 @@ def profile_collector(
         profiler.create_stats()
         seconds, top = bucket_stats(pstats.Stats(profiler).stats)  # type: ignore[arg-type]
         profiled = sum(seconds.values())
-        row["profiled_s"] = round(profiled, 2)
+        row["profiled_s"] = round(profiled, 4)
         row["profiled_share_of_wall"] = round(profiled / wall, 3) if wall > 0 else 0.0
         row["buckets_s"] = {bucket: round(value, 2) for bucket, value in seconds.items()}
         row["bucket_share"] = {bucket: round(value / profiled, 3) if profiled > 0 else 0.0 for bucket, value in seconds.items()}
