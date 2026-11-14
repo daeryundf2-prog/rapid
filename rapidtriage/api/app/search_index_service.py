@@ -420,7 +420,7 @@ class ReviewMarks:
         """Never silently wrong: past ``REVIEW_MARK_LIMIT`` marks the response says so."""
         if not self.truncated:
             return
-        message = f"리뷰 표시가 {REVIEW_MARK_LIMIT:,}건을 넘어 최근 {REVIEW_MARK_LIMIT:,}건만 반영했습니다"
+        message = f"검토 표시가 {REVIEW_MARK_LIMIT:,}건을 넘어 최근 {REVIEW_MARK_LIMIT:,}건만 반영했습니다"
         query = result.get("query") if isinstance(result.get("query"), dict) else {}
         parsed = query.get("parsed") if isinstance(query.get("parsed"), dict) else {}
         warnings = parsed.get("warnings")

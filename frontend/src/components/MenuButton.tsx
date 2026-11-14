@@ -43,7 +43,7 @@ export interface MenuItem {
   onSelect: () => void;
   /** Rule above the item. */
   separator?: boolean;
-  /** Section heading above the item (e.g. "리뷰", "원본"); implies a rule unless it is first. */
+  /** Section heading above the item (e.g. "검토", "원본"); implies a rule unless it is first. */
   section?: string;
 }
 

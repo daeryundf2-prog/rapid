@@ -697,7 +697,7 @@ describe("미디어 탐색기 패널", () => {
 
 // --- review fixes (R4 console) ---------------------------------------------------------------
 
-describe("탐색기 리뷰 수정", () => {
+describe("탐색기 검토 수정", () => {
   function renderFs() {
     renderWithClient(
       <FsExplorerLayout>

@@ -3,7 +3,7 @@
  * the viewer header:
  *  - ONE review-status chip "미검토 ▾" (dot + text): its menu sets 관련 · 재검토 · 제외 · 보고서 포함 ·
  *    북마크 (a checked status un-presses);
- *  - one "⋯" menu (더보기): 리뷰 (메모 · 메모 기록 · 태그 관리) · 태그 전파 (one entry, plus one per
+ *  - one "⋯" menu (더보기): 검토 (메모 · 메모 기록 · 태그 관리) · 태그 전파 (one entry, plus one per
  *    tag only when that differs) · 원본 (원본 열기 · 해시/경로/인용 복사 · 같은 출처의 다른 행) · 피벗.
  * Every entry is a view of a registered Command (same ids as before), so the palette, the key
  * map and this menu run the same code; key hints come from the registry.
@@ -306,7 +306,7 @@ export function ViewerToolbar({
       label: "메모…",
       command: "viewer.note",
       icon: "message",
-      section: "리뷰",
+      section: "검토",
       disabledReason: noteReason,
       onSelect: () => setNoteOpen(true),
     },
@@ -384,12 +384,12 @@ export function ViewerToolbar({
       <div className="viewer-actions">
         {/* One review-status chip with its menu (C-W9): "미검토 ▾", not a toggle + a second chip. */}
         <MenuButton
-          label={`리뷰 상태: ${currentLabel}`}
+          label={`검토 상태: ${currentLabel}`}
           items={statusItems}
           triggerClassName="viewer-status-trigger"
           onDisabled={(reason) => announce(reason)}
           testId="viewer-review-status-menu"
-          title={`리뷰 상태: ${currentLabel} — 눌러서 바꾸기`}
+          title={`검토 상태: ${currentLabel} — 눌러서 바꾸기`}
         >
           <span
             className="status-chip viewer-status"

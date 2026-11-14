@@ -251,7 +251,7 @@ describe("조건 줄 (visual-polish S1/S2, viewer-families U-F1)", () => {
     fireEvent.click(screen.getByRole("button", { name: /^조건/ }));
     expect(screen.queryByLabelText("시작 시각")).toBeNull();
     fireEvent.keyDown(screen.getByRole("dialog", { name: "조건" }), { key: "Escape" });
-    const status = screen.getByRole("combobox", { name: "리뷰 상태" }) as HTMLSelectElement;
+    const status = screen.getByRole("combobox", { name: "검토 상태" }) as HTMLSelectElement;
     expect(status.value).toBe("relevant");
     fireEvent.change(status, { target: { value: "excluded" } });
     expect(onReviewStatus).toHaveBeenCalledWith("excluded");
@@ -266,7 +266,7 @@ describe("조건 줄 (visual-polish S1/S2, viewer-families U-F1)", () => {
 
   it("보고 toolbar: export kind + search; the kind is the type filter, shown as 종류", () => {
     bar({ variant: "report", kindOptions: ["보고서", "아티팩트"] });
-    expect(screen.queryByRole("combobox", { name: "리뷰 상태" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "검토 상태" })).toBeNull();
     const kind = screen.getByRole("combobox", { name: "종류" }) as HTMLSelectElement;
     expect(Array.from(kind.options).map((o) => o.textContent)).toEqual(["전체", "보고서", "아티팩트"]);
     fireEvent.change(kind, { target: { value: "아티팩트" } });

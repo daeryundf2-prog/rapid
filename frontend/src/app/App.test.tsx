@@ -124,7 +124,7 @@ describe("App shell", () => {
       "theme-toggle",
       "help-button",
     ]);
-    // 리뷰보드 / 보고 are rail stages; density lives in the grid's column menu.
+    // 검토 목록 / 보고 are rail stages; density lives in the grid's column menu.
     for (const gone of ["review-board-button", "report-button", "density-toggle"])
       expect(screen.queryByTestId(gone)).toBeNull();
   });

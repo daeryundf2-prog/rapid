@@ -192,7 +192,7 @@ export const REVIEW_ROWS: ReadonlyArray<Omit<ReviewSummaryRow, "count">> = [
     color: "var(--status-report, #a58bf0)",
     status: "include-in-report",
   },
-  { key: "bookmark", label: "리뷰보드 항목(북마크)", color: "var(--status-bookmark, #3fb96f)" },
+  { key: "bookmark", label: "검토 목록 항목(북마크)", color: "var(--status-bookmark, #3fb96f)" },
 ];
 
 export function reviewSummary(review: ReviewCounts | undefined): { rows: ReviewSummaryRow[]; total: number } {

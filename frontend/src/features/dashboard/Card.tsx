@@ -21,7 +21,7 @@ export interface CardLayout {
 
 /**
  * v1 card id → v2 card id. Merged cards (증거 목록 + 증거 소스, 처리 문제 + 공개 사항, 케이스 메모 +
- * 요약 노트, 리뷰 + 내보내기) map several old ids to one; the removed 처리 설정 스냅샷 maps to none.
+ * 요약 노트, 검토 + 내보내기) map several old ids to one; the removed 처리 설정 스냅샷 maps to none.
  */
 export const LEGACY_CARD_MAP: Record<string, string | null> = {
   "case-info": "case-info",

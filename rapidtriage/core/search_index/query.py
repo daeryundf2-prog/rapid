@@ -90,7 +90,7 @@ FIELD_LABELS = {
     "gap": "빈 구간", "hash": "해시", "md5": "MD5", "sha1": "SHA-1", "sha256": "SHA-256", "hashset": "해시 세트",
     "path": "경로", "ext": "확장자", "extset": "확장자 묶음", "size": "크기", "deleted": "삭제됨", "mismatch": "시그니처 불일치",
     "archive": "압축 내부", "under": "폴더 아래", "author": "작성자", "savedby": "마지막 저장자", "template": "템플릿",
-    "review": "리뷰 상태", "tag": "태그", "note": "메모", "bookmark": "북마크", "analysis": "분석",
+    "review": "검토 상태", "tag": "태그", "note": "메모", "bookmark": "북마크", "analysis": "분석",
     "eventid": "이벤트 ID", "provider": "제공자", "channel": "채널",
     "pre": "순서 근접", "list": "검색 목록", "lang": "언어",
     "rrn": "주민등록번호", "corpno": "법인등록번호", "card": "카드번호", "bizno": "사업자등록번호", "phone": "전화번호",

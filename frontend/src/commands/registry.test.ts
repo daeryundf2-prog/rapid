@@ -170,8 +170,8 @@ describe("built-in commands", () => {
 describe("fuzzyScore", () => {
   it("matches subsequences, prefers substrings, rejects misses", () => {
     expect(fuzzyScore("", "아무거나")).toBe(0);
-    expect(fuzzyScore("리뷰", "이동: 리뷰보드")).not.toBeNull();
-    expect(fuzzyScore("ㅁ", "이동: 리뷰보드")).toBeNull();
+    expect(fuzzyScore("검토", "이동: 검토 목록")).not.toBeNull();
+    expect(fuzzyScore("ㅎ", "이동: 검토 목록")).toBeNull();
     const substring = fuzzyScore("time", "이동: 타임라인 navigate.timeline") ?? 0;
     const scattered = fuzzyScore("tmln", "이동: 타임라인 navigate.timeline") ?? 0;
     expect(substring).toBeGreaterThan(scattered);

@@ -2,7 +2,7 @@
 /**
  * 행(카드) 보기 (r4 §2.3, AXIOM 행 보기): a virtualised list of row cards — title (the row's
  * representative value), 유형 — 계열 subtitle, key time and source path, the date right-aligned
- * in bold, 특이사항 / 리뷰 / 태그 chips, and inline actions (인용 · 원본 열기 · 북마크) that show
+ * in bold, 특이사항 / 검토 / 태그 chips, and inline actions (인용 · 원본 열기 · 북마크) that show
  * on hover and keyboard focus.
  *
  * A11y: `role="list"` of `role="listitem"` cards (aria-setsize / aria-posinset, since only the

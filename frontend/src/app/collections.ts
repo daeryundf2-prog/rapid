@@ -10,7 +10,7 @@ export const COLLECTION_NODES: ReadonlyArray<{ id: CollectionId; label: string; 
   { id: "artifacts", label: "아티팩트", icon: "layers" },
   { id: "timeline", label: "타임라인", icon: "clock" },
   { id: "indicators", label: "IOC/위험", icon: "shield" },
-  { id: "review", label: "리뷰보드", icon: "list" },
+  { id: "review", label: "검토 목록", icon: "list" },
   { id: "outputs", label: "산출물", icon: "package" },
   { id: "process", label: "처리", icon: "cpu" },
   { id: "derived", label: "통합 보기", icon: "link" },

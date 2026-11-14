@@ -389,7 +389,7 @@ export function CategoryCard({
   );
 }
 
-// --- 검토·보고서 (리뷰 상태 + 내보내기 이력) -------------------------------------------
+// --- 검토·보고서 (검토 상태 + 내보내기 이력) -------------------------------------------
 
 export function ReviewCard({
   rows,
@@ -400,10 +400,10 @@ export function ReviewCard({
 }) {
   const empty = rows.every((row) => row.count === 0);
   return (
-    <section className="dash-section" aria-label="리뷰 상태">
-      <h3 className="dash-subhead">리뷰 상태</h3>
+    <section className="dash-section" aria-label="검토 상태">
+      <h3 className="dash-subhead">검토 상태</h3>
       <div className="dash-scroll">
-        <table className="data-table dash-table" aria-label="리뷰 상태별 건수">
+        <table className="data-table dash-table" aria-label="검토 상태별 건수">
           <tbody>
             {rows.map((row) => (
               <tr key={row.key}>
@@ -412,7 +412,7 @@ export function ReviewCard({
                     type="button"
                     className="dash-link"
                     onClick={() => onOpenStatus(row.status)}
-                    aria-label={`${row.label} ${n(row.count)}건 리뷰보드에서 열기`}
+                    aria-label={`${row.label} ${n(row.count)}건 검토 목록에서 열기`}
                   >
                     <span className="dash-chip" style={{ background: row.color }} aria-hidden="true" />
                     {row.label}
@@ -597,7 +597,7 @@ export function StartCard({ onGo }: { onGo: (target: "search" | "artifacts" | "r
     {
       target: "review" as const,
       icon: "bookmark" as const,
-      label: "리뷰보드",
+      label: "검토 목록",
       hint: "표시한 항목을 상태별로 검토합니다",
     },
   ];

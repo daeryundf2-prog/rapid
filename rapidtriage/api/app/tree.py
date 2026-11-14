@@ -556,7 +556,7 @@ def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
     if derived_node is not None:
         nodes.append(derived_node)
 
-    # --- 문서 / 타임라인 / 지표 / 리뷰 선별 / 검증 이슈 -----------------------
+    # --- 문서 / 타임라인 / 지표 / 검토 목록 / 검증 이슈 -----------------------
     docs_count = int(counts.get("docs") or 0)
     document_candidates = int(counts.get("document_candidates") or 0)
     if docs_count or document_candidates:
@@ -602,7 +602,7 @@ def build_run_tree(store: RunJobStore, run_id: str) -> dict[str, Any]:
     nodes.append(tree_search_node(job, run_id))
 
     bookmark_count = _case_bookmark_count(store, run_id)
-    nodes.append(_node("review", "리뷰 선별", bookmark_count, collection="review"))
+    nodes.append(_node("review", "검토 목록", bookmark_count, collection="review"))
 
     issue_count = int(counts.get("validation_issues") or 0)
     nodes.append(_node("issues", "검증 이슈", issue_count, collection="issues"))
