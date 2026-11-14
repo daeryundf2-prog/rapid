@@ -221,9 +221,10 @@ def evidence_record_lines(metadata: Mapping[str, object]) -> list[str]:
         ]
         count = record.get("segment_count")
         if segments or (isinstance(count, int) and not isinstance(count, bool) and count):
-            shown = min(len(segments), SEGMENT_ROW_LIMIT)
-            total = count if isinstance(count, int) and not isinstance(count, bool) and count else len(segments)
-            cut = f" (표에는 앞 {shown}개만 적음)" if len(segments) > shown else ""
+            segment_rows_total = len(segments)
+            segment_rows_truncated = segment_rows_total > SEGMENT_ROW_LIMIT
+            total = count if isinstance(count, int) and not isinstance(count, bool) and count else segment_rows_total
+            cut = f" (표 상한 {SEGMENT_ROW_LIMIT}개까지만 적음, 나머지 행은 잘림)" if segment_rows_truncated else ""
             lines.append(f"- {number} 세그먼트 수: {total:,}개{cut}")
         if segments and container_sha:
             lines.append(f"- {number} 컨테이너 SHA-256(세그먼트 파일을 순서대로 이은 바이트): {md_code(container_sha)}")

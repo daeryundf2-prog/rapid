@@ -236,7 +236,7 @@ class KoreanExpertReportTests(unittest.TestCase):
         record = {**_e01_record(), "segments": segments, "segment_count": 60}
         evidence = _section(_report(evidence_records=[record]), "### 2.1 감정 대상 증거", "### 2.2")
         self.assertEqual(len([line for line in evidence.splitlines() if line.startswith("| E-01 |")]), 20)
-        self.assertIn("- E-01 세그먼트 수: 60개 (표에는 앞 20개만 적음)", evidence)
+        self.assertIn("- E-01 세그먼트 수: 60개 (표 상한 20개까지만 적음, 나머지 행은 잘림)", evidence)
 
     def test_no_raw_identifiers_in_body(self) -> None:
         """Acceptance ⑥: no English id tokens outside code spans anywhere in the 감정서."""
