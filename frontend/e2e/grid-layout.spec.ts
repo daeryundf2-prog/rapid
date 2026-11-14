@@ -88,7 +88,10 @@ for (const width of [1920, 1600]) {
   });
 }
 
-test("1920 · 파일 목록: no sideways scroll; path cells always hold the file name (C-D8)", async ({
+// T-171 (r8-tasks WB-6, r8 C.9.1): the files list 경로 cell shows the in-evidence PARENT FOLDER
+// only — the 이름 column names the file — tail first; its tooltip holds the whole in-evidence path.
+// (Before T-171 the cell held the whole path incl. the file name: R7 C-D8.)
+test("1920 · 파일 목록: no sideways scroll; 경로 = in-evidence folder, 이름 = the file (T-171, C-D8)", async ({
   page,
 }) => {
   await guard(page);
@@ -98,19 +101,34 @@ test("1920 · 파일 목록: no sideways scroll; path cells always hold the file
   await expect
     .poll(async () => scroll.evaluate((el) => el.scrollWidth - el.clientWidth))
     .toBeLessThanOrEqual(1);
-  const pairs = await page.evaluate(() =>
-    [...document.querySelectorAll('[role="grid"] [role="row"][data-index]')].slice(0, 40).map((row) => ({
-      name: (row.querySelector('[data-col="title"]') as HTMLElement | null)?.innerText ?? "",
-      path: (row.querySelector('[data-col="path"]') as HTMLElement | null)?.innerText ?? "",
-      title: (row.querySelector('[data-col="path"] span[title]') as HTMLElement | null)?.title ?? "",
-    })),
+  const rows = await page.evaluate(() =>
+    [...document.querySelectorAll('[role="grid"] [role="row"][data-index]')].slice(0, 40).map((row) => {
+      const cell = row.querySelector('[data-col="path"]') as HTMLElement | null;
+      return {
+        name: (row.querySelector('[data-col="title"]') as HTMLElement | null)?.innerText ?? "",
+        recovered: Boolean(cell?.querySelector('[data-testid="path-cell-recovered"]')),
+        text: (cell?.querySelector(".mid-path-text") as HTMLElement | null)?.innerText ?? "",
+        tail: (cell?.querySelector(".mid-path-tail") as HTMLElement | null)?.innerText ?? "",
+        title: (cell?.querySelector(".mid-path[title]") as HTMLElement | null)?.title ?? "",
+      };
+    }),
   );
-  expect(pairs.length).toBeGreaterThan(0);
-  for (const pair of pairs) {
-    if (!pair.title) continue;
-    const fileName = pair.title.split(/[\\/]/).pop() ?? "";
-    expect(pair.path).toContain(fileName);
+  expect(rows.length).toBeGreaterThan(0);
+  let checked = 0;
+  for (const row of rows) {
+    if (!row.title || row.recovered) continue;
+    const segments = row.title.split(/[\\/]/);
+    const fileName = segments.pop() ?? "";
+    const folder = row.title.slice(0, row.title.length - fileName.length).replace(/[\\/]$/, "");
+    // The 이름 column names the file; the 경로 cell is exactly its folder, the folder name last.
+    expect(row.name).toContain(fileName);
+    expect(row.text).toBe(folder);
+    expect(row.tail).toBe(segments.pop() ?? "");
+    // Never the result-folder prefix of an image run (T-171 acceptance).
+    expect(row.title).not.toMatch(/[\\/]_e01[\\/]fs[\\/]/i);
+    checked += 1;
   }
+  expect(checked).toBeGreaterThan(0);
   await page.screenshot({ path: join(SHOTS, "l2-1920-files.png") });
 });
 

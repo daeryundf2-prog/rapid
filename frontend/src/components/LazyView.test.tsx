@@ -1,4 +1,4 @@
-// T-116: lazy screens — the Korean loading status, render after the chunk resolves, a Korean retry
+// T-116: lazy screens — the Korean loading text, render after the chunk resolves, a Korean retry
 // message (not a blank pane) when the chunk fails, a fresh import on 다시 시도, and render errors of
 // the loaded screen left to the region boundary.
 import { act, fireEvent, render, screen } from "@testing-library/react";
@@ -33,16 +33,19 @@ class Catch extends Component<{ children: ReactNode }, { error: Error | null }> 
 afterEach(() => vi.restoreAllMocks());
 
 describe("lazyView", () => {
-  it("shows 불러오는 중 (role=status) until the chunk resolves, then the screen with its props", async () => {
+  it("shows 불러오는 중 (aria-busy, no live region of its own) until the chunk resolves, then the screen", async () => {
     const chunk = deferred<typeof Hello>();
     const LazyHello = lazyView("인사 보기", () => chunk.promise);
-    render(<LazyHello name="세계" />);
-    const status = screen.getByRole("status");
-    expect(status.textContent).toContain("인사 보기 불러오는 중");
-    expect(status.getAttribute("aria-live")).toBe("polite");
+    const { container } = render(<LazyHello name="세계" />);
+    const loading = screen.getByTestId("lazy-view-loading");
+    expect(loading.textContent).toContain("인사 보기 불러오는 중");
+    expect(loading.getAttribute("aria-busy")).toBe("true");
+    // a11y rule 9: the app root's LiveRegion is the one polite region; a fallback adds none.
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(container.querySelector("[aria-live]")).toBeNull();
     await act(async () => chunk.resolve(Hello));
     expect(await screen.findByText("안녕 세계")).toBeTruthy();
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByTestId("lazy-view-loading")).toBeNull();
   });
 
   it("a failed chunk shows a Korean retry message, and 다시 시도 imports again", async () => {

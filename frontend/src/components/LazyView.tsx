@@ -32,15 +32,15 @@ export class ChunkLoadError extends Error {
   }
 }
 
-/** The Suspense fallback of every lazy screen. */
+/**
+ * The Suspense fallback of every lazy screen. Not a live region: the app mounts exactly one polite
+ * region (`LiveRegion`), and a second `role=status` while a chunk loads broke that rule (a11y
+ * rule 9 — e2e review-tools Q-X10 / a11y saw "live-polite 2" whenever the viewer's 이미지 chunk
+ * was still loading). The visible text says what is loading; `aria-busy` marks the pane.
+ */
 export function LazyFallback({ label }: { label: string }) {
   return (
-    <div
-      className="pane-empty lazy-view-loading"
-      role="status"
-      aria-live="polite"
-      data-testid="lazy-view-loading"
-    >
+    <div className="pane-empty lazy-view-loading" aria-busy="true" data-testid="lazy-view-loading">
       {label} 불러오는 중…
     </div>
   );
