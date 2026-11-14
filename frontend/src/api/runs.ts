@@ -164,6 +164,19 @@ export interface RunJob extends RunListItem {
   /** T-348/D37: why nothing is written for this run (see `shell/readOnly.ts`); null when writable. */
   readonly_reason?: string | null;
   error?: string;
+  /** Exception class of a failed run (e.g. `OutputDiskFull` = OUTPUT_DISK_FULL, T-352). */
+  error_type?: string | null;
+  /** T-186: disk free-space advice attached to a run-start response (`POST /api/runs`, retry). */
+  preflight_space?: PreflightSpace | null;
+}
+
+/** `preflight_space` of a run-start response (`api/app/preflight_space.py`; fields the console reads). */
+export interface PreflightSpace {
+  level?: "ok" | "warn" | "block" | "unknown" | string | null;
+  code?: string | null;
+  message?: string | null;
+  estimated_bytes?: number | null;
+  free_bytes?: number | null;
 }
 
 export interface CanonicalCounts {

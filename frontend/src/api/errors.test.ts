@@ -7,6 +7,7 @@ import {
   isAbortError,
   isGenericMessage,
   NETWORK_UNREACHABLE,
+  partialBatchCounts,
   REQUEST_ABORTED,
   REQUEST_TIMEOUT,
 } from "./errors";
@@ -78,6 +79,32 @@ describe("apiErrorFromBody — D.7 envelope", () => {
     expect(error.code).toBe("OUTPUT_INSIDE_EVIDENCE");
     expect(error.message).toBe("출력 위치가 증거 경로 안입니다");
     expect(error.hint).toMatch(HANGUL);
+  });
+});
+
+describe("apiErrorFromBody — partly applied batch (review WB-10/11 P2-16)", () => {
+  it("names applied_count/total_count of a 409 batch in the message", () => {
+    const error = apiErrorFromBody(409, {
+      code: "CASE_DB_BATCH_PARTIAL",
+      message: "일괄 표시가 중간에 실패했습니다.",
+      detail: {
+        code: "CASE_DB_BATCH_PARTIAL",
+        message: "일괄 표시가 중간에 실패했습니다.",
+        applied_count: 1000,
+        total_count: 2500,
+      },
+    });
+    expect(error.message).toBe("일괄 표시가 중간에 실패했습니다. (저장됨 1,000/2,500행)");
+    expect(error.code).toBe("CASE_DB_BATCH_PARTIAL");
+    expect(partialBatchCounts(error.detail)).toEqual({ applied: 1000, total: 2500 });
+  });
+
+  it("a refusal that saved nothing has no count", () => {
+    const error = apiErrorFromBody(409, {
+      detail: { code: "CASE_DB_LOCKED", message: "잠겨 있어 저장하지 못했습니다" },
+    });
+    expect(error.message).toBe("잠겨 있어 저장하지 못했습니다");
+    expect(partialBatchCounts({ applied_count: 0, total_count: 5 })).toBeNull();
   });
 });
 

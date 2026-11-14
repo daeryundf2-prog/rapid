@@ -14,6 +14,7 @@ import { RUNS_QUERY_KEY, type RunPlanCountsCompact, type RunWithProgress } from 
 import { COLLECTION_NODES, runDisplayName } from "../app/collections";
 import { useToastStore } from "../components/toastStore";
 import type { Command, CommandContext } from "../contracts/command";
+import { showPreflightSpace } from "../features/case/preflightSpace";
 import { conditionsCommand } from "../features/filters/conditionPanel";
 import { useViewPrefs } from "../features/review/viewPrefs";
 import { treeEmptyCommand } from "../features/tree/treePrefs";
@@ -442,6 +443,7 @@ export function caseCommands(queryClient: QueryClient): Command[] {
         store().navigate({ runId: job.run_id, collection: "process" });
       }
       announce(message);
+      showPreflightSpace(job);
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) throw new Error(RETRY_CONFLICT_MESSAGE);
       throw error;

@@ -56,6 +56,7 @@ import { disclosureDigest, disclosureItems, runWarnings, stepLabelKo } from "../
 import { stepCountsText } from "../dashboard/model";
 import { formatCount } from "../grid/gridUtils";
 import { isLegacyPlan, planSummaryText, RunPlanTable } from "./RunPlanTable";
+import { runFailureReason } from "./runFailure";
 import { missingDurationText, stepStatusLabel, stepWarningLabel } from "./stepLabels";
 import { useNow } from "./useNow";
 import "../analysis/analysis.css";
@@ -700,6 +701,7 @@ export function ProcessPage() {
   // still "대기") or that has none: say so instead of showing 23 waiting groups (C-G1).
   const legacyPlan = layout === "results" && (Boolean(plan.data && isLegacyPlan(plan.data)) || planMissing);
   const completedAt = run ? runCompletedAt(run) : null;
+  const failure = runFailureReason(run);
   return (
     <section
       className="stage-page"
@@ -746,6 +748,15 @@ export function ProcessPage() {
                 처리 단계 count line (T-022). */}
             <dt>수집기 오류</dt>
             <dd>{run.progress?.error_count ?? 0}</dd>
+            {failure ? (
+              <>
+                <dt>실패 사유</dt>
+                <dd data-testid="process-run-failure" data-disk-full={failure.diskFull ? "true" : undefined}>
+                  <b>{failure.title}</b> — {failure.text}
+                  {failure.hint ? <span className="process-run-note is-warn"> · {failure.hint}</span> : null}
+                </dd>
+              </>
+            ) : null}
           </dl>
         ) : (
           <p className="analysis-desc">런 정보를 불러오는 중…</p>
