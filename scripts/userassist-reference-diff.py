@@ -4,9 +4,21 @@
 # dependencies = ["regipy>=6.0.0"]
 # ///
 # --- How to run ---
-#   uv run scripts/userassist-reference-diff.py --ntuser <NTUSER.DAT> --output <report.json> --json
+#   Export mode (T-207; no extra dependencies):
+#     python scripts/userassist-reference-diff.py --ours <run>/artifacts/<execution per-kind output .json or JSONL> \
+#         --reference <RECmd/Registry Explorer UserAssist CSV | generic CSV> --output <report.json> --json
+#   Hive mode (decoder check):
+#     uv run scripts/userassist-reference-diff.py --ntuser <NTUSER.DAT> --output <report.json> --json
 #
-# Compares RapidTriage's native UserAssist decode
+# Export mode diffs RapidTriage `userassist-schema-entry` rows against a dedicated
+# parser's CSV. Key = account + decoded (ROT13) name, case-insensitive; our row is also
+# found by its resolved executable/display path, for tools that expand known-folder
+# GUIDs. Compares run count and last-run time (UTC, second precision). The account comes
+# from an account/user column or the hive path (Users/<name>/NTUSER.DAT) and leaves the
+# key when either side has none. Shared loader/diff/report:
+# rapidtriage/validation/reference_diff.py. Exit 0 clean, 1 differences, 2 input error.
+#
+# Hive mode compares RapidTriage's native UserAssist decode
 # (userassist-schema-entry records: ROT13 names + Win7/XP binary
 # layouts) against regipy's UserAssistPlugin on the same NTUSER.DAT.
 #
@@ -30,6 +42,7 @@ if hasattr(_sys.stderr, "reconfigure"):
 import argparse
 import hashlib
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +52,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from rapidtriage.artifacts.windows.execution import build_native_userassist_records
+from rapidtriage.validation import reference_diff as rd
 
 
 def _canon_name(value: object) -> str:
@@ -101,7 +115,7 @@ def trusted_side(path: Path) -> dict[str, object]:
     return {"rows": rows, "raw_count": len(plugin.entries)}
 
 
-def main(argv: list[str] | None = None) -> int:
+def hive_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ntuser", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
@@ -177,6 +191,91 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"-> {args.output}")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Export mode (T-207)
+# ---------------------------------------------------------------------------
+
+USERASSIST_ARTIFACT_TYPES = ("userassist-schema-entry",)
+REF_NAME = ("programname", "decodedname", "name", "program", "path")
+REF_COUNT = ("runcounter", "runcount", "count", "executioncount")
+REF_TIME = ("lastexecuted", "lastrun", "lastruntime", "lastexecution", "lastexecutedutc", "timestamp")
+REF_ACCOUNT = ("account", "user", "username", "profile", "usersid", "sid")
+REF_HIVE = ("hivepath", "sourcefile", "hive", "source", "sourcepath")
+_PROFILE_RE = re.compile(r"(?:^|/)(?:users|documents and settings)/([^/]+)/ntuser\.dat$")
+
+
+def account_name(explicit: object, hive_path: object) -> str:
+    """Explicit account, else the profile folder of ``.../Users/<name>/NTUSER.DAT``; ``""`` when unknown."""
+    text = rd.normalize_text(explicit)
+    if text:
+        return text
+    match = _PROFILE_RE.search(rd.normalize_path(hive_path))
+    return match.group(1) if match else ""
+
+
+def program_key(value: object) -> str:
+    return rd.normalize_text(str(value or "").strip().strip('"').replace("/", "\\").rstrip("\\"))
+
+
+def assist_row(account: str, names: list[object], count: int | None, last_run: object) -> rd.KeyedRow:
+    canon = [key for key in dict.fromkeys(program_key(name) for name in names) if key]
+    return rd.KeyedRow(
+        keys=[f"{account}|{name}" for name in canon],
+        fields={"run_count": count, "last_run": last_run},
+        label={"account": account, "name": canon[0], "run_count": count, "last_run": last_run},
+    )
+
+
+def build_userassist_comparison(args: argparse.Namespace, warnings: list[str]) -> rd.Comparison:
+    table, header = rd.read_table(args.reference)
+    rd.require_columns(header, args.reference, name=REF_NAME)
+    tool = "RECmd / Registry Explorer UserAssist (CSV)" if {"programname", "runcounter"} <= set(header) else "generic UserAssist CSV"
+    reference: list[rd.KeyedRow] = []
+    for line, row in enumerate(table, start=2):
+        name = rd.pick(row, *REF_NAME)
+        if not name:
+            rd.add_warning(warnings, f"기준 {line}행에 프로그램 이름이 없어 건너뛰었습니다")
+            continue
+        stamp = rd.safe_timestamp(rd.pick(row, *REF_TIME), args.reference_tzinfo, warnings, f"기준 {line}행")
+        account = account_name(rd.pick(row, *REF_ACCOUNT), rd.pick(row, *REF_HIVE))
+        reference.append(assist_row(account, [name], rd.parse_int(rd.pick(row, *REF_COUNT)), stamp))
+    ours: list[rd.KeyedRow] = []
+    for row in rd.iter_rapid_rows(args.ours, USERASSIST_ARTIFACT_TYPES, warnings):
+        names = [rd.rapid_field(row, name) for name in ("decoded_name", "executable_path", "display_path", "name")]
+        if not any(names):
+            continue
+        account = account_name(
+            rd.rapid_field(row, "account", "user", "user_name", "username"),
+            rd.rapid_field(row, "source_path", "path"),
+        )
+        stamp = rd.safe_timestamp(rd.rapid_field(row, "timestamp", "last_run"), args.ours_tzinfo, warnings, "우리 UserAssist 행")
+        count = rd.parse_int(rd.rapid_field(row, "run_counter", "run_count"))
+        ours.append(assist_row(account, names, count, stamp))
+    key_fields = ["account", "decoded_name"]
+    if rd.drop_blank_key_part(ours, reference, 0):
+        key_fields = ["decoded_name"]
+        rd.add_warning(warnings, "한쪽에 계정 값이 없어 키에서 계정을 뺐습니다")
+    return rd.Comparison(
+        ours=ours,
+        reference=reference,
+        reference_tool=tool,
+        key_fields=key_fields,
+        compared_fields=["run_count", "last_run"],
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if any(item == "--ntuser" or item.startswith("--ntuser=") for item in argv):
+        return hive_main(argv)
+    return rd.run_comparison_cli(
+        argv,
+        comparison="userassist",
+        description="Diff RapidTriage userassist-schema-entry rows against a UserAssist parser CSV (key = account + name).",
+        build=build_userassist_comparison,
+    )
 
 
 if __name__ == "__main__":
