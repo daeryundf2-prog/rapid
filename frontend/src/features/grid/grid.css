@@ -946,3 +946,28 @@
   border-left-color: var(--warn);
   background: color-mix(in srgb, var(--warn) 10%, var(--surface-1));
 }
+
+/* Data rows (T-203 perf): no `background: inherit` on the body cells. Explicit inheritance keeps
+   Chrome from reusing computed styles between elements (matched-properties cache), and the cells
+   of every row scrolled in paid a full style computation (≈ 2/3 of the per-frame style time).
+   Scrolling cells sit on their row's opaque background, so they need none; the sticky cells
+   repeat the row's background for each .grid-row state (base · selected · hover). Kept last in
+   the file, after every .grid-cell rule. */
+.grid-body .grid-row:not(.grid-row-loading) > .grid-cell {
+  background: none;
+}
+
+.grid-body .grid-row:not(.grid-row-loading) > .grid-cell-select,
+.grid-body .grid-row:not(.grid-row-loading) > .grid-cell-first {
+  background: var(--bg);
+}
+
+.grid-body .grid-row.is-selected:not(.grid-row-loading) > .grid-cell-select,
+.grid-body .grid-row.is-selected:not(.grid-row-loading) > .grid-cell-first {
+  background: var(--bg-selected);
+}
+
+.grid-body .grid-row:hover:not(.is-selected, .grid-row-loading) > .grid-cell-select,
+.grid-body .grid-row:hover:not(.is-selected, .grid-row-loading) > .grid-cell-first {
+  background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg);
+}

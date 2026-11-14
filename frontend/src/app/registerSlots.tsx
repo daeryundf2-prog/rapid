@@ -10,7 +10,7 @@ import { AnalysisProgressChip } from "../features/analysis/AnalysisProgressChip"
 import { useCaseDialogs } from "../features/case/dialogs";
 import { stageOf } from "../router";
 import { registerSlot, type SlotProps } from "../shell/slots";
-import { useRoute } from "../state/hooks";
+import { useAppStore } from "../state/store";
 import { connectGridToShell } from "./gridBridge";
 import { IntakePane } from "./IntakePane";
 // T-116: every pane is a lazy chunk; the case list (Landing) needs none of them.
@@ -31,9 +31,11 @@ import { connectViewerToShell } from "./viewerBridge";
 
 /** S4 tree for the routed case; an explicit empty state otherwise. */
 function TreeSlot() {
-  const { route } = useRoute();
-  if (route.runId) {
-    switch (stageOf(route)) {
+  // Only what picks the panel: a new `row=` (each J/K in the grid) must not re-render the tree.
+  const runId = useAppStore((s) => s.route.runId);
+  const stage = useAppStore((s) => (s.route.runId ? stageOf(s.route) : null));
+  if (runId) {
+    switch (stage) {
       case "process":
         return <ProcessPanel />;
       case "review":
@@ -42,7 +44,7 @@ function TreeSlot() {
         return <ReportPanel />;
       default:
         // 접수 and 탐색: the domain tree (증거 소스 first).
-        return <EvidenceTree runId={route.runId} />;
+        return <EvidenceTree runId={runId} />;
     }
   }
   return (
@@ -57,16 +59,17 @@ function TreeSlot() {
 
 /** 접수 shows the case summary; every other collection is the one DataGrid. */
 function GridSlot() {
-  const { route } = useRoute();
+  // Only the routed collection picks the pane (a new `row=` must not re-render it).
+  const collection = useAppStore((s) => (s.route.runId ? s.route.collection : undefined));
   // 분석 작업 nodes: header + history + the one DataGrid over the selected job's rows.
-  if (route.runId && route.collection === "analysis") return <AnalysisPane />;
+  if (collection === "analysis") return <AnalysisPane />;
   // 통합 보기 (axiom-adoption §3.2): derived tables + original rows, not the DataGrid.
-  if (route.runId && route.collection === "derived") return <DerivedPane />;
+  if (collection === "derived") return <DerivedPane />;
   // 레지스트리 탐색기 (r4 §2.2): hive → key tree + value table, its own pane.
-  if (route.runId && route.collection === "registry") return <RegistryExplorer />;
-  if (route.runId && route.collection === "process") return <ProcessPage />;
-  if (route.runId && route.collection === "outputs") return <ReportPage />;
-  if (route.runId && route.collection === "intake") return <IntakePane />;
+  if (collection === "registry") return <RegistryExplorer />;
+  if (collection === "process") return <ProcessPage />;
+  if (collection === "outputs") return <ReportPage />;
+  if (collection === "intake") return <IntakePane />;
   return <ExploreGrid />;
 }
 

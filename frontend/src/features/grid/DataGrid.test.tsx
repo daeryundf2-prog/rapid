@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useToastStore } from "../../components/toastStore";
 import type { GridRow } from "../../contracts/collection";
 import type { CommandContext } from "../../contracts/command";
+import { useAppStore } from "../../state/store";
 import { getRegisteredCommand, useGridLocalStore } from "./adapter";
 import { DataGrid } from "./DataGrid";
 import { applyReviewAction } from "./reviewActions";
@@ -164,6 +165,33 @@ describe("DataGrid ARIA", () => {
     await waitFor(() =>
       expect(screen.getByTestId("grid-scope-banner").textContent).toMatch(/정렬·필터는 불러온 행 기준/),
     );
+  });
+});
+
+describe("DataGrid memoized rows (T-203 perf)", () => {
+  it("time cells follow a display timezone change although the rows keep their identity", async () => {
+    useAppStore.setState({ timezone: "utc" });
+    try {
+      await renderFiles(40);
+      const cell = () => rowAt(0).querySelector<HTMLElement>('[data-col="timestamp"]')?.textContent ?? "";
+      const utc = cell();
+      expect(utc).toContain("12:00:00");
+      act(() => useAppStore.setState({ timezone: "Asia/Seoul" }));
+      await waitFor(() => expect(cell()).toContain("21:00:00"));
+      expect(cell()).not.toBe(utc);
+    } finally {
+      useAppStore.setState({ timezone: null });
+    }
+  });
+
+  it("J re-renders only the rows whose focus changed (row elements are kept)", async () => {
+    await renderFiles(40);
+    fireEvent.mouseDown(rowAt(2), { button: 0 });
+    await waitFor(() => expect(focusedRows()[0]?.getAttribute("data-index")).toBe("2"));
+    const before = rowAt(5);
+    fireEvent.keyDown(rowAt(2), { key: "j" });
+    await waitFor(() => expect(focusedRows()[0]?.getAttribute("data-index")).toBe("3"));
+    expect(rowAt(5)).toBe(before);
   });
 });
 
