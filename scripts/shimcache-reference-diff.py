@@ -231,7 +231,7 @@ def build_shimcache_comparison(args: argparse.Namespace, warnings: list[str]) ->
         if order is None or not path:
             rd.add_warning(warnings, f"기준 {line}행에 순번이나 경로가 없어 건너뛰었습니다")
             continue
-        stamp = rd.safe_timestamp(rd.pick(row, *REF_TIME), args.reference_tzinfo, warnings, f"기준 {line}행")
+        stamp = rd.safe_timestamp(rd.pick(row, *REF_TIME), args.reference_tzinfo, warnings, f"기준 {line}행", "last_modified")
         reference.append(shim_row(control_set_number(rd.pick(row, *REF_CONTROL_SET)), order, path, stamp))
     ours: list[rd.KeyedRow] = []
     for row in rd.iter_rapid_rows(args.ours, SHIMCACHE_ARTIFACT_TYPES, warnings):
@@ -239,7 +239,7 @@ def build_shimcache_comparison(args: argparse.Namespace, warnings: list[str]) ->
         path = rd.rapid_field(row, "executable_path", "path")
         if order is None or not path:
             continue
-        stamp = rd.safe_timestamp(rd.rapid_field(row, "timestamp", "last_modified"), args.ours_tzinfo, warnings, f"우리 순번 {order}")
+        stamp = rd.safe_timestamp(rd.rapid_field(row, "timestamp", "last_modified"), args.ours_tzinfo, warnings, f"우리 순번 {order}", "last_modified")
         ours.append(shim_row(control_set_number(rd.rapid_field(row, "control_set")), order, path, stamp))
     key_fields = ["control_set", "cache_order", "path"]
     if rd.drop_blank_key_part(ours, reference, 0):

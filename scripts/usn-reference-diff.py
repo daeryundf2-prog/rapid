@@ -262,7 +262,7 @@ def build_usn_comparison(args: argparse.Namespace, warnings: list[str]) -> rd.Co
         if usn is None:
             rd.add_warning(warnings, f"기준 {line}행에 USN 번호가 없어 건너뛰었습니다")
             continue
-        stamp = rd.safe_timestamp(rd.pick(row, *REF_TIME), args.reference_tzinfo, warnings, f"기준 {line}행")
+        stamp = rd.safe_timestamp(rd.pick(row, *REF_TIME), args.reference_tzinfo, warnings, f"기준 {line}행", "timestamp")
         keyed = usn_row(usn, rd.pick(row, *REF_NAME), stamp, rd.pick(row, *REF_REASON), rd.pick(row, *REF_ENTRY))
         reference.append(keyed)
         reference_reasons[keyed.keys[0]] = keyed.fields["reasons"]  # type: ignore[assignment]
@@ -271,7 +271,7 @@ def build_usn_comparison(args: argparse.Namespace, warnings: list[str]) -> rd.Co
         usn = rd.parse_int(rd.rapid_field(row, "usn"))
         if usn is None:
             continue
-        stamp = rd.safe_timestamp(rd.rapid_field(row, "timestamp"), args.ours_tzinfo, warnings, f"우리 USN {usn}")
+        stamp = rd.safe_timestamp(rd.rapid_field(row, "timestamp"), args.ours_tzinfo, warnings, f"우리 USN {usn}", "timestamp")
         ours.append(
             usn_row(
                 usn,

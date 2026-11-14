@@ -88,7 +88,7 @@ def build_shellbags_comparison(args: argparse.Namespace, warnings: list[str]) ->
             continue
         account = account_name(rd.pick(row, *REF_ACCOUNT), rd.pick(row, *REF_HIVE), rd.pick(row, *REF_SID))
         times = {
-            name: rd.safe_timestamp(rd.pick(row, *aliases), args.reference_tzinfo, warnings, f"기준 {line}행")
+            name: rd.safe_timestamp(rd.pick(row, *aliases), args.reference_tzinfo, warnings, f"기준 {line}행", name)
             for name, aliases in REF_TIMES.items()
         }
         reference.append(bag_row(account, path, times))
@@ -103,7 +103,7 @@ def build_shellbags_comparison(args: argparse.Namespace, warnings: list[str]) ->
             rd.rapid_field(row, "user_sid"),
         )
         times = {
-            name: rd.safe_timestamp(rd.rapid_field(row, field), args.ours_tzinfo, warnings, "우리 ShellBags 행")
+            name: rd.safe_timestamp(rd.rapid_field(row, field), args.ours_tzinfo, warnings, "우리 ShellBags 행", name)
             for name, field in OURS_TIMES.items()
         }
         ours.append(bag_row(account, path, times))

@@ -79,6 +79,45 @@ class UsbReferenceDiffTests(ReferenceDiffCase):
     def test_missing_input_exits_2(self) -> None:
         self.assert_missing_input_exit_2(write_csv(self.tmp / "present.csv", HEADER, DEVICES))
 
+    def test_review_experiment_times_are_read_and_differ(self) -> None:
+        # WB-12 review P1-3: these used to be skipped silently (recall 1.0, 0 mismatched, exit 0).
+        serial, name = DEVICES[0][0], DEVICES[0][1]
+        ours = [ours_row(serial, name, "2024-03-01T00:00:00+00:00", "2024-03-05T10:00:00+00:00")]
+        code, report, _ = self._diff(ours, [(serial, name, "2023-01-01 오후 3:04:05", "05-Mar-2019 10:00:00")])
+        self.assertEqual(code, 1)
+        self.assertEqual(report["unparsed_time_count"], 0)
+        self.assertEqual(report["field_mismatch_counts"], {"first_connected": 1, "last_connected": 1})
+
+    def test_unreadable_reference_time_is_counted_and_not_clean(self) -> None:
+        serial, name, first, last = DEVICES[0]
+        code, report, _ = self._diff([ours_row(*DEVICES[0])], [(serial, name, "어제 오후쯤", last)])
+        self.assertEqual(code, 1)
+        self.assertEqual(report["status"], "unparsed-time")
+        self.assertEqual(report["recall"], 1.0)
+        self.assertEqual(report["mismatched"], [])
+        self.assertEqual(report["unparsed_time_count"], 1)
+        self.assertEqual(report["unparsed_time_fields"], {"reference": {"first_connected": 1}, "ours": {}})
+        self.assertEqual(report["unparsed_time_uncompared"], 1)
+
+    def test_ambiguous_slashed_date_warns_and_date_order_decides(self) -> None:
+        serial, name = DEVICES[0][0], DEVICES[0][1]
+        ours = [ours_row(serial, name, "2024-04-03T10:00:00+00:00", "2024-04-03T10:00:00+00:00")]
+        reference = [(serial, name, "03/04/2024 10:00:00", "03/04/2024 10:00:00")]
+        code, report, _ = self._diff(ours, reference)
+        self.assertEqual(code, 1)  # read as 4 March (tool default mdy)
+        self.assertEqual(report["ambiguous_date_count"], 2)
+        self.assertEqual(report["settings"]["date_order_source"], "tool-default")
+        self.assertTrue(any("--date-order" in item for item in report["warnings"]))
+        code, report, _ = self._diff(ours, reference, "--date-order", "dmy")
+        self.assertEqual((code, report["status"], report["ambiguous_date_count"]), (0, "clean", 0))
+        self.assertEqual(report["settings"]["date_order"], "dmy")
+
+    def test_empty_reference_exits_2(self) -> None:
+        code, report, stderr = self._diff([ours_row(*d) for d in DEVICES], [])
+        self.assertEqual(code, 2)
+        self.assertIn("기준 행 0개 — 비교 불가", stderr)
+        self.assertEqual((report["status"], report["recall"]), ("no-reference", None))
+        self.assertEqual(report["inputs"]["reference"]["encoding"], "utf-8")
 
 if __name__ == "__main__":
     unittest.main()

@@ -65,7 +65,7 @@ def mail_time(value: object, default_tz: dt.tzinfo, warnings: list[str], context
             return (stamp if stamp.tzinfo else stamp.replace(tzinfo=default_tz)).astimezone(dt.timezone.utc)
         except (TypeError, ValueError, IndexError):
             pass
-    return rd.safe_timestamp(value, default_tz, warnings, context)
+    return rd.safe_timestamp(value, default_tz, warnings, context, "date")
 
 
 def message_row(message_id: object, sender: object, subject: object, date: object, count: int) -> rd.KeyedRow:

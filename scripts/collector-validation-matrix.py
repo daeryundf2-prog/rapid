@@ -21,8 +21,10 @@ Relative paths resolve against ``base_dir`` (itself relative to the inputs file)
 
 Each corpus cell is ``pass`` (통과), ``fail`` (미달, with the numbers) or ``not_measured``
 (미측정 — <사유>): no inputs config, corpus or row not configured, an explicit reason, a
-missing reference/our file, a script input error (exit 2) or a missing dependency, or a
-metric the report could not compute (e.g. an empty reference). A row is ``pass`` only when
+missing reference/our file, a script input error (exit 2), a reference with 0 comparable rows
+("기준 행 0개 — 비교 불가") or a missing dependency, or a metric the report could not compute.
+A report whose time values could not be read in a key or compared field
+(``unparsed_time_uncompared`` > 0) is ``fail`` (미달) whatever its recall. A row is ``pass`` only when
 every requested corpus passes, ``fail`` when any corpus fails, otherwise ``not_measured``.
 
 Writes ``collector-validation-matrix.json`` and ``.md`` (plus each script's report under
@@ -284,12 +286,21 @@ def run_cell_run(run: Mapping[str, object], argv: Sequence[str], report_path: Pa
     except Exception as exc:  # a crash in one cell must not stop the table
         raise NotMeasured(f"대조 스크립트 오류: {type(exc).__name__}: {str(exc)[:160]}") from exc
     result["exit_code"] = code
-    if code == 2 or not report_path.is_file():
+    report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.is_file() else None
+    if isinstance(report, Mapping) and report.get("status") == "no-reference":
+        # WB-12 P1-4: an empty reference is not a clean result; nothing was compared.
+        raise NotMeasured("기준 행 0개 — 비교 불가")
+    if code == 2 or report is None:
         reason = _last_line(stderr.getvalue()) or f"보고서가 만들어지지 않음(종료 {code})"
         raise NotMeasured(f"대조 스크립트 입력 오류(종료 {code}): {reason}")
-    report = json.loads(report_path.read_text(encoding="utf-8"))
     result["report"] = str(report_path)
     result["checks"] = [evaluate_check(report, check) for check in run["checks"]]
+    unread = report.get("unparsed_time_uncompared") if isinstance(report, Mapping) else None
+    if isinstance(unread, int) and not isinstance(unread, bool) and unread > 0:
+        # WB-12 P1-3: a time that could not be read was not compared -- the pass line is not met.
+        result["checks"].append(
+            {"metric": "unparsed_time_uncompared", "op": "==", "threshold": 0, "value": unread, "ok": False}
+        )
     return result
 
 
