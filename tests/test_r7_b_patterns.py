@@ -194,11 +194,20 @@ class GuardTests(unittest.TestCase):
             "1." * 200_000,
             ("010-1234-5678 " * 30_000),
         ]
-        for row in rows:
+        def cost(text: str) -> float:
             started = time.perf_counter()
-            find_entities(row)
-            mask_sensitive(row)
-            self.assertLess(time.perf_counter() - started, 3.0, row[:20])
+            find_entities(text)
+            mask_sensitive(text)
+            return time.perf_counter() - started
+
+        # Linear, not "fast on this machine": a shared CI runner ran the 420 KB phone row in 5.6 s
+        # where a desk PC takes 0.55 s. Doubling the row must not much more than double the time
+        # (quadratic backtracking would quadruple it); the absolute cap only catches a hang.
+        for row in rows:
+            half = cost(row[: len(row) // 2])
+            full = cost(row)
+            self.assertLess(full, 3.0 * half + 0.25, f"{row[:20]!r}: half {half:.2f}s, full {full:.2f}s")
+            self.assertLess(full, 30.0, row[:20])
 
     def test_scan_cap_bounds_a_row(self) -> None:
         row = "010-1234-5678 " * 50_000
