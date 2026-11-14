@@ -1,11 +1,13 @@
 """``rapidtriage audit-verify <file> [--json]``: check an export audit chain (R8 T-359).
 
 Calls the T-029 check (``core.audit.verify_audit_chain``). Exit 0 when the chain is intact
-(R7-format lines written before the chain existed are counted as ``pre_chain_lines`` /
-``unchecked_lines``, not broken), exit 3 with ``first_broken_line`` when a line was changed,
-removed, cut from the head or cannot be read, and also exit 3 (``status: unverifiable``) when
-nothing chained could be checked (no record, no chained record in a chain-era file, a sidecar
-without its history); exit 4 when the file is missing or cannot be read (r8-contracts D.8).
+and at least one chained line was checked (R7-format lines written before the chain existed
+are counted as ``pre_chain_lines`` / ``unchecked_lines``, not broken), exit 3 with
+``first_broken_line`` when a line was changed, removed, cut from the head or cannot be read,
+and also exit 3 (``status: unverifiable``) when nothing chained could be checked (no record,
+zero chained records — an all-R7 file or sidecar, a lone ``{"command": "export"}`` line — or a
+chained sidecar without its history; R8 WB-13 review P1-1); exit 4 when the file is missing or
+cannot be read (r8-contracts D.8).
 ``--expect-last <sha256>`` compares the last ``record_sha256`` with a value kept elsewhere; without
 it the output lists what the check cannot prove (``not_proven``: tail deletion, whole rewrite).
 """
