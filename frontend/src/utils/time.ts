@@ -6,14 +6,33 @@ export interface FormatOptions {
   precision?: "date" | "minute" | "second" | "ms";
 }
 
+// Building an Intl.DateTimeFormat costs ~0.1–1 ms (locale + zone data), and a grid time cell asks
+// for several per render (zone check, wall clock, the zone label's offsets): every grid row scrolled
+// in or re-rendered paid that (T-203 perf). Formatters and zone checks are cached per zone; the
+// output is the same.
+const ZONE_CACHE_MAX = 64;
+const zoneValidity = new Map<string, boolean>();
+const wallClockFormats = new Map<string, Intl.DateTimeFormat>();
+let browserZone: string | null = null;
+
+function remember<V>(cache: Map<string, V>, key: string, value: V): V {
+  if (cache.size >= ZONE_CACHE_MAX) cache.clear();
+  cache.set(key, value);
+  return value;
+}
+
 export function isValidTimezone(tz: string): boolean {
   if (tz === "utc" || tz === "local") return true;
+  const known = zoneValidity.get(tz);
+  if (known !== undefined) return known;
+  let valid: boolean;
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: tz });
-    return true;
+    valid = true;
   } catch {
-    return false;
+    valid = false;
   }
+  return remember(zoneValidity, tz, valid);
 }
 
 /** Parse ISO text (naive text counts as UTC), epoch seconds or a Date; null when invalid. */
@@ -39,17 +58,31 @@ function zoneOf(tz: string): string | undefined {
   return isValidTimezone(tz) ? tz : "UTC";
 }
 
+function wallClockFormat(tz: string): Intl.DateTimeFormat {
+  const timeZone = zoneOf(tz);
+  // "" = the browser's zone (no timeZone option).
+  const key = timeZone ?? "";
+  return (
+    wallClockFormats.get(key) ??
+    remember(
+      wallClockFormats,
+      key,
+      new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        hourCycle: "h23",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }),
+    )
+  );
+}
+
 function wallClock(date: Date, tz: string): Record<string, number> {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: zoneOf(tz),
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).formatToParts(date);
+  const parts = wallClockFormat(tz).formatToParts(date);
   const out: Record<string, number> = {};
   for (const p of parts) if (p.type !== "literal") out[p.type] = Number(p.value);
   return out;
@@ -132,11 +165,14 @@ const ZONE_ABBR: Record<string, [string, string?]> = {
 export function zoneName(tz: TimezoneChoice): string {
   if (tz === "utc") return "UTC";
   if (tz === "local") {
-    try {
-      return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-    } catch {
-      return "UTC";
+    if (browserZone === null) {
+      try {
+        browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      } catch {
+        browserZone = "UTC";
+      }
     }
+    return browserZone;
   }
   return isValidTimezone(tz) ? tz : "UTC";
 }

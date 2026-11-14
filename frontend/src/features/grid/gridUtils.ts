@@ -86,8 +86,11 @@ export function backendLabel(backend: string): string {
   }
 }
 
+// One formatter: `toLocaleString("ko-KR")` builds a new Intl.NumberFormat on every call (same output).
+const COUNT_FORMAT = new Intl.NumberFormat("ko-KR");
+
 export function formatCount(n: number): string {
-  return n.toLocaleString("ko-KR");
+  return COUNT_FORMAT.format(n);
 }
 
 /** The one aria-live sentence: "{n}건 · {backend} · {ms}ms". */
