@@ -5,7 +5,19 @@
 # ///
 # --- How to run ---
 #   uv run scripts/srum-reference-diff.py --srudb <SRUDB.dat> --output <report.json> --json
+#   python scripts/srum-reference-diff.py --ours <records.jsonl> --reference <csv folder> --output <report.json> --json
 #
+# Mode 2 (T-210, --ours/--reference): compares RapidTriage SRUM and
+# Windows Search JSONL records against a folder of per-table CSVs written
+# by an ESE parser (SrumECmd, an ESE table dump, ...). One CSV per table;
+# the table name comes from the file name (``<date>_SrumECmd_`` prefix and
+# ``_Output`` suffix dropped; well-known SRUM table GUIDs are mapped to
+# their names). Per table: row counts and the multiset of keys
+# app id + timestamp (UTC seconds). Report keys: tables[].recall,
+# missing_tables, reference_tool (+ recall, matched, missing, mismatched,
+# extra_tables). Exit 2 when an input is missing. Needs no dissect.esedb.
+#
+# Mode 1 (--srudb):
 # Compares RapidTriage's native ESE decode (ese_native.py: header,
 # catalog, page/tag/node walk, fixed/variable/tagged record fields)
 # against dissect.esedb's independent row decode on the same SRUDB.dat.
@@ -33,9 +45,11 @@ import argparse
 import datetime
 import hashlib
 import json
+import re
 import struct
 import sys
 from collections import Counter
+from datetime import timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -44,6 +58,9 @@ if str(REPO_ROOT) not in sys.path:
 
 from rapidtriage.artifacts.windows.ese_native import EseDatabase
 from rapidtriage.artifacts.windows.srum_ese import decode_srudb_ese_catalog
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _wc5_helpers as H
 
 MAX_COMPARE_ROWS_PER_TABLE = 250_000
 
@@ -164,8 +181,8 @@ def trusted_side(path: Path) -> dict[str, object]:
     return {"tables": tables, "idmap": idmap, "table_errors": table_errors}
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+def ese_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="RapidTriage native ESE decode vs dissect.esedb on one SRUDB.dat")
     parser.add_argument("--srudb", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--json", action="store_true")
@@ -269,6 +286,192 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"-> {args.output}")
     return 0
+
+
+# --- mode 2: RapidTriage JSONL vs per-table reference CSV folder (T-210) -----
+
+SRUM_TABLE_NAMES = {
+    # Well-known SRUM extension table GUIDs -> canonical names.
+    "973f5d5c1d904944be8e24b94231a174": "network_usage",
+    "d10ca2fe6fcf4f6d848eb2e99266fa89": "app_resource_usage",
+    "dd6636c489294683974e22c046a43763": "network_connectivity",
+    "fee4e14f02a94550b5ce5fa2da202e37": "energy_usage",
+    "fee4e14f02a94550b5ce5fa2da202e37lt": "energy_usage_long_term",
+    "d10ca2fe6fcf4f6d848eb2e99266fa86": "push_notifications",
+    "5c8cf1c772574f13b223970ef5939312": "app_timeline",
+    "7acbbaa3d0294be49a7a0885927f1d8f": "vfu",
+    # Tool / RapidTriage spellings -> canonical names.
+    "networkusage": "network_usage",
+    "networkusages": "network_usage",
+    "networkdatausage": "network_usage",
+    "srumnetworkusage": "network_usage",
+    "appresourceuseinfo": "app_resource_usage",
+    "appresourceusage": "app_resource_usage",
+    "applicationresourceusage": "app_resource_usage",
+    "srumappresourceusage": "app_resource_usage",
+    "networkconnections": "network_connectivity",
+    "networkconnectivity": "network_connectivity",
+    "energyusage": "energy_usage",
+    "energyusages": "energy_usage",
+    "energyusagelongterm": "energy_usage_long_term",
+    "energyusageslongterm": "energy_usage_long_term",
+    "pushnotification": "push_notifications",
+    "pushnotifications": "push_notifications",
+    "apptimelineprovider": "app_timeline",
+    "vfuprov": "vfu",
+}
+TABLE_OURS = ("table_name", "srum_table", "table", "source_table", "table_family")
+APP_OURS = ("app_id", "executable_path", "app_name", "application", "item_path", "work_id")
+APP_REF = (
+    "ExeInfo", "Exe Info", "Application", "AppName", "App Name", "AppId", "App Id", "app_id",
+    "System_ItemPathDisplay", "ItemPathDisplay", "WorkID", "Work Id",
+)
+TS_OURS = ("timestamp", "srum_timestamp", "time_stamp")
+TS_REF = ("Timestamp", "TimeStamp", "Time Stamp", "timestamp", "System_DateModified", "DateModified")
+SAMPLE_CAP = 50
+# File/summary records, not table rows: never counted against a table.
+NON_ROW_TYPES = {
+    "srum-database-file",
+    "srum-database-pivot",
+    "srum-table-candidate",
+    "windows-search-edb-file",
+    "windows-search-db",
+    "windows-search-edb-pivot",
+}
+
+
+def canon_table(name: object) -> str:
+    """Canonical table id: file/table name without tool prefix, suffix and punctuation."""
+    text = Path(str(name or "")).name
+    text = re.sub(r"\.(csv|tsv)$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^\d+_srumecmd_", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"_output$", "", text, flags=re.IGNORECASE)
+    token = re.sub(r"[^0-9a-z]", "", text.casefold())
+    return SRUM_TABLE_NAMES.get(token, token)
+
+
+def _row_key(row, app_aliases, ts_aliases, naive_tz, app_basename: bool) -> str:
+    app = H.norm_path(H.pick(row, app_aliases))
+    if app_basename:
+        app = app.rsplit("\\", 1)[-1]
+    return f"{app}|{H.norm_ts(H.pick(row, ts_aliases), naive_tz)}"
+
+
+def load_reference_tables(folder: Path) -> dict[str, list[dict[str, str]]]:
+    tables: dict[str, list[dict[str, str]]] = {}
+    for path in sorted(folder.iterdir(), key=lambda item: item.name.casefold()):
+        if path.is_file() and path.suffix.lower() in {".csv", ".tsv"}:
+            tables.setdefault(canon_table(path.name), []).extend(H.load_csv(path))
+    if not tables:
+        raise H.InputError(f"--reference folder has no .csv/.tsv tables: {folder}")
+    return tables
+
+
+def compare_tables(ours_rows, reference_tables, naive_tz, *, app_basename: bool = False) -> dict[str, object]:
+    ours_tables: dict[str, list] = {}
+    unassigned = 0
+    for row in ours_rows:
+        if str(row.get("artifact_type") or "") in NON_ROW_TYPES:
+            continue
+        table = canon_table(H.pick(row, TABLE_OURS))
+        if not table or table == "unknown":
+            unassigned += 1
+            continue
+        ours_tables.setdefault(table, []).append(row)
+    table_reports: list[dict[str, object]] = []
+    missing: list[dict[str, str]] = []
+    mismatched: list[dict[str, object]] = []
+    matched_total = 0
+    reference_total = 0
+    for name in sorted(reference_tables):
+        ref_keys = Counter(_row_key(r, APP_REF, TS_REF, naive_tz, app_basename) for r in reference_tables[name])
+        ours_keys = Counter(
+            _row_key(r, APP_OURS, TS_OURS, timezone.utc, app_basename) for r in ours_tables.get(name, [])
+        )
+        shared = sum((ref_keys & ours_keys).values())
+        only_ref = ref_keys - ours_keys
+        only_ours = ours_keys - ref_keys
+        ref_rows = sum(ref_keys.values())
+        ours_rows_n = sum(ours_keys.values())
+        matched_total += shared
+        reference_total += ref_rows
+        table_reports.append(
+            {
+                "name": name,
+                "present_in_ours": name in ours_tables,
+                "reference_rows": ref_rows,
+                "ours_rows": ours_rows_n,
+                "matched": shared,
+                "recall": round(shared / ref_rows, 6) if ref_rows else None,
+                "missing_rows": sum(only_ref.values()),
+                "extra_rows": sum(only_ours.values()),
+                "missing_sample": sorted(only_ref)[:SAMPLE_CAP],
+                "extra_sample": sorted(only_ours)[:SAMPLE_CAP],
+            }
+        )
+        missing.extend({"table": name, "key": key} for key in sorted(only_ref.elements()))
+        if ref_rows != ours_rows_n:
+            mismatched.append({"table": name, "reference_rows": ref_rows, "ours_rows": ours_rows_n})
+    return {
+        "recall": round(matched_total / reference_total, 6) if reference_total else None,
+        "matched": matched_total,
+        "missing": missing[: H.LIST_CAP],
+        "mismatched": mismatched,
+        "missing_tables": sorted(name for name in reference_tables if name not in ours_tables),
+        "extra_tables": sorted(name for name in ours_tables if name not in reference_tables),
+        "tables": table_reports,
+        "counts": {
+            "reference_rows": reference_total,
+            "ours_rows": sum(len(rows) for rows in ours_tables.values()),
+            "matched": matched_total,
+            "missing": reference_total - matched_total,
+            "mismatched": len(mismatched),
+            "ours_rows_without_table": unassigned,
+        },
+        "key": "app id + timestamp (UTC seconds)" + (", app file name only" if app_basename else ""),
+    }
+
+
+def export_main(argv: list[str] | None = None) -> int:
+    parser = H.base_parser(
+        "RapidTriage SRUM/Windows Search JSONL vs per-table ESE parser CSVs "
+        "(--srudb <SRUDB.dat> runs the native-ESE vs dissect.esedb comparison instead)",
+        "ese-parser-csv",
+    )
+    parser.add_argument(
+        "--app-match",
+        choices=("path", "basename"),
+        default="path",
+        help="compare the app id as a full path (default) or as its file name",
+    )
+
+    def body() -> int:
+        args = parser.parse_args(argv)
+        H.require_inputs({"--ours": args.ours, "--reference": args.reference}, directory=("--reference",))
+        naive_tz = H.parse_tz(args.reference_tz)
+        result = compare_tables(
+            H.load_ours(args.ours),
+            load_reference_tables(args.reference),
+            naive_tz,
+            app_basename=args.app_match == "basename",
+        )
+        report = H.envelope(
+            "srum-windows-search", args.reference_tool, {"ours": args.ours, "reference": args.reference}, result
+        )
+        summary = (
+            f"recall={report['recall']} tables={len(result['tables'])} "
+            f"missing_tables={result['missing_tables']} reference_tool={report['reference_tool']}"
+        )
+        return H.emit(report, args.output, args.json, summary)
+
+    return H.run_cli(body)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    if any(arg == "--srudb" or arg.startswith("--srudb=") for arg in args):
+        return ese_main(args)
+    return export_main(args)
 
 
 if __name__ == "__main__":
