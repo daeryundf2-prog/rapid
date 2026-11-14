@@ -1,8 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { AnalysisDialog } from "./AnalysisDialog";
+import { lazyView } from "../../components/LazyView";
 import { registerAnalysisCommands } from "./commands";
 import { useAnalyses, useAnalysisStore } from "./store";
+
+// T-116: the run dialog (form + presets) is a lazy chunk, fetched when a dialog first opens.
+const AnalysisDialog = lazyView("분석 실행", () => import("./AnalysisDialog").then((m) => m.AnalysisDialog));
 
 /**
  * Mount ONCE in the app (next to CaseFeature): registers the analysis.* commands, keeps

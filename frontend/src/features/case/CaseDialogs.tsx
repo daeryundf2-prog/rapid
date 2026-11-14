@@ -40,7 +40,7 @@ import {
   type RunForm,
   validateRunForm,
 } from "./runForm";
-import { summarizeRunRequest } from "./runSummary";
+import { LEVEL_LABEL, summarizeRunRequest } from "./runSummary";
 import {
   CASE_TYPE_SUGGESTIONS,
   type CaseInfoForm,
@@ -666,5 +666,3 @@ export function ProblemsDialog({
     </Modal>
   );
 }
-
-export const LEVEL_LABEL: Record<string, string> = { error: "오류", warning: "경고", notice: "알림" };

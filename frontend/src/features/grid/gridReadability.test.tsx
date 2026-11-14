@@ -18,7 +18,6 @@ import { eventSummaryKo } from "../derived/derivedFields";
 import { artifactTypeLabel, timelineEventTypeLabel } from "../filters/typeLabels";
 import {
   type CatalogFamily,
-  FALLBACK_CATALOG,
   familyForType,
   familyForTypes,
   majorityFamilyForTypes,
@@ -26,6 +25,7 @@ import {
   resetKindTypeCounts,
   setCatalog,
 } from "../flags/catalog";
+import { FALLBACK_CATALOG } from "../flags/familiesFallback";
 import { DOMAINS, flattenDomainNodes } from "../tree/domains";
 import { resolveModes } from "../viewer/modes";
 import { MetaView } from "../viewer/views/MetaView";

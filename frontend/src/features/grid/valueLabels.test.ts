@@ -5,7 +5,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { RunTree } from "../../api/runs";
 import type { GridRow } from "../../contracts/collection";
-import { FALLBACK_CATALOG, familyById, setCatalog } from "../flags/catalog";
+import { familyById, setCatalog } from "../flags/catalog";
+import { FALLBACK_CATALOG } from "../flags/familiesFallback";
 import { barsFromRows, barsFromTree } from "../views/histogram";
 import { uniqueLabels } from "./columns/families";
 import { stripLegacySummaryPrefix } from "./columns/timeline";

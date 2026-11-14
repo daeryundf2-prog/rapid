@@ -13,6 +13,9 @@ export interface SummaryRow {
   value: string;
 }
 
+/** Korean names of a run problem's level (문제 목록 dialog, dashboard 문제 card). */
+export const LEVEL_LABEL: Record<string, string> = { error: "오류", warning: "경고", notice: "알림" };
+
 const yesNo = (value: unknown) => (value ? "예" : "아니오");
 
 /**

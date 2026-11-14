@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AnalysisState } from "../../api/analyses";
 import { avAction, deriveColumn } from "../derived/derivedFields";
 import { hiddenFilterLabel } from "../filters/filterModel";
-import { FALLBACK_CATALOG, setCatalog } from "../flags/catalog";
+import { setCatalog } from "../flags/catalog";
+import { FALLBACK_CATALOG } from "../flags/familiesFallback";
 import {
   analysisCollection,
   analysisFamily,

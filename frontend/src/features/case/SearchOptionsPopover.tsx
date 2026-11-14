@@ -3,16 +3,19 @@ import { type RefObject, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { saveSearch } from "../../api/caseDb";
 import { listKeywordPacks, SEARCH_SOURCES } from "../../api/keywordPacks";
+import { lazyView } from "../../components/LazyView";
 import { Popover } from "../../components/Popover";
 import { Icon } from "../../icons";
 import { ensureRunCaseDb } from "../grid/reviewActions";
-import { EntityPanel } from "./EntityPanel";
 import { ErrorText } from "./ErrorText";
 import { ReasonButton } from "./ReasonButton";
 import { invalidateSavedSearches } from "./savedSearches";
 import { useSearchState } from "./searchState";
 import "./case.css";
 import { useWriteBlock } from "../../shell/readOnly";
+
+// T-116: 개체 패널 is a lazy chunk, fetched the first time it opens.
+const EntityPanel = lazyView("개체 패널", () => import("./EntityPanel").then((m) => m.EntityPanel));
 
 function toggle(list: string[], value: string, on: boolean): string[] {
   return on ? [...list.filter((v) => v !== value), value] : list.filter((v) => v !== value);

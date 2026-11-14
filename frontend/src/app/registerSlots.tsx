@@ -6,23 +6,27 @@
 
 import { useEffect } from "react";
 import { CommandButton } from "../commands/CommandButton";
-import { AnalysisPane } from "../features/analysis/AnalysisPane";
 import { AnalysisProgressChip } from "../features/analysis/AnalysisProgressChip";
 import { useCaseDialogs } from "../features/case/dialogs";
-import { DerivedPane } from "../features/derived/DerivedPane";
-import { FsExplorerLayout, fsExplorerOpen } from "../features/explorers/FsExplorer";
-import { RegistryExplorer } from "../features/explorers/RegistryExplorer";
-import { DataGrid } from "../features/grid/DataGrid";
-import { ProcessPage, ProcessPanel } from "../features/stages/ProcessStage";
-import { ReportPage, ReportPanel, ReviewPanel } from "../features/stages/ReviewReportStage";
-import { EvidenceTree } from "../features/tree/EvidenceTree";
-import { Viewer } from "../features/viewer/Viewer";
 import { stageOf } from "../router";
 import { registerSlot, type SlotProps } from "../shell/slots";
 import { useRoute } from "../state/hooks";
 import { connectGridToShell } from "./gridBridge";
 import { IntakePane } from "./IntakePane";
-import { ViewSwitch } from "./ViewSwitch";
+// T-116: every pane is a lazy chunk; the case list (Landing) needs none of them.
+import {
+  AnalysisPane,
+  DerivedPane,
+  EvidenceTree,
+  ExploreGrid,
+  ProcessPage,
+  ProcessPanel,
+  RegistryExplorer,
+  ReportPage,
+  ReportPanel,
+  ReviewPanel,
+  Viewer,
+} from "./lazyViews";
 import { connectViewerToShell } from "./viewerBridge";
 
 /** S4 tree for the routed case; an explicit empty state otherwise. */
@@ -63,13 +67,7 @@ function GridSlot() {
   if (route.runId && route.collection === "process") return <ProcessPage />;
   if (route.runId && route.collection === "outputs") return <ReportPage />;
   if (route.runId && route.collection === "intake") return <IntakePane />;
-  const grid = (
-    <ViewSwitch>
-      <DataGrid />
-    </ViewSwitch>
-  );
-  // 파일 시스템 탐색기 (r4 §2.2): folder tree beside the grid of the selected folder.
-  return route.runId && fsExplorerOpen(route) ? <FsExplorerLayout>{grid}</FsExplorerLayout> : grid;
+  return <ExploreGrid />;
 }
 
 /** "실행/불러오기" opens S4's run dialog (hosted by CaseFeature). */

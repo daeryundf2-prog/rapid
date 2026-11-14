@@ -1,8 +1,10 @@
 /**
  * Family catalogue (viewer-families plan §3.1/§3.2): `GET /api/meta/families` → per family the
- * core / auxiliary grid columns and the triage rules (특이사항 지표). The console starts with the
- * bundled fallback (families.fallback.json, generated from scripts/families-mock.mjs) and swaps in
- * the server's catalogue once it loads; an older server without the endpoint keeps the fallback.
+ * core / auxiliary grid columns and the triage rules (특이사항 지표). The console swaps in the
+ * server's catalogue once it loads. The bundled fallback (families.fallback.json, generated from
+ * scripts/families-mock.mjs) is a JSON asset of the bundle, not JS (T-116: ~0.3 MB kept out of the
+ * first-screen JS), fetched only when the server has no catalogue (an older server without the
+ * endpoint) — until either arrives no family is claimed (KIND_COLUMNS layout).
  *
  * Contract (D1):
  *   { version, families: [{ id, label, types, kinds?, prefixes?, core_columns, aux_columns, rules }],
@@ -16,7 +18,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useSyncExternalStore } from "react";
 import { api } from "../../api/client";
-import fallbackJson from "./families.fallback.json";
+// The URL of the emitted asset (Vite `?url`), never the parsed object: see loadBundledFallback.
+import fallbackUrl from "./families.fallback.json?url";
 
 export type Grade = "A" | "B" | "C";
 export const GRADES: readonly Grade[] = ["A", "B", "C"];
@@ -290,19 +293,25 @@ export function normalizeCatalog(raw: unknown): FamilyCatalog | null {
   };
 }
 
-export const FALLBACK_CATALOG: FamilyCatalog = normalizeCatalog(fallbackJson) as FamilyCatalog;
-
 export type CatalogSource = "fallback" | "server";
 
-/** A catalogue that claims no family (tests of the KIND_COLUMNS fallback). */
-export const EMPTY_CATALOG_FOR_TESTS: FamilyCatalog = Object.freeze({
+/** A catalogue that claims no family (KIND_COLUMNS layout; in effect until a catalogue loads). */
+const EMPTY_CATALOG: FamilyCatalog = Object.freeze({
   version: "empty",
   families: [],
   rules: [],
 });
 
-/** The catalogue `setCatalog(null)` returns to (tests pin it to the stable mock fixture). */
-let fallback: FamilyCatalog = FALLBACK_CATALOG;
+/** Tests of the KIND_COLUMNS fallback. */
+export const EMPTY_CATALOG_FOR_TESTS: FamilyCatalog = EMPTY_CATALOG;
+
+/**
+ * The catalogue `setCatalog(null)` returns to: empty until the bundled fallback JSON loads
+ * (`loadBundledFallback`); tests pin it to the stable mock fixture.
+ */
+let fallback: FamilyCatalog = EMPTY_CATALOG;
+let fallbackPinned = false;
+let fallbackLoad: Promise<void> | null = null;
 let active: FamilyCatalog = fallback;
 let source: CatalogSource = "fallback";
 const listeners = new Set<() => void>();
@@ -339,7 +348,34 @@ export function setCatalog(next: FamilyCatalog | null, from: CatalogSource = "se
  */
 export function pinFallbackCatalogForTests(next: FamilyCatalog): void {
   fallback = next;
+  fallbackPinned = true;
   setCatalog(null);
+}
+
+/**
+ * Fetch the bundled fallback catalogue (a JSON asset, T-116) once and install it unless the
+ * server's catalogue is already in effect. A failed fetch is retried on the next call.
+ */
+export function loadBundledFallback(): Promise<void> {
+  if (fallbackPinned) return Promise.resolve();
+  fallbackLoad ??= fetch(fallbackUrl)
+    .then((response) => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json() as Promise<unknown>;
+    })
+    .then(
+      (raw) => {
+        const next = normalizeCatalog(raw);
+        if (!next || fallbackPinned) return;
+        fallback = next;
+        if (source === "fallback") setCatalog(null);
+      },
+      (error: unknown) => {
+        fallbackLoad = null;
+        console.warn("기본 계열 목록을 불러오지 못했습니다.", error);
+      },
+    );
+  return fallbackLoad;
 }
 
 export function subscribeCatalog(listener: () => void): () => void {
@@ -469,8 +505,8 @@ export function fetchFamilyCatalog(signal?: AbortSignal): Promise<unknown> {
 }
 
 /**
- * Mounted once by the app: loads the server catalogue (a 404 from an older server keeps the
- * bundled fallback, never an error state on screen).
+ * Mounted once by the app: loads the server catalogue (a 404 from an older server loads the
+ * bundled fallback instead, never an error state on screen).
  */
 export function useFamilyCatalogLoader(enabled = true): void {
   const query = useQuery({
@@ -484,5 +520,9 @@ export function useFamilyCatalogLoader(enabled = true): void {
     if (!query.data) return;
     const next = normalizeCatalog(query.data);
     if (next) setCatalog(next, "server");
+    else void loadBundledFallback();
   }, [query.data]);
+  useEffect(() => {
+    if (query.isError) void loadBundledFallback();
+  }, [query.isError]);
 }

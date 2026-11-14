@@ -49,6 +49,8 @@ import {
   writeClipboard,
 } from "./commands";
 import { targetKey } from "./history";
+// T-116: 헥스 / SQLite / 이미지 are lazy chunks.
+import { HexView, ImageView, SqliteView } from "./lazyModes";
 import { ModeTabs, panelId, tabId, VIEWER_PANEL_ID } from "./ModeTabs";
 import { resolveModes, sqliteRowTarget, visibleModes } from "./modes";
 import { POPOUT_COMMAND_ID } from "./popout/host";
@@ -59,12 +61,9 @@ import { ViewerToolbar } from "./ViewerToolbar";
 import { DocumentView } from "./views/DocumentView";
 import { EmailView } from "./views/EmailView";
 import { FamilyView } from "./views/FamilyView";
-import { HexView } from "./views/HexView";
-import { ImageView } from "./views/ImageView";
 import { MediaView } from "./views/MediaView";
 import { MetaView } from "./views/MetaView";
 import { SourceView } from "./views/SourceView";
-import { SqliteView } from "./views/SqliteView";
 import "./viewer.css";
 
 /** Files up to this size get their SHA-256 computed automatically after load. */

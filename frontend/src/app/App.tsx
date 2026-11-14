@@ -26,7 +26,7 @@ export function App() {
   const runsQuery = useRunsPoll();
   const { route } = useRoute();
   useShortcuts();
-  // Family catalogue (U-F3/U-F4): the bundled fallback until the server's loads.
+  // Family catalogue (U-F3/U-F4): the server's; the bundled fallback JSON only when it has none (T-116).
   useFamilyCatalogLoader(!runsQuery.isError);
   useReviewInvalidation();
   // Tab title: 화면 · 사건 표시명 — RapidTriage, with (n%) / (!) for the run's state (T-169).
