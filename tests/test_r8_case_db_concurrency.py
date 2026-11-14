@@ -159,7 +159,7 @@ class CaseDbConcurrentWriteTests(unittest.TestCase):
         try:
             with (
                 patch.object(write_lock, "BUSY_TIMEOUT_MS", 50),
-                patch.object(write_lock.time, "sleep", side_effect=sleeps.append),
+                patch.object(write_lock, "_sleep", side_effect=sleeps.append),
                 self.assertRaises(CaseDatabaseLockedError) as refused,
             ):
                 CaseDatabase(self.path).mark_review(
@@ -189,7 +189,7 @@ class CaseDbConcurrentWriteTests(unittest.TestCase):
         try:
             with (
                 patch.object(write_lock, "BUSY_TIMEOUT_MS", 50),
-                patch.object(write_lock.time, "sleep", side_effect=release_on_second_wait),
+                patch.object(write_lock, "_sleep", side_effect=release_on_second_wait),
             ):
                 mark = CaseDatabase(self.path).mark_review(
                     case_id=CASE, target_type="file_record", target_id=str(self.ids[0]), status="relevant"
@@ -325,7 +325,7 @@ class WriteTransactionScopeTests(unittest.TestCase):
                 raise failures.pop()
             return original(self_, write=write)
 
-        with patch.object(CaseDatabase, "connect", connect), patch.object(write_lock.time, "sleep"):
+        with patch.object(CaseDatabase, "connect", connect), patch.object(write_lock, "_sleep"):
             with self.assertRaises(sqlite3.OperationalError):
                 CaseDatabase(self.path).mark_review(
                     case_id=CASE, target_type="file_record", target_id=str(self.ids[0]), status="relevant"
@@ -371,7 +371,7 @@ class WriteTransactionScopeTests(unittest.TestCase):
         try:
             with (
                 patch.object(write_lock, "BUSY_TIMEOUT_MS", 50),
-                patch.object(write_lock.time, "sleep"),
+                patch.object(write_lock, "_sleep"),
                 self.assertRaises(CaseDatabaseLockedError),
             ):
                 CaseDatabase(self.path).mark_reviews_batch(case_id=CASE, targets=_targets(self.ids[:3]), status="relevant")
@@ -526,7 +526,7 @@ class LockedCaseDbRouteTests(unittest.TestCase):
         tag_id = self.client.get(f"/api/cases/{CASE}/tags", params={"database": str(self.path)}).json()["tags"][0]["id"]
         blocker = self._locked()
         try:
-            with patch.object(write_lock, "BUSY_TIMEOUT_MS", 50), patch.object(write_lock.time, "sleep"):
+            with patch.object(write_lock, "BUSY_TIMEOUT_MS", 50), patch.object(write_lock, "_sleep"):
                 self.assert_locked_409(self._batch(targets=_targets(self.ids[:3]), add_tags=["X"]))
                 self.assert_locked_409(self._batch(targets=_targets(self.ids[:3]), status="relevant"))
                 self.assert_locked_409(self._batch(targets=_targets(self.ids[:3]), tag_ids=[tag_id]))
@@ -556,14 +556,14 @@ class LockedCaseDbRouteTests(unittest.TestCase):
                 raise sqlite3.OperationalError("database is locked")
             return real(*args, **kwargs)
 
-        with patch.object(routes_review_tools, "create_case_tag", flaky), patch.object(write_lock.time, "sleep"):
+        with patch.object(routes_review_tools, "create_case_tag", flaky), patch.object(write_lock, "_sleep"):
             response = self.client.post(f"/api/cases/{CASE}/tags", params={"database": str(self.path)}, json={"name": "재시도 태그"})
         self.assertEqual(response.status_code, 201, response.text)
         self.assertEqual(len(attempts), 2)
         tag_id = response.json()["tag"]["id"]
         blocker = self._locked()
         try:
-            with patch.object(write_lock, "BUSY_TIMEOUT_MS", 50), patch.object(write_lock.time, "sleep"):
+            with patch.object(write_lock, "BUSY_TIMEOUT_MS", 50), patch.object(write_lock, "_sleep"):
                 self.assert_locked_409(self.client.delete(f"/api/cases/{CASE}/tags/{tag_id}", params={"database": str(self.path)}))
         finally:
             blocker.rollback()
@@ -580,7 +580,7 @@ class LockedCaseDbRouteTests(unittest.TestCase):
         self.client.app.add_api_route("/api/probe/case-db-lock", probe, methods=["POST"])
         blocker = self._locked()
         try:
-            with patch.object(write_lock, "BUSY_TIMEOUT_MS", 50), patch.object(write_lock.time, "sleep"):
+            with patch.object(write_lock, "BUSY_TIMEOUT_MS", 50), patch.object(write_lock, "_sleep"):
                 self.assert_locked_409(self.client.post("/api/probe/case-db-lock"))
         finally:
             blocker.rollback()
@@ -607,7 +607,7 @@ class RetryWhenLockedTests(unittest.TestCase):
             calls.append(1)
             raise sqlite3.OperationalError("no such table: review_mark")
 
-        with patch.object(write_lock.time, "sleep") as sleep, self.assertRaises(sqlite3.OperationalError):
+        with patch.object(write_lock, "_sleep") as sleep, self.assertRaises(sqlite3.OperationalError):
             retry_when_locked(broken)
         self.assertEqual((len(calls), sleep.call_count), (1, 0))
 
@@ -625,7 +625,7 @@ class RetryWhenLockedTests(unittest.TestCase):
                 raise outcome
             return outcome
 
-        with patch.object(write_lock.time, "sleep") as sleep:
+        with patch.object(write_lock, "_sleep") as sleep:
             self.assertEqual(retry_when_locked(flaky, backoff_s=0.1), "ok")
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [0.1, 0.2, 0.4])
 

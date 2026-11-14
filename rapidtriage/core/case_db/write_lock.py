@@ -16,6 +16,10 @@ from typing import ParamSpec, TypeVar
 
 from .base import CaseDatabaseError
 
+#: The back-off wait; tests patch this name (never the global ``time.sleep``, which other
+#: threads in the same process use too).
+_sleep = time.sleep
+
 _P = ParamSpec("_P")
 _T = TypeVar("_T")
 
@@ -125,7 +129,7 @@ def retry_when_locked(write: Callable[[], _T], *, retries: int | None = None, ba
                 raise
             if attempt >= attempts:
                 raise CaseDatabaseLockedError(CASE_DB_LOCKED_MESSAGE) from exc
-            time.sleep(delay * (2**attempt))
+            _sleep(delay * (2**attempt))
     raise AssertionError("unreachable")  # pragma: no cover
 
 
