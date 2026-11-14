@@ -6,7 +6,10 @@
 
 Key = Message-ID (angle brackets dropped, case-insensitive); a message
 without one is keyed by sender + subject + date (UTC whole seconds; RFC 2822
-dates are read too). Compared per message: attachment count and subject.
+dates are read too). ``key_fields`` is therefore ``message_id`` + ``date``: an unread date
+of a message without Message-ID is counted under ``date`` and makes the result not clean
+(R8 WB-13 review P2-8); an unread date of a message with a Message-ID is not part of the key
+and is counted under ``date_not_compared``. Compared per message: attachment count and subject.
 The report adds message and attachment totals on each side and ``match``
 (true only when counts, keys and fields all agree).
 
@@ -57,7 +60,9 @@ def attachment_count(value: object) -> int:
     return len([part for part in text.split(";") if part.strip()])
 
 
-def mail_time(value: object, default_tz: dt.tzinfo, warnings: list[str], context: str) -> dt.datetime | None:
+def mail_time(
+    value: object, default_tz: dt.tzinfo, warnings: list[str], context: str, field: str = "date"
+) -> dt.datetime | None:
     text = str(value or "").strip()
     if text and "," in text[:5]:  # RFC 2822: "Mon, 03 Jun 2024 09:00:00 +0900"
         try:
@@ -65,7 +70,12 @@ def mail_time(value: object, default_tz: dt.tzinfo, warnings: list[str], context
             return (stamp if stamp.tzinfo else stamp.replace(tzinfo=default_tz)).astimezone(dt.timezone.utc)
         except (TypeError, ValueError, IndexError):
             pass
-    return rd.safe_timestamp(value, default_tz, warnings, context, "date")
+    return rd.safe_timestamp(value, default_tz, warnings, context, field)
+
+
+def _date_field(message_id: object) -> str:
+    """``date`` when the date is part of the fallback key (no Message-ID), else ``date_not_compared``."""
+    return "date_not_compared" if str(message_id or "").strip().strip("<>") else "date"
 
 
 def message_row(message_id: object, sender: object, subject: object, date: object, count: int) -> rd.KeyedRow:
@@ -84,18 +94,18 @@ def build_mail_comparison(args: argparse.Namespace, warnings: list[str]) -> rd.C
     for line, row in enumerate(table, start=2):
         count_text = rd.pick(row, *REF_ATTACH_COUNT)
         count = attachment_count(count_text if count_text else rd.pick(row, *REF_ATTACH_LIST))
-        date = mail_time(rd.pick(row, *REF_DATE), args.reference_tzinfo, warnings, f"기준 {line}행")
-        reference.append(
-            message_row(rd.pick(row, *REF_MSGID), rd.pick(row, *REF_FROM), rd.pick(row, *REF_SUBJECT), date, count)
-        )
+        message_id = rd.pick(row, *REF_MSGID)
+        date = mail_time(rd.pick(row, *REF_DATE), args.reference_tzinfo, warnings, f"기준 {line}행", _date_field(message_id))
+        reference.append(message_row(message_id, rd.pick(row, *REF_FROM), rd.pick(row, *REF_SUBJECT), date, count))
     ours: list[rd.KeyedRow] = []
     for row in rd.iter_rapid_rows(args.ours, MAIL_ARTIFACT_TYPES, warnings):
         count_value = rd.rapid_field(row, "attachment_count")
         count = attachment_count(count_value if count_value is not None else rd.rapid_field(row, "attachments"))
-        date = mail_time(rd.rapid_field(row, "date", "sent_at"), args.ours_tzinfo, warnings, "우리 메일 행")
+        message_id = rd.rapid_field(row, "message_id", "internet_message_id")
+        date = mail_time(rd.rapid_field(row, "date", "sent_at"), args.ours_tzinfo, warnings, "우리 메일 행", _date_field(message_id))
         ours.append(
             message_row(
-                rd.rapid_field(row, "message_id", "internet_message_id"),
+                message_id,
                 rd.rapid_field(row, "from", "sender"),
                 rd.rapid_field(row, "subject"),
                 date,
@@ -128,7 +138,7 @@ def build_mail_comparison(args: argparse.Namespace, warnings: list[str]) -> rd.C
         ours=ours,
         reference=reference,
         reference_tool="mailbox tool message export (CSV)",
-        key_fields=["message_id"],
+        key_fields=["message_id", "date"],  # date: fallback key part when there is no Message-ID
         compared_fields=["attachment_count", "subject"],
         extra_sections=totals,
     )

@@ -130,6 +130,20 @@ class MailReferenceDiffTests(ReferenceDiffCase):
         self.assertEqual(code, 0)
         self.assertTrue(report["match"])
 
+    def test_unread_fallback_key_date_is_not_clean(self) -> None:
+        # WB-13 review P2-8: without Message-ID the date is part of the key; unread on both sides
+        # used to pair on sender + subject and report clean.
+        messages = [("", "No id", "d@example.com", "sometime in June", [])]
+        code, report, _ = self._diff(ours_messages(messages), reference_messages(messages))
+        self.assertEqual((code, report["status"]), (1, "unparsed-time"))
+        self.assertIn("date", report["key_fields"])
+        self.assertEqual(report["unparsed_time_uncompared"], 2)
+        # With a Message-ID the date is not compared and an unread one does not block a clean result.
+        with_id = [("<m9@example.com>", "Has id", "d@example.com", "sometime in June", [])]
+        code, report, _ = self._diff(ours_messages(with_id), reference_messages(with_id))
+        self.assertEqual((code, report["status"], report["unparsed_time_uncompared"]), (0, "clean", 0))
+        self.assertEqual(report["unparsed_time_fields"]["reference"], {"date_not_compared": 1})
+
     def test_missing_input_exits_2(self) -> None:
         self.assert_missing_input_exit_2(write_csv(self.tmp / "present.csv", MAIL_HEADER, reference_messages(MESSAGES)))
 
