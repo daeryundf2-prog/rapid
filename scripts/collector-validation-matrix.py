@@ -24,8 +24,12 @@ Each corpus cell is ``pass`` (통과), ``fail`` (미달, with the numbers) or ``
 missing reference/our file, a script input error (exit 2), a reference with 0 comparable rows
 ("기준 행 0개 — 비교 불가") or a missing dependency, or a metric the report could not compute.
 A report whose time values could not be read in a key or compared field
-(``unparsed_time_uncompared`` > 0) is ``fail`` (미달) whatever its recall. A row is ``pass`` only when
-every requested corpus passes, ``fail`` when any corpus fails, otherwise ``not_measured``.
+(``unparsed_time_uncompared`` > 0) is ``fail`` (미달) whatever its recall. Recall counts key
+matches only, so every reference-diff row also checks ``counts.mismatched <= 0`` (R8 WB-13
+review P1-2); a report with ``counts.mismatched`` > 0 whose run states no ``counts.*`` check
+(no explicit mismatch allowance) is ``fail`` as well, and the cell text shows the mismatch count.
+A row is ``pass`` only when every requested corpus passes, ``fail`` when any corpus fails,
+otherwise ``not_measured``.
 
 Writes ``collector-validation-matrix.json`` and ``.md`` (plus each script's report under
 ``cells/``) to ``--output-dir``; without it the Markdown table goes to stdout. Exit 0 no
@@ -301,7 +305,21 @@ def run_cell_run(run: Mapping[str, object], argv: Sequence[str], report_path: Pa
         result["checks"].append(
             {"metric": "unparsed_time_uncompared", "op": "==", "threshold": 0, "value": unread, "ok": False}
         )
+    mismatched = _mismatch_count(report)
+    if mismatched is not None:
+        result["mismatched"] = mismatched
+        result["script_status"] = report.get("status") if isinstance(report, Mapping) else None
+        allowance = any(str(check.get("metric", "")).startswith("counts.") for check in run["checks"])  # type: ignore[union-attr]
+        if mismatched > 0 and not allowance:
+            # WB-13 P1-2: recall counts key matches only; matched rows with wrong fields are not a pass.
+            result["checks"].append({"metric": "counts.mismatched", "op": "<=", "threshold": 0, "value": mismatched, "ok": False})
     return result
+
+
+def _mismatch_count(report: object) -> int | None:
+    counts = report.get("counts") if isinstance(report, Mapping) else None
+    value = counts.get("mismatched") if isinstance(counts, Mapping) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def run_cell(row: Mapping[str, object], corpus: str, inputs: Mapping[str, dict[str, object]], cells_dir: Path) -> dict[str, object]:
@@ -439,6 +457,10 @@ def cell_text(cell: Mapping[str, object]) -> str:
                 parts.append(f"{label}미측정 — {check['metric']} 값 없음")
             else:
                 parts.append(f"{label}통과 {check['metric']} {value}")
+        if isinstance(run.get("mismatched"), int) and not any(
+            str(check["metric"]) == "counts.mismatched" for check in run.get("checks") or []
+        ):
+            parts.append(f"{label}필드 불일치 {run['mismatched']}")
     return "; ".join(parts) or LABELS[str(status)]
 
 
