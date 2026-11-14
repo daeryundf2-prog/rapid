@@ -14,8 +14,8 @@ Steps, in order (any failure stops the run with a non-zero exit; nothing is push
    merge touched frontend/src;
 6. the regenerated contract / families fallback / console bundle and the exec-bit fixes go into ONE
    follow-up commit (only those paths are staged; never ``git add -A``);
-7. quick gates: ruff, contract ``--check``, ``npm run check:bundle`` (frontend changed) and
-   tests/test_script_exec_bits.py.
+7. quick gates: ruff, contract ``--check``, ``npm run check:bundle`` (frontend changed),
+   tests/test_script_exec_bits.py and the ratchets (architecture, glossary, collector caps).
 
 Examples::
 
@@ -301,6 +301,22 @@ def gate_commands(
         (
             "exec-bits",
             [sys.executable, "-m", "unittest", "tests.test_script_exec_bits"],
+            repo,
+        )
+    )
+    # Ratchets that lanes trip only in combination (two lanes each under a baseline, together
+    # over it): file sizes, glossary terms, collector caps. Cheap, so run them on every merge.
+    gates.append(
+        (
+            "ratchets",
+            [
+                sys.executable,
+                "-m",
+                "unittest",
+                "tests.test_architecture",
+                "tests.test_glossary_lint",
+                "tests.test_collector_caps_inventory",
+            ],
             repo,
         )
     )
