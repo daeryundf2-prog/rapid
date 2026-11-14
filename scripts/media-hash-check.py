@@ -14,14 +14,23 @@ Sources (at least one of ``--reference``/``--acquisition-log``):
   ``at sector(s): A - B (number: N)`` (one range = one error chunk).
 - ``--acquisition-log``: acquisition tool log (FTK Imager ``.txt``,
   ewfacquire, Guymager ``.info``). The first MD5/SHA1/SHA256 value is the
-  acquisition hash; ``bad sectors``/``bad blocks`` counts are read when present.
-- ``--ours`` (alias ``--rapid``): optional RapidTriage JSON; the first
-  ``md5``/``sha1``/``sha256`` keys found (any nesting) are its media hashes.
+  acquisition hash; every ``bad sectors``/``bad blocks``/``read errors`` count is
+  summed (a "no bad blocks" line elsewhere does not zero a stated count).
+- ``--ours`` (alias ``--rapid``): optional RapidTriage JSON. "Ours" is taken only from a
+  hash RapidTriage computed (WB-12 review P1-5): the dotted ``--ours-key`` path, else the
+  first present of ``OURS_COMPUTED_KEYS`` (the ``hashes`` of ``source-metadata`` with
+  ``hash_status: computed`` = SHA/MD5 of the file's bytes). A key path naming an expected,
+  recorded, stored, acquisition, record or inventory value is refused (that would compare a
+  value with itself). The key used and its scope are in ``sources.ours``. Scope limit: for an
+  E01 the file bytes are the container, which never equals ``ewfverify``'s media hash; only a
+  raw image's file hash is a media hash.
 
 Each pair of sources is compared per algorithm. ``match`` is true only when
-every comparison is equal, ewfverify did not report FAILURE and no error
-chunk was found. Report keys: match, error_chunks, recall (equal
-comparisons / comparisons), matched, missing, mismatched, reference_tool.
+every comparison is equal, ewfverify did not report FAILURE, no error chunk
+was found and the acquisition log states no bad sectors/blocks. Report keys:
+match, error_chunks (ewfverify error ranges + the log's bad sector/block count;
+split in ``error_chunk_sources``), bad_sectors, recall (equal comparisons /
+comparisons), matched, missing, mismatched, reference_tool.
 Shared helpers: rapidtriage/validation/reference_diff.py. Exit 0 match,
 1 differences (or FAILURE / error chunks), 2 input error or no comparison possible.
 """
@@ -48,8 +57,11 @@ EWF_RESULT_RE = re.compile(r"ewfverify:\s*(SUCCESS|FAILURE)", re.IGNORECASE)
 EWF_RANGE_RE = re.compile(r"at sector\(s\):\s*(\d+)\s*-\s*(\d+)(?:\s*\(number:\s*(\d+)\))?", re.IGNORECASE)
 EWF_TOTAL_RE = re.compile(r"total number of errors:\s*(\d+)", re.IGNORECASE)
 LOG_HASH_RE = re.compile(r"\b" + _ALG_RE + r"\b[^\n:=]*[:=]\s*([0-9a-fA-F]{32,64})\b", re.IGNORECASE)
-LOG_NO_BAD_RE = re.compile(r"no bad (?:blocks|sectors)", re.IGNORECASE)
-LOG_BAD_RE = re.compile(r"bad (?:blocks|sectors)[^\d\n]*(\d+)", re.IGNORECASE)
+LOG_BAD_RE = re.compile(r"(?:bad (?:blocks?|sectors?)|read errors?)(?: count| found)?\s*[:=]?\s*(\d+)", re.IGNORECASE)
+#: Where RapidTriage writes a hash it computed itself (tried in order unless --ours-key is given).
+OURS_COMPUTED_KEYS = ("hashes", "computed_hashes", "media_hashes")
+#: A key path containing any of these names a value RapidTriage did not compute.
+_NOT_COMPUTED_MARKERS = ("expected", "recorded", "stored", "acquisition", "record_", "inventory", "header")
 LOG_VERIFY_FAIL_RE = re.compile(r"does not match|mismatch|verification failed", re.IGNORECASE)
 
 
@@ -91,30 +103,53 @@ def parse_acquisition_log(text: str) -> dict[str, object]:
         alg, value = _alg(match.group(1)), match.group(2).casefold()
         if _valid(alg, value):
             hashes.setdefault(alg, value)
-    bad = 0
-    if not LOG_NO_BAD_RE.search(text):
-        bad = sum(int(m.group(1)) for m in LOG_BAD_RE.finditer(text))
+    bad = sum(int(m.group(1)) for m in LOG_BAD_RE.finditer(text))
     return {"hashes": hashes, "bad_sectors": bad, "verify_failed": bool(LOG_VERIFY_FAIL_RE.search(text))}
 
 
-def find_hashes(payload: object) -> dict[str, str]:
+def _hashes_at(node: object) -> dict[str, str]:
+    """``{alg: hex}`` from a dict of algorithm keys, or one hex string (algorithm by length)."""
     found: dict[str, str] = {}
-
-    def walk(node: object) -> None:
-        if isinstance(node, dict):
-            for key, value in node.items():
-                alg = re.sub(r"[^0-9a-z]", "", str(key).casefold())
-                alg = next((name for name in ALGORITHMS if alg == name or alg.endswith(name)), "")
-                if alg and isinstance(value, str) and _valid(alg, value.strip()):
-                    found.setdefault(alg, value.strip().casefold())
-                else:
-                    walk(value)
-        elif isinstance(node, list):
-            for item in node:
-                walk(item)
-
-    walk(payload)
+    if isinstance(node, str):
+        value = node.strip().casefold()
+        alg = next((name for name, length in ALGORITHMS.items() if len(value) == length), "")
+        if alg and re.fullmatch(r"[0-9a-f]+", value):
+            found[alg] = value
+        return found
+    if isinstance(node, dict):
+        for key, value in node.items():
+            alg = re.sub(r"[^0-9a-z]", "", str(key).casefold())
+            if alg in ALGORITHMS and isinstance(value, str) and _valid(alg, value.strip()):
+                found[alg] = value.strip().casefold()
     return found
+
+
+def find_hashes(payload: object, key: str | None = None) -> tuple[dict[str, str], str]:
+    """RapidTriage's own computed hashes and the key path they came from.
+
+    Only ``key`` (dotted) or ``OURS_COMPUTED_KEYS`` are read; never an ``expected_*`` /
+    recorded / header value (review P1-5: a recorded hash compared with itself is a circular pass).
+    """
+    candidates = [key] if key else list(OURS_COMPUTED_KEYS)
+    for path in candidates:
+        lowered = path.casefold()
+        bad = next((marker for marker in _NOT_COMPUTED_MARKERS if marker in lowered), None)
+        if bad:
+            raise rd.ReferenceDiffInputError(
+                f"--ours-key {path}: '{bad}'가 든 값은 RapidTriage가 계산한 해시가 아닙니다(기록값끼리 비교가 됨)."
+            )
+        node: object = payload
+        for segment in path.split("."):
+            node = node.get(segment) if isinstance(node, dict) else None
+        if key is None and isinstance(payload, dict) and path == "hashes" and payload.get("hash_status") not in (None, "computed"):
+            continue
+        found = _hashes_at(node)
+        if found:
+            return found, path
+    tried = ", ".join(candidates)
+    raise rd.ReferenceDiffInputError(
+        f"우리 출력에서 RapidTriage가 계산한 해시를 찾지 못했습니다(찾은 키: {tried}). --ours-key로 경로를 지정하세요."
+    )
 
 
 def _compare(name: str, left: dict[str, str], right: dict[str, str]) -> list[dict[str, object]]:
@@ -125,7 +160,9 @@ def _compare(name: str, left: dict[str, str], right: dict[str, str]) -> list[dic
     ]
 
 
-def check(ewf: dict | None, acquisition: dict | None, ours: dict[str, str] | None) -> dict[str, object]:
+def check(
+    ewf: dict | None, acquisition: dict | None, ours: dict[str, str] | None, ours_key: str | None = None
+) -> dict[str, object]:
     comparisons: list[dict[str, object]] = []
     missing: list[dict[str, str]] = []
     current = (ewf or {}).get("calculated") or {}
@@ -138,12 +175,16 @@ def check(ewf: dict | None, acquisition: dict | None, ours: dict[str, str] | Non
         label = "ewfverify-calculated" if ewf is not None else "acquisition-log"
         comparisons += _compare(f"ours-vs-{label}", ours, baseline)
         missing += [{"source": label, "algorithm": alg} for alg in baseline if alg not in ours]
-    error_chunks = int((ewf or {}).get("error_chunks") or 0)
+    ewf_chunks = int((ewf or {}).get("error_chunks") or 0)
+    bad_sectors = int((acquisition or {}).get("bad_sectors") or 0)
+    error_chunks = ewf_chunks + bad_sectors
     failed = (ewf or {}).get("result") == "FAILURE" or bool((acquisition or {}).get("verify_failed"))
     equal = sum(1 for item in comparisons if item["equal"])
     return {
         "match": bool(comparisons) and equal == len(comparisons) and not failed and error_chunks == 0,
         "error_chunks": error_chunks,
+        "error_chunk_sources": {"ewfverify_error_ranges": ewf_chunks, "acquisition_log_bad_sectors": bad_sectors},
+        "bad_sectors": bad_sectors,
         "recall": round(equal / len(comparisons), 6) if comparisons else None,
         "matched": equal,
         "missing": missing,
@@ -152,7 +193,15 @@ def check(ewf: dict | None, acquisition: dict | None, ours: dict[str, str] | Non
         "sources": {
             "ewfverify": ewf,
             "acquisition_log": acquisition,
-            "ours": {"hashes": ours} if ours is not None else None,
+            "ours": (
+                {
+                    "hashes": ours,
+                    "key": ours_key,
+                    "scope": "RapidTriage가 계산한 파일 바이트 해시(원시 이미지 = 매체 데이터, E01 = 컨테이너라 ewfverify와 같을 수 없음)",
+                }
+                if ours is not None
+                else None
+            ),
         },
     }
 
@@ -165,6 +214,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, help="write the JSON report here")
     parser.add_argument("--json", action="store_true", help="print the JSON report to stdout")
     parser.add_argument("--reference-tool", default="", help="reference tool name/version recorded in the report")
+    parser.add_argument(
+        "--ours-key",
+        default=None,
+        help="dotted path of the hash RapidTriage computed in --ours (default: " + ", ".join(OURS_COMPUTED_KEYS) + ")",
+    )
     args = parser.parse_args(argv)
     sources = (("reference", "--reference", args.reference), ("acquisition_log", "--acquisition-log",
                args.acquisition_log), ("ours", "--ours", args.ours))
@@ -174,11 +228,15 @@ def main(argv: list[str] | None = None) -> int:
         inputs = {name: rd.require_file(path, flag) for name, flag, path in sources if path is not None}
         ewf = parse_ewfverify(rd.read_text(args.reference)) if args.reference else None
         acquisition = parse_acquisition_log(rd.read_text(args.acquisition_log)) if args.acquisition_log else None
-        try:
-            ours = find_hashes(json.loads(rd.read_text(args.ours))) if args.ours else None
-        except ValueError as exc:
-            raise rd.ReferenceDiffInputError(f"우리 출력 파일을 읽지 못했습니다: {args.ours} ({exc})") from exc
-        result = check(ewf, acquisition, ours)
+        ours: dict[str, str] | None = None
+        ours_key: str | None = None
+        if args.ours:
+            try:
+                payload = json.loads(rd.read_text(args.ours))
+            except ValueError as exc:
+                raise rd.ReferenceDiffInputError(f"우리 출력 파일을 읽지 못했습니다: {args.ours} ({exc})") from exc
+            ours, ours_key = find_hashes(payload, args.ours_key)
+        result = check(ewf, acquisition, ours, ours_key)
         if not result["comparisons"]:
             raise rd.ReferenceDiffInputError("비교할 해시 쌍이 없습니다. 같은 알고리즘의 해시가 두 출처 이상에 있어야 합니다.")
     except rd.ReferenceDiffInputError as exc:
