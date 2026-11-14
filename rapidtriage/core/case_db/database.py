@@ -148,7 +148,11 @@ from .search import (
 from .trusted_diffs import (
     build_forensic_integrity_matrix,
 )
-from .write_lock import CaseDatabaseLockedError, retry_when_locked
+from .write_lock import (
+    CaseDatabaseBatchPartialError,
+    CaseDatabaseLockedError,
+    retry_when_locked,
+)
 
 #: Rows per review-batch transaction (WB-9 P2-15): one chunk holds the write lock ~0.7 s (500 rows,
 #: measured on a synthetic DB; 2,000 rows took 3.5 s, close to the 5 s busy timeout of other windows).
@@ -1065,6 +1069,13 @@ class CaseDatabase:
             except CaseDatabaseLockedError as exc:
                 exc.applied_rows, exc.total_rows = index * REVIEW_BATCH_CHUNK_ROWS, len(targets)
                 raise
+            except Exception as exc:
+                if index == 0:
+                    raise  # nothing was committed: the plain error is the whole truth
+                # Review WB-10/11 P2-15: any other error after a commit still reports what was saved.
+                raise CaseDatabaseBatchPartialError(
+                    exc, applied_rows=index * REVIEW_BATCH_CHUNK_ROWS, total_rows=len(targets)
+                ) from exc
         with self.connect() as connection:
             rows = [
                 connection.execute(

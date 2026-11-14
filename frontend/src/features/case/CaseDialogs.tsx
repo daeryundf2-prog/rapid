@@ -29,6 +29,7 @@ import { snapshotQueryKey } from "./caseLink";
 import { ErrorText } from "./ErrorText";
 import { EvidenceFields } from "./EvidenceFields";
 import { Modal } from "./Modal";
+import { showPreflightSpace } from "./preflightSpace";
 import { ReasonButton } from "./ReasonButton";
 import { RunOptionsFields } from "./RunOptionsFields";
 import { RunPlanGroupsField } from "./RunPlanGroupsField";
@@ -506,6 +507,7 @@ export function AddRunDialog({
       invalidateCase(queryClient, caseId);
       void queryClient.invalidateQueries({ queryKey: ["runs"] });
       onNotice?.(`증거 ${chosen?.evidence_number ?? ""} 런을 시작했습니다.`);
+      showPreflightSpace(result);
       onClose();
       navigate({ runId: result.run.run_id, collection: "intake" });
     },

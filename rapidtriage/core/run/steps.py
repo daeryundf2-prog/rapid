@@ -11,6 +11,7 @@ from .disk_full import (  # R8 T-352: step exception classification (a full outp
     OUTPUT_DISK_FULL,
     OutputDiskFull,
     classify_step_exception,
+    extraction_disk_full_error,
     is_disk_full_error,
     remove_partial_outputs,
 )
@@ -34,6 +35,7 @@ __all__ = [
     "docs_warning_messages",
     "extract_warning_level",
     "extract_warning_messages",
+    "extraction_disk_full_error",
     "files_warning_level",
     "files_warning_messages",
     "highest_warning_level",

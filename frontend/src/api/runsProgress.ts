@@ -53,6 +53,8 @@ export interface RunWithProgress extends RunListItem {
   /** Present for queued/running runs (and interrupted ones since R4 V1). */
   progress?: RunProgressCompact | null;
   error?: string;
+  /** Exception class of a failed run (e.g. `OutputDiskFull` = OUTPUT_DISK_FULL, T-352). */
+  error_type?: string | null;
 }
 
 export const RUNS_QUERY_KEY = ["runs"] as const;

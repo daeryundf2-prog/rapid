@@ -307,6 +307,8 @@ export interface CaseRunResult {
   snapshot: { run_id: string; snapshot: ProcessingSnapshotBody };
   snapshot_file: string | null;
   snapshot_file_error: string | null;
+  /** T-186: disk free-space advice for this run start (null for a dry run). */
+  preflight_space?: RunJob["preflight_space"];
 }
 
 export function createCaseRun(caseId: string, body: CaseRunBody): Promise<CaseRunResult> {

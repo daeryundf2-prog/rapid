@@ -175,7 +175,8 @@ class CaseReportRowsTests(unittest.TestCase):
     def test_defensive_fields_and_four_axis_scope(self) -> None:
         markdown = self.report()
         self.assertIn(f"- 도구 버전: {PRODUCT_NAME} {__version__}", markdown)
-        self.assertIn("- 규칙·분류 카탈로그 버전: triage-flags: 2026.11.1", markdown)
+        self.assertIn("- 규칙·분류 카탈로그 버전: 특이사항: `2026.11.1`", markdown)
+        self.assertNotIn("triage-flags", markdown)
         self.assertIn("- 표시 시간대: UTC+09:00 (증거 시스템 시간대, Korea Standard Time)", markdown)
         self.assertIn("- 부분 단계: 아티팩트 수집: 레지스트리", markdown)
         self.assertIn("- 처리 범위(추정): 파티션 2개 중 지원 파일시스템 1개, 처리 1개 · 할당 파일 목록화 100%", markdown)

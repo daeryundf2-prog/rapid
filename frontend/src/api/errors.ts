@@ -201,7 +201,31 @@ export function apiErrorFromBody(status: number, body: unknown): ApiError {
   const message = korean(stringField(envelope, "message")) || koreanFromDetail(detail) || fallback.message;
   const hint = korean(stringField(envelope, "hint")) || korean(stringField(detail, "hint")) || fallback.hint;
   const crashId = stringField(envelope, "crash_id") || null;
-  return new ApiError(message, status, detail, { code, hint, crashId });
+  const partial = partialBatchCounts(detail) ?? partialBatchCounts(envelope);
+  const shown = partial ? `${message} (저장됨 ${partialBatchText(partial)})` : message;
+  return new ApiError(shown, status, detail, { code, hint, crashId });
+}
+
+/** Rows saved / requested of a chunked batch that failed part-way (`CASE_DB_LOCKED` /
+ * `CASE_DB_BATCH_PARTIAL` with `applied_count`, `total_count`; review WB-10/11 P2-16). */
+export interface PartialBatchCounts {
+  applied: number;
+  total: number;
+}
+
+export function partialBatchCounts(detail: unknown): PartialBatchCounts | null {
+  if (!detail || typeof detail !== "object" || Array.isArray(detail)) return null;
+  const record = detail as Record<string, unknown>;
+  const applied = record.applied_count;
+  const total = record.total_count;
+  if (typeof applied !== "number" || typeof total !== "number") return null;
+  if (!Number.isFinite(applied) || !Number.isFinite(total) || applied <= 0 || total <= 0) return null;
+  return { applied, total };
+}
+
+/** `10/25행` (ko-KR digit grouping). */
+export function partialBatchText(counts: PartialBatchCounts): string {
+  return `${counts.applied.toLocaleString("ko-KR")}/${counts.total.toLocaleString("ko-KR")}행`;
 }
 
 /** Read a non-2xx `Response` into an `ApiError` (a non-JSON or unreadable body still yields Korean text). */

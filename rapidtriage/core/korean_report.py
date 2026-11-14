@@ -41,7 +41,7 @@ from .case_report_items import (
     subject_lines,
 )
 from .report_candidates import is_report_candidate, report_scope_notes
-from .step_labels import run_mode_ko, step_name_ko
+from .step_labels import run_mode_ko, source_name_ko, step_name_ko
 
 TEMPLATE_ID = "korean-expert"
 NOT_ENTERED = "미기재"
@@ -62,6 +62,14 @@ HASH_STATUS_KO = {
     "mismatched": "계산 완료 — 입력한 기대 해시와 불일치",
 }
 HASHED_STATUSES = frozenset(HASH_STATUS_KO)
+#: Input expected hash vs the acquisition hash recorded in the image (``recorded_compare``).
+RECORDED_COMPARE_KO = {
+    "equals": "입력한 기대 해시가 이미지에 기록된 취득 해시와 같음",
+    "differs": "입력한 기대 해시가 이미지에 기록된 취득 해시와 다름 — 취득 기록·이미지 확인 필요",
+    "not-comparable": "이미지에 같은 종류의 취득 해시가 없어 비교하지 못함",
+}
+#: Per-segment rows of one evidence item in the section 2.1 table; the rest is counted.
+SEGMENT_ROW_LIMIT = 20
 
 
 def _mapping(value: object) -> Mapping[str, object]:
@@ -100,7 +108,7 @@ def _review_rows(
         rows.append(
             {
                 "summary": str(bookmark.get("summary") or bookmark.get("bookmark_id") or "항목"),
-                "source": str(reference.get("command") or bookmark.get("source") or ""),
+                "source": source_name_ko(reference.get("command") or bookmark.get("source")),
                 "status": review_status_label(review.get("status")),
                 # Same reviewer source as the per-item "검토자" line of the other templates.
                 "reviewer": author_label(review.get("reviewer") or review.get("reviewed_by") or bookmark.get("created_by")),
@@ -161,6 +169,22 @@ def _recorded_hash_text(record: Mapping[str, object]) -> str:
     return f"읽지 못함 — {_text(recorded.get('reason'), '사유 기록 없음')}"
 
 
+def _hash_result_text(record: Mapping[str, object], status: str) -> str:
+    """``해시 결과``: never a plain "계산 완료" for a segment set known to be incomplete."""
+    if not record.get("segment_set_incomplete"):
+        return HASH_STATUS_KO[status]
+    count = record.get("segment_count")
+    covered = (
+        f"있는 세그먼트 {count:,}개만 해시함"
+        if isinstance(count, int) and not isinstance(count, bool) and count
+        else "있는 세그먼트만 해시함"
+    )
+    gaps = [int(item) for item in record.get("segment_gaps") or [] if isinstance(item, int) and not isinstance(item, bool)]
+    missing = f", 빠진 세그먼트 번호 {', '.join(str(item) for item in gaps)}" if gaps else ", 마지막 세그먼트 없음 또는 번호 미상"
+    tail = {"matched": " · 기대 해시와 일치", "mismatched": " · 기대 해시와 불일치"}.get(status, "")
+    return f"세그먼트 집합 불완전 — {covered}(컨테이너 전체의 해시 아님){missing}{tail}"
+
+
 def evidence_record_lines(metadata: Mapping[str, object]) -> list[str]:
     """Section 2.1 "감정 대상 증거": the case evidence rows' own hash results (T-182 records)."""
     records = _evidence_records(metadata)
@@ -180,7 +204,7 @@ def evidence_record_lines(metadata: Mapping[str, object]) -> list[str]:
             lines.append(f"- {number} {md_code(name)}: {why}")
             continue
         if segments:
-            for segment in segments:
+            for segment in segments[:SEGMENT_ROW_LIMIT]:
                 sha = md_inline(segment.get("sha256"))
                 rows.append(
                     f"| {md_cell(number)} | `{md_cell(segment.get('name') or name)}` "
@@ -190,12 +214,27 @@ def evidence_record_lines(metadata: Mapping[str, object]) -> list[str]:
         else:
             rows.append(f"| {md_cell(number)} | `{md_cell(name)}` | {_size_text(record.get('size_bytes'))} | `{md_cell(container_sha)}` |")
         scope = str(record.get("hash_scope") or "")
-        scope_text = HASH_SCOPE_KO.get(scope) or (md_inline(scope) and f"기록값 {md_code(scope)}") or NOT_RECORDED
+        scope_text = HASH_SCOPE_KO.get(scope) or ("목록에 없는 범위 값(기술 부록 참고)" if scope else NOT_RECORDED)
         lines += [
-            f"- {number} 해시 결과: {HASH_STATUS_KO[status]}",
+            f"- {number} 해시 결과: {_hash_result_text(record, status)}",
             f"- {number} 해시 대상: {scope_text}",
-            f"- {number} 기록된 취득 해시: {_recorded_hash_text(record)}",
         ]
+        count = record.get("segment_count")
+        if segments or (isinstance(count, int) and not isinstance(count, bool) and count):
+            segment_rows_total = len(segments)
+            segment_rows_truncated = segment_rows_total > SEGMENT_ROW_LIMIT
+            total = count if isinstance(count, int) and not isinstance(count, bool) and count else segment_rows_total
+            cut = f" (표 상한 {SEGMENT_ROW_LIMIT}개까지만 적음, 나머지 행은 잘림)" if segment_rows_truncated else ""
+            lines.append(f"- {number} 세그먼트 수: {total:,}개{cut}")
+        if segments and container_sha:
+            lines.append(f"- {number} 컨테이너 SHA-256(세그먼트 파일을 순서대로 이은 바이트): {md_code(container_sha)}")
+        lines.append(f"- {number} 기록된 취득 해시: {_recorded_hash_text(record)}")
+        compare = RECORDED_COMPARE_KO.get(str(record.get("recorded_compare") or ""))
+        if compare:
+            lines.append(f"- {number} 기록된 취득 해시 대조: {compare}")
+        message = md_inline(record.get("hash_message"))
+        if message:
+            lines.append(f"- {number} 해시 처리 메시지: {message}")
     table = ["| 증거 번호 | 증거 파일 | 크기 | SHA-256 |", "|---|---|---|---|", *rows, ""] if rows else []
     return table + lines
 

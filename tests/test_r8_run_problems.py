@@ -245,6 +245,21 @@ class RunProblemLimitsTests(unittest.TestCase):
         for message in silent + [warning["message"]]:
             self.assertNotRegex(message, ENGLISH_PHRASE)
 
+    def test_more_than_99_segments_discloses_engine_coverage(self) -> None:
+        """Review WB-10/11 P1-5: the hash covers 101 segments, the engine opens 99 -- the run says so."""
+        image_dir = Path(self._tmp.name) / "image"
+        image_dir.mkdir()
+        for name in [f"disk.E{index:02d}" for index in range(1, 100)] + ["disk.EAA", "disk.EAB"]:
+            (image_dir / name).write_bytes(b"x")
+        self.summary["source"]["source_path"] = str(image_dir / "disk.E01")
+        items = [item for item in self.limits() if item["reason_id"] == "e01-segment-cap"]
+        self.assertEqual(len(items), 1)
+        self.assertIn("엔진은 E01–E99까지만 열어 처리함 — 세그먼트 101개 중 99개", items[0]["message"])
+        self.assertIn("e01-segment-cap", run_problems.ALL_REASON_LABELS)
+        (image_dir / "disk.EAA").unlink()
+        (image_dir / "disk.EAB").unlink()
+        self.assertEqual([item for item in self.limits() if item["reason_id"] == "e01-segment-cap"], [])
+
     def test_folder_evidence_has_no_engine_items(self) -> None:
         self.summary.pop("source")
         self.summary["outputs"] = {}

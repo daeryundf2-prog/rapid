@@ -27,7 +27,9 @@ from rapidtriage.core.case_db import database as database_module
 from rapidtriage.core.case_db.write_lock import (
     BUSY_TIMEOUT_MS,
     CASE_DB_LOCKED_MESSAGE,
+    CaseDatabaseBatchPartialError,
     CaseDatabaseLockedError,
+    case_db_batch_partial_detail,
     case_db_locked_detail,
     raised_in_case_db_code,
     retry_when_locked,
@@ -414,6 +416,36 @@ class WriteTransactionScopeTests(unittest.TestCase):
         self.assertEqual((detail["applied_count"], detail["total_count"]), (10, 25))
         self.assertIn("25행 중 앞의 10행은 이미 저장되었고 나머지는 저장되지 않았습니다", str(detail["message"]))
 
+    def test_any_error_on_a_later_chunk_reports_the_rows_already_saved(self) -> None:
+        """Review WB-10/11 P2-15: a full disk (or a target deleted after the check) in chunk 2+."""
+        calls: list[int] = []
+
+        def second_chunk_full(write):
+            calls.append(1)
+            if len(calls) == 2:
+                raise sqlite3.OperationalError("database or disk is full")
+            return write()
+
+        with patch.object(database_module, "REVIEW_BATCH_CHUNK_ROWS", 10), \
+                patch.object(database_module, "retry_when_locked", second_chunk_full), \
+                self.assertRaises(CaseDatabaseBatchPartialError) as caught:
+            CaseDatabase(self.path).mark_reviews_batch(case_id=CASE, targets=_targets(self.ids[:25]), status="relevant")
+        self.assertEqual((caught.exception.applied_rows, caught.exception.total_rows), (10, 25))
+        self.assertEqual(self._count("SELECT COUNT(*) FROM review_mark"), 10)
+        detail = case_db_batch_partial_detail(caught.exception)
+        self.assertEqual((detail["code"], detail["applied_count"], detail["total_count"]), ("CASE_DB_BATCH_PARTIAL", 10, 25))
+        self.assertIn("25행 중 앞의 10행은 이미 저장되었고", str(detail["message"]))
+        # The first chunk failing keeps the plain error: nothing was saved.
+        calls.clear()
+
+        def first_chunk_full(write):
+            raise sqlite3.OperationalError("database or disk is full")
+
+        with patch.object(database_module, "REVIEW_BATCH_CHUNK_ROWS", 10), \
+                patch.object(database_module, "retry_when_locked", first_chunk_full), \
+                self.assertRaises(sqlite3.OperationalError):
+            CaseDatabase(self.path).mark_reviews_batch(case_id=CASE, targets=_targets(self.ids[30:45]), status="relevant")
+
 
 @unittest.skipUnless(HAS_FASTAPI, "fastapi is required for RapidTriage API tests")
 class LockedCaseDbRouteTests(unittest.TestCase):
@@ -470,6 +502,25 @@ class LockedCaseDbRouteTests(unittest.TestCase):
         self.assertEqual(body["code"], "CASE_DB_LOCKED")
         self.assertIn("잠겨 있어", body["message"])
         self.assertNotIn("database is locked", response.text)
+
+    def test_a_partly_applied_batch_is_409_with_both_counts(self) -> None:
+        calls: list[int] = []
+
+        def second_chunk_full(write):
+            calls.append(1)
+            if len(calls) == 2:
+                raise sqlite3.OperationalError("database or disk is full")
+            return write()
+
+        with (
+            patch.object(database_module, "REVIEW_BATCH_CHUNK_ROWS", 10),
+            patch.object(database_module, "retry_when_locked", second_chunk_full),
+        ):
+            response = self._batch(targets=_targets(self.ids[:25]), status="relevant")
+        self.assertEqual(response.status_code, 409, response.text)
+        body = response.json()
+        self.assertEqual(body["code"], "CASE_DB_BATCH_PARTIAL")
+        self.assertEqual((body["detail"]["applied_count"], body["detail"]["total_count"]), (10, 25))
 
     def test_locked_writes_are_409_with_a_korean_message(self) -> None:
         tag_id = self.client.get(f"/api/cases/{CASE}/tags", params={"database": str(self.path)}).json()["tags"][0]["id"]

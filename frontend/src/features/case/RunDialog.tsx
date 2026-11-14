@@ -10,6 +10,7 @@ import { BrowsePanel } from "./BrowsePanel";
 import { runSampleWithConfirm } from "./commands";
 import { ErrorText } from "./ErrorText";
 import { Modal } from "./Modal";
+import { showPreflightSpace } from "./preflightSpace";
 import { ReasonButton } from "./ReasonButton";
 import { RunOptionsFields } from "./RunOptionsFields";
 import { RunPlanGroupsField } from "./RunPlanGroupsField";
@@ -86,7 +87,10 @@ export function RunDialog({
 
   const start = useMutation({
     mutationFn: () => createRun(buildRunBody(form)),
-    onSuccess: (job) => afterStart(job.run_id, "런을 시작했습니다."),
+    onSuccess: (job) => {
+      afterStart(job.run_id, "런을 시작했습니다.");
+      showPreflightSpace(job);
+    },
   });
   // 샘플 실행 (C-G6): a write confirmation first; the shared helper toasts the result and opens it.
   const sample = useMutation({

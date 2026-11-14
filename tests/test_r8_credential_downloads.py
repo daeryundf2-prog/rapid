@@ -242,7 +242,9 @@ class CredentialGridTests(unittest.TestCase):
         if group == "ocr":
             return [self.source("source-ocr-queue", path), self.source("source-ocr-translation", path)]
         if group == "archive-member":
-            return [self.source("source-preview", f"{self.archive}::{GRID_CREDENTIAL_FILES[index]}")]
+            member = f"{self.archive}::{GRID_CREDENTIAL_FILES[index]}"
+            # source-search applies the same member judgment as the preview (review WB-10/11 P2-8).
+            return [self.source("source-preview", member), self.source("source-search", member, keyword="secret")]
         if group == "outputs-file":
             name = f"cred_{index:02d}"
             return [
@@ -285,6 +287,8 @@ class CredentialGridTests(unittest.TestCase):
         self.assertEqual(served, 20)
         member = self.source("source-preview", f"{self.archive}::Documents/note-00.txt")
         self.assertEqual(member.status_code, 200, member.text)
+        searched = self.source("source-search", f"{self.archive}::Documents/note-00.txt", keyword="ordinary")
+        self.assertEqual(searched.status_code, 200, searched.text)
         self.assertIn("ordinary file 0", member.text)
         report = self.client.get("/api/runs/r1/outputs/report_ok/file")
         self.assertEqual(report.status_code, 200, report.text)

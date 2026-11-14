@@ -86,6 +86,16 @@ class ValidationPackageFreshHashTests(unittest.TestCase):
             self.assertEqual(segment["sha256"], hashlib.sha256(data).hexdigest())
         self.assertEqual(result["hashes"]["sha256"], segments[0]["sha256"])
 
+    def test_set_past_e99_is_listed_in_full(self) -> None:
+        """Review WB-10/11 P1-5: the package lists the same full set as the evidence hash."""
+        names = [f"disk.E{index:02d}" for index in range(1, 100)] + ["disk.EAA", "disk.EAB"]
+        for name in names:
+            (self.base / name).write_bytes(b"x")
+        result = build_run_validation_source_integrity({"root": str(self.base / "disk.E01")}, compute_hashes=False)
+        self.assertEqual([segment["name"] for segment in result["segments"]], names)
+        self.assertEqual(result["segments"][-1]["segment_number"], 101)
+        self.assertFalse([w for w in result.get("warnings") or [] if "not included" in w])
+
     def test_tampered_later_segment_is_visible(self) -> None:
         for n in (1, 2, 3):
             (self.base / f"disk.E0{n}").write_bytes(bytes([n]) * 256)
@@ -171,15 +181,18 @@ class ValidationPackageFreshHashTests(unittest.TestCase):
         self.assertNotIn("compute_source_hashes=False", post_body)
 
     def test_segment_gap_and_undiscovered_siblings_are_named(self) -> None:
-        for name in ("disk.E01", "disk.E03", "disk.EAA", "DISK.E02"):
+        # The listing uses the evidence hash's discovery (review WB-10/11 P1-5): the stem is matched
+        # case-insensitively (DISK.E02 is segment 2) and a letter segment after a gap is not part
+        # of the chain, so it is named as an unlisted sibling.
+        for name in ("disk.E01", "disk.E03", "disk.E05", "disk.EAA", "DISK.E02"):
             (self.base / name).write_bytes(b"seg")
         result = build_run_validation_source_integrity({"root": str(self.base / "disk.E01")})
+        self.assertEqual([row["name"] for row in result["segments"]], ["disk.E01", "DISK.E02", "disk.E03", "disk.E05"])
         warnings = result["segment_warnings"]
-        self.assertTrue(any("missing" in warning and "[2]" in warning for warning in warnings), warnings)
+        self.assertTrue(any("missing" in warning and "[4]" in warning for warning in warnings), warnings)
         undiscovered = [warning for warning in warnings if "not included" in warning]
         self.assertEqual(len(undiscovered), 1)
         self.assertIn("disk.EAA", undiscovered[0])
-        self.assertIn("DISK.E02", undiscovered[0])
         for warning in warnings:
             self.assertIn(warning, result["limitations"])
 

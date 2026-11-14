@@ -16,7 +16,9 @@ from fastapi.staticfiles import StaticFiles
 
 from ...core.case_db import open_case_database
 from ...core.case_db.write_lock import (
+    CaseDatabaseBatchPartialError,
     CaseDatabaseLockedError,
+    case_db_batch_partial_detail,
     case_db_locked_detail,
     is_lock_error,
     raised_in_case_db_code,
@@ -222,6 +224,11 @@ def create_app(
         if exc.reason == SERVER_READ_ONLY:
             return error_response(409, server_read_only_detail())
         return error_response(409, exc.to_detail())
+
+    @api.exception_handler(CaseDatabaseBatchPartialError)
+    async def case_db_batch_partial(_request: Request, exc: CaseDatabaseBatchPartialError):
+        """A chunked batch that failed after earlier chunks were saved: 409 with both counts (P2-15)."""
+        return error_response(409, case_db_batch_partial_detail(exc))
 
     @api.exception_handler(CaseDatabaseLockedError)
     async def case_db_locked(_request: Request, exc: CaseDatabaseLockedError):

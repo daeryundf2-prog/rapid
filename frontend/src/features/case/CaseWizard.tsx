@@ -28,6 +28,7 @@ import { AiRunOptionsField } from "./AiRunOptionsField";
 import { ErrorText } from "./ErrorText";
 import { EvidenceFields } from "./EvidenceFields";
 import { Modal } from "./Modal";
+import { showPreflightSpace } from "./preflightSpace";
 import { ReasonButton } from "./ReasonButton";
 import { RunOptionsFields } from "./RunOptionsFields";
 import { RunPlanGroupsField } from "./RunPlanGroupsField";
@@ -329,6 +330,7 @@ export function CaseWizard({
           caseRunBody(plan.runForm, state.evidence[draft.key] as string),
         );
         state.runs[draft.key] = result.run.run_id;
+        showPreflightSpace(result);
         setProgress({ ...state, runs: { ...state.runs } });
       }
       void queryClient.invalidateQueries({ queryKey: ["runs"] });

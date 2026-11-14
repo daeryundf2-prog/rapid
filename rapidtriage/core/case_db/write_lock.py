@@ -41,6 +41,34 @@ class CaseDatabaseLockedError(CaseDatabaseError):
     total_rows: int = 0
 
 
+class CaseDatabaseBatchPartialError(CaseDatabaseError):
+    """A chunked batch failed (any error but a lasting lock) after earlier chunks were committed
+    (review WB-10/11 P2-15): ``applied_rows`` of ``total_rows`` are saved, the rest are not."""
+
+    def __init__(self, cause: BaseException, *, applied_rows: int, total_rows: int) -> None:
+        self.applied_rows = applied_rows
+        self.total_rows = total_rows
+        self.cause_message = str(cause)
+        super().__init__(
+            f"일괄 표시가 중간에 실패했습니다. 이 요청의 {total_rows:,}행 중 앞의 {applied_rows:,}행은 이미 "
+            f"저장되었고 나머지는 저장되지 않았습니다(원인: {cause})."
+        )
+
+
+#: Error code of a chunked batch that failed after earlier chunks were saved (``core/error_codes.py``).
+CASE_DB_BATCH_PARTIAL = "CASE_DB_BATCH_PARTIAL"
+
+
+def case_db_batch_partial_detail(exc: CaseDatabaseBatchPartialError) -> dict[str, object]:
+    """HTTP 409 ``detail`` for a partly applied batch: the Korean sentence and both counts."""
+    return {
+        "code": CASE_DB_BATCH_PARTIAL,
+        "message": str(exc),
+        "applied_count": exc.applied_rows,
+        "total_count": exc.total_rows,
+    }
+
+
 def case_db_locked_detail(exc: BaseException | None = None) -> dict[str, object]:
     """HTTP 409 ``detail`` for a locked case DB. Nothing of the refused transaction was written; for a
     chunked batch the message says how many rows earlier transactions already saved."""
