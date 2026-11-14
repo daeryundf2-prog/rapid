@@ -181,13 +181,59 @@ class MediaHashCheckTests(ReferenceDiffCase):
             for key in ("evidence.expected_md5", "evidence.hash_recorded", "inventory_sha256", "record_sha256"):
                 self.assertEqual(self.module.main(["--reference", ewf, "--ours", circular, "--ours-key", key]), 2)
         self.assertIn("RapidTriage가 계산한 해시가 아닙니다", stderr.getvalue())
-        computed = self._file("computed.json", json.dumps({"run": {"media": {"md5": MD5}}}))
+        computed = self._file("computed.json", json.dumps({"run": {"media": {"md5": MD5, "sha1": SHA1}}}))
         report = self._run("--reference", ewf, "--ours", computed, "--ours-key", "run.media", expect=0)
         self.assertEqual(report["sources"]["ours"]["key"], "run.media")
         self.assertIn("컨테이너", report["sources"]["ours"]["scope"])
         not_computed = self._file("pending.json", json.dumps({"hash_status": "not-requested", "hashes": {"md5": MD5}}))
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(self.module.main(["--reference", ewf, "--ours", not_computed]), 2)
+
+    def test_ours_without_a_shared_algorithm_is_not_a_match(self) -> None:
+        # WB-13 review P1-4 experiment: ewfverify MD5 stored = calculated, ours a computed SHA-256 only.
+        ewf_md5 = "\n".join(line for line in EWF_OK.splitlines() if "SHA1" not in line) + "\n"
+        ours = self._file("ours.json", json.dumps({"command": "source-metadata", "hash_status": "computed",
+                                                   "extension": ".dd", "hashes": {"sha256": "ab" * 32}}))
+        report = self._run("--reference", self._file("ewfverify.txt", ewf_md5), "--ours", ours, expect=1)
+        self.assertFalse(report["match"])
+        self.assertIs(report["ours_compared"], False)
+        self.assertEqual([item["pair"] for item in report["comparisons"]], ["ewfverify-stored-vs-calculated"])
+        self.assertIn("우리 해시와 겹치는 알고리즘 없음", report["match_reasons"][0])
+
+    def test_missing_algorithm_in_ours_is_not_a_match(self) -> None:
+        ours = self._file("ours.json", json.dumps({"command": "source-metadata", "hash_status": "computed",
+                                                   "extension": ".dd", "hashes": {"md5": MD5}}))
+        report = self._run("--reference", self._file("ewfverify.txt", EWF_OK), "--ours", ours, expect=1)
+        self.assertFalse(report["match"])
+        self.assertIs(report["ours_compared"], True)
+        self.assertEqual(report["missing"], [{"source": "ewfverify-calculated", "algorithm": "sha1"}])
+        self.assertTrue(any("RapidTriage 해시에 없는 알고리즘: sha1" in reason for reason in report["match_reasons"]))
+
+    def test_e01_container_hash_is_never_counted_as_a_match(self) -> None:
+        payload = {"command": "source-metadata", "hash_status": "computed", "name": "synthetic.E01",
+                   "extension": ".e01", "hashes": {"md5": MD5, "sha1": SHA1}}
+        ours = self._file("ours.json", json.dumps(payload))
+        ewf = self._file("ewfverify.txt", EWF_OK)
+        report = self._run("--reference", ewf, "--ours", ours, expect=1)
+        self.assertFalse(report["match"])
+        self.assertEqual(report["match_reasons"], ["컨테이너 해시 — 매체 해시와 비교 불가"])
+        self.assertIs(report["ours_compared"], False)
+        self.assertEqual(report["sources"]["ours"]["scope_kind"], "container")
+        self.assertFalse(any(item["pair"].startswith("ours-vs-") for item in report["comparisons"]))
+        # A raw image named as such (or --ours-scope media) is a media hash and is compared.
+        report = self._run("--reference", ewf, "--ours", ours, "--ours-scope", "media", expect=0)
+        self.assertEqual((report["match"], report["ours_compared"], report["match_reasons"]), (True, True, []))
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(self.module.main(["--reference", ewf, "--ours", ours]), 1)
+        self.assertIn("일치 아님: 컨테이너 해시 — 매체 해시와 비교 불가", stdout.getvalue())
+
+    def test_hashes_without_hash_status_are_not_taken_as_computed(self) -> None:
+        ours = self._file("ours.json", json.dumps({"hashes": {"md5": MD5, "sha1": SHA1}}))
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            self.assertEqual(self.module.main(["--reference", self._file("ewfverify.txt", EWF_OK), "--ours", ours]), 2)
+        self.assertIn("RapidTriage가 계산한 해시를 찾지 못했습니다", stderr.getvalue())
 
     def test_bad_blocks_in_the_acquisition_log_fail_the_match(self) -> None:
         log = FTK_LOG.replace("No bad blocks found in image", "Bad Blocks: 37\nNo bad blocks found in segment 2")

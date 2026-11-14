@@ -205,6 +205,13 @@ class CollectorValidationMatrixTests(unittest.TestCase):
                     metrics = [check["metric"] for check in run["checks"]]
                     self.assertIn("counts.mismatched", metrics, (row["id"], run.get("id")))
 
+    def test_media_hash_row_is_labelled_integrity_only(self) -> None:
+        # WB-13 P1-4: the row passes on ewfverify alone, so it must not read as a RapidTriage check.
+        row = next(row for row in self.module.load_matrix(MATRIX_PATH)["rows"] if row["id"] == "media-hash")
+        self.assertIn("RapidTriage 해시 비교 아님", row["collector"])
+        flags = [option["flag"] for run in row["runs"] for option in run.get("optional") or []]
+        self.assertNotIn("--ours", flags)
+
     def test_run_without_a_mismatch_check_still_fails_on_mismatches(self) -> None:
         # A table that forgets the field check (no explicit allowance) must not turn mismatches into 통과.
         matrix = json.loads(MATRIX_PATH.read_text(encoding="utf-8"))

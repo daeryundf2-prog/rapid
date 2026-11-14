@@ -321,18 +321,17 @@
     },
     {
       "id": "media-hash",
-      "collector": "매체 해시(증거 무결성)",
-      "pass_line": "해시 전부 일치 · 오류 청크 0",
+      "collector": "이미지 무결성(ewfverify·획득 로그) — RapidTriage 해시 비교 아님",
+      "pass_line": "ewfverify 저장값=계산값 · 획득 로그 해시 일치 · 오류 청크 0 (수집기 검증의 전제 조건)",
       "threshold_source": "T-212 / IS-069",
+      "note": "R8 WB-13 review P1-4: RapidTriage computes no media-data hash of an E01 (its file hash is the container), so this row checks the evidence integrity only and never passes RapidTriage. A raw image's RapidTriage hash is compared by running scripts/media-hash-check.py --ours by hand.",
       "runs": [
         {
           "script": "media-hash-check",
           "args": ["--reference", "{reference}"],
           "files": ["reference"],
           "optional": [
-            {"flag": "--acquisition-log", "input": "acquisition_log", "path": true},
-            {"flag": "--ours", "input": "ours", "path": true},
-            {"flag": "--ours-key", "input": "ours_key", "path": false}
+            {"flag": "--acquisition-log", "input": "acquisition_log", "path": true}
           ],
           "checks": [
             {"metric": "match", "op": "==", "value": true},
