@@ -78,6 +78,17 @@ describe("bundled catalogue (copy of the backend YAML)", () => {
       expect(rule.label_ko, rule.id).not.toBe("");
     }
   });
+
+  it("carries every family's R8 classification keys (T-045)", () => {
+    const catalog = normalizeCatalog(fallbackJson) as FamilyCatalog;
+    for (const family of catalog.families) {
+      expect([1, 2, 3], family.id).toContain(family.tier);
+      expect(family.section, family.id).toMatch(/^[a-z][a-z0-9-]*$/);
+      expect(family.card === null || typeof family.card === "string", family.id).toBe(true);
+    }
+    const usb = catalog.families.find((family) => family.id === "usb");
+    expect([usb?.tier, usb?.card, usb?.section]).toEqual([1, "exfil", "usb"]);
+  });
 });
 
 it("every ts_kind of the bundled catalogue has a Korean chip label", () => {

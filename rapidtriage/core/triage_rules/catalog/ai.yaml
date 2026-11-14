@@ -5,6 +5,9 @@
 # attribution (Cursor scoring, git trailers) and usage. Rule implementations: core/triage_rules/ai.py.
 families:
 - id: ai-tool
+  tier: 1
+  card: ai
+  section: tools
   label: AI 도구·설치
   types:
   - ai-tool-presence
@@ -73,6 +76,9 @@ families:
   rules:
   - ai.unknown_tool_candidate
 - id: ai-session
+  tier: 1
+  card: ai
+  section: sessions
   label: AI 에이전트 세션
   types:
   - ai-agent-session
@@ -144,6 +150,9 @@ families:
     format: path
   rules: []
 - id: ai-message
+  tier: 1
+  card: ai
+  section: messages
   label: AI 에이전트 메시지
   types:
   - ai-agent-message
@@ -181,6 +190,9 @@ families:
     label: 이미지 포함
   rules: []
 - id: ai-tool-call
+  tier: 2
+  card: ai
+  section: tool-calls
   label: AI 도구 호출
   types:
   - ai-agent-tool-call
@@ -238,6 +250,9 @@ families:
   - ai.destructive_tool_call
   - ai.evidence_path_in_tool_call
 - id: ai-file-touch
+  tier: 2
+  card: ai
+  section: file-touches
   label: AI 파일 접촉
   types:
   - ai-agent-file-touch
@@ -280,6 +295,9 @@ families:
   rules:
   - ai.evidence_path_in_tool_call
 - id: ai-mcp-server
+  tier: 2
+  card: ai
+  section: mcp-servers
   label: MCP 서버
   types:
   - ai-mcp-server
@@ -320,6 +338,9 @@ families:
   rules:
   - ai.mcp_server_remote
 - id: ai-config
+  tier: 2
+  card: ai
+  section: config
   label: AI 지침·자격 증명 파일
   types:
   - ai-instruction-file
@@ -360,6 +381,9 @@ families:
   - ai.credential_file_present
   - ai.retention_cleanup_observed
 - id: ai-account
+  tier: 1
+  card: ai
+  section: accounts
   label: AI 계정·전환
   types:
   - ai-account
@@ -400,6 +424,9 @@ families:
   - ai.account_switch
   - ai.personal_account_on_corporate
 - id: ai-code
+  tier: 2
+  card: ai
+  section: code-attribution
   label: AI 코드 기여·사용량
   types:
   - ai-code-attribution

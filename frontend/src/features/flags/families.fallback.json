@@ -1,8 +1,11 @@
 {
- "version": "3d7b35f7254dcd23",
+ "version": "9f0beab0ddd9a664",
  "families": [
   {
    "id": "sam-account",
+   "tier": 1,
+   "card": "accounts",
+   "section": "local-accounts",
    "label": "SAM 계정",
    "types": [
     "windows-sam-account",
@@ -186,6 +189,9 @@
   },
   {
    "id": "sam-group",
+   "tier": 2,
+   "card": "accounts",
+   "section": "groups",
    "label": "SAM 그룹",
    "types": [
     "windows-sam-group",
@@ -274,6 +280,9 @@
   },
   {
    "id": "task",
+   "tier": 2,
+   "card": "programs",
+   "section": "scheduled-tasks",
    "label": "예약 작업",
    "types": [
     "task-scheduler-task"
@@ -380,6 +389,9 @@
   },
   {
    "id": "wer",
+   "tier": 3,
+   "card": null,
+   "section": "crash-reports",
    "label": "오류 보고(WER)",
    "types": [
     "wer-report"
@@ -497,6 +509,9 @@
   },
   {
    "id": "ai-tool",
+   "tier": 1,
+   "card": "ai",
+   "section": "tools",
    "label": "AI 도구·설치",
    "types": [
     "ai-tool-presence",
@@ -600,6 +615,9 @@
   },
   {
    "id": "ai-session",
+   "tier": 1,
+   "card": "ai",
+   "section": "sessions",
    "label": "AI 에이전트 세션",
    "types": [
     "ai-agent-session"
@@ -716,6 +734,9 @@
   },
   {
    "id": "ai-message",
+   "tier": 1,
+   "card": "ai",
+   "section": "messages",
    "label": "AI 에이전트 메시지",
    "types": [
     "ai-agent-message"
@@ -777,6 +798,9 @@
   },
   {
    "id": "ai-tool-call",
+   "tier": 2,
+   "card": "ai",
+   "section": "tool-calls",
    "label": "AI 도구 호출",
    "types": [
     "ai-agent-tool-call"
@@ -867,6 +891,9 @@
   },
   {
    "id": "ai-file-touch",
+   "tier": 2,
+   "card": "ai",
+   "section": "file-touches",
    "label": "AI 파일 접촉",
    "types": [
     "ai-agent-file-touch"
@@ -933,6 +960,9 @@
   },
   {
    "id": "ai-mcp-server",
+   "tier": 2,
+   "card": "ai",
+   "section": "mcp-servers",
    "label": "MCP 서버",
    "types": [
     "ai-mcp-server"
@@ -1002,6 +1032,9 @@
   },
   {
    "id": "ai-config",
+   "tier": 2,
+   "card": "ai",
+   "section": "config",
    "label": "AI 지침·자격 증명 파일",
    "types": [
     "ai-instruction-file",
@@ -1067,6 +1100,9 @@
   },
   {
    "id": "ai-account",
+   "tier": 1,
+   "card": "ai",
+   "section": "accounts",
    "label": "AI 계정·전환",
    "types": [
     "ai-account",
@@ -1132,6 +1168,9 @@
   },
   {
    "id": "ai-code",
+   "tier": 2,
+   "card": "ai",
+   "section": "code-attribution",
    "label": "AI 코드 기여·사용량",
    "types": [
     "ai-code-attribution",
@@ -1217,6 +1256,9 @@
   },
   {
    "id": "antiforensics",
+   "tier": 2,
+   "card": "deleted",
+   "section": "anti-forensics",
    "label": "안티 포렌식(BitLocker 복구 키 파일)",
    "types": [
     "bitlocker-recovery-key-file"
@@ -1315,6 +1357,9 @@
   },
   {
    "id": "vm-config",
+   "tier": 2,
+   "card": null,
+   "section": "system-context",
    "label": "가상 머신 구성",
    "types": [
     "vm-config"
@@ -1429,6 +1474,9 @@
   },
   {
    "id": "crypto-wallet",
+   "tier": 2,
+   "card": "programs",
+   "section": "crypto-wallets",
    "label": "암호화폐 지갑(존재만)",
    "types": [
     "crypto-wallet-presence"
@@ -1543,6 +1591,9 @@
   },
   {
    "id": "av-detection-log",
+   "tier": 2,
+   "card": null,
+   "section": "compromise",
    "label": "백신 탐지 로그",
    "types": [
     "av-detection-log"
@@ -1668,6 +1719,9 @@
   },
   {
    "id": "av-product-presence",
+   "tier": 2,
+   "card": null,
+   "section": "system-context",
    "label": "백신 제품 흔적",
    "types": [
     "av-product-presence"
@@ -1820,6 +1874,9 @@
   },
   {
    "id": "archive",
+   "tier": 2,
+   "card": null,
+   "section": "review-mgmt",
    "label": "압축·암호 컨테이너",
    "types": [
     "archive-file-inventory"
@@ -1897,6 +1954,9 @@
   },
   {
    "id": "browser-visit",
+   "tier": 1,
+   "card": "web",
+   "section": "visits",
    "label": "브라우저 방문",
    "types": [
     "browser-visit",
@@ -1996,6 +2056,9 @@
   },
   {
    "id": "browser-download",
+   "tier": 1,
+   "card": "web",
+   "section": "downloads",
    "label": "브라우저 다운로드",
    "types": [
     "browser-download"
@@ -2133,6 +2196,9 @@
   },
   {
    "id": "browser-history",
+   "tier": 1,
+   "card": "web",
+   "section": "visits",
    "label": "브라우저 방문 기록",
    "types": [
     "browser-history",
@@ -2219,6 +2285,9 @@
   },
   {
    "id": "browser-cookie",
+   "tier": 2,
+   "card": "web",
+   "section": "cookies",
    "label": "쿠키",
    "types": [
     "browser-cookie"
@@ -2314,6 +2383,9 @@
   },
   {
    "id": "browser-login",
+   "tier": 2,
+   "card": "web",
+   "section": "saved-logins",
    "label": "저장된 로그인",
    "types": [
     "browser-login"
@@ -2400,6 +2472,9 @@
   },
   {
    "id": "browser-search",
+   "tier": 1,
+   "card": "web",
+   "section": "searches",
    "label": "검색어",
    "types": [
     "browser-search"
@@ -2449,6 +2524,9 @@
   },
   {
    "id": "browser-bookmark",
+   "tier": 2,
+   "card": "web",
+   "section": "bookmarks",
    "label": "북마크",
    "types": [
     "browser-bookmark"
@@ -2500,6 +2578,9 @@
   },
   {
    "id": "browser-extension",
+   "tier": 2,
+   "card": "web",
+   "section": "extensions",
    "label": "브라우저 확장",
    "types": [
     "browser-extension"
@@ -2590,6 +2671,9 @@
   },
   {
    "id": "browser-autofill",
+   "tier": 2,
+   "card": "web",
+   "section": "autofill",
    "label": "자동완성",
    "types": [
     "browser-autofill",
@@ -2669,6 +2753,9 @@
   },
   {
    "id": "browser-cache-entry",
+   "tier": 3,
+   "card": null,
+   "section": "browser-cache",
    "label": "브라우저 캐시 항목",
    "types": [
     "browser-cache-entry"
@@ -2841,6 +2928,9 @@
   },
   {
    "id": "web-upload-candidate",
+   "tier": 1,
+   "card": "web",
+   "section": "uploads",
    "label": "웹메일·웹하드 업로드 후보",
    "types": [
     "web-upload-candidate"
@@ -2958,6 +3048,9 @@
   },
   {
    "id": "location-url-candidate",
+   "tier": 2,
+   "card": "web",
+   "section": "location-urls",
    "label": "지도 URL 위치 후보",
    "types": [
     "location-url-candidate"
@@ -3072,6 +3165,9 @@
   },
   {
    "id": "browser-analytics-cookie",
+   "tier": 2,
+   "card": "web",
+   "section": "analytics-cookies",
    "label": "방문 분석 쿠키(Google Analytics)",
    "types": [
     "browser-analytics-cookie"
@@ -3183,6 +3279,9 @@
   },
   {
    "id": "carved-url-candidate",
+   "tier": 3,
+   "card": null,
+   "section": "carved-urls",
    "label": "URL 카빙 후보",
    "types": [
     "carved-url-candidate"
@@ -3294,6 +3393,9 @@
   },
   {
    "id": "cloud",
+   "tier": 1,
+   "card": "exfil",
+   "section": "cloud",
    "label": "클라우드",
    "types": [
     "cloud-activity",
@@ -3427,6 +3529,9 @@
   },
   {
    "id": "cloud-sync-account",
+   "tier": 2,
+   "card": "exfil",
+   "section": "cloud-accounts",
    "label": "클라우드 동기화 계정",
    "types": [
     "cloud-sync-account"
@@ -3502,6 +3607,9 @@
   },
   {
    "id": "cloud-sync",
+   "tier": 1,
+   "card": "exfil",
+   "section": "cloud-sync",
    "label": "클라우드 동기화 파일·이벤트",
    "types": [
     "cloud-sync-file",
@@ -3641,6 +3749,9 @@
   },
   {
    "id": "cloud-sync-inventory",
+   "tier": 3,
+   "card": null,
+   "section": "cloud-inventory",
    "label": "클라우드 동기화 클라이언트 인벤토리",
    "types": [
     "cloud-sync-inventory"
@@ -3734,6 +3845,9 @@
   },
   {
    "id": "document",
+   "tier": 1,
+   "card": "documents",
+   "section": "metadata",
    "label": "문서 메타데이터",
    "types": [
     "document-metadata-risk",
@@ -3901,6 +4015,9 @@
   },
   {
    "id": "email",
+   "tier": 1,
+   "card": "email",
+   "section": "messages",
    "label": "이메일",
    "types": [
     "email-message",
@@ -4117,6 +4234,9 @@
   },
   {
    "id": "email-attachment",
+   "tier": 1,
+   "card": "email",
+   "section": "attachments",
    "label": "메일 첨부",
    "types": [
     "email-attachment"
@@ -4205,6 +4325,9 @@
   },
   {
    "id": "calendar-event",
+   "tier": 2,
+   "card": "email",
+   "section": "calendar",
    "label": "일정(약속)",
    "types": [
     "calendar-event"
@@ -4295,6 +4418,9 @@
   },
   {
    "id": "contact",
+   "tier": 2,
+   "card": "email",
+   "section": "contacts",
    "label": "연락처",
    "types": [
     "contact"
@@ -4358,6 +4484,9 @@
   },
   {
    "id": "email-container",
+   "tier": 2,
+   "card": "email",
+   "section": "containers",
    "label": "메일 컨테이너(PST/OST)",
    "types": [
     "email-container-inventory"
@@ -4430,6 +4559,9 @@
   },
   {
    "id": "email-client-account",
+   "tier": 2,
+   "card": "email",
+   "section": "accounts",
    "label": "메일 클라이언트 계정",
    "types": [
     "email-client-account"
@@ -4530,6 +4662,9 @@
   },
   {
    "id": "email-client-profile",
+   "tier": 3,
+   "card": null,
+   "section": "email-profiles",
    "label": "메일 클라이언트 프로필",
    "types": [
     "email-client-profile"
@@ -4617,6 +4752,9 @@
   },
   {
    "id": "email-client-store",
+   "tier": 3,
+   "card": null,
+   "section": "email-stores",
    "label": "메일 저장소(ESE)",
    "types": [
     "email-client-store"
@@ -4686,6 +4824,9 @@
   },
   {
    "id": "email-client-error",
+   "tier": 3,
+   "card": null,
+   "section": "parse-errors",
    "label": "메일 클라이언트 처리 오류",
    "types": [
     "email-client-parse-error"
@@ -4733,6 +4874,9 @@
   },
   {
    "id": "eventlog-event",
+   "tier": 3,
+   "card": null,
+   "section": "eventlog",
    "label": "이벤트 로그",
    "types": [
     "eventlog-event"
@@ -5105,6 +5249,9 @@
   },
   {
    "id": "eventlog-detection",
+   "tier": 2,
+   "card": null,
+   "section": "eventlog",
    "label": "이벤트 로그 탐지",
    "types": [
     "eventlog-detection"
@@ -5472,6 +5619,9 @@
   },
   {
    "id": "eventlog-logon-session",
+   "tier": 1,
+   "card": "accounts",
+   "section": "logons",
    "label": "로그온 세션",
    "types": [
     "eventlog-logon-session"
@@ -5558,6 +5708,9 @@
   },
   {
    "id": "eventlog-record-candidate",
+   "tier": 3,
+   "card": null,
+   "section": "eventlog-carved",
    "label": "EVTX 레코드 후보",
    "types": [
     "eventlog-record-candidate"
@@ -5616,6 +5769,9 @@
   },
   {
    "id": "powershell",
+   "tier": 2,
+   "card": "programs",
+   "section": "powershell",
    "label": "PowerShell 기록",
    "types": [
     "powershell-history-command"
@@ -5657,6 +5813,9 @@
   },
   {
    "id": "execution",
+   "tier": 1,
+   "card": "programs",
+   "section": "execution",
    "label": "실행 흔적",
    "types": [],
    "prefixes": [
@@ -5877,6 +6036,9 @@
   },
   {
    "id": "shimcache",
+   "tier": 2,
+   "card": "programs",
+   "section": "shimcache",
    "label": "앱 호환성 캐시(ShimCache)",
    "types": [
     "shimcache-schema-entry"
@@ -6006,6 +6168,9 @@
   },
   {
    "id": "amcache-file",
+   "tier": 2,
+   "card": "programs",
+   "section": "amcache",
    "label": "Amcache 파일·프로그램 항목",
    "types": [
     "amcache-schema-row",
@@ -6169,6 +6334,9 @@
   },
   {
    "id": "prefetch-file",
+   "tier": 1,
+   "card": "programs",
+   "section": "prefetch",
    "label": "프리페치",
    "types": [
     "prefetch-file",
@@ -6368,6 +6536,9 @@
   },
   {
    "id": "prefetch-reference",
+   "tier": 3,
+   "card": null,
+   "section": "prefetch-reference",
    "label": "프리페치 참조 파일",
    "types": [
     "prefetch-reference"
@@ -6420,6 +6591,9 @@
   },
   {
    "id": "srum",
+   "tier": 2,
+   "card": "programs",
+   "section": "srum",
    "label": "시스템 자원 사용 (SRUM)",
    "types": [],
    "prefixes": [
@@ -6484,6 +6658,9 @@
   },
   {
    "id": "pca",
+   "tier": 2,
+   "card": "programs",
+   "section": "pca",
    "label": "프로그램 호환성 도우미(PCA)",
    "types": [
     "execution-pca"
@@ -6588,6 +6765,9 @@
   },
   {
    "id": "feature-usage",
+   "tier": 2,
+   "card": "programs",
+   "section": "feature-usage",
    "label": "작업 표시줄 사용(FeatureUsage)",
    "types": [
     "execution-feature-usage"
@@ -6651,6 +6831,9 @@
   },
   {
    "id": "startup-item",
+   "tier": 2,
+   "card": "programs",
+   "section": "startup",
    "label": "시작 프로그램",
    "types": [
     "startup-item"
@@ -6782,6 +6965,9 @@
   },
   {
    "id": "shortcut",
+   "tier": 1,
+   "card": "documents",
+   "section": "recent-files",
    "label": "바로 가기(LNK)",
    "types": [
     "recent-shortcut",
@@ -6993,6 +7179,9 @@
   },
   {
    "id": "jumplist",
+   "tier": 1,
+   "card": "documents",
+   "section": "jumplists",
    "label": "점프 목록",
    "types": [
     "jumplist-entry",
@@ -7172,6 +7361,9 @@
   },
   {
    "id": "media-image",
+   "tier": 2,
+   "card": null,
+   "section": "media",
    "label": "이미지·동영상",
    "types": [
     "media-image",
@@ -7354,6 +7546,9 @@
   },
   {
    "id": "synthetic-media",
+   "tier": 2,
+   "card": null,
+   "section": "media",
    "label": "합성 미디어 선별",
    "types": [],
    "prefixes": [
@@ -7443,6 +7638,9 @@
   },
   {
    "id": "media-player",
+   "tier": 2,
+   "card": null,
+   "section": "media",
    "label": "미디어 플레이어 재생 기록",
    "types": [
     "media-player-recent"
@@ -7588,6 +7786,9 @@
   },
   {
    "id": "media-player-app",
+   "tier": 3,
+   "card": null,
+   "section": "media-player-app",
    "label": "미디어 플레이어 인벤토리·오류",
    "types": [
     "media-player-inventory",
@@ -7667,6 +7868,9 @@
   },
   {
    "id": "messenger",
+   "tier": 1,
+   "card": "messenger",
+   "section": "messages",
    "label": "메신저",
    "types": [
     "mobile-message",
@@ -7857,6 +8061,9 @@
   },
   {
    "id": "kakaotalk",
+   "tier": 1,
+   "card": "messenger",
+   "section": "kakaotalk",
    "label": "카카오톡 후보",
    "types": [],
    "prefixes": [
@@ -7941,6 +8148,9 @@
   },
   {
    "id": "messenger-attachment",
+   "tier": 1,
+   "card": "messenger",
+   "section": "attachments",
    "label": "메신저 첨부",
    "types": [
     "chat-attachment"
@@ -8064,6 +8274,9 @@
   },
   {
    "id": "messenger-contact",
+   "tier": 2,
+   "card": "messenger",
+   "section": "contacts",
    "label": "메신저 연락처",
    "types": [
     "chat-contact"
@@ -8129,6 +8342,9 @@
   },
   {
    "id": "messenger-app",
+   "tier": 2,
+   "card": "messenger",
+   "section": "apps",
    "label": "메신저 앱 목록",
    "types": [
     "chat-app-inventory"
@@ -8238,6 +8454,9 @@
   },
   {
    "id": "messenger-error",
+   "tier": 3,
+   "card": null,
+   "section": "parse-errors",
    "label": "메신저 처리 오류",
    "types": [
     "chat-parse-error"
@@ -8300,6 +8519,9 @@
   },
   {
    "id": "kakaotalk-app",
+   "tier": 2,
+   "card": "messenger",
+   "section": "apps",
    "label": "카카오톡 앱 인벤토리",
    "types": [
     "kakaotalk-app-inventory"
@@ -8356,6 +8578,9 @@
   },
   {
    "id": "kakaotalk-shared-picture",
+   "tier": 2,
+   "card": "messenger",
+   "section": "shared-pictures",
    "label": "카카오톡 공유 사진",
    "types": [
     "kakaotalk-shared-picture"
@@ -8445,6 +8670,9 @@
   },
   {
    "id": "mobile",
+   "tier": 2,
+   "card": null,
+   "section": "mobile-detail",
    "label": "모바일",
    "types": [
     "mobile-call",
@@ -8568,6 +8796,9 @@
   },
   {
    "id": "android-backup",
+   "tier": 2,
+   "card": null,
+   "section": "mobile-detail",
    "label": "Android adb 백업",
    "types": [
     "android-backup"
@@ -8637,6 +8868,9 @@
   },
   {
    "id": "android-backup-member",
+   "tier": 3,
+   "card": null,
+   "section": "mobile-detail",
    "label": "Android 백업 항목",
    "types": [
     "android-backup-member"
@@ -8740,6 +8974,9 @@
   },
   {
    "id": "mft",
+   "tier": 3,
+   "card": null,
+   "section": "mft",
    "label": "MFT/USN 메타",
    "types": [
     "mft-record",
@@ -8855,6 +9092,9 @@
   },
   {
    "id": "ntfs-timestamp-mismatch",
+   "tier": 2,
+   "card": "deleted",
+   "section": "timestamp-mismatch",
    "label": "NTFS 타임스탬프 불일치",
    "types": [
     "ntfs-timestamp-mismatch"
@@ -8971,6 +9211,9 @@
   },
   {
    "id": "ntfs-logfile-transaction",
+   "tier": 3,
+   "card": null,
+   "section": "logfile",
    "label": "$LogFile 트랜잭션",
    "types": [
     "ntfs-logfile-transaction"
@@ -9053,6 +9296,9 @@
   },
   {
    "id": "zone",
+   "tier": 2,
+   "card": "web",
+   "section": "zone-identifier",
    "label": "다운로드 출처 표식 (Zone.Identifier)",
    "types": [
     "zone-identifier",
@@ -9146,6 +9392,9 @@
   },
   {
    "id": "recycle",
+   "tier": 1,
+   "card": "deleted",
+   "section": "recycle-bin",
    "label": "휴지통",
    "types": [
     "recycle-bin-entry"
@@ -9200,6 +9449,9 @@
   },
   {
    "id": "file",
+   "tier": 3,
+   "card": null,
+   "section": "files",
    "label": "파일",
    "types": [],
    "core_columns": [
@@ -9316,6 +9568,9 @@
   },
   {
    "id": "ntfs-volume-information",
+   "tier": 3,
+   "card": null,
+   "section": "volume",
    "label": "NTFS 볼륨 정보",
    "types": [
     "ntfs-volume-information"
@@ -9444,6 +9699,9 @@
   },
   {
    "id": "defender",
+   "tier": 2,
+   "card": null,
+   "section": "compromise",
    "label": "Defender 로그",
    "types": [],
    "prefixes": [
@@ -9498,6 +9756,9 @@
   },
   {
    "id": "system-log",
+   "tier": 2,
+   "card": null,
+   "section": "system-context",
    "label": "시스템 로그",
    "types": [
     "firewall-log",
@@ -9551,6 +9812,9 @@
   },
   {
    "id": "crash-dump",
+   "tier": 3,
+   "card": null,
+   "section": "crash-dumps",
    "label": "크래시 덤프",
    "types": [
     "crash-dump-indicators"
@@ -9642,6 +9906,9 @@
   },
   {
    "id": "string-candidate",
+   "tier": 3,
+   "card": null,
+   "section": "strings",
    "label": "문자열 후보",
    "types": [],
    "suffixes": [
@@ -9715,6 +9982,9 @@
   },
   {
    "id": "summary",
+   "tier": 3,
+   "card": null,
+   "section": "summaries",
    "label": "요약(집계)",
    "types": [],
    "suffixes": [
@@ -9792,6 +10062,9 @@
   },
   {
    "id": "timeline",
+   "tier": 2,
+   "card": "timeline",
+   "section": "events",
    "label": "타임라인 이벤트",
    "types": [],
    "core_columns": [
@@ -9833,6 +10106,9 @@
   },
   {
    "id": "indicator",
+   "tier": 2,
+   "card": "findings",
+   "section": "indicators",
    "label": "지표",
    "types": [],
    "core_columns": [
@@ -9894,6 +10170,9 @@
   },
   {
    "id": "carved-file",
+   "tier": 1,
+   "card": "deleted",
+   "section": "carved",
    "label": "카빙 복구 파일",
    "types": [
     "carve-row"
@@ -9998,6 +10277,9 @@
   },
   {
    "id": "generic",
+   "tier": 3,
+   "card": null,
+   "section": "records",
    "label": "레코드",
    "types": [],
    "core_columns": [
@@ -10076,6 +10358,9 @@
   },
   {
    "id": "desktop-wallpaper",
+   "tier": 2,
+   "card": null,
+   "section": "system-context",
    "label": "바탕 화면 배경",
    "types": [
     "desktop-wallpaper"
@@ -10174,6 +10459,9 @@
   },
   {
    "id": "credential-store-presence",
+   "tier": 2,
+   "card": "accounts",
+   "section": "credential-stores",
    "label": "저장된 자격 증명(존재만)",
    "types": [
     "credential-store-presence"
@@ -10262,6 +10550,9 @@
   },
   {
    "id": "p2p-torrent",
+   "tier": 1,
+   "card": "exfil",
+   "section": "p2p",
    "label": "토렌트 파일",
    "types": [
     "p2p-torrent"
@@ -10354,6 +10645,9 @@
   },
   {
    "id": "p2p-transfer",
+   "tier": 1,
+   "card": "exfil",
+   "section": "p2p",
    "label": "P2P 전송 기록",
    "types": [
     "p2p-transfer"
@@ -10482,6 +10776,9 @@
   },
   {
    "id": "p2p-shared-file",
+   "tier": 1,
+   "card": "exfil",
+   "section": "p2p",
    "label": "eMule 공유·완료 파일",
    "types": [
     "p2p-shared-file"
@@ -10563,6 +10860,9 @@
   },
   {
    "id": "p2p-search-term",
+   "tier": 2,
+   "card": "exfil",
+   "section": "p2p-search",
    "label": "P2P 검색어",
    "types": [
     "p2p-search-term"
@@ -10607,6 +10907,9 @@
   },
   {
    "id": "p2p-client-config",
+   "tier": 2,
+   "card": "exfil",
+   "section": "p2p-config",
    "label": "P2P 클라이언트 설정",
    "types": [
     "p2p-client-config"
@@ -10657,6 +10960,9 @@
   },
   {
    "id": "p2p-error",
+   "tier": 3,
+   "card": null,
+   "section": "parse-errors",
    "label": "P2P 읽기 오류",
    "types": [
     "p2p-parse-error"
@@ -10713,6 +11019,9 @@
   },
   {
    "id": "phone-link-message",
+   "tier": 1,
+   "card": "messenger",
+   "section": "phone-link",
    "label": "휴대폰과 연결 문자",
    "types": [
     "phone-link-message"
@@ -10841,6 +11150,9 @@
   },
   {
    "id": "phone-link-call",
+   "tier": 2,
+   "card": "messenger",
+   "section": "phone-link-calls",
    "label": "휴대폰과 연결 통화",
    "types": [
     "phone-link-call"
@@ -10913,6 +11225,9 @@
   },
   {
    "id": "phone-link-contact",
+   "tier": 2,
+   "card": "messenger",
+   "section": "phone-link-contacts",
    "label": "휴대폰과 연결 연락처",
    "types": [
     "phone-link-contact"
@@ -10975,6 +11290,9 @@
   },
   {
    "id": "phone-link-photo",
+   "tier": 2,
+   "card": "messenger",
+   "section": "phone-link-photos",
    "label": "휴대폰과 연결 사진",
    "types": [
     "phone-link-photo"
@@ -11052,6 +11370,9 @@
   },
   {
    "id": "phone-link-device",
+   "tier": 2,
+   "card": "people_devices",
+   "section": "phone-link-devices",
    "label": "휴대폰과 연결 기기·오류",
    "types": [
     "phone-link-device",
@@ -11146,6 +11467,9 @@
   },
   {
    "id": "rdp",
+   "tier": 1,
+   "card": "exfil",
+   "section": "remote",
    "label": "원격 데스크톱",
    "types": [],
    "prefixes": [
@@ -11210,6 +11534,9 @@
   },
   {
    "id": "ssh-known-host",
+   "tier": 2,
+   "card": "exfil",
+   "section": "ssh",
    "label": "SSH 알려진 호스트",
    "types": [
     "ssh-known-host"
@@ -11304,6 +11631,9 @@
   },
   {
    "id": "ssh-authorized-key",
+   "tier": 2,
+   "card": "exfil",
+   "section": "ssh",
    "label": "SSH 허용 공개키",
    "types": [
     "ssh-authorized-key"
@@ -11369,6 +11699,9 @@
   },
   {
    "id": "ssh-client-session",
+   "tier": 1,
+   "card": "exfil",
+   "section": "ssh",
    "label": "SSH·파일 전송 접속 세션",
    "types": [
     "ssh-client-session"
@@ -11492,6 +11825,9 @@
   },
   {
    "id": "ssh-key-file",
+   "tier": 2,
+   "card": "exfil",
+   "section": "ssh",
    "label": "SSH 키 파일",
    "types": [
     "ssh-key-file"
@@ -11582,6 +11918,9 @@
   },
   {
    "id": "ssh-server-config",
+   "tier": 3,
+   "card": null,
+   "section": "ssh-config",
    "label": "OpenSSH 서버 설정",
    "types": [
     "ssh-server-config"
@@ -11636,6 +11975,9 @@
   },
   {
    "id": "registry",
+   "tier": 3,
+   "card": null,
+   "section": "registry",
    "label": "레지스트리",
    "types": [],
    "prefixes": [
@@ -11771,6 +12113,9 @@
   },
   {
    "id": "persistence",
+   "tier": 2,
+   "card": null,
+   "section": "compromise",
    "label": "자동 실행",
    "types": [
     "registry-persistence-entry",
@@ -11861,6 +12206,9 @@
   },
   {
    "id": "service",
+   "tier": 3,
+   "card": null,
+   "section": "services",
    "label": "서비스",
    "types": [
     "windows-service-config"
@@ -11960,6 +12308,9 @@
   },
   {
    "id": "timezone",
+   "tier": 2,
+   "card": null,
+   "section": "system-context",
    "label": "표준 시간대",
    "types": [
     "windows-timezone"
@@ -12032,6 +12383,9 @@
   },
   {
    "id": "system-info",
+   "tier": 2,
+   "card": null,
+   "section": "system-context",
    "label": "시스템 정보",
    "types": [
     "windows-control-set",
@@ -12203,6 +12557,9 @@
   },
   {
    "id": "mounted-device",
+   "tier": 2,
+   "card": "exfil",
+   "section": "usb",
    "label": "마운트된 장치",
    "types": [
     "windows-mounted-device"
@@ -12310,6 +12667,9 @@
   },
   {
    "id": "shellbag",
+   "tier": 2,
+   "card": "documents",
+   "section": "shellbags",
    "label": "셸백",
    "types": [],
    "prefixes": [
@@ -12441,6 +12801,9 @@
   },
   {
    "id": "network-profile",
+   "tier": 2,
+   "card": null,
+   "section": "system-context",
    "label": "네트워크 프로필(NetworkList)",
    "types": [
     "registry-network-profile"
@@ -12543,6 +12906,9 @@
   },
   {
    "id": "network-share",
+   "tier": 1,
+   "card": "exfil",
+   "section": "network-shares",
    "label": "네트워크 공유·매핑 드라이브",
    "types": [
     "registry-network-share"
@@ -12630,6 +12996,9 @@
   },
   {
    "id": "wlan-profile-registry",
+   "tier": 2,
+   "card": null,
+   "section": "system-context",
    "label": "무선 연결 이력(레지스트리)",
    "types": [
     "registry-wlan-profile"
@@ -12711,6 +13080,9 @@
   },
   {
    "id": "office-mru",
+   "tier": 1,
+   "card": "documents",
+   "section": "office-mru",
    "label": "Office 최근 파일(MRU)",
    "types": [
     "registry-office-mru"
@@ -12791,6 +13163,9 @@
   },
   {
    "id": "known-dll",
+   "tier": 3,
+   "card": null,
+   "section": "known-dll",
    "label": "알려진 DLL(KnownDLLs)",
    "types": [
     "registry-known-dll"
@@ -12854,6 +13229,9 @@
   },
   {
    "id": "default-browser",
+   "tier": 2,
+   "card": null,
+   "section": "system-context",
    "label": "기본 브라우저",
    "types": [
     "registry-default-browser"
@@ -12911,6 +13289,9 @@
   },
   {
    "id": "install-state",
+   "tier": 2,
+   "card": "programs",
+   "section": "installed",
    "label": "설치 상태(App Paths·MSI)",
    "types": [
     "registry-install-state"
@@ -13006,6 +13387,9 @@
   },
   {
    "id": "logon-banner",
+   "tier": 3,
+   "card": null,
+   "section": "system-context",
    "label": "로그온 배너(법적 고지)",
    "types": [
     "registry-logon-banner"
@@ -13062,6 +13446,9 @@
   },
   {
    "id": "office-identity",
+   "tier": 2,
+   "card": "accounts",
+   "section": "office-identity",
    "label": "Office 연결 계정",
    "types": [
     "office-identity"
@@ -13137,6 +13524,9 @@
   },
   {
    "id": "office-backstage",
+   "tier": 2,
+   "card": "documents",
+   "section": "office-backstage",
    "label": "Office Backstage 캐시",
    "types": [
     "office-backstage-item"
@@ -13221,6 +13611,9 @@
   },
   {
    "id": "usb",
+   "tier": 1,
+   "card": "exfil",
+   "section": "usb",
    "label": "USB 장치",
    "types": [
     "windows-usb-device",

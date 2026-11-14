@@ -1,6 +1,9 @@
 # Triage catalogue: mobile (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
 families:
 - id: mobile
+  tier: 2
+  card: null
+  section: mobile-detail
   label: 모바일
   types:
   - mobile-call
@@ -87,6 +90,9 @@ families:
   - mobile.factory_reset_gap
 # R5 L3: Android adb backup (.ab) unpacked in memory: header row + one row per tar member.
 - id: android-backup
+  tier: 2
+  card: null
+  section: mobile-detail
   label: Android adb 백업
   types:
   - android-backup
@@ -128,6 +134,9 @@ families:
     format: number
   rules: []
 - id: android-backup-member
+  tier: 3
+  card: null
+  section: mobile-detail
   label: Android 백업 항목
   types:
   - android-backup-member

@@ -1,6 +1,9 @@
 # Triage catalogue: execution (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
 families:
 - id: execution
+  tier: 1
+  card: programs
+  section: execution
   label: 실행 흔적
   types: []
   prefixes:
@@ -147,6 +150,9 @@ families:
 # Timeline/grid readability (C8): ShimCache and Amcache file rows get their own examiner layout;
 # the semantic columns of `execution` are repeated (aux) so the derived tables read them as before.
 - id: shimcache
+  tier: 2
+  card: programs
+  section: shimcache
   label: 앱 호환성 캐시(ShimCache)
   types:
   - shimcache-schema-entry
@@ -232,6 +238,9 @@ families:
   - execution.multi_source
   - antiforensics.tool_present
 - id: amcache-file
+  tier: 2
+  card: programs
+  section: amcache
   label: Amcache 파일·프로그램 항목
   types:
   - amcache-schema-row
@@ -341,6 +350,9 @@ families:
   - execution.multi_source
   - antiforensics.tool_present
 - id: prefetch-file
+  tier: 1
+  card: programs
+  section: prefetch
   label: 프리페치
   types:
   - prefetch-file
@@ -469,6 +481,9 @@ families:
   - antiforensics.tool_present
   - antiforensics.wiper_run_after_incident
 - id: prefetch-reference
+  tier: 3
+  card: null
+  section: prefetch-reference
   label: 프리페치 참조 파일
   types:
   - prefetch-reference
@@ -501,6 +516,9 @@ families:
   aux_columns: []
   rules: []
 - id: srum
+  tier: 2
+  card: programs
+  section: srum
   label: 시스템 자원 사용 (SRUM)
   types: []
   prefixes:
@@ -540,6 +558,9 @@ families:
   rules:
   - execution.srum_bulk_upload
 - id: pca
+  tier: 2
+  card: programs
+  section: pca
   label: 프로그램 호환성 도우미(PCA)
   types:
   - execution-pca
@@ -602,6 +623,9 @@ families:
   - antiforensics.tool_present
   - antiforensics.wiper_run_after_incident
 - id: feature-usage
+  tier: 2
+  card: programs
+  section: feature-usage
   label: 작업 표시줄 사용(FeatureUsage)
   types:
   - execution-feature-usage
@@ -641,6 +665,9 @@ families:
   - antiforensics.tool_present
 # --- R5 L2: startup items (StartupApproved registry rows + Startup-folder files) --------------
 - id: startup-item
+  tier: 2
+  card: programs
+  section: startup
   label: 시작 프로그램
   types:
   - startup-item

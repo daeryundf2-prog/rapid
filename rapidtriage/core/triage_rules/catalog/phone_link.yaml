@@ -3,6 +3,9 @@
 # column meanings are matched by name across app versions (see docs/rapidtriage-known-limitations.md).
 families:
 - id: phone-link-message
+  tier: 1
+  card: messenger
+  section: phone-link
   label: 휴대폰과 연결 문자
   types:
   - phone-link-message
@@ -81,6 +84,9 @@ families:
     format: mono
   rules: []
 - id: phone-link-call
+  tier: 2
+  card: messenger
+  section: phone-link-calls
   label: 휴대폰과 연결 통화
   types:
   - phone-link-call
@@ -124,6 +130,9 @@ families:
     format: mono
   rules: []
 - id: phone-link-contact
+  tier: 2
+  card: messenger
+  section: phone-link-contacts
   label: 휴대폰과 연결 연락처
   types:
   - phone-link-contact
@@ -161,6 +170,9 @@ families:
     format: path
   rules: []
 - id: phone-link-photo
+  tier: 2
+  card: messenger
+  section: phone-link-photos
   label: 휴대폰과 연결 사진
   types:
   - phone-link-photo
@@ -209,6 +221,9 @@ families:
     format: path
   rules: []
 - id: phone-link-device
+  tier: 2
+  card: people_devices
+  section: phone-link-devices
   label: 휴대폰과 연결 기기·오류
   types:
   - phone-link-device

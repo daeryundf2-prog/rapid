@@ -211,7 +211,7 @@ class CatalogSemanticTests(unittest.TestCase):
 
     def test_validator_rejects_bad_tags(self) -> None:
         def family(column: dict[str, object]) -> list[tuple[str, bytes]]:
-            document = {"families": [{"id": "x", "label": "X", "core_columns": [{"key": "a", "label": "A", **column}]}]}
+            document = {"families": [{"id": "x", "label": "X", "tier": 3, "card": None, "section": "x", "core_columns": [{"key": "a", "label": "A", **column}]}]}
             return [("x.yaml", json.dumps(document).encode("utf-8"))]
 
         for column, message in (
@@ -304,7 +304,7 @@ class R2ConsoleCatalogTests(unittest.TestCase):
 
     def test_value_labels_validator_is_korean(self) -> None:
         def family(column: dict[str, object]) -> list[tuple[str, bytes]]:
-            document = {"families": [{"id": "x", "label": "X", "core_columns": [{"key": "a", "label": "A", **column}]}]}
+            document = {"families": [{"id": "x", "label": "X", "tier": 3, "card": None, "section": "x", "core_columns": [{"key": "a", "label": "A", **column}]}]}
             return [("x.yaml", json.dumps(document).encode("utf-8"))]
 
         for labels in ({}, ["a"], {"a": ""}, {"": "가"}, {"a": 1}):

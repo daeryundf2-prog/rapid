@@ -1,6 +1,9 @@
 # Triage catalogue: archives (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
 families:
 - id: archive
+  tier: 2
+  card: null
+  section: review-mgmt
   label: 압축·암호 컨테이너
   types:
   - archive-file-inventory

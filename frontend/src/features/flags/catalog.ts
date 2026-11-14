@@ -56,6 +56,14 @@ export interface CatalogFamily {
   core_columns: CatalogColumn[];
   aux_columns: CatalogColumn[];
   rules: string[];
+  /**
+   * R8 classification (T-045): 1 = first screen, 2 = "더 보기", 3 = expert items; `card` is one of
+   * the 12 card ids (null = no card owns the rows); `section` = the card's sub-tab or Tier 2/3 group.
+   * Optional so an older server's payload still type-checks.
+   */
+  tier?: 1 | 2 | 3;
+  card?: string | null;
+  section?: string;
 }
 
 /**
@@ -262,6 +270,9 @@ export function normalizeCatalog(raw: unknown): FamilyCatalog | null {
         .map(column)
         .filter((c): c is CatalogColumn => c !== null),
       rules: strings(entry.rules),
+      ...(entry.tier === 1 || entry.tier === 2 || entry.tier === 3 ? { tier: entry.tier } : {}),
+      ...(typeof entry.card === "string" || entry.card === null ? { card: entry.card } : {}),
+      ...(typeof entry.section === "string" && entry.section ? { section: entry.section } : {}),
     });
   }
   if (!families.length) return null;

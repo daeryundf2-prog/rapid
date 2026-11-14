@@ -1,6 +1,9 @@
 # Triage catalogue: usb (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
 families:
 - id: usb
+  tier: 1
+  card: exfil
+  section: usb
   label: USB 장치
   types:
   - windows-usb-device

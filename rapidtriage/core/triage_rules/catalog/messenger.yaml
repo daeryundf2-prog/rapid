@@ -1,6 +1,9 @@
 # Triage catalogue: messenger (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
 families:
 - id: messenger
+  tier: 1
+  card: messenger
+  section: messages
   label: 메신저
   types:
   - mobile-message
@@ -129,6 +132,9 @@ families:
   - messenger.attachment_missing
   - messenger.app_reinstall_gap
 - id: kakaotalk
+  tier: 1
+  card: messenger
+  section: kakaotalk
   label: 카카오톡 후보
   types: []
   prefixes:
@@ -178,6 +184,9 @@ families:
     format: number
   rules: []
 - id: messenger-attachment
+  tier: 1
+  card: messenger
+  section: attachments
   label: 메신저 첨부
   types:
   - chat-attachment
@@ -255,6 +264,9 @@ families:
   rules:
   - messenger.external_file_transfer
 - id: messenger-contact
+  tier: 2
+  card: messenger
+  section: contacts
   label: 메신저 연락처
   types:
   - chat-contact
@@ -293,6 +305,9 @@ families:
     format: number
   rules: []
 - id: messenger-app
+  tier: 2
+  card: messenger
+  section: apps
   label: 메신저 앱 목록
   types:
   - chat-app-inventory
@@ -361,6 +376,9 @@ families:
   rules: []
 # Store read failures of the desktop messenger provider: 앱 · 사유 · 앱 폴더 first.
 - id: messenger-error
+  tier: 3
+  card: null
+  section: parse-errors
   label: 메신저 처리 오류
   types:
   - chat-parse-error
@@ -397,6 +415,9 @@ families:
     format: mono
 # r2 M2: KakaoTalk PC decryption status per profile and shared/saved pictures.
 - id: kakaotalk-app
+  tier: 2
+  card: messenger
+  section: apps
   label: 카카오톡 앱 인벤토리
   types:
   - kakaotalk-app-inventory
@@ -430,6 +451,9 @@ families:
     label: 복호 정책
   rules: []
 - id: kakaotalk-shared-picture
+  tier: 2
+  card: messenger
+  section: shared-pictures
   label: 카카오톡 공유 사진
   types:
   - kakaotalk-shared-picture

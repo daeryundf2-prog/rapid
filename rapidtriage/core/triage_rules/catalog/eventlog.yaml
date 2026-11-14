@@ -1,6 +1,9 @@
 # Triage catalogue: eventlog (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
 families:
 - id: eventlog-event
+  tier: 3
+  card: null
+  section: eventlog
   label: 이벤트 로그
   types:
   - eventlog-event
@@ -242,6 +245,9 @@ families:
   - accounts.new_account
   - accounts.admin_added
 - id: eventlog-detection
+  tier: 2
+  card: null
+  section: eventlog
   label: 이벤트 로그 탐지
   types:
   - eventlog-detection
@@ -466,6 +472,9 @@ families:
     format: mono
   rules: []
 - id: eventlog-logon-session
+  tier: 1
+  card: accounts
+  section: logons
   label: 로그온 세션
   types:
   - eventlog-logon-session
@@ -517,6 +526,9 @@ families:
     ts_kind: logon-end
   rules: []
 - id: eventlog-record-candidate
+  tier: 3
+  card: null
+  section: eventlog-carved
   label: EVTX 레코드 후보
   types:
   - eventlog-record-candidate
@@ -550,6 +562,9 @@ families:
   aux_columns: []
   rules: []
 - id: powershell
+  tier: 2
+  card: programs
+  section: powershell
   label: PowerShell 기록
   types:
   - powershell-history-command

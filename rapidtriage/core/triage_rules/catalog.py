@@ -16,6 +16,12 @@ four ``execution.*`` rules, ``registry`` lists ``rdp.enabled`` and
 ``accounts.task_mismatch``, ``mounted-device`` lists
 ``registry.usb_serial_cross``; the plan §5.1 has the full list. Counts are
 per rule, never per listing family.
+
+Classification (R8 T-045, plan r8-redesign §4.1-4.2): every family carries ``tier`` (1 = 첫 화면,
+2 = 더 보기, 3 = 전문가), ``card`` (one of :data:`CARD_IDS`, ``null`` for rows no card owns) and
+``section`` (the card's sub-tab, or the Tier 2/3 group); ``type_defaults.yaml`` places the artifact
+types no family shows. A missing key is a :class:`CatalogError`; :meth:`Catalog.classify` resolves
+any ``artifact_type``/``kind`` and :meth:`Catalog.unclassified` is the "미분류 0" validator.
 """
 
 from __future__ import annotations
@@ -23,7 +29,7 @@ from __future__ import annotations
 import hashlib
 import re
 import threading
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -73,6 +79,27 @@ VALIDATION_KEYS = frozenset({"synthetic", "real", "public", "notes_ko"})
 VALIDATION_ENTRY_KEYS = frozenset({"source", "result", "hits", "false_positives", "sample_size", "checked_at", "note_ko"})
 VALIDATION_RESULTS = ("positive", "negative", "not_applicable", "unevaluated")
 VALIDATION_COUNTED_RESULTS = frozenset({"positive", "negative"})
+# Classification keys (R8 T-045). Card ids = docs/plans/r8/r8-task-cards.md T-045 (appendix C.2):
+# Tier 1 rows always belong to a card, Tier 3 rows to none (전문가 항목).
+TIERS = (1, 2, 3)
+CARD_IDS = (
+    "findings",
+    "documents",
+    "email",
+    "messenger",
+    "web",
+    "exfil",
+    "programs",
+    "deleted",
+    "accounts",
+    "ai",
+    "timeline",
+    "people_devices",
+)
+CLASS_KEYS = ("tier", "card", "section")
+SECTION_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
+TYPE_DEFAULT_MATCH_KEYS = ("types", "prefixes", "suffixes", "kinds")
+UNCLASSIFIED_SECTION = "unclassified"
 
 
 class CatalogError(ValueError):
@@ -116,10 +143,56 @@ class Catalog:
     specs: Mapping[str, RuleSpec] = field(default_factory=dict)
     # YAML file name -> SHA-256 of its bytes (the summary's ``rule_set`` block).
     file_hashes: Mapping[str, str] = field(default_factory=dict)
+    # ``type_defaults.yaml`` entries: ``{types?, prefixes?, suffixes?, kinds?, tier, card, section}``.
+    type_defaults: tuple[dict[str, Any], ...] = ()
+    _classified: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict, compare=False, repr=False)
 
     def payload(self) -> dict[str, object]:
-        """``GET /api/meta/families`` body."""
+        """``GET /api/meta/families`` body. Families carry their ``tier``/``card``/``section``; the type
+        defaults stay server-side (:meth:`classify`) so the console's bundled copy of this payload
+        (``families.fallback.json``) does not grow past the bundle budget."""
         return {"version": self.version, "families": list(self.families), "rules": list(self.rules)}
+
+    def classify(self, artifact_type: str, kind: str = "") -> dict[str, Any]:
+        """``{tier, card, section, source}`` of a row: the family that shows the type, then the type
+        defaults (exact, prefix, suffix), then the family / default of the kind; anything else is
+        Tier 3 ``unclassified`` (``source`` = ``family:<id>`` | ``type-default`` | ``unclassified``)."""
+        key = (artifact_type or "", kind or "")
+        cached = self._classified.get(key)
+        if cached is None:
+            cached = self._resolve(*key)
+            self._classified[key] = cached
+        return dict(cached)
+
+    def unclassified(self, artifact_types: Iterable[str]) -> list[str]:
+        """The validator (T-045/T-319 "미분류 0"): the given types that resolve to nothing."""
+        return sorted({name for name in artifact_types if self.classify(name)["source"] == "unclassified"})
+
+    def _resolve(self, artifact_type: str, kind: str) -> dict[str, Any]:
+        family_id = self.family_for(artifact_type) if artifact_type else None
+        entry = self._type_default(artifact_type) if family_id is None and artifact_type else None
+        if family_id is None and entry is None and kind:
+            family_id = self.family_for("", kind)
+            if family_id is None:
+                entry = next((item for item in self.type_defaults if kind in (item.get("kinds") or ())), None)
+        if family_id is not None:
+            family = next(item for item in self.families if item["id"] == family_id)
+            return {**{name: family[name] for name in CLASS_KEYS}, "source": f"family:{family_id}"}
+        if entry is not None:
+            return {**{name: entry[name] for name in CLASS_KEYS}, "source": "type-default"}
+        return {"tier": 3, "card": None, "section": UNCLASSIFIED_SECTION, "source": "unclassified"}
+
+    def _type_default(self, artifact_type: str) -> dict[str, Any] | None:
+        for entry in self.type_defaults:
+            if artifact_type in (entry.get("types") or ()):
+                return entry
+        for entry in self.type_defaults:
+            if any(artifact_type.startswith(prefix) for prefix in entry.get("prefixes") or ()):
+                return entry
+        for entry in self.type_defaults:
+            if any(artifact_type.endswith(suffix) for suffix in entry.get("suffixes") or ()):
+                return entry
+        return None
 
     def family_for(self, artifact_type: str, kind: str = "") -> str | None:
         """Family id of an artifact type: suffix, exact type, prefix, then the kind (frontend ``sheetForType`` order)."""
@@ -142,6 +215,67 @@ class Catalog:
 
 def _fail(source: str, message: str) -> CatalogError:
     return CatalogError(f"특이사항 카탈로그 오류({source}): {message}")
+
+
+def _check_class(source: str, owner: str, entry: Mapping[str, Any]) -> None:
+    """``tier``/``card``/``section`` present and valid (R8 T-045): a missing key is an error, Tier 1
+    needs a card, Tier 3 has none."""
+    missing = [name for name in CLASS_KEYS if name not in entry]
+    if missing:
+        raise _fail(source, f"{owner}에 분류 키가 없습니다: {missing} (tier·card·section)")
+    tier, card, section = entry["tier"], entry["card"], entry["section"]
+    if isinstance(tier, bool) or tier not in TIERS:
+        raise _fail(source, f"{owner}의 tier는 1·2·3 중 하나여야 합니다: {tier!r}")
+    if card is not None and card not in CARD_IDS:
+        raise _fail(source, f"{owner}의 card가 알 수 없는 값입니다: {card!r} (허용: {', '.join(CARD_IDS)}, null)")
+    if tier == 1 and card is None:
+        raise _fail(source, f"{owner}: tier 1은 card가 있어야 합니다")
+    if tier == 3 and card is not None:
+        raise _fail(source, f"{owner}: tier 3(전문가 항목)은 card가 null이어야 합니다")
+    if not isinstance(section, str) or not SECTION_PATTERN.fullmatch(section):
+        raise _fail(source, f"{owner}의 section 형식이 아닙니다: {section!r} (소문자·숫자·하이픈)")
+
+
+def _check_type_defaults(source: str, raw: object) -> list[dict[str, Any]]:
+    """``type_defaults: [{types?|prefixes?|suffixes?|kinds?: [..], tier, card, section}]``."""
+    if not isinstance(raw, list):
+        raise _fail(source, "type_defaults는 목록이어야 합니다")
+    entries: list[dict[str, Any]] = []
+    for index, entry in enumerate(raw, start=1):
+        owner = f"유형 기본값 {index}번"
+        if not isinstance(entry, Mapping):
+            raise _fail(source, f"{owner} 항목이 객체가 아닙니다")
+        unknown = set(entry) - set(CLASS_KEYS) - set(TYPE_DEFAULT_MATCH_KEYS)
+        if unknown:
+            raise _fail(source, f"{owner}에 알 수 없는 키가 있습니다: {sorted(unknown)}")
+        matches = [name for name in TYPE_DEFAULT_MATCH_KEYS if name in entry]
+        if not matches:
+            raise _fail(source, f"{owner}에 types·prefixes·suffixes·kinds 중 하나가 없습니다")
+        for name in matches:
+            values = entry[name]
+            if not isinstance(values, list) or not values or not all(isinstance(v, str) and v for v in values):
+                raise _fail(source, f"{owner}의 {name}는 빈 값 없는 문자열 목록이어야 합니다")
+        _check_class(source, owner, entry)
+        entries.append(dict(entry))
+    return entries
+
+
+def _check_type_default_overlap(families: list[dict[str, Any]], type_defaults: list[dict[str, Any]]) -> None:
+    """A match value named twice in the type defaults, or an exact type / kind a family already
+    lists (the default could never be read), is an error."""
+    family_values = {
+        "types": {value for family in families for value in family.get("types") or ()},
+        "kinds": {value for family in families for value in family.get("kinds") or ()},
+    }
+    for name in TYPE_DEFAULT_MATCH_KEYS:
+        seen: set[str] = set()
+        for entry in type_defaults:
+            for value in entry.get(name) or ():
+                if value in seen:
+                    raise _fail("type_defaults", f"{name} 값이 두 번 나옵니다: {value}")
+                seen.add(value)
+                if value in family_values.get(name, ()):
+                    raise _fail("type_defaults", f"{value}은(는) 이미 계열이 보여 주는 {name} 값입니다")
 
 
 def _check_columns(source: str, family_id: str, columns: object, name: str) -> None:
@@ -292,6 +426,7 @@ def parse_catalog(files: list[tuple[str, bytes]]) -> Catalog:
     specs: dict[str, RuleSpec] = {}
     family_ids: set[str] = set()
     file_hashes: dict[str, str] = {}
+    type_defaults: list[dict[str, Any]] = []
     for name, data in sorted(files):
         digest.update(name.encode("utf-8") + b"\0" + data + b"\0")
         file_hashes[name] = hashlib.sha256(data).hexdigest()
@@ -304,8 +439,10 @@ def parse_catalog(files: list[tuple[str, bytes]]) -> Catalog:
             document = yaml.load(data.decode("utf-8"), Loader=loader) or {}
         except (_yaml().YAMLError, UnicodeDecodeError) as exc:
             raise _fail(name, f"YAML을 읽을 수 없습니다: {exc}") from exc
-        if not isinstance(document, Mapping) or set(document) - {"families", "rules"}:
-            raise _fail(name, "최상위는 families/rules 두 키만 가질 수 있습니다")
+        if not isinstance(document, Mapping) or set(document) - {"families", "rules", "type_defaults"}:
+            raise _fail(name, "최상위는 families/rules/type_defaults 키만 가질 수 있습니다")
+        if "type_defaults" in document:
+            type_defaults.extend(_check_type_defaults(name, document["type_defaults"]))
         for family in document.get("families") or []:
             family_id = str(family.get("id") or "") if isinstance(family, Mapping) else ""
             if not FAMILY_ID_PATTERN.fullmatch(family_id):
@@ -314,6 +451,7 @@ def parse_catalog(files: list[tuple[str, bytes]]) -> Catalog:
                 raise _fail(name, f"계열 id가 중복됩니다: {family_id}")
             if not family.get("label"):
                 raise _fail(name, f"계열 {family_id}에 label이 없습니다")
+            _check_class(name, f"계열 {family_id}", family)
             _check_columns(name, family_id, family.get("core_columns"), "core_columns")
             _check_columns(name, family_id, family.get("aux_columns") or [], "aux_columns")
             family_ids.add(family_id)
@@ -338,8 +476,14 @@ def parse_catalog(files: list[tuple[str, bytes]]) -> Catalog:
         if unknown:
             raise _fail("catalog", f"계열 {family['id']}이(가) 없는 규칙을 가리킵니다: {unknown}")
         family["rules"] = list(listed)
+    _check_type_default_overlap(families, type_defaults)
     return Catalog(
-        version=digest.hexdigest()[:16], families=tuple(families), rules=tuple(rules), specs=specs, file_hashes=file_hashes
+        version=digest.hexdigest()[:16],
+        families=tuple(families),
+        rules=tuple(rules),
+        specs=specs,
+        file_hashes=file_hashes,
+        type_defaults=tuple(type_defaults),
     )
 
 

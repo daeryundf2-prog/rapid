@@ -2,6 +2,9 @@
 # FrostWire), any .torrent file, and eMule (known.met, *.part.met, AC_SearchStrings.dat, preferences.ini).
 families:
 - id: p2p-torrent
+  tier: 1
+  card: exfil
+  section: p2p
   label: 토렌트 파일
   types:
   - p2p-torrent
@@ -59,6 +62,9 @@ families:
     label: 사용자
   rules: []
 - id: p2p-transfer
+  tier: 1
+  card: exfil
+  section: p2p
   label: P2P 전송 기록
   types:
   - p2p-transfer
@@ -137,6 +143,9 @@ families:
   - p2p.torrent_seeding_uploaded
   - p2p.transfer_completed
 - id: p2p-shared-file
+  tier: 1
+  card: exfil
+  section: p2p
   label: eMule 공유·완료 파일
   types:
   - p2p-shared-file
@@ -187,6 +196,9 @@ families:
   rules:
   - p2p.emule_shared_uploaded
 - id: p2p-search-term
+  tier: 2
+  card: exfil
+  section: p2p-search
   label: P2P 검색어
   types:
   - p2p-search-term
@@ -213,6 +225,9 @@ families:
     label: 사용자
   rules: []
 - id: p2p-client-config
+  tier: 2
+  card: exfil
+  section: p2p-config
   label: P2P 클라이언트 설정
   types:
   - p2p-client-config
@@ -243,6 +258,9 @@ families:
     label: 사용자
   rules: []
 - id: p2p-error
+  tier: 3
+  card: null
+  section: parse-errors
   label: P2P 읽기 오류
   types:
   - p2p-parse-error

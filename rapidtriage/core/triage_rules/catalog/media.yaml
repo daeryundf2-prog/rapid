@@ -1,6 +1,9 @@
 # Triage catalogue: media (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
 families:
 - id: media-image
+  tier: 2
+  card: null
+  section: media
   label: 이미지·동영상
   types:
   - media-image
@@ -118,6 +121,9 @@ families:
   - media.live_photo_orphan
   - media.metadata_conflict
 - id: synthetic-media
+  tier: 2
+  card: null
+  section: media
   label: 합성 미디어 선별
   types: []
   prefixes:
@@ -169,6 +175,9 @@ families:
   rules: []
 # R5 L1: media player recent-play lists (media-player kind; VLC, PotPlayer, GOM Player, KMPlayer).
 - id: media-player
+  tier: 2
+  card: null
+  section: media
   label: 미디어 플레이어 재생 기록
   types:
   - media-player-recent
@@ -260,6 +269,9 @@ families:
     format: mono
   rules: []
 - id: media-player-app
+  tier: 3
+  card: null
+  section: media-player-app
   label: 미디어 플레이어 인벤토리·오류
   types:
   - media-player-inventory

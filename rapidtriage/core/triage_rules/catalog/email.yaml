@@ -1,6 +1,9 @@
 # Triage catalogue: email (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
 families:
 - id: email
+  tier: 1
+  card: email
+  section: messages
   label: 이메일
   types:
   - email-message
@@ -151,6 +154,9 @@ families:
   - email.deleted_folder_recent
 # r2 M2: Outlook PST/OST rows normalised from pffexport/readpst output, and ICS files.
 - id: email-attachment
+  tier: 1
+  card: email
+  section: attachments
   label: 메일 첨부
   types:
   - email-attachment
@@ -207,6 +213,9 @@ families:
     format: path
   rules: []
 - id: calendar-event
+  tier: 2
+  card: email
+  section: calendar
   label: 일정(약속)
   types:
   - calendar-event
@@ -260,6 +269,9 @@ families:
     format: path
   rules: []
 - id: contact
+  tier: 2
+  card: email
+  section: contacts
   label: 연락처
   types:
   - contact
@@ -296,6 +308,9 @@ families:
     format: path
   rules: []
 - id: email-container
+  tier: 2
+  card: email
+  section: containers
   label: 메일 컨테이너(PST/OST)
   types:
   - email-container-inventory
@@ -340,6 +355,9 @@ families:
   rules: []
 # R5 L1: desktop mail clients (Thunderbird, Windows Mail, Windows Live Mail; email-clients kind).
 - id: email-client-account
+  tier: 2
+  card: email
+  section: accounts
   label: 메일 클라이언트 계정
   types:
   - email-client-account
@@ -400,6 +418,9 @@ families:
     format: mono
   rules: []
 - id: email-client-profile
+  tier: 3
+  card: null
+  section: email-profiles
   label: 메일 클라이언트 프로필
   types:
   - email-client-profile
@@ -450,6 +471,9 @@ families:
     format: path
   rules: []
 - id: email-client-store
+  tier: 3
+  card: null
+  section: email-stores
   label: 메일 저장소(ESE)
   types:
   - email-client-store
@@ -493,6 +517,9 @@ families:
     format: path
   rules: []
 - id: email-client-error
+  tier: 3
+  card: null
+  section: parse-errors
   label: 메일 클라이언트 처리 오류
   types:
   - email-client-parse-error

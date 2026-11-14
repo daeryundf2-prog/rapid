@@ -1,6 +1,9 @@
 # Triage catalogue: browser (plan viewer-families-2026-10-15; research docs/research/forensic-field-catalog-*.md)
 families:
 - id: browser-visit
+  tier: 1
+  card: web
+  section: visits
   label: 브라우저 방문
   types:
   - browser-visit
@@ -61,6 +64,9 @@ families:
   - browser.typed_url_direct
   - browser.torrent_site_visit
 - id: browser-download
+  tier: 1
+  card: web
+  section: downloads
   label: 브라우저 다운로드
   types:
   - browser-download
@@ -145,6 +151,9 @@ families:
   - browser.dl_dangerous
   - browser.dl_missing_file
 - id: browser-history
+  tier: 1
+  card: web
+  section: visits
   label: 브라우저 방문 기록
   types:
   - browser-history
@@ -196,6 +205,9 @@ families:
   - browser.incognito_gap
   - browser.history_cleared
 - id: browser-cookie
+  tier: 2
+  card: web
+  section: cookies
   label: 쿠키
   types:
   - browser-cookie
@@ -250,6 +262,9 @@ families:
     ts_kind: expires
   rules: []
 - id: browser-login
+  tier: 2
+  card: web
+  section: saved-logins
   label: 저장된 로그인
   types:
   - browser-login
@@ -303,6 +318,9 @@ families:
   rules:
   - browser.cred_first_use_new_site
 - id: browser-search
+  tier: 1
+  card: web
+  section: searches
   label: 검색어
   types:
   - browser-search
@@ -332,6 +350,9 @@ families:
   rules:
   - browser.search_sensitive
 - id: browser-bookmark
+  tier: 2
+  card: web
+  section: bookmarks
   label: 북마크
   types:
   - browser-bookmark
@@ -363,6 +384,9 @@ families:
   aux_columns: []
   rules: []
 - id: browser-extension
+  tier: 2
+  card: web
+  section: extensions
   label: 브라우저 확장
   types:
   - browser-extension
@@ -415,6 +439,9 @@ families:
   - browser.ext_broad_perm
   - browser.ext_sideloaded
 - id: browser-autofill
+  tier: 2
+  card: web
+  section: autofill
   label: 자동완성
   types:
   - browser-autofill
@@ -463,6 +490,9 @@ families:
     ts_kind: last-used
   rules: []
 - id: browser-cache-entry
+  tier: 3
+  card: null
+  section: browser-cache
   label: 브라우저 캐시 항목
   types:
   - browser-cache-entry
@@ -569,6 +599,9 @@ families:
     label: 사용자
   rules: []
 - id: web-upload-candidate
+  tier: 1
+  card: web
+  section: uploads
   label: 웹메일·웹하드 업로드 후보
   types:
   - web-upload-candidate
@@ -640,6 +673,9 @@ families:
 # The candidate restates its source row's URL (no url tag: counted once on the source row); the
 # coordinate (geo) and the search text (search_term) are its own.
 - id: location-url-candidate
+  tier: 2
+  card: web
+  section: location-urls
   label: 지도 URL 위치 후보
   types:
   - location-url-candidate
@@ -710,6 +746,9 @@ families:
 # R5 L3: Google Analytics cookies (__utma / __utmz / _ga): visit times, session count, source, search term.
 # The client (visitor) ID is never stored (plan r5 §2 decision).
 - id: browser-analytics-cookie
+  tier: 2
+  card: web
+  section: analytics-cookies
   label: 방문 분석 쿠키(Google Analytics)
   types:
   - browser-analytics-cookie
@@ -779,6 +818,9 @@ families:
 # R5 L3: URL carving of page files / unallocated dumps (analysis url-carve, typed rows). The URL feeds
 # 통합 보기 › URL 분류 like a visit; the row keeps no page body.
 - id: carved-url-candidate
+  tier: 3
+  card: null
+  section: carved-urls
   label: URL 카빙 후보
   types:
   - carved-url-candidate
