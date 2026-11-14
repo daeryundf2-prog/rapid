@@ -48,7 +48,7 @@ FILESYSTEM_OUTPUT = "artifacts_windows-filesystem"
 
 LIMIT_REASONS = {
     "e01-extract-cap": "E01 추출 상한 도달 (전수 아님)",
-    "e01-read-error": "E01 읽기 오류 (내용 미추출)",
+    "e01-read-error": "E01 읽기 또는 쓰기 실패 (내용 미추출 · 결과 폴더 여유 부족 포함)",
     "e01-depth-cap": "E01 폴더 깊이 상한으로 건너뜀",
     "e01-segment-cap": "E01 세그먼트 일부만 열어 처리함",
     "ntfs-parse-cap": "NTFS 기록 분석 상한 도달 ($MFT·USN·$LogFile)",

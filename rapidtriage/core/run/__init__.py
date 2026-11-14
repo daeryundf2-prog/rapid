@@ -523,6 +523,8 @@ def run_triage_mode(
         evidence_paths = [root]
     check_output_outside_evidence(output_dir, evidence_paths)
     output_dir.mkdir(parents=True, exist_ok=True)
+    # WB-12 P1-1: outputs already in the folder are never removed by a disk-full cleanup by name.
+    preexisting_outputs = snapshot_existing_outputs(output_dir)
     # A resumed run reuses stage outputs (manifest/docs/files/timeline/...)
     # only when the previous run's plan finished ``complete``: after a
     # partial/cancelled/failed run, or one that died before it ended (outcome
@@ -577,16 +579,19 @@ def run_triage_mode(
 
     try:
         record_memory_cap("prepare")
-        input_root, image_result = prepare_run_input_root(
-            root,
-            input_kind=input_kind,
-            output_dir=output_dir,
-            e01_partition_start_sector=e01_partition_start_sector,
-        )
+        # WB-12 P1-2: the engine unlinks a file it could not write, so free space is sampled while
+        # the image is extracted (minimum kept) instead of read once afterwards.
+        with FreeSpaceSampler(output_dir) as free_space:
+            input_root, image_result = prepare_run_input_root(
+                root,
+                input_kind=input_kind,
+                output_dir=output_dir,
+                e01_partition_start_sector=e01_partition_start_sector,
+            )
         if image_result is not None:
             # T-352 review P1-2: the native engine counts a file it could not write as an error and
             # goes on; errors on a (nearly) full result volume are a full disk, not a finished tree.
-            extraction_full = extraction_disk_full_error(output_dir, image_result.to_dict())
+            extraction_full = extraction_disk_full_error(output_dir, image_result.to_dict(), sampler=free_space)
             if extraction_full is not None:
                 raise extraction_full
         progress.set_run_root(str(input_root.root_path))
@@ -656,7 +661,9 @@ def run_triage_mode(
         stage = str(progress.snapshot().get("stage") or "")
         # The heartbeat renames its own temp file into place: stop it before any cleanup (P2-4).
         progress.stop_heartbeat()
-        failure = classify_step_exception(exc, stage=stage, output_dir=output_dir, since_epoch=run_started_epoch)
+        failure = classify_step_exception(
+            exc, stage=stage, output_dir=output_dir, since_epoch=run_started_epoch, preexisting=preexisting_outputs
+        )
         progress.fail(failure)
         if failure is not exc:
             raise failure from exc
