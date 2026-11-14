@@ -12,9 +12,9 @@ import type {
 } from "../../contracts/collection";
 import { RECORD_FIELD_KEYS, recordFieldsKey } from "../../contracts/collection";
 import type { IconName } from "../../icons";
-import { CARVE_KINDS } from "../analysis/analysisForm";
 import {
   ANALYSIS_NODES,
+  CARVE_KINDS,
   isPartialResult,
   latestForNode,
   nodeStateIcon,

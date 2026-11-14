@@ -36,7 +36,7 @@ import {
 } from "../../contracts/collection";
 import type { Route } from "../../router";
 import { parseInstant } from "../../utils/time";
-import { CARVE_KINDS } from "../analysis/analysisForm";
+import { CARVE_KINDS } from "../analysis/kinds";
 import { type Grade, isGrade } from "../flags/catalog";
 import { rowMatchesFlagFilter, ruleLabel } from "../flags/flags";
 import { DUP_LABELS, DUP_MODE_LABELS, type DupMode, type DupStatus, irregularLabel } from "./conditionValues";

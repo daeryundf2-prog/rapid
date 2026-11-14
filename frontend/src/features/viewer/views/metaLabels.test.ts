@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FALLBACK_CATALOG } from "../../flags/catalog";
+import { FALLBACK_CATALOG } from "../../flags/familiesFallback";
 import { isRawToken, metaLabel, metaValueLabel, sectionLabels, viewerLimitationKo } from "./metaLabels";
 
 describe("meta key labels (visual-polish S5)", () => {

@@ -4,22 +4,23 @@ import { announce } from "../../a11y";
 import { getReviewCounts } from "../../api/caseDb";
 import { useRunLive } from "../tree/adapter";
 import { useTreeCommands } from "../tree/commands";
+import { CasePicker, DeleteCaseDialog } from "./CasePicker";
+import { useCaseLinks, useRunCaseLink } from "./caseLink";
+import { registerCaseCommands } from "./commands";
+import { useCaseDialogs } from "./dialogs";
+// T-116: every dialog but the case picker is a lazy chunk.
 import {
   AddEvidenceDialog,
   AddRunDialog,
   CaseEditDialog,
+  CaseWizard,
+  DoctorDialog,
+  ImportDialog,
   LinkCaseDialog,
   ProblemsDialog,
-} from "./CaseDialogs";
-import { CasePicker, DeleteCaseDialog } from "./CasePicker";
-import { CaseWizard } from "./CaseWizard";
-import { useCaseLinks, useRunCaseLink } from "./caseLink";
-import { registerCaseCommands } from "./commands";
-import { DoctorDialog } from "./DoctorDialog";
-import { useCaseDialogs } from "./dialogs";
-import { ImportDialog } from "./ImportDialog";
-import { ReportDialog } from "./ReportDialog";
-import { RunDialog } from "./RunDialog";
+  ReportDialog,
+  RunDialog,
+} from "./lazyDialogs";
 import "./case.css";
 
 /**

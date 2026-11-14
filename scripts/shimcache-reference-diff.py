@@ -4,9 +4,21 @@
 # dependencies = ["regipy>=6.0.0"]
 # ///
 # --- How to run ---
-#   uv run scripts/shimcache-reference-diff.py --system <SYSTEM hive> --output <report.json> --json
+#   Export mode (T-206; no extra dependencies):
+#     python scripts/shimcache-reference-diff.py --ours <run>/artifacts/<execution per-kind output .json or JSONL> \
+#         --reference <AppCompatCacheParser CSV | generic CSV> --output <report.json> --json
+#   Hive mode (decoder check):
+#     uv run scripts/shimcache-reference-diff.py --system <SYSTEM hive> --output <report.json> --json
 #
-# Compares RapidTriage's native ShimCache binary decode
+# Export mode diffs RapidTriage `shimcache-schema-entry` rows against a dedicated
+# ShimCache parser's CSV. Key = control set + 0-based cache position + path (case-
+# insensitive); a row whose path moved to another position still pairs (by control set +
+# path) and reports `cache_order` as a field mismatch. Compares the last-modified time
+# (UTC, second precision). The control set leaves the key when either side has none.
+# Shared loader/diff/report: rapidtriage/validation/reference_diff.py. Exit 0 clean,
+# 1 differences, 2 input error.
+#
+# Hive mode compares RapidTriage's native ShimCache binary decode
 # (shimcache-schema-entry records from the AppCompatCache value)
 # against regipy's ShimCachePlugin on the same SYSTEM hive.
 #
@@ -29,6 +41,7 @@ if hasattr(_sys.stderr, "reconfigure"):
 import argparse
 import hashlib
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,6 +51,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from rapidtriage.artifacts.windows.execution import build_native_shimcache_records
+from rapidtriage.validation import reference_diff as rd
 
 
 def _canon_path(value: object) -> str:
@@ -96,7 +110,7 @@ def trusted_side(path: Path) -> dict[str, object]:
     return {"rows": rows}
 
 
-def main(argv: list[str] | None = None) -> int:
+def hive_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--system", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
@@ -178,6 +192,78 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"-> {args.output}")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Export mode (T-206)
+# ---------------------------------------------------------------------------
+
+SHIMCACHE_ARTIFACT_TYPES = ("shimcache-schema-entry",)
+REF_ORDER = ("cacheentryposition", "position", "cacheorder", "order", "entryposition", "index")
+REF_PATH = ("path", "executablepath", "filepath", "fullpath", "name")
+REF_TIME = ("lastmodifiedtimeutc", "lastmodifiedtime", "lastmodified", "lastmoddate", "modified", "timestamp")
+REF_CONTROL_SET = ("controlset", "controlsetnumber")
+
+
+def control_set_number(value: object) -> str:
+    """``ControlSet001`` / ``1`` / ``001`` -> ``"1"``; ``""`` when absent."""
+    digits = re.sub(r"\D", "", str(value or ""))
+    return str(int(digits)) if digits else ""
+
+
+def shim_row(control_set: str, order: int, path: object, modified: object) -> rd.KeyedRow:
+    canon = rd.normalize_text(str(path or "").strip().strip('"').replace("/", "\\").rstrip("\\"))
+    return rd.KeyedRow(
+        keys=[f"{control_set}|{order}|{canon}", f"{control_set}|*|{canon}"],
+        fields={"cache_order": order, "last_modified": modified},
+        label={"control_set": control_set, "cache_order": order, "path": canon, "last_modified": modified},
+    )
+
+
+def build_shimcache_comparison(args: argparse.Namespace, warnings: list[str]) -> rd.Comparison:
+    table, header = rd.read_table(args.reference)
+    rd.require_columns(header, args.reference, position=REF_ORDER, path=REF_PATH)
+    tool = "AppCompatCacheParser (CSV)" if "cacheentryposition" in header else "generic ShimCache CSV"
+    reference: list[rd.KeyedRow] = []
+    for line, row in enumerate(table, start=2):
+        order = rd.parse_int(rd.pick(row, *REF_ORDER))
+        path = rd.pick(row, *REF_PATH)
+        if order is None or not path:
+            rd.add_warning(warnings, f"기준 {line}행에 순번이나 경로가 없어 건너뛰었습니다")
+            continue
+        stamp = rd.safe_timestamp(rd.pick(row, *REF_TIME), args.reference_tzinfo, warnings, f"기준 {line}행")
+        reference.append(shim_row(control_set_number(rd.pick(row, *REF_CONTROL_SET)), order, path, stamp))
+    ours: list[rd.KeyedRow] = []
+    for row in rd.iter_rapid_rows(args.ours, SHIMCACHE_ARTIFACT_TYPES, warnings):
+        order = rd.parse_int(rd.rapid_field(row, "cache_order"))
+        path = rd.rapid_field(row, "executable_path", "path")
+        if order is None or not path:
+            continue
+        stamp = rd.safe_timestamp(rd.rapid_field(row, "timestamp", "last_modified"), args.ours_tzinfo, warnings, f"우리 순번 {order}")
+        ours.append(shim_row(control_set_number(rd.rapid_field(row, "control_set")), order, path, stamp))
+    key_fields = ["control_set", "cache_order", "path"]
+    if rd.drop_blank_key_part(ours, reference, 0):
+        key_fields = ["cache_order", "path"]
+        rd.add_warning(warnings, "한쪽에 ControlSet 값이 없어 키에서 ControlSet을 뺐습니다")
+    return rd.Comparison(
+        ours=ours,
+        reference=reference,
+        reference_tool=tool,
+        key_fields=key_fields,
+        compared_fields=["cache_order", "last_modified"],
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if any(item == "--system" or item.startswith("--system=") for item in argv):
+        return hive_main(argv)
+    return rd.run_comparison_cli(
+        argv,
+        comparison="shimcache",
+        description="Diff RapidTriage shimcache-schema-entry rows against a ShimCache parser CSV (key = path + position).",
+        build=build_shimcache_comparison,
+    )
 
 
 if __name__ == "__main__":

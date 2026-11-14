@@ -5,8 +5,9 @@
  * Mounted in the grid slot when the route's collection is "intake".
  */
 
-import { CaseDashboard } from "../features/dashboard/CaseDashboard";
 import { useRoute } from "../state/hooks";
+// T-116: the dashboard cards are a lazy chunk.
+import { CaseDashboard } from "./lazyViews";
 
 export function IntakePane() {
   const { route } = useRoute();
