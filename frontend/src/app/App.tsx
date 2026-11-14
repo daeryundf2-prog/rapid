@@ -17,20 +17,27 @@ import { installPopoutHost, popoutCommands } from "../features/viewer/popout/hos
 import { Layout } from "../shell/Layout";
 import { useShortcuts } from "../shortcuts";
 import { useRoute } from "../state/hooks";
+import { useAppStore } from "../state/store";
 import { useDocumentTitle } from "./documentTitle";
 import { TokenGate } from "./TokenGate";
+
+/** Tab title: 화면 · 사건 표시명 — RapidTriage, with (n%) / (!) for the run's state (T-169). */
+function DocumentTitle({ runs }: { runs: Parameters<typeof useDocumentTitle>[1] }) {
+  const { route } = useRoute();
+  useDocumentTitle(route, runs);
+  return null;
+}
 
 /** Shell root: commands, key map, runs poller, token gate, layout. */
 export function App() {
   const queryClient = useQueryClient();
   const runsQuery = useRunsPoll();
-  const { route } = useRoute();
+  // The run id only: the whole route (a new `row=` on every J/K) would re-render the shell.
+  const runId = useAppStore((s) => s.route.runId);
   useShortcuts();
   // Family catalogue (U-F3/U-F4): the server's; the bundled fallback JSON only when it has none (T-116).
   useFamilyCatalogLoader(!runsQuery.isError);
   useReviewInvalidation();
-  // Tab title: 화면 · 사건 표시명 — RapidTriage, with (n%) / (!) for the run's state (T-169).
-  useDocumentTitle(route, runsQuery.data);
 
   useEffect(() => registerBuiltinCommands(queryClient), [queryClient]);
   useEffect(() => registerStageCommands(), []);
@@ -52,6 +59,7 @@ export function App() {
   if (unauthorized) {
     return (
       <div className="shell" data-testid="workbench-shell">
+        <DocumentTitle runs={runsQuery.data} />
         <TokenGate onSaved={() => void queryClient.invalidateQueries({ queryKey: RUNS_QUERY_KEY })} />
         <LiveRegion />
       </div>
@@ -60,18 +68,19 @@ export function App() {
 
   return (
     <>
+      <DocumentTitle runs={runsQuery.data} />
       <RegionBoundary region="콘솔 화면">
         <Layout />
       </RegionBoundary>
       {/* Case-level hooks (tree.goto.* commands, dialogs) fail on their own, not with the layout. */}
       <RegionBoundary region="케이스 기능" floating>
-        <CaseFeature runId={route.runId} />
+        <CaseFeature runId={runId} />
       </RegionBoundary>
       <RegionBoundary region="분석 기능" floating>
-        <AnalysisFeature runId={route.runId} />
+        <AnalysisFeature runId={runId} />
       </RegionBoundary>
       <RegionBoundary region="파생 산출물 기능" floating>
-        <DerivedFeature runId={route.runId} />
+        <DerivedFeature runId={runId} />
       </RegionBoundary>
       <LiveRegion />
     </>

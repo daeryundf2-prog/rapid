@@ -6,16 +6,17 @@
 
 import { FsExplorerLayout, fsExplorerOpen } from "../features/explorers/FsExplorer";
 import { DataGrid } from "../features/grid/DataGrid";
-import { useRoute } from "../state/hooks";
+import { useAppStore } from "../state/store";
 import { ViewSwitch } from "./ViewSwitch";
 
 export function ExploreGrid() {
-  const { route } = useRoute();
+  // A boolean only: a new `row=` (each J/K) must not re-render the pane.
+  const explorerOpen = useAppStore((s) => Boolean(s.route.runId) && fsExplorerOpen(s.route));
   const grid = (
     <ViewSwitch>
       <DataGrid />
     </ViewSwitch>
   );
   // 파일 시스템 탐색기 (r4 §2.2): folder tree beside the grid of the selected folder.
-  return route.runId && fsExplorerOpen(route) ? <FsExplorerLayout>{grid}</FsExplorerLayout> : grid;
+  return explorerOpen ? <FsExplorerLayout>{grid}</FsExplorerLayout> : grid;
 }
