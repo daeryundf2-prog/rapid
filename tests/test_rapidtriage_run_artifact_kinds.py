@@ -19,6 +19,7 @@ from rapidtriage.core.run.plan import (
     build_run_plan,
     find_task,
 )
+from tests._timing import time_budget
 from tests.fixtures.ai_agents import make_fixtures as mf
 
 
@@ -64,7 +65,7 @@ class ArtifactKindsRunTests(unittest.TestCase):
         started = time.monotonic()
         summary = run_triage_mode(self.root, mode="seizure", output_dir=self.output_dir, artifact_kinds=["ai-agent"], case_db=False)
         elapsed = time.monotonic() - started
-        self.assertLess(elapsed, 60.0)
+        self.assertLess(elapsed, time_budget(60.0))
         self.assertEqual(summary["run_scope"]["artifact_kinds"], ["ai-agent"])
         self.assertTrue(summary["run_scope"]["kinds_only"])
         self.assertEqual(summary["fingerprint_mode"], "sampled")
@@ -112,7 +113,7 @@ class ArtifactKindsRunTests(unittest.TestCase):
                 ]
             )
         self.assertEqual(code, 0)
-        self.assertLess(time.monotonic() - started, 60.0)
+        self.assertLess(time.monotonic() - started, time_budget(60.0))
         summary = _load(self.output_dir / "rapidtriage-run-summary.json")
         self.assertEqual(summary["run_scope"]["artifact_kinds"], ["ai-agent"])
         self.assertEqual(summary["fingerprint_mode"], "sampled")

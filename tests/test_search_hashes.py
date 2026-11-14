@@ -32,6 +32,7 @@ from rapidtriage.core.search_index.hashsets import (
 )
 from rapidtriage.core.search_index.schema import INDEX_FILE_NAME
 from rapidtriage.core.search_index.textutil import normalize_hash
+from tests._timing import time_budget
 from tests.search_index_fixture import build_fixture_run
 
 FILE_COUNT = 5000
@@ -90,7 +91,7 @@ class HashSearchTests(unittest.TestCase):
         elapsed = time.monotonic() - started
         self.assertEqual(result["matched_count"], FILE_COUNT)
         self.assertEqual(result["unmatched_count"], FILE_COUNT)
-        self.assertLess(elapsed, 10.0)  # plan target 3 s on the real run; loose bound for CI
+        self.assertLess(elapsed, time_budget(10.0))  # plan target 3 s on the real run; loose bound for CI
         sample = result["matched"][0]
         self.assertEqual(sample["docs"][0]["collection"], "files")
         self.assertIn(sample["algorithm"], {"md5", "sha1", "sha256"})

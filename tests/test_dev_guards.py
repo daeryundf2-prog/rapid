@@ -12,6 +12,8 @@ import time
 import unittest
 from pathlib import Path
 
+from tests._timing import time_budget
+
 REPO = Path(__file__).resolve().parents[1]
 CHECK_EOL = REPO / "scripts" / "dev" / "check-eol.py"
 CHECK_STAGED = REPO / "scripts" / "dev" / "check-staged.py"
@@ -182,7 +184,7 @@ class RepoGuardTests(unittest.TestCase):
         # times, so the strict budget is opt-in; the default ceiling only
         # catches gross regressions.  Best of three absorbs a cold file cache.
         strict = os.environ.get("RT_STRICT_TIMING") == "1"
-        budget = EOL_BUDGET_SECONDS if strict else LOADED_CEILING_SECONDS
+        budget = time_budget(EOL_BUDGET_SECONDS if strict else LOADED_CEILING_SECONDS)
         timings = []
         for _ in range(3):
             start = time.monotonic()

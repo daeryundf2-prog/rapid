@@ -27,6 +27,7 @@ from rapidtriage.core.search_index.hits import (
 )
 from rapidtriage.core.search_index.schema import FOLD_RULE, INDEX_VERSION
 from rapidtriage.core.search_index.textutil import stored_fold
+from tests._timing import time_budget
 from tests.search_index_fixture import write_kind
 
 
@@ -414,7 +415,7 @@ class BudgetPrefixTest(IsolatedEnv):
         self.assertEqual(cut["scanned"]["files"]["stopped"], "budget")  # type: ignore[index]
         self.assertEqual(cut["scanned"]["artifacts"]["stopped"], "after-budget")  # type: ignore[index]
         # The whole request stays near its budget (summary load and hit finalization included).
-        self.assertLess(cut["elapsed_ms"], 3000)
+        self.assertLess(cut["elapsed_ms"], time_budget(3.0) * 1000)
 
     def test_page_past_the_cut_is_empty_with_a_korean_reason(self) -> None:
         page = self.syn.v1_payload(["zz"], limit=250, offset=20_000, scan_budget_seconds=0.05)
@@ -444,7 +445,7 @@ class V1RegexGuardTest(IsolatedEnv):
         started = time.monotonic()
         with self.assertRaises(SearchError) as caught:
             self.syn.v1_payload(["Live(a+)+$"], search_mode="regex", scan_budget_seconds=1.0)
-        self.assertLess(time.monotonic() - started, 1.0)
+        self.assertLess(time.monotonic() - started, time_budget(1.0))
         self.assertIn("정규식이 너무 복잡합니다", str(caught.exception))
         self.assertIsNotNone(regex_guard_problem("(\\w+)*x"))
         self.assertIsNone(regex_guard_problem("Live.*Update"))

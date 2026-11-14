@@ -49,6 +49,7 @@ TIERS = ("full", "fast", "slow", "real-data")
 MAX_DEFAULT_WORKERS = 8
 DEFAULT_DURATION_S = 5.0
 POLL_S = 0.25
+TIME_SCALE_ENV = "RAPIDTRIAGE_TEST_TIME_SCALE"  # workers' wall-clock budget scale, read by tests/_timing.py
 # Load ratio (busy CPUs / CPUs) at or below which limits are not stretched.
 LOAD_IDLE_RATIO = 0.25
 # Multiplier at a fully busy box (ratio 1.0); higher ratios (POSIX) extrapolate up to LOAD_MAX_MULTIPLIER.
@@ -90,15 +91,7 @@ def _worker_main(events_path: Path, tests_dir: Path, modules: list[str]) -> int:
     worst = 0
     for module in modules:
         suite = loader.loadTestsFromName(module)
-        _emit(
-            events_path,
-            {
-                "event": "start",
-                "module": module,
-                "t": time.time(),
-                "tests": suite.countTestCases(),
-            },
-        )
+        _emit(events_path, {"event": "start", "module": module, "t": time.time(), "tests": suite.countTestCases()})
         print(f"===== {module} =====", file=sys.stderr, flush=True)
         started = time.monotonic()
         result = unittest.TextTestRunner(stream=sys.stderr, verbosity=1).run(suite)
@@ -380,7 +373,19 @@ class Worker:
     results: list[dict] = field(default_factory=list)
 
 
-def _spawn(worker: Worker, python: str, tests_dir: Path) -> None:
+def worker_env(base: dict[str, str], multiplier: float) -> dict[str, str]:
+    """``base`` + runner settings; ``RAPIDTRIAGE_TEST_TIME_SCALE`` = max(1, load multiplier, a valid inherited value), so CI's 3 is never lowered."""
+    env = dict(base, RAPIDTRIAGE_NO_BROWSER="1", PYTHONIOENCODING="utf-8")
+    env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
+    try:
+        scales = [multiplier, float(env.get(TIME_SCALE_ENV, ""))]
+    except ValueError:
+        scales = [multiplier]
+    env[TIME_SCALE_ENV] = f"{max([1.0, *(scale for scale in scales if math.isfinite(scale))]):g}"
+    return env
+
+
+def _spawn(worker: Worker, python: str, tests_dir: Path, time_scale: float = 1.0) -> None:
     worker.spawns += 1
     tag = f"w{worker.index}-{worker.spawns}"
     worker.events = worker.run_dir / f"{tag}.events.jsonl"
@@ -388,10 +393,7 @@ def _spawn(worker: Worker, python: str, tests_dir: Path) -> None:
     worker.events.write_text("", encoding="utf-8")
     worker.offset = 0
     worker.current = None
-    env = dict(os.environ)
-    env["RAPIDTRIAGE_NO_BROWSER"] = "1"
-    env["PYTHONIOENCODING"] = "utf-8"
-    env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
+    env = worker_env(dict(os.environ), time_scale)
     cmd = [
         python,
         str(Path(__file__).resolve()),
@@ -480,7 +482,7 @@ def run_batches(
         if batch
     ]
     for worker in workers:
-        _spawn(worker, args.python, args.tests_dir)
+        _spawn(worker, args.python, args.tests_dir, args.load["multiplier"])
     try:
         while any(w.proc is not None for w in workers):
             time.sleep(POLL_S)
@@ -516,7 +518,7 @@ def run_batches(
                                 flush=True,
                             )
                         if worker.pending:
-                            _spawn(worker, args.python, args.tests_dir)
+                            _spawn(worker, args.python, args.tests_dir, args.load["multiplier"])
                         else:
                             worker.proc = None
                         continue
@@ -531,7 +533,7 @@ def run_batches(
                             f"worker exited with code {rc} before finishing the module; see log",
                         )
                     if worker.pending:
-                        _spawn(worker, args.python, args.tests_dir)
+                        _spawn(worker, args.python, args.tests_dir, args.load["multiplier"])
                     else:
                         worker.proc = None
     finally:

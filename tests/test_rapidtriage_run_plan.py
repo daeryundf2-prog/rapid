@@ -48,6 +48,7 @@ from rapidtriage.core.run.progress import (
     read_run_progress,
 )
 from tests import quiet_media_checks
+from tests._timing import time_budget
 from tests.test_rapidtriage_run import build_run_fixture
 
 setUpModule = quiet_media_checks.setUpModule
@@ -469,7 +470,7 @@ class RunControlPipelineTests(unittest.TestCase):
                 summary = run_triage_mode(self.root, mode="hacking", output_dir=self.output_dir)
                 elapsed = time.monotonic() - started
             trigger.join(5)
-            self.assertLess(elapsed, 60.0)
+            self.assertLess(elapsed, time_budget(60.0))
             plan = summary["plan"]
             self.assertEqual(plan["outcome"], "cancelled")
             task = find_task(plan, "eventlog")

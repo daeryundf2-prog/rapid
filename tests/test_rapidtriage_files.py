@@ -24,6 +24,7 @@ from rapidtriage.core.hash_cache import (
     import_hash_cache_snapshot,
     reset_hash_cache,
 )
+from tests._timing import time_budget
 
 
 def candidate_categories(candidate: dict[str, object]) -> list[str]:
@@ -339,7 +340,7 @@ class RapidTriageFilesTests(unittest.TestCase):
             stats: dict[str, object] = {}
             started = time.perf_counter()
             groups = build_fuzzy_text_duplicate_groups(candidates, stats=stats)
-            self.assertLess(time.perf_counter() - started, 5.0)
+            self.assertLess(time.perf_counter() - started, time_budget(5.0))
             self.assertEqual([group["file_count"] for group in groups], [2])
             self.assertEqual(stats["ratio_pairs_skipped"], 0)
             self.assertFalse(stats["truncated"])

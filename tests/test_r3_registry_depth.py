@@ -34,6 +34,7 @@ from rapidtriage.core.artifact_domains import artifact_type_domain
 from rapidtriage.core.timeline import TIMELINE_FIELD_MAP
 from rapidtriage.core.triage_rules import load_catalog
 from tests import registry_depth_fixtures as fx
+from tests._timing import time_budget
 from tests.test_parser_quality_registry import write_hive
 
 
@@ -480,7 +481,7 @@ class RegistryDepthReviewTests(unittest.TestCase):
             stats = DepthStats()
             started = time.monotonic()
             rows = list(iter_depth_rows(depth.HiveKeySource(hive, "NTUSER"), stats))
-            self.assertLess(time.monotonic() - started, 5.0, target)
+            self.assertLess(time.monotonic() - started, time_budget(5.0), target)
             self.assertEqual([row for row in rows if row.artifact_type == "registry-office-mru"], [], target)
             self.assertEqual(stats.errors, [], target)
 
@@ -568,7 +569,7 @@ class RegistryDepthReviewTests(unittest.TestCase):
         lines = ["[HKEY_CURRENT_USER\\X]", '"Blob"=hex:00,\\', *([row] * 160_000), "  00", '"After"=dword:00000001']
         started = time.monotonic()
         keys = list(depth.iter_export_keys(lines))
-        self.assertLess(time.monotonic() - started, 10.0)
+        self.assertLess(time.monotonic() - started, time_budget(10.0))
         self.assertEqual(len(keys[0][1]["Blob"]), 4_000_002)
         self.assertEqual(keys[0][1]["After"], 1)
         stats = DepthStats()

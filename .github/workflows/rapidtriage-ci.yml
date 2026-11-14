@@ -74,6 +74,10 @@ jobs:
       - name: Run tests
         # Parallel runner (T-006): module batches per worker, per-module limit
         # max(300 s, 3 x recorded duration); a hung module is killed and named in the JSON.
+        # Shared runners run wall-clock checks several times slower (a 0.55 s check took
+        # 5.6 s on windows-latest); tests scale absolute budgets by this (tests/_timing.py).
+        env:
+          RAPIDTRIAGE_TEST_TIME_SCALE: "3"
         run: python scripts/dev/run-tests.py --tier ${{ env.TEST_TIER }} --workers 4 --timeout-floor 300 --timeout-factor 3 --state-dir run-tests-state --json-out run-tests-${{ env.TEST_TIER }}.json
 
       - name: Upload test summary

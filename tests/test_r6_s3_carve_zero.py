@@ -32,6 +32,7 @@ from rapidtriage.core.url_carving import (
     scan_url_source,
     scan_url_windows,
 )
+from tests._timing import time_budget
 from tests.test_r6_s2_unalloc_carve import build_ntfs_image
 from tests.test_rapidtriage_analyses import write_run
 
@@ -296,7 +297,7 @@ class ZeroSkipSummaryTests(unittest.TestCase):
         )
         self.assertEqual(created.status_code, 202, created.text)
         analysis_id = created.json()["analysis_id"]
-        deadline = time.monotonic() + 60
+        deadline = time.monotonic() + time_budget(60)
         while True:
             state = self.client.get(f"/api/runs/{self.run_id}/analyses/{analysis_id}").json()
             if state["status"] in analyses.TERMINAL_STATUSES and state.get("finished_at"):

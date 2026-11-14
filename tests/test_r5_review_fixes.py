@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import ClassVar
 from unittest import mock
 
+from tests._timing import time_budget
 from tests.test_parser_quality_registry import REG_SZ, HiveWriter, Key, sz, write_hive
 
 OLD_PASSWORD = "OLDWINSCPPASSWORDHEX-DEADBEEF1234"
@@ -303,7 +304,7 @@ class PsdXmpTests(unittest.TestCase):
             self.assertGreaterEqual(len(text), 2 * 1024 * 1024)
             started = time.perf_counter()
             result = parse_psd_xmp(text)
-            self.assertLess(time.perf_counter() - started, 1.0)
+            self.assertLess(time.perf_counter() - started, time_budget(1.0))
             self.assertTrue(result["xmp_truncated"])
 
     def test_history_still_parsed(self) -> None:

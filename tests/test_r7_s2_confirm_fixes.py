@@ -9,6 +9,8 @@ import time
 import unittest
 from typing import ClassVar
 
+from tests._timing import time_budget
+
 
 class CredentialMaskSpeedTest(unittest.TestCase):
     """S2: credential masking was quadratic on long alphanumeric runs (v1 search 10x slower)."""
@@ -22,7 +24,7 @@ class CredentialMaskSpeedTest(unittest.TestCase):
             elapsed = time.perf_counter() - started
             # The guarded regression (quadratic regex) took seconds per call; 0.5 s keeps that
             # signal while tolerating 8-way parallel test load (0.08 s seen under scripts/dev/run-tests.py).
-            self.assertLess(elapsed, 0.5, (text[:20], elapsed))
+            self.assertLess(elapsed, time_budget(0.5), (text[:20], elapsed))
 
     def test_record_with_many_long_leaves_snippet_is_fast(self) -> None:
         from rapidtriage.core.search_hits import search_snippet
@@ -30,7 +32,7 @@ class CredentialMaskSpeedTest(unittest.TestCase):
         record = {"details": {f"k{index}": "b" * 16000 + "=" for index in range(40)} | {"hit": "근로 token=abc"}}
         started = time.perf_counter()
         snippet, _ = search_snippet(record, ["근로"])
-        self.assertLess(time.perf_counter() - started, 0.5)
+        self.assertLess(time.perf_counter() - started, time_budget(0.5))
         self.assertEqual(snippet, "hit: 근로 token=[가림]")
 
     def test_masking_semantics_kept(self) -> None:
@@ -157,7 +159,7 @@ class ConsoleTitleApiTest(unittest.TestCase):
         response = client.post(f"/api/runs/{run_id}/search/index/build", json={"mode": "full"})
         self.assertEqual(response.status_code, 202, response.text)
         analysis_id = response.json()["analysis_id"]
-        deadline = time.monotonic() + 300
+        deadline = time.monotonic() + time_budget(300)
         while client.get(f"/api/runs/{run_id}/analyses/{analysis_id}").json()["status"] not in TERMINAL_STATUSES:
             self.assertLess(time.monotonic(), deadline)
             time.sleep(0.1)

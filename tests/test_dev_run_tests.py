@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -11,6 +12,8 @@ import textwrap
 import time
 import unittest
 from pathlib import Path
+
+from tests._timing import TIME_SCALE_ENV, time_budget
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "dev" / "run-tests.py"
@@ -154,6 +157,20 @@ class SelectionTests(unittest.TestCase):
         self.assertLessEqual(info["multiplier"], rt.LOAD_MAX_MULTIPLIER)
         self.assertEqual(info["multiplier"], rt.load_multiplier(info["ratio"]))
 
+    def test_worker_env_exports_the_load_multiplier_as_time_scale(self):
+        self.assertEqual(rt.TIME_SCALE_ENV, TIME_SCALE_ENV)
+        env = rt.worker_env({"KEEP": "x"}, 2.5)
+        self.assertEqual(env[TIME_SCALE_ENV], "2.5")
+        self.assertEqual((env["KEEP"], env["RAPIDTRIAGE_NO_BROWSER"]), ("x", "1"))
+        self.assertEqual(rt.worker_env({}, 1.0)[TIME_SCALE_ENV], "1")
+        self.assertEqual(rt.worker_env({}, 0.5)[TIME_SCALE_ENV], "1")
+        self.assertEqual(rt.worker_env({}, float("nan"))[TIME_SCALE_ENV], "1")
+        # An explicit setting (CI's 3) is never lowered; a lower or broken one is replaced.
+        self.assertEqual(rt.worker_env({TIME_SCALE_ENV: "3"}, 1.4)[TIME_SCALE_ENV], "3")
+        self.assertEqual(rt.worker_env({TIME_SCALE_ENV: "1.2"}, 2.0)[TIME_SCALE_ENV], "2")
+        self.assertEqual(rt.worker_env({TIME_SCALE_ENV: "fast"}, 1.5)[TIME_SCALE_ENV], "1.5")
+        self.assertEqual(rt.worker_env({TIME_SCALE_ENV: "inf"}, 1.0)[TIME_SCALE_ENV], "1")
+
     def test_default_workers_is_half_the_cpus_capped_at_8(self):
         self.assertEqual(rt.default_workers(16), 8)
         self.assertEqual(rt.default_workers(32), 8)
@@ -182,7 +199,7 @@ class EndToEndTests(unittest.TestCase):
     def write(self, name, body):
         (self.tests / f"{name}.py").write_text(textwrap.dedent(body), encoding="utf-8")
 
-    def run_cli(self, *extra, timeout=120):
+    def run_cli(self, *extra, timeout=120, env=None):
         cmd = [
             sys.executable,
             str(SCRIPT),
@@ -197,7 +214,7 @@ class EndToEndTests(unittest.TestCase):
             *extra,
         ]
         proc = subprocess.run(
-            cmd, cwd=ROOT, capture_output=True, text=True, timeout=timeout, check=False
+            cmd, cwd=ROOT, capture_output=True, text=True, timeout=timeout, check=False, env=env
         )
         summary = (
             json.loads(self.out.read_text(encoding="utf-8"))
@@ -236,6 +253,24 @@ class EndToEndTests(unittest.TestCase):
         proc, _ = self.run_cli("--load-multiplier", "0.5")
         self.assertEqual(proc.returncode, 2)
 
+    def test_workers_get_the_load_multiplier_as_time_scale(self):
+        self.write(
+            "test_scale",
+            f"""
+            import os, unittest
+            class T(unittest.TestCase):
+                def test_scale(self):
+                    self.assertEqual(os.environ.get("{TIME_SCALE_ENV}"), "2.5")
+            """,
+        )
+        env = {k: v for k, v in os.environ.items() if k != TIME_SCALE_ENV}
+        proc, summary = self.run_cli("--load-multiplier", "2.5", env=env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(summary["modules"][0]["status"], "passed")
+        env[TIME_SCALE_ENV] = "3"
+        proc, _ = self.run_cli("--load-multiplier", "2.5", env=env)
+        self.assertNotEqual(proc.returncode, 0)  # CI's 3 is kept, not lowered to 2.5
+
     def test_fast_tier_excludes_slow(self):
         self.write("test_p1", PASS)
         self.write("test_slow", PASS)
@@ -258,7 +293,7 @@ class EndToEndTests(unittest.TestCase):
             "--only",
             "test_a_hang,test_b_after,test_c_fail,test_d_crash,test_e_after",
         )
-        self.assertLess(time.monotonic() - started, 60)
+        self.assertLess(time.monotonic() - started, time_budget(60))
         self.assertNotEqual(proc.returncode, 0)
         by_name = {m["module"]: m for m in summary["modules"]}
         self.assertEqual(by_name["test_a_hang"]["status"], "timeout")
