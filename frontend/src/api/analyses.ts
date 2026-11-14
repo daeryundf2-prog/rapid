@@ -18,7 +18,9 @@ export type AnalysisKind =
   | "memory-import"
   | "cross-case"
   // R5 L3: URLs carved from page files / unallocated dumps.
-  | "url-carve";
+  | "url-carve"
+  // R7 P2: the run's v2 search index (rapidtriage-search.db), the console search's fast path.
+  | "search-index";
 
 export const ANALYSIS_KINDS: readonly AnalysisKind[] = [
   "carve",
@@ -30,6 +32,7 @@ export const ANALYSIS_KINDS: readonly AnalysisKind[] = [
   "memory-import",
   "cross-case",
   "url-carve",
+  "search-index",
 ];
 
 export function isAnalysisKind(value: unknown): value is AnalysisKind {

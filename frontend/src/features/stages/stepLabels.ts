@@ -3,6 +3,8 @@
  * dashboard's "케이스 처리 세부" card. The raw step id stays available as a tooltip.
  */
 
+import { kindLabel } from "../derived/tables";
+
 /** Korean labels of run summary step statuses (processing plan table). */
 const STEP_STATUS_LABEL: Record<string, string> = {
   completed: "완료",
@@ -31,6 +33,8 @@ const STEP_STATUS_LABEL: Record<string, string> = {
   failed_isolated: "일부 실패(격리됨)",
   unknown: "알 수 없음",
   "operator-exercise": "분석관 확인 필요",
+  reused: "재사용",
+  completed_with_warnings: "완료(경고 있음)",
 };
 
 /** Korean status of a plan step; an unknown one still reads as Korean ("상태 미상(xyz)"). */
@@ -74,12 +78,50 @@ const STEP_NAME_LABEL: Record<string, string> = {
   derived: "통합 보기",
 };
 
-/** Korean name of a plan step (`artifacts-<kind>` → "아티팩트 수집: <kind>"); unknown ids stay as-is. */
+/**
+ * Step names of collector kinds whose shared kind name (derived/tables `kindLabel`) has no Korean:
+ * a step row reads Korean first, the product term in parentheses.
+ */
+const STEP_KIND_LABEL: Record<string, string> = {
+  eventlog: "이벤트 로그(EVTX)",
+  "windows-shellbags": "셸백(ShellBags)",
+  "windows-prefetch": "프리페치(Prefetch)",
+  "android-apk": "안드로이드 앱(APK)",
+};
+
+const HANGUL = /[가-힣]/;
+
+/** Korean name of an `artifacts-<kind>` collector; an unregistered kind never shows its raw id. */
+function collectorLabel(kind: string): string {
+  const step = STEP_KIND_LABEL[kind];
+  if (step) return step;
+  const label = kindLabel(kind);
+  return HANGUL.test(label) ? label : "미등록 수집기";
+}
+
+/**
+ * Korean name of a plan step (`artifacts-<kind>` → "아티팩트 수집: <수집기 이름>"); the raw id stays
+ * in the row's tooltip. Unknown non-collector ids stay as-is.
+ */
 export function stepNameLabel(name: string): string {
   const known = STEP_NAME_LABEL[name] ?? STEP_NAME_LABEL[name.toLowerCase()];
   if (known) return known;
-  if (name.startsWith("artifacts-")) return `아티팩트 수집: ${name.slice("artifacts-".length)}`;
+  if (name.startsWith("artifacts-"))
+    return `아티팩트 수집: ${collectorLabel(name.slice("artifacts-".length))}`;
   return name;
+}
+
+/**
+ * 소요 cell of a step / task without a measured duration: why there is no value, never "—".
+ * `status` is the raw step status (queued → 시작 전, skipped → 실행 안 함).
+ */
+export function missingDurationText(status?: string | null): string {
+  const value = (status ?? "").toLowerCase();
+  if (value === "queued" || value === "pending") return "시작 전";
+  if (value === "skipped" || value === "cancelled" || value === "canceled" || value === "not_run") {
+    return "실행 안 함";
+  }
+  return "측정 안 됨";
 }
 
 /** Korean warning level of a plan step (`warning_level`); "" for none. */

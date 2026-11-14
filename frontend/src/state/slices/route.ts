@@ -2,6 +2,7 @@ import type { StateCreator } from "zustand";
 import type { CollectionId, ReviewStatus } from "../../contracts/collection";
 import { encodeRowRef } from "../../contracts/rowRef";
 import { collectionChanged, currentHashRoute, type Route, routesEqual, writeHash } from "../../router";
+import { allowLeave } from "../leaveGuard";
 import type { AppState } from "../store";
 
 export interface NavigateOptions {
@@ -83,6 +84,8 @@ function seedTarget(route: Route): AppState["viewerTarget"] {
 export const createRouteSlice: StateCreator<AppState, [], [], RouteSlice> = (set, get) => ({
   route: currentHashRoute(),
   navigate: (route, options) => {
+    // T-144: a screen with unsaved input (케이스 메모·요약 노트) asks before it is left.
+    if (!allowLeave(get().route, route)) return;
     writeHash(route, options?.replace ?? false);
     applyRoute(get, set, route);
   },
@@ -114,5 +117,15 @@ export const createRouteSlice: StateCreator<AppState, [], [], RouteSlice> = (set
     }
     get().navigate(next, options);
   },
-  syncRouteFromLocation: (route) => applyRoute(get, set, route),
+  syncRouteFromLocation: (route) => {
+    const prev = get().route;
+    // Back/forward or a hand-edited hash: when the analyst keeps the unsaved input, put the
+    // address back on the screen still shown (T-144). As a new entry: replacing would overwrite
+    // the entry the browser moved to, and that page would be gone from the history.
+    if (!routesEqual(prev, route) && !allowLeave(prev, route)) {
+      writeHash(prev, false);
+      return;
+    }
+    applyRoute(get, set, route);
+  },
 });

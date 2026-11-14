@@ -151,16 +151,16 @@ describe("EvidenceTree (탐색 domain tree)", () => {
     expect(screen.getByRole("tree", { name: "케이스 탐색 트리" })).toBeTruthy();
     expect(item("증거 소스").getAttribute("aria-level")).toBe("1");
     expect(item("전체 보기").getAttribute("aria-expanded")).toBe("true");
-    expect(item("전체 파일").getAttribute("aria-level")).toBe("2");
-    expect(item("전체 파일").textContent).toContain("30");
+    expect(item("파일 목록").getAttribute("aria-level")).toBe("2");
+    expect(item("파일 목록").textContent).toContain("30");
     expect(item("이벤트 로그").getAttribute("aria-level")).toBe("1");
     expect(item("이벤트 로그").getAttribute("aria-expanded")).toBe("false");
     expect(item("이벤트 로그").querySelector(".badge.strong")?.textContent).toBe("100");
     expect(screen.queryByText("전체 이벤트 로그(EVTX·ETL)")).toBeNull();
     fireEvent.click(item("이벤트 로그").querySelector(".case-tree-twisty") as Element);
     expect(item("전체 이벤트 로그(EVTX·ETL)").getAttribute("aria-level")).toBe("2");
-    // No workflow nodes: 접수 / 리뷰보드 / 산출물 / 분석 작업 are rail stages.
-    for (const gone of ["접수", "리뷰보드", "산출물", "분석 작업"]) {
+    // No workflow nodes: 접수 / 검토 목록 / 산출물 / 분석 작업 are rail stages.
+    for (const gone of ["접수", "검토 목록", "산출물", "분석 작업"]) {
       expect(screen.queryByRole("treeitem", { name: new RegExp(`^${gone}`) })).toBeNull();
     }
     await screen.findByText("패스워드");
@@ -189,9 +189,10 @@ describe("EvidenceTree (탐색 domain tree)", () => {
     await renderTree();
     item("전체 보기").focus();
     fireEvent.keyDown(document.activeElement as Element, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(item("전체 파일"));
+    expect(document.activeElement).toBe(item("파일 목록"));
     fireEvent.keyDown(document.activeElement as Element, { key: "End" });
-    expect(document.activeElement).toBe(item("위치·여행"));
+    // 처리 (R7 갈래 A 예외 항목) is the last domain.
+    expect(document.activeElement).toBe(item("처리"));
     fireEvent.keyDown(document.activeElement as Element, { key: "Home" });
     expect(document.activeElement).toBe(item("증거 소스"));
     fireEvent.keyDown(document.activeElement as Element, { key: "ArrowUp" });
@@ -243,7 +244,7 @@ describe("EvidenceTree (탐색 domain tree)", () => {
 
   it("clicking a view navigates; empty nodes stay put and explain why", async () => {
     await renderTree();
-    fireEvent.click(item("전체 파일"));
+    fireEvent.click(item("파일 목록"));
     expect(window.location.hash).toBe("#/case/r1/explore/files");
     expect(item("문서/메일").getAttribute("aria-disabled")).toBe("true");
     fireEvent.click(item("문서/메일"));
@@ -251,7 +252,7 @@ describe("EvidenceTree (탐색 domain tree)", () => {
     expect(document.querySelector(".case-tree-reason")?.textContent).toBe(
       "docs-index 산출물이 없는 런입니다",
     );
-    fireEvent.click(item("파일시스템").querySelector(".case-tree-twisty") as Element);
+    fireEvent.click(item("NTFS·파일시스템 아티팩트").querySelector(".case-tree-twisty") as Element);
     // Analysis result nodes always open their pane (never-ran state shown there).
     expect(item("복구/카빙").getAttribute("aria-disabled")).toBeNull();
     expect(item("복구/카빙").getAttribute("aria-label")).toContain("미실행");
@@ -269,8 +270,8 @@ describe("EvidenceTree (탐색 domain tree)", () => {
     expect(document.querySelector(".case-tree-reason")?.textContent).toContain("선택되지 않았습니다");
     fireEvent.click(ntfs);
     expect(window.location.hash).toBe("#/case/r1/explore/files");
-    // 전체 파일 owns the files route (first match); evidence shortcuts never render as selected.
-    await waitFor(() => expect(item("전체 파일").getAttribute("aria-selected")).toBe("true"));
+    // 파일 목록 owns the files route (first match); evidence shortcuts never render as selected.
+    await waitFor(() => expect(item("파일 목록").getAttribute("aria-selected")).toBe("true"));
     expect(ntfs.getAttribute("aria-selected")).toBe("false");
   });
 
@@ -283,6 +284,54 @@ describe("EvidenceTree (탐색 domain tree)", () => {
 });
 
 describe("tree commands", () => {
+  it("keeps partition node/command ids unique when partition numbers repeat or start at 0", () => {
+    const partition = (number: number, selected = false) => ({
+      number,
+      description: "",
+      filesystem: "ntfs",
+      size_bytes: 1024,
+      start_sector: number * 2048,
+      byte_offset: null,
+      selected,
+      recommended: false,
+    });
+    const model = buildTreeModel({
+      summary: { summary: { counts } },
+      evidence: {
+        path: "D:/x.E01",
+        name: "x.E01",
+        kind: "image",
+        image_output: "rapidtriage-e01.json",
+        size_bytes: null,
+        // What the pre-fix server sent for a GPT disk numbered from 0: two "1"s.
+        partitions: [partition(1), partition(1), partition(2), partition(3, true)],
+        selected_partition: 3,
+      },
+    });
+    const ids: string[] = [];
+    const visit = (nodes: TreeModelNode[]) => {
+      for (const node of nodes) {
+        ids.push(node.id);
+        if (node.children) visit(node.children);
+      }
+    };
+    visit(model);
+    const partitionIds = ids.filter((id) => id.startsWith("evidence:partition:"));
+    expect(partitionIds).toEqual([
+      "evidence:partition:1",
+      "evidence:partition:2",
+      "evidence:partition:3",
+      "evidence:partition:4",
+    ]);
+    expect(new Set(ids).size).toBe(ids.length);
+    const commandIds = buildTreeCommands("r1", model).map((c) => c.id);
+    expect(new Set(commandIds).size).toBe(commandIds.length);
+    // Labels still show the partition's own number.
+    const labels = model[0]?.children?.[0]?.children?.map((n) => n.label) ?? [];
+    expect(labels[0]).toContain("파티션 1");
+    expect(labels[1]).toContain("파티션 1");
+  });
+
   it("registers one tree.goto.* command per node with disabled reasons", () => {
     const model = buildTreeModel({ summary: { summary: { counts } } });
     const commands = buildTreeCommands("r1", model);
@@ -361,6 +410,10 @@ describe("결과 없는 계열 숨김 (viewer-families U-F7)", () => {
     const hiddenDomain = item("위치·여행");
     expect(hiddenDomain.classList.contains("is-dimmed")).toBe(true);
     expect(hiddenDomain.getAttribute("aria-description")).toMatch(/^결과 없음: /);
+    // T-015: the count slot of a shown empty family reads "자료 없음" (not a dimmed 0 / "—"); the
+    // accessible name keeps its count form.
+    for (const li of added) expect(li.querySelector(":scope > .badge")?.textContent).toBe("자료 없음");
+    expect(hiddenDomain.getAttribute("aria-label")).not.toContain("자료 없음");
     expect(window.localStorage.getItem(SHOW_EMPTY_KEY)).toBe("1");
     expect(useTreePrefs.getState().showEmpty).toBe(true);
   });

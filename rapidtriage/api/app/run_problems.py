@@ -5,6 +5,11 @@ artifacts output's ``parser_errors``, the silent-failure detector's failing
 checks and the failed/skipped ``steps`` and groups them by a stable
 ``reason_id`` with a Korean label, so the 접수 card shows "행 단위 절단 3" instead
 of 19 loose lines.
+
+R8 T-184: the engine's own limits (E01 truncation and read errors per axis, ``$MFT`` / USN record
+caps, the ``$LogFile`` scan window, caps whose hit is never recorded) are added as Korean items
+(``run_problem_limits``), and the silent-failure detector's English yield messages are replaced
+by Korean sentences.
 """
 
 from __future__ import annotations
@@ -12,15 +17,25 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
 
 from ...core.jobs import RunJob, RunJobStore
 from .helpers import get_job, get_output_path
-from .tree import read_output_key
+from .run_problem_limits import (
+    LIMIT_REASONS,
+    engine_limit_items,
+    korean_silent_message,
+    korean_warning_message,
+)
+from .run_steps_summary import classify_step_status
+from .tree import read_output_key, read_output_summary
 
 PROBLEM_PREVIEW_LIMIT = 20
+#: ``RunJob.error_type`` of a run stopped by a full output volume (core/run/steps.py ``OutputDiskFull``).
+DISK_FULL_ERROR_TYPE = "OutputDiskFull"
 PROBLEM_MAX_LIMIT = 5000
 
 LEVEL_RANK = {"error": 0, "warning": 1, "notice": 2}
@@ -32,6 +47,7 @@ WARNING_REASONS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
     ("cap-truncated", "상한·절단 적용 (전수 아님)", re.compile(r"상한/절단 적용|truncat", re.IGNORECASE)),
     ("size-cap", "크기 상한 초과로 본문 미추출", re.compile(r"크기 상한 초과|too-large")),
     ("binary-rejected", "비인쇄 문자 비율 초과로 미색인", re.compile(r"비인쇄 문자|binary-rejected")),
+    ("credential-withheld", "자격 증명 파일 — 본문 미수집", re.compile(r"자격 증명 파일 \d+건")),
     ("file-count-cap", "파일 수 상한으로 미선별", re.compile(r"파일 수 상한|미선별")),
     ("no-rows", "수집된 행 없음", re.compile(r"No [\w-]+ artifact rows were collected|수집된 행 없음")),
     ("input-missing", "입력 없음 (해당 증거 없음)", re.compile(r"루트 없음|추출물 없음|not found|찾을 수 없")),
@@ -39,14 +55,16 @@ WARNING_REASONS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
 FIXED_REASONS = {
     "parser-error": "파서 오류",
     "step-failed": "실패한 단계",
+    "step-partial": "일부만 완료된 단계",
     "step-skipped": "건너뛴 단계",
     "silent-failure": "조용한 실패 위험",
     "run-failed": "런 실패",
+    "output-disk-full": "결과 폴더 여유 부족 (이어서 처리 가능)",
     "run-cancelled": "런 취소됨",
     "other-warning": "기타 경고",
     "other-notice": "기타 알림",
 }
-ALL_REASON_LABELS = {**{rid: label for rid, label, _ in WARNING_REASONS}, **FIXED_REASONS}
+ALL_REASON_LABELS = {**{rid: label for rid, label, _ in WARNING_REASONS}, **FIXED_REASONS, **LIMIT_REASONS}
 
 
 def classify_warning(message: str, level: str) -> str:
@@ -64,6 +82,19 @@ def _warnings(summary: Mapping[str, object]) -> list[Mapping[str, object]]:
     return [item for item in warnings or [] if isinstance(item, Mapping)]
 
 
+def _summary_run_dir(summary: Mapping[str, object]) -> Path | None:
+    value = summary.get("output_dir")
+    return Path(value) if isinstance(value, str) and value else None
+
+
+def _output_summary(store: RunJobStore, run_id: str, name: str) -> Mapping[str, Any]:
+    """``summary`` of one run output (bounded head read); empty when it cannot be opened."""
+    try:
+        return read_output_summary(get_output_path(store, run_id, name))
+    except HTTPException:
+        return {}
+
+
 def collect_problem_items(store: RunJobStore, run_id: str, job: RunJob) -> list[dict[str, Any]]:
     """Every problem item ``{reason_id, source, step, level, message}`` in summary order."""
     items: list[dict[str, Any]] = []
@@ -71,14 +102,17 @@ def collect_problem_items(store: RunJobStore, run_id: str, job: RunJob) -> list[
     if summary is None:
         if job.status in ("failed", "cancelled", "canceled"):
             reason = "run-failed" if job.status == "failed" else "run-cancelled"
+            if job.status == "failed" and job.error_type == DISK_FULL_ERROR_TYPE:
+                reason = "output-disk-full"  # T-352: one line naming the space shortfall
             items.append({"reason_id": reason, "source": "run", "step": "", "level": "error",
-                          "message": job.error or ("런이 실패했습니다" if reason == "run-failed" else "런이 취소되었습니다")})
+                          "message": job.error or ("런이 실패했습니다" if job.status == "failed" else "런이 취소되었습니다")})
         return items
     for warning in _warnings(summary):
         message = str(warning.get("message") or "")
         level = str(warning.get("level") or "warning")
         items.append({"reason_id": classify_warning(message, level), "source": "warning",
-                      "step": str(warning.get("step") or ""), "level": level, "message": message})
+                      "step": str(warning.get("step") or ""), "level": level,
+                      "message": korean_warning_message(message)})
     # Steps already count each provider's parser errors: outputs with a recorded 0 are not opened
     # (24 artifact JSONs, some tens of MB, on a real run).
     recorded_errors = {
@@ -113,22 +147,27 @@ def collect_problem_items(store: RunJobStore, run_id: str, job: RunJob) -> list[
             level = str(check.get("level") or "")
             if level in ("pass", "") and not check.get("requires_review"):
                 continue
-            detail = str(check.get("detail") or "")
-            message = f"{check.get('id') or ''}: {check.get('message') or ''}" + (f" ({detail})" if detail else "")
             items.append({"reason_id": "silent-failure", "source": "silent_failure",
-                          "step": "silent-failure-detector", "level": "error" if level == "fail" else "warning",
-                          "message": message})
+                          "step": "silent-failure-detector", "level": "error" if level in ("fail", "failed", "error") else "warning",
+                          "message": korean_silent_message(check)})
+    items.extend(engine_limit_items(summary, _summary_run_dir(summary), lambda name: _output_summary(store, run_id, name)))
     steps = summary.get("steps")
     if isinstance(steps, list):
         for step in steps:
             if not isinstance(step, Mapping):
                 continue
             status = str(step.get("status") or "")
-            if status == "skipped":
+            # Same classification as the screens' step counts (T-021 summarize_steps): failed_isolated is
+            # partial (a warning here), never an error, so every screen reports the same failed count.
+            step_class = classify_step_status(status)
+            if step_class == "skipped":
                 reason, level = "step-skipped", "notice"
                 message = str(step.get("disabled_reason") or step.get("message") or "건너뜀")
-            elif "fail" in status:
+            elif step_class == "failed":
                 reason, level = "step-failed", "error"
+                message = str(step.get("error") or step.get("message") or status)
+            elif step_class == "partial":
+                reason, level = "step-partial", "warning"
                 message = str(step.get("error") or step.get("message") or status)
             else:
                 continue

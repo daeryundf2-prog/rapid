@@ -16,7 +16,7 @@ export interface ExtractEntry {
   size: number;
 }
 
-/** Response: the extract manifest plus `name` and `download_url` (zip, built lazily, max 2 GB). */
+/** Response: the extract manifest plus `name` and `download_url` (the zip this POST wrote, max 2 GB). */
 export interface RunExtractResult {
   command: "extract";
   output_dir: string;

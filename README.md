@@ -1,7 +1,6 @@
 # RapidForensic / RapidTriage
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com/)
 [![Taxonomy](https://img.shields.io/badge/Taxonomy-51%20Targets-brightgreen.svg?style=flat-square)](docs/)
 [![Validation](https://img.shields.io/badge/Validation-120%2F120%20Packages-success.svg?style=flat-square)](docs/)
@@ -73,10 +72,9 @@ RapidForensic은 아래 질문을 빠르게 답해야 하는 분석관을 기준
 
 ### 권장 런타임
 
-- Python 3.12 권장
-- 최소 Python 3.10+ 필요
-- Python 3.9는 지원하지 않습니다. 최신 타입 문법과 보안 패치가 적용된
-  의존성을 위해 Python 3.10 이상을 사용하세요.
+- Python 3.12 이상 필요 (잠금 파일 기준 버전)
+- Python 3.11 이하는 지원하지 않습니다. 최신 타입 문법과 보안 패치가 적용된
+  의존성을 위해 Python 3.12 이상을 사용하세요.
 - 대용량 케이스는 SSD 권장
 - 실제 E01/Ex01은 가능하면 읽기 전용 mount 또는 검증된 export 경로 권장
 
@@ -90,7 +88,7 @@ python -m pip install -e '.[web,test,kakaotalk,columnar]'
 rapidtriage doctor
 ```
 
-`python3.12`가 없다면 설치된 Python 3.10+ 인터프리터를 사용하세요.
+`python3.12`가 없다면 설치된 Python 3.12+ 인터프리터를 사용하세요.
 
 ### Windows PowerShell
 
@@ -384,9 +382,15 @@ Contract maturity:
 Example output commands:
 
 ```bash
-rapidtriage run . --mode fraud --output-dir ./rapidtriage-run-fraud
+rapidtriage run . --mode fraud --output-dir ../rapidtriage-run-fraud
 rapidtriage artifacts . --kind browser
 ```
+
+`run` needs `--output-dir`, and it must be outside the evidence: never the
+evidence path itself, a folder inside it, or a folder that contains it
+(`OUTPUT_INSIDE_EVIDENCE` / `EVIDENCE_INSIDE_OUTPUT`). The web console and API
+apply the same rule; there is no automatic output folder inside an evidence
+folder.
 
 `compare` compares two individual evidence/export files and validates against
 `rapidtriage/schemas/compare.schema.json`.

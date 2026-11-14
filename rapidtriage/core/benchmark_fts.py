@@ -15,6 +15,11 @@ from .benchmark import (
     percentile,
     scale_label,
 )
+from .cli_constants import (
+    SQLITE_FTS_DEFAULT_HIT_EVERY,
+    SQLITE_FTS_DEFAULT_QUERY_ITERATIONS,
+    SQLITE_FTS_DEFAULT_RECORD_COUNT,
+)
 from .docs import write_result
 from .search_backend import (
     build_synthetic_benchmark_generator_manifest,
@@ -23,9 +28,6 @@ from .search_backend import (
 
 SQLITE_FTS_BENCHMARK_VERSION = "sqlite-fts-synthetic-benchmark-v1"
 SQLITE_FTS_BENCHMARK_SCHEMA_VERSION = "sqlite-fts-benchmark-schema-v1"
-SQLITE_FTS_DEFAULT_RECORD_COUNT = 100_000
-SQLITE_FTS_DEFAULT_QUERY_ITERATIONS = 5
-SQLITE_FTS_DEFAULT_HIT_EVERY = 10
 SQLITE_FTS_DEFAULT_RESULT_WINDOW = 100
 
 

@@ -18,6 +18,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from tests._timing import time_budget
+
 try:
     from fastapi.testclient import TestClient
 
@@ -1472,7 +1474,7 @@ class AnalysisApiTests(unittest.TestCase):
             started = time.monotonic()
             gate.set()
             state = self.wait(str(created["analysis_id"]), timeout=5)
-        self.assertLess(time.monotonic() - started, 5)
+        self.assertLess(time.monotonic() - started, time_budget(5))
         self.assertEqual(state["status"], "cancelled", state)
         self.assertEqual(len(checks), 1, "the walk must stop at the first check after the cancel")
         self.assertEqual(state["row_count"], 0)
@@ -1681,7 +1683,7 @@ class AnalysisApiTests(unittest.TestCase):
         (other_run / "other.bin").write_bytes(JPEG)
         started = time.monotonic()
         state = self.wait(str(self.submit("carve", {"ext": ".bin"})["analysis_id"]), timeout=30)
-        self.assertLess(time.monotonic() - started, 30)
+        self.assertLess(time.monotonic() - started, time_budget(30))
         self.assertEqual(state["status"], "completed", state)
         paths = {row["path"] for row in self.rows(state["analysis_id"], limit=100)["rows"]}
         self.assertEqual(paths, {str(self.evidence_real / "blob1.bin"), str(self.evidence_real / "blob2.bin")})
@@ -1835,7 +1837,10 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertEqual([row["record_index"] for row in hit["candidates"]], [0])
         self.assertEqual(hit["candidates"][0]["ntfs"]["si_modified_at"], si_modified)  # the page itself is joined
         miss = self.client.get(f"/api/runs/{self.run_id}/files", params={"limit": 10, "from": "2029-12-31"}).json()
-        self.assertEqual(miss["candidates"], [])  # acquisition copies never use modified_at
+        # A joined NTFS $SI time wins over the copy's modified_at (2030); only copies without an
+        # NTFS time fall back to it (R7 S1 re-review R-2).
+        self.assertNotIn(0, [row["record_index"] for row in miss["candidates"]])
+        self.assertTrue(all(not (row.get("ntfs") or {}).get("si_modified_at") for row in miss["candidates"]), miss["candidates"])
 
     def test_files_join_skips_unparsed_ntfs_analyses(self) -> None:
         parsed = self.run_ntfs()
@@ -1924,7 +1929,7 @@ class AnalysisApiTests(unittest.TestCase):
         again = runner.submit(scope, "memory-import", {"volatility_output_dir": str(volatility)})  # kind freed
         self.assertEqual(again["status"], "queued")
         gate.set()
-        deadline = time.monotonic() + 10
+        deadline = time.monotonic() + time_budget(10)
         while (runner.load_state(self.run_dir, str(again["analysis_id"])) or {}).get("status") != "completed":
             self.assertLess(time.monotonic(), deadline)
             time.sleep(0.02)

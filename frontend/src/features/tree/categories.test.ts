@@ -12,6 +12,8 @@ import {
 
 /** `artifact_collectors()` keys in rapidtriage/core/artifacts (25 kinds + R5 L1 email-clients, media-player, windows-phone-link). */
 const ENGINE_KINDS = [
+  // R7 AI 사용
+  "ai-agent",
   "android-apk",
   "browser",
   "cloud-export",

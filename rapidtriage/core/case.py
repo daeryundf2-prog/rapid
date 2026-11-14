@@ -8,7 +8,11 @@ from pathlib import Path
 from typing import Any
 
 from .artifact_profiles import iter_payload_records
+from .cli_constants import (
+    REVIEW_STATUSES,
+)
 from .docs import write_result
+from .report_candidates import is_report_candidate
 from .schema_validation import SchemaValidationError, load_schema, validate
 
 
@@ -55,7 +59,6 @@ ARTIFACT_KEYS = (
     "tab_url",
     "status",
 )
-REVIEW_STATUSES = ("unreviewed", "relevant", "needs-review", "not-relevant", "excluded")
 
 CASE_SOURCE_ROWS = {
     "files": "candidates",
@@ -468,8 +471,8 @@ def build_case_summary(bookmarks: object) -> dict[str, object]:
         review_status = "unreviewed"
         if isinstance(review, Mapping):
             review_status = normalize_review_status(review.get("status"))
-            if bool(review.get("include_in_report")):
-                report_item_count += 1
+        if is_report_candidate(bookmark):
+            report_item_count += 1
         review_status_counts[review_status] = review_status_counts.get(review_status, 0) + 1
         history = bookmark.get("review_history")
         if isinstance(history, list):

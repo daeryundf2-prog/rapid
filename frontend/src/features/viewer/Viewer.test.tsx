@@ -61,17 +61,13 @@ function routes(previewBody: unknown, extra: Record<string, Handler> = {}) {
 const region = () => screen.getByRole("region", { name: "원본 뷰어" });
 const tab = (name: string) => screen.getByRole("tab", { name });
 const live = () => (screen.getByTestId("live-polite").textContent ?? "").trim();
-/** Menu holding each viewer command (review #6): one "⋯" 더보기 menu with 리뷰 / 원본 sections. */
+/** Menu holding each viewer command (review #6): the ⋯ 더보기 menu (marks: the status chip menu). */
 const MENU_OF: Record<string, string> = {
   "viewer.open-original": "더보기",
   "viewer.hash": "더보기",
   "viewer.copy-path": "더보기",
   "viewer.cite": "더보기",
   "navigate.rows-for-source": "더보기",
-  "viewer.mark.needs-review": "더보기",
-  "viewer.mark.excluded": "더보기",
-  "viewer.mark.include-in-report": "더보기",
-  "viewer.mark.bookmark": "더보기",
   "viewer.note": "더보기",
 };
 /** The control of a viewer command, opening the menu that holds it first. */
@@ -79,6 +75,8 @@ const tool = (id: string) => {
   const selector = `[data-command="${id}"]`;
   const shown = document.querySelector(selector);
   if (shown) return shown as HTMLButtonElement;
+  // Every mark lives in the one review-status chip menu (r7 L4, C-W9).
+  if (id.startsWith("viewer.mark.")) fireEvent.click(screen.getByTestId("viewer-review-status-menu"));
   const menu = MENU_OF[id];
   if (menu) fireEvent.click(screen.getByRole("button", { name: menu }));
   return document.querySelector(selector) as HTMLButtonElement;
@@ -115,7 +113,10 @@ describe("Viewer — empty state and toolbar", () => {
       expect(tool(id).getAttribute("data-disabled-reason")).toBe("뷰어에 표시된 행이 없습니다.");
     }
     expect(tool("viewer.mark.relevant").getAttribute("aria-disabled")).toBe("true");
-    expect(screen.getAllByRole("tab").every((t) => t.getAttribute("aria-disabled") === "true")).toBe(true);
+    // r8 T-086: only usable modes are tabs — with no row there are none.
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
+    // …and no empty tablist (e2e a11y rule "tablist-empty").
+    expect(screen.queryByRole("tablist")).toBeNull();
   });
 
   it("registers the toolbar actions as commands that report disabledReason", async () => {
@@ -239,31 +240,52 @@ describe("Viewer — loading, modes, focus", () => {
     expect(screen.getAllByRole("tabpanel")).toHaveLength(1);
   });
 
-  it("renders disabled tabs with a Korean reason in the tooltip only — never in the panel body", async () => {
+  it("r8 T-086: renders only usable tabs — no disabled tab, no reason text in the strip for text", async () => {
     await show({ preview_type: "text", extension: ".txt", text: "hi" });
-    const sqlite = tab("SQLite");
-    expect(sqlite.getAttribute("aria-disabled")).toBe("true");
-    const described = document.getElementById(sqlite.getAttribute("aria-describedby") || "");
-    expect(described?.hasAttribute("hidden")).toBe(true);
-    expect(described?.textContent).toBe("SQLite 데이터베이스가 아닙니다.");
-    fireEvent.click(sqlite);
-    expect(sqlite.getAttribute("aria-selected")).toBe("false");
-    const panel = screen.getByRole("tabpanel");
-    for (const reason of [
-      "SQLite 데이터베이스가 아닙니다.",
-      "이미지 파일이 아닙니다.",
-      "오디오·비디오 파일이 아닙니다.",
-    ]) {
-      expect(panel.textContent).not.toContain(reason);
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.map((t) => t.textContent)).toEqual(["원본", "헥스", "메타", "계열"]);
+    expect(tabs.some((t) => t.getAttribute("aria-disabled") === "true")).toBe(false);
+    expect(document.getElementById("viewer-tab-sqlite")).toBeNull();
+    expect(screen.queryByTestId("viewer-tab-notice")).toBeNull();
+    for (const reason of ["SQLite 데이터베이스가 아닙니다.", "이미지 파일이 아닙니다."]) {
+      expect(region().textContent).not.toContain(reason);
     }
-    // Only the hidden description / on-hover tooltip carry reasons; no visible text node has them.
-    const holders = Array.from(document.querySelectorAll("*")).filter(
-      (el) => el.children.length === 0 && el.textContent === "이미지 파일이 아닙니다.",
+  });
+
+  it("r8 T-086: a binary file says so in one sentence beside the tabs, with 헥스로 보기", async () => {
+    await show({ preview_type: "binary", extension: ".dat" }, {}, { "source-file": () => new Response("x") });
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["헥스", "메타", "계열"]);
+    fireEvent.click(tab("메타"));
+    const notice = screen.getByTestId("viewer-tab-notice");
+    expect(notice.textContent).toBe("텍스트로 표시할 수 없는 파일입니다 — 헥스로 보기");
+    fireEvent.click(screen.getByTestId("viewer-tab-notice-action"));
+    expect(tab("헥스").getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("r8 T-086: a withheld credential file shows 메타 only, the reason sentence and one alternative", async () => {
+    await show({
+      preview_type: "withheld",
+      extension: "",
+      name: "Cookies",
+      coverage_status: "body-withheld",
+      credential_reason: "browser-credential-store",
+      message: "자격 증명 파일 — 본문 미수집 (browser-credential-store)",
+    });
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["메타", "계열"]);
+    expect(tab("메타").getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByTestId("viewer-tab-notice").textContent).toBe(
+      "자격 증명 파일(브라우저 쿠키·로그인 저장소)이라 본문을 보여 주지 않습니다 — 파일 정보 보기",
     );
-    expect(holders.length).toBeGreaterThan(0);
-    expect(holders.every((el) => el.hasAttribute("hidden") || el.getAttribute("role") === "tooltip")).toBe(
-      true,
+  });
+
+  it("r8 T-086: the 원본 tab never prints binary bytes as text", async () => {
+    await show({ preview_type: "text", extension: ".txt", text: "a\u0000b\u0000c" });
+    expect(screen.getByTestId("viewer-source-binary").textContent).toBe(
+      "텍스트로 표시할 수 없는 파일입니다 — 헥스로 보기",
     );
+    expect(region().querySelector(".viewer-lines")).toBeNull();
+    fireEvent.click(screen.getByTestId("viewer-source-binary").querySelector("button") as HTMLButtonElement);
+    expect(tab("헥스").getAttribute("aria-selected")).toBe("true");
   });
 
   it("uses no banner landmark and no local live region (S5 announcer only)", async () => {
@@ -273,18 +295,23 @@ describe("Viewer — loading, modes, focus", () => {
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("file.bin");
   });
 
-  it("moves between tabs with arrow keys (disabled tabs focus but do not activate)", async () => {
-    await show({ preview_type: "text", extension: ".txt", text: "hi" });
+  it("moves between tabs with arrow keys (every tab is usable and activates)", async () => {
+    await show(
+      { preview_type: "text", extension: ".txt", text: "hi" },
+      {},
+      { "source-file": () => new Response("x") },
+    );
     tab("원본").focus();
     fireEvent.keyDown(tab("원본"), { key: "ArrowRight" });
     expect(document.activeElement).toBe(tab("헥스"));
     expect(tab("헥스").getAttribute("aria-selected")).toBe("true");
     fireEvent.keyDown(tab("헥스"), { key: "ArrowRight" });
-    expect(document.activeElement).toBe(tab("SQLite"));
-    expect(tab("헥스").getAttribute("aria-selected")).toBe("true");
-    fireEvent.keyDown(tab("SQLite"), { key: "End" });
     expect(document.activeElement).toBe(tab("메타"));
     expect(tab("메타").getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(tab("메타"), { key: "End" });
+    // The last tab is 계열 (R7 갈래 A), available on a files row.
+    expect(document.activeElement).toBe(tab("계열"));
+    expect(tab("계열").getAttribute("aria-selected")).toBe("true");
   });
 
   it("moves focus to the selected mode tab when opened with Enter (requestViewerFocus)", async () => {
@@ -400,7 +427,7 @@ describe("Viewer — toolbar actions", () => {
       case_id: "run-out",
       run_id: "run-1",
       targets: [{ collection: "files", locator: "/candidates/7" }],
-      reviewer: "web-ui",
+      reviewer: "",
       status: "relevant",
     });
     fireEvent.click(tool("viewer.mark.include-in-report"));
@@ -448,7 +475,7 @@ describe("Viewer — toolbar actions", () => {
       case_id: "run-run-1",
       run_id: "run-1",
       targets: [{ target_type: "artifact", target_id: "42" }],
-      reviewer: "web-ui",
+      reviewer: "",
       status: "excluded",
       include_in_report: false,
     });
@@ -460,11 +487,38 @@ describe("Viewer — toolbar actions", () => {
       {},
       {
         ensure: () => ({ database: "D:/case.db", case_id: "run-run-1" }),
-        "review-batch": () => jsonResponse({ detail: "case DB has no row for run locator(s)" }, 400),
+        "review-batch": () => jsonResponse({ detail: "케이스 DB에 이 런의 행이 없습니다" }, 400),
       },
     );
     fireEvent.click(tool("viewer.mark.bookmark"));
-    await waitFor(() => expect(live()).toBe("표시 실패: case DB has no row for run locator(s)"));
+    await waitFor(() => expect(live()).toBe("표시 실패: 케이스 DB에 이 런의 행이 없습니다"));
+  });
+
+  it("R-1: a failed mark (403) rolls the status chip back to the previous status", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await show(
+      { preview_type: "text", extension: ".txt", text: "hi" },
+      {},
+      {
+        ensure: () => ({ database: "D:/case.db", case_id: "run-run-1" }),
+        "review-batch": async () => {
+          await gate;
+          return jsonResponse({ detail: "쓰기 차단" }, 403);
+        },
+      },
+    );
+    const chip = () => screen.getByTestId("viewer-review-status");
+    expect(chip().textContent).toBe("미검토");
+    fireEvent.click(tool("viewer.mark.relevant"));
+    // Optimistic while the request is in flight …
+    await waitFor(() => expect(chip().textContent).toBe("관련 있음"));
+    release();
+    // … and back to 미검토 once the server refuses it, with the failure toast.
+    await waitFor(() => expect(live()).toBe("표시 실패: 쓰기 차단"));
+    await waitFor(() => expect(chip().textContent).toBe("미검토"));
   });
 });
 
@@ -594,9 +648,9 @@ describe("Viewer — decoded artifact rows (F2)", () => {
     const source = screen.getByRole("region", { name: "레코드 출처" });
     expect(source.textContent).toContain("EVTX 레코드 오프셋4608");
     expect(source.textContent).toContain("EVTX 레코드 SHA-256");
-    // No "검증" group above the evidence any more; unknown keys are visible, not folded.
+    // No "검증" group above the evidence any more; labelled extra keys are visible (추가 필드).
     expect(screen.queryByRole("region", { name: "레코드 검증" })).toBeNull();
-    const other = screen.getByRole("region", { name: "레코드 기타 필드" });
+    const other = screen.getByRole("region", { name: "레코드 추가 필드" });
     expect(other.textContent).toContain("이벤트 데이터");
   });
 

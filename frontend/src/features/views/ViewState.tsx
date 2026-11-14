@@ -5,9 +5,10 @@
 
 import type { ReactNode } from "react";
 
+// A single root LiveRegion announces (a11y rule 9); a loading card is busy, not a second live region.
 export function LoadingCard({ label, onCancel }: { label: string; onCancel?: () => void }) {
   return (
-    <div className="view-state" role="status" aria-live="polite" aria-busy="true">
+    <div className="view-state" aria-busy="true">
       <span className="view-spinner" aria-hidden="true" />
       <p className="view-state-title">{label}</p>
       {onCancel ? (

@@ -1,0 +1,17 @@
+{
+  "schema_version": "perf-processing-baseline-v1",
+  "description": "Processing-time and output-size baselines for scripts/perf-processing-gate.py (T-214, QA-129). Numbers only. Lower is better for every metric; a current value more than `tolerance` above its baseline is a regression. prepare_s = run-plan group 'prepare' duration; collection_s = provider collection window (first provider start to last provider finish); output_bytes = total size of the run output folder (decimal GB x 10^9). identity names the corpus; the gate requires --corpus and refuses a current record whose corpus / evidence_bytes differ (R8 WB-13 review P1-3). evidence_bytes is not recorded for IMG-B (not in the R7 record).",
+  "tolerance": 0.2,
+  "default_corpus": "IMG-B",
+  "corpora": {
+    "IMG-B": {
+      "source": "R7 IMG-B processing record (GAP-068, r8-redesign 2026-11-11): prepare 3,719 s, collection 3,511 s, output 71.6 GB",
+      "identity": {"corpus": "IMG-B"},
+      "metrics": {
+        "prepare_s": 3719,
+        "collection_s": 3511,
+        "output_bytes": 71600000000
+      }
+    }
+  }
+}

@@ -40,6 +40,7 @@ from rapidtriage.artifacts.windows.web_upload import (
 )
 from rapidtriage.core.models import ArtifactRecord
 from rapidtriage.core.triage_rules.browser import upload_strength_ok
+from tests._timing import time_budget
 from tests.browser_cache_fixtures import (
     BODY_MARKER,
     raw_headers,
@@ -591,7 +592,7 @@ class R2FixRegressionTests(unittest.TestCase):
         raw = "HTTP/1.1 200 OK\x00" + "\x00".join(f"x-h{index}: v" for index in range(200_000)) + "\x00content-type: text/html"
         started = time.perf_counter()
         parsed = browser_cache.parse_raw_headers(raw)
-        self.assertLess(time.perf_counter() - started, 2.0)
+        self.assertLess(time.perf_counter() - started, time_budget(2.0))
         self.assertEqual(len(parsed["header_names"]), browser_cache.MAX_HEADER_NAMES)
         self.assertEqual(parsed["http_status"], 200)
         # WebCache ResponseHeaders are cut to MAX_STREAM0_BYTES before parsing.

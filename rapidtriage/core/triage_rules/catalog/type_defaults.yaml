@@ -1,0 +1,264 @@
+# Triage catalogue: type defaults (R8 T-045, plan r8-redesign-2026-11-11 §4.2).
+# Artifact types no family's grid shows still need a place in the console's categories: each
+# entry gives the ``tier`` (1 = 첫 화면, 2 = 더 보기, 3 = 전문가), the ``card`` (one of the 12 card
+# ids, or null) and the ``section`` (sub-tab, or the Tier 2/3 group) of the types it names.
+# classify() order: family (by type) -> exact ``types`` here -> ``prefixes`` -> ``suffixes``
+# -> family (by kind) -> ``kinds`` here -> "unclassified" (Tier 3). A type listed here that a
+# family's ``types`` already names is an error (it would never be read).
+type_defaults:
+# Documents
+- types: [sticky-note]
+  tier: 1
+  card: documents
+  section: sticky-notes
+- types: [windows-search-edb-row-candidate, windows-search-row-candidate, windows-search-index-entry, windows-search-edb-pivot]
+  tier: 2
+  card: documents
+  section: windows-search
+- types: [windows-search-db, windows-search-edb-file, windows-search-edb-page-candidate, windows-search-edb-table-candidate]
+  tier: 3
+  card: null
+  section: windows-search
+# Web
+- types: [browser-profile-account]
+  tier: 2
+  card: web
+  section: profile-accounts
+- types: [browser-session-tab]
+  tier: 2
+  card: web
+  section: session-tabs
+- types: [browser-top-site]
+  tier: 2
+  card: web
+  section: top-sites
+- types: [macos-quarantine-event]
+  tier: 2
+  card: web
+  section: quarantine
+- types:
+  - browser-cache-inventory
+  - browser-cookie-store-inventory
+  - browser-credential-store-inventory
+  - browser-extension-inventory
+  - browser-session-storage-inventory
+  - browser-storage-inventory
+  - browser-sync-inventory
+  - macos-browser-storage-inventory
+  - webcachev01-ese-file
+  tier: 3
+  card: null
+  section: browser-inventory
+# Exfiltration paths
+- types: [print-spooler-job]
+  tier: 1
+  card: exfil
+  section: print
+- types: [third-party-remote-control-artifact]
+  tier: 1
+  card: exfil
+  section: remote-control
+- types: [desktop-cloud-sync-row-candidate]
+  tier: 2
+  card: exfil
+  section: cloud-sync
+- types: [linux-ssh-authorized-key, linux-ssh-known-host]
+  tier: 2
+  card: exfil
+  section: ssh
+- types: [desktop-cloud-sync-db, cloud-api-collection]
+  tier: 3
+  card: null
+  section: cloud-inventory
+# Programs
+- types: [linux-shell-history]
+  tier: 1
+  card: programs
+  section: shell-history
+- types: [uwp-package]
+  tier: 2
+  card: programs
+  section: installed
+- types: [linux-package, linux-package-event]
+  tier: 2
+  card: programs
+  section: linux-packages
+- types: [linux-cron-entry]
+  tier: 2
+  card: programs
+  section: scheduled-tasks
+# Deleted / recovered
+- types: [sticky-note-recovery-candidate]
+  tier: 2
+  card: deleted
+  section: sticky-notes
+- types: [icon-cache-entry-candidate, icon-cache-media-candidate, thumbnail-cache-entry-candidate, thumbnail-cache-media-candidate]
+  tier: 2
+  card: deleted
+  section: thumbnail-cache
+- types: [icon-cache-file, thumbnail-cache-file]
+  tier: 3
+  card: null
+  section: thumbnail-cache
+# Accounts
+- types: [windows-account-lifecycle]
+  tier: 1
+  card: accounts
+  section: account-lifecycle
+- types: [windows-user-profile, linux-user-profile, macos-user-profile]
+  tier: 2
+  card: accounts
+  section: user-profiles
+- types: [windows-privilege-assignment]
+  tier: 2
+  card: accounts
+  section: privileges
+- types: [linux-auth-log-event]
+  tier: 2
+  card: accounts
+  section: logons
+# AI usage
+- types: [desktop-ai-app-artifact]
+  tier: 1
+  card: ai
+  section: desktop-apps
+- types: [local-llm-artifact]
+  tier: 1
+  card: ai
+  section: local-llm
+- types: [macos-browser-ai-conversation]
+  tier: 1
+  card: ai
+  section: browser-ai
+- types: [ai-transcript-candidate, desktop-ai-conversation-candidate]
+  tier: 2
+  card: ai
+  section: transcripts
+- types: [local-llm-prompt-candidate]
+  tier: 2
+  card: ai
+  section: local-llm
+- types: [macos-browser-ai-usage]
+  tier: 2
+  card: ai
+  section: browser-ai
+- types: [windows-recall-snapshot-file]
+  tier: 2
+  card: ai
+  section: recall
+- types: [windows-recall-database]
+  tier: 3
+  card: null
+  section: recall
+# Findings
+- types: [indicator-ioc-scanner-hit]
+  tier: 2
+  card: findings
+  section: ioc-hits
+# Tier 2 groups without a card (더 보기)
+- types: [activities-cache-db]
+  tier: 3
+  card: null
+  section: usage-aux
+- types: [activities-cache-row-candidate, notification-row-candidate]
+  tier: 2
+  card: null
+  section: usage-aux
+- types: [macos-launch-agent, webshell-source-candidate]
+  tier: 2
+  card: null
+  section: compromise
+- types: [wifi-profile, macos-tcc-permission]
+  tier: 2
+  card: null
+  section: system-context
+- types: [archive-entry]
+  tier: 2
+  card: null
+  section: review-mgmt
+- types: [frametrace-video-record]
+  tier: 2
+  card: null
+  section: media
+# Tier 3 (전문가 항목)
+- types: [file]
+  tier: 3
+  card: null
+  section: files
+- types: [file-signature-mismatch]
+  tier: 3
+  card: null
+  section: signature-mismatch
+- types: [eventlog-file, etl-trace-file]
+  tier: 3
+  card: null
+  section: eventlog-files
+- types: [usn-journal-file]
+  tier: 3
+  card: null
+  section: usn
+- types: [ntfs-logfile-transaction-candidate]
+  tier: 3
+  card: null
+  section: logfile
+- types: [bits-qmgr-sqlite-job-candidate, bits-qmgr-transfer-candidate]
+  tier: 3
+  card: null
+  section: bits
+- types: [disk-memory-file-indicators]
+  tier: 3
+  card: null
+  section: crash-dumps
+- types: [notification-database]
+  tier: 3
+  card: null
+  section: usage-aux
+- types: [kakaotalk-macos-database]
+  tier: 3
+  card: null
+  section: messenger-stores
+- types: [sticky-note-db-unreadable, browser-parse-error]
+  tier: 3
+  card: null
+  section: parse-errors
+- types: [linux-systemd-service]
+  tier: 3
+  card: null
+  section: services
+- types: [linux-auditd-event, linux-container-config]
+  tier: 3
+  card: null
+  section: linux
+- types: [macos-apfs-snapshot-hint]
+  tier: 3
+  card: null
+  section: macos
+- types: [windows-lsa-policy-location]
+  tier: 3
+  card: null
+  section: system-context
+- types: [wmi-repository-file]
+  tier: 3
+  card: null
+  section: wmi
+- types:
+  - e01-ex01-workflow
+  - forensic-container-workflow
+  - forensic-validation-smoke
+  - frametrace-package-integrity
+  - raw-split-workflow
+  - search-analysis-workbench
+  - virtual-disk-workflow
+  tier: 3
+  card: null
+  section: workflow
+# Hash / network indicators extracted from rows (19k-row hash lists): expert only.
+- prefixes: [indicator-]
+  tier: 3
+  card: null
+  section: indicators
+# Analysis result rows (``<kind>-row``, api/app/analyses.py).
+- suffixes: [-row]
+  tier: 3
+  card: null
+  section: analysis-rows

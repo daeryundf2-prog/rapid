@@ -1,109 +1,40 @@
-import { useEffect, useRef, useState } from "react";
+import { QueryClientContext, useQuery } from "@tanstack/react-query";
+import { type ReactElement, useContext, useEffect, useRef, useState } from "react";
 import { announce } from "../a11y";
-import { normalizeRunStatus, RETRYABLE_RUN_STATUSES } from "../api/runs";
+import { listCases } from "../api/cases";
+import { getRunDashboard } from "../api/dashboard";
+import {
+  normalizeRunStatus,
+  RETRYABLE_RUN_STATUSES,
+  type RunEvidenceTimezone,
+  runEvidenceZone,
+  runStartedAt,
+} from "../api/runs";
 import type { RunWithProgress } from "../api/runsProgress";
 import { runDisplayName } from "../app/collections";
 import { CommandButton } from "../commands/CommandButton";
 import { StatusBadge, statusLabel } from "../components/Badge";
+import { ToneChip } from "../components/ToneChip";
 import "../components/status.css";
 import { serializeRoute } from "../router";
 import { useRuns, useTimezone } from "../state/hooks";
 import { isRunActive } from "../state/slices/runs";
 import { useAppStore } from "../state/store";
-import { tzOffsetLabel } from "../utils/time";
+import { evidenceZoneOption, tzOffsetLabel } from "../utils/time";
 import { Slot } from "./slots";
+import {
+  formatElapsed,
+  OUTCOME_UNKNOWN,
+  progressText,
+  type RunOutcome,
+  runIdentityText,
+  runOutcome,
+  staleText,
+} from "./statusBarOutcome";
 
 const NOTICE_MS = 6000;
 
-export function formatElapsed(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 0) return "";
-  const total = Math.floor(ms / 1000);
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  const mm = String(m).padStart(2, "0");
-  const ss = String(s).padStart(2, "0");
-  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
-}
-
-/** Heartbeat age after which a running run reads "응답 없음" (the server's `stale` threshold). */
-export const STALE_HEARTBEAT_MS = 90_000;
-
 const n = (value: number) => value.toLocaleString("ko-KR");
-
-/**
- * Run-plan progress (R4 V1): "그룹 7/23 · 태스크 19/36 · 실행 중: 이벤트 로그(12,340행) · 건너뜀 3".
- * `groups` / `tasks` of `plan_counts` are totals; the rest are task counts. The finished-group
- * count is shown only when the server sends one (`groups_done`).
- */
-export function planProgressText(progress: RunWithProgress["progress"]): string {
-  const counts = progress?.plan_counts;
-  if (!counts || typeof counts.tasks !== "number") return "";
-  const parts: string[] = [];
-  if (typeof counts.groups === "number") {
-    parts.push(
-      typeof counts.groups_done === "number"
-        ? `그룹 ${n(counts.groups_done)}/${n(counts.groups)}`
-        : `그룹 ${n(counts.groups)}`,
-    );
-  }
-  const finished =
-    (counts.completed ?? 0) +
-    (counts.partial ?? 0) +
-    (counts.failed ?? 0) +
-    (counts.skipped ?? 0) +
-    (counts.cancelled ?? 0);
-  parts.push(`태스크 ${n(finished)}/${n(counts.tasks)}`);
-  const current = (progress?.current ?? []).slice(0, 3);
-  if (current.length) {
-    parts.push(
-      `실행 중: ${current
-        .map((task) => {
-          const label = task.label || task.task;
-          return typeof task.rows_so_far === "number" ? `${label}(${n(task.rows_so_far)}행)` : label;
-        })
-        .join(", ")}`,
-    );
-  } else if (progress?.running?.length) {
-    parts.push(
-      `실행 중: ${progress.running.slice(0, 3).join(", ")}${progress.running.length > 3 ? " 외" : ""}`,
-    );
-  }
-  if (counts.skipped) parts.push(`건너뜀 ${n(counts.skipped)}`);
-  if (counts.cancelled) parts.push(`취소 ${n(counts.cancelled)}`);
-  if (counts.failed) parts.push(`실패 ${n(counts.failed)}`);
-  return parts.join(" · ");
-}
-
-/**
- * "응답 없음 · 마지막 신호 3분 전" when an active run's heartbeat stopped (server `stale`, or the
- * heartbeat is older than 90 s); "" otherwise.
- */
-export function staleText(run: RunWithProgress, now: number): string {
-  if (!isRunActive(run)) return "";
-  const beat = run.progress?.heartbeat_at ? Date.parse(run.progress.heartbeat_at) : Number.NaN;
-  const age = Number.isFinite(beat) ? now - beat : Number.NaN;
-  const stale = run.progress?.stale === true || (Number.isFinite(age) && age > STALE_HEARTBEAT_MS);
-  if (!stale) return "";
-  if (!Number.isFinite(age)) return "응답 없음";
-  const minutes = Math.max(1, Math.floor(age / 60_000));
-  return `응답 없음 · 마지막 신호 ${n(minutes)}분 전`;
-}
-
-/** Plain-language progress line for a run (also the live-region sentence). */
-export function progressText(run: RunWithProgress): string {
-  const p = run.progress;
-  const plan = planProgressText(p);
-  if (plan) return plan;
-  const parts: string[] = [];
-  if (p?.stage) parts.push(p.stage);
-  if (typeof p?.total_count === "number" && p.total_count > 0) {
-    parts.push(`provider ${p.completed_count ?? 0}/${p.total_count}`);
-  }
-  if (p?.running?.length)
-    parts.push(`실행 중: ${p.running.slice(0, 3).join(", ")}${p.running.length > 3 ? " 외" : ""}`);
-  return parts.join(" · ");
-}
 
 function useNow(active: boolean): number {
   const [now, setNow] = useState(() => Date.now());
@@ -115,10 +46,42 @@ function useNow(active: boolean): number {
   return now;
 }
 
-function RunProgress({ run }: { run: RunWithProgress }) {
+/** The run line with its case/evidence names and (finished runs) the scope/steps outcome. */
+function RunProgressQueried({ run }: { run: RunWithProgress }) {
+  const active = isRunActive(run);
+  const cases = useQuery({ queryKey: ["cases"], queryFn: listCases, retry: false });
+  // Same key as the 접수 dashboard / tree: scope (T-023) and steps (T-021) of a finished run.
+  const dashboard = useQuery({
+    queryKey: ["run-dashboard", run.run_id],
+    queryFn: () => getRunDashboard(run.run_id),
+    enabled: !active,
+    retry: false,
+  });
+  const outcome = dashboard.data ? runOutcome(dashboard.data.scope, dashboard.data.steps) : null;
+  return (
+    <RunProgress
+      run={run}
+      identity={runIdentityText(run, cases.data)}
+      outcome={outcome}
+      outcomePending={!active && dashboard.isPending}
+    />
+  );
+}
+
+function RunProgress({
+  run,
+  identity,
+  outcome = null,
+  outcomePending = false,
+}: {
+  run: RunWithProgress;
+  identity?: string;
+  outcome?: RunOutcome | null;
+  outcomePending?: boolean;
+}) {
   const active = isRunActive(run);
   const now = useNow(active);
-  const started = run.created_at ? Date.parse(run.created_at) : Number.NaN;
+  const started = Date.parse(runStartedAt(run) ?? "");
   const errors = run.progress?.error_count ?? 0;
   const planCounts = run.progress?.plan_counts;
   const planTotal = typeof planCounts?.tasks === "number" ? planCounts.tasks : 0;
@@ -136,7 +99,7 @@ function RunProgress({ run }: { run: RunWithProgress }) {
   // Announce stage / status transitions only (not every poll).
   const stage = run.progress?.stage ?? "";
   const status = normalizeRunStatus(run.status);
-  const name = runDisplayName(run);
+  const name = identity || runDisplayName(run);
   const retryable = RETRYABLE_RUN_STATUSES.has(status);
   const announced = useRef<string | null>(null);
   useEffect(() => {
@@ -146,15 +109,57 @@ function RunProgress({ run }: { run: RunWithProgress }) {
     announced.current = sentence;
   }, [status, stage, name]);
 
-  // "런 682636ce… · 완료 · 오류 0", then the run actions as their own group (visual-polish §0).
+  // A finished run's chip comes from its scope and steps (T-174): green 완료 only with every
+  // measured axis at 100 % and no failed step; never 완료 · 오류 0 while the run is partial.
+  const finishedOk = status === "completed";
+  const known = outcome && outcome.kind !== "unknown" ? outcome : null;
+  let chip: ReactElement;
+  if (finishedOk && known?.kind === "complete") {
+    chip = (
+      <ToneChip tone="ok" testId="status-outcome">
+        완료
+      </ToneChip>
+    );
+  } else if (finishedOk && known?.kind === "partial") {
+    chip = (
+      <ToneChip tone="warn" testId="status-outcome" title={known.reasons.join(" · ") || undefined}>
+        부분
+      </ToneChip>
+    );
+  } else if (finishedOk) {
+    // Still loading, or unknown (the dashboard request failed / the server sent no scope or
+    // steps): a neutral chip, never the green run-status 완료 that reads as a full outcome.
+    chip = (
+      <ToneChip tone="" testId="status-outcome">
+        {outcomePending ? "범위 확인 중" : OUTCOME_UNKNOWN}
+      </ToneChip>
+    );
+  } else {
+    chip = <StatusBadge status={String(run.status)} />;
+  }
+  const failedSteps = known?.failed ?? 0;
+
+  // "사건 · 증거 · 완료" / "… · 부분 · 실패 단계 2", then the run actions as their own group (visual-polish §0).
   return (
     <div className="status-run" data-testid="status-run">
       <span className="status-group">
-        <span className="mono" title={run.run_id}>
-          런 {run.run_id.slice(0, 8)}…
+        <span data-testid="status-run-name" title={`런 ID ${run.run_id}`}>
+          {name}
         </span>
         <StatusSep />
-        <StatusBadge status={String(run.status)} />
+        {chip}
+        {failedSteps > 0 ? (
+          <>
+            <StatusSep />
+            <span
+              className="status-errors"
+              data-testid="status-failed-steps"
+              title={known?.failedNames.join(", ") || undefined}
+            >
+              실패 단계 {n(failedSteps)}
+            </span>
+          </>
+        ) : null}
         {text ? (
           <>
             <StatusSep />
@@ -189,8 +194,14 @@ function RunProgress({ run }: { run: RunWithProgress }) {
             <span>{formatElapsed(now - started)} 경과</span>
           </>
         ) : null}
-        <StatusSep />
-        <span className={errors > 0 ? "status-errors" : undefined}>오류 {errors}</span>
+        {/* A finished run drops "오류 0" (the chip and the failed-step count say it; an unknown
+            outcome must not read as "no errors"). */}
+        {(!known && !finishedOk) || errors > 0 ? (
+          <>
+            <StatusSep />
+            <span className={errors > 0 ? "status-errors" : undefined}>오류 {errors}</span>
+          </>
+        ) : null}
       </span>
       {/* Run actions only when they apply (review #8): 취소 while running, 재시도 after a failure;
           an interrupted or cancelled run resumes (R4 V1). */}
@@ -233,16 +244,33 @@ const TZ_OPTIONS: ReadonlyArray<[string, string]> = [
   ["Europe/London", "런던"],
 ];
 
+/**
+ * Zone choices of the status bar: the evidence system's zone first when the run recorded one
+ * (P6: "증거 시스템(KST −540)"), then the fixed list; the current choice is kept when unknown.
+ */
+export function timezoneOptions(
+  evidence: RunEvidenceTimezone | null | undefined,
+  current?: string,
+): Array<[string, string]> {
+  const options: Array<[string, string]> = [];
+  const zone = evidenceZoneOption(evidence);
+  if (zone) options.push([zone.value, zone.label]);
+  for (const option of TZ_OPTIONS)
+    if (!options.some(([value]) => value === option[0])) options.push([...option]);
+  if (current && !options.some(([value]) => value === current)) options.unshift([current, current]);
+  return options;
+}
+
 /** "시간대 UTC+09:00" with a select that changes the global display timezone (X4). */
 export function TimezoneControl() {
   const { timezone, setTimezone } = useTimezone();
-  const known = TZ_OPTIONS.some(([value]) => value === timezone);
+  const { currentRun } = useRuns();
+  const options = timezoneOptions(runEvidenceZone(currentRun), timezone);
   return (
     <label className="status-tz" data-testid="status-tz">
       <span>시간대 {tzOffsetLabel(timezone)}</span>
       <select aria-label="표시 시간대" value={timezone} onChange={(event) => setTimezone(event.target.value)}>
-        {known ? null : <option value={timezone}>{timezone}</option>}
-        {TZ_OPTIONS.map(([value, label]) => (
+        {options.map(([value, label]) => (
           <option key={value} value={value}>
             {label}
           </option>
@@ -252,12 +280,25 @@ export function TimezoneControl() {
   );
 }
 
+/** "런 40건 · 케이스 1건" (C-G5); the case count only once known. */
+export function runCountText(runCount: number, caseCount?: number | null): string {
+  const runs = `런 ${n(runCount)}건`;
+  return typeof caseCount === "number" ? `${runs} · 케이스 ${n(caseCount)}건` : runs;
+}
+
+function RunCaseCount({ runCount }: { runCount: number }) {
+  const cases = useQuery({ queryKey: ["cases"], queryFn: listCases, retry: false });
+  return <span data-testid="status-run-count">{runCountText(runCount, cases.data?.length)}</span>;
+}
+
 /** Bottom status bar (plan U8): run progress, cancel/retry, connection, last command notice. */
 export function StatusBar() {
   const { runs, runsStatus, currentRun } = useRuns();
   const notice = useAppStore((s) => s.notice);
   const clearNotice = useAppStore((s) => s.clearNotice);
   const activeCount = runs.filter(isRunActive).length;
+  // Runs and cases are different things (C-G5): "런 40건 · 케이스 1건" (cases need the query client).
+  const queryClient = useContext(QueryClientContext);
 
   useEffect(() => {
     if (!notice) return;
@@ -268,9 +309,15 @@ export function StatusBar() {
   return (
     <footer className="statusbar" data-testid="statusbar">
       {currentRun ? (
-        <RunProgress run={currentRun} />
+        queryClient ? (
+          <RunProgressQueried run={currentRun} />
+        ) : (
+          <RunProgress run={currentRun} />
+        )
+      ) : queryClient ? (
+        <RunCaseCount runCount={runs.length} />
       ) : (
-        <span data-testid="status-run-count">케이스 {runs.length}건</span>
+        <span data-testid="status-run-count">{runCountText(runs.length)}</span>
       )}
       {activeCount > 0 && (!currentRun || !isRunActive(currentRun)) ? (
         <span>실행 중 런 {activeCount}건</span>

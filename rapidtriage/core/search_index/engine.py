@@ -4,7 +4,8 @@ The parsed query compiles to one parameterised SQL predicate over
 ``search_doc d`` in two shapes:
 
 * **set mode** (whole index): keyword terms are ``d.group_id IN (<FTS LIKE
-  candidates>)`` (the trigram index serves them), field terms are
+  candidates>)`` (the trigram index serves them; 2-character non-ASCII terms
+  use ``search_bigram MATCH`` instead -- index v3), field terms are
   ``IN``-subqueries on ``search_field``/``search_hash``, time windows use the
   ``ts`` index and never touch FTS;
 * **row mode** (a known small candidate set): the same terms as correlated
@@ -31,6 +32,15 @@ A progress handler stops any statement when the wall-clock budget runs out or
 the client went away (``cancel_event``); the response then carries
 ``truncated`` + ``truncated_reason``. SQLite/limit errors become 400s with a
 Korean message, never 500s.
+
+Entities (index v5, R7 lane B): ``rrn:``/``card:``/``phone:``/``account:``/``bizno:``/
+``corpno:``/``passport:``/``email:``/``ip:``/``host:`` read ``search_entity_value`` (SHA-256 +
+mask) and ``search_entity`` (postings); a keyword typed as a whole personal number is answered
+from the same tables (the stored text carries only its mask). ``lang:`` reads the ``lang``
+search field, ``list:<id>`` ORs the items of a keyword pack / run search list (per-item counts
+in ``lists`` when the result is aggregated), ``pre:(a b)/n`` is ordered proximity and
+``hashset:known-good`` (a category) means every hash set of that category. Query echoes
+(``query.raw``, clause displays) carry masks, never a typed personal number.
 """
 
 from __future__ import annotations
@@ -40,6 +50,7 @@ import bisect
 import datetime as dt
 import functools
 import hashlib
+import ipaddress
 import json
 import math
 import re
@@ -52,6 +63,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..files import CATEGORY_RULES
+from ..search_hits import ENTRY_MARK
+from ..textnorm import locate_normalized
+from .patterns import (
+    ENTITY_RULE,
+    KIND_BITS,
+    KIND_LABELS,
+    KINDS,
+    SENSITIVE_KINDS,
+    entity_sha256,
+    ip_net_range,
+    mask_sensitive,
+    parse_entity_value,
+    whole_entity,
+)
 from .query import (
     MAX_LIST_ITEMS,
     Group,
@@ -66,15 +91,19 @@ from .query import (
 )
 from .regex_guard import GuardedRegex, RowTimeout
 from .schema import (
-    INDEX_VERSION,
+    BIGRAM_RULE,
+    FOLD_RULE,
     QUERY_BUDGET_SECONDS,
     QUERY_GRACE_SECONDS,
+    READABLE_INDEX_VERSIONS,
     TOKENIZER_TRIGRAM,
     open_read_only,
 )
 from .textutil import (
+    ascii_lower,
     fold,
     format_offset,
+    is_bigram_term,
     ms_to_iso,
     nfc,
     normalize_hash,
@@ -84,6 +113,8 @@ from .textutil import (
 
 # The aggregate pass materialises at most this many matching rows (memory guard).
 TOTAL_CAP = 1_000_000
+# Highest result position a page may start at (cursor ``pos``, the console's ``page.offset``).
+MAX_POSITION = TOTAL_CAP
 SORT_TS_CAP = 50_000
 DEFAULT_BUDGET_SECONDS = QUERY_BUDGET_SECONDS
 GRACE_SECONDS = QUERY_GRACE_SECONDS
@@ -144,7 +175,22 @@ EXTSETS: dict[str, tuple[str, ...]] = {
 REVIEW_FIELDS = frozenset({"review", "tag", "note", "bookmark"})
 BOOKMARK_TAG = "북마크"
 SORTS = ("relevance", "ts", "-ts", "path")
-TEXT_SQL_FIELDS = frozenset({"kw", "word", "near"})
+TEXT_SQL_FIELDS = frozenset({"kw", "word", "near", "pre"})
+ENTITY_FIELDS = frozenset(KINDS)
+LANGUAGES = {
+    "ko": "ko", "ja": "ja", "zh": "zh", "en": "en", "ru": "ru", "mixed": "mixed",
+    "한국어": "ko", "일본어": "ja", "중국어": "zh", "영어": "en", "러시아어": "ru", "혼합": "mixed",
+}
+LANGUAGE_LABELS = {"ko": "한국어", "ja": "일본어", "zh": "중국어", "en": "영어", "ru": "러시아어", "mixed": "혼합"}
+HASHSET_CATEGORIES = ("known-good", "known-bad", "custom")
+HASHSET_CATEGORY_LABELS = {"known-good": "알려진 정상", "known-bad": "알려진 악성", "custom": "사용자 지정"}
+MAX_LIST_TERMS = 500
+PRE_MAX_WORDS = 8
+LANG_FACET_MAX_ROWS = 200_000
+ROW_ENTITY_MAX = 64
+MASKED_PREVIEW_MAX = 5
+ENTITY_SUMMARY_VALUES = 200
+NO_ENTITY_INDEX = "이 검색 색인은 개체 추출 이전 형식(v4)이라 '{field}:' 필드를 쓸 수 없습니다. 처리 단계에서 색인을 다시 만드세요"
 
 
 class Interrupted(Exception):
@@ -204,6 +250,38 @@ class SearchOptions:
 
 ReviewProvider = Callable[[], list[Mapping[str, object]] | None]
 HashsetResolver = Callable[[str], Path | None]
+# Hash-set ids of a category (``known-good`` / ``known-bad`` / ``custom``).
+HashsetCategoryResolver = Callable[[str], list[str]]
+
+
+@dataclass
+class SearchList:
+    """A keyword pack or run search list ``list:<id>`` reads (items as typed)."""
+
+    id: str
+    name: str
+    items: list[str]
+
+
+ListResolver = Callable[[str], "SearchList | None"]
+
+
+@dataclass
+class ListItemCount:
+    """One ``list:`` item compiled for its per-item count (set-mode predicate over ``d``)."""
+
+    item: str
+    type: str
+    sql: str
+    params: list[object]
+
+
+@dataclass
+class ListCount:
+    id: str
+    name: str
+    items: list[ListItemCount] = field(default_factory=list)
+    omitted: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +338,42 @@ def sx_near(text: object, left: object, right: object, distance: object) -> int:
     return 0
 
 
+def _word_hits(folded: str, starts: list[int], needle: str) -> list[tuple[int, int, int]]:
+    """``(word index, start, end)`` of each occurrence of ``needle`` in ``folded`` (at most 1000)."""
+    hits: list[tuple[int, int, int]] = []
+    index = folded.find(needle)
+    while index >= 0 and len(hits) < 1000:
+        hits.append((max(0, bisect.bisect_right(starts, index) - 1), index, index + len(needle)))
+        index = folded.find(needle, index + 1)
+    return hits
+
+
+def sx_pre(text: object, words: object, distance: object) -> int:
+    """The words occur in this order, each within ``distance`` words after the previous one."""
+    if not isinstance(text, str) or not isinstance(words, str):
+        return 0
+    try:
+        needles = [fold(item) for item in json.loads(words) if isinstance(item, str) and item]
+    except ValueError:
+        return 0
+    if not needles:
+        return 0
+    folded = fold(text)
+    starts = [match.start() for match in _WORD_RE.finditer(folded)]
+    if not starts:
+        return 0
+    limit = int(distance or 0)
+    reached = _word_hits(folded, starts, needles[0])
+    for needle in needles[1:]:
+        if not reached:
+            return 0
+        hits = _word_hits(folded, starts, needle)
+        reached = [
+            hit for hit in hits if any(hit[1] >= prev[2] and 0 <= hit[0] - prev[0] <= limit for prev in reached)
+        ]
+    return 1 if reached else 0
+
+
 def sx_data(text: object, name: object, value: object, prefix: object) -> int:
     """An EventData ``Name=Value`` line of the row text equals (or, with ``prefix``, starts with) the value."""
     if not isinstance(text, str) or not isinstance(name, str):
@@ -280,6 +394,7 @@ def register_functions(connection: sqlite3.Connection) -> None:
     connection.create_function("sx_word", 2, sx_word, deterministic=True)
     connection.create_function("sx_near", 4, sx_near, deterministic=True)
     connection.create_function("sx_data", 4, sx_data, deterministic=True)
+    connection.create_function("sx_pre", 3, sx_pre, deterministic=True)
 
 
 # ---------------------------------------------------------------------------
@@ -287,8 +402,21 @@ def register_functions(connection: sqlite3.Connection) -> None:
 # ---------------------------------------------------------------------------
 
 
-def ascii_lower(text: str) -> str:
-    return "".join(char.lower() if char.isascii() else char for char in text)
+def bigram_match(literal: str) -> str:
+    """FTS5 query of one ``search_bigram`` token (both characters are non-ASCII, so never a ``"``)."""
+    return f'"{literal}"'
+
+
+def contains_sql(column: str, literal: str) -> tuple[str, str]:
+    """``instr`` test of ``column`` containing ``literal`` ignoring ASCII case: ``(sql, param)``.
+
+    SQLite ``lower`` only folds A-Z, so a literal without ASCII letters (a Korean word) matches
+    the raw text exactly where it matches the lowered text -- and skips copying every row's text
+    through ``lower`` (about 20 % of a short-term scan, R7 P2).
+    """
+    if any("a" <= char <= "z" or "A" <= char <= "Z" for char in literal):
+        return f"instr(lower({column}), ?) > 0", ascii_lower(literal)
+    return f"instr({column}, ?) > 0", literal
 
 
 def like_escape(text: str) -> str:
@@ -418,9 +546,13 @@ class RegexJob:
 
 @dataclass
 class Driver:
-    """A top-level positive keyword whose FTS order drives the first page."""
+    """A top-level positive keyword whose FTS order drives the first page (or, with ``ids_sql``,
+    an entity term whose postings give the candidate rows in ``doc_id`` order)."""
 
     literal: str
+    bigram: bool = False  # served by ``search_bigram`` (a 2-character non-ASCII term)
+    ids_sql: str = ""  # ``SELECT doc_id …`` of the candidates (entity postings)
+    ids_params: list[object] = field(default_factory=list)
 
 
 @dataclass
@@ -441,6 +573,12 @@ class CompileContext:
     attached: dict[str, str] = field(default_factory=dict)
     temp_tables: int = 0
     uses_review: bool = False
+    bigram: bool = False  # the index has ``search_bigram`` (v3)
+    folded: bool = False  # the index has ``text_fold`` and folded full-text content (v4)
+    entities: bool = False  # the index has entity tables, masked text and ``lang`` fields (v5)
+    category_resolver: HashsetCategoryResolver | None = None
+    list_resolver: ListResolver | None = None
+    list_counts: list[ListCount] = field(default_factory=list)
     _marks: list[Mapping[str, object]] | None = None
 
     def warn(self, message: str) -> None:
@@ -479,32 +617,72 @@ class Compiler:
             return f"EXISTS (SELECT 1 FROM {source} WHERE {column} = d.group_id AND ({where}))"
         return f"d.group_id IN (SELECT {column} FROM {source} WHERE {where})"
 
+    def match_literal(self, literal: str) -> str:
+        """The form a keyword is compared in: NFC + casefold on a v4 index (its full-text content
+        and bigram pairs are folded the same way), else as typed (SQLite folds ASCII only)."""
+        return fold(literal) if self.ctx.folded else literal
+
+    def fold_column(self, prefix: str = "") -> str:
+        """The folded row text (``text_fold`` where the row has one) -- raw ``text`` before v4."""
+        return f"COALESCE({prefix}text_fold, {prefix}text)" if self.ctx.folded else f"{prefix}text"
+
     def _fts_ok(self, literal: str) -> bool:
         return self.ctx.tokenizer == TOKENIZER_TRIGRAM and len(literal) >= 3 and "%" not in literal and "_" not in literal
 
+    def _bigram_ok(self, literal: str) -> bool:
+        """A 2-character non-ASCII term on an index with ``search_bigram`` (exact: no re-check needed)."""
+        if not is_bigram_term(literal):
+            return False
+        if not self.ctx.bigram:
+            self.ctx.warn("이전 형식 색인이라 2자 한글 검색어가 전체 본문을 훑습니다(느릴 수 있음). 색인을 다시 만드세요")
+            return False
+        return True
+
     def text_check(self, literal: str, extra: str = "", extra_params: Sequence[object] = ()) -> tuple[str, list[object]]:
-        """Rows whose primary text contains ``literal`` (+ ``extra`` on ``{text}``)."""
+        """Rows whose primary text contains ``literal`` (+ ``extra`` on ``{text}`` = the raw text,
+        ``{fold}`` = the folded text).
+
+        ``literal`` is compared in :meth:`match_literal` form; ``extra`` always reads
+        ``search_doc`` itself (the full-text content of a v4 index is the folded text).
+        """
+        literal = self.match_literal(literal)
         if self.mode == "row":
-            sql = "p.text IS NOT NULL AND instr(lower(p.text), ?) > 0"
-            params: list[object] = [ascii_lower(literal)]
+            if not extra and self._bigram_ok(literal):
+                # Exact without reading the text: the term's (small) row set, computed once.
+                return "d.group_id IN (SELECT rowid FROM search_bigram WHERE search_bigram MATCH ?)", [bigram_match(literal)]
+            test, param = contains_sql(self.fold_column("p."), literal)
+            sql = f"p.text IS NOT NULL AND {test}"
+            params: list[object] = [param]
             if extra:
-                sql += " AND " + extra.format(text="p.text")
+                sql += " AND " + extra.format(text="p.text", fold=self.fold_column("p."))
                 params.extend(extra_params)
             return f"EXISTS (SELECT 1 FROM search_doc p WHERE p.doc_id = d.group_id AND {sql})", params
         if self._fts_ok(literal):
             sql = "SELECT rowid FROM search_text WHERE text LIKE ?"
             params = [f"%{literal}%"]
+            if extra:
+                sql = f"SELECT doc_id FROM search_doc WHERE doc_id IN ({sql})"
+        elif self._bigram_ok(literal):
+            sql = "SELECT rowid FROM search_bigram WHERE search_bigram MATCH ?"
+            params = [bigram_match(literal)]
+            if extra:  # contentless: the extra checks read the row's text
+                sql = f"SELECT doc_id FROM search_doc WHERE doc_id IN ({sql})"
         else:
-            sql = "SELECT doc_id FROM search_doc WHERE text IS NOT NULL AND instr(lower(text), ?) > 0"
-            params = [ascii_lower(literal)]
+            test, param = contains_sql(self.fold_column(), literal)
+            sql = f"SELECT doc_id FROM search_doc WHERE text IS NOT NULL AND {test}"
+            params = [param]
         if extra:
-            sql += " AND " + extra.format(text="text")
+            sql += " AND " + extra.format(text="text", fold=self.fold_column())
             params.extend(extra_params)
         return f"d.group_id IN ({sql})", params
 
     def add_driver(self, literal: str, negated: bool, top: bool) -> None:
-        if self.mode == "set" and top and not negated and self._fts_ok(literal):
-            self.ctx.drivers.append(Driver(literal))
+        literal = self.match_literal(literal)
+        if self.mode == "set" and top and not negated:
+            if self._fts_ok(literal):
+                self.ctx.drivers.append(Driver(literal))
+            elif self.ctx.bigram and is_bigram_term(literal):
+                self.ctx.drivers.append(Driver(literal, bigram=True))
 
     # -- text --------------------------------------------------------------
 
@@ -551,10 +729,13 @@ class Compiler:
             self.add_driver(left, negated, top)
             extra = "sx_near({text}, ?, ?, ?)"
             params: list[object] = [left, right, distance]
-            if self.mode == "set" and self._fts_ok(right):
-                extra += " AND {text} LIKE ?"
-                params.append(f"%{right}%")
+            folded_right = self.match_literal(right)
+            if self.mode == "set" and self._fts_ok(folded_right):
+                extra += " AND {fold} LIKE ?"
+                params.append(f"%{folded_right}%")
             return self.text_check(left, extra, params)
+        if name == "pre":
+            return self.pre_term(term, value, negated, top)
         parts: list[str] = []
         params = []
         items = _items(value)
@@ -562,6 +743,14 @@ class Compiler:
             literal = nfc(_scalar(item, name))
             if not literal:
                 raise QueryError("빈 검색어입니다", item.pos or term.pos)
+            entity = whole_entity(literal) if self.ctx.entities and name in {"kw", "word"} else None
+            if entity is not None and entity.sensitive:
+                # The stored text carries only the mask: a whole personal number is answered from
+                # the entity tables (same rows the keyword found before index v5).
+                sql, sql_params = self.entity_values("value_sha256 = ?", [entity_sha256(entity.kind, entity.normalized)])
+                parts.append(sql)
+                params.extend(sql_params)
+                continue
             if not negated and self.mode == "set":
                 self.ctx.text_terms.append((name, literal))
             if len(items) == 1:
@@ -578,13 +767,49 @@ class Compiler:
             params.extend(sql_params)
         return " OR ".join(parts), params
 
+    def pre_term(self, term: Term, value: Value, negated: bool, top: bool) -> tuple[str, list[object]]:
+        """``pre:(w1 w2 …)/n``: the words in order, each within ``n`` words after the previous."""
+        words = [nfc(item.text.strip()) for item in value.items if item.text.strip()]
+        try:
+            distance = int(value.text)
+        except ValueError as exc:
+            raise QueryError("pre: 거리는 단어 수(정수)여야 합니다", value.pos or term.pos) from exc
+        if not 2 <= len(words) <= PRE_MAX_WORDS:
+            raise QueryError(f"pre: 단어는 2~{PRE_MAX_WORDS}개여야 합니다", value.pos or term.pos)
+        if not negated and self.mode == "set":
+            self.ctx.text_terms.extend(("pre", word) for word in words)
+        anchor = max(words, key=len)
+        self.add_driver(anchor, negated, top)
+        # The other words narrow the rows first through their own index (trigram / bigram), so
+        # the ordered check (sx_pre, a Python scan of the row text) runs on few rows.
+        filters: list[str] = []
+        filter_params: list[object] = []
+        for word in words:
+            folded_word = self.match_literal(word)
+            if word == anchor:
+                continue
+            if self._fts_ok(folded_word):
+                filters.append("d.group_id IN (SELECT rowid FROM search_text WHERE text LIKE ?)")
+                filter_params.append(f"%{folded_word}%")
+            elif self.ctx.bigram and is_bigram_term(folded_word):
+                filters.append("d.group_id IN (SELECT rowid FROM search_bigram WHERE search_bigram MATCH ?)")
+                filter_params.append(bigram_match(folded_word))
+        sql, params = self.text_check(anchor, "sx_pre({text}, ?, ?)", [json.dumps(words, ensure_ascii=False), distance])
+        if not filters:
+            return sql, params
+        return " AND ".join([*filters, f"({sql})"]), [*filter_params, *params]
+
     # -- fields ------------------------------------------------------------
 
     def term(self, term: Term, negated: bool, top: bool) -> tuple[str, list[object]]:
         name = term.field
         value = term.value
-        if name in {"kw", "word", "re", "near"}:
+        if name in {"kw", "word", "re", "near", "pre"}:
             return self.text_term(term, value, negated, top)
+        if name in ENTITY_FIELDS:
+            return self.entity_field(name, term, value, negated, top)
+        if name == "list":
+            return self.field_list(term, value, negated, top)
         if name.startswith("data."):
             return self.data_field(term, negated, top)
         if name in REVIEW_FIELDS:
@@ -814,13 +1039,174 @@ class Compiler:
             return None
         return self.group_in("h.doc_id", f"search_hash h JOIN {alias}.hash_entry s ON s.algorithm = h.algorithm AND s.value = h.value", "1")
 
+    def hashset_ids(self, hashset_id: str, position: int) -> list[str] | None:
+        """The sets a ``hashset:`` value names: a category (``known-good``…) -> its sets, else ``None``."""
+        key = fold(hashset_id)
+        if key not in HASHSET_CATEGORIES:
+            return None
+        ids = self.ctx.category_resolver(key) if self.ctx.category_resolver is not None else []
+        if not ids:
+            self.ctx.warn(f"'{HASHSET_CATEGORY_LABELS[key]}'({key}) 범주의 해시 세트가 없어 그 조건과 일치하는 행이 없습니다")
+        if len(ids) > MAX_HASHSETS:
+            raise QueryError(f"'{key}' 범주의 해시 세트가 {MAX_HASHSETS}개를 넘습니다(한 질의에 최대 {MAX_HASHSETS}개)", position)
+        return list(ids)
+
     def field_hashset(self, term: Term, value: Value, negated: bool) -> tuple[str, list[object]]:
         parts: list[str] = []
         for item in _items(value):
-            sql = self.hashset_clause(_scalar(item, "hashset"), item.pos or term.pos)
-            assert sql is not None
-            parts.append(sql)
+            hashset_id = _scalar(item, "hashset")
+            category = self.hashset_ids(hashset_id, item.pos or term.pos)
+            if category is None:
+                sql = self.hashset_clause(hashset_id, item.pos or term.pos)
+                assert sql is not None
+                parts.append(sql)
+                continue
+            clauses = [clause for clause in (self.hashset_clause(set_id, item.pos or term.pos, missing_ok=True) for set_id in category) if clause]
+            parts.append(" OR ".join(f"({clause})" for clause in clauses) if clauses else "0")
         return " OR ".join(parts), []
+
+    def hidden_hashset_clauses(self, hashset_ids: Sequence[str]) -> list[str]:
+        """``options.hide_hashsets`` (ids or categories) -> clauses to exclude."""
+        clauses: list[str] = []
+        for hashset_id in list(hashset_ids)[:MAX_LIST_ITEMS]:
+            category = self.hashset_ids(str(hashset_id), 0)
+            for set_id in category if category is not None else [str(hashset_id)]:
+                if category is not None or self.mode == "set" or set_id in self.ctx.attached:
+                    sql = self.hashset_clause(set_id, 0, missing_ok=True)
+                    if sql is not None:
+                        clauses.append(sql)
+        return clauses
+
+    # -- entities (index v5) ------------------------------------------------------
+
+    def _entities_ready(self, term: Term) -> None:
+        if not self.ctx.entities:
+            raise QueryError(NO_ENTITY_INDEX.format(field=term.field), term.pos, status=409)
+
+    def entity_values(self, where: str, params: list[object]) -> tuple[str, list[object]]:
+        """Rows posting a ``search_entity_value`` matching ``where``."""
+        values = f"SELECT value_id FROM search_entity_value WHERE {where}"
+        if self.mode == "row":
+            return f"EXISTS (SELECT 1 FROM search_entity e WHERE e.doc_id = d.group_id AND e.value_id IN ({values}))", list(params)
+        return f"d.group_id IN (SELECT e.doc_id FROM search_entity e WHERE e.value_id IN ({values}))", list(params)
+
+    def entity_value_clause(self, kind: str, raw: str, position: int) -> tuple[str, list[object]]:
+        """Predicate over ``search_entity_value`` for one typed value (never echoes it)."""
+        label = KIND_LABELS[kind]
+        text = raw.strip()
+        lowered = fold(text)
+        if lowered in {"*", "any", "있음"}:
+            return "kind = ?", [kind]
+        if lowered in {"verified", "검증"}:
+            return "kind = ? AND verified = 1", [kind]
+        if lowered in {"candidate", "후보"}:
+            return "kind = ? AND verified = 0", [kind]
+        if kind == "ip" and "/" in text:
+            try:
+                network = ipaddress.ip_network(text, strict=False)
+            except ValueError as exc:
+                raise QueryError("ip: CIDR 범위를 읽을 수 없습니다(예: 10.0.0.0/8)", position) from exc
+            low, high = ip_net_range(network)
+            return "kind = 'ip' AND net != '' AND net BETWEEN ? AND ?", [low, high]
+        if kind == "email" and lowered.lstrip("*").startswith("@"):
+            domain = lowered.lstrip("*")
+            return "kind = 'email' AND masked LIKE ? ESCAPE '\\'", [f"%{like_escape(domain)}"]
+        if kind == "host" and "*" not in text and "?" not in text:
+            host = parse_entity_value("host", text)
+            if host is None:
+                raise QueryError("host: 호스트 이름을 읽을 수 없습니다(예: example.com)", position)
+            return "kind = 'host' AND (masked = ? OR masked LIKE ? ESCAPE '\\')", [host, f"%.{like_escape(host)}"]
+        if kind == "card" and text.isdigit() and len(text) == 4:
+            return "kind = 'card' AND masked = ?", [f"**** **** **** {text}"]
+        if kind == "rrn" and text.isdigit() and len(text) == 6:
+            return "kind = 'rrn' AND masked GLOB ?", [f"{text}-*"]
+        if "*" in text or "?" in text:
+            return "kind = ? AND masked GLOB ?", [kind, glob_escape(lowered if kind in {"email", "host"} else text)]
+        normalized = parse_entity_value(kind, text)
+        if normalized is None:
+            raise QueryError(
+                f"{label}({kind}:) 값으로 읽을 수 없습니다. *·verified·candidate·전체 값·마스크 접두(예: {kind}:*)를 쓰세요", position
+            )
+        return "value_sha256 = ?", [entity_sha256(kind, normalized)]
+
+    def entity_field(self, kind: str, term: Term, value: Value, negated: bool, top: bool) -> tuple[str, list[object]]:
+        self._entities_ready(term)
+        clauses: list[str] = []
+        params: list[object] = []
+        for item in _items(value):
+            if item.kind not in {"token", "phrase"}:
+                raise QueryError(f"{term.field}: 값은 하나의 값 또는 목록이어야 합니다", item.pos or term.pos)
+            clause, clause_params = self.entity_value_clause(kind, item.text, item.pos or term.pos)
+            clauses.append(f"({clause})")
+            params.extend(clause_params)
+        where = " OR ".join(clauses)
+        if self.mode == "set" and top and not negated:
+            # The postings drive the first page (a rare kind never scans the whole index).
+            self.ctx.drivers.append(
+                Driver(
+                    term.field,
+                    ids_sql=f"SELECT e.doc_id FROM search_entity e WHERE e.value_id IN (SELECT value_id FROM search_entity_value WHERE {where})",
+                    ids_params=list(params),
+                )
+            )
+        return self.entity_values(where, params)
+
+    def field_lang(self, term: Term, value: Value, negated: bool) -> tuple[str, list[object]]:
+        self._entities_ready(term)
+        codes: list[str] = []
+        for item in _items(value):
+            code = LANGUAGES.get(fold(_scalar(item, "lang")))
+            if code is None:
+                raise QueryError("lang: 값은 ko·ja·zh·en·ru·mixed(한국어·일본어·중국어·영어·러시아어·혼합) 중 하나여야 합니다", item.pos or term.pos)
+            codes.append(code)
+        marks = ", ".join("?" for _ in codes)
+        return self.group_in("f.doc_id", "search_field f", f"f.name = 'lang' AND f.value_fold IN ({marks})"), codes
+
+    def list_item_term(self, text: str, position: int) -> tuple[str, Term]:
+        """One list item as a term: regex, hash, IP/CIDR, e-mail, host, personal number or keyword."""
+        item = nfc(text.strip())
+        if len(item) > 2 and item.startswith("/") and item.endswith("/"):
+            return "regex", Term("re", Value("regex", text=item[1:-1], pos=position), position, item)
+        if normalize_hash(item) is not None:
+            return "hash", Term("hash", Value("token", text=item, pos=position), position, item)
+        if self.ctx.entities:
+            try:
+                ipaddress.ip_network(item, strict=False)
+                return "ip", Term("ip", Value("token", text=item, pos=position), position, item)
+            except ValueError:
+                pass
+            entity = whole_entity(item)
+            if entity is not None and entity.kind != "ip":
+                return entity.kind, Term(entity.kind, Value("token", text=item, pos=position), position, item)
+        return "keyword", Term("kw", Value("phrase", text=item, pos=position), position, item)
+
+    def field_list(self, term: Term, value: Value, negated: bool, top: bool) -> tuple[str, list[object]]:
+        parts: list[str] = []
+        params: list[object] = []
+        for item in _items(value):
+            list_id = _scalar(item, "list")
+            found = self.ctx.list_resolver(list_id) if self.ctx.list_resolver is not None else None
+            if found is None:
+                raise QueryError(f"검색 목록을 찾을 수 없습니다: {list_id}", item.pos or term.pos, status=404)
+            items = [text for text in found.items if str(text).strip()][:MAX_LIST_TERMS]
+            if not items:
+                raise QueryError(f"검색 목록이 비어 있습니다: {list_id}", item.pos or term.pos)
+            omitted = max(0, len(found.items) - len(items))
+            if omitted:
+                self.ctx.warn(f"검색 목록 {found.name}의 항목이 {MAX_LIST_TERMS}개를 넘어 처음 {MAX_LIST_TERMS}개만 찾습니다")
+            record = ListCount(found.id, found.name, omitted=omitted) if self.mode == "set" and not negated else None
+            item_parts: list[str] = []
+            for text in items:
+                item_type, sub_term = self.list_item_term(str(text), item.pos or term.pos)
+                sql, sql_params = self.term(sub_term, negated, False)
+                item_parts.append(f"({sql})")
+                params.extend(sql_params)
+                if record is not None:
+                    record.items.append(ListItemCount(mask_sensitive(str(text).strip()), item_type, sql, list(sql_params)))
+            if record is not None:
+                self.ctx.list_counts.append(record)
+            parts.append(" OR ".join(item_parts))
+        return " OR ".join(f"({part})" for part in parts), params
 
     def _path_pattern(self, raw: str) -> str:
         text = path_key(nfc(raw))
@@ -960,7 +1346,7 @@ class Compiler:
         if self.ctx._marks is None:
             marks = self.ctx.review_provider() if self.ctx.review_provider is not None else None
             if marks is None:
-                self.ctx.warn("케이스 DB가 없어 리뷰 조건과 일치하는 행이 없습니다")
+                self.ctx.warn("케이스 DB가 없어 검토 조건과 일치하는 행이 없습니다")
                 marks = []
             self.ctx._marks = [mark for mark in marks if mark.get("locator")]
         return self.ctx._marks
@@ -974,7 +1360,13 @@ class Compiler:
             f"INSERT OR IGNORE INTO temp.{name} VALUES (?, ?, ?)",
             [(str(mark.get("collection") or ""), str(mark.get("kind") or ""), str(mark.get("locator") or "")) for mark in self.marks() if predicate(mark)],
         )
-        return f"(d.collection, d.kind, d.locator) IN (SELECT collection, kind, locator FROM temp.{name})"
+        # An archive entry (``<locator>#entry:<n>``) carries the mark of its archive record.
+        return (
+            f"((d.collection, d.kind, d.locator) IN (SELECT collection, kind, locator FROM temp.{name}) OR "
+            f"(d.artifact_type = 'archive-entry' AND instr(d.locator, '{ENTRY_MARK}') > 0 AND "
+            f"(d.collection, d.kind, substr(d.locator, 1, instr(d.locator, '{ENTRY_MARK}') - 1)) IN "
+            f"(SELECT collection, kind, locator FROM temp.{name})))"
+        )
 
     def field_review(self, term: Term, value: Value, negated: bool) -> tuple[str, list[object]]:
         statuses = {fold(_scalar(item, "review")) for item in _items(value)}
@@ -1012,13 +1404,34 @@ def query_hash(q: str, options: SearchOptions, collapse: bool, build_id: str) ->
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
-def encode_cursor(qhash: str, sort: str, effective: str, key: object, row_id: int, direction: str) -> str:
-    payload = json.dumps(
-        {"v": CURSOR_VERSION, "qhash": qhash, "sort": sort, "es": effective, "last": [key, row_id], "dir": direction},
-        separators=(",", ":"),
-        ensure_ascii=False,
-    )
+def encode_cursor(qhash: str, sort: str, effective: str, key: object, row_id: int, direction: str, *, position: int | None = None) -> str:
+    """``position``: the 0-based result position of the first row of the page the cursor opens
+    (the server numbers console hits from it; R7 S2 review #11)."""
+    body: dict[str, object] = {"v": CURSOR_VERSION, "qhash": qhash, "sort": sort, "es": effective, "last": [key, row_id], "dir": direction}
+    if position is not None:
+        body["pos"] = max(0, int(position))
+    payload = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
     return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def cursor_position(cursor: str | None) -> int | None:
+    """The ``pos`` a (validated) cursor carries, or ``None`` (first page: 0; an older cursor: unknown).
+
+    A position past :data:`MAX_POSITION` is not a cursor this server made: 400.
+    """
+    if not cursor:
+        return None
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except (ValueError, UnicodeError):
+        return None
+    position = payload.get("pos") if isinstance(payload, dict) else None
+    if position is None:
+        return None
+    if not isinstance(position, int) or isinstance(position, bool) or not 0 <= position <= MAX_POSITION:
+        raise QueryError("커서가 이 질의에 맞지 않습니다")
+    return position
 
 
 def _sql_int(value: object) -> bool:
@@ -1125,6 +1538,11 @@ class SearchIndex:
     def build_id(self) -> str:
         return str(self.meta.get("build_id") or "")
 
+    @property
+    def entities(self) -> bool:
+        """Index v5: entity tables, masked text, ``lang`` fields and ``search_doc.entity_mask``."""
+        return self.meta.get("entities") == ENTITY_RULE
+
     def tz(self, override: str | None) -> dt.timedelta:
         if override:
             offset = parse_offset(override)
@@ -1147,11 +1565,18 @@ class SearchIndex:
         review_provider: ReviewProvider | None,
         hashset_resolver: HashsetResolver | None,
         row_mode: bool,
+        category_resolver: HashsetCategoryResolver | None = None,
+        list_resolver: ListResolver | None = None,
     ) -> Prepared:
         tz = self.tz(options.tz)
         ctx = CompileContext(
             connection=self.connection,
             tokenizer=self.tokenizer,
+            bigram=self.meta.get("bigram") == BIGRAM_RULE,
+            folded=self.meta.get("fold") == FOLD_RULE,
+            entities=self.entities,
+            category_resolver=category_resolver,
+            list_resolver=list_resolver,
             tz=tz,
             ref_ms=self.reference_ms(options.reference_ts, tz),
             options=options,
@@ -1162,21 +1587,14 @@ class SearchIndex:
         compiler = Compiler(ctx)
         assert parsed.root is not None
         where, params = compiler.compile(parsed.root)
-        hidden: list[str] = []
-        for hashset_id in options.hide_hashsets[:MAX_LIST_ITEMS]:
-            sql = compiler.hashset_clause(str(hashset_id), 0, missing_ok=True)
-            if sql is not None:
-                hidden.append(sql)
-        for sql in hidden:
+        for sql in compiler.hidden_hashset_clauses(options.hide_hashsets):
             where = f"({where}) AND NOT ({sql})"
         prepared = Prepared(where=where, params=params, ctx=ctx)
         if row_mode and not ctx.regex_jobs:
             row_compiler = Compiler(ctx, mode="row")
             row_where, row_params = row_compiler.compile(parsed.root)
-            for hashset_id in options.hide_hashsets[:MAX_LIST_ITEMS]:
-                if hashset_id in ctx.attached:
-                    sql = row_compiler.hashset_clause(str(hashset_id), 0, missing_ok=True)
-                    row_where = f"({row_where}) AND NOT ({sql})"
+            for sql in row_compiler.hidden_hashset_clauses(options.hide_hashsets):
+                row_where = f"({row_where}) AND NOT ({sql})"
             prepared.row_where, prepared.row_params = row_where, row_params
         return prepared
 
@@ -1188,7 +1606,9 @@ class SearchIndex:
             spans = prepared.regex_spans.setdefault(job.table, {})
             if job.literal and self.tokenizer == TOKENIZER_TRIGRAM and "%" not in job.literal and "_" not in job.literal:
                 sql = "SELECT d.doc_id, d.text FROM search_doc d WHERE d.doc_id IN (SELECT rowid FROM search_text WHERE text LIKE ?) ORDER BY d.doc_id"
-                params: list[object] = [f"%{job.literal}%"]
+                # A v4 index's full-text content is folded: the (prefilter) literal is folded too.
+                literal = fold(job.literal) if prepared.ctx.folded else job.literal
+                params: list[object] = [f"%{literal}%"]
             elif job.literal:
                 sql = "SELECT doc_id, text FROM search_doc WHERE text IS NOT NULL AND instr(lower(text), ?) > 0 ORDER BY doc_id"
                 params = [ascii_lower(job.literal)]
@@ -1234,14 +1654,15 @@ class SearchIndex:
         connection.execute(f"DROP TABLE IF EXISTS temp.{table}")
         connection.execute(
             f"CREATE TEMP TABLE {table} (doc_id INTEGER PRIMARY KEY, group_id INTEGER, ts INTEGER, domain TEXT, "
-            "collection TEXT, artifact_type TEXT, ts_kind TEXT, actor TEXT, computer TEXT, first INTEGER)"
+            "collection TEXT, artifact_type TEXT, ts_kind TEXT, actor TEXT, computer TEXT, first INTEGER, entity_mask INTEGER)"
         )
+        mask = "d.entity_mask" if self.entities else "0"
         try:
             # ``first``: the group's representative row in this result (the primary row when it matched).
             connection.execute(
-                f"INSERT INTO temp.{table} (doc_id, group_id, ts, domain, collection, artifact_type, ts_kind, actor, computer, first) "
-                "SELECT d.doc_id, d.group_id, d.ts, d.domain, d.collection, d.artifact_type, d.ts_kind, d.actor, d.computer, d.doc_id = d.group_id "
-                f"FROM search_doc d WHERE {where} LIMIT ?",
+                f"INSERT INTO temp.{table} (doc_id, group_id, ts, domain, collection, artifact_type, ts_kind, actor, computer, first, entity_mask) "
+                "SELECT d.doc_id, d.group_id, d.ts, d.domain, d.collection, d.artifact_type, d.ts_kind, d.actor, d.computer, d.doc_id = d.group_id, "
+                f"{mask} FROM search_doc d WHERE {where} LIMIT ?",
                 [*params, TOTAL_CAP + 1],
             )
             count = int(connection.execute(f"SELECT COUNT(*) FROM temp.{table}").fetchone()[0])
@@ -1398,7 +1819,13 @@ def driver_page(
     selective rest): the caller falls back to the set-mode plan.
     """
     forward = direction == "next"
-    pattern = f"%{driver.literal}%"
+    source_params: list[object]
+    if driver.ids_sql:
+        source, source_params = f"(SELECT DISTINCT doc_id AS rowid FROM ({driver.ids_sql})) WHERE 1", list(driver.ids_params)
+    elif driver.bigram:
+        source, source_params = "search_bigram WHERE search_bigram MATCH ?", [bigram_match(driver.literal)]
+    else:
+        source, source_params = "search_text WHERE text LIKE ?", [f"%{driver.literal}%"]
     after_doc: int | None = None
     bound: int | None = None
     if after is not None:
@@ -1412,10 +1839,10 @@ def driver_page(
     entries: list[tuple[int, int, object]] = []
     for _round in range(DRIVER_MAX_CHUNKS):
         if forward:
-            sql = "SELECT rowid FROM search_text WHERE text LIKE ?" + (" AND rowid > ?" if bound is not None else "") + " ORDER BY rowid LIMIT ?"
+            sql = f"SELECT rowid FROM {source}" + (" AND rowid > ?" if bound is not None else "") + " ORDER BY rowid LIMIT ?"
         else:
-            sql = "SELECT rowid FROM search_text WHERE text LIKE ?" + (" AND rowid < ?" if bound is not None else "") + " ORDER BY rowid DESC LIMIT ?"
-        ids = [int(row[0]) for row in connection.execute(sql, [pattern, *([bound] if bound is not None else []), DRIVER_CHUNK])]
+            sql = f"SELECT rowid FROM {source}" + (" AND rowid < ?" if bound is not None else "") + " ORDER BY rowid DESC LIMIT ?"
+        ids = [int(row[0]) for row in connection.execute(sql, [*source_params, *([bound] if bound is not None else []), DRIVER_CHUNK])]
         if not ids:
             return (entries if forward else list(reversed(entries))), False
         bound = ids[-1]
@@ -1463,6 +1890,12 @@ def build_snippet(
         if found is not None:
             matched.append({"term": literal, "field": field_name})
             spans.append((found.start(), found.end()))
+        elif field_name != "word":
+            # Full case folding (``straße`` ~ ``STRASSE``) that ``re.IGNORECASE`` does not do.
+            located = locate_normalized(text, literal)
+            if located is not None and located[0] == text:
+                matched.append({"term": literal, "field": field_name})
+                spans.append((located[1], located[2]))
     for matcher, span in regexes:
         if span is not None and span[1] > span[0]:
             matched.append({"term": matcher.pattern, "field": "re"})
@@ -1479,11 +1912,16 @@ def build_snippet(
     if highlight:
         for field_name, literal in terms:
             pattern = _word_regex(literal) if field_name == "word" else _literal_regex(literal)
+            before = len(marks)
             for found in pattern.finditer(window):
                 if found.end() > found.start():
                     marks.append([found.start(), found.end()])
                 if len(marks) >= MAX_MARKS:
                     break
+            if len(marks) == before and field_name != "word":
+                located = locate_normalized(window, literal)
+                if located is not None and located[0] == window and located[2] > located[1]:
+                    marks.append([located[1], located[2]])
         for matcher, _span in regexes:
             if len(marks) >= MAX_MARKS:
                 break
@@ -1534,8 +1972,12 @@ def build_aggregates(
     gap_seconds: int | None,
     warnings: list[str],
     exact: bool,
+    entities: bool = False,
 ) -> tuple[dict[str, object] | None, dict[str, object] | None]:
     """Facets (one GROUP BY) and histogram (one GROUP BY) from ``temp.m`` -- never the live predicate.
+
+    Index v5 adds ``entities`` (rows/groups per entity kind, from ``entity_mask``) and ``lang``
+    (document/mail languages; skipped above ``LANG_FACET_MAX_ROWS`` result rows).
 
     With ``collapse`` every count is of distinct groups: group-invariant facets count the
     groups' ``first`` rows; ``ts_kind``, histogram buckets and the after-hours count subtract
@@ -1622,6 +2064,8 @@ def build_aggregates(
         facet_payload["ts_kind"] = [{"key": key, "count": count} for key, count in ordered_kinds]
         order = ["exact", "domain", "collection", "artifact_type", "ts_kind", "actor", "computer"]
         facet_payload = {key: facet_payload[key] for key in order}
+        if entities:
+            facet_payload.update(entity_facets(connection, collapse=collapse))
     histogram: dict[str, object] | None = None
     if histogram_spec is not None:
         start, step, high, low, seconds = histogram_spec
@@ -1646,6 +2090,28 @@ def build_aggregates(
     return facet_payload, histogram
 
 
+def entity_facets(connection: sqlite3.Connection, *, collapse: bool) -> dict[str, object]:
+    """``entities`` / ``lang`` facets of ``temp.m`` (index v5)."""
+    weight = "first" if collapse else "1"
+    sums = ", ".join(f"COALESCE(SUM(CASE WHEN entity_mask & {KIND_BITS[kind]} THEN {weight} ELSE 0 END), 0)" for kind in KINDS)
+    row = connection.execute(f"SELECT {sums}, COUNT(*) FROM temp.m").fetchone()
+    entity_items = sorted(
+        ({"key": kind, "label": KIND_LABELS[kind], "count": int(row[index])} for index, kind in enumerate(KINDS) if int(row[index]) > 0),
+        key=lambda item: (-int(item["count"]), str(item["key"])),
+    )
+    payload: dict[str, object] = {"entities": entity_items, "lang": []}
+    if int(row[len(KINDS)]) <= LANG_FACET_MAX_ROWS:
+        where = "WHERE m.first = 1" if collapse else ""
+        languages = connection.execute(
+            f"SELECT f.value_fold, COUNT(*) FROM temp.m m JOIN search_field f ON f.doc_id = m.group_id AND f.name = 'lang' {where} GROUP BY 1"
+        ).fetchall()
+        payload["lang"] = sorted(
+            ({"key": str(key), "label": LANGUAGE_LABELS.get(str(key), str(key)), "count": int(count)} for key, count in languages),
+            key=lambda item: (-int(item["count"]), str(item["key"])),
+        )
+    return payload
+
+
 def find_gaps(connection: sqlite3.Connection, gap_seconds: int, tz: dt.timedelta) -> list[dict[str, object]]:
     """Silent stretches of at least ``gap_seconds`` between consecutive times of ``temp.m`` (SQL window)."""
     rows = connection.execute(
@@ -1667,6 +2133,7 @@ def _row_payload(
     regexes: list[tuple[GuardedRegex, tuple[int, int] | None]],
     highlight: bool,
     ts_kinds: list[str] | None,
+    entities: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     text = str(row["ptext"] or "")
     snippet, matched = build_snippet(text, terms, regexes, highlight=highlight)
@@ -1676,6 +2143,8 @@ def _row_payload(
         fields = {}
     fields = dict(list(fields.items())[:20]) if isinstance(fields, dict) else {}
     ts = row["ts"]
+    # v4: the record's own time ("" = the record has none); ``None`` before v4 (not indexed).
+    record_ts = str(row["pts_text"] or "") if "pts_text" in row.keys() else None
     return {
         "doc_id": int(row["doc_id"]),
         "group_id": int(row["group_id"]),
@@ -1692,6 +2161,8 @@ def _row_payload(
         "ts": ms_to_iso(ts, dt.timedelta(0)) if ts is not None else None,
         "ts_local": ms_to_iso(ts, tz) if ts is not None else None,
         "ts_kind": row["ts_kind"] or None,
+        # The record's own time as its source spells it (v4; what a v1 hit shows as ``timestamp``).
+        "record_ts": record_ts,
         "ts_kinds": ts_kinds if ts_kinds is not None else ([row["ts_kind"]] if row["ts_kind"] else []),
         "actor": row["actor"],
         "computer": row["computer"],
@@ -1702,17 +2173,63 @@ def _row_payload(
         "matched": matched,
         "fields": fields,
         "review": None,
-        "pii": None,
-        "masked_preview": [],
+        **_pii_payload(entities),
     }
+
+
+def _pii_payload(entities: list[dict[str, object]] | None) -> dict[str, object]:
+    """``pii`` (personal values per kind), ``masked_preview`` and ``entities`` of a row (index v5;
+    masks and SHA-256 only)."""
+    if entities is None:
+        return {"pii": None, "masked_preview": [], "entities": None}
+    counts = Counter(str(item["kind"]) for item in entities if item["kind"] in SENSITIVE_KINDS)
+    preview = [str(item["masked"]) for item in entities if item["kind"] in SENSITIVE_KINDS][:MASKED_PREVIEW_MAX]
+    return {"pii": dict(sorted(counts.items())) or None, "masked_preview": preview, "entities": entities}
+
+
+def fetch_entities(connection: sqlite3.Connection, group_ids: Sequence[int]) -> dict[int, list[dict[str, object]]]:
+    """The entity values (mask, SHA-256, kind, verified, source) of these primary rows."""
+    found: dict[int, list[dict[str, object]]] = {}
+    ids = sorted({int(item) for item in group_ids})
+    for start in range(0, len(ids), 500):
+        chunk = ids[start : start + 500]
+        marks = ", ".join("?" for _ in chunk)
+        for doc_id, kind, masked, sha, verified, source in connection.execute(
+            "SELECT e.doc_id, v.kind, v.masked, v.value_sha256, v.verified, e.source FROM search_entity e "
+            f"JOIN search_entity_value v ON v.value_id = e.value_id WHERE e.doc_id IN ({marks}) ORDER BY e.doc_id, v.masked",
+            chunk,
+        ):
+            bucket = found.setdefault(int(doc_id), [])
+            bucket.append(
+                    {
+                        "kind": str(kind),
+                        "label": KIND_LABELS.get(str(kind), str(kind)),
+                        "masked": str(masked),
+                        "value_sha256": bytes(sha).hex(),
+                        "verified": bool(verified),
+                        "source": str(source),
+                    }
+                )
+    # Personal numbers first (rrn, corpno, card, …: ``KINDS`` order), then network identifiers.
+    order = {kind: position for position, kind in enumerate(KINDS)}
+    return {
+        doc_id: sorted(items, key=lambda item: (order.get(str(item["kind"]), len(order)), str(item["masked"])))[:ROW_ENTITY_MAX]
+        for doc_id, items in found.items()
+    }
+
+
+def _has_ts_text(connection: sqlite3.Connection) -> bool:
+    """Index v4 rows carry ``ts_text`` (v2/v3 indexes stay readable without it)."""
+    return any(row[1] == "ts_text" for row in connection.execute("PRAGMA table_info(search_doc)"))
 
 
 def fetch_rows(connection: sqlite3.Connection, doc_ids: list[int]) -> dict[int, sqlite3.Row]:
     if not doc_ids:
         return {}
     marks = ", ".join("?" for _ in doc_ids)
+    record_ts = ", p.ts_text AS pts_text" if _has_ts_text(connection) else ""
     rows = connection.execute(
-        "SELECT d.*, p.text AS ptext, p.fields_json AS pfields FROM search_doc d JOIN search_doc p ON p.doc_id = d.group_id "
+        f"SELECT d.*, p.text AS ptext, p.fields_json AS pfields{record_ts} FROM search_doc d JOIN search_doc p ON p.doc_id = d.group_id "
         f"WHERE d.doc_id IN ({marks})",
         doc_ids,
     ).fetchall()
@@ -1720,7 +2237,7 @@ def fetch_rows(connection: sqlite3.Connection, doc_ids: list[int]) -> dict[int, 
 
 
 def _check_index(meta: Mapping[str, object]) -> None:
-    if meta.get("index_version") != INDEX_VERSION:
+    if meta.get("index_version") not in READABLE_INDEX_VERSIONS:
         raise QueryError("검색 색인 형식이 오래되었습니다. 처리 단계에서 색인을 다시 만드세요", status=409)
 
 
@@ -1739,16 +2256,26 @@ def _sql_error(exc: Exception) -> QueryError:
     return QueryError(f"검색을 실행할 수 없습니다: {text}")
 
 
-def truncated_warning(meta: Mapping[str, object], domains: Iterable[str]) -> str | None:
-    """Matched domains (all domains when nothing matched) that hold rows cut at an index cap."""
+# Search sources a truncated-rows warning names (collection -> Korean label).
+SOURCE_LABELS = {"docs": "문서", "files": "파일", "artifacts": "아티팩트", "indicators": "지표", "analysis": "분석 결과"}
+
+
+def truncated_warning(meta: Mapping[str, object], collections: Iterable[str], domains: Iterable[str] = ()) -> str | None:
+    """The matched sources (all when nothing matched) that hold rows cut at an index cap, with the
+    number of cut rows per source (``문서 8건, 아티팩트 45건``); indexes before v4 name domains."""
     summary = meta.get("summary") if isinstance(meta.get("summary"), Mapping) else {}
-    by_domain = summary.get("truncated_by_domain") if isinstance(summary.get("truncated_by_domain"), Mapping) else {}
-    wanted = set(domains) or set(by_domain)
-    hits = {str(name): int(count) for name, count in by_domain.items() if name in wanted and isinstance(count, int) and count > 0}
+    by_collection = summary.get("truncated_by_collection")
+    if isinstance(by_collection, Mapping):
+        counts, wanted, labels = by_collection, set(collections), SOURCE_LABELS
+    else:
+        by_domain = summary.get("truncated_by_domain")
+        counts, wanted, labels = (by_domain if isinstance(by_domain, Mapping) else {}), set(domains), {}
+    wanted = wanted or {str(name) for name in counts}
+    hits = {str(name): int(count) for name, count in counts.items() if name in wanted and isinstance(count, int) and count > 0}
     if not hits:
         return None
-    detail = ", ".join(f"{name} {count:,}건" for name, count in sorted(hits.items(), key=lambda item: -item[1])[:6])
-    return f"색인 상한에서 본문 일부가 잘린 행이 있어 그 부분은 검색되지 않습니다({detail})"
+    detail = ", ".join(f"{labels.get(name, name)} {count:,}건" for name, count in sorted(hits.items(), key=lambda item: (-item[1], item[0]))[:6])
+    return f"색인 상한에서 본문 일부가 잘린 행이 있어 잘린 뒷부분은 검색되지 않습니다(본문이 잘린 행: {detail})"
 
 
 def run_query(
@@ -1761,6 +2288,8 @@ def run_query(
     review_lookup: Callable[[list[dict[str, object]]], None] | None = None,
     hashset_resolver: HashsetResolver | None = None,
     stale: bool = False,
+    category_resolver: HashsetCategoryResolver | None = None,
+    list_resolver: ListResolver | None = None,
 ) -> dict[str, object]:
     """Execute one ``search/query`` request (plan §3.2 response shape). Raises :class:`QueryError` for 4xx."""
     parsed = parse_query(request.q)
@@ -1773,7 +2302,10 @@ def run_query(
     sort = "ts" if request.view == "timeline" and request.sort == "relevance" else request.sort
     try:
         with SearchIndex(index_path, meta, budget=budget) as index:
-            return _run_query(index, parsed, request, sort, limit, budget, review_provider, review_lookup, hashset_resolver, stale)
+            return _run_query(
+                index, parsed, request, sort, limit, budget, review_provider, review_lookup, hashset_resolver, stale,
+                category_resolver=category_resolver, list_resolver=list_resolver,
+            )
     except (sqlite3.OperationalError, sqlite3.IntegrityError, OverflowError) as exc:
         raise _sql_error(exc) from exc
     except sqlite3.DatabaseError as exc:
@@ -1791,18 +2323,26 @@ def _run_query(
     review_lookup: Callable[[list[dict[str, object]]], None] | None,
     hashset_resolver: HashsetResolver | None,
     stale: bool,
+    *,
+    category_resolver: HashsetCategoryResolver | None = None,
+    list_resolver: ListResolver | None = None,
 ) -> dict[str, object]:
     meta = index.meta
     qhash = query_hash(request.q, request.options, request.collapse, index.build_id)
     after: tuple[object, int] | None = None
     direction = "next"
     cursor_sort: str | None = None
+    # 0-based position of this page's first row: 0 on the first page, from the cursor after it
+    # (``None``: a cursor of an older server; the caller falls back to its own count).
+    position: int | None = 0
     if request.cursor:
         key, row_id, direction, cursor_sort = decode_cursor(request.cursor, qhash, sort)
         after = (key, row_id)
+        position = cursor_position(request.cursor)
     wants_full = request.aggregates or sort != "relevance" or (cursor_sort is not None and cursor_sort != "relevance")
     prepared = index.prepare(
-        parsed, request.options, review_provider=review_provider, hashset_resolver=hashset_resolver, row_mode=not wants_full
+        parsed, request.options, review_provider=review_provider, hashset_resolver=hashset_resolver, row_mode=not wants_full,
+        category_resolver=category_resolver, list_resolver=list_resolver,
     )
     ctx = prepared.ctx
     warnings = ctx.warnings
@@ -1888,20 +2428,23 @@ def _run_query(
                 truncated_reason = truncated_reason or index.budget.reason
     rows_payload = _page_payload(index, prepared, request, page_rows, review_lookup, materialized=materialized)
     next_cursor = previous_cursor = None
+    next_position = position + len(page_rows) if position is not None else None
+    previous_position = max(0, position - limit) if position is not None else None
     if page_rows:
         first, last = page_rows[0], page_rows[-1]
         if direction == "next":
             if more:
-                next_cursor = encode_cursor(qhash, sort, effective, last[2], last[0], "next")
+                next_cursor = encode_cursor(qhash, sort, effective, last[2], last[0], "next", position=next_position)
             if after is not None:
-                previous_cursor = encode_cursor(qhash, sort, effective, first[2], first[0], "prev")
+                previous_cursor = encode_cursor(qhash, sort, effective, first[2], first[0], "prev", position=previous_position)
         else:
-            next_cursor = encode_cursor(qhash, sort, effective, last[2], last[0], "next")
+            next_cursor = encode_cursor(qhash, sort, effective, last[2], last[0], "next", position=next_position)
             if more:
-                previous_cursor = encode_cursor(qhash, sort, effective, first[2], first[0], "prev")
+                previous_cursor = encode_cursor(qhash, sort, effective, first[2], first[0], "prev", position=previous_position)
     facets: dict[str, object] | None = None
     histogram: dict[str, object] | None = None
     matched_domains: set[str] = {str(row.get("domain") or "") for row in rows_payload}
+    matched_collections: set[str] = {str(row.get("collection") or "") for row in rows_payload}
     if materialized and request.aggregates:
         try:
             facets, histogram = build_aggregates(
@@ -1914,9 +2457,11 @@ def _run_query(
                 gap_seconds=ctx.gap_seconds,
                 warnings=warnings,
                 exact=complete,
+                entities=ctx.entities,
             )
             if facets is not None:
                 matched_domains |= {str(item["key"]) for item in facets["domain"]}  # type: ignore[index, union-attr]
+                matched_collections |= {str(item["key"]) for item in facets["collection"]}  # type: ignore[index, union-attr]
         except sqlite3.OperationalError:
             if not index.budget.expired():
                 raise
@@ -1924,17 +2469,24 @@ def _run_query(
             truncated_reason = truncated_reason or index.budget.reason
     if request.aggregates and request.facets and facets is None:
         facets = {"exact": False, **EMPTY_FACETS}
+    lists = None
+    if ctx.list_counts:
+        lists = list_item_counts(index, ctx.list_counts, materialized=materialized and not capped, collapse=request.collapse)
     if capped:
         warnings.append(f"결과가 {TOTAL_CAP:,}건을 넘어 건수·집계는 처음 {TOTAL_CAP:,}건 기준입니다")
     if ctx.text_terms or ctx.regex_jobs:
-        message = truncated_warning(meta, {domain for domain in matched_domains if domain})
+        message = truncated_warning(
+            meta, {name for name in matched_collections if name}, {domain for domain in matched_domains if domain}
+        )
         if message:
             warnings.append(message)
     return {
-        "query": {"raw": request.q, "parsed": {"clauses": parsed.clauses(), "warnings": warnings}},
+        "query": {"raw": mask_sensitive(request.q), "parsed": {"clauses": masked_clauses(parsed.clauses()), "warnings": warnings}},
         "rows": rows_payload,
         "page": {
             "cursor": request.cursor,
+            # 0-based result position of this page's first row (``None``: an older cursor).
+            "position": position,
             "next_cursor": next_cursor,
             "previous_cursor": previous_cursor,
             "returned": len(rows_payload),
@@ -1948,12 +2500,58 @@ def _run_query(
         },
         "facets": facets,
         "histogram": histogram,
-        "index": {"build_id": index.build_id, "built_at": meta.get("built_at"), "stale": stale, "tokenizer": index.tokenizer, "index_tokenizer": index.tokenizer},
+        "lists": lists,
+        "index": {
+            "build_id": index.build_id,
+            "built_at": meta.get("built_at"),
+            "stale": stale,
+            "tokenizer": index.tokenizer,
+            "index_tokenizer": index.tokenizer,
+            "entities": index.entities,
+        },
         "elapsed_ms": budget.elapsed_ms(),
         "truncated": truncated_reason is not None,
         "truncated_reason": truncated_reason,
         "uses_review": ctx.uses_review,
     }
+
+
+def masked_clauses(clauses: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Parsed clauses with every typed personal number masked (display and value)."""
+
+    def mask_value(value: object) -> object:
+        if isinstance(value, str):
+            return mask_sensitive(value)
+        if isinstance(value, list):
+            return [mask_value(item) for item in value]
+        if isinstance(value, dict):
+            return {key: mask_value(item) for key, item in value.items()}
+        return value
+
+    return [{**clause, "display": mask_sensitive(str(clause.get("display") or "")), "value": mask_value(clause.get("value"))} for clause in clauses]
+
+
+def list_item_counts(index: SearchIndex, records: list[ListCount], *, materialized: bool, collapse: bool) -> list[dict[str, object]]:
+    """``lists``: per-item result counts of each ``list:`` term (``count`` None when the result was
+    not aggregated or the budget ran out)."""
+    payload: list[dict[str, object]] = []
+    weight = "m.first = 1 AND " if collapse else ""
+    for record in records:
+        items: list[dict[str, object]] = []
+        for item in record.items:
+            count: int | None = None
+            if materialized and not index.budget.expired():
+                try:
+                    row = index.connection.execute(
+                        f"SELECT COUNT(*) FROM temp.m m JOIN search_doc d ON d.doc_id = m.doc_id WHERE {weight}({item.sql})", item.params
+                    ).fetchone()
+                    count = int(row[0])
+                except sqlite3.OperationalError:
+                    if not index.budget.expired():
+                        raise
+            items.append({"item": item.item, "type": item.type, "count": count})
+        payload.append({"id": record.id, "name": record.name, "items": items, "omitted": record.omitted})
+    return payload
 
 
 def _fast_page(
@@ -1969,7 +2567,8 @@ def _fast_page(
     connection = index.connection
     try:
         if prepared.ctx.drivers and prepared.row_where is not None:
-            driver = max(prepared.ctx.drivers, key=lambda item: len(item.literal))
+            # Entity postings first (a kind's rows are few), else the longest keyword.
+            driver = max(prepared.ctx.drivers, key=lambda item: (bool(item.ids_sql), len(item.literal)))
             return driver_page(
                 connection, driver, prepared.row_where, prepared.row_params, collapse=request.collapse, limit=limit,
                 after=anchor, direction=direction, budget=index.budget,
@@ -2012,6 +2611,7 @@ def _page_payload(
             if ts_kind not in bucket:
                 bucket.append(str(ts_kind))
     positive = [job for job in ctx.regex_jobs if job.positive]
+    entity_rows = fetch_entities(connection, [int(row["group_id"]) for row in details.values()]) if ctx.entities else None
     rows_payload: list[dict[str, object]] = []
     for rid, rep, _key in page_rows:
         row = details.get(rep)
@@ -2027,6 +2627,7 @@ def _page_payload(
                 regexes=regexes,
                 highlight=request.highlight,
                 ts_kinds=kinds.get(rid) if request.collapse else None,
+                entities=entity_rows.get(group_id, []) if entity_rows is not None else None,
             )
         )
     if review_lookup is not None:
@@ -2044,6 +2645,8 @@ def run_count(
     budget: Budget,
     review_provider: ReviewProvider | None = None,
     hashset_resolver: HashsetResolver | None = None,
+    category_resolver: HashsetCategoryResolver | None = None,
+    list_resolver: ListResolver | None = None,
 ) -> dict[str, object]:
     """``search/count``: per-term totals (collapsed), domains and first/last time until the budget ends."""
     _check_index(meta)
@@ -2055,14 +2658,24 @@ def run_count(
             tz = index.tz(options.tz)
             for position in range(offset, len(terms)):
                 term = terms[position]
-                item: dict[str, object] = {"label": term.get("label"), "q": term.get("q"), "count": None, "by_domain": {}, "first_ts": None, "last_ts": None}
+                item: dict[str, object] = {
+                    "label": mask_sensitive(str(term.get("label") or "")),
+                    "q": mask_sensitive(str(term.get("q") or "")),
+                    "count": None,
+                    "by_domain": {},
+                    "first_ts": None,
+                    "last_ts": None,
+                }
                 if truncated or budget.expired():
                     truncated = True
                     items.append(item)
                     continue
                 try:
                     parsed = parse_query(str(term.get("q") or ""))
-                    prepared = index.prepare(parsed, options, review_provider=review_provider, hashset_resolver=hashset_resolver, row_mode=False)
+                    prepared = index.prepare(
+                        parsed, options, review_provider=review_provider, hashset_resolver=hashset_resolver, row_mode=False,
+                        category_resolver=category_resolver, list_resolver=list_resolver,
+                    )
                     index.run_regex_jobs(prepared)
                     _rows, capped = index.materialize(prepared.where, prepared.params)
                     total, first, last = index.connection.execute("SELECT COALESCE(SUM(first), 0), MIN(ts), MAX(ts) FROM temp.m").fetchone()
@@ -2129,3 +2742,146 @@ def run_hashes(
             matched.append({"hash": value, "algorithm": algorithm, "docs": docs, "doc_count": len(docs)})
         unique = int(connection.execute("SELECT COUNT(*) FROM temp.wanted").fetchone()[0])
     return {"matched": matched, "matched_count": len(matched), "unmatched_count": unique - len(matched), "elapsed_ms": budget.elapsed_ms()}
+
+
+# ---------------------------------------------------------------------------
+# entity summary (``POST …/search/entities``, R7 lane B)
+# ---------------------------------------------------------------------------
+
+
+def run_entity_summary(
+    index_path: Path,
+    meta: Mapping[str, object],
+    *,
+    q: str = "",
+    kind: str | None = None,
+    value_sha256: str | None = None,
+    limit: int = 50,
+    options: SearchOptions | None = None,
+    budget: Budget,
+    review_provider: ReviewProvider | None = None,
+    hashset_resolver: HashsetResolver | None = None,
+    category_resolver: HashsetCategoryResolver | None = None,
+    list_resolver: ListResolver | None = None,
+) -> dict[str, object]:
+    """Entity kinds (rows, distinct values, verified values), the most frequent masked values and
+    the document languages of the whole index or of the rows matching ``q``; with ``value_sha256``
+    also the first ``limit`` rows posting that value. Masks and SHA-256 only, never a value."""
+    _check_index(meta)
+    if meta.get("entities") != ENTITY_RULE:
+        raise QueryError(NO_ENTITY_INDEX.format(field="entities"), status=409)
+    if kind is not None and kind not in KINDS:
+        raise QueryError(f"개체 종류는 {', '.join(KINDS)} 중 하나여야 합니다")
+    wanted: bytes | None = None
+    if value_sha256 is not None:
+        try:
+            wanted = bytes.fromhex(value_sha256)
+        except ValueError as exc:
+            raise QueryError("value_sha256은 64자리 16진수여야 합니다") from exc
+        if len(wanted) != 32:
+            raise QueryError("value_sha256은 64자리 16진수여야 합니다")
+    limit = max(1, min(PAGE_MAX, int(limit)))
+    options = options or SearchOptions()
+    warnings: list[str] = []
+    truncated = False
+    try:
+        with SearchIndex(index_path, meta, budget=budget) as index:
+            connection = index.connection
+            scope = ""
+            if q.strip():
+                parsed = parse_query(q)
+                prepared = index.prepare(
+                    parsed, options, review_provider=review_provider, hashset_resolver=hashset_resolver, row_mode=False,
+                    category_resolver=category_resolver, list_resolver=list_resolver,
+                )
+                warnings.extend(prepared.ctx.warnings)
+                try:
+                    index.run_regex_jobs(prepared)
+                    _rows, capped = index.materialize(prepared.where, prepared.params)
+                except Interrupted:
+                    raise QueryError("시간 예산 안에 질의를 마치지 못했습니다. 질의를 좁히세요", status=408) from None
+                if capped:
+                    warnings.append(f"결과가 {TOTAL_CAP:,}건을 넘어 처음 {TOTAL_CAP:,}건 기준입니다")
+                connection.execute("CREATE TEMP TABLE scope_docs AS SELECT DISTINCT group_id AS doc_id FROM temp.m")
+                connection.execute("CREATE INDEX temp.scope_docs_id ON scope_docs(doc_id)")
+                scope = " AND e.doc_id IN (SELECT doc_id FROM temp.scope_docs)"
+            kind_filter = " AND v.kind = ?" if kind else ""
+            kind_params: list[object] = [kind] if kind else []
+            kinds = []
+            for row_kind, docs, values, verified in connection.execute(
+                "SELECT v.kind, COUNT(DISTINCT e.doc_id), COUNT(DISTINCT v.value_id), COUNT(DISTINCT CASE WHEN v.verified THEN v.value_id END) "
+                f"FROM search_entity e JOIN search_entity_value v ON v.value_id = e.value_id WHERE 1{scope}{kind_filter} GROUP BY v.kind",
+                kind_params,
+            ):
+                kinds.append({"kind": row_kind, "label": KIND_LABELS.get(str(row_kind), str(row_kind)), "rows": int(docs), "values": int(values), "verified_values": int(verified), "sensitive": row_kind in SENSITIVE_KINDS})
+            kinds.sort(key=lambda item: KINDS.index(str(item["kind"])) if item["kind"] in KINDS else len(KINDS))
+            budget.check()
+            values = [
+                {
+                    "kind": str(row_kind),
+                    "label": KIND_LABELS.get(str(row_kind), str(row_kind)),
+                    "masked": str(masked),
+                    "value_sha256": bytes(sha).hex(),
+                    "verified": bool(verified),
+                    "rows": int(docs),
+                }
+                for row_kind, masked, sha, verified, docs in connection.execute(
+                    "SELECT v.kind, v.masked, v.value_sha256, v.verified, COUNT(*) AS docs FROM search_entity e "
+                    f"JOIN search_entity_value v ON v.value_id = e.value_id WHERE 1{scope}{kind_filter} "
+                    "GROUP BY v.value_id ORDER BY docs DESC, v.kind, v.masked LIMIT ?",
+                    [*kind_params, ENTITY_SUMMARY_VALUES],
+                )
+            ]
+            budget.check()
+            lang_scope = " AND f.doc_id IN (SELECT doc_id FROM temp.scope_docs)" if scope else ""
+            languages = sorted(
+                (
+                    {"key": str(key), "label": LANGUAGE_LABELS.get(str(key), str(key)), "count": int(count)}
+                    for key, count in connection.execute(f"SELECT f.value_fold, COUNT(*) FROM search_field f WHERE f.name = 'lang'{lang_scope} GROUP BY 1")
+                ),
+                key=lambda item: (-int(item["count"]), str(item["key"])),
+            )
+            rows: list[dict[str, object]] | None = None
+            rows_total: int | None = None
+            if wanted is not None:
+                ids = [
+                    int(row[0])
+                    for row in connection.execute(
+                        "SELECT e.doc_id FROM search_entity e JOIN search_entity_value v ON v.value_id = e.value_id "
+                        f"WHERE v.value_sha256 = ?{scope} ORDER BY e.doc_id LIMIT ?",
+                        [wanted, limit + 1],
+                    )
+                ]
+                rows_total = len(ids) if len(ids) <= limit else None
+                ids = ids[:limit]
+                details = fetch_rows(connection, ids)
+                entity_rows = fetch_entities(connection, ids)
+                tz = index.tz(options.tz)
+                rows = [
+                    _row_payload(details[doc_id], tz=tz, terms=[], regexes=[], highlight=False, ts_kinds=None, entities=entity_rows.get(doc_id, []))
+                    for doc_id in ids
+                    if doc_id in details
+                ]
+            postings = int(connection.execute("SELECT COUNT(*) FROM search_entity").fetchone()[0])
+    except Interrupted:
+        truncated = True
+        raise QueryError("시간 예산 안에 개체 집계를 마치지 못했습니다. 질의를 좁히세요", status=408) from None
+    except (sqlite3.OperationalError, OverflowError) as exc:
+        if budget.expired():
+            raise QueryError("시간 예산 안에 개체 집계를 마치지 못했습니다. 질의를 좁히세요", status=408) from exc
+        raise _sql_error(exc) from exc
+    summary = meta.get("summary") if isinstance(meta.get("summary"), Mapping) else {}
+    entity_meta = summary.get("entities") if isinstance(summary.get("entities"), Mapping) else {}
+    return {
+        "query": {"raw": mask_sensitive(q), "warnings": warnings},
+        "kinds": kinds,
+        "values": values,
+        "languages": languages,
+        "rows": rows,
+        "rows_total": rows_total,
+        "postings": postings,
+        "capped": {key: value for key, value in (summary.get("skipped") or {}).items() if str(key).startswith("entity-")} if isinstance(summary.get("skipped"), Mapping) else {},
+        "rule": entity_meta.get("rule") or ENTITY_RULE,
+        "elapsed_ms": budget.elapsed_ms(),
+        "truncated": truncated,
+    }

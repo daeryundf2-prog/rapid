@@ -35,7 +35,9 @@ from pathlib import Path
 from ...core.case_db.helpers import normalize_path_for_db
 from ...core.case_db.review import load_review_target_match
 from ...core.json_stream import JsonStreamError, iter_array_items
+from ...core.readonly_runs import readonly_reason_for
 from ...core.run.persist import CASE_DB_FILE_NAME, legacy_run_case_ids, run_case_id
+from ...core.search_hits import base_locator
 
 ARTIFACT_LOCATOR_KEY = "source_locator"
 # Analysis-workbench result rows (plan P1 §3.3) are not imported into the case
@@ -47,6 +49,8 @@ INDICATOR_PARSER_NAME = "rapidtriage-indicators"
 # not in the report, unverified) is "cleared": the row stays in ``review_mark``
 # (``review_mark_history`` keeps the audit trail) but the review board and the
 # review tallies leave it out.
+# Order of the active marks a review map / report reads (the newest first; the cap keeps these).
+ACTIVE_MARK_ORDER_SQL = "ORDER BY updated_at DESC, id DESC"
 ACTIVE_MARK_SQL = (
     "NOT (status = 'unreviewed' AND include_in_report = 0 AND COALESCE(note, '') = '' "
     "AND COALESCE(tags_json, '[]') IN ('[]', '') "
@@ -65,6 +69,23 @@ SOURCE_ALIASES = {
     "indicators": "indicators",
     "artifacts": "artifacts",
 }
+
+
+def read_only_sqlite_uri(path: Path) -> str:
+    """``file:`` URI that reads ``path`` without writing next to it.
+
+    In a folder held read-only (``core.readonly_runs``: nothing writes there) with no or an empty
+    ``-wal``, ``mode=ro&immutable=1``: a plain ``mode=ro`` open of a WAL-mode case DB creates
+    ``-wal`` / ``-shm`` in the folder. Otherwise (a live DB, or committed rows still in the
+    ``-wal``) ``mode=ro``."""
+    wal = path.with_name(path.name + "-wal")
+    try:
+        pending = wal.stat().st_size > 0
+    except OSError:
+        pending = False
+    if pending or readonly_reason_for(path) is None:
+        return f"{path.as_uri()}?mode=ro"
+    return f"{path.as_uri()}?mode=ro&immutable=1"
 
 
 def canonical_run_case(summary: Mapping[str, object], run_id: str) -> tuple[Path, str]:
@@ -86,7 +107,7 @@ def canonical_run_case(summary: Mapping[str, object], run_id: str) -> tuple[Path
     older = legacy_run_case_ids(output_dir)
     wanted = (legacy, persisted, *older)
     try:
-        connection = sqlite3.connect(f"{database.as_uri()}?mode=ro", uri=True)
+        connection = sqlite3.connect(read_only_sqlite_uri(database), uri=True)
     except sqlite3.Error:
         return database, legacy
     try:
@@ -161,6 +182,7 @@ class RunLocatorIndex:
         self._docs_results: list[str] | None = None
         self._docs_candidates: list[str] | None = None
         self._file_candidate_count: int | None = None
+        self._last_artifact: tuple[int, ...] | None = None
 
     # -- helpers ------------------------------------------------------------
 
@@ -242,12 +264,15 @@ class RunLocatorIndex:
         """Bisect the contiguous per-kind artifact block; scan as a fallback."""
         target = (output_name, row_index)
         lo = self._first_id("artifact", " AND parser_name != ?", (INDICATOR_PARSER_NAME,))
-        last = self.connection.execute(
-            "SELECT id FROM artifact WHERE evidence_source_id = ? AND parser_name != ? ORDER BY id DESC LIMIT 1",
-            (self.evidence_source_id, INDICATOR_PARSER_NAME),
-        ).fetchone()
-        if lo is not None and last is not None:
-            hi = int(last[0])
+        if self._last_artifact is None:
+            last = self.connection.execute(
+                "SELECT id FROM artifact WHERE evidence_source_id = ? AND parser_name != ? ORDER BY id DESC LIMIT 1",
+                (self.evidence_source_id, INDICATOR_PARSER_NAME),
+            ).fetchone()
+            # Once per request (it walks back over the indicator rows): ``()`` when none.
+            self._last_artifact = (int(last[0]),) if last is not None else ()
+        if lo is not None and self._last_artifact:
+            hi = self._last_artifact[0]
             while lo <= hi:
                 mid = (lo + hi) // 2
                 key = self._artifact_key(mid)
@@ -352,12 +377,43 @@ class RunLocatorIndex:
                     return ("artifact", str(row_id)) if row_id is not None else None
             return None
         if collection == "artifacts":
-            row_index = _ordinal(locator, "/artifacts/")
+            # ``/artifacts/<n>#entry:<m>`` (a search-index archive entry): the archive record.
+            row_index = _ordinal(base_locator(locator), "/artifacts/")
             if row_index is None or not kind:
                 return None
             row_id = self._artifact_id(f"artifacts_{kind}", row_index)
             return ("artifact", str(row_id)) if row_id is not None else None
         return None
+
+    def artifact_summaries(self, keys: Iterable[tuple[str, str]]) -> dict[tuple[str, str], str]:
+        """``{(kind, locator): stored artifact summary}`` of ``/artifacts/<n>`` locators (one page
+        of search hits: R7 S2 confirmation #10). The import keeps each kind's rows contiguous, so
+        once a row of a kind is found the others are tried at the same id offset (verified)
+        before a bisect."""
+        found: dict[tuple[str, str], str] = {}
+        if self.evidence_source_id is None:
+            return found
+        offsets: dict[str, int] = {}
+        for kind, locator in keys:
+            row_index = _ordinal(base_locator(locator), "/artifacts/")
+            if row_index is None or not kind:
+                continue
+            output_name = f"artifacts_{kind}"
+            guess = offsets.get(output_name)
+            if guess is not None and self._artifact_key(guess + row_index) == (output_name, row_index):
+                row_id: int | None = guess + row_index
+            else:
+                row_id = self._artifact_id(output_name, row_index)
+                if row_id is not None:
+                    offsets[output_name] = row_id - row_index
+            if row_id is None:
+                continue
+            row = self.connection.execute(
+                "SELECT summary FROM artifact WHERE id = ? AND evidence_source_id = ?", (row_id, self.evidence_source_id)
+            ).fetchone()
+            if row is not None:
+                found[(kind, locator)] = str(row[0] or "")
+        return found
 
     def locate(self, target_type: str, target_id: str) -> dict[str, str] | None:
         """(target_type, target_id) -> {collection, kind, locator}, or None."""
@@ -493,8 +549,8 @@ def review_map_entries(
     """Every review mark of the case with its run-output locator (when known)."""
     index = RunLocatorIndex(connection, case_id, outputs, output_dir=output_dir)
     rows = connection.execute(
-        "SELECT citation_id, target_type, target_id, status, tags_json, note, include_in_report, updated_at "
-        f"FROM review_mark WHERE case_id = ? AND {ACTIVE_MARK_SQL} ORDER BY updated_at DESC, id DESC LIMIT ?",
+        "SELECT citation_id, target_type, target_id, status, tags_json, note, include_in_report, updated_at, reviewer "
+        f"FROM review_mark WHERE case_id = ? AND {ACTIVE_MARK_SQL} {ACTIVE_MARK_ORDER_SQL} LIMIT ?",
         (case_id, limit + 1),
     ).fetchall()
     truncated = len(rows) > limit
@@ -515,6 +571,8 @@ def review_map_entries(
             "note": str(row[5] or ""),
             "include_in_report": bool(row[6]),
             "updated_at": str(row[7] or ""),
+            # Examiner who made the latest mark (T-036/T-180); the case report prints it.
+            "reviewer": str(row[8] or ""),
             "collection": "",
             "kind": "",
             "locator": "",

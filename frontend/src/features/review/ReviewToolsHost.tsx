@@ -6,10 +6,15 @@
 
 import { useEffect } from "react";
 import { registerCommands } from "../../commands/registry";
+import { lazyView } from "../../components/LazyView";
 import { reviewToolCommands } from "./commands";
-import { NotePanel } from "./NotePanel";
-import { TagManagerDialog } from "./TagManagerDialog";
 import { useReviewToolsUi } from "./uiStore";
+
+// T-116: 태그 관리 and 메모·이력 are lazy chunks, fetched the first time each opens.
+const NotePanel = lazyView("메모·이력", () => import("./NotePanel").then((m) => m.NotePanel));
+const TagManagerDialog = lazyView("태그 관리", () =>
+  import("./TagManagerDialog").then((m) => m.TagManagerDialog),
+);
 
 export function ReviewToolsHost() {
   const tagRunId = useReviewToolsUi((s) => s.tagManagerRunId);

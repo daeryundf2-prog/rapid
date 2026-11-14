@@ -50,9 +50,14 @@ from typing import Any, TypedDict
 from fastapi import HTTPException, Query
 from pydantic import BaseModel, ValidationError
 
+from ...core.import_roots import (
+    IMPORT_ROOT_UNVERIFIED_MESSAGE,
+    IMPORT_SOURCE_ROOT_UNVERIFIED,
+    is_imported_summary,
+)
 from ...core.jobs import RunJob, RunJobStore, is_relative_to, run_output_dir
 from ...core.json_safe import json_default
-from .helpers import allowed_source_roots, get_job
+from .helpers import allowed_source_roots, get_job, unverified_import_root_error
 
 LOGGER = logging.getLogger(__name__)
 
@@ -378,19 +383,32 @@ class RunScope:
         source = self.summary.get("source")
         return source if isinstance(source, Mapping) else {}
 
+    def _imported_checked(self, path: Path) -> Path:
+        """An imported run's claimed evidence path is used only inside its verified roots (T-350)."""
+        if is_imported_summary(self.summary) and not any(
+            path == root or path.is_relative_to(root) for root in allowed_source_roots(self.summary)
+        ):
+            error = unverified_import_root_error(self.summary, str(path))
+            if error is not None:
+                raise error
+            raise HTTPException(status_code=403, detail={"code": IMPORT_SOURCE_ROOT_UNVERIFIED, "message": IMPORT_ROOT_UNVERIFIED_MESSAGE})
+        return path
+
     def source_path(self) -> Path | None:
         value = self.source.get("source_path") or self.summary.get("root")
-        return Path(str(value)).expanduser().resolve() if value else None
+        return self._imported_checked(Path(str(value)).expanduser().resolve()) if value else None
 
     def scan_root(self) -> Path:
         for value in (self.summary.get("scan_scope_root"), self.source.get("analysis_root"), self.summary.get("root")):
             if isinstance(value, str) and value:
-                return Path(value).expanduser().resolve()
+                return self._imported_checked(Path(value).expanduser().resolve())
         raise AnalysisFailure("런 요약에 스캔 루트가 없습니다")
 
     def input_roots(self) -> list[Path]:
         raw = [self.summary.get(key) for key in ("root", "scan_scope_root", "output_dir")]
         raw += [self.source.get(key) for key in ("analysis_root", "stage_dir", "source_path")]
+        if is_imported_summary(self.summary):
+            raw = []  # T-350: the summary's own paths are not read roots of an imported run
         roots = _root_forms([*raw, *allowed_source_roots(self.summary)])
         roots.extend(root for root in extra_analysis_roots() if root not in roots)
         return roots

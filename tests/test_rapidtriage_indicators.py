@@ -12,8 +12,12 @@ from rapidtriage.core.indicators import (
     build_ioc_ti_trusted_diff,
     ioc_ti_core_accuracy_gates,
 )
+from tests import quiet_media_checks
 from tests.test_rapidtriage_rule_engine import sha256_hex
 from tests.test_rapidtriage_run import build_run_fixture
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
 
 
 class RapidTriageIndicatorsTests(unittest.TestCase):

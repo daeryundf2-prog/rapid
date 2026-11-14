@@ -8,19 +8,12 @@
 //      classic UI stores the token there, so a returning analyst stays signed
 //      in when opening /v2).
 
+import { ApiError, apiErrorFromFetchFailure, apiErrorFromResponse, errorMessageFromDetail } from "./errors";
+
+// Error normalization lives in ./errors (R8 T-008); re-exported so existing imports keep working.
+export { ApiError, errorMessageFromDetail };
+
 const TOKEN_KEY = "rapidtriage.authToken";
-
-export class ApiError extends Error {
-  readonly status: number;
-  readonly detail: unknown;
-
-  constructor(message: string, status: number, detail: unknown) {
-    super(message);
-    this.name = "ApiError";
-    this.status = status;
-    this.detail = detail;
-  }
-}
 
 export function captureFragmentToken(
   hash: string = window.location.hash,
@@ -63,25 +56,22 @@ export function clearAuthToken(): void {
   }
 }
 
-export function errorMessageFromDetail(detail: unknown): string {
-  if (typeof detail === "string") return detail;
-  // FastAPI validation errors (422): a list of {msg} — show the messages, never "[object Object]".
-  if (Array.isArray(detail)) {
-    const messages = detail
-      .map((item) => (item && typeof item === "object" && "msg" in item ? String(item.msg) : String(item)))
-      .filter(Boolean);
-    if (messages.length) return messages.join(" · ");
+/**
+ * `fetch` that never rejects with the browser's own error: a failed connection, a timeout or a
+ * cancelled signal becomes an `ApiError` (`NETWORK_UNREACHABLE` / `REQUEST_TIMEOUT` /
+ * `REQUEST_ABORTED`) with a Korean message.
+ */
+async function guardedFetch(path: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(path, init);
+  } catch (error) {
+    throw apiErrorFromFetchFailure(error, init.signal);
   }
-  if (detail && typeof detail === "object" && "message" in detail) {
-    const message = (detail as { message?: unknown }).message;
-    if (typeof message === "string") return message;
-  }
-  return String(detail || "Request failed");
 }
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = authToken();
-  const response = await fetch(path, {
+  const response = await guardedFetch(path, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -89,13 +79,28 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
       ...(options.headers || {}),
     },
   });
-  if (!response.ok) {
-    const detail = await response.json().catch(() => ({ detail: response.statusText }));
-    const raw = (detail as { detail?: unknown }).detail ?? detail;
-    throw new ApiError(errorMessageFromDetail(raw), response.status, raw);
+  if (!response.ok) throw await apiErrorFromResponse(response);
+  try {
+    return await readBody<T>(response);
+  } catch (error) {
+    // The connection dropped mid-body (or the signal fired): same Korean codes as a failed fetch.
+    if (error instanceof SyntaxError) throw error;
+    throw apiErrorFromFetchFailure(error, options.signal);
   }
+}
+
+/**
+ * Parse a successful response body. 204/205 and empty bodies resolve to
+ * `undefined` instead of throwing "Unexpected end of JSON input" — DELETE
+ * endpoints answer 204 with no body (and sometimes a JSON content type).
+ */
+async function readBody<T>(response: Response): Promise<T> {
+  if (response.status === 204 || response.status === 205) return undefined as T;
+  const text = await response.text();
   const contentType = response.headers.get("content-type") || "";
-  return (contentType.includes("application/json") ? response.json() : response.text()) as Promise<T>;
+  if (!contentType.includes("application/json")) return text as T;
+  if (!text.trim()) return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 /**
@@ -104,15 +109,11 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
  */
 export async function apiResponse(path: string, init: { signal?: AbortSignal } = {}): Promise<Response> {
   const token = authToken();
-  const response = await fetch(path, {
+  const response = await guardedFetch(path, {
     headers: token ? { "X-RapidTriage-Token": token } : {},
     signal: init.signal,
   });
-  if (!response.ok) {
-    const detail = await response.json().catch(() => ({ detail: response.statusText }));
-    const raw = (detail as { detail?: unknown }).detail ?? detail;
-    throw new ApiError(errorMessageFromDetail(raw), response.status, raw);
-  }
+  if (!response.ok) throw await apiErrorFromResponse(response);
   return response;
 }
 

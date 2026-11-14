@@ -20,16 +20,28 @@ import {
   patchCase,
 } from "../../api/cases";
 import { ApiError } from "../../api/client";
+import { useWriteBlock } from "../../shell/readOnly";
+import { problemMessageKo, stepLabelKo } from "../dashboard/disclosures";
 import { navigate } from "../tree/adapter";
+import { AiRunOptionsField } from "./AiRunOptionsField";
 import { caseRunBody, caseRunFormReason } from "./CaseWizard";
 import { snapshotQueryKey } from "./caseLink";
 import { ErrorText } from "./ErrorText";
 import { EvidenceFields } from "./EvidenceFields";
 import { Modal } from "./Modal";
+import { showPreflightSpace } from "./preflightSpace";
 import { ReasonButton } from "./ReasonButton";
 import { RunOptionsFields } from "./RunOptionsFields";
-import { DEFAULT_RUN_FORM, type RunForm, validateRunForm } from "./runForm";
-import { summarizeRunRequest } from "./runSummary";
+import { RunPlanGroupsField } from "./RunPlanGroupsField";
+import {
+  caseRunOutputSpec,
+  DEFAULT_RUN_FORM,
+  outputOverlapReason,
+  outputRequiredReason,
+  type RunForm,
+  validateRunForm,
+} from "./runForm";
+import { LEVEL_LABEL, summarizeRunRequest } from "./runSummary";
 import {
   CASE_TYPE_SUGGESTIONS,
   type CaseInfoForm,
@@ -99,7 +111,9 @@ export function LinkCaseDialog({
   );
   const chosenEvidence = evidence.find((item) => item.citation_id === evidenceId);
   const pathDiffers = Boolean(chosenEvidence && run.data && !samePathText(runRoot, chosenEvidence.path));
-  const reason = !caseId
+  // T-348: a read-only result / server says why instead of answering with a 409.
+  const writeBlock = useWriteBlock("server");
+  const reasonOwn = !caseId
     ? "연결할 케이스를 고르세요"
     : !evidenceId && !evidenceNumber.trim()
       ? "기존 증거를 고르거나 새 증거 번호를 입력하세요"
@@ -108,6 +122,7 @@ export function LinkCaseDialog({
         : pathDiffers && !forceReason.trim()
           ? "런 경로가 증거 경로와 다릅니다. 그래도 연결하려면 사유를 입력하세요"
           : undefined;
+  const reason = writeBlock ?? reasonOwn;
   const link = useMutation({
     mutationFn: () =>
       linkCaseRun(caseId, {
@@ -141,7 +156,7 @@ export function LinkCaseDialog({
         </div>
       }
     >
-      <p className="case-reason">이 런의 처리 옵션을 케이스에 스냅숏으로 남기고 증거 번호를 붙입니다.</p>
+      <p className="case-reason">이 런의 처리 옵션을 케이스에 스냅샷으로 남기고 증거 번호를 붙입니다.</p>
       {cases.isPending ? <p aria-busy="true">케이스 목록을 불러오는 중…</p> : null}
       {cases.isError ? <ErrorText>케이스 목록을 불러오지 못했습니다.</ErrorText> : null}
       {cases.data && sorted.length === 0 ? (
@@ -280,7 +295,10 @@ export function CaseEditDialog({
   const [form, setForm] = useState<CaseInfoForm | null>(null);
   const current = form ?? (detail.data ? infoFromCase(detail.data) : null);
   const errors = current ? validateCaseInfo({ ...current, caseRoot: "" }) : {};
-  const reason = !current ? "사건 정보를 불러오는 중입니다" : firstError(errors);
+  // T-348: a read-only result / server says why instead of answering with a 409.
+  const writeBlock = useWriteBlock("server");
+  const reasonOwn = !current ? "사건 정보를 불러오는 중입니다" : firstError(errors);
+  const reason = writeBlock ?? reasonOwn;
   const unchanged =
     current && detail.data && Object.keys(changedCaseFields(detail.data, current)).length === 0;
   const changes = current && detail.data ? changedCaseFields(detail.data, current) : {};
@@ -388,7 +406,10 @@ export function AddEvidenceDialog({
   const [attempted, setAttempted] = useState(false);
   const all = [...existing, draft];
   const errors = validateEvidenceDraft(draft, all);
-  const reason = detail.isPending ? "케이스를 불러오는 중입니다" : firstError(errors);
+  // T-348: a read-only result / server says why instead of answering with a 409.
+  const writeBlock = useWriteBlock("server");
+  const reasonOwn = detail.isPending ? "케이스를 불러오는 중입니다" : firstError(errors);
+  const reason = writeBlock ?? reasonOwn;
   const save = useMutation({
     mutationFn: () => addEvidence(caseId, evidenceBody(draft)),
     onSuccess: (saved) => {
@@ -463,17 +484,30 @@ export function AddRunDialog({
   const chosen = evidence.find((item) => item.citation_id === evidenceId);
   const body = caseRunBody(form, evidenceId);
   const summary = summarizeRunRequest(body as unknown as Record<string, unknown>);
-  const reason = runIsActive
+  // E01 QA D4: the default is the case folder's run subfolder; without one the examiner chooses.
+  const outputSpec = caseRunOutputSpec(detail.data?.case_root);
+  // R7: never inside / around any evidence of the case (the server checks the same, on real paths).
+  const outputError = outputOverlapReason(
+    form.outputDir,
+    allEvidence.map((item) => item.path),
+  );
+  // T-348: a read-only result / server says why instead of answering with a 409.
+  const writeBlock = useWriteBlock("server");
+  const reasonOwn = runIsActive
     ? "실행 중 런이 있습니다"
     : !evidenceId
       ? "증거를 고르세요"
-      : caseRunFormReason(form);
+      : (caseRunFormReason(form) ??
+        (detail.data ? outputRequiredReason(outputSpec, form.outputDir) : undefined) ??
+        outputError);
+  const reason = writeBlock ?? reasonOwn;
   const start = useMutation({
     mutationFn: () => createCaseRun(caseId, body),
     onSuccess: (result) => {
       invalidateCase(queryClient, caseId);
       void queryClient.invalidateQueries({ queryKey: ["runs"] });
       onNotice?.(`증거 ${chosen?.evidence_number ?? ""} 런을 시작했습니다.`);
+      showPreflightSpace(result);
       onClose();
       navigate({ runId: result.run.run_id, collection: "intake" });
     },
@@ -530,6 +564,20 @@ export function AddRunDialog({
         onChange={set}
         advanced={advanced}
         onAdvancedChange={setAdvanced}
+        idPrefix={`${id}-run`}
+        output={outputSpec}
+        outputError={outputError}
+      />
+      {/* The same 처리 그룹 checklist and AI 사용 기록 fields as the quick-run dialog and the
+          wizard step 3 (plan r8 T-080 / T-191; verify WB-10). */}
+      <RunPlanGroupsField
+        form={form}
+        onChange={(skipGroups) => set("skipGroups", skipGroups)}
+        idPrefix={`${id}-run`}
+      />
+      <AiRunOptionsField
+        form={form}
+        onChange={(patch) => setForm((f) => ({ ...f, ...patch }))}
         idPrefix={`${id}-run`}
       />
       <table className="data-table dash-table" aria-label="처리 옵션 요약">
@@ -603,9 +651,12 @@ export function ProblemsDialog({
               {group.items.map((item, index) => (
                 // biome-ignore lint/suspicious/noArrayIndexKey: problem items have no id; order is stable
                 <tr key={index}>
-                  <td className="mono">{item.step || "—"}</td>
+                  {/* R-7: Korean step name and reasons (key→reason table); raw text stays the tooltip. */}
+                  <td title={item.step || undefined}>{item.step ? stepLabelKo(item.step) : "—"}</td>
                   <td>{LEVEL_LABEL[item.level] ?? item.level}</td>
-                  <td className="break-all">{item.message}</td>
+                  <td className="break-all" title={item.message}>
+                    {problemMessageKo(item.message)}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -617,5 +668,3 @@ export function ProblemsDialog({
     </Modal>
   );
 }
-
-export const LEVEL_LABEL: Record<string, string> = { error: "오류", warning: "경고", notice: "알림" };

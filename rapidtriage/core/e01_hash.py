@@ -9,11 +9,10 @@ from pathlib import Path
 from .docs import write_result
 from .e01 import (
     build_e01_segment_set_profile,
-    discover_e01_segments,
-    ewf_segment_number,
     is_e01_path,
     stable_manifest_sha256,
 )
+from .e01_recorded_hash import discover_segment_files, ewf_segment_index
 
 E01_STREAMING_HASH_VERSION = "e01-streaming-full-hash-v1"
 E01_STREAMING_HASH_CHECKPOINT_VERSION = "e01-streaming-hash-checkpoint-v1"
@@ -56,7 +55,10 @@ def run_e01_streaming_hash(
     markdown_path = output_dir / "e01-streaming-hash.md"
     is_e01 = is_e01_path(source_path)
     segment_profile = build_e01_segment_set_profile(source_path) if is_e01 else {}
-    segment_paths = tuple(discover_e01_segments(source_path)) if is_e01 else (source_path,)
+    # R8 WB-9 P1-4: the full segment discovery (past .E99 into .EAA..), not the engine's two-digit
+    # one, so a large image's container hash covers every segment; gaps are disclosed in hash_scope.
+    segment_list, segment_gaps = discover_segment_files(source_path) if is_e01 else ([source_path], [])
+    segment_paths = tuple(segment_list)
     segment_sizes = {path: path.stat().st_size for path in segment_paths}
     segment_set_size = sum(segment_sizes.values())
     stat = source_path.stat()
@@ -98,7 +100,7 @@ def run_e01_streaming_hash(
             {
                 "path": str(segment_path),
                 "name": segment_path.name,
-                "segment_number": ewf_segment_number(segment_path),
+                "segment_number": ewf_segment_index(segment_path),
                 "size_bytes": segment_sizes[segment_path],
                 "bytes_hashed": segment_bytes,
                 "digests": {name: hasher.hexdigest() for name, hasher in segment_hashers.items()},
@@ -137,6 +139,7 @@ def run_e01_streaming_hash(
             "claims_decoded_media_hash": False,
             "claims_acquisition_media_hash": False,
             "segment_count": len(segment_paths),
+            "segment_gaps": list(segment_gaps),
             "coverage": "all-discovered-segments" if len(segment_paths) > 1 else "single-file",
             "aggregate_definition": (
                 "digests cover every discovered segment's container bytes concatenated in "

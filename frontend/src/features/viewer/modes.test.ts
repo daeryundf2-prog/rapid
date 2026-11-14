@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ViewerMode } from "../../contracts/viewer";
-import { REASONS, resolveModes } from "./modes";
+import { NOTICES, REASONS, resolveModes, visibleModes, withheldSentence } from "./modes";
 import { preview, target } from "./testSupport";
 
 function available(result: ReturnType<typeof resolveModes>): ViewerMode[] {
@@ -18,7 +18,7 @@ describe("resolveModes — one case per preview_type", () => {
       preview: preview({ preview_type: "text", extension: ".log" }),
     });
     expect(result.best).toBe("source");
-    expect(available(result)).toEqual(["source", "hex", "meta"]);
+    expect(available(result)).toEqual(["source", "hex", "meta", "family"]);
     expect(reason(result, "document")).toBe(REASONS.notDocument);
   });
 
@@ -28,7 +28,7 @@ describe("resolveModes — one case per preview_type", () => {
       preview: preview({ preview_type: "text", extension: ".pdf" }),
     });
     expect(result.best).toBe("document");
-    expect(available(result)).toEqual(["hex", "document", "meta"]);
+    expect(available(result)).toEqual(["hex", "document", "meta", "family"]);
     expect(reason(result, "source")).toBe(REASONS.documentHere);
   });
 
@@ -62,7 +62,7 @@ describe("resolveModes — one case per preview_type", () => {
       preview: preview({ preview_type: "image", extension: ".png" }),
     });
     expect(result.best).toBe("image");
-    expect(available(result)).toEqual(["hex", "image", "meta"]);
+    expect(available(result)).toEqual(["hex", "image", "meta", "family"]);
     expect(reason(result, "sqlite")).toBe(REASONS.notSqlite);
     expect(reason(result, "source")).toBe(REASONS.notText);
   });
@@ -73,7 +73,7 @@ describe("resolveModes — one case per preview_type", () => {
       preview: preview({ preview_type: "sqlite", extension: ".db" }),
     });
     expect(result.best).toBe("sqlite");
-    expect(available(result)).toEqual(["hex", "sqlite", "meta"]);
+    expect(available(result)).toEqual(["hex", "sqlite", "meta", "family"]);
     expect(reason(result, "image")).toBe(REASONS.notImage);
   });
 
@@ -101,7 +101,7 @@ describe("resolveModes — one case per preview_type", () => {
       preview: preview({ preview_type: "hex", extension: ".evtx" }),
     });
     expect(result.best).toBe("hex");
-    expect(available(result)).toEqual(["hex", "meta"]);
+    expect(available(result)).toEqual(["hex", "meta", "family"]);
     expect(reason(result, "media")).toBe(REASONS.notMedia);
   });
 
@@ -134,10 +134,10 @@ describe("resolveModes — edge cases", () => {
     expect(available(result)).toEqual([]);
   });
 
-  it("row without a source file → meta only", () => {
+  it("row without a source file → meta only (+ 계열 of a files row)", () => {
     const result = resolveModes({ target: target({ sourcePath: null }), preview: null });
     expect(result.best).toBe("meta");
-    expect(available(result)).toEqual(["meta"]);
+    expect(available(result)).toEqual(["meta", "family"]);
     expect(reason(result, "hex")).toBe(REASONS.noPath);
   });
 
@@ -173,5 +173,132 @@ describe("resolveModes — edge cases", () => {
       preview: preview({ preview_type: "json", container_path: "C:/a.zip" }),
     });
     expect(reason(result, "hex")).toBe(REASONS.archiveHex);
+  });
+});
+
+describe("계열 tab (R7 갈래 A)", () => {
+  it("is available for item rows and never chosen automatically", () => {
+    const files = resolveModes({
+      target: target(),
+      preview: preview({ preview_type: "text", extension: ".log" }),
+    });
+    expect(files.modes.find((m) => m.mode === "family")?.available).toBe(true);
+    expect(files.best).toBe("source");
+    const artifact = resolveModes({
+      target: target({
+        ref: { collection: "artifacts", kind: "email", locator: "/artifacts/3" },
+        sourcePath: null,
+      }),
+      preview: null,
+    });
+    expect(available(artifact)).toEqual(["meta", "family"]);
+    const entry = resolveModes({
+      target: target({
+        ref: { collection: "artifacts", kind: "generic-documents", locator: "/artifacts/0#entry:2" },
+      }),
+      preview: null,
+    });
+    expect(entry.modes.find((m) => m.mode === "family")?.available).toBe(true);
+  });
+
+  it("is disabled with a Korean reason for other rows; a requested 계열 wins when available", () => {
+    const timeline = resolveModes({
+      target: target({ ref: { collection: "timeline", locator: "/events/3" }, sourcePath: null }),
+      preview: null,
+    });
+    expect(reason(timeline, "family")).toBe(REASONS.notFamily);
+    const hit = resolveModes({
+      target: target({
+        ref: { collection: "search", locator: "search:artifacts:email:/artifacts/1" },
+        review: { collection: "artifacts", kind: "email", pointer: "/artifacts/1" },
+        sourcePath: null,
+      }),
+      preview: null,
+    });
+    expect(hit.modes.find((m) => m.mode === "family")?.available).toBe(true);
+    const asked = resolveModes({ target: target({ preferredMode: "family" }), preview: null });
+    expect(asked.best).toBe("family");
+  });
+});
+
+describe("r8 T-086: only usable tabs, withheld / binary sentences", () => {
+  const tabs = (result: ReturnType<typeof resolveModes>) => visibleModes(result.modes).map((m) => m.mode);
+  const withheld = preview({
+    preview_type: "withheld",
+    extension: "",
+    name: "Cookies",
+    coverage_status: "body-withheld",
+    credential_reason: "browser-credential-store",
+  });
+
+  it("C2 rows (txt · pdf · jpg · cookie · binary): no disabled tab is rendered", () => {
+    for (const body of [
+      preview({ preview_type: "text", extension: ".txt" }),
+      preview({ preview_type: "text", extension: ".pdf" }),
+      preview({ preview_type: "image", extension: ".jpg" }),
+      withheld,
+      preview({ preview_type: "binary", extension: ".dat" }),
+    ]) {
+      const result = resolveModes({ target: target(), preview: body });
+      expect(visibleModes(result.modes).every((m) => m.available)).toBe(true);
+      expect(result.best !== null && tabs(result).includes(result.best)).toBe(true);
+    }
+  });
+
+  it("QA-046 sample: the reviewer default averages ≤ 4 tabs", () => {
+    const samples = [
+      withheld, // 쿠키 DB 행 (browser credential store)
+      preview({ preview_type: "withheld", credential_reason: "private-key", extension: ".pem" }),
+      preview({ preview_type: "binary", extension: ".dat" }),
+      preview({ preview_type: "binary", extension: ".bin", size: 0 }),
+      preview({ preview_type: "text", extension: ".txt" }),
+      preview({ preview_type: "image", extension: ".jpg" }),
+      preview({ preview_type: "text", extension: ".pdf" }),
+      preview({ preview_type: "media", extension: ".mp4" }),
+      preview({ preview_type: "media", extension: ".wav" }),
+      preview({ preview_type: "sqlite", extension: "" }),
+      preview({ preview_type: "email", extension: ".eml" }),
+    ];
+    const counts = samples.map((body) => tabs(resolveModes({ target: target(), preview: body })).length);
+    expect(counts.reduce((a, b) => a + b, 0) / counts.length).toBeLessThanOrEqual(4);
+  });
+
+  it("withheld: 메타 (+계열) only, one reason sentence and the 파일 정보 alternative", () => {
+    const result = resolveModes({ target: target(), preview: withheld });
+    expect(tabs(result)).toEqual(["meta", "family"]);
+    expect(result.best).toBe("meta");
+    expect(reason(result, "sqlite")).toBe(REASONS.withheld);
+    expect(result.notice).toEqual({
+      text: withheldSentence(withheld),
+      action: { mode: "meta", label: NOTICES.toMeta },
+    });
+    expect(withheldSentence(withheld)).toBe(
+      "자격 증명 파일(브라우저 쿠키·로그인 저장소)이라 본문을 보여 주지 않습니다",
+    );
+    expect(withheldSentence({ credential_reason: "unknown-code" })).toBe(
+      "자격 증명 파일이라 본문을 보여 주지 않습니다",
+    );
+  });
+
+  it("binary: 텍스트로 표시할 수 없는 파일입니다 — 헥스로 보기", () => {
+    const result = resolveModes({ target: target(), preview: preview({ preview_type: "binary" }) });
+    expect(result.notice).toEqual({ text: NOTICES.binary, action: { mode: "hex", label: NOTICES.toHex } });
+    const failed = resolveModes({
+      target: target(),
+      preview: preview({ preview_type: "binary", extension: ".pdf", message: "bad xref" }),
+    });
+    expect(failed.notice?.text).toBe(NOTICES.extractionFailed);
+    const empty = resolveModes({ target: target(), preview: preview({ preview_type: "binary", size: 0 }) });
+    expect(empty.notice).toEqual({
+      text: NOTICES.emptyFile,
+      action: { mode: "meta", label: NOTICES.toMeta },
+    });
+  });
+
+  it("viewable content carries no notice", () => {
+    for (const type of ["text", "image", "sqlite", "email", "media"] as const) {
+      const result = resolveModes({ target: target(), preview: preview({ preview_type: type }) });
+      expect(result.notice ?? null).toBeNull();
+    }
   });
 });

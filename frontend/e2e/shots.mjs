@@ -3,7 +3,7 @@
 import { mkdirSync } from "node:fs";
 import { chromium } from "@playwright/test";
 
-const BASE = "http://127.0.0.1:8791";
+const BASE = `http://127.0.0.1:${process.env.RAPIDTRIAGE_E2E_PORT || "8791"}`;
 const TOKEN = "e2e-token";
 const OUT = "D:/devin/rapid/docs/screenshots/console-2026-10-11";
 mkdirSync(OUT, { recursive: true });

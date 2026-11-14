@@ -27,9 +27,12 @@ from ..core.macos_live_smoke import MacOsLiveSmokeError, run_macos_live_smoke
 from ..core.run import RunModeError
 from ..core.search import SearchError
 from ..core.sqlite_wal import SqliteWalPreviewError, build_sqlite_wal_preview
+from .helpers import refuse_output_inside_evidence
 
 
 def handle_benchmark(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
+        if args.root:
+            refuse_output_inside_evidence(parser, Path(args.output_dir).expanduser().resolve(), [Path(args.root)])
         try:
             payload = run_benchmark(
                 root=Path(args.root).expanduser().resolve() if args.root else None,
@@ -88,6 +91,7 @@ def handle_macos_live_smoke(args: argparse.Namespace, parser: argparse.ArgumentP
 
 
 def handle_e01_smoke(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
+        refuse_output_inside_evidence(parser, Path(args.output_dir), [Path(args.source)])
         payload = run_windows11_e01_smoke(
             Path(args.source),
             output_dir=Path(args.output_dir),
@@ -125,6 +129,7 @@ def handle_e01_smoke(args: argparse.Namespace, parser: argparse.ArgumentParser, 
 
 
 def handle_e01_hash(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
+        refuse_output_inside_evidence(parser, Path(args.output_dir).expanduser().resolve(), [Path(args.source)])
         try:
             payload = run_e01_streaming_hash(
                 source_path=Path(args.source).expanduser().resolve(),

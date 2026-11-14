@@ -73,14 +73,22 @@ def build_timeline_histogram(
     max_source_rows: int = MAX_SOURCE_ROWS,
     window_start: dt.datetime = DEFAULT_WINDOW_START,
     window_end: dt.datetime = DEFAULT_WINDOW_END,
+    range_from: dt.datetime | None = None,
+    range_until: dt.datetime | None = None,
 ) -> dict[str, object]:
-    """Aggregate timeline events into time x source density buckets."""
+    """Aggregate timeline events into time x source density buckets.
+
+    ``range_from`` (inclusive) / ``range_until`` (exclusive) keep only the events in that window
+    (the ``from``/``to`` of ``GET /timeline-histogram``): the buckets span those events only and
+    the events outside are counted in ``range_excluded_events`` (not ``out_of_range_count``,
+    which stays the plausibility window's)."""
     events = payload.get("events")
     if not isinstance(events, Sequence) or isinstance(events, (str, bytes)):
         events = []
 
     parsed_events: list[tuple[dt.datetime, str]] = []
     unparsed = 0
+    excluded = 0
     out_of_range = 0
     oor_min: dt.datetime | None = None
     oor_max: dt.datetime | None = None
@@ -97,7 +105,10 @@ def build_timeline_histogram(
             oor_min = timestamp if oor_min is None else min(oor_min, timestamp)
             oor_max = timestamp if oor_max is None else max(oor_max, timestamp)
             continue
-        source = str(event.get("source") or event.get("event_type") or "unknown")
+        if (range_from is not None and timestamp < range_from) or (range_until is not None and timestamp >= range_until):
+            excluded += 1
+            continue
+        source =str(event.get("source") or event.get("event_type") or "unknown")
         parsed_events.append((timestamp, source))
 
     oor_info: dict[str, object] = {
@@ -105,6 +116,8 @@ def build_timeline_histogram(
         "out_of_range_min": oor_min.isoformat() if oor_min else None,
         "out_of_range_max": oor_max.isoformat() if oor_max else None,
     }
+    if range_from is not None or range_until is not None:
+        oor_info["range_excluded_events"] = excluded
 
     if not parsed_events:
         return {

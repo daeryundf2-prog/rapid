@@ -5,7 +5,8 @@
 * evidence source — image name/size and the partition rows the image stage
   recorded (``rapidtriage-e01.json`` ``partition_selection.partition_browser_rows``);
 * export history — case report formats, reviewer bundle, submission manifest,
-  validation package and row extracts already written under the output dir.
+  validation package and row extracts already written under the output dir;
+* processing scope — four axes from the extraction stats (``run_scope.py``, T-023).
 
 Nothing here parses evidence or changes recovery behaviour; it only reads
 files the run (or earlier console actions) already produced.
@@ -30,9 +31,13 @@ from .helpers import (
     default_reviewer_bundle_dir_path,
     default_run_validation_package_path,
     default_submission_manifest_path,
+    extract_zip_has_policy,
     get_output_path,
     job_output_dir,
 )
+from .readonly_mode import effective_readonly_reason
+from .run_scope import build_run_scope
+from .run_steps_summary import summarize_steps
 
 CASE_NOTES_FILE_NAME = "rapidtriage-case-notes.json"
 CASE_NOTES_PROFILE = "rapidtriage-case-notes-v1"
@@ -137,17 +142,34 @@ def _partition_rows(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     return [row for row in table if isinstance(row, Mapping)] if isinstance(table, list) else []
 
 
+def _unique_partition_number(row: Mapping[str, Any], index: int, used: set[int]) -> int:
+    """Partition number for display: 0 is a valid number (mmls/GPT slot 0), so only
+    ``None`` falls through. A number already taken falls back to the 1-based row
+    index (then the next free integer) so ``number`` stays unique per source."""
+    number = _int_or_none(row.get("partition_number"))
+    if number is None:
+        number = _int_or_none(row.get("slot"))
+    if number is None or number in used:
+        number = index
+        while number in used:
+            number += 1
+    used.add(number)
+    return number
+
+
 def _normalize_partitions(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
     selection = payload.get("partition_selection") if isinstance(payload.get("partition_selection"), Mapping) else {}
     selected_sector = _int_or_none(selection.get("selected_start_sector"))
     if selected_sector is None:
         selected_sector = _int_or_none(payload.get("partition_start_sector"))
     partitions: list[dict[str, Any]] = []
+    used_numbers: set[int] = set()
     for index, row in enumerate(_partition_rows(payload), start=1):
         start = _int_or_none(row.get("start_sector"))
         partitions.append(
             {
-                "number": _int_or_none(row.get("partition_number")) or _int_or_none(row.get("slot")) or index,
+                "index": index,
+                "number": _unique_partition_number(row, index, used_numbers),
                 "description": str(row.get("description") or ""),
                 "filesystem": str(row.get("filesystem_guess") or "unknown"),
                 "size_bytes": _int_or_none(row.get("size_bytes")),
@@ -280,6 +302,8 @@ def build_export_history(store: RunJobStore, run_id: str, job: RunJob) -> list[d
             if not folder.is_dir() or not EXTRACT_NAME_PATTERN.fullmatch(folder.name):
                 continue
             archive = extract_root / f"{folder.name}.zip"
+            # A zip written before the credential policy (T-347) is not served: rebuild it first.
+            ready = archive.is_file() and extract_zip_has_policy(archive)
             extracted = None
             try:
                 manifest_payload = json.loads((folder / "rapidtriage-extract-manifest.json").read_text(encoding="utf-8"))
@@ -294,10 +318,12 @@ def build_export_history(store: RunJobStore, run_id: str, job: RunJob) -> list[d
                     "type": "extract",
                     "label": "선택 추출",
                     "created_at": _iso_mtime(folder),
-                    "size": archive.stat().st_size if archive.is_file() else None,
-                    "status": "zip 준비됨" if archive.is_file() else "zip 미생성",
+                    "size": archive.stat().st_size if ready else None,
+                    "status": "zip 준비됨" if ready else ("zip 다시 만들기 필요" if archive.is_file() else "zip 미생성"),
                     "item_count": extracted,
                     "download_url": f"{base}/extract/{folder.name}/file",
+                    # POST that writes the missing zip first (the download GET never writes).
+                    "build_url": None if ready else f"{base}/extract/{folder.name}/zip",
                 }
             )
     entries.sort(key=lambda entry: entry.get("created_at") or "", reverse=True)
@@ -307,7 +333,9 @@ def build_export_history(store: RunJobStore, run_id: str, job: RunJob) -> list[d
 # --- aggregate --------------------------------------------------------------
 
 
-def build_run_dashboard(store: RunJobStore, run_id: str, job: RunJob) -> dict[str, Any]:
+def build_run_dashboard(
+    store: RunJobStore, run_id: str, job: RunJob, *, server_read_only: bool = False
+) -> dict[str, Any]:
     mode = str(getattr(job.request, "mode", "") or "")
     profile = RUN_PROFILES.get(mode)
     return {
@@ -321,4 +349,10 @@ def build_run_dashboard(store: RunJobStore, run_id: str, job: RunJob) -> dict[st
         },
         "evidence_source": build_evidence_source(store, run_id, job),
         "exports": build_export_history(store, run_id, job),
+        # summary.steps by class (T-021); not the collector progress ("providers"). None until the run ends.
+        "steps": summarize_steps(job.summary) if job.summary is not None else None,
+        # T-023: processing scope on four axes (partitions/allocated/deleted/unallocated).
+        "scope": build_run_scope(job.summary, job_output_dir(job)),
+        # T-348: why the console shows the read-only band and disables writes (null: writable).
+        "readonly_reason": effective_readonly_reason(job.readonly_reason, server_read_only),
     }

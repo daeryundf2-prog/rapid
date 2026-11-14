@@ -13,11 +13,13 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 from .audit import compute_sha256
+from .cli_constants import (
+    DEFAULT_CLOUD_API_MAX_RESPONSE_BYTES,
+    DEFAULT_CLOUD_API_TIMEOUT_SECONDS,
+    DEFAULT_CLOUD_BEARER_TOKEN_ENV,
+)
 from .forensic_accuracy import build_accuracy_gate
 
-DEFAULT_CLOUD_BEARER_TOKEN_ENV = "RAPIDTRIAGE_CLOUD_BEARER_TOKEN"
-DEFAULT_CLOUD_API_TIMEOUT_SECONDS = 30
-DEFAULT_CLOUD_API_MAX_RESPONSE_BYTES = 50 * 1024 * 1024
 DEFAULT_CLOUD_API_MAX_RETRY_ATTEMPTS = 1
 DEFAULT_CLOUD_API_BACKOFF_SECONDS = 0.0
 FUNCTIONAL_EXPANSION_BATCH_ID = "commercial-uplift-056-060"

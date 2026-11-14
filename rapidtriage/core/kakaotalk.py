@@ -22,7 +22,15 @@ from ..artifacts.windows.registry import (
     parse_registry_vk_cell,
     registry_value_data_preview,
 )
+from .cli_constants import (
+    DEFAULT_MEMORY_MESSAGE_RESIDUE_LIMIT,
+    DEFAULT_MEMORY_SQLCIPHER_KEY_RESIDUE_LIMIT,
+    DEFAULT_MEMORY_SQLITE_MAX_CARVE_BYTES,
+    DEFAULT_MEMORY_SQLITE_MAX_HITS,
+)
+from .clock import now_local, now_local_iso
 from .docs import write_result
+from .output_guard import check_output_outside_evidence
 from .submission import compute_hashes
 
 KAKAOTALK_DECRYPT_VERSION = "kakaotalk-windows-decrypt-v1"
@@ -46,9 +54,6 @@ TIME_COLUMN_HINTS = ("time", "date", "created", "sent", "timestamp")
 SQLITE_HEADER = b"SQLite format 3"
 PAGE_SIZE = 4096
 BLOCK_SIZE = 16
-DEFAULT_MEMORY_SQLITE_MAX_HITS = 200
-DEFAULT_MEMORY_SQLITE_MAX_CARVE_BYTES = 64 * 1024 * 1024
-DEFAULT_MEMORY_MESSAGE_RESIDUE_LIMIT = 200
 KEY_MATERIAL_SCAN_LIMIT = 256 * 1024 * 1024
 KEY_MATERIAL_CHUNK_SIZE = 1024 * 1024
 PK_PATTERN = re.compile(rb"(?<![A-Za-z0-9+/])([A-Za-z0-9+/]{86}==)([0-9]{3,20})(?![0-9A-Za-z+/])")
@@ -77,7 +82,6 @@ USERDIR_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
 MEMORY_DUMP_SUFFIXES = (".dmp", ".dump", ".raw", ".mem")
 MEMORY_DUMP_NAME_HINTS = ("kakaotalk", "memory", "process")
 DEFAULT_MEMORY_REVERSE_INDICATOR_LIMIT = 300
-DEFAULT_MEMORY_SQLCIPHER_KEY_RESIDUE_LIMIT = 300
 SQLCIPHER_KEY_LITERAL_PATTERN = re.compile(rb"x'([0-9a-fA-F]{64}|[0-9a-fA-F]{96})'")
 KAKAOTALK_POSTPATCH_ENTROPY_PATTERN = re.compile(rb"([A-Za-z0-9+/]{86}==)")
 MEMORY_REVERSE_INDICATOR_PATTERNS = (
@@ -434,7 +438,7 @@ def run_kakaotalk_windows_collect(
     if not source_root.exists() or not source_root.is_dir():
         raise KakaoTalkDecryptError(f"KakaoTalk root does not exist: {source_root}")
 
-    timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = now_local().strftime("%Y%m%d_%H%M%S")
     case_dir = output_root / f"kakaotalk_collection_{timestamp}"
     collection_dir = case_dir / "collection"
     collected_kakao_root = collection_dir / "KakaoTalk"
@@ -475,7 +479,7 @@ def run_kakaotalk_windows_collect(
     payload: dict[str, object] = {
         "command": "kakaotalk-collect-windows",
         "parser": KAKAOTALK_WINDOWS_COLLECT_VERSION,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "summary": {
             "source_kakao_root": str(source_root),
             "case_dir": str(case_dir),
@@ -929,7 +933,10 @@ def run_kakaotalk_decrypt(
         if decrypted_dir is not None
         else output.parent / f"{output.stem}-decrypted"
     )
+    # R7: the JSON and the decrypted copies (default: beside the JSON) never land inside the evidence.
+    check_output_outside_evidence(output, [root])
     if write_decrypted:
+        check_output_outside_evidence(decrypt_output_dir, [root])
         decrypt_output_dir.mkdir(parents=True, exist_ok=True)
 
     entries: list[dict[str, object]] = []
@@ -960,7 +967,7 @@ def run_kakaotalk_decrypt(
     payload = {
         "command": "kakaotalk-decrypt",
         "parser": KAKAOTALK_DECRYPT_VERSION,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "root": str(root),
         "output": str(output),
         "authorization_model": {
@@ -1057,6 +1064,10 @@ def run_kakaotalk_memory_carve(
         if carve_dir is not None
         else output.parent / f"{output.stem}-carves"
     )
+    # R7: the JSON and the carved fragments (default: beside the JSON) never land inside the evidence.
+    check_output_outside_evidence(output, [root])
+    if write_carves:
+        check_output_outside_evidence(resolved_carve_dir, [root])
     if root.is_file():
         if root.suffix.lower() != ".zip":
             raise KakaoTalkDecryptError("kakaotalk-memory-carve expects an extracted KakaoTalk folder or ZIP archive")
@@ -1189,7 +1200,7 @@ def run_kakaotalk_sqlcipher_probe(
     payload: dict[str, object] = {
         "command": "kakaotalk-sqlcipher-probe",
         "parser": KAKAOTALK_MEMORY_CARVE_VERSION,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "root": str(root),
         "output": str(output),
         "authorization_model": {
@@ -1520,7 +1531,7 @@ def run_kakaotalk_key_store_inspect(
     payload: dict[str, object] = {
         "command": "kakaotalk-key-store-inspect",
         "parser": KAKAOTALK_KEY_STORE_VERSION,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "root": str(root),
         "output": str(output),
         "authorization_model": {
@@ -2498,7 +2509,7 @@ def build_kakaotalk_memory_carve_payload(
     return {
         "command": command,
         "parser": KAKAOTALK_MEMORY_CARVE_VERSION,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "root": str(root),
         "output": str(output),
         "authorization_model": {
@@ -3513,7 +3524,7 @@ def run_kakaotalk_userdir_bruteforce(
     payload: dict[str, object] = {
         "command": "kakaotalk-userdir-bruteforce",
         "parser": KAKAOTALK_USERDIR_BRUTEFORCE_VERSION,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "root": str(root),
         "output": str(output),
         "authorization_model": {
@@ -4113,14 +4124,14 @@ def run_userdir_bruteforce_chunk(
     start_id: int,
     end_id: int,
 ) -> dict[str, object]:
-    started_at = dt.datetime.now()
+    started_at = now_local()
     proc = subprocess.run(
         [str(helper_path), str(pragma_path), userdir_home, userdir, str(start_id), str(end_id)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
     )
-    finished_at = dt.datetime.now()
+    finished_at = now_local()
     stdout = proc.stdout.decode("utf-8", errors="replace").strip()
     stderr = proc.stderr.decode("utf-8", errors="replace").strip()
     result: dict[str, object] = {

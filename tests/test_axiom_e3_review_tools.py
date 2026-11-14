@@ -25,6 +25,11 @@ from rapidtriage.core.case_db import (
     update_case_tag,
 )
 from rapidtriage.core.case_db.review_schema import SYSTEM_TAGS
+from tests import quiet_media_checks
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
+
 
 HAS_FASTAPI = True
 try:

@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import time
 import unicodedata
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from pathlib import Path
 
 from ...core.artifact_profiles import payload_record_count
 from ...core.eventlog_channels import GROUP_LABELS, ChannelFilter
+from ...core.search_budget import resolve_scan_budget_seconds
 from .jsonl_records import iter_artifact_records
 
 ARTIFACT_PATH_FILTER_SCAN_CAP = 2_000_000
 # Rows scanned per request by the all-kinds ``artifact_type=`` pager.
 CROSS_KIND_SCAN_CAP = 200_000
+# Rows between two wall-clock budget checks of a filter scan.
+BUDGET_CHECK_ROWS = 512
 # ``channel=`` (event-log channel, exact match on ``details.channel``) bounds.
 MAX_CHANNEL_VALUES = 256
 MAX_CHANNEL_CHARS = 256
@@ -122,6 +126,44 @@ def field_matching_records(
     return found
 
 
+# List ``notice`` codes of a partial / uncounted page (r8-contracts D.7, T-019).
+SCAN_BUDGET_STOPPED = "SCAN_BUDGET_STOPPED"
+TOTAL_NOT_COUNTED = "TOTAL_NOT_COUNTED"
+
+
+def total_lower_bound(total: int | None, matched: int, has_more: bool) -> int:
+    """Rows the list certainly has: ``total`` when counted, else the matches seen so far plus the
+    lookahead row (``has_more``) -- ``offset + returned + 1`` for a full page, the matches found
+    before the stop for a budget / scan-cap stop."""
+    if total is not None:
+        return int(total)
+    return int(matched) + (1 if has_more else 0)
+
+
+def list_notice(*, total: int | None, lower_bound: int, scanned: int, budget_stopped: bool) -> dict[str, str] | None:
+    """Top-level ``notice`` of a list page: ``None`` when the page is complete and counted.
+
+    ``SCAN_BUDGET_STOPPED``: the wall-clock budget ended the scan, so an empty page is not an
+    empty result. ``TOTAL_NOT_COUNTED``: rows were found but the total was not counted.
+    """
+    if budget_stopped:
+        seconds = resolve_scan_budget_seconds()
+        return {
+            "code": SCAN_BUDGET_STOPPED,
+            "message": f"시간 제한({seconds:g}초) 안에 {scanned:,}행까지만 확인했습니다",
+        }
+    if total is None:
+        return {"code": TOTAL_NOT_COUNTED, "message": f"전체 건수는 세지 않았습니다 — {lower_bound:,}건 이상"}
+    return None
+
+
+def attach_list_notice(page: dict[str, object], notice: dict[str, str] | None) -> dict[str, object]:
+    """Set ``page["notice"]`` only for a partial / uncounted page (complete pages carry none)."""
+    if notice is not None:
+        page["notice"] = notice
+    return page
+
+
 def nfc_fold(value: object) -> str:
     return unicodedata.normalize("NFC", str(value or "")).casefold()
 
@@ -140,6 +182,7 @@ def filter_artifact_page(
     channels: ChannelFilter | Collection[str] | None = None,
     fields: FieldFilters | None = None,
     row_filter: Callable[[Mapping[str, object]], bool] | None = None,
+    deadline: float | None = None,
 ) -> dict[str, object]:
     """Page only rows whose ``path`` contains ``path_contains`` (NFC, case-insensitive),
     when ``artifact_types`` is given, whose ``artifact_type`` is one of them,
@@ -155,7 +198,8 @@ def filter_artifact_page(
     ``rows_source`` yields ``(record_index, row)`` in another order (server
     sort); by default rows stream in JSONL order, records ``0..record_limit-1``
     only when ``record_limit`` is given. Every returned row carries its
-    original ``record_index``.
+    original ``record_index``. ``deadline`` (``time.monotonic()``) stops the
+    scan like ``scan_cap`` (``truncated``, ``budget_stopped``).
     """
     needle = nfc_fold(path_contains) if path_contains else ""
     wanted_types = frozenset(artifact_types) if artifact_types else None
@@ -166,6 +210,7 @@ def filter_artifact_page(
     scanned = 0
     has_more = False
     exhausted = True
+    budget_stopped = False
     if rows_source is None:
         rows_source = iter_artifact_records(payload, payload_path=payload_path, limit=record_limit)
     for record_index, row in rows_source:
@@ -173,6 +218,10 @@ def filter_artifact_page(
             # Checked before scanning the next row (like ``filter_across_kinds``):
             # a scan that ends exactly at the cap is complete, not truncated.
             exhausted = False
+            break
+        if deadline is not None and scanned % BUDGET_CHECK_ROWS == 0 and time.monotonic() >= deadline:
+            exhausted = False
+            budget_stopped = True
             break
         scanned += 1
         if matches(row):
@@ -184,6 +233,8 @@ def filter_artifact_page(
                 rows.append({**row, "record_index": record_index})
             matched += 1
     end = offset + len(rows)
+    total = matched if exhausted else None
+    lower_bound = total_lower_bound(total, matched, has_more)
     page = dict(payload)
     page["artifacts"] = rows
     page["pagination"] = {
@@ -191,7 +242,8 @@ def filter_artifact_page(
         "offset": offset,
         "limit": limit,
         "returned": len(rows),
-        "total": matched if exhausted else None,
+        "total": total,
+        "total_lower_bound": lower_bound,
         "next_offset": end if has_more else None,
         "previous_offset": max(0, offset - limit) if offset > 0 else None,
         "has_more": has_more,
@@ -202,8 +254,11 @@ def filter_artifact_page(
         **({"fields": {key: sorted(values) for key, values in fields.items()}} if fields else {}),
         "scanned": scanned,
         "truncated": not exhausted and not has_more,
+        "budget_stopped": budget_stopped,
     }
-    return page
+    return attach_list_notice(
+        page, list_notice(total=total, lower_bound=lower_bound, scanned=scanned, budget_stopped=budget_stopped)
+    )
 
 
 def row_matcher(
@@ -287,6 +342,7 @@ def filter_across_kinds(
     channels: ChannelFilter | Collection[str] | None = None,
     fields: FieldFilters | None = None,
     row_filter: Callable[[Mapping[str, object]], bool] | None = None,
+    deadline: float | None = None,
 ) -> dict[str, object]:
     """Page filtered rows across kinds (``sources`` order) as one collection (``row_filter``: row conditions).
 
@@ -321,6 +377,7 @@ def filter_across_kinds(
     scanned = 0
     has_more = False
     exhausted = True
+    budget_stopped = False
     last: tuple[str, int] | None = None
     for position in range(start_pos, len(sources)):
         kind, payload, payload_path = sources[position]
@@ -333,6 +390,10 @@ def filter_across_kinds(
         for record_index, row in kind_rows:
             if scanned >= scan_cap:
                 exhausted = False
+                break
+            if deadline is not None and scanned % BUDGET_CHECK_ROWS == 0 and time.monotonic() >= deadline:
+                exhausted = False
+                budget_stopped = True
                 break
             scanned += 1
             if matches(row):
@@ -350,7 +411,9 @@ def filter_across_kinds(
     if not exhausted and last is None and resume is not None:
         next_after = after
     record_count = sum(payload_record_count(payload) for _kind, payload, _path in sources)
-    return {
+    total = matched if exhausted else None
+    lower_bound = total_lower_bound(total, matched, has_more)
+    response: dict[str, object] = {
         "artifacts": {
             kind: {"artifacts": rows_by_kind[kind], "record_count": payload_record_count(payload)}
             for kind, payload, _path in sources
@@ -363,7 +426,9 @@ def filter_across_kinds(
             "returned": len(order),
             "order": order,
             "record_count": record_count,
-            "matched": matched if exhausted else None,
+            "matched": total,
+            "total": total,
+            "total_lower_bound": lower_bound,
             "has_more": has_more or not exhausted,
             "next_offset": base + len(order) if not exhausted else None,
             "next_after": next_after,
@@ -373,9 +438,13 @@ def filter_across_kinds(
             **({"fields": {key: sorted(values) for key, values in fields.items()}} if fields else {}),
             "scanned": scanned,
             "truncated": not exhausted and not has_more,
+            "budget_stopped": budget_stopped,
             **dict(extra or {}),
         },
     }
+    return attach_list_notice(
+        response, list_notice(total=total, lower_bound=lower_bound, scanned=scanned, budget_stopped=budget_stopped)
+    )
 
 
 # Row collections of the files output: ``candidates`` (selected categories)
@@ -468,6 +537,7 @@ def filter_files_by_category(
         "limit": limit,
         "returned": len(page_rows),
         "total": total,
+        "total_lower_bound": total_lower_bound(total, matched, False),
         "matched": total,
         "next_offset": offset + len(page_rows) if has_more else None,
         "previous_offset": max(0, offset - limit) if offset > 0 and limit > 0 else None,
@@ -476,5 +546,8 @@ def filter_files_by_category(
         "categories": sorted(wanted) if wanted else None,
         "scanned": scanned,
         "truncated": not exhausted,
+        "budget_stopped": False,
     }
-    return page
+    return attach_list_notice(
+        page, list_notice(total=total, lower_bound=total_lower_bound(total, matched, False), scanned=scanned, budget_stopped=False)
+    )

@@ -1,10 +1,31 @@
 import { useMemo, useState } from "react";
 import { fetchSourceTextPrefix, isArchiveEntryPath, type SourcePreview } from "../../../api/viewer";
+import { NOTICES } from "../modes";
 import { errorText } from "../useAsync";
 import { countHits, highlight, keywordPattern } from "./Highlight";
 
 export const FULL_TEXT_MAX_BYTES = 2 * 1024 * 1024;
 export const LINE_WINDOW = 2000;
+
+const BINARY_SAMPLE_CHARS = 4096;
+
+/**
+ * Bytes that are not text (r8 T-086, QA-046 "이진을 텍스트로 뿌리지 않음"): any NUL, or more than
+ * 10% control characters (tab / newline / CR / form feed excepted) in the first 4 KiB.
+ */
+export function looksBinary(text: string): boolean {
+  const sample = text.slice(0, BINARY_SAMPLE_CHARS);
+  if (!sample) return false;
+  let controls = 0;
+  for (let index = 0; index < sample.length; index += 1) {
+    const code = sample.charCodeAt(index);
+    if (code === 0) return true;
+    if ((code < 32 && code !== 9 && code !== 10 && code !== 12 && code !== 13) || code === 0xfffd) {
+      controls += 1;
+    }
+  }
+  return controls / sample.length > 0.1;
+}
 
 interface TextLinesProps {
   text: string;
@@ -57,9 +78,11 @@ interface SourceViewProps {
   runId: string;
   preview: SourcePreview;
   terms: string[];
+  /** The one alternative when the bytes are not text: switch to the 헥스 tab. */
+  onShowHex?: () => void;
 }
 
-export function SourceView({ runId, preview, terms }: SourceViewProps) {
+export function SourceView({ runId, preview, terms, onShowHex }: SourceViewProps) {
   const [full, setFull] = useState<{ text: string; complete: boolean; bytes: number } | null>(null);
   const [loadState, setLoadState] = useState<{ busy: boolean; error: string | null }>({
     busy: false,
@@ -67,6 +90,7 @@ export function SourceView({ runId, preview, terms }: SourceViewProps) {
   });
   const archive = isArchiveEntryPath(preview.path) || Boolean(preview.container_path);
   const text = full?.text ?? preview.text ?? "";
+  const binary = useMemo(() => looksBinary(text), [text]);
 
   const loadMore = async () => {
     setLoadState({ busy: true, error: null });
@@ -102,12 +126,24 @@ export function SourceView({ runId, preview, terms }: SourceViewProps) {
           </ul>
         </details>
       ) : null}
-      {text ? (
+      {binary ? (
+        <p className="viewer-note" data-testid="viewer-source-binary">
+          {NOTICES.binary}
+          {onShowHex ? (
+            <>
+              {" — "}
+              <button type="button" className="viewer-tab-notice-action" onClick={onShowHex}>
+                {NOTICES.toHex}
+              </button>
+            </>
+          ) : null}
+        </p>
+      ) : text ? (
         <TextLines text={text} terms={terms} label={`${preview.name} 원본 텍스트`} />
       ) : (
         <p className="viewer-empty">표시할 텍스트가 없습니다.</p>
       )}
-      {preview.truncated && !full ? (
+      {preview.truncated && !full && !binary ? (
         <div className="viewer-more">
           <p className="viewer-note">
             미리보기는 처음 {(preview.text ?? "").length.toLocaleString("ko-KR")}자만 표시합니다.

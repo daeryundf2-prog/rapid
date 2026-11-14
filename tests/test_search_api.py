@@ -325,7 +325,7 @@ class SearchApiTests(unittest.TestCase):
         self.build_index()
         result = self.query("review:relevant")
         self.assertEqual(result["page"]["total"], 0)
-        self.assertIn("케이스 DB가 없어 리뷰 조건과 일치하는 행이 없습니다", result["query"]["parsed"]["warnings"])
+        self.assertIn("케이스 DB가 없어 검토 조건과 일치하는 행이 없습니다", result["query"]["parsed"]["warnings"])
 
     def test_legacy_search_is_deprecated(self) -> None:
         response = self.client.get(self.url("/search"), params={"keyword": "AnyDesk", "ocr": "false"})

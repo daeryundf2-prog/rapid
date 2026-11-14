@@ -18,7 +18,7 @@ import {
   resetGridStore,
 } from "../grid/testSupport";
 import { VIEW_DEFS, viewAvailability, viewDisabledReason } from "./availability";
-import { CARD_HEIGHT, CardView, cardAccessibleName, cardModel } from "./CardView";
+import { CARD_HEIGHT, CardView, cardAccessibleName, cardModel, unknownEventTypeLabel } from "./CardView";
 import {
   CLUSTER_CELL_DEGREES,
   cellEdge,
@@ -98,6 +98,22 @@ describe("view switch registration (cards · map)", () => {
 });
 
 describe("cardModel", () => {
+  it("labels MFT timeline events in Korean, never the raw event id (E01 QA D6)", () => {
+    const model = cardModel(
+      row({
+        rowKey: "t1",
+        title: "파일 생성(SI): Userskim\report.docx",
+        artifactType: "artifact-mft-record-si-created",
+        timestamp: "2025-05-26T10:30:00Z",
+      }),
+      "utc",
+    );
+    expect(model.subtitle).toContain("MFT 레코드 · SI 생성");
+    expect(model.subtitle).not.toContain("artifact-");
+    expect(unknownEventTypeLabel("artifact-zz-unknown-type-si-created")).toBe("아티팩트 이벤트 · SI 생성");
+    expect(unknownEventTypeLabel("artifact-zz-unknown")).toBe("아티팩트 이벤트");
+  });
+
   it("builds title, Korean subtitle, right-aligned date and flag chips", () => {
     const model = cardModel(
       row({

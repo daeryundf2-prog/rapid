@@ -339,12 +339,12 @@ describe("domain mapping table (parser-quality r1)", () => {
     expect(devices.some((n) => n.target.types?.includes("windows-network-interface"))).toBe(false);
   });
 
-  it("파일시스템 lists the inventory (전체 파일(인벤토리), 기타 (스캔 제외)) as scope=inventory routes", () => {
+  it("NTFS·파일시스템 아티팩트 lists the inventory (인벤토리, 기타 (스캔 제외)) as scope=inventory routes", () => {
     const fs = DOMAINS.find((d) => d.id === "filesystem")?.nodes ?? [];
     const inv = fs.find((n) => n.id === "fs-inventory");
     const other = fs.find((n) => n.id === "fs-other");
     expect(inv).toMatchObject({
-      label: "전체 파일(인벤토리)",
+      label: "인벤토리(스캔한 모든 파일)",
       target: { collection: "files", fileScope: "inventory" },
     });
     expect(other).toMatchObject({

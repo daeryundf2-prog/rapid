@@ -342,7 +342,14 @@ def build_mobile_vendor_export_report_grade_validation_plan(
     mapper_manifest: Mapping[str, object],
 ) -> dict[str, object]:
     registry = VENDOR_SCHEMA_REGISTRY.get(source_tool, {})
-    output_root = path.parent / f"{path.stem}-rapidtriage-validation"
+    # Suggested command text only: the validation outputs go beside the vendor export folder,
+    # never inside it (R7 / IS-068, T-033). Collection logic is unchanged.
+    export_dir = path.parent
+    output_root = (
+        export_dir.parent / f"{export_dir.name}-{path.stem}-rapidtriage-validation"
+        if export_dir.parent != export_dir
+        else Path("<output-folder-outside-evidence>") / f"{path.stem}-rapidtriage-validation"
+    )
     vendor_version = optional_text(vendor_manifest_profile.get("vendor_tool_version"))
     source_hash_matches = bool(vendor_manifest_profile.get("source_hash_matches_manifest"))
     original_hash_present = bool(vendor_manifest_profile.get("original_acquisition_hash_present"))

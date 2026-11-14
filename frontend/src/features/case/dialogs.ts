@@ -1,5 +1,14 @@
 import { create } from "zustand";
 import { pushToast } from "../../components/toastStore";
+import type { ExportKind } from "./exports";
+
+/**
+ * One name for "remove a run from the registry" (T-034): the command palette, the case picker's row
+ * menu and the confirmation dialog title all say this, so the analyst sees the action they chose.
+ */
+export const DELETE_RUN_TITLE = "처리 결과 삭제";
+/** Menu / palette label of the same action (`…` = a confirmation follows). */
+export const DELETE_RUN_LABEL = `${DELETE_RUN_TITLE}…`;
 
 export type CaseDialogName =
   | "run"
@@ -23,6 +32,8 @@ export interface CaseDialogTarget {
   runId?: string;
   reasonId?: string;
   reasonLabel?: string;
+  /** 보고서 내보내기: the kind chosen when the dialog opens. */
+  exportKind?: ExportKind;
 }
 
 interface CaseDialogState {

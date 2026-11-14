@@ -14,6 +14,9 @@ from .case_db import (
     case_db_fts_optimization_assessment,
     case_db_search_index_health,
 )
+from .cli_constants import (
+    DEFAULT_LARGE_CASE_P95_THRESHOLD_MS,
+)
 from .docs import write_result
 from .large_case_controls import (
     build_duplicate_grouping_contract,
@@ -27,7 +30,6 @@ LARGE_CASE_READINESS_VERSION = "large-case-readiness-v1"
 LARGE_SCALE_PERFORMANCE_MATRIX_VERSION = "large-scale-performance-readiness-matrix-v1"
 LARGE_CASE_READINESS_ITEM_NUMBERS = list(range(66, 81))
 LARGE_SCALE_TARGET_RECORD_COUNTS = [100_000, 1_000_000, 10_000_000]
-DEFAULT_LARGE_CASE_P95_THRESHOLD_MS = 1_000.0
 CASE_DB_PROFILE_TABLES = [
     "case_record",
     "evidence_source",

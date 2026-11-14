@@ -4,6 +4,7 @@ data, windows-search-index early exit, synthetic-media skip/budget."""
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 import tempfile
 import time
@@ -32,6 +33,7 @@ from rapidtriage.core.case_db.search import search_artifacts
 from rapidtriage.core.run.persist import build_run_case_db
 from rapidtriage.core.search_budget import SearchBudget
 from rapidtriage.core.search_fts import fts_unified_matches
+from tests._timing import time_budget
 
 NFD_NAME = unicodedata.normalize("NFD", "계약서")
 
@@ -242,7 +244,7 @@ class BulkPersistThroughputTests(unittest.TestCase):
             elapsed = time.perf_counter() - started
             self.assertEqual(record["status"], "completed", record.get("error"))
             self.assertEqual(record["counts"]["artifact_count"], self.ARTIFACTS)
-            self.assertLess(elapsed, self.BUDGET_SECONDS)
+            self.assertLess(elapsed, time_budget(self.BUDGET_SECONDS))
             database = CaseDatabase(out_dir / "rapidtriage-case.db")
             with database.connect() as connection:
                 for row_id in (1, 777, self.ARTIFACTS):
@@ -277,7 +279,7 @@ class SearchIndexEarlyExitTests(unittest.TestCase):
                 elapsed = time.perf_counter() - started
             self.assertEqual(records, [])
             self.assertEqual(resolve.call_count, 0)
-            self.assertLess(elapsed, 5.0)
+            self.assertLess(elapsed, time_budget(5.0))
             export = root / "exports" / "windows-search-export.csv"
             export.parent.mkdir()
             export.write_text("System.ItemPathDisplay,System.ItemName\nC:/Users/u/a.txt,a.txt\n", encoding="utf-8")
@@ -306,11 +308,21 @@ class SyntheticMediaTimingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._tree(root, 200)
-            with mock.patch.object(synthetic_media, "deepfake_lens_module", return_value=None):
+            with mock.patch.object(synthetic_media, "deepfake_lens_module", return_value=None), \
+                    mock.patch.object(synthetic_media.shutil, "which", side_effect=shutil.which) as which:
                 started = time.perf_counter()
+                cpu_started = time.thread_time()
                 records = list(synthetic_media.SyntheticMediaProvider().collect(root))
+                cpu = time.thread_time() - cpu_started
                 elapsed = time.perf_counter() - started
-            self.assertLess(elapsed, 1.0)
+            # The regression guarded here is per-file work on the skip path (e.g. one shutil.which
+            # PATH x PATHEXT walk per candidate, ~50 ms each = ~10 s for these 200 files). That is
+            # checked by count and by this thread's CPU time, which waiting for a busy box does not
+            # inflate; a wall-clock "< 1 s" failed at 2.3 s under an 8-worker run (T-148). The wall
+            # bound stays only as a coarse backstop for a hang.
+            self.assertLessEqual(which.call_count, 1)
+            self.assertLess(cpu, 2.0)
+            self.assertLess(elapsed, time_budget(30.0))
             self.assertEqual(len(records), 1)
             details = records[0].details
             self.assertEqual(details["skip_reason"], synthetic_media.SYNTHETIC_MEDIA_SKIP_REASON)

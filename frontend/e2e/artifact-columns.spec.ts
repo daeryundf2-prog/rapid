@@ -35,10 +35,13 @@ test.beforeAll(async ({ request }) => {
     headers: HEADERS,
     data: { output_dir: outputDir, overwrite: true, read_only: true },
   });
-  if (created.status() !== 201) return;
+  // Fail loudly: a silent skip here hides a broken server (e.g. 403 PATH_OUTSIDE_ALLOWED_ROOT).
+  if (created.status() !== 201) {
+    throw new Error(`POST /api/sample-case/run returned ${created.status()}: ${await created.text()}`);
+  }
   const list = await request.get("/api/runs", { headers: HEADERS });
   runId = ((await list.json()) as { runs: Array<{ run_id: string }> }).runs[0]?.run_id ?? "";
-  if (!runId) return;
+  if (!runId) throw new Error("sample case was created (201) but GET /api/runs returned no run");
   const all = (await artifacts(request, runId, "limit=20")) ?? {};
   const kinds = Object.keys(all).filter((k) => (all[k]?.artifacts?.length ?? 0) >= 2);
   kind = kinds.includes("windows-prefetch") ? "windows-prefetch" : (kinds[0] ?? "");

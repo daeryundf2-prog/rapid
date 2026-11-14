@@ -6,7 +6,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { GridRow } from "../../../contracts/collection";
 import { matchesColumnFilter } from "../../filters/columnFilters";
-import { FALLBACK_CATALOG, familyById, setCatalog, typeValueLabel } from "../../flags/catalog";
+import { familyById, setCatalog, typeValueLabel } from "../../flags/catalog";
+import { FALLBACK_CATALOG } from "../../flags/familiesFallback";
 import { flagCitation } from "../../flags/flags";
 import { recordLayout } from "../../viewer/fieldSheets";
 import { KIND_COLUMNS, MESSENGER_DIRECTION_KO } from "./artifacts";

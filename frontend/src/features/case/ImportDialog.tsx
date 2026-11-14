@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { importRun } from "../../api/runs";
+import { useWriteBlock } from "../../shell/readOnly";
 import { navigate } from "../tree/adapter";
 import { BrowsePanel } from "./BrowsePanel";
 import { ErrorText } from "./ErrorText";
@@ -30,11 +31,14 @@ export function ImportDialog({
     },
   });
 
-  const reason = runIsActive
+  // T-348: a read-only result / server says why instead of answering with a 409.
+  const writeBlock = useWriteBlock("server");
+  const reasonOwn = runIsActive
     ? "실행 중 런이 있습니다"
     : !outputDir.trim()
       ? "불러올 런 출력 폴더를 입력하세요."
       : undefined;
+  const reason = writeBlock ?? reasonOwn;
 
   return (
     <Modal title="불러오기" onClose={onClose} wide>

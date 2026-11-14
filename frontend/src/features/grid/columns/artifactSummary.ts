@@ -1,3 +1,4 @@
+import { aiArtifactSummary } from "./ai";
 import { baseName, str, strOrNull } from "./common";
 
 export interface ArtifactSummary {
@@ -69,6 +70,9 @@ export function summarizeArtifact(
 ): ArtifactSummary {
   const type = artifactType ?? "";
   const name = baseName(path);
+  // R7 AI 사용 (갈래 D): session title, "역할: 본문", "호출 도구 명령", "작업 · 파일" …
+  const ai = aiArtifactSummary(type, details, path);
+  if (ai) return ai;
   if (type === "eventlog-event") {
     const eventId = str(details.event_id);
     const channel = eventChannel(details);

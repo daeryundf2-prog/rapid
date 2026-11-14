@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import hashlib
 import json
 from collections import Counter
@@ -12,6 +11,7 @@ from collections.abc import (
 )
 from pathlib import Path
 
+from ..clock import now_local_iso
 from ..docs import write_result
 from ..forensic_accuracy import build_accuracy_gate
 from .constants import (
@@ -58,7 +58,7 @@ def record_run_checkpoint(
         "size_bytes": path.stat().st_size if path.is_file() else None,
         "reused": reused,
         **({"plan_status": plan_status, "plan_reason": plan_reason or ""} if plan_status else {}),
-        "recorded_at": dt.datetime.now().isoformat(),
+        "recorded_at": now_local_iso(),
         "commercial_gap_ids": [CHECKPOINT_RESUME_GAP_ID],
         "core_accuracy_gates": checkpoint_resume_core_accuracy_gates(
             checkpoints=[{
@@ -139,7 +139,7 @@ def write_run_checkpoints(
     ]
     payload = {
         "command": "run-checkpoints",
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "output_dir": str(output_dir),
         "resume": {
             "requested": resume_requested,

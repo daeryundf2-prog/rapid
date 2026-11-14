@@ -115,6 +115,8 @@ export interface TagBatchResult {
     matched_file_rows: number;
     added_rows: number;
     hashless_targets: number;
+    /** Same-hash rows left out because they are empty (zero bytes / empty-file digest), T-183. */
+    skipped_empty?: number;
     cap: number;
   };
 }

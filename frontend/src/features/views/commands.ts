@@ -10,13 +10,19 @@ import { registerCommands } from "../../commands/registry";
 import type { Command } from "../../contracts/command";
 import type { ExplorerView } from "../../router";
 import { useAppStore } from "../../state/store";
+import { aiConversationPatch } from "../ai/aiChat";
+import { useGridLocalStore } from "../grid/adapter";
 import { VIEW_DEFS, viewDisabledReason } from "./availability";
 
 export function switchView(view: ExplorerView): void {
   const state = useAppStore.getState();
   const next = view === "columns" ? undefined : view;
   if ((state.route.view ?? undefined) === next) return;
-  state.patchRoute({ view: next });
+  // 대화 보기 with an AI session / message row focused opens that exact session (session id + tool),
+  // like the 메타 tab's 대화 보기 link — never every message under "세션 미상" (verify T-190).
+  const scope =
+    next === "chat" ? aiConversationPatch(state.route, useGridLocalStore.getState().focusedRow) : null;
+  state.patchRoute({ view: next, ...(scope ?? {}) });
 }
 
 export function viewCommands(): Command[] {

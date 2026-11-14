@@ -19,6 +19,7 @@ import { barsFromRows, barsFromTree, rangeOf, rebucket, type TimelineHistogramPa
 import { loadThumbBlob, THUMB_CONCURRENCY, THUMB_SIZE, ThumbnailView } from "./ThumbnailView";
 import { createLimiter, gridMove, isImageRow, sortThumbs } from "./thumbnails";
 import { useToolbarLead } from "./toolbarSlot";
+import { autoLoadPending } from "./useViewRows";
 
 let restoreLayout: () => void = () => {};
 
@@ -163,7 +164,7 @@ describe("ViewSwitch", () => {
     expect(screen.getByRole("toolbar", { name: "보기 전환" }).closest(".view-switch-row")).toBeTruthy();
   });
 
-  it("a node with only the column view (리뷰보드) shows no switch (visual-polish S2)", () => {
+  it("a node with only the column view (검토 목록) shows no switch (visual-polish S2)", () => {
     routeTo("review");
     renderQ(
       <ViewSwitch>
@@ -373,6 +374,37 @@ describe("ThumbnailView", () => {
     );
     const thumb = calls.find((c) => c.url.includes("/source-thumbnail"));
     expect(new URL(thumb?.url ?? "", "http://x").searchParams.get("size")).toBe(String(THUMB_SIZE));
+  });
+
+  it("settles the toolbar once enough tiles are loaded though the server has more rows (r8 verify F4)", async () => {
+    installFetch({
+      "/files": () =>
+        jsonResponse({
+          candidates: Array.from({ length: 60 }, (_, i) => ({
+            path: `C:/case/img${String(i).padStart(2, "0")}.jpg`,
+            name: `img${String(i).padStart(2, "0")}.jpg`,
+            extension: "jpg",
+          })),
+          total: 100_000,
+        }),
+      "/artifacts": () => jsonResponse({ artifacts: {} }),
+      "/source-thumbnail": () => new Response("thumb", { status: 200 }),
+    });
+    renderQ(<ThumbnailView />);
+    expect(await screen.findByRole("grid", { name: /이미지 60개/ })).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByText(/이미지 60건 \(\d+행 검사\)/).textContent).not.toContain("불러오는 중"),
+    );
+  });
+
+  it("autoLoadPending: in flight or still auto-paging only (r8 verify F4)", () => {
+    const base = { isFetching: false, canLoadMore: true, loadedCount: 100, error: null };
+    expect(autoLoadPending(base, false, 1000)).toBe(false); // enough rows: more on the server is not loading
+    expect(autoLoadPending(base, true, 1000)).toBe(true);
+    expect(autoLoadPending({ ...base, loadedCount: 1000 }, true, 1000)).toBe(false); // capped → 더 불러오기
+    expect(autoLoadPending({ ...base, error: new Error("x") }, true, 1000)).toBe(false); // failed page
+    expect(autoLoadPending({ ...base, canLoadMore: false }, true, 1000)).toBe(false);
+    expect(autoLoadPending({ ...base, isFetching: true }, false, 1000)).toBe(true);
   });
 
   it("explains an empty node", async () => {
@@ -846,11 +878,32 @@ describe("HistogramView (timeline)", () => {
 
   it("emits rapidtriage:filter for a dragged range and for keyboard selection", async () => {
     useGridLocalStore.setState((s) => ({ route: { ...s.route, collection: { id: "timeline" } } }));
-    installFetch({ "/timeline-histogram": () => jsonResponse(timeline) });
+    // The server ranges the buckets (`from` / `to`, R7 S1 re-review): the mock keeps the buckets
+    // inside the requested range and counts the rest as `range_excluded_events`.
+    const requested: Array<{ from: string | null; to: string | null }> = [];
+    installFetch({
+      "/timeline-histogram": (url) => {
+        const from = url.searchParams.get("from");
+        const to = url.searchParams.get("to");
+        requested.push({ from, to });
+        if (!from && !to) return jsonResponse(timeline);
+        const lo = from ? Date.parse(from) : -Infinity;
+        const hi = to ? Date.parse(to) : Infinity;
+        const inside = timeline.buckets.filter((b) => Date.parse(b.start) >= lo && Date.parse(b.start) <= hi);
+        const excluded =
+          timeline.buckets.reduce((n, b) => n + b.count, 0) - inside.reduce((n, b) => n + b.count, 0);
+        return jsonResponse({
+          ...timeline,
+          buckets: inside.map((b, index) => ({ ...b, index })),
+          bucket_count: inside.length,
+          range_excluded_events: excluded,
+        });
+      },
+    });
     const events = captureFilterEvents();
     renderQ(<HistogramView />);
     const group = await screen.findByRole("group", { name: /타임라인 히스토그램, 막대 3개/ });
-    const bars = Array.from(group.querySelectorAll<HTMLButtonElement>("button.hist-bar"));
+    let bars = Array.from(group.querySelectorAll<HTMLButtonElement>("button.hist-bar"));
     expect(bars).toHaveLength(3);
     expect(bars[1]?.getAttribute("aria-label")).toMatch(/6건$/);
     expect(bars.filter((b) => b.tabIndex === 0)).toHaveLength(1);
@@ -862,6 +915,18 @@ describe("HistogramView (timeline)", () => {
       from: "2026-10-01T10:00:00.000Z",
       to: "2026-10-01T11:59:59.999Z",
     });
+
+    // The range condition now shapes the bars too (C-V2): only the two hours inside it remain.
+    await screen.findByRole("group", { name: /타임라인 히스토그램, 막대 2개/ });
+    expect(screen.getByText(/시간 범위 안만/)).toBeTruthy();
+    // Ranged on the server, never clipped in the browser.
+    expect(requested.at(-1)?.from).toBe("2026-10-01T10:00:00.000Z");
+    expect(requested.at(-1)?.to).toBeTruthy();
+    act(() => {
+      window.dispatchEvent(new CustomEvent("rapidtriage:filter", { detail: { from: null, to: null } }));
+    });
+    await screen.findByRole("group", { name: /타임라인 히스토그램, 막대 3개/ });
+    bars = Array.from(document.querySelectorAll<HTMLButtonElement>("button.hist-bar"));
 
     act(() => bars[1]?.focus());
     fireEvent.keyDown(bars[1] as HTMLElement, { key: "Escape" }); // clears the dragged range

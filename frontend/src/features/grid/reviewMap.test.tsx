@@ -47,6 +47,48 @@ describe("review map overlay", () => {
     expect(overlayReview(hit, map).reviewStatus).toBe("relevant");
   });
 
+  it("a grouped timeline row shows a mark stored on any member (UX-round review)", () => {
+    const timelineMark = (index: number, extra: Partial<ReviewMapMark> = {}) =>
+      mark({
+        collection: "timeline",
+        kind: "",
+        locator: `/events/${index}`,
+        target_type: "timeline_event",
+        ...extra,
+      });
+    const grouped = (leader: number, members: number[]) =>
+      COLLECTIONS.timeline.mapRow(
+        {
+          record_index: leader,
+          timestamp: "2024-03-01T10:00:00Z",
+          summary: "a",
+          group_members: members,
+          source_count: 2,
+        },
+        leader,
+        { ref: { id: "timeline" } },
+      );
+    // Marked while ungrouped (or under another leader): event 5; the group row now leads with 3.
+    const map = buildReviewMap([timelineMark(5, { status: "relevant", tags: ["핵심"] })]);
+    const row = grouped(3, [3, 5, 9]);
+    expect(row.ref.locator).toBe("/events/3");
+    expect(overlayReview(row, map)).toMatchObject({ reviewStatus: "relevant", tags: ["핵심"] });
+    // The leader's own mark wins over a member's.
+    const both = buildReviewMap([
+      timelineMark(5, { status: "relevant" }),
+      timelineMark(3, { status: "excluded" }),
+    ]);
+    expect(overlayReview(row, both).reviewStatus).toBe("excluded");
+    // A cleared toggle on one member does not hide a real mark on another.
+    const cleared = buildReviewMap([
+      timelineMark(5, { status: "unreviewed" }),
+      timelineMark(9, { status: "needs-review" }),
+    ]);
+    expect(overlayReview(row, cleared).reviewStatus).toBe("needs-review");
+    // Members outside this row (or a non-grouped row) are not looked at.
+    expect(overlayReview(grouped(4, [4, 6]), map).reviewStatus ?? null).toBeNull();
+  });
+
   it("grid rows show the stored case-DB status after a reload (GET /review-map)", async () => {
     installFetch({
       "/files": filesHandler(5),

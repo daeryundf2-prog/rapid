@@ -467,7 +467,7 @@ def load_or_build(sources: Sequence[Source], output_dir: Path | None) -> GeoInde
         if stored is not None:
             return stored
     index = scan_geo_index(sources, stamp=stamp)
-    if output_dir is None or not index_persist_enabled():
+    if output_dir is None or not index_persist_enabled(output_dir):
         index.source = "memory"
         return index
     if sources_stamp(sources) != stamp:

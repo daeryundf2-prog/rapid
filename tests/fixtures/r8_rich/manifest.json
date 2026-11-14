@@ -1,0 +1,129 @@
+{
+  "acquisition_copy_time": "2026-03-09T01:00:00+00:00",
+  "budget_trigger": {
+    "artifact_type": "mft-entry",
+    "env": {
+      "RAPIDTRIAGE_SEARCH_SCAN_BUDGET_SECONDS": "0.01"
+    },
+    "kind": "windows-filesystem",
+    "rows": 40000
+  },
+  "copy_time_rows": 6,
+  "expected_log_scan": {
+    "by_pattern": {
+      "aws_access_key": 1,
+      "card_number": 1,
+      "github_token": 1,
+      "kr_resident_number": 2,
+      "openai_style_key": 1,
+      "secret_assignment": 1
+    },
+    "total_hits": 7
+  },
+  "failed_isolated_step": "artifacts-windows-shellbags",
+  "generator_version": "1",
+  "kind_rows": {
+    "ai-agent": 22,
+    "browser": 48,
+    "cloud-sync": 10,
+    "email": 18,
+    "eventlog": 25,
+    "generic-documents": 24,
+    "kakaotalk-windows": 30,
+    "mobile-export": 6,
+    "recent-files": 18,
+    "windows-execution": 10,
+    "windows-filesystem": 40024,
+    "windows-os-account": 2,
+    "windows-prefetch": 15,
+    "windows-registry": 3,
+    "windows-system": 3
+  },
+  "output": {
+    "file_count": 33,
+    "total_bytes": 15028000,
+    "tree_sha256": "7d983db789604392ff50e7cee94defa51b52e1ab09c05122bbdee3a792fd0584"
+  },
+  "planted_fakes": {
+    "aws_doc_example_key": 1,
+    "github_style_fake_token": 1,
+    "invalid_rrn_impossible_date": 2,
+    "luhn_invalid_card": 1,
+    "luhn_valid_published_test_card": 1,
+    "openai_style_fake_key": 1,
+    "password_assignment_fake": 1
+  },
+  "release_evidence": false,
+  "schema": "r8-rich-fixture/1",
+  "seed": 8,
+  "synthetic_only": true,
+  "tier1_cards": {
+    "accounts_logon": {
+      "by_kind_type": {
+        "eventlog/logon-failure": 5,
+        "eventlog/logon-success": 20,
+        "windows-os-account/windows-user-profile": 2
+      },
+      "rows": 27
+    },
+    "ai_usage": {
+      "by_kind_type": {
+        "ai-agent/ai-agent-message": 16,
+        "ai-agent/ai-agent-session": 4,
+        "ai-agent/ai-credential-presence": 2
+      },
+      "rows": 22
+    },
+    "deleted": {
+      "by_kind_type": {
+        "windows-filesystem/deleted-mft-entry": 8,
+        "windows-filesystem/recycle-bin-entry": 6,
+        "windows-filesystem/usn-record": 10
+      },
+      "rows": 24
+    },
+    "documents": {
+      "by_kind_type": {
+        "generic-documents/office-document": 24,
+        "recent-files/jumplist-entry": 6,
+        "recent-files/lnk-file": 12
+      },
+      "rows": 42
+    },
+    "email": {
+      "by_kind_type": {
+        "email/email-message": 18
+      },
+      "rows": 18
+    },
+    "execution": {
+      "by_kind_type": {
+        "windows-execution/amcache-entry": 10,
+        "windows-prefetch/prefetch-file": 15
+      },
+      "rows": 25
+    },
+    "exfil": {
+      "by_kind_type": {
+        "cloud-sync/cloud-sync-file": 10,
+        "windows-registry/windows-usb-device": 3,
+        "windows-system/usb-setupapi-device-install-candidate": 3
+      },
+      "rows": 16
+    },
+    "messenger": {
+      "by_kind_type": {
+        "kakaotalk-windows/kakaotalk-message": 30,
+        "mobile-export/mobile-message": 6
+      },
+      "rows": 36
+    },
+    "web": {
+      "by_kind_type": {
+        "browser/browser-download": 8,
+        "browser/browser-history": 40
+      },
+      "rows": 48
+    }
+  }
+}

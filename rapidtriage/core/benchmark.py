@@ -11,13 +11,15 @@ import tracemalloc
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from .cli_constants import (
+    DEFAULT_BENCHMARK_FILE_COUNT,
+    DEFAULT_BENCHMARK_KEYWORD,
+)
 from .docs import write_result
 from .forensic_accuracy import build_accuracy_gate
 from .run import run_triage_mode
 from .search import run_unified_search, stable_search_sha256
 
-DEFAULT_BENCHMARK_FILE_COUNT = 100
-DEFAULT_BENCHMARK_KEYWORD = "password"
 DEFAULT_STRESS_SIZE_TB = (1, 5, 10)
 DEFAULT_BENCHMARK_THRESHOLDS = {
     "search_p95_seconds": 2.0,

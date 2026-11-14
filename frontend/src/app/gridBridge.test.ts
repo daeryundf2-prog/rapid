@@ -116,7 +116,7 @@ describe("viewer only where a viewer is mounted (review B2-2)", () => {
   });
 });
 
-describe("검토 리뷰 상태 keeps the other filters (review B2-5)", () => {
+describe("검토 toolbar 검토 상태 keeps the other filters (review B2-5)", () => {
   it("changing the status patches the route instead of opening a clean one", () => {
     s().navigate({
       runId: "r1",

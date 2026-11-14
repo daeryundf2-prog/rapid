@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from .credential_stores import is_credential_store_path
 from .evidence import ADAPTERS
 
 BROWSE_ENTRY_LIMIT = 400
@@ -69,11 +70,15 @@ def browse_directory(
     *,
     show_hidden: bool = False,
     limit: int = BROWSE_ENTRY_LIMIT,
+    hide_credential_stores: bool = False,
 ) -> dict[str, object]:
     """List a directory for the path picker. Directories sort first.
 
     Only names, kinds, sizes and evidence-suffix flags are returned; file
     contents are never read. ``limit`` bounds entries per directory.
+    ``hide_credential_stores`` (remote browsing, T-350) leaves out well-known
+    credential stores (``core/credential_stores.py``) even with ``show_hidden``;
+    only their number is reported (``credential_hidden_count``).
     """
     resolved = Path(path).expanduser() if path else Path.home()
     try:
@@ -91,6 +96,7 @@ def browse_directory(
     rows: list[dict[str, object]] = []
     truncated = False
     skipped_hidden = 0
+    skipped_credential = 0
     try:
         children = sorted(
             resolved.iterdir(),
@@ -102,6 +108,9 @@ def browse_directory(
         if len(rows) >= limit:
             truncated = True
             break
+        if hide_credential_stores and is_credential_store_path(child):
+            skipped_credential += 1
+            continue
         if not show_hidden and child.name.startswith("."):
             skipped_hidden += 1
             continue
@@ -125,6 +134,7 @@ def browse_directory(
         rows.append(entry)
 
     parent = resolved.parent
+    extra: dict[str, object] = {"credential_hidden_count": skipped_credential} if hide_credential_stores else {}
     return {
         "profile_version": BROWSE_PROFILE_VERSION,
         "path": str(resolved),
@@ -137,4 +147,5 @@ def browse_directory(
         "truncated": truncated,
         "hidden_count": skipped_hidden,
         "limit": limit,
+        **extra,
     }

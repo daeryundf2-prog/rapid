@@ -8,6 +8,7 @@ import warnings
 from collections.abc import Mapping
 from pathlib import Path
 
+from .ai_agents import AiAgentsProvider
 from .android import AndroidApkProvider
 from .cloud import CloudExportProvider
 from .cloud_sync import CloudSyncClientsProvider
@@ -98,6 +99,7 @@ def clear_collect_cache() -> None:
 def _builtin_providers() -> list[object]:
     return [
         GenericDocumentArtifactProvider(),
+        AiAgentsProvider(),  # R7 stage 3.5: AI usage records
         AndroidApkProvider(),
         CloudExportProvider(),
         CloudSyncClientsProvider(),

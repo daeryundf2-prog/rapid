@@ -18,8 +18,11 @@ max_items: number
 }
 summary: {
 case_bookmark_count: number
+report_candidate_count?: number
 hashed_item_count: number
 skipped_count: number
+max_items_skipped_count?: number
+truncated?: boolean
 total_size: number
 }
 items: {

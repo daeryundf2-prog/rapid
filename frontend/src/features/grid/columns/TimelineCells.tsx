@@ -1,8 +1,45 @@
 import type { ReactNode } from "react";
 import type { GridRow } from "../../../contracts/collection";
+import { formatTimestamp } from "../../../utils/time";
+
+/**
+ * 시각 열 width (T-175, r8 design system: "시각 열 176px 고정"): the column neither grows nor
+ * shrinks, and its cell text ("YYYY-MM-DD HH:MM:SS") always fits.
+ */
+export const TIME_COLUMN_WIDTH = 176;
+
+/**
+ * A 시각 cell's text: "YYYY-MM-DD HH:MM:SS" in the display zone, without the zone suffix (the zone
+ * stays in the tooltip's full reading), so a fixed 176px cell is never truncated. "" when empty.
+ */
+export function gridTimeText(value: unknown, tz: string): string {
+  if (typeof value !== "string" && typeof value !== "number") return "";
+  if (value === "") return "";
+  return formatTimestamp(value, tz);
+}
 
 /** Separator of `fields.timeKinds` (the Korean time kinds of one event, primary first). */
 export const TIME_KINDS_SEPARATOR = " · ";
+
+/**
+ * 출처 N cell (timeline display groups, `group=1`): a chip with the number of sources that recorded
+ * the same target at the same second with the same kind of time; nothing for a single source.
+ */
+export function sourceCountCell(row: GridRow): ReactNode {
+  const count = typeof row.fields.sourceCount === "number" ? row.fields.sourceCount : 1;
+  if (count <= 1) {
+    return (
+      <span className="grid-cell-empty" aria-hidden="true">
+        —
+      </span>
+    );
+  }
+  return (
+    <span className="grid-tag-chip" data-testid="timeline-source-count">
+      출처 {count}
+    </span>
+  );
+}
 
 /**
  * 시각 종류 cell (parser-quality r2 `labels[]`): the primary kind, then a compact "+n" chip when

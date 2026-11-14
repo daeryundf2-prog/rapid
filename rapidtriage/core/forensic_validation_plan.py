@@ -6,6 +6,10 @@ import json
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
+from .cli_constants import (
+    DEFAULT_FORENSIC_VALIDATION_ITEMS,
+    DEFAULT_FORENSIC_VALIDATION_PACK_ITEMS,
+)
 from .commercial_readiness import build_commercial_readiness_report, parse_item_range
 from .docs import write_result
 from .forensic_accuracy import accuracy_profile_for_item
@@ -13,8 +17,6 @@ from .forensic_accuracy import accuracy_profile_for_item
 FORENSIC_VALIDATION_PLAN_VERSION = "forensic-validation-plan-v1"
 FORENSIC_VALIDATION_PACK_VERSION = "forensic-validation-pack-v1"
 FORENSIC_VALIDATION_BATCHES_VERSION = "forensic-validation-batches-v1"
-DEFAULT_FORENSIC_VALIDATION_ITEMS = "1-120"
-DEFAULT_FORENSIC_VALIDATION_PACK_ITEMS = "1-5"
 
 
 def build_forensic_validation_plan(

@@ -19,6 +19,38 @@ Deviations from the plan text (documented in docs/plans/search-2026-10-13.md §3
   ``path:``/``under:`` match ``path_fold`` or ``path2_fold``.
 * ``truncated``: 1 when any value, list or the row text was cut at a cap
   (counted per field in ``summary.skipped`` / ``summary.skipped_fields``).
+* ``search_bigram`` (index v3, R7 S2): the trigram index cannot serve 2-character
+  terms, so a contentless FTS5 table (``tokenize='ascii'``, ``detail=none``)
+  holds, per primary row, every distinct pair of adjacent non-ASCII characters
+  of ``text`` as one token (``근로계약서`` -> ``근로 로계 계약 약서``). The
+  ``ascii`` tokenizer keeps non-ASCII characters verbatim (no folding), so
+  ``MATCH '"계약"'`` returns exactly the rows whose text contains ``계약`` -- the
+  same rows as the ``instr`` scan. 2-character terms with an ASCII character and
+  1-character terms still scan (budgeted, with a warning). ``meta.bigram`` names
+  the pair rule; a v2 index (no table) stays readable and is reported stale.
+* ``text_fold`` (index v4, R7 S2 review #2): SQLite ``LIKE``/``lower``/``instr`` fold
+  only ASCII, so ``ÉCOLE``, full-width ``Ａ``, Greek/Cyrillic capitals and ``ß``
+  (casefold ``ss``) never matched a v1-style (NFC + casefold) keyword. ``text_fold``
+  holds ``casefold(text)`` only where that differs from the ASCII-lowered text (a
+  Korean/ASCII row keeps it NULL: no copy), and ``search_text`` indexes the view
+  ``search_text_src`` (``COALESCE(text_fold, text)``); keywords are folded the same
+  way and the bigram pairs come from the folded text. ``meta.fold`` names the rule;
+  a v2/v3 index stays readable (ASCII-only folding) and is reported stale.
+* ``ts_text`` (index v4, review #1): the record's own time as v1 shows it
+  (``search_hits.record_time``: files grid 수정 time, documents ``modified_at``,
+  artifacts the first ``_TIME_KEYS`` member of details/record), spelled as the
+  record spells it, on the primary row. Console hits show it (v1 hit ``timestamp``);
+  ``ts`` stays the per-kind epoch time rows for sorting and time filters.
+* ``search_entity_value`` / ``search_entity`` (index v5, R7 lane B): named entities
+  (주민등록번호·카드·전화·계좌·사업자/법인등록번호·여권·이메일·IP·호스트, :mod:`.patterns`).
+  A value row holds only ``value_sha256`` (32-byte BLOB), the mask, ``verified`` and, for IPs,
+  a fixed-width hex ``net`` key (CIDR ranges); a posting ties a value to a primary row
+  (``source``: title/path/body/meta). The stored row text, title, paths, ``fields_json`` and
+  ``search_field`` values carry the masks instead of the personal numbers.
+  ``search_doc.entity_mask`` is the row's kind bit set (result facets) and ``pii_count`` its
+  number of distinct personal values. The language of document and mail/messenger rows is a
+  ``search_field`` ``lang`` row (ko/ja/zh/en/ru/mixed). ``meta.entities`` names the rule; a v4
+  index stays readable (its entity fields answer 409) and is reported stale.
 """
 
 from __future__ import annotations
@@ -28,7 +60,15 @@ from pathlib import Path
 
 INDEX_FILE_NAME = "rapidtriage-search.db"
 BUILDING_SUFFIX = ".building"
-INDEX_VERSION = "search-index-v2"
+INDEX_VERSION = "search-index-v5"
+# Older formats the engine still reads (a v2 index has no ``search_bigram``: its
+# 2-character terms scan and the status asks for a rebuild).
+READABLE_INDEX_VERSIONS = frozenset({"search-index-v2", "search-index-v3", "search-index-v4", INDEX_VERSION})
+BIGRAM_RULE = "nonascii-pairs-v1"
+BIGRAM_SQL = "CREATE VIRTUAL TABLE IF NOT EXISTS search_bigram USING fts5(g, content='', tokenize='ascii', detail=none)"
+FOLD_RULE = "nfc-casefold-v1"
+# The full-text index reads the folded text where the row has one (index v4).
+FOLD_VIEW_SQL = "CREATE VIEW IF NOT EXISTS search_text_src AS SELECT doc_id, COALESCE(text_fold, text) AS text FROM search_doc"
 # Bump when the flattening rules change: an index of an older rule set is stale.
 FLATTEN_VERSION = "flatten-v2"
 
@@ -64,6 +104,7 @@ CREATE TABLE IF NOT EXISTS search_doc (
     size INTEGER,
     ts INTEGER,
     ts_kind TEXT NOT NULL DEFAULT '',
+    ts_text TEXT NOT NULL DEFAULT '',
     ts_family TEXT NOT NULL DEFAULT '',
     ts_labels TEXT NOT NULL DEFAULT '',
     actor TEXT NOT NULL DEFAULT '',
@@ -73,12 +114,14 @@ CREATE TABLE IF NOT EXISTS search_doc (
     sha1 TEXT NOT NULL DEFAULT '',
     sha256 TEXT NOT NULL DEFAULT '',
     text TEXT,
+    text_fold TEXT,
     fields_json TEXT NOT NULL DEFAULT '{}',
     deleted INTEGER NOT NULL DEFAULT 0,
     sig_mismatch INTEGER NOT NULL DEFAULT 0,
     in_archive INTEGER NOT NULL DEFAULT 0,
     pii_count INTEGER NOT NULL DEFAULT 0,
-    truncated INTEGER NOT NULL DEFAULT 0
+    truncated INTEGER NOT NULL DEFAULT 0,
+    entity_mask INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS search_field (
     doc_id INTEGER NOT NULL,
@@ -109,6 +152,21 @@ CREATE TABLE IF NOT EXISTS search_ident (
     masked TEXT NOT NULL DEFAULT '',
     hmac TEXT NOT NULL DEFAULT ''
 );
+-- v5 (R7 lane B): named entities -- a value's SHA-256 and mask only, never the value.
+CREATE TABLE IF NOT EXISTS search_entity_value (
+    value_id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
+    value_sha256 BLOB NOT NULL,
+    masked TEXT NOT NULL,
+    verified INTEGER NOT NULL DEFAULT 0,
+    net TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS search_entity (
+    value_id INTEGER NOT NULL,
+    doc_id INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (value_id, doc_id)
+) WITHOUT ROWID;
 """
 
 SCHEMA_INDEXES = """
@@ -127,6 +185,10 @@ CREATE INDEX IF NOT EXISTS search_field_name_int ON search_field(name, value_int
 CREATE INDEX IF NOT EXISTS search_field_doc ON search_field(doc_id);
 CREATE INDEX IF NOT EXISTS search_hash_value ON search_hash(algorithm, value);
 CREATE INDEX IF NOT EXISTS search_hash_doc ON search_hash(doc_id);
+CREATE UNIQUE INDEX IF NOT EXISTS search_entity_value_sha ON search_entity_value(value_sha256);
+CREATE INDEX IF NOT EXISTS search_entity_value_kind ON search_entity_value(kind, masked);
+CREATE INDEX IF NOT EXISTS search_entity_value_net ON search_entity_value(kind, net) WHERE net != '';
+CREATE INDEX IF NOT EXISTS search_entity_doc ON search_entity(doc_id);
 """
 
 
@@ -158,12 +220,14 @@ def fts_sql(tokenizer: str) -> str:
     else:
         options = "tokenize='unicode61 remove_diacritics 0'"
     # Identifiers are constants: the tokenizer is one of two literals above.
-    return f"CREATE VIRTUAL TABLE IF NOT EXISTS search_text USING fts5(text, content='search_doc', content_rowid='doc_id', {options})"
+    return f"CREATE VIRTUAL TABLE IF NOT EXISTS search_text USING fts5(text, content='search_text_src', content_rowid='doc_id', {options})"
 
 
 def create_schema(connection: sqlite3.Connection, tokenizer: str, *, with_indexes: bool) -> None:
     connection.executescript(SCHEMA_TABLES)
+    connection.execute(FOLD_VIEW_SQL)
     connection.execute(fts_sql(tokenizer))
+    connection.execute(BIGRAM_SQL)
     if with_indexes:
         connection.executescript(SCHEMA_INDEXES)
 

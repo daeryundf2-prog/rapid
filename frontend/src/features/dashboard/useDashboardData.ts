@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getReviewCounts, listSavedSearches } from "../../api/caseDb";
+import { getReviewCounts } from "../../api/caseDb";
 import { ApiError, api } from "../../api/client";
 import { getCaseNotes, getRunDashboard } from "../../api/dashboard";
 import {
@@ -12,6 +12,7 @@ import {
 } from "../../api/runs";
 import { ACTIVE_POLL_MS } from "../../api/runsProgress";
 import { isRunActive } from "../../state/slices/runs";
+import { useSavedSearches } from "../case/savedSearches";
 import type { ProgressLike } from "./model";
 
 export interface ProviderProgress {
@@ -64,12 +65,7 @@ export function useDashboardData(runId: string) {
   });
   const database = review.data?.exists ? review.data.database : null;
   const caseId = review.data?.case_id ?? null;
-  const saved = useQuery({
-    queryKey: ["saved-searches", runId, database],
-    queryFn: () => listSavedSearches(database as string, caseId as string),
-    enabled: Boolean(database && caseId),
-    retry: false,
-  });
+  const saved = useSavedSearches(runId, database, caseId);
   const dashboard = useQuery({
     queryKey: ["run-dashboard", runId],
     queryFn: () => getRunDashboard(runId),

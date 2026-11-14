@@ -12,7 +12,21 @@ import { announce } from "../a11y";
 import type { CaseTag } from "../api/reviewTools";
 import { type Command, KEY_MAP } from "../contracts/command";
 import type { MarkAction, ViewerTarget } from "../contracts/viewer";
-import { applyReviewAction, type BatchAction, storeNotice } from "../features/grid/reviewActions";
+import {
+  applyReviewAction,
+  type BatchAction,
+  isUndoableAction,
+  lastUndo,
+  optimisticPatch,
+  optimisticRestore,
+  storeNotice,
+  UNDO_COMMAND_ID,
+  UNDO_NOTHING_REASON,
+  undoLastReview,
+  undoneNotice,
+  undoToastAction,
+} from "../features/grid/reviewActions";
+import { currentRowSource } from "../features/review/rowSource";
 import {
   resolveTagKey,
   TAG_KEY_DIGITS,
@@ -35,7 +49,7 @@ const MARKS: ReadonlyArray<{ action: MarkAction; label: string; shortcut?: strin
   { action: "excluded", label: "제외 표시", shortcut: KEY_MAP.markExcluded },
   { action: "needs-review", label: "재검토 표시", shortcut: KEY_MAP.markNeedsReview },
   { action: "bookmark", label: "북마크", shortcut: KEY_MAP.bookmark },
-  { action: "include-in-report", label: "보고서 포함 표시" },
+  { action: "include-in-report", label: "보고서 포함 표시", shortcut: KEY_MAP.markIncludeInReport },
 ];
 
 /** The row the keys act on (see module comment). */
@@ -61,13 +75,62 @@ export async function applyToContextRow(
   if (!target) throw new Error(NO_ROW_REASON);
   // Prefer the grid's own row (exact pointer/case-db fields); otherwise derive it from the target.
   const row = useAppStore.getState().viewerRow ?? targetAsGridRow(target);
-  const result = await applyReviewAction(target.runId, [row], action, tag ? { tag } : {});
+  // Optimistic (r8 T-036, budget 100 ms): the list on screen shows the judgement before the
+  // server answers; a failure rolls it back.
+  const rollback = currentRowSource()?.patchRows?.([row.rowKey], optimisticPatch(action, tag)) ?? (() => {});
+  let result: Awaited<ReturnType<typeof applyReviewAction>>;
+  try {
+    result = await applyReviewAction(target.runId, [row], action, tag ? { tag } : {});
+  } catch (error) {
+    rollback();
+    throw error;
+  }
   const text = `${label}: 1건 처리했습니다${storeNotice(result)}`;
   announce(text);
-  useAppStore.getState().showNotice(text);
+  const undo = isUndoableAction(action) ? undoToastAction(target.runId) : undefined;
+  useAppStore.getState().showNotice(text, "info", undo ? { action: undo } : undefined);
   await queryClient?.invalidateQueries({
     predicate: (query) => query.queryKey.includes(target.runId),
   });
+}
+
+/**
+ * 실행 취소 (r8 T-036): take back the newest judgement of the run as one unit (a batch of n rows
+ * together). The list on screen goes back at once; the server write follows. The stack is in
+ * memory only — after a reload the reason says "방금 한 표시만 되돌릴 수 있습니다".
+ */
+export async function runUndo(queryClient: QueryClient | null, runId: string | null): Promise<void> {
+  const unit = lastUndo(runId);
+  if (!unit || !runId) throw new Error(UNDO_NOTHING_REASON);
+  const source = currentRowSource();
+  const rollbacks = unit.entries.map(
+    (entry) => source?.patchRows?.([entry.row.rowKey], optimisticRestore(entry.before)) ?? (() => {}),
+  );
+  try {
+    const result = await undoLastReview(runId);
+    const text = undoneNotice(result);
+    announce(text);
+    useAppStore.getState().showNotice(text);
+  } catch (error) {
+    for (const rollback of rollbacks) rollback();
+    throw error;
+  }
+  await queryClient?.invalidateQueries({ predicate: (query) => query.queryKey.includes(runId) });
+}
+
+function undoCommand(queryClient: QueryClient | null): Command {
+  return {
+    id: UNDO_COMMAND_ID,
+    label: "표시 실행 취소",
+    group: "review",
+    shortcut: KEY_MAP.undoReview,
+    icon: "arrow-left",
+    disabledReason: (ctx) => {
+      if (!ctx.runId) return NO_RUN_REASON;
+      return lastUndo(ctx.runId) ? undefined : UNDO_NOTHING_REASON;
+    },
+    run: (ctx) => runUndo(queryClient, ctx.runId),
+  };
 }
 
 /** Command id of digit `level`'s tag key (review.priority.1–5 kept for 1–5). */
@@ -139,5 +202,5 @@ export function reviewCommands(queryClient: QueryClient | null): Command[] {
   const extraKeys = TAG_KEY_DIGITS.filter((level) => level > PRIORITY_LEVELS.length).map((level) =>
     tagKey(level, tagKeyCommandId(level)),
   );
-  return [...marks, ...priorities, ...extraKeys];
+  return [...marks, ...priorities, ...extraKeys, undoCommand(queryClient)];
 }

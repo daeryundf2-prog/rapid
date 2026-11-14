@@ -85,6 +85,19 @@
             "null"
           ]
         },
+        "credential_files": {
+          "type": "object",
+          "description": "Credential / secret files: name and path only, body never indexed (core/credential_files.py). Present when count > 0.",
+          "required": ["count", "coverage_status", "reason_counts", "rows_truncated", "note"],
+          "properties": {
+            "count": {"type": "integer", "minimum": 0},
+            "coverage_status": {"const": "body-withheld"},
+            "reason_counts": {"type": "object", "additionalProperties": {"type": "integer"}},
+            "rows_truncated": {"type": "boolean"},
+            "note": {"type": "string"}
+          },
+          "additionalProperties": false
+        },
         "size_caps": {
           "type": [
             "object",
@@ -346,6 +359,25 @@
             }
           }
         }
+      }
+    },
+    "credential_files": {
+      "type": "array",
+      "description": "credential-file rows (at most 5,000; summary.credential_files.count is the full count).",
+      "items": {
+        "type": "object",
+        "required": ["record_type", "path", "name", "size", "modified_at", "reason", "coverage_status", "value_collected"],
+        "properties": {
+          "record_type": {"const": "credential-file"},
+          "path": {"type": "string"},
+          "name": {"type": "string"},
+          "size": {"type": ["integer", "null"]},
+          "modified_at": {"type": ["string", "null"]},
+          "reason": {"type": "string"},
+          "coverage_status": {"const": "body-withheld"},
+          "value_collected": {"const": false}
+        },
+        "additionalProperties": false
       }
     },
     "extraction_errors": {

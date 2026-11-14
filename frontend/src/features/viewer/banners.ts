@@ -270,6 +270,13 @@ function bucket(level: number): string {
   return level < 0.45 ? "low" : level < 0.75 ? "medium" : "high";
 }
 
+const CONFIDENCE_KO: Record<string, string> = { low: "낮음", medium: "중간", high: "높음" };
+
+function confidenceText(value: unknown): string {
+  const raw = text(value);
+  return CONFIDENCE_KO[raw.trim().toLowerCase()] ?? raw;
+}
+
 function confidenceContradiction(row: GridRow, fields: Record<string, unknown>): RecordBanner | null {
   const record = isRecord(row.fields.artifact_record) ? row.fields.artifact_record : {};
   const rowConfidence = record.confidence ?? row.fields.confidence;
@@ -281,7 +288,8 @@ function confidenceContradiction(row: GridRow, fields: Record<string, unknown>):
     id: "confidence",
     tone: "info",
     title: "신뢰도 값이 서로 다릅니다",
-    detail: `레코드 신뢰도 ${text(rowConfidence)} · 파서 신뢰도 ${text(parserConfidence)} — 출처의 파서 신뢰도(parser_confidence)를 기준으로 보세요.`,
+    // Confidence words read Korean (R7 L3: never "medium"); numbers as written.
+    detail: `레코드 신뢰도 ${confidenceText(rowConfidence)} · 파서 신뢰도 ${confidenceText(parserConfidence)} — 출처의 파서 신뢰도를 기준으로 보세요.`,
     keys: ["confidence", "parser_confidence"],
   };
 }

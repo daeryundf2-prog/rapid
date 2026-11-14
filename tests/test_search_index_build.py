@@ -119,7 +119,7 @@ class SearchIndexBuildTests(unittest.TestCase):
         self.assertIn("공제 내역", text)  # body (re-extracted: no case DB in the fixture)
         self.assertIn("김경리", text)
         names = {row[0] for row in self.query("SELECT name FROM search_field WHERE doc_id = 1")}
-        self.assertEqual(names, {"author", "last_saved_by", "template"})
+        self.assertEqual(names, {"author", "last_saved_by", "template", "lang"})  # lang: R7 lane B
 
     def test_hashes_from_files_documents_indicators_and_analysis_rows(self) -> None:
         exe = self.fixture["exe_hashes"]

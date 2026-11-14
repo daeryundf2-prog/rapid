@@ -4,7 +4,7 @@
  * gains 네트워크 (core/eventlog_channels.py `networking`).
  */
 import { describe, expect, it } from "vitest";
-import { FALLBACK_CATALOG } from "../flags/catalog";
+import { FALLBACK_CATALOG } from "../flags/familiesFallback";
 import { DOMAINS, type DomainNodeDef, EVENTLOG_CHANNEL_NODES, flattenDomainNodes } from "./domains";
 
 /** (kind, type) -> server domain (artifact_domains.py R5 L2 block + kind defaults). */

@@ -5,6 +5,11 @@ that the search engine ATTACHes read-only for ``hashset:<id>`` /
 ``-hashset:<id>`` and ``options.hide_hashsets``. Text lists (one hash per
 line, ``#`` comments) and CSV/NSRL RDS files are parsed with
 ``core.files.parse_known_good_hash_feed`` (the files stage's known-good parser).
+
+Category (R7 lane B, Nuix "hash set categories"): every set is ``known-good``,
+``known-bad`` or ``custom`` (``category``, stored as the summary's ``label`` too). An NSRL
+RDS upload without an explicit category is ``known-good``. ``hashset:known-good`` /
+``-hashset:known-good`` in a query mean every set of that category.
 """
 
 from __future__ import annotations
@@ -27,6 +32,9 @@ DATA_DIR_ENV = "RAPIDTRIAGE_DATA_DIR"
 HASH_SET_DIR = "hash-sets"
 HASH_SET_ID_RE = re.compile(r"^hs-[0-9a-f]{12}$")
 LABELS = ("known-good", "known-bad", "custom")
+CATEGORIES = LABELS
+CATEGORY_LABELS = {"known-good": "알려진 정상", "known-bad": "알려진 악성", "custom": "사용자 지정"}
+NSRL_FORMATS = frozenset({"nsrl-rds-csv"})
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_REJECTED = 100
 NAME_MAX_CHARS = 200
@@ -116,13 +124,17 @@ def _looks_csv(text_head: str, filename: str) -> bool:
     return first.count(",") >= 2 and not HASH_TOKEN_RE.search(first)
 
 
-def create_hash_set(*, name: str, label: str, data: bytes, filename: str = "") -> dict[str, object]:
-    """Parse ``data`` (text or CSV/NSRL), store the set and return its summary."""
+def create_hash_set(*, name: str, label: str | None, data: bytes, filename: str = "") -> dict[str, object]:
+    """Parse ``data`` (text or CSV/NSRL), store the set and return its summary.
+
+    ``label`` is the category; ``None`` = automatic (an NSRL RDS file is ``known-good``, anything
+    else ``custom``).
+    """
     clean_name = " ".join(str(name or "").split())[:NAME_MAX_CHARS]
     if not clean_name:
         raise HashSetError("해시 세트 이름이 필요합니다")
-    if label not in LABELS:
-        raise HashSetError(f"해시 세트 라벨은 {', '.join(LABELS)} 중 하나여야 합니다")
+    if label is not None and label not in LABELS:
+        raise HashSetError(f"해시 세트 범주는 {', '.join(LABELS)} 중 하나여야 합니다")
     if len(data) > MAX_UPLOAD_BYTES:
         raise HashSetError("해시 세트 파일이 너무 큽니다(최대 50 MB)", status=413)
     if b"\x00" in data[:4096]:
@@ -136,6 +148,8 @@ def create_hash_set(*, name: str, label: str, data: bytes, filename: str = "") -
     unique = sorted(set(hashes))
     if not unique:
         raise HashSetError("해시 세트에 유효한 해시가 없습니다")
+    if label is None:
+        label = "known-good" if feed_format in NSRL_FORMATS else "custom"
     counts = Counter(algorithm for algorithm, _value in unique)
     hash_set_id = f"hs-{uuid.uuid4().hex[:12]}"
     directory = hash_set_dir()
@@ -146,6 +160,8 @@ def create_hash_set(*, name: str, label: str, data: bytes, filename: str = "") -
         "id": hash_set_id,
         "name": clean_name,
         "label": label,
+        "category": label,
+        "category_label": CATEGORY_LABELS[label],
         "count": len(unique),
         "count_by_algorithm": dict(sorted(counts.items())),
         "sha256": hashlib.sha256(data).hexdigest(),
@@ -183,7 +199,14 @@ def read_hash_set(hash_set_id: str) -> dict[str, object]:
         summary = json.loads(row[0]) if row else {}
     except ValueError:
         summary = {}
-    return summary if isinstance(summary, dict) else {}
+    if not isinstance(summary, dict):
+        return {}
+    # Sets made before R7 lane B: the label is the category.
+    category = summary.get("category") if summary.get("category") in CATEGORIES else summary.get("label")
+    if category in CATEGORIES:
+        summary["category"] = category
+        summary["category_label"] = CATEGORY_LABELS[str(category)]
+    return summary
 
 
 def list_hash_sets() -> list[dict[str, object]]:
@@ -202,6 +225,15 @@ def list_hash_sets() -> list[dict[str, object]]:
         sets.append(summary)
     sets.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
     return sets
+
+
+def hash_set_ids_by_category(category: str) -> list[str]:
+    """Ids of the stored sets of ``category`` (oldest first: a stable query plan)."""
+    if category not in CATEGORIES:
+        return []
+    sets = [item for item in list_hash_sets() if item.get("category") == category and item.get("id")]
+    sets.sort(key=lambda item: (str(item.get("created_at") or ""), str(item.get("id"))))
+    return [str(item["id"]) for item in sets]
 
 
 def read_hash_values(hash_set_id: str) -> list[tuple[str, str]]:

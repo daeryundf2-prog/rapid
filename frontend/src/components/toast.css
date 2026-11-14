@@ -1,0 +1,40 @@
+/* r7 L4: written-file toasts (path + 열기) and the write confirmation dialog. */
+.toast-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.toast-detail {
+  font-family: var(--font-mono);
+  font-size: var(--fs-table-aux, 12px);
+  color: var(--text-muted);
+  user-select: text;
+}
+
+.toast-action {
+  align-self: flex-start;
+  margin-top: 2px;
+  color: var(--accent, currentColor);
+  text-decoration: underline;
+  font-weight: 600;
+}
+
+.write-confirm-list {
+  margin: 0;
+  padding-left: 1.2em;
+}
+
+.write-confirm-list li + li {
+  margin-top: var(--space-1, 4px);
+}
+
+.write-confirm-where {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+/* The write confirmation opens over the dialog that asked for it (e.g. 샘플 실행 in the run dialog). */
+.case-modal-backdrop:has([data-testid="write-confirm"]) {
+  z-index: 60;
+}

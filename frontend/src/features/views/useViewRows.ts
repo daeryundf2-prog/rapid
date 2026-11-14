@@ -212,6 +212,21 @@ export function useAutoLoad(cq: CollectionQueryResult, wanted: boolean, maxRows:
   return capped && cq.canLoadMore;
 }
 
+/**
+ * Whether the view is still paging for `useAutoLoad(cq, wanted, maxRows)`: a page is in flight, or
+ * the automatic paging will fetch another one. More rows on the server alone is not "loading" — once
+ * enough rows are loaded (`wanted` false) or a page failed, the view is settled (r8 verify F4: the
+ * 썸네일 보기 said "불러오는 중…" for good while its tiles were already drawn).
+ */
+export function autoLoadPending(
+  cq: Pick<CollectionQueryResult, "isFetching" | "canLoadMore" | "loadedCount" | "error">,
+  wanted: boolean,
+  maxRows: number,
+): boolean {
+  if (cq.isFetching) return true;
+  return wanted && cq.canLoadMore && cq.loadedCount < maxRows && !cq.error;
+}
+
 /** Content width of an element (ResizeObserver), `fallback` before the first measure / in jsdom. */
 export function useElementWidth(ref: RefObject<HTMLElement | null>, fallback: number): number {
   const [width, setWidth] = useState(fallback);

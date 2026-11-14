@@ -114,7 +114,7 @@ describe("App shell", () => {
     act(() => useAppStore.getState().navigate({ runId: "run-aaaaaaaa", collection: "files" }));
     const topbar = screen.getByTestId("topbar");
     expect(topbar.querySelector(".brand .brand-mark")).toBeTruthy();
-    expect(topbar.textContent).toContain("RapidForensic");
+    expect(topbar.textContent).toContain("RapidTriage");
     // Search options are folded into the search field.
     const search = topbar.querySelector(".global-search") as HTMLElement;
     expect(search.querySelector('[aria-label="검색 옵션"]')).toBeTruthy();
@@ -124,7 +124,7 @@ describe("App shell", () => {
       "theme-toggle",
       "help-button",
     ]);
-    // 리뷰보드 / 보고 are rail stages; density lives in the grid's column menu.
+    // 검토 목록 / 보고 are rail stages; density lives in the grid's column menu.
     for (const gone of ["review-board-button", "report-button", "density-toggle"])
       expect(screen.queryByTestId(gone)).toBeNull();
   });
@@ -135,7 +135,7 @@ describe("App shell", () => {
     expect(screen.getByRole("main").contains(landing)).toBe(true);
     expect(screen.queryByRole("navigation", { name: "탐색 트리" })).toBeNull();
     expect(screen.queryByRole("complementary", { name: "뷰어 패널" })).toBeNull();
-    expect(screen.getByRole("heading", { level: 1, name: "RapidForensic" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "RapidTriage" })).toBeTruthy();
     for (const name of ["케이스 만들기", "케이스 열기", "케이스 없이 빠른 런", "샘플"])
       expect(screen.getByRole("button", { name })).toBeTruthy();
     const recent = await screen.findByRole("link", { name: /case1\.E01/ });
@@ -164,11 +164,11 @@ describe("App shell", () => {
     renderApp();
     // The case picker is a combobox popover (review #5): open it, then pick the case row.
     const picker = await screen.findByTestId("case-picker");
-    await waitFor(() => expect(picker.textContent).toContain("케이스 선택"));
+    await waitFor(() => expect(picker.textContent).toContain("런 선택"));
     fireEvent.click(picker);
-    const search = screen.getByRole("combobox", { name: "케이스 검색" });
+    const search = screen.getByRole("combobox", { name: "런 검색" });
     expect(document.activeElement).toBe(search);
-    const options = within(screen.getByRole("listbox", { name: "케이스" })).getAllByRole("option");
+    const options = within(screen.getByRole("listbox", { name: "런" })).getAllByRole("option");
     expect(options).toHaveLength(1);
     fireEvent.keyDown(search, { key: "Enter" });
     expect(window.location.hash).toBe("#/case/run-aaaaaaaa/intake");
@@ -182,7 +182,7 @@ describe("App shell", () => {
     await waitFor(() => expect(screen.getByTestId("intake-pane").textContent).toContain("registry"));
     const intake = screen.getByTestId("intake-pane");
     expect(intake.textContent).toContain("inventory");
-    expect(intake.textContent).toContain("케이스 처리 세부");
+    expect(intake.textContent).toContain("처리 상태");
     expect(intake.textContent).toContain("런이 완료되면 표시됩니다.");
   });
 

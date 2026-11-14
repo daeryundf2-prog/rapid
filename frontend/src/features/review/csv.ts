@@ -9,6 +9,7 @@
 
 import type { ExportContext } from "../../api/reviewTools";
 import type { GridRow } from "../../contracts/collection";
+import { evidencePathOf } from "../../utils/pathDisplay";
 import { isRecord, str } from "../grid/columns/common";
 import type { ColumnSpec } from "../grid/types";
 import { evidenceInfo } from "../viewer/evidenceInfo";
@@ -69,7 +70,8 @@ export function locationOf(row: GridRow): string {
 
 export function trailingValues(row: GridRow, context: Partial<ExportContext> | null): string[] {
   return [
-    filled(row.sourcePath),
+    // 소스: the in-evidence path, never the analysis PC's result folder (IS-128).
+    filled(evidencePathOf(row.sourcePath).path),
     locationOf(row),
     filled(evidenceInfo(row).recovery),
     filled(context?.evidence_number),

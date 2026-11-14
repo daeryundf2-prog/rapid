@@ -18,6 +18,14 @@ from ...core.case_db import (
     CaseDatabase,
     CaseDatabaseError,
 )
+from ...core.case_db.base import normalize_identifier
+from ...core.case_db.review import saved_search_to_dict
+from ...core.case_db.write_lock import (
+    CaseDatabaseBatchPartialError,
+    CaseDatabaseLockedError,
+    case_db_batch_partial_detail,
+    case_db_locked_detail,
+)
 from ...core.jobs import (
     RunJobStore,
     run_output_dir,
@@ -26,17 +34,26 @@ from ...core.keyword_packs import (
     KeywordPackError,
     resolve_keyword_packs,
 )
+from ...core.output_guard import (
+    OutputInsideEvidenceError,
+    canonical_path,
+    check_output_outside_evidence,
+)
 from ...core.run import RunModeError
 from ...core.sample_case import (
+    SAMPLE_DIR_HAS_OTHER_FILES,
+    SAMPLE_DIR_NOT_EMPTY,
+    SAMPLE_DIR_NOT_SAMPLE,
     SampleCaseError,
     run_sample_workflow,
+    sample_case_root,
 )
 from ...core.search import (
     SearchError,
 )
 from .helpers import (
     get_job,
-    resolve_request_reviewer,
+    resolve_request_actor,
     run_not_finished_message,
 )
 from .models import (
@@ -51,14 +68,58 @@ from .models import (
     RunCaseDbEnsureRequest,
     SampleCaseRunRequest,
 )
+from .review_payload import CASE_DB_UNREADABLE, report_candidate_count
 from .routes_review_tools import apply_review_tag_batch
 from .run_review import (
     ACTIVE_MARK_SQL,
     RunLocatorIndex,
     canonical_run_case,
+    read_only_sqlite_uri,
     review_map_entries,
     split_batch_targets,
 )
+
+#: ``detail.code`` of a sample folder outside the server's sample root (stable).
+PATH_OUTSIDE_ALLOWED_ROOT = "PATH_OUTSIDE_ALLOWED_ROOT"
+SAMPLE_CONFLICT_CODES = frozenset({SAMPLE_DIR_NOT_EMPTY, SAMPLE_DIR_NOT_SAMPLE, SAMPLE_DIR_HAS_OTHER_FILES})
+
+
+def _known_evidence_paths(store: RunJobStore) -> list[str]:
+    paths: list[str] = []
+    for job in store.list():
+        if job.request is not None and job.request.root:
+            paths.append(str(job.request.root))
+        root = (job.summary or {}).get("root")
+        if isinstance(root, str) and root:
+            paths.append(root)
+    return paths
+
+
+def sample_request_output_dir(store: RunJobStore, raw: str | None) -> Path:
+    """The practice-sample folder of ``POST /api/sample-case/run`` (R8 RI-04).
+
+    The server chooses the parent (:func:`~rapidtriage.core.sample_case.sample_case_root`,
+    ``~/.rapidtriage``): a request may name a folder under it, never anywhere else (403). The folder
+    must not overlap the evidence of any run the server knows (``core/output_guard``, 422)."""
+    allowed = sample_case_root()
+    target = (Path(raw).expanduser() if raw else allowed / "sample-case").resolve()
+    if target == allowed or not target.is_relative_to(allowed):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": PATH_OUTSIDE_ALLOWED_ROOT,
+                "message": f"샘플 폴더는 서버의 샘플 위치({allowed}) 아래에만 만들 수 있습니다: {target}",
+            },
+        )
+    try:
+        # A previous sample's own synthetic evidence (``<target>/evidence``) is replaced, not guarded.
+        own = canonical_path(target / "evidence")
+        check_output_outside_evidence(
+            target, [path for path in _known_evidence_paths(store) if canonical_path(path) != own]
+        )
+    except OutputInsideEvidenceError as exc:
+        raise HTTPException(status_code=422, detail=exc.to_detail()) from exc
+    return target
 
 
 def _summary_output_dir(summary: dict[str, object]) -> Path | None:
@@ -68,17 +129,40 @@ def _summary_output_dir(summary: dict[str, object]) -> Path | None:
         return None
 
 
+def read_only_saved_searches(database_path: Path, case_id: str) -> list[dict[str, object]]:
+    """Saved searches of a case read through a ``mode=ro`` connection (none without a DB file or
+    before the table exists): a read-only run folder or server never has its case DB written."""
+    if not database_path.is_file():
+        return []
+    try:
+        connection = sqlite3.connect(read_only_sqlite_uri(database_path), uri=True)
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=400, detail=f"케이스 DB를 열 수 없습니다: {exc}") from exc
+    connection.row_factory = sqlite3.Row
+    try:
+        rows = connection.execute(
+            "SELECT * FROM saved_search WHERE case_id = ? ORDER BY updated_at DESC, name ASC",
+            (normalize_identifier(case_id, fallback="case"),),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []  # an older DB without the table: nothing saved
+    finally:
+        connection.close()
+    return [saved_search_to_dict(row) for row in rows]
+
+
 def build_case_db_router(
     store: RunJobStore,
     open_request_case_database: Callable[[str | Path], CaseDatabase],
     resolve_request_catalog_path: Callable[[str | Path], Path],
+    read_only_case_db_path: Callable[[str | Path], Path | None] | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
     @router.post("/api/sample-case/run", status_code=201)
     def run_sample_case(request: SampleCaseRunRequest) -> dict[str, object]:
+        output_dir = sample_request_output_dir(store, request.output_dir)
         try:
-            output_dir = Path(request.output_dir).expanduser() if request.output_dir else Path.home() / ".rapidtriage" / "sample-case"
             sample_payload = run_sample_workflow(
                 output_dir,
                 mode=request.mode,
@@ -91,7 +175,10 @@ def build_case_db_router(
                 "sample": sample_payload,
                 "run": job.to_dict(include_summary=True),
             }
-        except (SampleCaseError, RunModeError, OSError, json.JSONDecodeError, ValueError) as exc:
+        except SampleCaseError as exc:
+            status = 409 if exc.code in SAMPLE_CONFLICT_CODES else 400
+            raise HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
+        except (RunModeError, OSError, json.JSONDecodeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
 
@@ -111,6 +198,7 @@ def build_case_db_router(
         by_status: dict[str, int] = {}
         db_include = 0
         cleared = 0
+        db_error: str | None = None
         db_exists = database_path.is_file()
         if db_exists:
             try:
@@ -131,12 +219,10 @@ def build_case_db_router(
                             db_include += int(count)
                 finally:
                     connection.close()
-            except sqlite3.Error:
-                by_status = {}
-                db_include = 0
-                cleared = 0
+            except sqlite3.Error as exc:
+                # R8 T-025: an unreadable case DB is ``null`` + ``error``, never a silent 0.
+                db_error = str(exc)
         bookmarks = 0
-        bookmarks_in_report = 0
         case_json = output_dir / "rapidtriage-case.json"
         if case_json.is_file():
             try:
@@ -144,22 +230,31 @@ def build_case_db_router(
                 items = payload.get("bookmarks") if isinstance(payload, dict) else None
                 if isinstance(items, list):
                     bookmarks = len(items)
-                    bookmarks_in_report = sum(
-                        1 for item in items if isinstance(item, dict) and item.get("include_in_report")
-                    )
             except (OSError, json.JSONDecodeError):
                 pass
+        # R8 RI-02: the one count the case report, manifest and reviewer bundle use.
+        candidates = report_candidate_count(store, run_id)
+        if db_error is not None and candidates["error"] is None:
+            candidates = {
+                **candidates,
+                "count": None,
+                "error": {"code": CASE_DB_UNREADABLE, "message": f"케이스 DB를 읽지 못했습니다: {db_error}"},
+            }
         return {
             "command": "case-db.review-counts",
             "run_id": run_id,
             "database": str(database_path),
             "case_id": case_id,
             "exists": db_exists,
-            "by_status": by_status,
-            "cleared": cleared,
-            "include_in_report": db_include,
-            "case_json": {"bookmarks": bookmarks, "include_in_report": bookmarks_in_report},
-            "report_candidates": db_include + bookmarks_in_report,
+            "by_status": None if db_error is not None else by_status,
+            "cleared": None if db_error is not None else cleared,
+            "include_in_report": None if db_error is not None else db_include,
+            "case_json": {"bookmarks": bookmarks, "include_in_report": candidates["case_json"]},
+            # ``null`` with ``error`` when a review store cannot be read (never a silent 0).
+            "report_candidates": candidates["count"],
+            "report_candidates_detail": candidates,
+            "truncated": candidates["truncated"],
+            "error": candidates["error"],
         }
 
 
@@ -241,6 +336,7 @@ def build_case_db_router(
     def mark_case_db_review(request: CaseDbReviewRequest) -> dict[str, object]:
         try:
             database = open_request_case_database(request.database)
+            reviewer, actor_source = resolve_request_actor(request.reviewer)
             return database.mark_review(
                 case_id=request.case_id,
                 target_type=request.target_type,
@@ -249,7 +345,8 @@ def build_case_db_router(
                 verification_status=request.verification_status,
                 tags=request.tags,
                 note=request.note,
-                reviewer=resolve_request_reviewer(request.reviewer),
+                reviewer=reviewer,
+                actor_source=actor_source,
                 assignee=request.assignee,
                 priority=request.priority,
                 due_at=request.due_at,
@@ -347,36 +444,29 @@ def build_case_db_router(
         request: CaseDbReviewBatchRequest,
         targets: list[dict[str, str]],
     ) -> dict[str, object]:
-        """Console marks: omitted ``tags`` keep the row's tags; ``add_tags`` merges."""
-        reviewer = resolve_request_reviewer(request.reviewer)
-        marks: list[dict[str, object]] = []
-        for target in targets:
-            tags: list[str] | None = list(request.tags) if request.tags is not None else None
-            if request.add_tags:
-                try:
-                    existing = database.get_review_mark(
-                        request.case_id, target_type=target["target_type"], target_id=target["target_id"]
-                    ).get("tags", [])
-                except CaseDatabaseError:
-                    existing = []
-                merged = [str(tag) for tag in (tags if tags is not None else existing or [])]
-                tags = merged + [tag for tag in request.add_tags if tag not in merged]
-            marks.append(
-                database.mark_review(
-                    case_id=request.case_id,
-                    target_type=target["target_type"],
-                    target_id=target["target_id"],
-                    status=request.status,
-                    verification_status=request.verification_status,
-                    tags=tags,
-                    note=request.note,
-                    reviewer=reviewer,
-                    assignee=request.assignee,
-                    priority=request.priority,
-                    due_at=request.due_at,
-                    include_in_report=request.include_in_report,
-                )
-            )
+        """Console marks: omitted ``tags`` keep the row's tags; ``add_tags`` merges.
+
+        The merge with the row's current tags happens inside the case DB's write transaction
+        (``add_tags`` of :meth:`CaseDatabase.mark_reviews_batch`), so a tag added by another window
+        between our read and our write is never lost (R8 T-131 review P1-7); the batch is all or nothing.
+        """
+        reviewer, actor_source = resolve_request_actor(request.reviewer)
+        marks = database.mark_reviews_batch(
+            case_id=request.case_id,
+            targets=targets,
+            status=request.status,
+            verification_status=request.verification_status,
+            tags=request.tags,
+            add_tags=request.add_tags,
+            keep_omitted_tags=True,
+            note=request.note,
+            reviewer=reviewer,
+            actor_source=actor_source,
+            assignee=request.assignee,
+            priority=request.priority,
+            due_at=request.due_at,
+            include_in_report=request.include_in_report,
+        )["marks"]
         return {
             "command": "case-review-batch",
             "database": str(database.path),
@@ -399,6 +489,7 @@ def build_case_db_router(
                 return apply_review_tag_batch(database, request, targets)
             if request.run_id or request.add_tags:
                 return _mark_preserving_tags(database, request, targets)
+            reviewer, actor_source = resolve_request_actor(request.reviewer)
             return database.mark_reviews_batch(
                 case_id=request.case_id,
                 targets=targets,
@@ -406,12 +497,17 @@ def build_case_db_router(
                 verification_status=request.verification_status,
                 tags=request.tags,
                 note=request.note,
-                reviewer=resolve_request_reviewer(request.reviewer),
+                reviewer=reviewer,
+                actor_source=actor_source,
                 assignee=request.assignee,
                 priority=request.priority,
                 due_at=request.due_at,
                 include_in_report=request.include_in_report,
             )
+        except CaseDatabaseLockedError as exc:
+            raise HTTPException(status_code=409, detail=case_db_locked_detail(exc)) from exc
+        except CaseDatabaseBatchPartialError as exc:
+            raise HTTPException(status_code=409, detail=case_db_batch_partial_detail(exc)) from exc
         except CaseDatabaseError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
@@ -451,12 +547,17 @@ def build_case_db_router(
     @router.post("/api/case-db/saved-searches/list")
     def list_case_db_saved_searches(request: CaseDbSavedSearchListRequest) -> dict[str, object]:
         try:
-            database = open_request_case_database(request.database)
+            read_only_path = read_only_case_db_path(request.database) if read_only_case_db_path else None
+            if read_only_path is not None:
+                # A read-only run folder / server: read through ``mode=ro``, never initialise it.
+                saved_searches = read_only_saved_searches(read_only_path, request.case_id)
+            else:
+                saved_searches = open_request_case_database(request.database).list_saved_searches(request.case_id)
             return {
                 "command": "case-db.saved-searches",
                 "database": str(Path(request.database).expanduser().resolve()),
                 "case_id": request.case_id,
-                "saved_searches": database.list_saved_searches(request.case_id),
+                "saved_searches": saved_searches,
             }
         except CaseDatabaseError as exc:
             raise HTTPException(status_code=400, detail=str(exc))

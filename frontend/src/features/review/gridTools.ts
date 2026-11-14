@@ -15,6 +15,7 @@ import { type ExportContext, getExportContext, postTagBatch } from "../../api/re
 import { NO_RUN_REASON } from "../../commands/reasons";
 import type { GridRow } from "../../contracts/collection";
 import type { Command } from "../../contracts/command";
+import { writeBlockReason } from "../../shell/readOnly";
 import { useAppStore } from "../../state/store";
 import type { GridCommandHost } from "../grid/gridCommands";
 import { notifyReviewApplied, reviewTargetOf } from "../grid/reviewActions";
@@ -90,6 +91,8 @@ export function propagateReason(
   names?: readonly string[],
 ): string | undefined {
   if (!runId) return NO_RUN_REASON;
+  const readOnly = writeBlockReason("run"); // T-348
+  if (readOnly) return readOnly;
   if (rows.length === 0) return NO_PROPAGATE_ROW;
   if (rows.some((row) => reviewTargetOf(row) === null)) return NO_LOCATOR_PROPAGATE;
   if (names) return names.length ? undefined : NO_TAGS_TO_PROPAGATE;
@@ -122,7 +125,12 @@ export async function propagateTagsByHash(
   currentRowSource()?.refetch?.();
   const label = chosen.map((tag) => `'${tag.name}'`).join(", ");
   const hashless = result.propagation?.hashless_targets ?? 0;
-  const tail = hashless ? ` (해시가 없는 행 ${hashless.toLocaleString("ko-KR")}건은 그 행에만 적용)` : "";
+  const skippedEmpty = result.propagation?.skipped_empty ?? 0;
+  const notes = [
+    hashless ? `해시가 없는 행 ${hashless.toLocaleString("ko-KR")}건은 그 행에만 적용` : "",
+    skippedEmpty ? `빈 파일(0바이트) ${skippedEmpty.toLocaleString("ko-KR")}건은 전파하지 않음` : "",
+  ].filter(Boolean);
+  const tail = notes.length ? ` (${notes.join(" · ")})` : "";
   return `같은 해시 행 ${result.applied_count.toLocaleString("ko-KR")}건에 태그 ${label}을(를) 전파했습니다${tail}`;
 }
 

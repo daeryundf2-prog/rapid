@@ -62,6 +62,14 @@ def row_refs(rows: list[Mapping[str, Any]]) -> list[tuple[str, int]]:
 
 def run_case(case: Mapping[str, Any], rule_id: str, *, base: Path | None = None) -> tuple[set[tuple[str, int]], set[tuple[str, int]], dict[str, Any]]:
     """``(refs the rule flagged, refs expected, engine summary)`` of one case."""
+    flags, expected, summary = case_flags(case, rule_id, base=base)
+    return set(flags), expected, summary
+
+
+def case_flags(
+    case: Mapping[str, Any], rule_id: str, *, base: Path | None = None
+) -> tuple[dict[tuple[str, int], dict[str, Any]], set[tuple[str, int]], dict[str, Any]]:
+    """``({ref: the rule's flag (grade, evidence, note)}, refs expected, engine summary)`` of one case."""
     rows = list(case.get("rows") or [])
     refs = row_refs(rows)
     with tempfile.TemporaryDirectory(dir=base) as temp:
@@ -100,12 +108,13 @@ def run_case(case: Mapping[str, Any], rule_id: str, *, base: Path | None = None)
             incident_start=incident[0],
             incident_end=incident[1],
         )
-        flagged: set[tuple[str, int]] = set()
+        flagged: dict[tuple[str, int], dict[str, Any]] = {}
         with open(out / FLAGS_FILE_NAME, encoding="utf-8") as handle:
             for line in handle:
                 entry = json.loads(line)
-                if any(flag["id"] == rule_id for flag in entry["flags"]):
-                    flagged.add((entry["kind"], entry["record_index"]))
+                for flag in entry["flags"]:
+                    if flag["id"] == rule_id:
+                        flagged[(entry["kind"], entry["record_index"])] = flag
     expected = {refs[position] for position in case.get("flagged") or []}
     return flagged, expected, summary
 

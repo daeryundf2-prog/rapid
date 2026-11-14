@@ -222,12 +222,15 @@ describe("kind default columns (§4.3) and sort keys", () => {
       "항목",
       "특이사항",
       "경로",
-      "선별",
+      "검토",
       "내용",
       "파서",
       "탐지 규칙",
       "지원",
       "SHA-256",
+      // R7 갈래 A: 중복 · 계열, default but hidden while no loaded row has a value.
+      "중복",
+      "계열",
     ]);
     // 특이사항 is a default column, hidden while no loaded row is flagged (ARTIFACT_PRIORITY).
     expect(generic.filter((c) => c.presets.includes("analysis")).map((c) => c.header)).toEqual([
@@ -236,7 +239,9 @@ describe("kind default columns (§4.3) and sort keys", () => {
       "항목",
       "특이사항",
       "경로",
-      "선별",
+      "검토",
+      "중복",
+      "계열",
     ]);
   });
 

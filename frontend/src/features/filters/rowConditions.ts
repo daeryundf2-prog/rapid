@@ -208,6 +208,11 @@ export interface RowConditionFilters extends ClockConditions {
   partial?: boolean;
   content?: readonly string[];
   geo?: string;
+  /** R7 갈래 A row sets (server only: `family=` · `dup=` + `dup_mode=` · `irregular=`). */
+  family?: readonly string[];
+  dup?: string;
+  dupMode?: string;
+  irregular?: readonly string[];
 }
 
 /** Client check of the clock / 부분 결과 / 콘텐츠 유형 / 위치 conditions (the time range is checked by the caller). */
@@ -322,6 +327,12 @@ export function serverConditionParams(
   if (filters.partial) params.partial = "1";
   if (filters.content?.length) params.content = [...filters.content];
   if (options.geo && parseGeo(filters.geo)) params.geo = filters.geo as string;
+  if (filters.family?.length) params.family = [...filters.family];
+  if (filters.dup) {
+    params.dup = filters.dup;
+    if (filters.dupMode && filters.dupMode !== "item") params.dup_mode = filters.dupMode;
+  }
+  if (filters.irregular?.length) params.irregular = filters.irregular.join(",");
   return params;
 }
 

@@ -119,6 +119,60 @@ def redact_url_fields(row: dict[str, Any], fields: tuple[str, ...] | list[str]) 
     return row
 
 
+# Free text (timeline summaries / targets, UX-round review): query pairs also hide Azure SAS
+# ``sharedAccessToken`` and the OAuth ``state``; a bare ``key=value`` outside a URL (a command line,
+# a log message) is hidden only for unambiguous credential names (``state=running`` or
+# ``key=HKLM\...`` in prose stays readable).
+TEXT_QUERY_KEYS = SENSITIVE_QUERY_KEYS | frozenset({"sharedaccesstoken", "state"})
+TEXT_BARE_KEYS = frozenset(
+    {
+        "password",
+        "passwd",
+        "pwd",
+        "token",
+        "access_token",
+        "refresh_token",
+        "id_token",
+        "client_secret",
+        "secret",
+        "api_key",
+        "apikey",
+        "sharedaccesstoken",
+    }
+)
+# Pass 1: query pairs (``?&;#`` lead) with TEXT_QUERY_KEYS. Pass 2: bare pairs (start of text,
+# whitespace, quote, parenthesis or comma lead; ``--password=`` / ``/token=`` switches too) with
+# TEXT_BARE_KEYS; a quoted value is hidden whole.
+_BARE_PAIR_RE = re.compile(r"(?P<lead>^|[\s\"'(,])(?P<key>[^=&;#?\s\"'(,]+)=(?P<value>\"[^\"]*\"|'[^']*'|[^&;#\s\"')]*)")
+
+
+def _replace_query_pair(match: re.Match[str]) -> str:
+    key, value = match.group("key"), match.group("value")
+    if not value or value == REDACTED_VALUE or (key.lower() not in TEXT_QUERY_KEYS and not _SENSITIVE_VALUE_RE.match(value)):
+        return match.group(0)
+    return f"{match.group('lead')}{key}={REDACTED_VALUE}"
+
+
+def _replace_bare_pair(match: re.Match[str]) -> str:
+    key, value = match.group("key"), match.group("value")
+    bare = value.strip("\"'")
+    if not bare or bare == REDACTED_VALUE or key.lower().lstrip("-/") not in TEXT_BARE_KEYS:
+        return match.group(0)
+    return f"{match.group('lead')}{key}={REDACTED_VALUE}"
+
+
+def redact_secret_text(value: Any) -> Any:
+    """:func:`redact_url` for free text that may embed URLs or ``password=`` style arguments
+    (``TEXT_QUERY_KEYS`` in query strings, ``TEXT_BARE_KEYS`` anywhere). Non-strings unchanged."""
+    if not isinstance(value, str):
+        return value
+    if "@" in value and "://" in value:
+        value = _USERINFO_RE.sub(lambda match: f"{match.group('scheme')}{REDACTED_VALUE}@", value)
+    if "=" not in value:
+        return value
+    return _BARE_PAIR_RE.sub(_replace_bare_pair, _PAIR_RE.sub(_replace_query_pair, value))
+
+
 def redact_text_urls(values: list[Any]) -> tuple[list[Any], bool]:
     """Redact a list of log strings; returns ``(new_list, any_changed)``."""
     changed = False

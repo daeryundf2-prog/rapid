@@ -3,6 +3,11 @@
 A search never blocks for minutes: every source scan checks a deadline per
 row and stops when it passes, and the response then reports
 ``truncated: true`` with per-source ``scanned`` counters.
+
+Sources run in their fixed order against one deadline (R7 S2 review #5): a
+budget stop ends the search at that point of the order (later sources are
+skipped as ``after-budget``), so a truncated result is always a prefix of the
+full result and paging past it never skips rows.
 """
 
 from __future__ import annotations
@@ -69,28 +74,22 @@ class SourceScan:
 
 
 class SearchBudget:
-    """Overall search deadline, split fairly across the sources still to run."""
+    """One search deadline for every source (they run in order; a stop ends the search there)."""
 
-    def __init__(self, seconds: float) -> None:
+    def __init__(self, seconds: float, *, started: float | None = None) -> None:
+        """``started``: when the request began (a fallback backend keeps the original deadline)."""
         self.seconds = seconds
-        self.started = time.monotonic()
+        self.started = time.monotonic() if started is None else started
         # The budget covers the whole request: source scans stop early enough
         # to leave time for building the response (enrichment, analysis).
         reserve = min(FINALIZE_RESERVE_MAX_SECONDS, seconds * FINALIZE_RESERVE_FRACTION)
         self.deadline = self.started + seconds - reserve if seconds > 0 else None
         self.sources: dict[str, SourceScan] = {}
 
-    def start_source(self, source: str, *, sources_left: int = 1) -> SourceScan:
-        """Begin a source scan with an equal share of the remaining budget.
-
-        Time a fast source does not use carries over to the next ones, so a
-        slow source (documents re-extracting text) cannot starve the rest.
-        """
-        deadline = None
-        if self.deadline is not None:
-            now = time.monotonic()
-            deadline = now + max(0.0, self.deadline - now) / max(1, sources_left)
-        scan = SourceScan(source, deadline)
+    def start_source(self, source: str) -> SourceScan:
+        """Begin a source scan against the whole remaining budget (sources run in order: a stop
+        cuts the result at that point, never in the middle of the order)."""
+        scan = SourceScan(source, self.deadline)
         self.sources[source] = scan
         return scan
 
@@ -102,6 +101,14 @@ class SearchBudget:
     @property
     def truncated(self) -> bool:
         return any(scan.stopped == "budget" for scan in self.sources.values())
+
+    @property
+    def stopped_source(self) -> str | None:
+        """The source the budget stopped in (later sources were skipped), or ``None``."""
+        for source, scan in self.sources.items():
+            if scan.stopped == "budget":
+                return source
+        return None
 
     def elapsed_ms(self) -> float:
         return round((time.monotonic() - self.started) * 1000, 1)

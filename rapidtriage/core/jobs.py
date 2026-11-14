@@ -16,6 +16,13 @@ from pathlib import Path
 
 from .files import DEFAULT_KNOWN_GOOD_MAX_HASH_BYTES
 from .forensic_accuracy import build_accuracy_gate
+from .output_guard import (
+    OUTPUT_INSIDE_EVIDENCE,
+    check_output_outside_evidence,
+    output_evidence_conflict,
+)
+from .power import prevent_system_sleep
+from .readonly_runs import register_readonly_folder, unregister_readonly_folder
 from .rules import RuleConfigError, load_rule_set
 from .run import RunModeError, run_triage_mode
 from .run.plan import (
@@ -149,6 +156,14 @@ def int_or_default(value: object, default: int) -> int:
     return int(value)
 
 
+def _collector_options(value: object) -> dict[str, dict[str, object]] | None:
+    """Stored ``collector_options`` (``{kind: {option: value}}``); anything else is dropped."""
+    if not isinstance(value, Mapping):
+        return None
+    options = {str(kind): dict(item) for kind, item in value.items() if isinstance(item, Mapping) and item}
+    return options or None
+
+
 @dataclass(frozen=True)
 class RunRequest:
     root: str
@@ -171,6 +186,8 @@ class RunRequest:
     case_db: bool = True
     skip_groups: tuple[str, ...] = ()
     skip_tasks: tuple[str, ...] = ()
+    # Per-kind collector options (R7 AI: ``{"ai-agent": {"ai_bodies": ..., "ai_hash_dbs": ...}}``).
+    collector_options: Mapping[str, Mapping[str, object]] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -194,6 +211,7 @@ class RunRequest:
             "case_db": self.case_db,
             "skip_groups": list(self.skip_groups),
             "skip_tasks": list(self.skip_tasks),
+            "collector_options": {kind: dict(options) for kind, options in (self.collector_options or {}).items()},
         }
 
     @classmethod
@@ -226,6 +244,7 @@ class RunRequest:
             case_db=bool(payload.get("case_db", True)),
             skip_groups=string_tuple(payload.get("skip_groups", [])),
             skip_tasks=string_tuple(payload.get("skip_tasks", [])),
+            collector_options=_collector_options(payload.get("collector_options")),
         )
 
 
@@ -252,6 +271,9 @@ class RunJob:
     # is not this run's).
     retried_by: str | None = None
     superseded_by: str | None = None
+    # D37: a run whose output folder is inside its evidence (written before the output guard)
+    # opens read-only — ``OUTPUT_INSIDE_EVIDENCE``; ``None`` otherwise.
+    readonly_reason: str | None = None
 
     def __post_init__(self) -> None:
         if not self.steps:
@@ -277,6 +299,7 @@ class RunJob:
             "retry_attempt": self.retry_attempt,
             "retried_by": self.retried_by,
             "superseded_by": self.superseded_by,
+            "readonly_reason": self.readonly_reason,
             "transition_log": self.transition_log,
             "transition_log_profile": job_transition_log_profile(self.transition_log),
             "retry_lineage_profile": job_retry_lineage_profile(self),
@@ -320,18 +343,27 @@ class RunJob:
         request_payload = payload.get("request")
         request = RunRequest.from_dict(request_payload if isinstance(request_payload, Mapping) else {})
         summary_payload = payload.get("summary")
+        origin = str(payload.get("origin") or "web")
+        summary = dict(summary_payload) if isinstance(summary_payload, Mapping) else None
+        if summary is not None:
+            if origin == "imported":
+                # T-350: a run imported before the marker existed is checked like an API import;
+                # an explicit False (a server-side import, e.g. the practice sample) is kept.
+                summary["imported_run"] = summary.get("imported_run") is not False
+            else:
+                summary.pop("imported_run", None)
         return cls(
             run_id=str(payload.get("run_id") or uuid.uuid4().hex[:12]),
             request=request,
             status=normalize_run_status(payload.get("status") or "failed"),
-            origin=str(payload.get("origin") or "web"),
+            origin=origin,
             created_at=str(payload.get("created_at") or now_iso()),
             updated_at=str(payload.get("updated_at") or now_iso()),
             started_at=str(payload["started_at"]) if payload.get("started_at") else None,
             completed_at=str(payload["completed_at"]) if payload.get("completed_at") else None,
             error=str(payload["error"]) if payload.get("error") else None,
             error_type=str(payload["error_type"]) if payload.get("error_type") else None,
-            summary=dict(summary_payload) if isinstance(summary_payload, Mapping) else None,
+            summary=summary,
             steps=[
                 _normalize_record_spelling(step, ("status",))
                 for step in payload.get("steps", [])
@@ -351,6 +383,7 @@ class RunJob:
             retry_attempt=int(payload.get("retry_attempt") or 0),
             retried_by=str(payload["retried_by"]) if payload.get("retried_by") else None,
             superseded_by=str(payload["superseded_by"]) if payload.get("superseded_by") else None,
+            readonly_reason=str(payload["readonly_reason"]) if payload.get("readonly_reason") else None,
         )
 
 
@@ -504,7 +537,49 @@ class RunJobStore:
         self._state_path = state_path.expanduser().resolve() if state_path is not None else None
         # name -> hook(store, job) called after a run is written ``completed`` (best effort).
         self._completion_hooks: dict[str, Callable[[RunJobStore, RunJob], None]] = {}
+        # D37: run_id -> canonical read-only folder this store holds in ``core.readonly_runs``,
+        # released when the run leaves the list or the store is closed.
+        self._readonly_token = object()
+        self._readonly_holds: dict[str, str] = {}
+        self._readonly_lock = threading.Lock()
         self._load_state()
+
+    def close(self) -> None:
+        """Release every read-only folder this store holds (the app's shutdown calls it).
+
+        The runs stay listed; a folder another store still holds stays read-only."""
+        with self._readonly_lock:
+            holds, self._readonly_holds = self._readonly_holds, {}
+        for run_id, folder in holds.items():
+            unregister_readonly_folder(folder, owner=(self._readonly_token, run_id))
+
+    def __enter__(self) -> RunJobStore:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def _sync_readonly(self, job: RunJob) -> None:
+        """Hold ``job``'s output folder read-only when it has a D37 reason, else release its hold."""
+        owner = (self._readonly_token, job.run_id)
+        output_dir = job.output_dir()
+        with self._readonly_lock:
+            previous = self._readonly_holds.get(job.run_id)
+            current = None
+            if job.readonly_reason and output_dir is not None:
+                # Register first: the folder is never unguarded between the old and the new hold.
+                current = register_readonly_folder(output_dir, job.readonly_reason, owner=owner)
+                self._readonly_holds[job.run_id] = current
+            else:
+                self._readonly_holds.pop(job.run_id, None)
+            if previous is not None and previous != current:
+                unregister_readonly_folder(previous, owner=owner)
+
+    def _release_readonly(self, run_id: str) -> None:
+        with self._readonly_lock:
+            folder = self._readonly_holds.pop(run_id, None)
+            if folder is not None:
+                unregister_readonly_folder(folder, owner=(self._readonly_token, run_id))
 
     @property
     def state_path(self) -> Path | None:
@@ -530,6 +605,7 @@ class RunJobStore:
 
     def submit(self, request: RunRequest, *, retry_of_run_id: str | None = None, retry_attempt: int = 0) -> RunJob:
         run_id = uuid.uuid4().hex[:12]
+        check_request_output_outside_evidence(request, run_id=run_id)
         job = RunJob(
             run_id=run_id,
             request=request,
@@ -554,6 +630,7 @@ class RunJobStore:
 
     def run_sync(self, request: RunRequest) -> RunJob:
         job = RunJob(run_id=uuid.uuid4().hex[:12], request=request)
+        check_request_output_outside_evidence(request, run_id=job.run_id)
         append_job_transition(job, event_type="job-queued", status="queued", message="Synchronous job submitted")
         with self._lock:
             self._raise_if_output_dir_busy_locked(job)
@@ -721,14 +798,22 @@ class RunJobStore:
             )
         return files
 
-    def import_completed_run(self, output_dir_or_summary: str | Path) -> RunJob:
+    def import_completed_run(self, output_dir_or_summary: str | Path, *, verify_roots: bool = False) -> RunJob:
+        """Register a finished run folder (R8 RI-05: the summary's paths are not trusted).
+
+        ``output_dir`` becomes the folder the summary file is in; every ``outputs`` path must
+        resolve inside it (:func:`validated_import_summary`); ``root`` is kept as the evidence
+        reference only. A folder that overlaps its evidence opens read-only (D37).
+
+        ``verify_roots`` (``POST /api/runs/import``, T-350): the folder came from a client, so the
+        source routes read only from the folder and the evidence root its own input fingerprint
+        verifies (``core/import_roots.py``). In-process callers (the practice sample) keep the
+        summary's roots."""
         summary_path = resolve_run_summary_path(Path(output_dir_or_summary).expanduser())
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         if not isinstance(summary, dict):
-            raise ValueError("run summary must be a JSON object")
-        outputs = summary.get("outputs")
-        if not isinstance(outputs, Mapping):
-            raise ValueError("run summary does not include outputs")
+            raise RunImportError(IMPORT_SUMMARY_INVALID, "실행 요약 JSON이 객체가 아닙니다")
+        summary = validated_import_summary(summary, summary_path, verify_roots=verify_roots)
 
         run_id = uuid.uuid5(uuid.NAMESPACE_URL, str(summary_path.resolve())).hex[:12]
         safety = summary.get("safety")
@@ -736,7 +821,7 @@ class RunJobStore:
         request = RunRequest(
             root=str(summary.get("root") or ""),
             mode=str(summary.get("mode") or ""),
-            output_dir=str(summary.get("output_dir") or summary_path.parent),
+            output_dir=str(summary["output_dir"]),
             input_kind=str(summary["input_kind"]) if summary.get("input_kind") else None,
             dry_run=bool(safety_options.get("dry_run", False)),
             read_only=bool(safety_options.get("read_only", False)),
@@ -762,6 +847,7 @@ class RunJobStore:
             started_at=imported_at,
             completed_at=imported_at,
             summary=summary,
+            readonly_reason=output_inside_evidence_reason(summary["output_dir"], request.root),
         )
         append_job_transition(job, event_type="job-imported", status="completed", message="Completed run imported")
         with self._lock:
@@ -772,6 +858,7 @@ class RunJobStore:
                 job.completed_at = existing.completed_at
             self._jobs[run_id] = job
             self._write_state_locked()
+        self._sync_readonly(job)
         _invalidate_summary_outputs(summary)
         return job
 
@@ -782,6 +869,7 @@ class RunJobStore:
             job = self._jobs.pop(run_id)
             self._futures.pop(run_id, None)
             self._write_state_locked()
+        self._release_readonly(run_id)
         _invalidate_summary_outputs(job.summary)
 
     def cancel(self, run_id: str, *, actor: str = "web") -> RunJob:
@@ -934,6 +1022,8 @@ class RunJobStore:
                     raise RunOutputDirBusy(busy)
             else:
                 request = replace(request, resume=False, output_dir=fresh_retry_output_dir(previous))
+            # A run recorded before the R7 output guard may write inside its evidence: never again.
+            check_request_output_outside_evidence(request, run_id=previous.run_id)
             next_attempt = int(previous.retry_attempt or 0) + 1
             append_job_transition(
                 previous,
@@ -972,7 +1062,8 @@ class RunJobStore:
             self._mark_step(run_id, "prepare", "completed", message="Run request accepted")
             self._mark_step(run_id, "triage", "running", message="Executing triage workflow")
             # Control requests written after submission (a quick "모두 취소") apply to this run.
-            summary = execute_run_request(job.request, run_id=run_id, control_since=job.created_at)
+            with prevent_system_sleep():  # T-353: no system sleep mid-run; released on any end
+                summary = execute_run_request(job.request, run_id=run_id, control_since=job.created_at)
         except Exception as exc:
             with self._lock:
                 job.status = "failed"
@@ -1038,6 +1129,11 @@ class RunJobStore:
             if not isinstance(record, Mapping):
                 continue
             job = RunJob.from_record(record)
+            if job.readonly_reason is None and job.summary is not None:
+                # D37: a finished run kept from before the output guard, written inside its evidence.
+                job.readonly_reason = legacy_readonly_reason(job)
+                changed = changed or job.readonly_reason is not None
+            self._sync_readonly(job)
             if job.status in ACTIVE_JOB_STATUSES:
                 # Plan P2 §3.2: a run the server was executing when it stopped
                 # is "중단됨"; "이어서 실행" (retry resume) reuses its completed tasks.
@@ -2280,6 +2376,7 @@ def execute_run_request(
             case_db=request.case_db,
             skip_groups=request.skip_groups,
             skip_tasks=request.skip_tasks,
+            collector_options=request.collector_options or None,
             actor=actor,
             control_since=control_since,
         )
@@ -2302,13 +2399,117 @@ def persist_step_message(summary: Mapping[str, object]) -> str:
     return "Run summary persisted; case DB index skipped, search uses scan"
 
 
+def check_request_output_outside_evidence(request: RunRequest, *, run_id: str | None = None) -> None:
+    """Raise ``OutputInsideEvidenceError`` when the request's output folder overlaps its evidence.
+
+    Without ``output_dir`` the (legacy) default folder is checked: for a folder evidence it is
+    inside the evidence, so a folder run without an explicit output folder is refused.
+    """
+    if not request.root:
+        return
+    root = Path(request.root).expanduser().resolve()
+    output = (
+        Path(request.output_dir).expanduser().resolve()
+        if request.output_dir
+        else default_run_output_dir(root, request.mode, run_id=run_id)
+    )
+    check_output_outside_evidence(output, [root])
+
+
 def default_run_output_dir(root: Path, mode: str, *, run_id: str | None = None) -> Path:
+    """Legacy default run folder (``<file>-rapidtriage-run-…`` beside a file, ``<folder>/rapidtriage-run-…``).
+
+    Kept to find the output of job records written without ``output_dir``; a new run never
+    writes to the in-folder default (``check_request_output_outside_evidence``).
+    """
     suffix = f"rapidtriage-run-{mode.lower()}"
     if run_id:
         suffix = f"{suffix}-{run_id}"
     if root.is_file():
         return root.parent / f"{root.stem}-{suffix}"
     return root / suffix
+
+
+IMPORT_SUMMARY_INVALID = "IMPORT_SUMMARY_INVALID"
+IMPORT_OUTPUT_OUTSIDE_FOLDER = "IMPORT_OUTPUT_OUTSIDE_FOLDER"
+
+
+class RunImportError(ValueError):
+    """A run folder the import refuses (HTTP 400; ``code`` is stable, the message Korean)."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+    def to_detail(self) -> dict[str, str]:
+        return {"code": self.code, "message": str(self)}
+
+
+def validated_import_summary(
+    summary: Mapping[str, object], summary_path: Path, *, verify_roots: bool = False
+) -> dict[str, object]:
+    """The imported summary with its paths pinned to the folder it was read from (R8 RI-05).
+
+    * ``output_dir`` is the summary file's folder — whatever the JSON says. A different value (a
+      moved result folder, or a forged one) is kept as ``imported_output_dir_claimed`` only.
+    * every ``outputs`` value must be a path inside that folder: relative paths resolve against it,
+      absolute ones under the claimed ``output_dir`` are rebased onto it, anything else is refused.
+    * ``root`` (the evidence) is a reference: it is never an output location.
+    """
+    folder = summary_path.parent.resolve()
+    outputs = summary.get("outputs")
+    if not isinstance(outputs, Mapping):
+        raise RunImportError(IMPORT_SUMMARY_INVALID, "실행 요약에 산출물 목록(outputs)이 없습니다")
+    claimed_raw = summary.get("output_dir")
+    claimed = Path(claimed_raw).expanduser() if isinstance(claimed_raw, str) and claimed_raw.strip() else None
+    pinned: dict[str, object] = {}
+    for name, raw in outputs.items():
+        if not isinstance(raw, str) or not raw.strip():
+            raise RunImportError(IMPORT_SUMMARY_INVALID, f"실행 요약의 산출물 경로가 문자열이 아닙니다: outputs.{name}")
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = folder / candidate
+        elif claimed is not None and claimed.is_absolute():
+            try:
+                candidate = folder / candidate.relative_to(claimed)
+            except ValueError:
+                pass
+        resolved = candidate.resolve()
+        if not is_relative_to(resolved, folder):
+            raise RunImportError(
+                IMPORT_OUTPUT_OUTSIDE_FOLDER,
+                f"실행 요약의 산출물 경로가 가져오는 결과 폴더 밖입니다: outputs.{name} = {raw} (결과 폴더 {folder})",
+            )
+        pinned[str(name)] = str(resolved)
+    validated = dict(summary)
+    validated["outputs"] = pinned
+    validated["output_dir"] = str(folder)
+    # T-350: set by the import, never read from the file. ``True`` (``POST /api/runs/import``):
+    # the source routes stop trusting the summary's evidence paths (core/import_roots.py).
+    validated["imported_run"] = bool(verify_roots)
+    if claimed is not None and str(claimed) != str(folder):
+        validated["imported_output_dir_claimed"] = str(claimed_raw)
+    return validated
+
+
+def output_inside_evidence_reason(output_dir: Path | str | None, root: str | None) -> str | None:
+    """``OUTPUT_INSIDE_EVIDENCE`` when a run folder is (inside) its evidence (D37), else ``None``.
+
+    Only that overlap makes a kept run read-only: lazy writers write below the run folder, which
+    is then evidence. Evidence *inside* the run folder (refused for new runs because overwrite /
+    resume cleanup could delete it) is untouched by them and stays writable."""
+    if output_dir is None or not root:
+        return None
+    try:
+        conflict = output_evidence_conflict(output_dir, root)
+    except (OSError, ValueError):
+        return None
+    return conflict if conflict == OUTPUT_INSIDE_EVIDENCE else None
+
+
+def legacy_readonly_reason(job: RunJob) -> str | None:
+    """D37 reason of a kept run written inside its evidence before the output guard."""
+    return output_inside_evidence_reason(job.output_dir(), job.request.root if job.request is not None else "")
 
 
 def resolve_run_summary_path(output_dir_or_summary: Path) -> Path:

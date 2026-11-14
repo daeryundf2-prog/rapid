@@ -43,9 +43,50 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEPENDENCY_MONITORING_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "dependency-monitoring.yml"
 
 
+def pip_audit_lock_arguments(lock_files: list[str]) -> list[str]:
+    """Audit hashed lock files directly: no resolver, no install, no site-packages."""
+    if not lock_files:
+        return []
+    arguments: list[str] = []
+    for lock_file in lock_files:
+        arguments.extend(["-r", lock_file])
+    return [*arguments, "--require-hashes", "--disable-pip"]
+
+
+def pip_audit_summary(stdout: str) -> dict[str, object]:
+    """Per-package advisory counts (unique ids) and how many have a fixed version."""
+    try:
+        dependencies = json.loads(stdout).get("dependencies", []) if stdout.strip() else []
+    except (json.JSONDecodeError, AttributeError):
+        return {"audited_package_count": None, "findings_by_package": {}, "advisory_count": None}
+    findings: dict[str, dict[str, object]] = {}
+    for dependency in dependencies:
+        vulns = {vuln.get("id"): vuln for vuln in dependency.get("vulns", [])}
+        if not vulns:
+            continue
+        fixable = [vuln for vuln in vulns.values() if vuln.get("fix_versions")]
+        findings[str(dependency.get("name"))] = {
+            "version": dependency.get("version"),
+            "advisory_count": len(vulns),
+            "fixable_count": len(fixable),
+        }
+    return {
+        "audited_package_count": len(dependencies),
+        "findings_by_package": dict(sorted(findings.items())),
+        "advisory_count": sum(int(item["advisory_count"]) for item in findings.values()),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Write a local dependency vulnerability monitoring baseline")
     parser.add_argument("--output", default="dependency-monitoring.json", help="JSON output path")
+    parser.add_argument(
+        "--requirement",
+        "-r",
+        action="append",
+        default=[],
+        help="Hashed lock file to audit instead of the running environment (repeatable)",
+    )
     args = parser.parse_args(argv)
 
     output = Path(args.output).expanduser().resolve()
@@ -57,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
         check=False,
     )
     pip_audit = subprocess.run(
-        [sys.executable, "-m", "pip_audit", "--format=json"],
+        [sys.executable, "-m", "pip_audit", "--format=json", *pip_audit_lock_arguments(args.requirement)],
         text=True,
         capture_output=True,
         check=False,
@@ -106,6 +147,8 @@ def main(argv: list[str] | None = None) -> int:
                 trusted_diff=trusted_diff,
             ),
             "tool": "pip-audit",
+            "audit_target": {"lock_files": list(args.requirement)} if args.requirement else {"environment": sys.executable},
+            **pip_audit_summary(pip_audit.stdout),
             "available": pip_audit.returncode != 1 or bool(pip_audit.stdout.strip()),
             "return_code": pip_audit.returncode,
             "raw_output": pip_audit.stdout[:20000],

@@ -32,6 +32,17 @@
   outline: none;
 }
 
+/* Portalled (plan r7 §3.2 L2, C-D4; menus too, plan r8 T-014): fixed to the trigger by
+   placePopover, above every pane — the viewer, its drawer and resize handles included — and never
+   clipped by a pane's overflow. */
+.popover.popover-portal {
+  position: fixed;
+  right: auto;
+  bottom: auto;
+  z-index: 750; /* above the viewer / tree drawers (700), below modal overlays (800) */
+  max-width: min(420px, calc(100vw - 16px));
+}
+
 .popover-start {
   left: 0;
 }
@@ -91,6 +102,14 @@
   gap: 0;
   min-width: 180px;
   padding: var(--space-1);
+  overflow-y: auto;
+}
+
+/* A capped menu (placePopover max-height) scrolls; its rows never shrink below their content —
+   an item with a reason line would otherwise overlap its neighbours (r8 verify F1). */
+.popover.menu > *,
+.popover.menu .menu-row > * {
+  flex: none;
 }
 
 .menu-row {

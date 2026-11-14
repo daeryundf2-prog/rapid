@@ -3,7 +3,7 @@ import { fuzzyMatchIndexes, fuzzyScore } from "./fuzzy";
 
 describe("fuzzyMatchIndexes (palette highlight, review #12)", () => {
   it("marks a substring hit as one run, else the in-order characters fuzzyScore matched", () => {
-    expect(fuzzyMatchIndexes("리뷰", "이동: 리뷰보드")).toEqual([4, 5]);
+    expect(fuzzyMatchIndexes("검토", "이동: 검토 목록")).toEqual([4, 5]);
     expect(fuzzyMatchIndexes("tmln", "timeline")).toEqual([0, 2, 4, 6]);
     expect(fuzzyMatchIndexes("TIME", "timeline")).toEqual([0, 1, 2, 3]);
     expect(fuzzyMatchIndexes("r v", "review")).toEqual([0, 2]);

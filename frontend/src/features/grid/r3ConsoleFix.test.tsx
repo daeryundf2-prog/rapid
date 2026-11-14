@@ -8,10 +8,12 @@ import type { ColumnFilter, GridRow } from "../../contracts/collection";
 import { useAppStore } from "../../state/store";
 import { formatGridTime } from "../../utils/time";
 import { artifactTypeLabel } from "../filters/typeLabels";
-import { type CatalogFamily, FALLBACK_CATALOG, familyById, setCatalog } from "../flags/catalog";
+import { type CatalogFamily, familyById, setCatalog } from "../flags/catalog";
+import { FALLBACK_CATALOG } from "../flags/familiesFallback";
 import { analysisCollection, analysisColumnsForKind, analysisFamily } from "./columns/analysis";
 import { makeRef, makeRow } from "./columns/common";
 import { catalogColumn, cellTsKind, familyColumnId, readKey } from "./columns/families";
+import { gridTimeText } from "./columns/TimelineCells";
 import type { ColumnSpec } from "./types";
 
 const SOURCE = (value: string): ColumnFilter[] => [{ col: "f:source", op: ":", value }];
@@ -172,7 +174,9 @@ describe("#3 Prefetch volumes and run times", () => {
     // Older rows without run_time_N: the list index alias reads the slot.
     const second = catalogCol("prefetch-file", "run_time_2");
     const older = row({ last_run_times: times });
-    expect(second.format?.(older)).toBe(formatGridTime(times[1] as string, "Asia/Seoul"));
+    // T-175: the cell holds the zone-free time (fixed 176px column); the tooltip keeps the zone.
+    expect(second.format?.(older)).toBe(gridTimeText(times[1] as string, "Asia/Seoul"));
+    expect(second.tooltip?.(older)).toContain(formatGridTime(times[1] as string, "Asia/Seoul"));
     expect(second.tooltip?.(older)).toContain("실행 2회차(run-2)");
     expect(readKey({ last_run_times: times }, "last_run_times.1")).toBe(times[1]);
     expect(readKey({ last_run_times: times }, "last_run_times.7")).toBeUndefined();

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import struct
 import tempfile
@@ -12,6 +13,12 @@ import zlib
 from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
+
+from tests import quiet_media_checks
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
+
 
 HAS_FASTAPI = True
 try:
@@ -525,12 +532,12 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             store = RunJobStore()
             job = store.import_completed_run(run_dir)
-            client = api_test_client(store)
-
-            response = client.get(
-                f"/api/runs/{job.run_id}/source-sqlite-wal-preview",
-                params={"path": str(db_path), "max_frames": 5},
-            )
+            # The run folder is inside its evidence (D37): the app's shutdown releases it.
+            with api_test_client(store) as client:
+                response = client.get(
+                    f"/api/runs/{job.run_id}/source-sqlite-wal-preview",
+                    params={"path": str(db_path), "max_frames": 5},
+                )
 
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()
@@ -623,7 +630,7 @@ class RapidTriageApiTests(unittest.TestCase):
     def test_health_and_index_are_available(self) -> None:
         client = api_test_client(RunJobStore())
 
-        self.assertEqual(client.get("/api/health").json(), {"status": "ok"})
+        self.assertEqual(client.get("/api/health").json(), {"status": "ok", "read_only": False})
         self.assertFalse(client.get("/api/enterprise/policy").json()["telemetry"]["enabled"])
         keyword_packs = client.get("/api/keyword-packs").json()
         library_assessment = keyword_packs["keyword_pack_library_assessment"]
@@ -720,7 +727,7 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertEqual(index_response.status_code, 200)
         # The v2 console bundle is served at "/" by default (2026-10-12).
         self.assertIn('<div id="root"></div>', index_response.text)
-        self.assertIn("RapidForensic", index_response.text)
+        self.assertIn("RapidTriage", index_response.text)
         favicon_response = client.get("/favicon.ico")
         self.assertEqual(favicon_response.status_code, 200)
         self.assertEqual(favicon_response.headers["content-type"].split(";")[0], "image/svg+xml")
@@ -787,10 +794,10 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             store = RunJobStore()
             job = store.import_completed_run(run_dir)
-            client = api_test_client(store)
-
-            static_response = client.get("/api/forensic-capabilities")
-            run_response = client.get(f"/api/runs/{job.run_id}/capabilities")
+            # The run folder is its own evidence root (D37): the app's shutdown releases it.
+            with api_test_client(store) as client:
+                static_response = client.get("/api/forensic-capabilities")
+                run_response = client.get(f"/api/runs/{job.run_id}/capabilities")
 
         self.assertEqual(static_response.status_code, 200, static_response.text)
         static_payload = static_response.json()
@@ -1305,6 +1312,7 @@ class RapidTriageApiTests(unittest.TestCase):
 
     def test_sample_case_api_creates_and_imports_practice_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
+            self.enterContext(patch.dict(os.environ, {"RAPIDTRIAGE_SAMPLE_ROOT": tmp_dir}))
             client = api_test_client(RunJobStore())
             response = client.post(
                 "/api/sample-case/run",
@@ -1325,6 +1333,7 @@ class RapidTriageApiTests(unittest.TestCase):
 
     def test_run_validation_package_exports_hashes_review_status_and_blockers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
+            self.enterContext(patch.dict(os.environ, {"RAPIDTRIAGE_SAMPLE_ROOT": tmp_dir}))
             client = api_test_client(RunJobStore())
             response = client.post(
                 "/api/sample-case/run",
@@ -1353,7 +1362,10 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             self.assertEqual(bookmark_response.status_code, 200, bookmark_response.text)
 
+            # R8: the GET builds in memory; the POST writes the package and its audit record.
             package_response = client.get(f"/api/runs/{run_id}/validation-package")
+            self.assertFalse((output_dir / "rapidforensic-run-validation-package.json").exists())
+            self.assertEqual(client.post(f"/api/runs/{run_id}/validation-package").status_code, 200)
 
             self.assertEqual(package_response.status_code, 200, package_response.text)
             package = package_response.json()
@@ -1609,7 +1621,8 @@ class RapidTriageApiTests(unittest.TestCase):
             indicators_response = client.get(f"/api/runs/{run_id}/indicators", params={"offset": 0, "limit": 5})
             search_response = client.get(
                 f"/api/runs/{run_id}/search",
-                params={"keyword": "password", "ocr": "false", "keyword_pack": "credentials"},
+                # detail=1: the audit/source-viewer profiles asserted below are opt-in since R7.
+                params={"keyword": "password", "ocr": "false", "keyword_pack": "credentials", "detail": "1"},
             )
             docs_index_search_response = client.get(
                 f"/api/runs/{run_id}/docs-index-search",
@@ -3462,7 +3475,10 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(payload["case"]["bookmarks"][0]["review"]["include_in_report"], True)
             self.assertEqual(payload["case"]["bookmarks"][0]["review_history"][0]["action"], "created")
 
+            # R8: the GET builds in memory; the POST writes the manifest and its audit record.
             manifest_response = client.get(f"/api/runs/{run_id}/submission-manifest")
+            self.assertFalse((output_dir / "rapidtriage-submission-manifest.json").exists())
+            self.assertEqual(client.post(f"/api/runs/{run_id}/submission-manifest").status_code, 200)
             self.assertEqual(manifest_response.status_code, 200, manifest_response.text)
             manifest = manifest_response.json()
             self.assertEqual(manifest["command"], "submission-manifest")
@@ -3500,24 +3516,24 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(report_response.status_code, 200, report_response.text)
             report_payload = report_response.json()
             self.assertIn("디지털 포렌식 분석 보고서", report_payload["markdown"])
-            self.assertIn("Report template: `technical-appendix`", report_payload["markdown"])
-            self.assertIn("Noise policy:", report_payload["markdown"])
-            self.assertIn("Technical appendix", report_payload["markdown"])
-            self.assertIn("Max extract bytes", report_payload["markdown"])
-            self.assertIn("Source path", report_payload["markdown"])
-            self.assertIn("IOC/Indicator review pivots", report_payload["markdown"])
+            self.assertIn("보고서 양식: 기술 부록 포함 (`technical-appendix`)", report_payload["markdown"])
+            self.assertIn("구성 기준:", report_payload["markdown"])
+            self.assertIn("## 9. 기술 부록", report_payload["markdown"])
+            self.assertIn("추출 최대 바이트", report_payload["markdown"])
+            self.assertIn("원본 경로", report_payload["markdown"])
+            self.assertIn("### 침해 지표 검토 항목", report_payload["markdown"])
             self.assertIn("Review this indicator pivot.", report_payload["markdown"])
-            self.assertIn("Source-search cited hits", report_payload["markdown"])
+            self.assertIn("출처 검색 인용", report_payload["markdown"])
             self.assertIn("credentials.txt line 3 offset 12 keyword password", report_payload["markdown"])
-            self.assertIn("Source type: `source-search`", report_payload["markdown"])
-            self.assertIn("Structured citation: SQLite row citation", report_payload["markdown"])
-            self.assertIn("Source locator: `abc123`", report_payload["markdown"])
-            self.assertIn("Snippet: admin password found", report_payload["markdown"])
-            self.assertIn("Review hint: verify source hashes before report inclusion", report_payload["markdown"])
+            self.assertIn("출처 유형: 현재 파일 출처 검색 (`source-search`)", report_payload["markdown"])
+            self.assertIn("구조화 인용: SQLite row citation", report_payload["markdown"])
+            self.assertIn("출처 위치: `abc123`", report_payload["markdown"])
+            self.assertIn("내용 일부: admin password found", report_payload["markdown"])
+            self.assertIn("검토 안내: verify source hashes before report inclusion", report_payload["markdown"])
             self.assertIn("docs-index://document/7", report_payload["markdown"])
-            self.assertIn("Source type: `docs-index`", report_payload["markdown"])
-            self.assertIn("Matched terms: password:2, admin:1", report_payload["markdown"])
-            self.assertIn("Result hash: `deadbeef1234`", report_payload["markdown"])
+            self.assertIn("출처 유형: 문서 색인 (`docs-index`)", report_payload["markdown"])
+            self.assertIn("일치 검색어: password:2, admin:1", report_payload["markdown"])
+            self.assertIn("결과 해시: `deadbeef1234`", report_payload["markdown"])
             self.assertIn("CASE-001", report_payload["markdown"])
             self.assertIn(evidence["hashes"]["sha256"], report_payload["markdown"])
             self.assertIn("html", report_payload["exports"])
@@ -3545,7 +3561,7 @@ class RapidTriageApiTests(unittest.TestCase):
             # The download must serve the report written by the POST above —
             # regenerating with a default request would clobber the chosen
             # template (previously this endpoint rebuilt with legal-handoff).
-            self.assertIn("Report template: `technical-appendix`", report_file_response.text)
+            self.assertIn("보고서 양식: 기술 부록 포함 (`technical-appendix`)", report_file_response.text)
             html_report_response = client.get(f"/api/runs/{run_id}/case-report/file/html")
             self.assertEqual(html_report_response.status_code, 200)
             self.assertIn("<h1>디지털 포렌식 분석 보고서</h1>", html_report_response.text)
@@ -4068,12 +4084,11 @@ class RapidTriageApiTests(unittest.TestCase):
             )
 
             client = api_test_client(RunJobStore())
+            # R8 RI-05: refused when imported (it used to import and answer 403 on access).
             import_response = client.post("/api/runs/import", json={"output_dir": str(output_dir)})
-            self.assertEqual(import_response.status_code, 201, import_response.text)
-            run_id = import_response.json()["run_id"]
-
-            report_response = client.get(f"/api/runs/{run_id}/outputs/report/file")
-            self.assertEqual(report_response.status_code, 403)
+            self.assertEqual(import_response.status_code, 400, import_response.text)
+            self.assertEqual(import_response.json()["detail"]["code"], "IMPORT_OUTPUT_OUTSIDE_FOLDER")
+            self.assertEqual(client.get("/api/runs").json()["runs"], [])
 
     def test_e01_smoke_stage_status_output_is_served_through_run_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -4496,7 +4511,7 @@ class RapidTriageApiTests(unittest.TestCase):
 
             unscoped = client.get(f"/api/runs/{run_id}/artifacts", params={"limit": 1, "sort": "timestamp:desc"})
             self.assertEqual(unscoped.status_code, 400)
-            self.assertEqual(unscoped.json(), {"detail": "sort requires exactly one kind"})
+            self.assertEqual(unscoped.json()["detail"], "sort requires exactly one kind")
             inline = client.get(
                 f"/api/runs/{run_id}/artifacts", params={"limit": 1, "kind": "browser", "sort": "timestamp"}
             ).json()
@@ -4556,7 +4571,9 @@ class RapidTriageApiTests(unittest.TestCase):
             broken = root / "broken.png"
             broken.write_bytes(b"not really a png")
             undecodable = client.get(f"/api/runs/{run_id}/source-thumbnail", params={"path": str(broken)})
-            self.assertEqual(undecodable.status_code, 415)
+            # T-018: an image-typed file that does not decode is "no preview", not an error.
+            self.assertEqual(undecodable.status_code, 204)
+            self.assertEqual(undecodable.headers["x-rapidtriage-thumbnail"], "unavailable")
 
             too_big = client.get(f"/api/runs/{run_id}/source-thumbnail", params={"path": str(photo), "size": 513})
             self.assertEqual(too_big.status_code, 422)
@@ -4715,6 +4732,88 @@ class RapidTriageApiTests(unittest.TestCase):
             pdf = next(entry for entry in exports if entry["name"].endswith(".pdf"))
             self.assertEqual(pdf["download_url"], f"/api/runs/{run_id}/case-report/file/pdf")
             self.assertEqual(client.get("/api/runs/missing/dashboard").status_code, 404)
+
+    def test_dashboard_partitions_keep_number_zero_and_stay_unique(self) -> None:
+        from rapidtriage.api.app.dashboard import _normalize_partitions
+
+        def row(slot: int | None, number: int | None, start: int) -> dict[str, object]:
+            return {"slot": slot, "partition_number": number, "start_sector": start, "filesystem_guess": "ntfs"}
+
+        # GPT tables number partitions from 0; 0 must not be treated as "missing".
+        gpt = _normalize_partitions(
+            {"partition_table": [row(0, 0, 2048), row(1, 1, 4096), row(2, 2, 8192)], "partition_start_sector": 4096}
+        )
+        self.assertEqual([p["number"] for p in gpt], [0, 1, 2])
+        self.assertEqual([p["index"] for p in gpt], [1, 2, 3])
+        self.assertEqual([p["selected"] for p in gpt], [False, True, False])
+        # Duplicate / missing numbers fall back to a unique value.
+        dup = _normalize_partitions(
+            {"partition_table": [row(None, 1, 1), row(None, 1, 2), row(None, None, 3), row(None, 2, 4)]}
+        )
+        numbers = [p["number"] for p in dup]
+        self.assertEqual(len(set(numbers)), len(numbers), numbers)
+        self.assertEqual(numbers[0], 1)
+
+    def test_tree_summary_head_scan_reads_pretty_printed_outputs_without_full_parse(self) -> None:
+        from unittest.mock import patch
+
+        from rapidtriage.api.app import tree
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "rapidtriage-files.json"
+            payload = {"command": "files", "summary": {"scanned_file_count": 3}, "files": [{"p": "x" * 64}] * 4000}
+            for indent, newline in ((2, "\n"), (2, "\r\n"), (None, "\n")):
+                text = json.dumps(payload, indent=indent)
+                path.write_bytes(text.replace("\n", newline).encode("utf-8"))
+                self.assertGreater(path.stat().st_size, tree.SUMMARY_SCAN_BYTES)
+                with patch.object(tree, "read_output_json", side_effect=AssertionError("full parse")):
+                    self.assertEqual(tree.read_output_summary(path), {"scanned_file_count": 3})
+
+    def test_compact_views_drop_large_nested_details_and_summary_file_lists(self) -> None:
+        from rapidtriage.api.app.compact_views import (
+            COMPACT_NESTED_MAX_BYTES,
+            compact_artifact_row,
+            compact_artifacts_response,
+            compact_run_summary,
+        )
+
+        big = {"profile": "x" * (COMPACT_NESTED_MAX_BYTES + 10)}
+        row = {
+            "record_index": 7,
+            "details": {
+                "name": "a" * 4000,  # long scalars stay (grid columns / filters)
+                "size": 1,
+                "risk_flags": ["r"] * 300,  # scalar arrays stay (promotable columns)
+                "source_hashes": {"sha256": "ab" * 32},  # small nested stays
+                "mft_full_parser_profile": big,
+                "raw": [big],
+            },
+        }
+        compacted = compact_artifact_row(row)
+        self.assertEqual(compacted["details_omitted"], ["mft_full_parser_profile", "raw"])
+        self.assertEqual(set(compacted["details"]), {"name", "size", "risk_flags", "source_hashes"})
+        self.assertEqual(compacted["record_index"], 7)
+        self.assertIn("raw", row["details"])  # the source row is not mutated
+        small = {"record_index": 1, "details": {"a": 1}}
+        self.assertIs(compact_artifact_row(small), small)
+        self.assertNotIn("details_omitted", small)
+        response = {"artifacts": {"windows-filesystem": {"artifacts": [row, small]}}}
+        compact_artifacts_response(response)
+        rows = response["artifacts"]["windows-filesystem"]["artifacts"]
+        self.assertEqual(rows[0]["details_omitted"], ["mft_full_parser_profile", "raw"])
+
+        summary = {
+            "summary": {"counts": {"files": 2}},
+            "source": {"type": "e01", "recovered_root_manifest": {"root": "r", "files": [{"p": 1}, {"p": 2}]}},
+            "safety": {"input_fingerprint": {"summary": {"n": 2}, "files": [{"p": 1}]}},
+        }
+        slim = compact_run_summary(summary)
+        self.assertEqual(slim["source"]["recovered_root_manifest"], {"root": "r", "files_omitted": 2})
+        self.assertEqual(slim["source"]["type"], "e01")
+        self.assertEqual(slim["safety"]["input_fingerprint"], {"summary": {"n": 2}, "files_omitted": 1})
+        self.assertEqual(slim["summary"], summary["summary"])
+        self.assertEqual(len(summary["source"]["recovered_root_manifest"]["files"]), 2)  # not mutated
+        self.assertEqual(compact_run_summary({"steps": []}), {"steps": []})
 
     def test_run_case_notes_round_trip_and_feed_the_case_report(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

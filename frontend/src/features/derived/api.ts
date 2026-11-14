@@ -10,7 +10,16 @@ import { api } from "../../api/client";
 
 const enc = encodeURIComponent;
 
-export type DerivedTableId = "people" | "devices" | "paths" | "attachments" | "credentials" | "urls";
+export type DerivedTableId =
+  | "people"
+  | "devices"
+  | "paths"
+  | "attachments"
+  | "credentials"
+  | "urls"
+  | "ai_usage"
+  | "ai_projects";
+/** Every table the server's `derived` set holds (R7 lane C added the two AI session aggregates). */
 export const DERIVED_TABLE_IDS: readonly DerivedTableId[] = [
   "people",
   "devices",
@@ -18,6 +27,8 @@ export const DERIVED_TABLE_IDS: readonly DerivedTableId[] = [
   "attachments",
   "credentials",
   "urls",
+  "ai_usage",
+  "ai_projects",
 ];
 
 export function isDerivedTable(value: unknown): value is DerivedTableId {
@@ -76,6 +87,20 @@ export interface DerivedRow {
   examples?: string[];
   length?: number;
   sha256?: string;
+  /** ai_usage / ai_projects (session aggregates, core/derived/tables_ai.py). */
+  tool_label?: string;
+  tool?: string;
+  account?: string;
+  day?: string;
+  sessions?: number;
+  subagent_sessions?: number;
+  turns?: number;
+  tool_calls?: number;
+  tokens_in?: number;
+  tokens_out?: number;
+  projects?: number;
+  tools?: Record<string, number>;
+  file_touch_rows?: number;
 }
 
 export interface DerivedPage {

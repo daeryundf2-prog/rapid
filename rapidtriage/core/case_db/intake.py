@@ -556,6 +556,20 @@ class CaseIntake:
                     actor="rapidtriage", params={"status": status, "message": message, **dict(digests)},
                 )
 
+    def latest_hash_params(self, citation_id: str) -> dict[str, object]:
+        """Params of the newest ``evidence.hash`` audit event of an evidence row (``{}`` when none):
+        the server-side record of the recorded acquisition hash and segment coverage (WB-9 P1-5)."""
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT params_json FROM audit_event WHERE action = 'evidence.hash' AND target_id = ? "
+                "ORDER BY id DESC LIMIT 1", (citation_id,),
+            ).fetchone()
+        try:
+            params = json.loads(str(row[0])) if row is not None else {}
+        except ValueError:
+            return {}
+        return params if isinstance(params, dict) else {}
+
     def mark_interrupted_hashes(self, started_before: str) -> list[str]:
         """``hashing`` rows saved before ``started_before`` have no worker any more: store ``interrupted``."""
         message = "서버가 다시 시작되어 해시 계산이 끊겼습니다. 다시 계산하세요"

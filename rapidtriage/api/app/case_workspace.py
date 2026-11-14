@@ -9,6 +9,7 @@ snapshot of every run started for a case. Runs keep their own per-run
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -24,6 +25,11 @@ from ...core.case_db.base import now_iso
 from ...core.case_db.intake import CaseIntake, ensure_intake_schema
 from ...core.e01 import is_e01_path
 from ...core.e01_hash import run_e01_streaming_hash
+from ...core.e01_recorded_hash import (
+    RecordedHash,
+    evidence_hash_verdict,
+    read_recorded_acquisition_hash,
+)
 from ...core.evidence import identify_evidence
 from ...core.jobs import RunJob, RunJobStore, RunRequest
 from ...core.run.profiles import RUN_PROFILES
@@ -38,6 +44,51 @@ LINKED_SNAPSHOT_DIR = "rapidtriage-processing-snapshots"
 SNAPSHOT_VERSION = "processing-snapshot-v1"
 HEX_HASH = re.compile(r"^[0-9a-fA-F]+$")
 HASH_LENGTHS = {32: "md5", 40: "sha1", 64: "sha256"}
+#: Display sidecar the hash worker writes beside the hash output (R8 T-129): per-segment digests and
+#: the acquisition hash recorded in the image, so the console and the report (T-182) show them
+#: without a schema change. Read only for rows whose hash finished; never a verdict input.
+HASH_VIEW_FILE = "evidence-hash-view.json"
+HASH_VIEW_VERSION = "evidence-hash-view-v1"
+HASH_VIEW_STATUSES = frozenset({"computed", "matched", "mismatched"})
+#: Appended to EWF hash messages that do not say so already: the media (disk) is never re-hashed.
+MEDIA_NOT_REHASHED = "매체(디스크) 해시는 다시 계산하지 않음"
+#: Appended when the segment set is incomplete (WB-9 P1-3): the container hash covers present segments only.
+INCOMPLETE_SET_NOTE = "세그먼트 집합 불완전 — 컨테이너 해시는 있는 세그먼트만"
+HASH_ALGORITHMS_BY_LENGTH = {32: "md5", 40: "sha1"}
+
+
+def _hash_scope_counts(payload: Mapping[str, object]) -> tuple[int, list[int]]:
+    """``(segments hashed, missing segment indices)`` from an ``e01-streaming-hash`` payload."""
+    scope = payload.get("hash_scope") if isinstance(payload.get("hash_scope"), Mapping) else {}
+    gaps = [int(item) for item in scope.get("segment_gaps") or [] if isinstance(item, int)]  # type: ignore[union-attr]
+    return int(scope.get("segment_count") or 0), gaps  # type: ignore[union-attr]
+
+
+def server_hash_check(row: Mapping[str, object], params: Mapping[str, object]) -> dict[str, object]:
+    """Server-side hash comparison fields of an evidence row (WB-9 P1-3/P1-4/P1-5), from the row and
+    the newest ``evidence.hash`` audit params (never from the display sidecar):
+
+    * ``hash_recorded_compare`` -- EWF only: ``equals`` / ``differs`` (the image records a hash of the
+      input's algorithm and it equals / differs from the input), ``not-comparable`` (no such recorded
+      value), ``""`` (no input, not EWF, or no finished hash);
+    * ``hash_set_incomplete`` -- the segment set is known to be incomplete (missing last segment or a gap);
+    * ``hash_segment_count`` / ``hash_segment_gaps`` -- segments the container hash covered and the gaps.
+    """
+    out: dict[str, object] = {
+        "hash_recorded_compare": "", "hash_set_incomplete": False, "hash_segment_count": None, "hash_segment_gaps": [],
+    }
+    if row.get("hash_status") not in HASH_VIEW_STATUSES or params.get("status") != row.get("hash_status"):
+        return out
+    out["hash_set_incomplete"] = str(params.get("segment_set_incomplete") or "") == "1"
+    count = str(params.get("segments_hashed") or "")
+    out["hash_segment_count"] = int(count) if count.isdigit() else None
+    out["hash_segment_gaps"] = [int(part) for part in str(params.get("segment_gaps") or "").split(",") if part.strip().isdigit()]
+    expected = str(row.get("hash_expected") or "").strip().lower()
+    if expected and is_e01_path(Path(str(row.get("path") or ""))):
+        algorithm = HASH_ALGORITHMS_BY_LENGTH.get(len(expected), "")
+        recorded = str(params.get(f"recorded_{algorithm}") or "").lower() if algorithm else ""
+        out["hash_recorded_compare"] = ("equals" if recorded == expected else "differs") if recorded else "not-comparable"
+    return out
 
 
 def as_422(exc: HTTPException) -> HTTPException:
@@ -183,6 +234,37 @@ def build_processing_snapshot(
     return snapshot
 
 
+def write_hash_view(folder: Path, payload: Mapping[str, object], recorded: RecordedHash | None) -> None:
+    """Per-segment digests and the recorded acquisition hash (``HASH_VIEW_FILE``), display only."""
+    scope = payload.get("hash_scope")
+    segments = []
+    for row in payload.get("segment_digests") or []:
+        if not isinstance(row, Mapping):
+            continue
+        row_digests = row.get("digests") if isinstance(row.get("digests"), Mapping) else {}
+        segments.append({
+            "name": str(row.get("name") or ""),
+            "segment_number": row.get("segment_number"),
+            "size_bytes": row.get("size_bytes"),
+            **{name: str(row_digests.get(name) or "") for name in ("md5", "sha1", "sha256")},
+        })
+    count, gaps = _hash_scope_counts(payload)
+    view = {
+        "profile_version": HASH_VIEW_VERSION,
+        "scope": str(scope.get("scope") or "") if isinstance(scope, Mapping) else "",
+        "segments": segments,
+        "segment_count": count,
+        "segment_gaps": gaps,
+        "incomplete": bool(gaps) or bool(recorded is not None and recorded.incomplete),
+        "recorded_acquisition_hash": recorded.to_dict() if recorded is not None else None,
+    }
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / HASH_VIEW_FILE).write_text(json.dumps(view, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as exc:  # display only: the row's status and digests are still recorded
+        LOGGER.warning("could not write evidence hash view in %s: %s", folder, exc)
+
+
 class CaseWorkspace:
     """Lazily opened workspace case DB plus the evidence-hash worker threads."""
 
@@ -249,27 +331,111 @@ class CaseWorkspace:
 
     def _hash_worker(self, case_id: str, citation_id: str, path: Path, expected: str) -> None:
         try:
+            # WB-9 P2-6: a stale sidecar of the previous hash must not show under the new status.
+            (self.hash_dir(case_id, citation_id) / HASH_VIEW_FILE).unlink(missing_ok=True)
             payload = run_e01_streaming_hash(
                 source_path=path, output_dir=self.hash_dir(case_id, citation_id), overwrite=True
             )
             digests = {str(k): str(v) for k, v in dict(payload.get("digests") or {}).items()}
-            if expected:
-                algorithm = HASH_LENGTHS.get(len(expected), "")
-                actual = digests.get(algorithm, "")
-                status = "matched" if actual and actual.lower() == expected else "mismatched"
-                message = f"파일 바이트 {algorithm.upper()} 기대값 {expected} / 계산값 {actual or '없음'}"
-            else:
-                status, message = "computed", "기대 해시가 없어 계산값만 기록했습니다 (파일·컨테이너 바이트 기준)"
+            recorded = read_recorded_acquisition_hash(path) if is_e01_path(path) else None
+            status, message = evidence_hash_verdict(expected, digests, recorded)
+            if recorded is not None:
+                digests.update({f"recorded_{k}": v for k, v in (("md5", recorded.md5), ("sha1", recorded.sha1)) if v})
+                if "매체" not in message:
+                    message = f"{message} · {MEDIA_NOT_REHASHED}"
+                if recorded.detail:  # raw libewf / OS error: log and audit params only, never the message
+                    LOGGER.info("recorded acquisition hash not read for %s: %s", citation_id, recorded.detail)
+                    digests["recorded_error"] = recorded.detail
+                # Server-side coverage record (audit params; WB-9 P1-3/P1-4): read back by server_hash_check.
+                count, gaps = _hash_scope_counts(payload)
+                digests["segments_hashed"] = str(count)
+                if gaps:
+                    digests["segment_gaps"] = ",".join(str(item) for item in gaps[:64])
+                if recorded.incomplete or gaps:
+                    digests["segment_set_incomplete"] = "1"
+                    message = f"{message} · {INCOMPLETE_SET_NOTE}"
+            write_hash_view(self.hash_dir(case_id, citation_id), payload, recorded)
             self.intake.set_evidence_hash(citation_id, status=status, message=message, digests=digests)
         except Exception as exc:  # recorded on the evidence row, never raised into the server
             LOGGER.warning("evidence hash failed for %s: %s", citation_id, exc)
             try:
-                self.intake.set_evidence_hash(citation_id, status="failed", message=str(exc))
+                self.intake.set_evidence_hash(citation_id, status="failed", message=f"해시 계산 실패: {exc}")
             except Exception:
                 LOGGER.exception("could not record evidence hash failure for %s", citation_id)
         finally:
             with self._lock:
                 self._hash_threads.pop(citation_id, None)
+
+    def hash_view(self, evidence: Mapping[str, object]) -> dict[str, object]:
+        """``hash_scope`` / ``hash_segments`` / ``hash_recorded`` of a row whose hash finished
+        (empty values otherwise, or when the sidecar is missing or unreadable)."""
+        check = server_hash_check(evidence, self._hash_params(evidence))
+        empty: dict[str, object] = {"hash_scope": "", "hash_segments": [], "hash_recorded": None, **check}
+        if evidence.get("hash_status") not in HASH_VIEW_STATUSES:
+            return empty
+        try:
+            folder = self.hash_dir(str(evidence.get("case_id") or ""), str(evidence.get("citation_id") or ""))
+            view = json.loads((folder / HASH_VIEW_FILE).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return empty
+        if not isinstance(view, dict):
+            return empty
+        recorded = view.get("recorded_acquisition_hash")
+        return {
+            "hash_scope": str(view.get("scope") or ""),
+            "hash_segments": [row for row in view.get("segments") or [] if isinstance(row, dict)],
+            "hash_recorded": (
+                {**{key: str(recorded.get(key) or "") for key in ("md5", "sha1", "reason")},
+                 "incomplete": bool(recorded.get("incomplete"))}
+                if isinstance(recorded, dict)
+                else None
+            ),
+            **check,
+        }
+
+    def _hash_params(self, evidence: Mapping[str, object]) -> dict[str, object]:
+        if evidence.get("hash_status") not in HASH_VIEW_STATUSES:
+            return {}
+        try:
+            return self.intake.latest_hash_params(str(evidence.get("citation_id") or ""))
+        except Exception as exc:  # display fields only: a locked DB leaves them empty
+            LOGGER.warning("evidence hash audit params not read: %s", exc)
+            return {}
+
+    def run_evidence_records(self, run_id: str) -> list[dict[str, object]]:
+        """Evidence rows of a case run with their hash results, for report metadata (R8 T-182):
+        name, size, container digests, per-segment SHA-256 and the recorded acquisition hash.
+        ``[]`` for a run without a case or when the workspace case DB cannot be read."""
+        try:
+            if self._intake is None and not self.path().is_file():
+                return []  # no case was ever created: never create the workspace DB for a report
+            snapshot = self.intake.get_snapshot(run_id)
+            if snapshot is None:
+                return []
+            row = self.intake.get_evidence(str(snapshot["case_id"]), str(snapshot["evidence_citation_id"]))
+        except Exception as exc:  # report export must not fail on the workspace DB
+            LOGGER.warning("evidence records for run %s not read: %s", run_id, exc)
+            return []
+        view = self.hash_view(row)
+        hashes = row.get("hashes") if isinstance(row.get("hashes"), Mapping) else {}
+        return [{
+            "evidence_number": row.get("evidence_number", ""),
+            "citation_id": row.get("citation_id", ""),
+            "display_name": row.get("display_name", ""),
+            "source_type": row.get("source_type", ""),
+            "path": row.get("path", ""),
+            "size_bytes": row.get("size_bytes"),
+            "hash_status": row.get("hash_status", ""),
+            "hash_message": row.get("hash_message", ""),
+            "hashes": {name: str(hashes.get(name) or "") for name in ("md5", "sha1", "sha256") if hashes.get(name)},
+            "hash_scope": view["hash_scope"],
+            "segments": view["hash_segments"],
+            "recorded_acquisition_hash": view["hash_recorded"],
+            "recorded_compare": view["hash_recorded_compare"],
+            "segment_set_incomplete": view["hash_set_incomplete"],
+            "segment_count": view["hash_segment_count"],
+            "segment_gaps": view["hash_segment_gaps"],
+        }]
 
     def hash_running(self, citation_id: str) -> bool:
         with self._lock:
@@ -311,7 +477,7 @@ class CaseWorkspace:
         ):
             evidence = {**evidence, "hash_status": "interrupted", "hash_status_label": "해시 계산 중단됨 (서버 재시작)"}
         runnable, reason = self.readiness(str(evidence.get("path") or ""))
-        return {**evidence, "runnable": runnable, "run_blocked_reason": reason}
+        return {**evidence, **self.hash_view(evidence), "runnable": runnable, "run_blocked_reason": reason}
 
 
 def run_brief(store: RunJobStore, run_id: str) -> dict[str, object]:

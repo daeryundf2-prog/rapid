@@ -38,7 +38,7 @@ class RapidTriageDocumentationContractTests(unittest.TestCase):
         self.assertIn("docs/samples/rapidtriage-extract.sample.json", readme)
         self.assertIn("docs/samples/rapidtriage-artifacts.sample.json", readme)
         self.assertIn("docs/samples/rapidtriage-run-summary.sample.json", readme)
-        self.assertIn("rapidtriage run . --mode fraud --output-dir ./rapidtriage-run-fraud", readme)
+        self.assertIn("rapidtriage run . --mode fraud --output-dir ../rapidtriage-run-fraud", readme)
         self.assertIn("rapidtriage artifacts . --kind browser", readme)
 
     def test_readme_separates_implemented_experimental_and_planned_contracts(self) -> None:

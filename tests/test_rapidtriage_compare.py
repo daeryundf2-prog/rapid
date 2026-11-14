@@ -189,7 +189,7 @@ class RapidTriageCompareTests(unittest.TestCase):
                 case_payload=case_payload,
                 submission_manifest=submission,
             )
-            self.assertIn("A/B compare review pivots", report)
+            self.assertIn("### A/B 비교 검토 항목", report)
             self.assertIn("Check changed secret value.", report)
 
     def test_compare_command_supports_three_way_baseline_review(self) -> None:

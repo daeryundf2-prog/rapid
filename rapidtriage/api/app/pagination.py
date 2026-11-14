@@ -96,6 +96,10 @@ def paginate_payload(
         "limit": limit,
         "returned": returned,
         "total": total,
+        # Partial-result contract (T-019): an unfiltered page is always counted and complete.
+        "total_lower_bound": total,
+        "truncated": False,
+        "budget_stopped": False,
         "next_offset": end if end < total else None,
         "previous_offset": max(0, offset - limit) if offset > 0 else None,
         "cursor": cursor_value,

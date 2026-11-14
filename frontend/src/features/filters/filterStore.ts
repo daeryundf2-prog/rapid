@@ -68,13 +68,17 @@ export const useFilterStore = create<FilterStoreState>((set, get) => ({
   typeCounts: {},
   setOptions: (types, tags, counts = {}) => {
     const s = get();
-    if (
-      s.typeOptions.join("\u0000") === types.join("\u0000") &&
-      s.tagOptions.join("\u0000") === tags.join("\u0000") &&
-      JSON.stringify(s.typeCounts) === JSON.stringify(counts)
-    )
-      return;
-    set({ typeOptions: types, tagOptions: tags, typeCounts: counts });
+    const sameTypes = s.typeOptions.join("\u0000") === types.join("\u0000");
+    const sameTags = s.tagOptions.join("\u0000") === tags.join("\u0000");
+    const sameCounts = JSON.stringify(s.typeCounts) === JSON.stringify(counts);
+    if (sameTypes && sameTags && sameCounts) return;
+    // Unchanged lists keep their identity: a page that only adds counts does not re-render the
+    // components that read the type / tag menus (the grid itself reads `typeOptions`).
+    set({
+      typeOptions: sameTypes ? s.typeOptions : types,
+      tagOptions: sameTags ? s.tagOptions : tags,
+      typeCounts: sameCounts ? s.typeCounts : counts,
+    });
   },
   setFilters: (next) => {
     const clean: FilterState = { ...next, ext: next.ext.map(normalizeExt).filter(Boolean) };

@@ -6,7 +6,8 @@
  * filtered to image extensions; each visible tile loads a server-cached JPEG
  * thumbnail (`source-thumbnail`) through the authenticated blob fetch, at most
  * THUMB_CONCURRENCY at a time, and falls back to the original (source-file)
- * only when the thumbnail call fails. Only mounted tiles load.
+ * only on 415 / 5xx / network; otherwise a tile without a picture draws the
+ * type glyph (ThumbGlyph, r8 T-017). Only mounted tiles load.
  *
  * Keys (roving tabindex): arrows, Home/End (row), Ctrl+Home/End (all),
  * PageUp/PageDown; Enter = open in the viewer (image mode); Space = select;
@@ -33,6 +34,7 @@ import { fetchSourceBlob, fetchSourceThumbnailBlob, isArchiveEntryPath } from ".
 import type { CollectionRef, GridRow } from "../../contracts/collection";
 import { encodeRowRef } from "../../contracts/rowRef";
 import { useAppStore } from "../../state/store";
+import { evidencePathOf } from "../../utils/pathDisplay";
 import {
   MEDIA_PANEL_LABELS,
   MediaExplorerPanel,
@@ -50,6 +52,7 @@ import { registerRowSource } from "../review/rowSource";
 import { useViewPrefs } from "../review/viewPrefs";
 import { errorText, useBlobUrl } from "../viewer/useAsync";
 import { SelectionBar } from "./SelectionBar";
+import { noPreviewFor, THUMB_WITHHELD_TEXT, ThumbGlyph, ThumbUnavailableError } from "./ThumbGlyph";
 import {
   createLimiter,
   gridMove,
@@ -59,7 +62,7 @@ import {
   THUMB_SORT_LABELS,
   type ThumbSort,
 } from "./thumbnails";
-import { useAutoLoad, useElementWidth, useViewRows } from "./useViewRows";
+import { autoLoadPending, useAutoLoad, useElementWidth, useViewRows } from "./useViewRows";
 import { EmptyState, ErrorState, LoadingCard } from "./ViewState";
 
 export const TILE_WIDTH = 152;
@@ -75,15 +78,28 @@ export const THUMB_CONCURRENCY = 6;
 export const THUMB_SIZE = 160;
 const thumbSlots = createLimiter(THUMB_CONCURRENCY);
 
-/** Thumbnail first; the original only if the thumbnail call fails (not when aborted). */
+/**
+ * Thumbnail first; the original only when the server could not judge the file (415 / 5xx /
+ * network, never when aborted). HTTP 204 and other 4xx answers reject with ThumbUnavailableError.
+ */
 export function loadThumbBlob(runId: string, path: string, signal: AbortSignal): Promise<Blob> {
   return thumbSlots(signal, async () => {
+    let thumb: Blob | null;
     try {
-      return await fetchSourceThumbnailBlob(runId, path, THUMB_SIZE, signal);
+      thumb = await fetchSourceThumbnailBlob(runId, path, THUMB_SIZE, signal);
     } catch (error) {
       if (signal.aborted) throw error;
-      return fetchSourceBlob(runId, path, signal);
+      const none = noPreviewFor(error);
+      if (none) throw none;
+      try {
+        return await fetchSourceBlob(runId, path, signal);
+      } catch (fallbackError) {
+        if (signal.aborted) throw fallbackError;
+        throw noPreviewFor(fallbackError) ?? new ThumbUnavailableError(false);
+      }
     }
+    if (!thumb || thumb.size === 0) throw new ThumbUnavailableError(false);
+    return thumb;
   });
 }
 
@@ -92,9 +108,16 @@ function Thumb({ runId, path }: { runId: string; path: string }) {
   const image = useBlobUrl(archive ? null : `thumb|${runId}|${path}`, (signal) =>
     loadThumbBlob(runId, path, signal),
   );
-  if (image.url) return <img className="thumb-img" src={image.url} alt="" draggable={false} />;
-  const failed = archive || image.status === "error";
-  return <span className="thumb-placeholder">{failed ? "미리 보기 없음" : "불러오는 중…"}</span>;
+  // A blob the browser cannot decode: swap the <img> for the glyph once (no retry).
+  const [brokenUrl, setBrokenUrl] = useState<string | null>(null);
+  if (image.url && image.url !== brokenUrl) {
+    const url = image.url;
+    return <img className="thumb-img" src={url} alt="" draggable={false} onError={() => setBrokenUrl(url)} />;
+  }
+  if (archive || image.status === "error" || image.url) {
+    return <ThumbGlyph path={path} withheld={image.error === THUMB_WITHHELD_TEXT} />;
+  }
+  return <span className="thumb-placeholder">불러오는 중…</span>;
 }
 
 const Tile = memo(function Tile({
@@ -145,7 +168,7 @@ const Tile = memo(function Tile({
       <span className="thumb-frame">
         <Thumb runId={runId} path={row.sourcePath ?? ""} />
       </span>
-      <span className="thumb-name" title={row.sourcePath ?? name}>
+      <span className="thumb-name" title={evidencePathOf(row.sourcePath).path ?? name}>
         {name}
       </span>
     </div>
@@ -238,11 +261,10 @@ export function ThumbnailView() {
   const mediaCapped = useAutoLoad(media, wantMore, THUMB_AUTOLOAD_ROWS);
   const capped = filesCapped || mediaCapped;
   const scanned = cq.loadedCount + (withArtifacts ? media.loadedCount : 0);
+  // Settled once enough rows are loaded or a page failed, though the server has more (r8 verify F4).
   const paging =
-    cq.isFetching ||
-    (withArtifacts && media.isFetching) ||
-    (cq.canLoadMore && !filesCapped) ||
-    (withArtifacts && media.canLoadMore && !mediaCapped);
+    autoLoadPending(cq, wantMore, THUMB_AUTOLOAD_ROWS) ||
+    (withArtifacts && autoLoadPending(media, wantMore, THUMB_AUTOLOAD_ROWS));
   const loadMoreAll = () => {
     if (filesCapped) cq.loadMore();
     if (mediaCapped) media.loadMore();

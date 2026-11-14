@@ -13,6 +13,7 @@ import { expandViewerPane, focusViewer, MAIN_ID } from "../commands/builtin";
 import type { CollectionQuery, CollectionRef } from "../contracts/collection";
 import { encodeRowRef, type RowRef } from "../contracts/rowRef";
 import type { ViewerTarget } from "../contracts/viewer";
+import { parseSearchKeywords } from "../features/case/searchKeywords";
 import { useSearchState } from "../features/case/searchState";
 import { type RouteState, useGridLocalStore } from "../features/grid/adapter";
 import { collectionChanged, stageHasViewer, stageOf } from "../router";
@@ -43,7 +44,8 @@ function sameCollection(a: CollectionRef, b: CollectionRef): boolean {
 
 /** Search spec for the grid from the routed keywords + S4's options popover. */
 export function searchSpec(q: string | undefined): CollectionQuery["search"] {
-  const keywords = (q ?? "").split(/[\s,]+/).filter(Boolean);
+  // R7 S2 #4: at most 32 keywords / 4,000 characters (the v2 query's limits), with a Korean note.
+  const { keywords, note } = parseSearchKeywords(q);
   if (keywords.length === 0) return undefined;
   const { options } = useSearchState.getState();
   return {
@@ -51,6 +53,8 @@ export function searchSpec(q: string | undefined): CollectionQuery["search"] {
     mode: options.mode,
     sources: options.sources.length ? options.sources : undefined,
     hideKnownGood: options.hideKnownGood,
+    ...(options.ocr ? { ocr: true } : {}),
+    ...(note ? { keywordNote: note } : {}),
   };
 }
 
@@ -143,7 +147,7 @@ export function connectGridToShell(): () => void {
         app.route.collection === "review" &&
         ref.status !== app.route.status
       ) {
-        // 검토 toolbar 리뷰 상태: a patch of the same page, so tags / time / types / ext / path
+        // 검토 toolbar 검토 상태 filter: a patch of the same page, so tags / time / types / ext / path
         // filters stay (openCollection would start a clean route — review B2-5).
         app.patchRoute({ status: ref.status, row: undefined });
       } else if (!sameCollection(ref, gridRouteFromShell().collection)) {

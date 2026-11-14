@@ -59,6 +59,7 @@ from rapidtriage.core.search_index.schema import (
     open_writable,
 )
 from rapidtriage.core.search_index.textutil import target_path_key
+from tests._timing import time_budget
 from tests.search_index_fixture import build_fixture_run, write_analysis, write_kind
 
 try:
@@ -205,7 +206,7 @@ class RegexGuardTests(unittest.TestCase):
         started = time.monotonic()
         with self.assertRaises(RowTimeout):
             matcher.search("ab" * 32_000)
-        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertLess(time.monotonic() - started, time_budget(0.5))
         self.assertEqual(GuardedRegex(analyze_regex("needle").compiled).search("x" * 50_000 + "needle"), (50_000, 50_006))
 
 
@@ -242,14 +243,14 @@ class HardeningEngineTests(unittest.TestCase):
                 with self.assertRaises(QueryError) as caught:
                     self.run_q(f"re:/{pattern}/")
                 self.assertEqual(caught.exception.status, 400)
-                self.assertLess(time.monotonic() - started, 1.0)
+                self.assertLess(time.monotonic() - started, time_budget(1.0))
         # The 64-hex indicator row exists; the pattern never reaches it.
         self.assertEqual(self.total("type:indicator-sha256"), 1)
 
     def test_slow_allowed_regex_is_truncated_within_one_second(self) -> None:
         started = time.monotonic()
         result = self.run_q(r"re:/.*a.*b=/")
-        self.assertLess(time.monotonic() - started, 1.0)
+        self.assertLess(time.monotonic() - started, time_budget(1.0))
         self.assertTrue(result["truncated"])
         self.assertTrue(any("행당 시간 한도" in warning for warning in result["query"]["parsed"]["warnings"]))
 
@@ -273,7 +274,7 @@ class HardeningEngineTests(unittest.TestCase):
                 self.assertGreater(histogram["bucket_seconds"], 60)
                 self.assertTrue(any("구간을" in warning for warning in result["query"]["parsed"]["warnings"]))
                 self.assertEqual(sum(bucket["count"] for bucket in histogram["buckets"]), 2)
-                self.assertLess(time.monotonic() - started, 2.0)
+                self.assertLess(time.monotonic() - started, time_budget(2.0))
 
     # -- H3 ----------------------------------------------------------------
 
@@ -453,7 +454,7 @@ class HardeningEngineTests(unittest.TestCase):
         elapsed = time.monotonic() - started
         self.assertTrue(result["truncated"])
         self.assertIn("시간 예산", result["truncated_reason"])
-        self.assertLess(elapsed, 0.3 + 0.5 + 1.5)
+        self.assertLess(elapsed, time_budget(0.3 + 0.5 + 1.5))
         self.assertGreater(elapsed, 0.25)
 
 

@@ -316,6 +316,7 @@ from .sqlite import (
     sqlite_viewer_core_accuracy_gates,
     sqlite_wal_sidecar_info,
 )
+from .validation_source import build_run_validation_source_integrity
 from .viewer_core import (
     archived_source_viewer_actions,
     browser_e2e_performance_profile,
@@ -329,7 +330,6 @@ from .viewer_core import (
     build_run_validation_output_hashes,
     build_run_validation_parser_execution,
     build_run_validation_review_status,
-    build_run_validation_source_integrity,
     build_run_validation_warning_inventory,
     build_run_viewer_route_coverage,
     build_run_viewer_workflow_accuracy_gates,

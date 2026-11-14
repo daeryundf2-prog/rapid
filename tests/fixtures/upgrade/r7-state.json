@@ -1,0 +1,378 @@
+{
+  "fixture": "r7-state",
+  "synthetic": true,
+  "note": "합성 값만 담는다(실제 사건·증거·개인정보 없음). R8 T-355 / QA-206 업그레이드 점검용 R7 상태.",
+  "schema_source_commit": "1da1b1e",
+  "schema_version": 1,
+  "case": {
+    "case_id": "r7-case",
+    "name": "R7 합성 사건",
+    "examiner": "분석 담당 갑",
+    "citation_prefix": "R7",
+    "created_at": "2026-10-01T09:00:00+09:00"
+  },
+  "tags": [
+    "의심 송금",
+    "외부 반출",
+    "검토 보류"
+  ],
+  "review_marks": [
+    {
+      "target_type": "file",
+      "target_id": "f-0001",
+      "status": "relevant",
+      "tags": [
+        "의심 송금"
+      ],
+      "note": "송금 내역 첨부",
+      "include_in_report": true
+    },
+    {
+      "target_type": "file",
+      "target_id": "f-0002",
+      "status": "relevant",
+      "tags": [
+        "의심 송금",
+        "외부 반출"
+      ],
+      "note": "",
+      "include_in_report": true
+    },
+    {
+      "target_type": "file",
+      "target_id": "f-0003",
+      "status": "needs-review",
+      "tags": [
+        "검토 보류"
+      ],
+      "note": "",
+      "include_in_report": false
+    },
+    {
+      "target_type": "document",
+      "target_id": "d-0001",
+      "status": "relevant",
+      "tags": [],
+      "note": "계약서 초안",
+      "include_in_report": true
+    },
+    {
+      "target_type": "document",
+      "target_id": "d-0002",
+      "status": "not-relevant",
+      "tags": [],
+      "note": "",
+      "include_in_report": false
+    },
+    {
+      "target_type": "artifact",
+      "target_id": "a-0001",
+      "status": "relevant",
+      "tags": [
+        "외부 반출"
+      ],
+      "note": "",
+      "include_in_report": true
+    },
+    {
+      "target_type": "artifact",
+      "target_id": "a-0002",
+      "status": "needs-review",
+      "tags": [],
+      "note": "",
+      "include_in_report": false
+    },
+    {
+      "target_type": "event",
+      "target_id": "e-0001",
+      "status": "relevant",
+      "tags": [
+        "검토 보류"
+      ],
+      "note": "",
+      "include_in_report": false
+    },
+    {
+      "target_type": "event",
+      "target_id": "e-0002",
+      "status": "excluded",
+      "tags": [],
+      "note": "중복",
+      "include_in_report": false
+    },
+    {
+      "target_type": "file",
+      "target_id": "f-0004",
+      "status": "relevant",
+      "tags": [],
+      "note": "",
+      "include_in_report": false
+    }
+  ],
+  "case_notes": [
+    {
+      "author": "분석 담당 갑",
+      "text": "1차 검토: 송금 관련 파일 4건 확인"
+    },
+    {
+      "author": "검토자 을",
+      "text": "외부 반출 의심 2건 보고서 포함"
+    }
+  ],
+  "saved_searches": [
+    {
+      "name": "송금 키워드",
+      "keywords": [
+        "송금",
+        "이체"
+      ],
+      "filters": {
+        "types": [
+          "document"
+        ]
+      }
+    },
+    {
+      "name": "반출 흔적",
+      "keywords": [
+        "usb",
+        "업로드"
+      ],
+      "filters": {
+        "tags": [
+          "외부 반출"
+        ]
+      }
+    }
+  ],
+  "export_audit_records": [
+    {
+      "command": "case-report",
+      "generated_at": "2026-10-02T10:00:00",
+      "provenance": {
+        "options": {
+          "format": "md"
+        },
+        "input_root": null,
+        "input_files": [],
+        "notes": []
+      },
+      "integrity": {
+        "generated_outputs": [
+          {
+            "label": "report",
+            "path": "C:/synthetic/out/report-1.md",
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+            "size": 120,
+            "modified_at": "2026-10-02T01:00:00+00:00"
+          }
+        ]
+      }
+    },
+    {
+      "command": "case-report",
+      "generated_at": "2026-10-03T10:00:00",
+      "provenance": {
+        "options": {
+          "format": "docx"
+        },
+        "input_root": null,
+        "input_files": [],
+        "notes": []
+      },
+      "integrity": {
+        "generated_outputs": [
+          {
+            "label": "report",
+            "path": "C:/synthetic/out/report-2.docx",
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+            "size": 340,
+            "modified_at": "2026-10-03T01:00:00+00:00"
+          }
+        ]
+      }
+    },
+    {
+      "command": "submission-manifest",
+      "generated_at": "2026-10-04T10:00:00",
+      "provenance": {
+        "options": {},
+        "input_root": null,
+        "input_files": [],
+        "notes": []
+      },
+      "integrity": {
+        "generated_outputs": [
+          {
+            "label": "manifest",
+            "path": "C:/synthetic/out/manifest.json",
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000003",
+            "size": 88,
+            "modified_at": "2026-10-04T01:00:00+00:00"
+          }
+        ]
+      }
+    },
+    {
+      "command": "reviewer-bundle",
+      "generated_at": "2026-10-05T10:00:00",
+      "provenance": {
+        "options": {},
+        "input_root": null,
+        "input_files": [],
+        "notes": []
+      },
+      "integrity": {
+        "generated_outputs": [
+          {
+            "label": "bundle",
+            "path": "C:/synthetic/out/bundle.zip",
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000004",
+            "size": 512,
+            "modified_at": "2026-10-05T01:00:00+00:00"
+          }
+        ]
+      }
+    }
+  ],
+  "browser_storage": [
+    {
+      "item": "role",
+      "label": "역할",
+      "key": "rapidtriage.v3.role",
+      "r7_value": null,
+      "note": "R7에는 역할 키가 없었다(T-226이 만든다). 없는 값은 새 빌드가 기본값으로 추론한다."
+    },
+    {
+      "item": "reviewer_name",
+      "label": "담당자 이름",
+      "key": "rapidtriage.reviewer",
+      "r7_value": "검토자 을"
+    },
+    {
+      "item": "theme",
+      "label": "테마",
+      "key": "rapidtriage.v2.theme",
+      "r7_value": "dark",
+      "allowed": [
+        "dark",
+        "light"
+      ]
+    }
+  ],
+  "run": {
+    "summary_keys_absent_in_r7": [
+      "run_scope",
+      "fingerprint_mode"
+    ],
+    "runs_json_keys_absent_in_r7": [
+      "readonly_reason"
+    ],
+    "bookmarks": [
+      {
+        "bookmark_id": "bm-0001",
+        "source": "files",
+        "summary": "합성 북마크 1",
+        "review": {
+          "status": "relevant",
+          "include_in_report": true
+        }
+      },
+      {
+        "bookmark_id": "bm-0002",
+        "source": "files",
+        "summary": "합성 북마크 2",
+        "review": {
+          "status": "needs-review",
+          "include_in_report": false
+        }
+      },
+      {
+        "bookmark_id": "bm-0003",
+        "source": "docs",
+        "summary": "합성 북마크 3",
+        "review": {
+          "status": "relevant",
+          "include_in_report": true
+        }
+      }
+    ]
+  },
+  "expected": {
+    "review_marks": 10,
+    "case_notes": 2,
+    "user_tags": 3,
+    "saved_searches": 2,
+    "export_audit_pre_chain": 4,
+    "include_in_report_marks": 4,
+    "include_in_report_bookmarks": 2
+  },
+  "schema_sql_note": "commit 1da1b1e 시점 케이스 DB DDL(sqlite_master 덤프, FTS 그림자 표 제외). 이 목록으로 R7 모양 DB를 만든다.",
+  "schema_sql": [
+    "CREATE TABLE schema_info (\n    key TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n)",
+    "CREATE TABLE case_record (\n    case_id TEXT PRIMARY KEY,\n    name TEXT NOT NULL,\n    description TEXT NOT NULL DEFAULT '',\n    examiner TEXT NOT NULL DEFAULT '',\n    organization TEXT NOT NULL DEFAULT '',\n    case_root TEXT NOT NULL DEFAULT '',\n    citation_prefix TEXT NOT NULL,\n    status TEXT NOT NULL DEFAULT 'open',\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL\n, case_number TEXT NOT NULL DEFAULT '', case_type TEXT NOT NULL DEFAULT '', requester TEXT NOT NULL DEFAULT '')",
+    "CREATE TABLE citation_sequence (\n    case_id TEXT NOT NULL,\n    kind TEXT NOT NULL,\n    next_value INTEGER NOT NULL DEFAULT 1,\n    PRIMARY KEY (case_id, kind),\n    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE\n)",
+    "CREATE TABLE evidence_source (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    citation_id TEXT NOT NULL UNIQUE,\n    case_id TEXT NOT NULL,\n    display_name TEXT NOT NULL,\n    source_type TEXT NOT NULL,\n    original_path TEXT NOT NULL,\n    staged_path TEXT NOT NULL DEFAULT '',\n    size_bytes INTEGER,\n    hash_md5 TEXT,\n    hash_sha1 TEXT,\n    hash_sha256 TEXT,\n    detected_format TEXT NOT NULL DEFAULT '',\n    adapter_name TEXT NOT NULL DEFAULT '',\n    adapter_version TEXT NOT NULL DEFAULT '',\n    status TEXT NOT NULL DEFAULT 'pending',\n    added_at TEXT NOT NULL, evidence_number TEXT NOT NULL DEFAULT '', hash_verify INTEGER NOT NULL DEFAULT 0, hash_expected TEXT NOT NULL DEFAULT '', hash_status TEXT NOT NULL DEFAULT '', hash_message TEXT NOT NULL DEFAULT '',\n    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE\n)",
+    "CREATE TABLE file_record (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    citation_id TEXT NOT NULL UNIQUE,\n    case_id TEXT NOT NULL,\n    evidence_source_id INTEGER,\n    path TEXT NOT NULL,\n    normalized_path TEXT NOT NULL DEFAULT '',\n    extension TEXT NOT NULL DEFAULT '',\n    mime_type TEXT NOT NULL DEFAULT '',\n    size_bytes INTEGER,\n    created_at TEXT,\n    modified_at TEXT,\n    accessed_at TEXT,\n    changed_at TEXT,\n    hash_md5 TEXT,\n    hash_sha1 TEXT,\n    hash_sha256 TEXT,\n    is_deleted INTEGER NOT NULL DEFAULT 0,\n    is_recovered INTEGER NOT NULL DEFAULT 0,\n    source_offset INTEGER,\n    parent_id INTEGER,\n    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE,\n    FOREIGN KEY (evidence_source_id) REFERENCES evidence_source(id) ON DELETE SET NULL,\n    FOREIGN KEY (parent_id) REFERENCES file_record(id) ON DELETE SET NULL\n)",
+    "CREATE VIRTUAL TABLE file_record_fts USING fts5(\n    path,\n    extension,\n    hashes\n)",
+    "CREATE TRIGGER file_record_fts_ai AFTER INSERT ON file_record BEGIN\n    INSERT INTO file_record_fts(rowid, path, extension, hashes)\n    VALUES (\n        new.id,\n        new.path,\n        new.extension,\n        trim(COALESCE(new.hash_md5, '') || ' ' || COALESCE(new.hash_sha1, '') || ' ' || COALESCE(new.hash_sha256, ''))\n    );\nEND",
+    "CREATE TRIGGER file_record_fts_ad AFTER DELETE ON file_record BEGIN\n    DELETE FROM file_record_fts WHERE rowid = old.id;\nEND",
+    "CREATE TRIGGER file_record_fts_au AFTER UPDATE ON file_record BEGIN\n    DELETE FROM file_record_fts WHERE rowid = old.id;\n    INSERT INTO file_record_fts(rowid, path, extension, hashes)\n    VALUES (\n        new.id,\n        new.path,\n        new.extension,\n        trim(COALESCE(new.hash_md5, '') || ' ' || COALESCE(new.hash_sha1, '') || ' ' || COALESCE(new.hash_sha256, ''))\n    );\nEND",
+    "CREATE TABLE hash_record (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    citation_id TEXT NOT NULL UNIQUE,\n    case_id TEXT NOT NULL,\n    target_type TEXT NOT NULL,\n    target_id TEXT NOT NULL,\n    hash_scope TEXT NOT NULL,\n    algorithm TEXT NOT NULL,\n    value TEXT NOT NULL,\n    calculated_at TEXT NOT NULL,\n    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE\n)",
+    "CREATE TABLE acquisition_metadata (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    citation_id TEXT NOT NULL UNIQUE,\n    case_id TEXT NOT NULL,\n    evidence_source_citation_id TEXT NOT NULL DEFAULT '',\n    operator TEXT NOT NULL DEFAULT '',\n    acquisition_started_at TEXT NOT NULL DEFAULT '',\n    acquisition_completed_at TEXT NOT NULL DEFAULT '',\n    source_identifier TEXT NOT NULL DEFAULT '',\n    write_blocker TEXT NOT NULL DEFAULT '',\n    acquisition_tool TEXT NOT NULL DEFAULT '',\n    acquisition_tool_version TEXT NOT NULL DEFAULT '',\n    whole_source_sha256 TEXT NOT NULL DEFAULT '',\n    notes TEXT NOT NULL DEFAULT '',\n    created_at TEXT NOT NULL,\n    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE\n)",
+    "CREATE TABLE artifact (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    citation_id TEXT NOT NULL UNIQUE,\n    case_id TEXT NOT NULL,\n    evidence_source_id INTEGER,\n    file_record_id INTEGER,\n    artifact_type TEXT NOT NULL,\n    parser_name TEXT NOT NULL,\n    parser_version TEXT NOT NULL DEFAULT '',\n    title TEXT NOT NULL DEFAULT '',\n    summary TEXT NOT NULL DEFAULT '',\n    data_json TEXT NOT NULL DEFAULT '{}',\n    confidence REAL,\n    created_at TEXT NOT NULL,\n    data_blob BLOB,\n    data_codec TEXT NOT NULL DEFAULT '',\n    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE,\n    FOREIGN KEY (evidence_source_id) REFERENCES evidence_source(id) ON DELETE SET NULL,\n    FOREIGN KEY (file_record_id) REFERENCES file_record(id) ON DELETE SET NULL\n)",
+    "CREATE VIRTUAL TABLE artifact_fts USING fts5(\n    title,\n    summary,\n    metadata\n)",
+    "CREATE TRIGGER artifact_fts_ai AFTER INSERT ON artifact BEGIN\n    INSERT INTO artifact_fts(rowid, title, summary, metadata)\n    VALUES (\n        new.id,\n        new.title,\n        new.summary,\n        new.data_json\n    );\nEND",
+    "CREATE TRIGGER artifact_fts_ad AFTER DELETE ON artifact BEGIN\n    DELETE FROM artifact_fts WHERE rowid = old.id;\nEND",
+    "CREATE TRIGGER artifact_fts_au AFTER UPDATE ON artifact BEGIN\n    DELETE FROM artifact_fts WHERE rowid = old.id;\n    INSERT INTO artifact_fts(rowid, title, summary, metadata)\n    VALUES (\n        new.id,\n        new.title,\n        new.summary,\n        new.data_json\n    );\nEND",
+    "CREATE TABLE event (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    citation_id TEXT NOT NULL UNIQUE,\n    case_id TEXT NOT NULL,\n    evidence_source_id INTEGER,\n    artifact_id INTEGER,\n    file_record_id INTEGER,\n    event_type TEXT NOT NULL,\n    timestamp TEXT NOT NULL,\n    timestamp_kind TEXT NOT NULL DEFAULT '',\n    timezone TEXT NOT NULL DEFAULT '',\n    actor TEXT NOT NULL DEFAULT '',\n    action TEXT NOT NULL DEFAULT '',\n    target TEXT NOT NULL DEFAULT '',\n    description TEXT NOT NULL DEFAULT '',\n    source TEXT NOT NULL DEFAULT '',\n    confidence REAL,\n    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE,\n    FOREIGN KEY (evidence_source_id) REFERENCES evidence_source(id) ON DELETE SET NULL,\n    FOREIGN KEY (artifact_id) REFERENCES artifact(id) ON DELETE SET NULL,\n    FOREIGN KEY (file_record_id) REFERENCES file_record(id) ON DELETE SET NULL\n)",
+    "CREATE VIRTUAL TABLE event_fts USING fts5(\n    event_type,\n    timestamp,\n    target,\n    description,\n    source\n)",
+    "CREATE TRIGGER event_fts_ai AFTER INSERT ON event BEGIN\n    INSERT INTO event_fts(rowid, event_type, timestamp, target, description, source)\n    VALUES (\n        new.id,\n        new.event_type,\n        new.timestamp,\n        new.target,\n        new.description,\n        new.source\n    );\nEND",
+    "CREATE TRIGGER event_fts_ad AFTER DELETE ON event BEGIN\n    DELETE FROM event_fts WHERE rowid = old.id;\nEND",
+    "CREATE TRIGGER event_fts_au AFTER UPDATE ON event BEGIN\n    DELETE FROM event_fts WHERE rowid = old.id;\n    INSERT INTO event_fts(rowid, event_type, timestamp, target, description, source)\n    VALUES (\n        new.id,\n        new.event_type,\n        new.timestamp,\n        new.target,\n        new.description,\n        new.source\n    );\nEND",
+    "CREATE TABLE indexed_document (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    citation_id TEXT NOT NULL UNIQUE,\n    case_id TEXT NOT NULL,\n    evidence_source_id INTEGER,\n    file_record_id INTEGER,\n    artifact_id INTEGER,\n    source_type TEXT NOT NULL,\n    field_name TEXT NOT NULL DEFAULT '',\n    title TEXT NOT NULL DEFAULT '',\n    body TEXT NOT NULL DEFAULT '',\n    language TEXT NOT NULL DEFAULT '',\n    ocr_confidence REAL,\n    indexed_at TEXT NOT NULL,\n    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE,\n    FOREIGN KEY (evidence_source_id) REFERENCES evidence_source(id) ON DELETE SET NULL,\n    FOREIGN KEY (file_record_id) REFERENCES file_record(id) ON DELETE SET NULL,\n    FOREIGN KEY (artifact_id) REFERENCES artifact(id) ON DELETE SET NULL\n)",
+    "CREATE VIRTUAL TABLE indexed_document_fts USING fts5(\n    title,\n    body,\n    content='indexed_document',\n    content_rowid='id'\n)",
+    "CREATE TABLE review_mark (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    citation_id TEXT NOT NULL UNIQUE,\n    case_id TEXT NOT NULL,\n    target_type TEXT NOT NULL,\n    target_id TEXT NOT NULL,\n    status TEXT NOT NULL DEFAULT 'unreviewed',\n    verification_status TEXT NOT NULL DEFAULT 'unverified',\n    tags_json TEXT NOT NULL DEFAULT '[]',\n    note TEXT NOT NULL DEFAULT '',\n    include_in_report INTEGER NOT NULL DEFAULT 0,\n    reviewer TEXT NOT NULL DEFAULT '',\n    assignee TEXT NOT NULL DEFAULT '',\n    priority TEXT NOT NULL DEFAULT 'normal',\n    due_at TEXT NOT NULL DEFAULT '',\n    source_citation_package_json TEXT NOT NULL DEFAULT '{}',\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL, tag_ids_json TEXT,\n    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE\n)",
+    "CREATE TABLE review_mark_history (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    case_id TEXT NOT NULL,\n    review_citation_id TEXT NOT NULL,\n    target_type TEXT NOT NULL,\n    target_id TEXT NOT NULL,\n    version INTEGER NOT NULL,\n    changed_at TEXT NOT NULL,\n    actor TEXT NOT NULL DEFAULT '',\n    changed_fields_json TEXT NOT NULL DEFAULT '[]',\n    previous_json TEXT NOT NULL DEFAULT '{}',\n    current_json TEXT NOT NULL DEFAULT '{}',\n    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE\n)",
+    "CREATE TRIGGER review_mark_history_no_update\nBEFORE UPDATE ON review_mark_history\nBEGIN\n    SELECT RAISE(ABORT, 'review_mark_history is append-only');\nEND",
+    "CREATE TRIGGER review_mark_history_no_delete\nBEFORE DELETE ON review_mark_history\nBEGIN\n    SELECT RAISE(ABORT, 'review_mark_history is append-only');\nEND",
+    "CREATE TABLE saved_search (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    citation_id TEXT NOT NULL UNIQUE,\n    case_id TEXT NOT NULL,\n    name TEXT NOT NULL,\n    keywords_json TEXT NOT NULL DEFAULT '[]',\n    filters_json TEXT NOT NULL DEFAULT '{}',\n    created_by TEXT NOT NULL DEFAULT '',\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    last_run_at TEXT NOT NULL DEFAULT '',\n    UNIQUE(case_id, name),\n    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE\n)",
+    "CREATE TABLE audit_event (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    citation_id TEXT NOT NULL UNIQUE,\n    case_id TEXT NOT NULL,\n    actor TEXT NOT NULL DEFAULT '',\n    action TEXT NOT NULL,\n    target_type TEXT NOT NULL DEFAULT '',\n    target_id TEXT NOT NULL DEFAULT '',\n    timestamp TEXT NOT NULL,\n    tool_name TEXT NOT NULL DEFAULT '',\n    tool_version TEXT NOT NULL DEFAULT '',\n    params_json TEXT NOT NULL DEFAULT '{}',\n    result TEXT NOT NULL DEFAULT '',\n    error TEXT NOT NULL DEFAULT '',\n    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE\n)",
+    "CREATE TRIGGER audit_event_no_update\nBEFORE UPDATE ON audit_event\nBEGIN\n    SELECT RAISE(ABORT, 'audit_event is append-only');\nEND",
+    "CREATE TRIGGER audit_event_no_delete\nBEFORE DELETE ON audit_event\nBEGIN\n    SELECT RAISE(ABORT, 'audit_event is append-only');\nEND",
+    "CREATE TABLE report_item (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    citation_id TEXT NOT NULL UNIQUE,\n    case_id TEXT NOT NULL,\n    target_type TEXT NOT NULL,\n    target_id TEXT NOT NULL,\n    section TEXT NOT NULL,\n    title TEXT NOT NULL DEFAULT '',\n    narrative TEXT NOT NULL DEFAULT '',\n    order_index INTEGER NOT NULL DEFAULT 0,\n    created_at TEXT NOT NULL,\n    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE\n)",
+    "CREATE TABLE job (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    citation_id TEXT NOT NULL UNIQUE,\n    case_id TEXT NOT NULL,\n    job_type TEXT NOT NULL,\n    status TEXT NOT NULL DEFAULT 'pending',\n    params_json TEXT NOT NULL DEFAULT '{}',\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE\n)",
+    "CREATE TABLE job_step (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    job_id INTEGER NOT NULL,\n    step_name TEXT NOT NULL,\n    status TEXT NOT NULL DEFAULT 'pending',\n    retry_count INTEGER NOT NULL DEFAULT 0,\n    started_at TEXT,\n    completed_at TEXT,\n    error TEXT NOT NULL DEFAULT '',\n    FOREIGN KEY (job_id) REFERENCES job(id) ON DELETE CASCADE\n)",
+    "CREATE INDEX idx_evidence_source_case ON evidence_source(case_id)",
+    "CREATE INDEX idx_file_record_case_path ON file_record(case_id, normalized_path)",
+    "CREATE INDEX idx_hash_record_case_scope ON hash_record(case_id, hash_scope, algorithm)",
+    "CREATE INDEX idx_acquisition_metadata_case_source ON acquisition_metadata(case_id, evidence_source_citation_id)",
+    "CREATE INDEX idx_artifact_case_type ON artifact(case_id, artifact_type)",
+    "CREATE INDEX idx_event_case_time ON event(case_id, timestamp)",
+    "CREATE INDEX idx_indexed_document_case_source ON indexed_document(case_id, source_type)",
+    "CREATE INDEX idx_review_mark_case_status ON review_mark(case_id, status, verification_status)",
+    "CREATE INDEX idx_review_mark_case_target ON review_mark(case_id, target_type, target_id)",
+    "CREATE INDEX idx_review_mark_history_target ON review_mark_history(case_id, target_type, target_id, version)",
+    "CREATE INDEX idx_saved_search_case_name ON saved_search(case_id, name)",
+    "CREATE INDEX idx_audit_event_case_time ON audit_event(case_id, timestamp)",
+    "CREATE INDEX idx_report_item_case_section ON report_item(case_id, section, order_index)",
+    "CREATE INDEX idx_job_case_status ON job(case_id, status)",
+    "CREATE VIRTUAL TABLE indexed_document_trigram USING fts5(title, body, content='indexed_document', content_rowid='id', tokenize='trigram')",
+    "CREATE TABLE case_note (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    case_id TEXT NOT NULL,\n    author TEXT NOT NULL DEFAULT '',\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    deleted_at TEXT,\n    deleted_by TEXT NOT NULL DEFAULT '',\n    text TEXT NOT NULL,\n    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE\n)",
+    "CREATE INDEX idx_case_note_case ON case_note(case_id, created_at)",
+    "CREATE TABLE case_note_history (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    note_id INTEGER NOT NULL,\n    case_id TEXT NOT NULL,\n    action TEXT NOT NULL,\n    actor TEXT NOT NULL DEFAULT '',\n    at TEXT NOT NULL,\n    text TEXT NOT NULL DEFAULT ''\n)",
+    "CREATE INDEX idx_case_note_history_case ON case_note_history(case_id, id)",
+    "CREATE TRIGGER case_note_history_no_update\nBEFORE UPDATE ON case_note_history\nBEGIN\n    SELECT RAISE(ABORT, 'case_note_history is append-only');\nEND",
+    "CREATE TRIGGER case_note_history_no_delete\nBEFORE DELETE ON case_note_history\nBEGIN\n    SELECT RAISE(ABORT, 'case_note_history is append-only');\nEND",
+    "CREATE TABLE processing_snapshot (\n    run_id TEXT PRIMARY KEY,\n    case_id TEXT NOT NULL,\n    evidence_citation_id TEXT NOT NULL DEFAULT '',\n    captured_at TEXT NOT NULL,\n    snapshot_json TEXT NOT NULL DEFAULT '{}',\n    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE\n)",
+    "CREATE INDEX idx_processing_snapshot_case ON processing_snapshot(case_id, captured_at)",
+    "CREATE UNIQUE INDEX idx_case_record_case_number\n    ON case_record(case_number) WHERE case_number <> ''",
+    "CREATE UNIQUE INDEX idx_evidence_source_number\n    ON evidence_source(case_id, evidence_number) WHERE evidence_number <> ''",
+    "CREATE UNIQUE INDEX idx_case_record_case_number_nocase ON case_record(lower(case_number)) WHERE case_number <> ''",
+    "CREATE UNIQUE INDEX idx_case_record_citation_prefix ON case_record(citation_prefix)",
+    "CREATE TABLE case_tag (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    case_id TEXT NOT NULL,\n    name TEXT NOT NULL,\n    kind TEXT NOT NULL DEFAULT 'user',\n    color_token TEXT NOT NULL DEFAULT 'tag-5',\n    shortcut INTEGER,\n    description TEXT NOT NULL DEFAULT '',\n    created_by TEXT NOT NULL DEFAULT '',\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    deleted_at TEXT NOT NULL DEFAULT '',\n    deleted_by TEXT NOT NULL DEFAULT '',\n    CHECK (kind IN ('user', 'system')),\n    CHECK (shortcut IS NULL OR shortcut BETWEEN 1 AND 9),\n    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE\n)",
+    "CREATE UNIQUE INDEX idx_case_tag_live_name\n    ON case_tag(case_id, name COLLATE NOCASE) WHERE deleted_at = ''",
+    "CREATE UNIQUE INDEX idx_case_tag_live_shortcut\n    ON case_tag(case_id, shortcut) WHERE deleted_at = '' AND shortcut IS NOT NULL",
+    "CREATE TABLE histogram_baseline (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    case_id TEXT NOT NULL,\n    name TEXT NOT NULL,\n    run_id TEXT NOT NULL DEFAULT '',\n    created_by TEXT NOT NULL DEFAULT '',\n    created_at TEXT NOT NULL,\n    counts_json TEXT NOT NULL DEFAULT '{}',\n    UNIQUE(case_id, name),\n    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE\n)"
+  ]
+}

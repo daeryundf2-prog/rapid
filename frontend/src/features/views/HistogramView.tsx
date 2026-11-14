@@ -2,7 +2,9 @@
 /**
  * 히스토그램 보기 (S9, plan X15).
  *
- * Timeline: time bars (auto hour/day, UTC) from GET /api/runs/{id}/timeline-histogram.
+ * Timeline: time bars from GET /api/runs/{id}/timeline-histogram, fitted to the width (one bar
+ * per 4 px, "자동") with edges and labels in the display timezone, limited to the time range
+ * condition (R7 C-V2).
  * Click a bar or drag across bars → `rapidtriage:filter` {from, to} (see
  * filterEvent.ts), which S8's filter bar applies to the grid and the URL.
  * Keys: ←/→ move, Shift+←/→ extend the range, Home/End, Enter/Space apply,
@@ -19,35 +21,50 @@ import { announce, useRovingTabindex } from "../../a11y";
 import { api } from "../../api/client";
 import { getRunTree } from "../../api/runs";
 import type { GridRow } from "../../contracts/collection";
-import { useRoute as useAppRoute } from "../../state/hooks";
+import { useRoute as useAppRoute, useTimezone } from "../../state/hooks";
+import { tzOffsetMinutes, zoneLabel } from "../../utils/time";
 import { useFilterStore } from "../filters/filterStore";
-import { hasClock } from "../filters/rowConditions";
+import { hasClock, serverConditionParams } from "../filters/rowConditions";
 import { useRoute } from "../grid/adapter";
 import { BaselineHistogram } from "../review/BaselineHistogram";
 import { errorText } from "../viewer/useAsync";
 import { emitTimeRangeFilter, toggleExtFilter, toggleTypeFilter } from "./filterEvent";
 import {
+  barSizeLabel,
   barsFromRows,
   barsFromTree,
-  bucketAriaLabel,
-  bucketLabel,
   type CategoryBar,
+  fitBuckets,
   GRANULARITY_LABELS,
   type GranularityChoice,
+  maxBarsFor,
   rangeOf,
-  rebucket,
   type TimelineHistogramPayload,
+  zonedBucketAriaLabel,
+  zonedBucketLabel,
 } from "./histogram";
 import { useAutoLoad, useViewRows } from "./useViewRows";
 import { EmptyState, ErrorState, LoadingCard } from "./ViewState";
 
+/**
+ * `GET /timeline-histogram` — with the time range condition (`from` / `to`, the same server
+ * bounds as `/timeline`) the server buckets only that range (R-9/C-V2 backend) and says how many
+ * events it left out (`range_excluded_events`); no client clip.
+ */
 export function fetchTimelineHistogram(
   runId: string,
   signal?: AbortSignal,
+  range: { from?: string; to?: string } = {},
 ): Promise<TimelineHistogramPayload> {
-  return api<TimelineHistogramPayload>(`/api/runs/${encodeURIComponent(runId)}/timeline-histogram`, {
-    signal,
-  });
+  const params = new URLSearchParams();
+  const bounds = serverConditionParams({ from: range.from, to: range.to }, "UTC", { time: true, geo: false });
+  if (typeof bounds.from === "string") params.set("from", bounds.from);
+  if (typeof bounds.to === "string") params.set("to", bounds.to);
+  const query = params.toString();
+  return api<TimelineHistogramPayload>(
+    `/api/runs/${encodeURIComponent(runId)}/timeline-histogram${query ? `?${query}` : ""}`,
+    { signal },
+  );
 }
 
 const CHART_HEIGHT = 160;
@@ -65,20 +82,50 @@ function ShowInColumns() {
 
 function TimelineHistogram({ runId }: { runId: string }) {
   const queryClient = useQueryClient();
-  const queryKey = useMemo(() => ["timeline-histogram", runId] as const, [runId]);
+  const rangeFrom = useFilterStore((s) => s.filters.from);
+  const rangeTo = useFilterStore((s) => s.filters.to);
+  const queryKey = useMemo(
+    () => ["timeline-histogram", runId, rangeFrom ?? "", rangeTo ?? ""] as const,
+    [runId, rangeFrom, rangeTo],
+  );
   const [cancelled, setCancelled] = useState(false);
   const histogram = useQuery({
     queryKey,
-    queryFn: ({ signal }) => fetchTimelineHistogram(runId, signal),
+    queryFn: ({ signal }) => fetchTimelineHistogram(runId, signal, { from: rangeFrom, to: rangeTo }),
     enabled: !cancelled,
     staleTime: 60_000,
     retry: false,
   });
   const [choice, setChoice] = useState<GranularityChoice>("auto");
-  const { granularity, buckets } = useMemo(
-    () => (histogram.data ? rebucket(histogram.data, choice) : { granularity: "day" as const, buckets: [] }),
-    [histogram.data, choice],
-  );
+  const { timezone } = useTimezone();
+  const [width, setWidth] = useState<number | null>(null);
+  const filters = useFilterStore((s) => s.filters);
+  // Edges / labels in the display zone, at its offset at the start of the data.
+  const anchorDate = useMemo(() => {
+    const first = histogram.data?.range_start ? Date.parse(histogram.data.range_start) : Number.NaN;
+    return Number.isFinite(first) ? new Date(first) : new Date();
+  }, [histogram.data]);
+  const offsetMinutes = useMemo(() => tzOffsetMinutes(timezone, anchorDate), [timezone, anchorDate]);
+  const zone = zoneLabel(timezone, anchorDate);
+  const { buckets, sizeMs, clipped } = useMemo(() => {
+    if (!histogram.data) return { buckets: [], sizeMs: 0, clipped: false };
+    const serverMs = (histogram.data.bucket_seconds ?? 0) * 1000;
+    const forced =
+      choice === "hour"
+        ? 3_600_000
+        : choice === "day"
+          ? 86_400_000
+          : choice === "native"
+            ? serverMs
+            : undefined;
+    return fitBuckets(histogram.data, {
+      maxBars: forced === undefined ? maxBarsFor(width) : Number.MAX_SAFE_INTEGER,
+      offsetMinutes,
+      ...(forced === undefined ? {} : { sizeMs: forced }),
+    });
+  }, [histogram.data, choice, width, offsetMinutes]);
+  // The server left events outside the time range out of the buckets (`range_excluded_events`).
+  const rangeExcluded = Number(histogram.data?.range_excluded_events ?? 0) > 0;
   const max = useMemo(() => Math.max(1, ...buckets.map((b) => b.count)), [buckets]);
   const [selection, setSelection] = useState<{ anchor: number; focus: number } | null>(null);
   const [active, setActive] = useState(0);
@@ -86,7 +133,18 @@ function TimelineHistogram({ runId }: { runId: string }) {
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
   const barsRef = useRef<HTMLDivElement | null>(null);
-  const filters = useFilterStore((s) => s.filters);
+  // Bar count follows the bar area's width (one bar per 4 px).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-observe once the bars exist
+  useEffect(() => {
+    const el = barsRef.current;
+    if (!el) return;
+    const measure = () => setWidth(el.clientWidth || null);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [histogram.data]);
   const filterFrom = filters.from ? Date.parse(filters.from) : null;
   const filterTo = filters.to ? Date.parse(filters.to) : null;
   const hasFilter = filterFrom !== null || filterTo !== null;
@@ -205,8 +263,9 @@ function TimelineHistogram({ runId }: { runId: string }) {
       <div className="view-toolbar">
         <span className="view-count">
           이벤트 {data.parsed_events.toLocaleString("ko-KR")}건
-          {data.unparsed_events ? ` · 시각 없음 ${data.unparsed_events.toLocaleString("ko-KR")}건 제외` : ""}{" "}
-          · UTC
+          {data.unparsed_events ? ` · 시각 없음 ${data.unparsed_events.toLocaleString("ko-KR")}건 제외` : ""}
+          {` · ${zone}`}
+          {clipped || rangeExcluded ? " · 시간 범위 안만" : ""}
         </span>
         <label className="view-field">
           단위
@@ -214,7 +273,7 @@ function TimelineHistogram({ runId }: { runId: string }) {
             {(["auto", "hour", "day", "native"] as GranularityChoice[]).map((key) => (
               <option key={key} value={key}>
                 {GRANULARITY_LABELS[key]}
-                {key === "auto" ? ` (${GRANULARITY_LABELS[granularity]})` : ""}
+                {key === "auto" ? ` (${barSizeLabel(sizeMs)})` : ""}
               </option>
             ))}
           </select>
@@ -227,7 +286,7 @@ function TimelineHistogram({ runId }: { runId: string }) {
         ref={barsRef}
         className="hist-bars"
         role="group"
-        aria-label={`타임라인 히스토그램, 막대 ${buckets.length}개 (${GRANULARITY_LABELS[granularity]}, UTC)`}
+        aria-label={`타임라인 히스토그램, 막대 ${buckets.length}개 (${barSizeLabel(sizeMs)}, ${zone})`}
         style={{ height: CHART_HEIGHT }}
       >
         {buckets.map((bucket, index) => {
@@ -236,7 +295,7 @@ function TimelineHistogram({ runId }: { runId: string }) {
             (filterFrom === null || bucket.endMs > filterFrom) &&
             (filterTo === null || bucket.startMs <= filterTo);
           const selected = index >= lo && index <= hi;
-          const label = bucketAriaLabel(bucket, granularity);
+          const label = zonedBucketAriaLabel(bucket, offsetMinutes, zone);
           return (
             <button
               key={bucket.startMs}
@@ -278,14 +337,17 @@ function TimelineHistogram({ runId }: { runId: string }) {
       <div className="hist-axis" aria-hidden="true">
         {tickIndexes.map((i) => {
           const bucket = buckets[i];
-          return bucket ? <span key={i}>{bucketLabel(bucket.startMs, granularity)}</span> : null;
+          return bucket ? (
+            <span key={i}>{zonedBucketLabel(bucket.startMs, sizeMs, offsetMinutes)}</span>
+          ) : null;
         })}
       </div>
       <div className="hist-status" aria-live="polite">
         {selection ? (
           <span>
-            선택: {bucketLabel(buckets[lo]?.startMs ?? 0, granularity)} ~{" "}
-            {bucketLabel(buckets[hi]?.startMs ?? 0, granularity)} · {selectedCount.toLocaleString("ko-KR")}건
+            선택: {zonedBucketLabel(buckets[lo]?.startMs ?? 0, sizeMs, offsetMinutes)} ~{" "}
+            {zonedBucketLabel(buckets[hi]?.startMs ?? 0, sizeMs, offsetMinutes)} ·{" "}
+            {selectedCount.toLocaleString("ko-KR")}건
           </span>
         ) : null}
         {unappliedConditions ? (

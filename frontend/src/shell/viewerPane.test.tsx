@@ -1,10 +1,10 @@
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { caseCommands, collapseViewerPane, expandViewerPane } from "../commands/builtin";
 import { registerCommands, resetCommandRegistry, runCommand } from "../commands/registry";
 import type { RowRef } from "../contracts/rowRef";
-import { VIEWER_COLLAPSED_KEY, viewerPaneCollapsed } from "../state/slices/overlays";
+import { TREE_COLLAPSED_KEY, VIEWER_COLLAPSED_KEY, viewerPaneCollapsed } from "../state/slices/overlays";
 import { resetAppStore, useAppStore } from "../state/store";
 import { Layout } from "./Layout";
 
@@ -110,5 +110,66 @@ describe("Layout viewer rail", () => {
     fireEvent.click(screen.getByRole("button", { name: "뷰어 펼치기" }));
     expect(useAppStore.getState().viewerPane).toBe("open");
     expect(screen.queryByTestId("viewer-rail")).toBeNull();
+  });
+});
+
+function renderLayout() {
+  // The landing lists recent cases (react-query); nothing is fetched while the test runs.
+  const client = new QueryClient({ defaultOptions: { queries: { enabled: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <Layout />
+    </QueryClientProvider>,
+  );
+}
+
+describe("tree auto-fold (plan r7 §3.2 L2, r7 S2 regression)", () => {
+  const tree = () => useAppStore.getState().treeCollapsed;
+  let width = 0;
+  beforeEach(() => {
+    width = window.innerWidth;
+    Object.assign(window, { innerWidth: 1280 });
+  });
+  afterEach(() => {
+    Object.assign(window, { innerWidth: width });
+  });
+
+  it("opening the viewer at 1280 folds the tree; the landing and the review board find it unfolded", () => {
+    renderLayout();
+    expect(tree()).toBe(false);
+    act(() => selectRow());
+    expect(tree()).toBe(true);
+    expect(useAppStore.getState().treeAutoFolded).toBe(true);
+    // The landing unmounts the three panes: the fold must not outlive them.
+    act(() => useAppStore.getState().navigate({ runId: null, collection: null }));
+    expect(tree()).toBe(false);
+    act(() => useAppStore.getState().navigate({ runId: "r1", collection: "review" }));
+    expect(tree()).toBe(false);
+    expect(screen.queryByRole("button", { name: "왼쪽 패널 펼치기" })).toBeNull();
+    // Nothing of the automatic fold reached the session storage.
+    expect(window.sessionStorage.getItem(TREE_COLLAPSED_KEY)).toBeNull();
+  });
+
+  it("another run with the viewer still open unfolds the tree", () => {
+    renderLayout();
+    act(() => selectRow());
+    expect(tree()).toBe(true);
+    act(() => useAppStore.getState().navigate({ runId: "r2", collection: "files" }));
+    expect(tree()).toBe(false);
+  });
+
+  it("closing the viewer unfolds it; a fold the analyst chose in between stays", () => {
+    renderLayout();
+    act(() => selectRow());
+    expect(tree()).toBe(true);
+    act(() => collapseViewerPane());
+    expect(tree()).toBe(false);
+    act(() => expandViewerPane());
+    expect(tree()).toBe(true);
+    // The analyst unfolds and folds the tree again: theirs from here on.
+    act(() => useAppStore.getState().setTreeCollapsed(false));
+    act(() => useAppStore.getState().setTreeCollapsed(true));
+    act(() => useAppStore.getState().navigate({ runId: null, collection: null }));
+    expect(tree()).toBe(true);
   });
 });

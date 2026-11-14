@@ -153,6 +153,21 @@ class FieldFilterApiTests(unittest.TestCase):
         self.assertEqual(page["matched"], 3)
         self.assertEqual(page["pagination"]["fields"], {"browser": ["ie-edge-legacy"]})
 
+    def test_compact_listing_and_single_record_fetch(self) -> None:
+        """R7 S1: the grid lists ``compact=1``; the viewer reads ``offset=<record_index>&limit=1``."""
+        full = self.get("kind=browser&limit=50")["artifacts"]["browser"]["artifacts"]
+        compact = self.get("kind=browser&limit=50&compact=1")["artifacts"]["browser"]["artifacts"]
+        # Small details: nothing to leave out, the rows are unchanged.
+        self.assertEqual(compact, full)
+        crossed = self.get("limit=50&browser=ie-edge-legacy&compact=1")
+        self.assertEqual(crossed["cross_kind"]["matched"], 4)
+        for row in full:
+            single = self.get(f"kind=browser&offset={row['record_index']}&limit=1")["artifacts"]["browser"]["artifacts"]
+            self.assertEqual(single, [row])
+        summary = self.client.get(f"/api/runs/{self.run_id}/summary?compact=1")
+        self.assertEqual(summary.status_code, 200, summary.text)
+        self.assertEqual(summary.json()["summary"]["counts"]["artifacts"], self.client.get(f"/api/runs/{self.run_id}/summary").json()["summary"]["counts"]["artifacts"])
+
     def test_service_filter_is_exact_and_repeatable(self) -> None:
         page = self.get("kind=windows-messenger&limit=50&service=Slack&artifact_type=chat-message")["artifacts"]["windows-messenger"]
         self.assertEqual([row["details"]["body"] for row in page["artifacts"]], ["m1", "m2"])

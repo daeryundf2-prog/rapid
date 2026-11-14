@@ -6,6 +6,7 @@ import json
 import sqlite3
 from collections.abc import Mapping, Sequence
 
+from ... import PRODUCT_NAME
 from ...artifacts.synthetic_media import (
     SYNTHETIC_MEDIA_SCORE_GUIDANCE,
     SYNTHETIC_MEDIA_SCORE_SEMANTICS,
@@ -640,7 +641,7 @@ def render_case_db_report_markdown(
     synthetic_media_summary: Mapping[str, object] | None = None,
 ) -> tuple[str, bool]:
     lines = [
-        "# RapidForensic Case DB Report Export",
+        f"# {PRODUCT_NAME} Case DB Report Export",
         "",
         f"- Case ID: `{case_id}`",
         f"- Selected report candidates: {len(items)}",

@@ -18,6 +18,16 @@ export function parseCueTime(value: string | undefined): number | null {
   return seconds;
 }
 
+/** "길이 m:ss" (or "길이 h:mm:ss"); "길이 정보 없음" when the metadata has none (r8 T-017). */
+export function formatMediaDuration(seconds: number | null | undefined): string {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) return "길이 정보 없음";
+  const total = Math.round(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = String(total % 60).padStart(2, "0");
+  return hours > 0 ? `길이 ${hours}:${String(minutes).padStart(2, "0")}:${secs}` : `길이 ${minutes}:${secs}`;
+}
+
 interface MediaViewProps {
   runId: string;
   preview: SourcePreview;
@@ -34,8 +44,22 @@ export function MediaView({ runId, preview, onCopy }: MediaViewProps) {
   );
   const playerRef = useRef<HTMLMediaElement | null>(null);
   const [cueError, setCueError] = useState<string | null>(null);
+  // The player's own length (loadedmetadata) when the metadata has none (r8 verify F5).
+  // Keyed by the blob URL so another file never shows the previous player's length.
+  const [playerDuration, setPlayerDuration] = useState<{ url: string; seconds: number } | null>(null);
+  const onLoadedMetadata = (event: { currentTarget: HTMLMediaElement }) => {
+    const seconds = event.currentTarget.duration;
+    if (blob.url && Number.isFinite(seconds) && seconds >= 0) setPlayerDuration({ url: blob.url, seconds });
+  };
   const sidecars = media.transcript_sidecars || [];
   const metadata = media.metadata || {};
+  const metaSeconds = metadata.duration_seconds;
+  const durationSeconds =
+    typeof metaSeconds === "number" && Number.isFinite(metaSeconds) && metaSeconds >= 0
+      ? metaSeconds
+      : playerDuration && playerDuration.url === blob.url
+        ? playerDuration.seconds
+        : null;
 
   const seek = (start: string | undefined) => {
     const seconds = parseCueTime(start);
@@ -78,6 +102,7 @@ export function MediaView({ runId, preview, onCopy }: MediaViewProps) {
           src={blob.url}
           controls
           preload="metadata"
+          onLoadedMetadata={onLoadedMetadata}
           aria-label={`${preview.name} 재생`}
         />
       ) : (
@@ -90,11 +115,12 @@ export function MediaView({ runId, preview, onCopy }: MediaViewProps) {
           src={blob.url}
           controls
           preload="metadata"
+          onLoadedMetadata={onLoadedMetadata}
           aria-label={`${preview.name} 재생`}
         />
       )}
       <p className="viewer-note">
-        {mime || "미디어"} · 길이 {metadata.duration_seconds ?? "알 수 없음"}초
+        {mime || "미디어"} · {formatMediaDuration(durationSeconds)}
         {metadata.sample_rate ? ` · 샘플레이트 ${metadata.sample_rate}` : ""}
         {metadata.audio_channels ? ` · 채널 ${metadata.audio_channels}` : ""}
       </p>

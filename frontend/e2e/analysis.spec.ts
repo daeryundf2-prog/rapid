@@ -28,14 +28,17 @@ test.beforeAll(async ({ request }) => {
     headers: HEADERS,
     data: { output_dir: outputDir, overwrite: true, read_only: true },
   });
-  if (created.status() !== 201) return;
+  // Fail loudly: a silent skip here hides a broken server (e.g. 403 PATH_OUTSIDE_ALLOWED_ROOT).
+  if (created.status() !== 201) {
+    throw new Error(`POST /api/sample-case/run returned ${created.status()}: ${await created.text()}`);
+  }
   const payload = (await created.json()) as { run?: { run_id?: string } };
   runId = payload.run?.run_id ?? "";
   if (!runId) {
     const list = await request.get("/api/runs", { headers: HEADERS });
     runId = ((await list.json()) as { runs: Array<{ run_id: string }> }).runs[0]?.run_id ?? "";
   }
-  if (!runId) return;
+  if (!runId) throw new Error("sample case was created (201) but no run_id was found");
   analysesAvailable = (await listAnalyses(request)) !== null;
 });
 
@@ -138,7 +141,13 @@ test("Q-IA-3: carve on the 처리 card → progress → done → 결과 보기 �
   await firstRow.press("Enter");
   const hexTab = page.getByRole("tab", { name: /헥스/ });
   await expect(hexTab).toHaveAttribute("aria-selected", "true", { timeout: 20_000 });
-  await expect(page.locator("#viewer .is-hl").first()).toBeVisible({ timeout: 20_000 });
+  // The hex cursor opens on the hit offset; its row carries the highlighted bytes.
+  const hexCursorRow = page
+    .locator("#viewer")
+    .getByRole("grid", { name: /^헥스 보기/ })
+    .locator('[role="row"][aria-selected="true"]');
+  await expect(hexCursorRow).toBeVisible({ timeout: 20_000 });
+  await expect(hexCursorRow).toHaveClass(/(^|\s)is-hl-row(\s|$)/);
 });
 
 test("Q-IA-1 / review 16–17: Alt+n switches stage with focus on the panel heading; 침해사고 › 웹셸 exists", async ({

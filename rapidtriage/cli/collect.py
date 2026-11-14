@@ -19,6 +19,7 @@ from ..core.vsc import (
         discover_vsc_snapshot_roots,
         extract_vsc_changes,
 )
+from .helpers import refuse_output_inside_evidence
 
 
 def handle_cloud_collect(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
@@ -113,6 +114,9 @@ def handle_collect_export(args: argparse.Namespace, parser: argparse.ArgumentPar
             if args.manifest
             else output_dir / "rapidtriage-collect-export.json"
         )
+        refuse_output_inside_evidence(parser, output_dir, [root])
+        refuse_output_inside_evidence(parser, manifest_output, [root])
+        refuse_output_inside_evidence(parser, audit_path_for(manifest_output), [root])
         try:
             payload = run_collect_export(
                 root,
@@ -261,6 +265,10 @@ def handle_vsc_extract(args: argparse.Namespace, parser: argparse.ArgumentParser
         snapshot_roots = [Path(item).expanduser().resolve() for item in args.snapshot_roots]
         output_dir = Path(args.output_dir).expanduser().resolve()
         output = Path(args.manifest).expanduser().resolve() if args.manifest else output_dir / "rapidtriage-vsc-extract.json"
+        vsc_evidence: list[Path | str | None] = [current_root, *snapshot_roots]
+        refuse_output_inside_evidence(parser, output_dir, vsc_evidence)
+        refuse_output_inside_evidence(parser, output, vsc_evidence)
+        refuse_output_inside_evidence(parser, audit_path_for(output), vsc_evidence)
         try:
             payload = extract_vsc_changes(
                 current_root,
@@ -320,6 +328,7 @@ def handle_vsc_extract(args: argparse.Namespace, parser: argparse.ArgumentParser
 def handle_carve(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
         input_root = resolve_input_root(Path(args.root), kind=args.input_kind)
         output_dir = Path(args.output_dir).expanduser().resolve()
+        refuse_output_inside_evidence(parser, output_dir, [input_root.root_path])
         try:
             payload = run_bounded_carving(
                 input_root,
@@ -368,6 +377,7 @@ def handle_carve(args: argparse.Namespace, parser: argparse.ArgumentParser, rule
 
 def handle_ntfs_meta(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
         output_dir = Path(args.output_dir).expanduser().resolve()
+        refuse_output_inside_evidence(parser, output_dir, [Path(args.image)])
         try:
             payload = extract_ntfs_metadata(
                 Path(args.image),

@@ -28,6 +28,7 @@ from ..triage_rules.stage import (
     ROWS_FILE_NAME,
     STATE_FILE_NAME,
     _write_state,
+    new_run_stage_analysis_id,
 )
 from .engine import TABLES, run_derived
 
@@ -55,6 +56,27 @@ def _remove_older_generations(root: Path, *, keep: str) -> None:
             shutil.rmtree(child, ignore_errors=True)
 
 
+_NAME_ATTEMPTS = 5
+
+
+def _create_generation_directory(root: Path, analysis_id: str) -> tuple[str, Path]:
+    """Create ``root/<analysis_id>``; a name already taken gets a fresh id (never reuses a folder).
+
+    Two stage runs in one clock tick used to share a name and fail the step with
+    ``FileExistsError`` [WinError 183]; only the folder name changes, never its contents.
+    """
+    for attempt in range(_NAME_ATTEMPTS):
+        directory = root / analysis_id
+        try:
+            directory.mkdir(parents=True, exist_ok=False)
+            return analysis_id, directory
+        except FileExistsError:
+            if attempt == _NAME_ATTEMPTS - 1:
+                raise
+            analysis_id = new_run_stage_analysis_id(RUN_STAGE_ANALYSIS_PREFIX)
+    raise AssertionError("unreachable")
+
+
 def table_counts(summary: Mapping[str, object]) -> dict[str, int]:
     tables = summary.get("tables") if isinstance(summary.get("tables"), Mapping) else {}
     counts: dict[str, int] = {}
@@ -72,16 +94,17 @@ def run_derived_stage(
     files_path: Path | None = None,
     files_payload: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """Run the derived engine into a new ``analyses/run-derived-<time>/``; returns the run-summary step row."""
+    """Run the derived engine into a new ``analyses/run-derived-<time>-<hex>/``; returns the run-summary step row."""
     root = Path(output_dir) / ANALYSES_DIR_NAME
-    analysis_id = f"{RUN_STAGE_ANALYSIS_PREFIX}-{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%S%f')}"
+    analysis_id = new_run_stage_analysis_id(RUN_STAGE_ANALYSIS_PREFIX)
     directory = root / analysis_id
     started_at = _utc_now()
     started = time.monotonic()
     step: dict[str, object] = {"name": STEP_NAME, "analysis_id": analysis_id, "output": str(directory)}
     sources: list[str] = []
     try:
-        directory.mkdir(parents=True, exist_ok=False)
+        analysis_id, directory = _create_generation_directory(root, analysis_id)
+        step.update({"analysis_id": analysis_id, "output": str(directory)})
         (directory / ROWS_FILE_NAME).touch()
         summary = run_derived(
             TriageInputs(

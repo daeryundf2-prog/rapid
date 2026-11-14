@@ -13,7 +13,10 @@
     "lint:fix": "biome check --write .",
     "gen:schemas": "node scripts/gen-schemas.mjs",
     "check:contrast": "node scripts/check-contrast.mjs",
+    "check:tokens": "node scripts/check-tokens.mjs",
+    "check:bundle": "node scripts/check-bundle.mjs",
     "e2e": "playwright test --config e2e/playwright.config.ts",
+    "e2e:perf": "playwright test --config e2e/playwright.config.ts e2e/perf/",
     "gen:families": "node scripts/gen-families-fallback.mjs"
   },
   "dependencies": {

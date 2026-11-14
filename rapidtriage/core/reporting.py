@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+# Markdown report row budget for "Processing decisions"; overflow is disclosed.
+PROCESSING_DECISION_REPORT_LIMIT = 30
+
 
 def build_run_report_context(
     summary_payload: Mapping[str, object],
@@ -350,8 +353,7 @@ def render_run_markdown_report(report_context: Mapping[str, object]) -> str:
 
     lines.extend(["", "### Processing decisions / skipped, capped, reused", ""])
     if processing.get("decisions"):
-        for item in processing["decisions"][:30]:
-            lines.append(f"- {item}")
+        lines.extend(format_processing_decision_lines(processing["decisions"]))
     else:
         lines.append("- No skipped, capped, or reused processing decisions were recorded.")
 
@@ -552,6 +554,19 @@ def format_bounded_names(value: object, *, limit: int) -> str:
     return ", ".join(visible) + suffix if visible else "none"
 
 
+def format_processing_decision_lines(
+    decisions: object, *, limit: int = PROCESSING_DECISION_REPORT_LIMIT
+) -> list[str]:
+    items = [str(item) for item in decisions] if isinstance(decisions, list) else []
+    lines = [f"- {item}" for item in items[:limit]]
+    if len(items) > limit:
+        lines.append(
+            f"- +{len(items) - limit} more processing decision(s) not shown here; "
+            "see each step's warning_messages in the run summary JSON."
+        )
+    return lines
+
+
 def build_processing_decision_rows(steps: object, processing: Mapping[str, object]) -> list[str]:
     rows: list[str] = []
     caps = processing.get("caps", {}) if isinstance(processing.get("caps"), Mapping) else {}
@@ -571,25 +586,33 @@ def build_processing_decision_rows(steps: object, processing: Mapping[str, objec
 
     if not isinstance(steps, list):
         return rows
+    # The markdown report shows a bounded number of rows, so order them by
+    # importance: explicit skip/reuse decisions first, then failed/warning
+    # messages, then notices. Otherwise a long tail of "no rows collected"
+    # notices pushes the step-level skip decisions out of the report.
+    decision_rows: list[str] = []
+    alert_rows: list[str] = []
+    notice_rows: list[str] = []
     for step in steps:
         if not isinstance(step, Mapping):
             continue
         name = str(step.get("name") or "step")
         status = str(step.get("status") or "")
         if status in {"skipped", "reused"}:
-            rows.append(f"`{name}` status=`{status}` output=`{step.get('output', '')}`.")
+            decision_rows.append(f"`{name}` status=`{status}` output=`{step.get('output', '')}`.")
         skip_reasons = step.get("skip_reasons")
         if isinstance(skip_reasons, Mapping) and skip_reasons:
             reasons = ", ".join(f"{key}={value}" for key, value in skip_reasons.items())
-            rows.append(f"`{name}` skip reasons: {reasons}.")
+            decision_rows.append(f"`{name}` skip reasons: {reasons}.")
         warning_messages = step.get("warning_messages")
         if isinstance(warning_messages, list):
             # The step's own level word (notice/warning/failed), not "warning" for all.
             level = str(step.get("warning_level") or "none")
             level = "notice" if level == "none" else level
+            bucket = notice_rows if level == "notice" else alert_rows
             for message in warning_messages[:3]:
-                rows.append(f"`{name}` {level}: {message}")
-    return list(dict.fromkeys(rows))
+                bucket.append(f"`{name}` {level}: {message}")
+    return list(dict.fromkeys([*rows, *decision_rows, *alert_rows, *notice_rows]))
 
 
 def summarize_document_hits(results: object, *, limit: int) -> list[dict[str, object]]:

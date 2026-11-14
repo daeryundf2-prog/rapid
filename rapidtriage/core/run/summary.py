@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import hashlib
 import json
 from collections import Counter
@@ -12,6 +11,8 @@ from collections.abc import (
 )
 from pathlib import Path
 
+from ..clock import now_local_iso
+from ..credential_files import credential_disclosure_from_summary
 from ..forensic_accuracy import build_accuracy_gate
 from ..rules import (
     RuleSet,
@@ -164,7 +165,7 @@ def build_run_summary(
     payload = {
         "command": "run",
         "mode": profile.mode,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "root": str(root),
         "source": dict(source or {}),
         "scan_scope_root": str(files_payload.get("scan_scope_root") or docs_payload.get("scan_scope_root") or root),
@@ -332,7 +333,7 @@ def build_run_disclosures(
                     registry_context = {key: details.get(key) for key in REGISTRY_CONTEXT_KEYS if details.get(key) not in (None, "", [], {})}
                     break
     timezone = timeline_summary.get("timezone") if isinstance(timeline_summary.get("timezone"), Mapping) else {}
-    return {
+    disclosures: dict[str, object] = {
         "time_origin": files_summary.get("time_origin"),
         "acquisition_copy_note": (
             "폴더(추출 사본) 입력: 파일의 호스트 수정·생성·접근 시각은 취득/복사 시각이므로 "
@@ -381,6 +382,11 @@ def build_run_disclosures(
         "collection_notes": collection_notes,
         "input_row_truncation": summarize_input_row_truncation(steps),
     }
+    credential_files = credential_disclosure_from_summary(docs_summary)
+    if credential_files is not None:
+        # "자격 증명 파일 N건 — 본문 미수집" (core/credential_files.py): listed by name, body never collected.
+        disclosures["credential_files"] = credential_files
+    return disclosures
 
 
 def _count_values(value: object) -> int:

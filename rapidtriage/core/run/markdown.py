@@ -192,6 +192,11 @@ def build_disclosure_section(disclosures: Mapping[str, object]) -> str:
     size_caps = documents.get("size_caps") if isinstance(documents.get("size_caps"), Mapping) else {}
     if size_caps.get("too_large_count") or size_caps.get("binary_rejected_count"):
         lines.append(f"- 문서 크기 상한: {size_caps.get('note')}")
+    credential_files = disclosures.get("credential_files") if isinstance(disclosures.get("credential_files"), Mapping) else {}
+    if credential_files.get("count"):
+        lines.append(
+            f"- {credential_files.get('note')} (파일 이름·경로·크기·시각만 기록, 사유 {dict(credential_files.get('reason_counts') or {})})"
+        )
     row_truncation = disclosures.get("input_row_truncation") if isinstance(disclosures.get("input_row_truncation"), Mapping) else {}
     if row_truncation.get("payload_truncated_rows") or row_truncation.get("preview_truncated_rows"):
         steps = ", ".join(f"`{name}`" for name in (row_truncation.get("by_step") or {}))

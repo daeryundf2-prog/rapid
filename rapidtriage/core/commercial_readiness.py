@@ -7,6 +7,9 @@ import re
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
+from .cli_constants import (
+    MATURITY_GATE_ORDER,
+)
 from .docs import write_result
 
 COMMERCIAL_READINESS_JSON_NAME = "rapidtriage-commercial-readiness.json"
@@ -16,7 +19,6 @@ KNOWN_ANSWER_TEMPLATE_MARKDOWN_SUFFIX = ".md"
 BACKLOG_ITEM_RE = re.compile(
     r"^(?P<number>\d+)\.\s+(?P<title>.+?)\.\s+Status:\s+(?P<status>[^.]+)\.\s*(?P<body>.*)$"
 )
-MATURITY_GATE_ORDER = ("implemented", "usable", "validated", "commercial_grade")
 COMMERCIAL_UPLIFT_DEFAULT_TARGET_COUNT = 70
 COMMERCIAL_UPLIFT_DEFAULT_BATCH_SIZE = 5
 FUNCTIONAL_DEFENSIBILITY_BATCH_ID = "commercial-uplift-041-045"

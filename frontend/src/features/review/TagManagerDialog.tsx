@@ -10,11 +10,13 @@ import { useEffect, useId, useRef, useState } from "react";
 import { announce } from "../../a11y";
 import { type CaseTag, TAG_COLOR_LABELS, TAG_COLOR_TOKENS, type TagColorToken } from "../../api/reviewTools";
 import { ErrorText } from "../case/ErrorText";
+import { InlineConfirm } from "../case/InlineConfirm";
 import { Modal } from "../case/Modal";
 import { ReasonButton } from "../case/ReasonButton";
-import { currentReviewer, setReviewer } from "./author";
+import { reviewerPlaceholder, setReviewer, typedReviewer } from "./author";
 import { removeTag, saveNewTag, saveTagChanges, sortTags, useCaseTags } from "./tagStore";
 import "./review.css";
+import { useWriteBlock } from "../../shell/readOnly";
 
 const DIGITS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 export const SYSTEM_TAG_REASON = "기본 태그는 이름을 바꾸거나 삭제할 수 없습니다";
@@ -65,7 +67,9 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
   const [confirmDelete, setConfirmDelete] = useState<CaseTag | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [author, setAuthor] = useState(() => (currentReviewer() === "web-ui" ? "" : currentReviewer()));
+  // T-144: the field holds only a typed name; empty, the case's 담당자 signs (its name is the
+  // placeholder, else "담당자 이름") — never a system id such as "web-ui".
+  const [author, setAuthor] = useState(typedReviewer);
   const formId = useId();
   const nameId = useId();
   const shortcutId = useId();
@@ -158,9 +162,12 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
     });
   };
 
-  const saveReason = draft
+  // T-348: a read-only result / server says why instead of answering with a 409.
+  const writeBlock = useWriteBlock("run");
+  const saveReasonOwn = draft
     ? (draftReason(draft, tags) ?? (busy ? "저장하는 중입니다" : undefined))
     : undefined;
+  const saveReason = writeBlock ?? saveReasonOwn;
   const takenBy = (digit: number) => tags.find((tag) => tag.shortcut === digit && tag.id !== draft?.id);
 
   return (
@@ -181,7 +188,7 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
             id={authorId}
             type="text"
             value={author}
-            placeholder="web-ui"
+            placeholder={reviewerPlaceholder(runId)}
             maxLength={60}
             onChange={(event) => setAuthor(event.target.value)}
             onBlur={() => setReviewer(author)}
@@ -224,20 +231,23 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
                 <td>{tag.shortcut ?? "—"}</td>
                 <td className="num">{tag.count.toLocaleString("ko-KR")}</td>
                 <td className="tag-desc">{tag.description || "—"}</td>
-                <td>{tag.created_by || "—"}</td>
+                <td>{tag.created_by && tag.created_by !== "web-ui" ? tag.created_by : "—"}</td>
                 <td className="tag-actions">
-                  <button
-                    type="button"
+                  {/* T-348: read-only rows say why on hover / focus (quiet: the band says it once). */}
+                  <ReasonButton
                     className="button ghost"
                     aria-label={`${tag.name} 태그 편집`}
+                    reason={writeBlock}
+                    quietReason
                     onClick={() => startEdit(tag)}
                   >
                     편집
-                  </button>
+                  </ReasonButton>
                   <ReasonButton
                     className="button ghost"
                     aria-label={`${tag.name} 태그 삭제`}
-                    reason={tag.kind === "system" ? SYSTEM_TAG_REASON : undefined}
+                    reason={writeBlock ?? (tag.kind === "system" ? SYSTEM_TAG_REASON : undefined)}
+                    quietReason={Boolean(writeBlock)}
                     onClick={() => {
                       remember();
                       setDraft(null);
@@ -252,26 +262,22 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
           </tbody>
         </table>
         {confirmDelete ? (
-          <fieldset className="tag-confirm">
-            <legend className="sr-only">태그 삭제 확인</legend>
+          // Starts on 취소; Esc cancels the confirmation only, not the tag manager (T-034).
+          <InlineConfirm
+            key={confirmDelete.id}
+            label="태그 삭제 확인"
+            testId="tag-delete-confirm"
+            className="tag-confirm"
+            busy={busy}
+            onCancel={closeConfirm}
+            onConfirm={() => remove(confirmDelete)}
+          >
             <p>
               '{confirmDelete.name}' 태그를 삭제할까요? 이 태그가 붙은{" "}
-              {confirmDelete.count.toLocaleString("ko-KR")}개 행에서 빠집니다. 태그 기록은 삭제 표시로
-              남습니다.
+              {confirmDelete.count.toLocaleString("ko-KR")}개 행에서 태그만 빠지고, 행과 원본 증거는 그대로
+              남습니다. 태그 기록은 삭제 표시로 남습니다.
             </p>
-            <div className="case-actions">
-              <button type="button" className="button" onClick={closeConfirm}>
-                취소
-              </button>
-              <ReasonButton
-                className="button primary"
-                reason={busy ? "처리하는 중입니다" : undefined}
-                onClick={() => remove(confirmDelete)}
-              >
-                삭제
-              </ReasonButton>
-            </div>
-          </fieldset>
+          </InlineConfirm>
         ) : null}
         {draft ? (
           <form
@@ -374,15 +380,15 @@ export function TagManagerDialog({ runId, onClose }: { runId: string; onClose: (
           </form>
         ) : (
           <div className="case-actions">
-            <button
+            <ReasonButton
               ref={newButtonRef}
-              type="button"
               className="button primary"
+              reason={writeBlock}
               onClick={() => startEdit(null)}
               data-testid="tag-new"
             >
               새 태그
-            </button>
+            </ReasonButton>
           </div>
         )}
       </div>

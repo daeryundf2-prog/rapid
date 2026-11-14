@@ -1306,6 +1306,8 @@
       "compared_text_file_count": 0,
       "eligible_text_file_count": 1,
       "max_files": 200,
+      "ratio_max_chars": 8192,
+      "ratio_pairs_skipped": 0,
       "truncated": false
     },
     "fuzzy_text_duplicates_truncated": false,

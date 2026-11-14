@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-import datetime as dt
 import hashlib
 import ipaddress
 import json
@@ -12,6 +11,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .artifact_profiles import iter_payload_records
+from .clock import now_local_iso
 from .forensic_accuracy import build_accuracy_gate
 from .json_stream import LazyArray, LazyObject, Scalar, open_json
 from .rules import RuleSet
@@ -511,7 +511,7 @@ def build_indicator_summary(
     )
     return {
         "command": "indicators",
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "run_summary": str(summary.get("outputs", {}).get("summary", "")),
         "options": {
             "max_indicators": max_indicators,
@@ -1384,7 +1384,7 @@ def build_indicator_ti_enrichment_package(
     return {
         "command": "indicator-ti-enrichment",
         "profile_version": "ioc-ti-enrichment-review-package-v1",
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "local_only": True,
         "no_external_calls": True,
         "options": {

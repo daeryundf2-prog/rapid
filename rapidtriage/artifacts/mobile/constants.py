@@ -1,6 +1,13 @@
 from __future__ import annotations
 
+from ...core.ai_catalog import ai_service_tokens
+
 PARSER_VERSION = "mobile-export-v4"
+
+# R7 stage 3.5: AI service name tokens from the AI tool catalog (legacy chatgpt / claude / gemini /
+# perplexity / copilot first, then distinctive catalog chatbot names) for app, message and
+# browser-row hints.
+MOBILE_AI_SERVICE_TOKENS: tuple[str, ...] = ai_service_tokens()
 
 
 FUNCTIONAL_SOURCE_BATCH_ID = "commercial-uplift-046-050"

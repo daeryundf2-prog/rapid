@@ -34,6 +34,8 @@ export const CHAT_KINDS: readonly string[] = [
   "mobile-export",
   // r2 M1: Teams·Slack·Discord·… desktop apps (`chat-message` rows; chat.ts reads them).
   "windows-messenger",
+  // R7 AI 사용: agent sessions (messages as role bubbles, tool calls folded, file touches linked).
+  "ai-agent",
 ];
 /** Row listings the card view can draw (every node with paged / loaded rows). */
 export const CARD_COLLECTIONS: readonly CollectionId[] = [
@@ -64,7 +66,7 @@ export const NO_NODE_REASON = "케이스의 컬렉션 노드를 먼저 여세요
 export const THUMBNAIL_REASON =
   "썸네일 보기는 파일 노드와 미디어 이미지 아티팩트 노드에서 사용할 수 있습니다";
 export const CHAT_REASON =
-  "대화 보기는 카카오톡·데스크톱 메신저·모바일 내보내기 아티팩트 노드에서 사용할 수 있습니다";
+  "대화 보기는 카카오톡·데스크톱 메신저·모바일 내보내기·AI 사용 아티팩트 노드에서 사용할 수 있습니다";
 export const HISTOGRAM_REASON =
   "히스토그램 보기는 타임라인·아티팩트·파일·문서·검색 노드에서 사용할 수 있습니다";
 export const CARDS_REASON =

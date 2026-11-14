@@ -38,6 +38,9 @@
     "/api/cases/evidence-check": {
       "post": "check_evidence_api_cases_evidence_check_post"
     },
+    "/api/cases/output-check": {
+      "post": "check_output_api_cases_output_check_post"
+    },
     "/api/cases/{case_id}": {
       "get": "get_case_api_cases__case_id__get",
       "patch": "patch_case_api_cases__case_id__patch"
@@ -131,6 +134,9 @@
     "/api/run-plan/preview": {
       "get": "preview_run_plan_api_run_plan_preview_get"
     },
+    "/api/run-plan/space": {
+      "post": "preview_run_space_api_run_plan_space_post"
+    },
     "/api/runs": {
       "get": "list_runs_api_runs_get",
       "post": "create_run_api_runs_post"
@@ -141,6 +147,9 @@
     "/api/runs/{run_id}": {
       "delete": "delete_run_api_runs__run_id__delete",
       "get": "get_run_api_runs__run_id__get"
+    },
+    "/api/runs/{run_id}/ai-usage/gaps": {
+      "get": "get_run_ai_usage_gaps_api_runs__run_id__ai_usage_gaps_get"
     },
     "/api/runs/{run_id}/analyses": {
       "get": "list_analyses_api_runs__run_id__analyses_get",
@@ -192,6 +201,9 @@
     "/api/runs/{run_id}/dashboard": {
       "get": "get_run_dashboard_api_runs__run_id__dashboard_get"
     },
+    "/api/runs/{run_id}/dedup/summary": {
+      "get": "get_dedup_summary_api_runs__run_id__dedup_summary_get"
+    },
     "/api/runs/{run_id}/derived": {
       "get": "get_derived_api_runs__run_id__derived_get"
     },
@@ -219,8 +231,20 @@
     "/api/runs/{run_id}/extract/{name}/file": {
       "get": "download_run_extract_api_runs__run_id__extract__name__file_get"
     },
+    "/api/runs/{run_id}/extract/{name}/zip": {
+      "post": "build_run_extract_zip_api_runs__run_id__extract__name__zip_post"
+    },
+    "/api/runs/{run_id}/families/{ref}": {
+      "get": "get_run_family_api_runs__run_id__families__ref__get"
+    },
+    "/api/runs/{run_id}/family-expansion": {
+      "get": "get_family_expansion_api_runs__run_id__family_expansion_get"
+    },
     "/api/runs/{run_id}/files": {
       "get": "get_run_files_api_runs__run_id__files_get"
+    },
+    "/api/runs/{run_id}/files/sections": {
+      "get": "get_run_files_section_api_runs__run_id__files_sections_get"
     },
     "/api/runs/{run_id}/flags": {
       "get": "get_run_flags_api_runs__run_id__flags_get"
@@ -242,6 +266,9 @@
     },
     "/api/runs/{run_id}/indicators/ti-enrichment": {
       "get": "get_run_indicator_ti_enrichment_api_runs__run_id__indicators_ti_enrichment_get"
+    },
+    "/api/runs/{run_id}/irregular/summary": {
+      "get": "get_irregular_summary_api_runs__run_id__irregular_summary_get"
     },
     "/api/runs/{run_id}/issues": {
       "get": "get_run_issues_api_runs__run_id__issues_get"
@@ -312,6 +339,12 @@
     "/api/runs/{run_id}/search/count": {
       "post": "search_count_api_runs__run_id__search_count_post"
     },
+    "/api/runs/{run_id}/search/entities": {
+      "post": "search_entities_api_runs__run_id__search_entities_post"
+    },
+    "/api/runs/{run_id}/search/entities/reveal": {
+      "post": "reveal_entity_value_api_runs__run_id__search_entities_reveal_post"
+    },
     "/api/runs/{run_id}/search/hashes": {
       "post": "search_hashes_api_runs__run_id__search_hashes_post"
     },
@@ -323,6 +356,14 @@
     },
     "/api/runs/{run_id}/search/index/build": {
       "post": "build_search_index_api_runs__run_id__search_index_build_post"
+    },
+    "/api/runs/{run_id}/search/lists": {
+      "get": "get_search_lists_api_runs__run_id__search_lists_get",
+      "post": "create_search_list_api_runs__run_id__search_lists_post"
+    },
+    "/api/runs/{run_id}/search/lists/{list_id}": {
+      "delete": "delete_search_list_api_runs__run_id__search_lists__list_id__delete",
+      "get": "get_search_list_api_runs__run_id__search_lists__list_id__get"
     },
     "/api/runs/{run_id}/search/query": {
       "post": "search_query_api_runs__run_id__search_query_post"
@@ -376,10 +417,14 @@
       "get": "source_thumbnail_api_runs__run_id__source_thumbnail_get"
     },
     "/api/runs/{run_id}/submission-manifest": {
-      "get": "get_submission_manifest_api_runs__run_id__submission_manifest_get"
+      "get": "get_submission_manifest_api_runs__run_id__submission_manifest_get",
+      "post": "create_submission_manifest_api_runs__run_id__submission_manifest_post"
     },
     "/api/runs/{run_id}/submission-manifest/file": {
       "get": "download_submission_manifest_api_runs__run_id__submission_manifest_file_get"
+    },
+    "/api/runs/{run_id}/submission-manifest/saved": {
+      "get": "open_saved_submission_manifest_api_runs__run_id__submission_manifest_saved_get"
     },
     "/api/runs/{run_id}/summary": {
       "get": "get_run_summary_api_runs__run_id__summary_get"
@@ -394,10 +439,14 @@
       "get": "get_run_tree_api_runs__run_id__tree_get"
     },
     "/api/runs/{run_id}/validation-package": {
-      "get": "get_run_validation_package_api_runs__run_id__validation_package_get"
+      "get": "get_run_validation_package_api_runs__run_id__validation_package_get",
+      "post": "create_run_validation_package_api_runs__run_id__validation_package_post"
     },
     "/api/runs/{run_id}/validation-package/file": {
       "get": "download_run_validation_package_api_runs__run_id__validation_package_file_get"
+    },
+    "/api/runs/{run_id}/validation-package/saved": {
+      "get": "open_saved_run_validation_package_api_runs__run_id__validation_package_saved_get"
     },
     "/api/runs/{run_id}/viewer-workflow-validation": {
       "get": "get_run_viewer_workflow_validation_api_runs__run_id__viewer_workflow_validation_get"

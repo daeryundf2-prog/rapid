@@ -29,7 +29,11 @@ from rapidtriage.core.run import (
     collect_artifact_stages,
     run_triage_mode,
 )
+from tests import quiet_media_checks
 from tests.test_rapidtriage_run import build_run_fixture
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
 
 
 def load_json(path: Path) -> dict[str, object]:
@@ -149,6 +153,10 @@ class RunPipelineTests(unittest.TestCase):
                 self.assertEqual(len(recorded), 1, path)
                 on_disk = json.dumps(load_json(path), ensure_ascii=False, sort_keys=True)
                 self.assertEqual(on_disk, recorded[0])
+            # The ai-agent output is completed by the run-level indirect rows before its single
+            # write (R7 gate regression: it used to be rewritten after the artifact stage).
+            ai_output = artifact_outputs["artifacts_ai-agent"]
+            self.assertIn("ai_indirect", load_json(ai_output)["summary"])
 
     def test_failing_provider_is_isolated_and_other_outputs_persist(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

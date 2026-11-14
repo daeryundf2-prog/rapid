@@ -4,9 +4,14 @@
  */
 
 import type { ReviewCounts, SavedSearch } from "../../api/caseDb";
-import type { ExportEntry } from "../../api/dashboard";
+import type { ExportEntry, StepsSummary } from "../../api/dashboard";
 import type { CanonicalCounts, RunTree } from "../../api/runs";
 import type { ReviewStatus } from "../../contracts/collection";
+import { formatElapsed } from "../../shell/statusBarOutcome";
+import { runEvidenceTimezone } from "../../state/hooks";
+import { currentRun } from "../../state/slices/runs";
+import { useAppStore } from "../../state/store";
+import { formatRunTime } from "../../utils/time";
 import { type ArtifactCategory, groupByCategory } from "../tree/categories";
 import { artifactKindNodes } from "../tree/model";
 
@@ -66,20 +71,70 @@ export function stageRows(progress: ProgressLike | null | undefined, now = Date.
   return rows;
 }
 
-export function formatDuration(value: number | null | undefined): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
-  if (value < 1000) return `${Math.round(value)}ms`;
-  const s = value / 1000;
-  if (s < 60) return `${s.toFixed(1)}초`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}분 ${Math.round(s % 60)}초`;
-  return `${Math.floor(m / 60)}시간 ${m % 60}분`;
+// --- step counts (T-022) ------------------------------------------------------
+
+/**
+ * The one step-count line of the 접수 cards and the 처리 screen (T-022, GAP-029): the server's
+ * `summarize_steps` classes in a fixed order — "단계 42 · 완료 39 · 부분 1 · 실패 1 · 건너뜀 1".
+ * 단계 · 완료 · 부분 · 실패 always print; 건너뜀 and 미완료 only when non-zero, so the parts add up
+ * to 단계. "" when the server sent no counts (a run still in progress, an older server) — never a
+ * client-side guess. The collector count is a separate "수집기 n" label.
+ */
+export function stepCountsText(steps: StepsSummary | null | undefined): string {
+  if (!steps) return "";
+  return [
+    `단계 ${steps.total}`,
+    `완료 ${steps.completed}`,
+    `부분 ${steps.partial}`,
+    `실패 ${steps.failed}`,
+    ...(steps.skipped ? [`건너뜀 ${steps.skipped}`] : []),
+    ...(steps.incomplete ? [`미완료 ${steps.incomplete}`] : []),
+  ].join(" · ");
 }
 
-export function formatTime(value: string | null | undefined): string {
+/**
+ * The step bar of the 접수 strip and the 처리 상태 summary (T-022): with the server's counts it fills
+ * by the steps that ran (all but 미완료) and reads {@link stepCountsText}; while the run is still
+ * going (no counts yet) it shows the live pipeline progress as "진행 단계 n/m". A finished run
+ * without counts gets null — never a guessed "n/n 완료".
+ */
+export function stepProgress(
+  steps: StepsSummary | null | undefined,
+  finished: boolean,
+  stagesDone: number,
+  stagesTotal: number,
+): { now: number; max: number; text: string } | null {
+  const text = stepCountsText(steps);
+  if (steps && text) return { now: steps.total - steps.incomplete, max: steps.total, text };
+  if (finished || !stagesTotal) return null;
+  return { now: stagesDone, max: stagesTotal, text: `진행 단계 ${stagesDone}/${stagesTotal}` };
+}
+
+/**
+ * 소요 of the 접수 cards (C-G4): the console's one duration format and rounding — formatElapsed
+ * ("34:08", h:mm:ss / mm:ss, whole seconds floored) like the run chips and 처리; under a second
+ * reads "1초 미만".
+ */
+export function formatDuration(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "—";
+  if (value < 1000) return "1초 미만";
+  return formatElapsed(value);
+}
+
+/** The display timezone right now (URL `tz=` > preference > evidence zone > browser), outside React. */
+export function displayTimezoneNow(): string {
+  const state = useAppStore.getState();
+  return state.route.tz ?? state.timezone ?? runEvidenceTimezone(currentRun(state)) ?? "local";
+}
+
+/**
+ * Times of the 접수 cards (C-G4): the one console format — "2026-10-17 20:18" in the display
+ * timezone (`formatRunTime`), never the browser's `toLocaleString`; "—" when missing, the raw text
+ * when unparseable.
+ */
+export function formatTime(value: string | null | undefined, tz: string = displayTimezoneNow()): string {
   if (!value) return "—";
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString("ko-KR");
+  return formatRunTime(value, tz);
 }
 
 // --- artifact categories ----------------------------------------------------
@@ -137,7 +192,7 @@ export const REVIEW_ROWS: ReadonlyArray<Omit<ReviewSummaryRow, "count">> = [
     color: "var(--status-report, #a58bf0)",
     status: "include-in-report",
   },
-  { key: "bookmark", label: "리뷰보드 항목(북마크)", color: "var(--status-bookmark, #3fb96f)" },
+  { key: "bookmark", label: "검토 목록 항목(북마크)", color: "var(--status-bookmark, #3fb96f)" },
 ];
 
 export function reviewSummary(review: ReviewCounts | undefined): { rows: ReviewSummaryRow[]; total: number } {

@@ -10,6 +10,7 @@
 import type { GridRow } from "../../contracts/collection";
 import type { Route } from "../../router";
 import { flatValue } from "../../utils/flatValue";
+import { evidencePathOf } from "../../utils/pathDisplay";
 import { shiftIso } from "../../utils/time";
 import { layoutFields, recordLayout } from "./fieldSheets";
 
@@ -251,7 +252,8 @@ export function recordPivots(row: GridRow | null, runId: string, tz?: string): P
   const source = row.sourcePath
     ? {
         key: "source_path",
-        value: row.sourcePath,
+        // Shown in the menu label: the in-evidence path, never the result folder (IS-128).
+        value: evidencePathOf(row.sourcePath).path ?? "",
         route: {
           runId,
           collection: row.ref.collection,

@@ -9,7 +9,17 @@
 
 import type { RowRef } from "./rowRef";
 
-export type ViewerMode = "source" | "hex" | "sqlite" | "image" | "document" | "email" | "media" | "meta";
+export type ViewerMode =
+  | "source"
+  | "hex"
+  | "sqlite"
+  | "image"
+  | "document"
+  | "email"
+  | "media"
+  | "meta"
+  /** 계열 (R7 갈래 A): the row's parent, siblings and children. */
+  | "family";
 
 export interface ViewerTarget {
   ref: RowRef;
@@ -25,6 +35,11 @@ export interface ViewerTarget {
   isDirectory?: boolean;
   /** Byte offset / record locator to highlight (hex view, sqlite row). */
   highlight?: { offset?: number; length?: number; table?: string; rowid?: number };
+  /**
+   * The run-output row a search hit names (its API `locator`, R7 S2 #8): review marks, bookmarks
+   * and citations of the viewer use it instead of the hit's own `search` ref.
+   */
+  review?: { collection: string; kind?: string; pointer: string };
 }
 
 export interface ViewerModeState {

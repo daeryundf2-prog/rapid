@@ -4,7 +4,7 @@ This guide is for running the local RapidTriage web UI from a source checkout on
 
 ## Requirements
 
-- Python 3.10 or newer.
+- Python 3.12 or newer.
 - Git, if cloning from GitHub.
 - Internet access for first-time Python package installation.
 
@@ -99,7 +99,7 @@ Review the JSON fields before running extraction: `tool_preflight` shows libewf/
 If direct E01 tools are missing or fail, mount/export the image using your trusted forensic workflow and point RapidTriage at the resulting folder:
 
 ```bash
-rapidtriage run ./mounted-case-folder --mode fraud --read-only
+rapidtriage run ./mounted-case-folder --mode fraud --output-dir ./case-run --read-only
 ```
 
 For AD1, AFF/AFF4, VHD/VHDX, VMDK, ISO, DMG, XVA, QCOW, mobile extraction packages, and memory dumps, RapidTriage currently provides preflight detection and guidance. Direct parsing/mounting is not yet the default workflow.

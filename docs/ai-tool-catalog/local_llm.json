@@ -1,0 +1,902 @@
+[
+ {
+  "name": "Ollama",
+  "category": "local_llm",
+  "kind": "runner",
+  "paths": {
+   "windows": [
+    "models: %USERPROFILE%\\.ollama\\models (manifests\\registry.ollama.ai\\library\\<model>\\<tag>, blobs\\sha256-*)",
+    "logs: %LOCALAPPDATA%\\Ollama\\server.log, server-#.log (also app.log)",
+    "config: %USERPROFILE%\\.ollama\\server.json",
+    "REPL history: %USERPROFILE%\\.ollama\\history",
+    "identity keys: %USERPROFILE%\\.ollama\\id_ed25519(.pub)",
+    "desktop-app chat DB: %LOCALAPPDATA%\\Ollama\\db.sqlite (SQLite; schema unverified)",
+    "install: %LOCALAPPDATA%\\Programs\\Ollama"
+   ],
+   "macos": [
+    "models: ~/.ollama/models",
+    "logs: ~/.ollama/logs/server.log",
+    "config: ~/.ollama/server.json",
+    "history: ~/.ollama/history",
+    "keys: ~/.ollama/id_ed25519",
+    "app chat DB: ~/.ollama/db.sqlite (unverified)"
+   ],
+   "linux": [
+    "models (service install): /usr/share/ollama/.ollama/models",
+    "models (user run): ~/.ollama/models",
+    "logs: systemd journal (journalctl -u ollama)",
+    "service: /etc/systemd/system/ollama.service + override dir ollama.service.d",
+    "config: ~/.ollama/server.json"
+   ]
+  },
+  "formats_schema": "Model store is content-addressed: blobs sha256-<digest> (GGUF + template/params/license layers), manifests are JSON (OCI-like) per model:tag. REPL history is plaintext. API /api/chat is stateless: prompts appear only in server.log (verbose levels) and client apps. arXiv 2603.23996 reports Ollama plaintext prompt histories in JSON and file signatures.",
+  "ports_processes": "TCP 127.0.0.1:11434 (OLLAMA_HOST); processes ollama.exe, 'ollama app.exe', runner subprocess (ollama_llama_server / 'ollama runner')",
+  "env_vars": "OLLAMA_MODELS, OLLAMA_HOST, OLLAMA_ORIGINS, OLLAMA_CONTEXT_LENGTH, OLLAMA_KEEP_ALIVE, OLLAMA_MAX_QUEUE, OLLAMA_NUM_PARALLEL, OLLAMA_MAX_LOADED_MODELS, OLLAMA_FLASH_ATTENTION, OLLAMA_KV_CACHE_TYPE, OLLAMA_NO_CLOUD, OLLAMA_DEBUG (unverified), HTTPS_PROXY",
+  "memory_artifacts": "Loaded model resident in runner process (KV cache, prompts/responses in RAM); model unloaded after OLLAMA_KEEP_ALIVE (5m default). Dump runner process for prompt strings.",
+  "install_artifacts": "Windows installer OllamaSetup.exe, per-user; startup shortcut; registry uninstall key (unverified)",
+  "retention": "No auto-expiry documented; server-#.log rotated by app (rotation policy unverified); history grows unbounded",
+  "confidence": {
+   "models_paths": "official-doc",
+   "log_paths": "official-doc",
+   "config_server_json": "official-doc",
+   "env_vars": "official-doc",
+   "port": "official-doc",
+   "history_file": "third-party",
+   "db_sqlite": "unverified",
+   "keys": "third-party",
+   "install_dir": "unverified",
+   "memory": "unverified"
+  },
+  "sources": [
+   "https://raw.githubusercontent.com/ollama/ollama/main/docs/faq.mdx",
+   "https://raw.githubusercontent.com/ollama/ollama/main/docs/troubleshooting.mdx",
+   "https://arxiv.org/abs/2603.23996"
+  ],
+  "notes": ""
+ },
+ {
+  "name": "LM Studio",
+  "category": "local_llm",
+  "kind": "desktop_runner",
+  "paths": {
+   "windows": [
+    "chats: %USERPROFILE%\\.lmstudio\\conversations\\ (JSON)",
+    "models: %USERPROFILE%\\.lmstudio\\models\\<publisher>\\<repo>\\*.gguf (default; configurable)",
+    "other dirs under %USERPROFILE%\\.lmstudio: .internal, config-presets, hub, server-logs (unverified)",
+    "Electron app data: %APPDATA%\\LM Studio (unverified)",
+    "install: %LOCALAPPDATA%\\Programs\\LM Studio (unverified)"
+   ],
+   "macos": [
+    "chats: ~/.lmstudio/conversations/",
+    "models: ~/.lmstudio/models/ (default)"
+   ],
+   "linux": [
+    "chats: ~/.lmstudio/conversations/",
+    "models: ~/.lmstudio/models/"
+   ]
+  },
+  "formats_schema": "Conversations stored as JSON files (docs advise structure may change). Model files GGUF/MLX. arXiv 2603.23996 covers LM Studio on Windows/Linux (paths not in abstract).",
+  "ports_processes": "Local server default TCP 1234 (OpenAI-compatible) when enabled (unverified in this run); lms CLI; processes 'LM Studio.exe', lms.exe, llama.cpp engine subprocess",
+  "env_vars": "unknown",
+  "memory_artifacts": "Model and chat content in app/engine process memory",
+  "install_artifacts": "Per-user installer; ~/.lmstudio/bin lms CLI (unverified)",
+  "retention": "Chats kept until deleted by user; no expiry documented",
+  "confidence": {
+   "conversations_path": "official-doc",
+   "models_path": "unverified",
+   "server_logs": "unverified",
+   "port": "unverified",
+   "install": "unverified"
+  },
+  "sources": [
+   "https://lmstudio.ai/docs/app/basics/chat",
+   "https://arxiv.org/abs/2603.23996"
+  ],
+  "notes": "Older versions used ~/.cache/lm-studio (unverified)."
+ },
+ {
+  "name": "llama.cpp (llama-cli/llama-server)",
+  "category": "local_llm",
+  "kind": "runner",
+  "paths": {
+   "windows": [
+    "download cache (-hf / --model-url): %LOCALAPPDATA%\\llama.cpp (LLAMA_CACHE override) (unverified)",
+    "models: user-chosen *.gguf anywhere",
+    "logs: only if --log-file given",
+    "prompt cache: only if --prompt-cache / --slot-save-path given",
+    "Web UI chats: browser IndexedDB of whichever browser hit llama-server"
+   ],
+   "macos": [
+    "cache: ~/Library/Caches/llama.cpp (unverified)"
+   ],
+   "linux": [
+    "cache: ~/.cache/llama.cpp (unverified)",
+    "models: user-chosen"
+   ]
+  },
+  "formats_schema": "GGUF binary: magic 'GGUF', version, tensor count, KV metadata (general.name, architecture, chat_template). Server JSON API /v1/chat/completions, /completion, /slots. Web UI stores conversations client-side (IndexedDB). arXiv 2603.23996 covers llama.cpp.",
+  "ports_processes": "llama-server default TCP 127.0.0.1:8080; processes llama-server(.exe), llama-cli(.exe), llama-bench",
+  "env_vars": "LLAMA_CACHE, LLAMA_ARG_* (option env mirrors, e.g. LLAMA_ARG_MODEL, LLAMA_ARG_PORT), HF_TOKEN",
+  "memory_artifacts": "Weights mmapped (file-backed); KV cache + prompts in process memory; /slots endpoint exposes live prompt state if enabled",
+  "install_artifacts": "Portable binaries, no installer; build dirs build/bin; winget/brew packages exist",
+  "retention": "No persistence by default (stateless) -> artifacts mostly volatile or in the browser",
+  "confidence": {
+   "gguf_format": "third-party",
+   "port": "third-party",
+   "cache_dir": "unverified",
+   "env": "unverified",
+   "webui_indexeddb": "unverified"
+  },
+  "sources": [
+   "https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md",
+   "https://github.com/ggml-org/ggml/blob/master/docs/gguf.md",
+   "https://arxiv.org/abs/2603.23996"
+  ],
+  "notes": "Sources listed were not fetched in this run; claims from author knowledge."
+ },
+ {
+  "name": "llamafile",
+  "category": "local_llm",
+  "kind": "runner",
+  "paths": {
+   "windows": [
+    "self-extracting executable *.llamafile (zip + APE); extracts to %USERPROFILE%\\.llamafile (unverified)",
+    "bundled GGUF inside the file"
+   ],
+   "macos": [
+    "~/.llamafile (unverified)"
+   ],
+   "linux": [
+    "~/.llamafile (unverified)"
+   ]
+  },
+  "formats_schema": "Actually Portable Executable with embedded zip containing GGUF + .args; first run extracts helper libs.",
+  "ports_processes": "default TCP 8080 web UI/server (llama.cpp server based); processes *.llamafile / llamafile.exe",
+  "env_vars": "unknown",
+  "memory_artifacts": "as llama.cpp",
+  "install_artifacts": "No install; single file; Windows 4GB exe limit (external weights used)",
+  "retention": "No persistence by default",
+  "confidence": {
+   "all": "unverified"
+  },
+  "sources": [
+   "https://github.com/Mozilla-Ocho/llamafile"
+  ],
+  "notes": "Not fetched in this run."
+ },
+ {
+  "name": "GPT4All",
+  "category": "local_llm",
+  "kind": "desktop_runner",
+  "paths": {
+   "windows": [
+    "models/download path default: C:\\Users\\<u>\\AppData\\Local\\nomic.ai\\GPT4All",
+    "chat history (*.chat) in same nomic.ai\\GPT4All dir (unverified)",
+    "settings: %APPDATA%\\nomic.ai\\GPT4All.ini (unverified)",
+    "LocalDocs DB: localdocs_v*.db in data dir (unverified)",
+    "logs: unknown"
+   ],
+   "macos": [
+    "/Users/<u>/Library/Application Support/nomic.ai/GPT4All/"
+   ],
+   "linux": [
+    "/home/<u>/.local/share/nomic.ai/GPT4All"
+   ]
+  },
+  "formats_schema": "Chats are saved as .chat files (format unverified); LocalDocs is SQLite with embeddings.",
+  "ports_processes": "Local API server default TCP 4891 when enabled (unverified); process chat.exe / gpt4all",
+  "env_vars": "unknown",
+  "memory_artifacts": "unknown",
+  "install_artifacts": "Qt Installer Framework install (location unverified)",
+  "retention": "Chat history kept until deleted; optional datalake opt-in telemetry",
+  "confidence": {
+   "download_path": "official-doc",
+   "chat_files": "unverified",
+   "ini": "unverified",
+   "port": "unverified",
+   "install": "unverified"
+  },
+  "sources": [
+   "https://docs.gpt4all.io/gpt4all_desktop/settings.html",
+   "https://docs.gpt4all.io/gpt4all_desktop/chats.html"
+  ],
+  "notes": ""
+ },
+ {
+  "name": "Jan",
+  "category": "local_llm",
+  "kind": "desktop_runner",
+  "paths": {
+   "windows": [
+    "data folder: %APPDATA%\\Jan\\data",
+    "threads: threads\\<thread_id>\\messages.jsonl + thread.json",
+    "models: llamacpp\\models\\<org>\\<repo>\\model.gguf + model.yml; mlx\\models\\<id>\\model.yml",
+    "logs: logs\\app.log ([APP],[SERVER],[SPECS])"
+   ],
+   "macos": [
+    "~/Library/Application Support/Jan/data"
+   ],
+   "linux": [
+    "~/.local/share/Jan/data (XDG_DATA_HOME)"
+   ]
+  },
+  "formats_schema": "JSONL messages, JSON thread metadata (title, model settings, timestamps), YAML model descriptors. Data folder relocatable in Settings.",
+  "ports_processes": "Local API server default TCP 1337 (unverified); processes Jan.exe, llama.cpp backend (unverified)",
+  "env_vars": "XDG_DATA_HOME (Linux)",
+  "memory_artifacts": "chat content in app/backend process memory",
+  "install_artifacts": "Desktop app installer",
+  "retention": "Threads persist until deleted",
+  "confidence": {
+   "data_paths": "official-doc",
+   "structure": "official-doc",
+   "port": "unverified",
+   "memory": "unverified"
+  },
+  "sources": [
+   "https://docs.jan.ai/desktop/data-folder"
+  ],
+  "notes": "Older Jan (<0.6) used ~/jan; unverified."
+ },
+ {
+  "name": "Open WebUI",
+  "category": "local_llm",
+  "kind": "frontend",
+  "paths": {
+   "windows": [
+    "pip install: <site-packages>\\open_webui\\data (webui.db) unless DATA_DIR set (unverified)",
+    "Docker: /app/backend/data (volume open-webui)"
+   ],
+   "macos": [
+    "same as pip/Docker"
+   ],
+   "linux": [
+    "Docker volume: /var/lib/docker/volumes/open-webui/_data",
+    "in-container /app/backend/data/webui.db"
+   ]
+  },
+  "formats_schema": "DATA_DIR contains webui.db (SQLite: chat table with JSON blob of messages, user, auth, config, file, memory, prompt tables), uploads/, vector_db/ (ChromaDB chroma.sqlite3), cache/. Password hashes bcrypt; JWT secret in .webui_secret_key (unverified).",
+  "ports_processes": "default TCP 8080 in-app (Docker commonly mapped to 3000); process python/uvicorn open-webui",
+  "env_vars": "DATA_DIR, DATABASE_URL, PORT, WEBUI_SECRET_KEY, OLLAMA_BASE_URL, VECTOR_DB, UPLOAD_DIR (unverified)",
+  "memory_artifacts": "Python process memory",
+  "install_artifacts": "pip package open-webui or Docker image ghcr.io/open-webui/open-webui",
+  "retention": "Chats persist until user deletes; archive flag supported",
+  "confidence": {
+   "port": "official-doc",
+   "data_dir_use": "official-doc",
+   "webui_db_path": "unverified",
+   "schema": "unverified",
+   "env": "third-party"
+  },
+  "sources": [
+   "https://docs.openwebui.com/reference/env-configuration"
+  ],
+  "notes": ""
+ },
+ {
+  "name": "AnythingLLM Desktop",
+  "category": "local_llm",
+  "kind": "desktop_frontend",
+  "paths": {
+   "windows": [
+    "C:\\Users\\<u>\\AppData\\Roaming\\anythingllm-desktop\\storage",
+    "anythingllm.db (SQLite: workspaces, chats, users)",
+    "lancedb\\ (vector DB)",
+    "documents\\ (parsed text)",
+    "models\\ (GGUF)",
+    "also vector-cache, plugins, direct-uploads, logs"
+   ],
+   "macos": [
+    "/Users/<u>/Library/Application Support/anythingllm-desktop/storage"
+   ],
+   "linux": [
+    "~/.config/anythingllm-desktop/storage/"
+   ]
+  },
+  "formats_schema": "SQLite + LanceDB; docker/server variant uses server/storage with same layout and STORAGE_DIR env (unverified).",
+  "ports_processes": "Docker/server default TCP 3001 (unverified); process AnythingLLM.exe",
+  "env_vars": "STORAGE_DIR (server variant, unverified)",
+  "memory_artifacts": "Electron process memory",
+  "install_artifacts": "Electron installer",
+  "retention": "Chats kept until deleted",
+  "confidence": {
+   "paths": "official-doc",
+   "files": "official-doc",
+   "port": "unverified"
+  },
+  "sources": [
+   "https://docs.anythingllm.com/installation-desktop/storage"
+  ],
+  "notes": ""
+ },
+ {
+  "name": "KoboldCpp",
+  "category": "local_llm",
+  "kind": "runner_frontend",
+  "paths": {
+   "windows": [
+    "single koboldcpp.exe; no standard data dir",
+    "saved settings *.kcpps / *.kcppt where user saves",
+    "Kobold Lite UI stories/sessions in browser storage (unverified)"
+   ],
+   "macos": [
+    "unknown"
+   ],
+   "linux": [
+    "unknown"
+   ]
+  },
+  "formats_schema": "Models GGUF; .kcpps JSON config; Kobold Lite stories as JSON exports.",
+  "ports_processes": "default TCP 5001; process koboldcpp(.exe)",
+  "env_vars": "unknown",
+  "memory_artifacts": "process memory; PyInstaller temp extraction %TEMP%\\_MEI* while running (unverified)",
+  "install_artifacts": "none (portable)",
+  "retention": "Browser storage persists until cleared",
+  "confidence": {
+   "all": "unverified"
+  },
+  "sources": [
+   "https://github.com/LostRuins/koboldcpp"
+  ],
+  "notes": "Not fetched in this run."
+ },
+ {
+  "name": "text-generation-webui (oobabooga)",
+  "category": "local_llm",
+  "kind": "frontend",
+  "paths": {
+   "windows": [
+    "<install>\\user_data\\ (newer) or <install>\\ (older): models\\, loras\\, characters\\, presets\\, logs\\chat\\<character>\\*.json, logs\\instruct, settings.yaml, settings.json, cache\\",
+    "one-click installer env: <install>\\installer_files\\"
+   ],
+   "macos": [
+    "same layout"
+   ],
+   "linux": [
+    "same layout"
+   ]
+  },
+  "formats_schema": "Chat logs JSON {internal, visible} per session; settings YAML/JSON; models in HF format or GGUF.",
+  "ports_processes": "Gradio UI TCP 7860; OpenAI-compatible API TCP 5000 (--api); process python server.py",
+  "env_vars": "unknown",
+  "memory_artifacts": "python process",
+  "install_artifacts": "git clone + start_windows.bat; installer_files conda env",
+  "retention": "Logs persist unless deleted",
+  "confidence": {
+   "layout": "third-party",
+   "ports": "third-party"
+  },
+  "sources": [
+   "https://github.com/oobabooga/text-generation-webui"
+  ],
+  "notes": "Not fetched; user_data rename is version-dependent."
+ },
+ {
+  "name": "LocalAI",
+  "category": "local_llm",
+  "kind": "runner_server",
+  "paths": {
+   "windows": [
+    "models dir (default ./models; MODELS_PATH / --models-path)",
+    "per-model YAML config files in models dir",
+    "backend binaries (backends dir)",
+    "generated images/audio dir unknown"
+   ],
+   "macos": [
+    "unknown"
+   ],
+   "linux": [
+    "Docker volume mapped to /models (or /build/models)"
+   ]
+  },
+  "formats_schema": "YAML model definitions; GGUF/whisper/diffusers backends; OpenAI-compatible API.",
+  "ports_processes": "default TCP 8080; process local-ai",
+  "env_vars": "LOCALAI_MODELS_PATH / MODELS_PATH, LOCALAI_ADDRESS, DEBUG, LOCALAI_API_KEY (unverified)",
+  "memory_artifacts": "process memory",
+  "install_artifacts": "Docker image localai/localai or binary",
+  "retention": "Stateless API; logs stdout",
+  "confidence": {
+   "all": "unverified"
+  },
+  "sources": [
+   "https://localai.io/"
+  ],
+  "notes": "Not fetched in this run."
+ },
+ {
+  "name": "vLLM",
+  "category": "local_llm",
+  "kind": "server",
+  "paths": {
+   "windows": [
+    "cache: %USERPROFILE%\\.cache\\vllm (VLLM_CACHE_ROOT) (unverified, Linux-centric)",
+    "models via HF cache"
+   ],
+   "macos": [
+    "unknown"
+   ],
+   "linux": [
+    "~/.cache/vllm",
+    "~/.config/vllm/usage_stats.json (usage-stats file/ID)",
+    "HF cache for weights"
+   ]
+  },
+  "formats_schema": "Weights safetensors; usage stats JSON.",
+  "ports_processes": "default TCP 8000 OpenAI-compatible server; process 'vllm serve' / python -m vllm.entrypoints.openai.api_server",
+  "env_vars": "VLLM_CACHE_ROOT, VLLM_CONFIG_ROOT, VLLM_NO_USAGE_STATS, DO_NOT_TRACK, HF_HOME",
+  "memory_artifacts": "GPU/host memory",
+  "install_artifacts": "pip install vllm",
+  "retention": "Stateless server",
+  "confidence": {
+   "all": "unverified"
+  },
+  "sources": [
+   "https://docs.vllm.ai/"
+  ],
+  "notes": "Not fetched; mainly Linux."
+ },
+ {
+  "name": "Msty",
+  "category": "local_llm",
+  "kind": "desktop_frontend",
+  "paths": {
+   "windows": [
+    "unknown"
+   ],
+   "macos": [
+    "unknown"
+   ],
+   "linux": [
+    "unknown"
+   ]
+  },
+  "formats_schema": "Electron app; bundles a local Ollama-compatible service; chat DB format unknown.",
+  "ports_processes": "local service port unknown",
+  "env_vars": "unknown",
+  "memory_artifacts": "unknown",
+  "install_artifacts": "installer",
+  "retention": "unknown",
+  "confidence": {
+   "all": "unverified"
+  },
+  "sources": [
+   "https://msty.ai/"
+  ],
+  "notes": "No reliable path found."
+ },
+ {
+  "name": "Enchanted",
+  "category": "local_llm",
+  "kind": "client",
+  "paths": {
+   "windows": [
+    "unknown"
+   ],
+   "macos": [
+    "macOS/iOS app (SwiftData store in sandbox container; path unverified)"
+   ],
+   "linux": [
+    "unknown"
+   ]
+  },
+  "formats_schema": "Client for Ollama API; stores chats on-device.",
+  "ports_processes": "connects to Ollama 11434",
+  "env_vars": "unknown",
+  "memory_artifacts": "unknown",
+  "install_artifacts": "App Store",
+  "retention": "unknown",
+  "confidence": {
+   "all": "unverified"
+  },
+  "sources": [
+   "https://github.com/gluonfield/enchanted"
+  ],
+  "notes": "Not fetched."
+ },
+ {
+  "name": "Chatbox",
+  "category": "local_llm",
+  "kind": "client",
+  "paths": {
+   "windows": [
+    "Electron userData under %APPDATA% (folder name unverified); chats/settings in config.json + IndexedDB/LevelDB"
+   ],
+   "macos": [
+    "unknown"
+   ],
+   "linux": [
+    "unknown"
+   ]
+  },
+  "formats_schema": "Electron; API keys and sessions locally in app storage.",
+  "ports_processes": "process Chatbox.exe",
+  "env_vars": "unknown",
+  "memory_artifacts": "Electron renderer memory",
+  "install_artifacts": "NSIS installer",
+  "retention": "unknown",
+  "confidence": {
+   "all": "unverified"
+  },
+  "sources": [
+   "https://github.com/chatboxai/chatbox"
+  ],
+  "notes": "Not fetched."
+ },
+ {
+  "name": "LibreChat",
+  "category": "local_llm",
+  "kind": "frontend",
+  "paths": {
+   "windows": [
+    "server install dir: ./logs, ./uploads, ./client/public/images; Docker volumes ./data-node (MongoDB), ./meili_data_v1.x, ./images, ./uploads, ./logs (docker-compose default)"
+   ],
+   "macos": [
+    "same"
+   ],
+   "linux": [
+    "same"
+   ]
+  },
+  "formats_schema": "MongoDB collections (conversations, messages, users, files, ...); MeiliSearch index; logs/*.log.",
+  "ports_processes": "default TCP 3080; MongoDB 27017, MeiliSearch 7700, rag_api 8000; process node api/server/index.js",
+  "env_vars": "MONGO_URI, MEILI_HOST, JWT_SECRET, CREDS_KEY, CREDS_IV, DOMAIN_SERVER",
+  "memory_artifacts": "node/mongod memory",
+  "install_artifacts": "Docker compose or npm",
+  "retention": "Conversations persist until deleted; optional expiration settings (unverified)",
+  "confidence": {
+   "all": "third-party"
+  },
+  "sources": [
+   "https://www.librechat.ai/docs"
+  ],
+  "notes": "Not fetched; from author knowledge."
+ },
+ {
+  "name": "SillyTavern",
+  "category": "local_llm",
+  "kind": "frontend",
+  "paths": {
+   "windows": [
+    "<install>\\data\\default-user\\{chats\\<character>\\*.jsonl, group chats, characters\\*.png (card JSON embedded in PNG tEXt 'chara'), worlds, settings.json, secrets.json (API keys, plaintext), User Avatars, backups}",
+    "older versions: <install>\\public\\chats, public\\characters"
+   ],
+   "macos": [
+    "same"
+   ],
+   "linux": [
+    "same"
+   ]
+  },
+  "formats_schema": "JSONL chat logs (first line metadata, then message objects with name/is_user/send_date/mes); character cards PNG with base64 JSON in tEXt chunk.",
+  "ports_processes": "default TCP 8000 (config.yaml port); process node server.js",
+  "env_vars": "config.yaml (port, listen, whitelist)",
+  "memory_artifacts": "node process memory",
+  "install_artifacts": "git clone / Start.bat; node_modules",
+  "retention": "Chats persist; auto-backups in data/default-user/backups",
+  "confidence": {
+   "layout": "third-party",
+   "port": "third-party"
+  },
+  "sources": [
+   "https://docs.sillytavern.app/"
+  ],
+  "notes": "Not fetched; third-party knowledge."
+ },
+ {
+  "name": "Cherry Studio",
+  "category": "local_llm",
+  "kind": "desktop_frontend",
+  "paths": {
+   "windows": [
+    "Electron userData %APPDATA%\\CherryStudio (Data\\ with Files, Notes, KnowledgeBase; IndexedDB/LevelDB for chats) (unverified)"
+   ],
+   "macos": [
+    "unknown"
+   ],
+   "linux": [
+    "unknown"
+   ]
+  },
+  "formats_schema": "Electron; chat topics in IndexedDB; backups as zip.",
+  "ports_processes": "process CherryStudio.exe",
+  "env_vars": "unknown",
+  "memory_artifacts": "Electron memory",
+  "install_artifacts": "NSIS installer",
+  "retention": "unknown",
+  "confidence": {
+   "all": "unverified"
+  },
+  "sources": [
+   "https://github.com/CherryHQ/cherry-studio"
+  ],
+  "notes": "Not fetched."
+ },
+ {
+  "name": "NextChat (ChatGPT-Next-Web)",
+  "category": "local_llm",
+  "kind": "frontend",
+  "paths": {
+   "windows": [
+    "web: browser localStorage keys (chat-next-web-store, access-control); desktop Tauri app data dir (path unverified)"
+   ],
+   "macos": [
+    "unknown"
+   ],
+   "linux": [
+    "unknown"
+   ]
+  },
+  "formats_schema": "State in localStorage JSON; server stateless Next.js.",
+  "ports_processes": "default TCP 3000",
+  "env_vars": "OPENAI_API_KEY, CODE, BASE_URL",
+  "memory_artifacts": "browser memory",
+  "install_artifacts": "Docker/Vercel/Tauri",
+  "retention": "persists in browser until cleared",
+  "confidence": {
+   "all": "unverified"
+  },
+  "sources": [
+   "https://github.com/ChatGPTNextWeb/NextChat"
+  ],
+  "notes": "Not fetched."
+ },
+ {
+  "name": "Dify (self-hosted)",
+  "category": "local_llm",
+  "kind": "platform",
+  "paths": {
+   "windows": [
+    "Docker compose: dify/docker/volumes/{db/data (PostgreSQL), redis, weaviate or qdrant, app/storage (uploads), sandbox}"
+   ],
+   "macos": [
+    "same"
+   ],
+   "linux": [
+    "same"
+   ]
+  },
+  "formats_schema": "PostgreSQL tables (conversations, messages, apps, workflow_runs...); object files under app/storage.",
+  "ports_processes": "nginx TCP 80/443, api 5001, web 3000, plugin daemon 5002 (unverified)",
+  "env_vars": "STORAGE_TYPE, DB_*, SECRET_KEY",
+  "memory_artifacts": "containers",
+  "install_artifacts": "docker compose",
+  "retention": "Conversations persist in DB; workflow run retention configurable",
+  "confidence": {
+   "all": "third-party"
+  },
+  "sources": [
+   "https://docs.dify.ai/"
+  ],
+  "notes": "Not fetched."
+ },
+ {
+  "name": "Flowise",
+  "category": "local_llm",
+  "kind": "platform",
+  "paths": {
+   "windows": [
+    "%USERPROFILE%\\.flowise (default): database.sqlite, encryption.key, api.json, logs\\, uploads/storage; overridable via DATABASE_PATH, SECRETKEY_PATH, APIKEY_PATH, LOG_PATH, BLOB_STORAGE_PATH"
+   ],
+   "macos": [
+    "~/.flowise"
+   ],
+   "linux": [
+    "~/.flowise"
+   ]
+  },
+  "formats_schema": "SQLite (chat_flow, chat_message, credential [AES-encrypted], tool tables); logs flowise*.log.",
+  "ports_processes": "default TCP 3000; process node (flowise)",
+  "env_vars": "DATABASE_PATH, DATABASE_TYPE, SECRETKEY_PATH, APIKEY_PATH, LOG_PATH, BLOB_STORAGE_PATH",
+  "memory_artifacts": "node memory",
+  "install_artifacts": "npm i -g flowise or Docker",
+  "retention": "Chat messages persist until deleted",
+  "confidence": {
+   "paths": "third-party",
+   "port": "third-party"
+  },
+  "sources": [
+   "https://docs.flowiseai.com/configuration/environment-variables"
+  ],
+  "notes": "Not fetched in this run."
+ },
+ {
+  "name": "ComfyUI",
+  "category": "local_llm",
+  "kind": "image_gen",
+  "paths": {
+   "windows": [
+    "<ComfyUI>\\models\\{checkpoints,vae,loras,controlnet,embeddings,...} (extra_model_paths.yaml adds more)",
+    "<ComfyUI>\\output, input, temp, user\\default\\{workflows,comfy.settings.json}",
+    "Desktop app: %APPDATA%\\ComfyUI (unverified)"
+   ],
+   "macos": [
+    "same layout"
+   ],
+   "linux": [
+    "same layout"
+   ]
+  },
+  "formats_schema": "Output PNGs carry tEXt chunks 'prompt' and 'workflow' (JSON graph incl. prompts, seed, model names); .safetensors/.ckpt models.",
+  "ports_processes": "default TCP 8188 (--port, --listen); process python main.py / portable python_embeded",
+  "env_vars": "none standard",
+  "memory_artifacts": "Python/GPU memory",
+  "install_artifacts": "portable zip or Desktop installer; custom_nodes\\ (ComfyUI-Manager)",
+  "retention": "Outputs persist; temp\\ cleared at start",
+  "confidence": {
+   "models_dir": "official-doc",
+   "cli_args": "official-doc",
+   "png_metadata": "third-party",
+   "port": "third-party",
+   "user_dir": "third-party"
+  },
+  "sources": [
+   "https://raw.githubusercontent.com/comfyanonymous/ComfyUI/master/README.md"
+  ],
+  "notes": ""
+ },
+ {
+  "name": "AUTOMATIC1111 / Forge",
+  "category": "local_llm",
+  "kind": "image_gen",
+  "paths": {
+   "windows": [
+    "<webui>\\outputs\\{txt2img-images,img2img-images,extras-images,...} (date subfolders)",
+    "log\\images + log\\log.csv when saving log enabled",
+    "config.json, ui-config.json, params.txt, cache.json, models\\Stable-diffusion|Lora|VAE|embeddings"
+   ],
+   "macos": [
+    "same"
+   ],
+   "linux": [
+    "same"
+   ]
+  },
+  "formats_schema": "PNG tEXt chunk 'parameters' holds prompt, negative prompt, seed, model hash; log.csv.",
+  "ports_processes": "default TCP 7860; process python launch.py",
+  "env_vars": "COMMANDLINE_ARGS, SD_WEBUI_LOG_LEVEL",
+  "memory_artifacts": "python/GPU memory",
+  "install_artifacts": "git clone + venv, webui-user.bat",
+  "retention": "outputs persist",
+  "confidence": {
+   "all": "third-party"
+  },
+  "sources": [
+   "https://github.com/AUTOMATIC1111/stable-diffusion-webui"
+  ],
+  "notes": "Not fetched."
+ },
+ {
+  "name": "Whisper-based transcribers (openai-whisper, faster-whisper, whisper.cpp, Buzz, MacWhisper)",
+  "category": "local_llm",
+  "kind": "speech",
+  "paths": {
+   "windows": [
+    "openai-whisper models: %USERPROFILE%\\.cache\\whisper\\*.pt (XDG_CACHE_HOME override) (unverified)",
+    "faster-whisper: HF cache (hub\\models--Systran--faster-whisper-*)",
+    "whisper.cpp: user ggml-*.bin",
+    "Buzz: app DB path unknown",
+    "MacWhisper: unknown"
+   ],
+   "macos": [
+    "~/.cache/whisper",
+    "MacWhisper container unknown"
+   ],
+   "linux": [
+    "~/.cache/whisper",
+    "HF cache"
+   ]
+  },
+  "formats_schema": "Model .pt / CTranslate2 / ggml; transcripts as txt/srt/vtt/json in user output dir.",
+  "ports_processes": "CLI processes (python whisper, whisper-cli); Buzz GUI",
+  "env_vars": "XDG_CACHE_HOME, HF_HOME",
+  "memory_artifacts": "process memory",
+  "install_artifacts": "pip/exe",
+  "retention": "transcripts persist at chosen outputs",
+  "confidence": {
+   "all": "unverified"
+  },
+  "sources": [
+   "https://github.com/openai/whisper",
+   "https://github.com/ggml-org/whisper.cpp"
+  ],
+  "notes": "Not fetched; Buzz/MacWhisper unknown."
+ },
+ {
+  "name": "Hugging Face cache (transformers/hub/diffusers)",
+  "category": "local_llm",
+  "kind": "model_cache",
+  "paths": {
+   "windows": [
+    "%USERPROFILE%\\.cache\\huggingface\\hub (HF_HOME / HF_HUB_CACHE overrides)",
+    "hub\\models--<org>--<repo>\\{blobs,refs,snapshots,trees,.no_exist}; datasets--, spaces--",
+    "token: %USERPROFILE%\\.cache\\huggingface\\token (unverified)",
+    "xet cache: ~\\.cache\\huggingface\\xet\\<env>\\{shard-cache,staging}",
+    "assets\\ dir",
+    "CACHEDIR.TAG file"
+   ],
+   "macos": [
+    "~/.cache/huggingface/hub"
+   ],
+   "linux": [
+    "~/.cache/huggingface/hub"
+   ]
+  },
+  "formats_schema": "Symlinks snapshots->blobs (no symlinks on Windows without dev mode: files copied into snapshots/); refs files hold commit hash; trees/<commit>.json; .incomplete partial files; blob atime/mtime give use times (hf cache ls).",
+  "ports_processes": "none (library); hf CLI",
+  "env_vars": "HF_HOME, HF_HUB_CACHE, HF_XET_CACHE, HF_TOKEN, HF_HUB_DISABLE_SYMLINKS, HF_HUB_OFFLINE, TRANSFORMERS_CACHE (legacy)",
+  "memory_artifacts": "n/a",
+  "install_artifacts": "pip huggingface_hub",
+  "retention": "No auto-delete; manual hf cache rm/prune",
+  "confidence": {
+   "paths": "official-doc",
+   "structure": "official-doc",
+   "env": "official-doc",
+   "token_path": "unverified"
+  },
+  "sources": [
+   "https://huggingface.co/docs/huggingface_hub/guides/manage-cache"
+  ],
+  "notes": ""
+ },
+ {
+  "name": "Model file formats (GGUF, safetensors, pickle, ONNX)",
+  "category": "local_llm",
+  "kind": "model_files",
+  "paths": {
+   "windows": [
+    "search by signature/extension anywhere: *.gguf, *.safetensors, *.ckpt, *.pt, *.bin, *.onnx, *.llamafile"
+   ],
+   "macos": [
+    "same"
+   ],
+   "linux": [
+    "same"
+   ]
+  },
+  "formats_schema": "GGUF: magic bytes 'GGUF' (47 47 55 46), u32 version, counts, KV metadata (general.architecture, general.name, tokenizer.chat_template). safetensors: u64 LE header length + JSON header (dtype, shape, offsets). .ckpt/.pt/.bin often zip/pickle. Ollama blobs are named sha256-<hex> with no extension but GGUF magic.",
+  "ports_processes": "n/a",
+  "env_vars": "n/a",
+  "memory_artifacts": "weights mmapped by runners",
+  "install_artifacts": "n/a",
+  "retention": "n/a",
+  "confidence": {
+   "gguf_magic": "third-party",
+   "safetensors": "third-party",
+   "ollama_blob_naming": "third-party"
+  },
+  "sources": [
+   "https://github.com/ggml-org/ggml/blob/master/docs/gguf.md",
+   "https://huggingface.co/docs/safetensors/index",
+   "https://arxiv.org/abs/2603.23996"
+  ],
+  "notes": "Specs not fetched in this run; magic bytes from author knowledge."
+ },
+ {
+  "name": "llm CLI (Simon Willison)",
+  "category": "local_llm",
+  "kind": "cli",
+  "paths": {
+   "windows": [
+    "%APPDATA%\\io.datasette.llm\\logs.db (platformdirs; LLM_USER_PATH override) (unverified)"
+   ],
+   "macos": [
+    "~/Library/Application Support/io.datasette.llm/logs.db"
+   ],
+   "linux": [
+    "~/.config/io.datasette.llm/logs.db"
+   ]
+  },
+  "formats_schema": "SQLite logs.db (conversations, responses with prompt/response/model/datetime_utc); keys.json beside it.",
+  "ports_processes": "CLI only",
+  "env_vars": "LLM_USER_PATH",
+  "memory_artifacts": "process memory",
+  "install_artifacts": "pip install llm",
+  "retention": "logs persist until `llm logs off` or deleted",
+  "confidence": {
+   "all": "third-party"
+  },
+  "sources": [
+   "https://llm.datasette.io/en/stable/logging.html"
+  ],
+  "notes": "Not fetched."
+ }
+]

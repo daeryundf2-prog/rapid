@@ -1,0 +1,1149 @@
+[
+  {
+    "name": "Claude Code on the web (cloud sessions)",
+    "vendor": "Anthropic",
+    "execution": "cloud VM (Anthropic-managed) or self-hosted environment",
+    "local_artifacts": [
+      {
+        "claim": "Browser history/cookies for claude.ai/code; GitHub OAuth app grant 'Claude' in GitHub settings; branches pushed to the repo",
+        "confidence": "unverified",
+        "source": null
+      },
+      {
+        "claim": "Remote Control sessions execute locally; local transcripts in ~/.claude/projects/ for 30 days by default (cleanupPeriodDays)",
+        "confidence": "official-doc",
+        "source": "https://code.claude.com/docs/en/data-usage"
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "Anthropic stores the session transcript; repo cloned to isolated VM; GitHub credentials stored encrypted server-side and attached by Anthropic proxy; all outbound VM traffic passes a security proxy for audit logging",
+        "confidence": "official-doc",
+        "source": "https://code.claude.com/docs/en/data-usage"
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "Account/org data export, admin/Compliance API for Enterprise, legal process to Anthropic (specific per-session export path not confirmed)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "Commercial (Team/Enterprise/API): 30-day standard retention; ZDR per-org on Enterprise (cloud sessions may not be available under ZDR - third-party claim)",
+        "confidence": "official-doc",
+        "source": "https://code.claude.com/docs/en/data-usage"
+      },
+      {
+        "claim": "Consumer: 5 years if model-improvement allowed, else 30 days",
+        "confidence": "official-doc",
+        "source": "https://code.claude.com/docs/en/data-usage"
+      },
+      {
+        "claim": "User can delete a cloud session at any time; deletion permanently removes event data",
+        "confidence": "official-doc",
+        "source": "https://code.claude.com/docs/en/data-usage"
+      },
+      {
+        "claim": "/feedback transcripts retained 5 years; shared survey transcripts up to 6 months",
+        "confidence": "official-doc",
+        "source": "https://code.claude.com/docs/en/data-usage"
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "Branches commonly prefixed 'claude/' with random suffix; commits may carry 'Co-Authored-By: Claude <noreply@anthropic.com>' and 'Generated with Claude Code' footer in PR body",
+        "confidence": "third-party",
+        "source": null
+      },
+      {
+        "claim": "Git pushes limited to the current working branch via proxy",
+        "confidence": "third-party",
+        "source": "https://code.claude.com/docs/en/security"
+      }
+    ],
+    "domains": [
+      "claude.ai",
+      "code.claude.com",
+      "api.anthropic.com",
+      "anthropic.com",
+      "github.com/apps/claude (unverified)"
+    ],
+    "gaps": [
+      "Exact branch prefix and bot account not confirmed from official docs"
+    ]
+  },
+  {
+    "name": "GitHub Copilot coding/cloud agent",
+    "vendor": "GitHub (Microsoft)",
+    "execution": "cloud (GitHub Actions-based ephemeral environment)",
+    "local_artifacts": [
+      {
+        "claim": "Browser artifacts for github.com agents panel; VS Code/GitHub CLI session state; PR/branches in repo",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "Session logs viewable on GitHub.com for each task; Copilot Chat can query past sessions if syncing enabled and policy permits",
+        "confidence": "official-doc",
+        "source": "https://docs.github.com/en/copilot/concepts/agents/coding-agent/about-coding-agent"
+      },
+      {
+        "claim": "Each agent commit carries Agent-Logs-Url trailer linking permanently to the session logs",
+        "confidence": "official-doc",
+        "source": "https://github.blog/changelog/2026-03-20-trace-any-copilot-coding-agent-commit-to-its-session-logs"
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "Open the Agent-Logs-Url from commit; repo/org audit log; GitHub Enterprise audit log streaming (whether agent events are recorded as actor copilot-swe-agent[bot] not confirmed)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "Session log retention period not stated in official page fetched",
+        "confidence": "official-doc",
+        "source": "https://docs.github.com/en/copilot/concepts/agents/coding-agent/about-coding-agent"
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "Commit author is Copilot (bot copilot-swe-agent[bot]) with the human task assigner as Co-authored-by trailer",
+        "confidence": "official-doc",
+        "source": "https://github.blog/changelog/2026-03-20-trace-any-copilot-coding-agent-commit-to-its-session-logs"
+      },
+      {
+        "claim": "Bot login copilot-swe-agent[bot]; branches prefixed copilot/",
+        "confidence": "third-party",
+        "source": "https://discuss.python.org/t/cla-bot-and-ai-agents/106635"
+      },
+      {
+        "claim": "Squash-and-merge can replace agent identity with merger",
+        "confidence": "third-party",
+        "source": "https://github.com/orgs/community/discussions/179983"
+      }
+    ],
+    "domains": [
+      "github.com",
+      "api.githubcopilot.com",
+      "githubcopilot.com"
+    ],
+    "gaps": [
+      "Retention of session logs; audit-log event names"
+    ]
+  },
+  {
+    "name": "OpenAI Codex cloud",
+    "vendor": "OpenAI",
+    "execution": "cloud sandbox container",
+    "local_artifacts": [
+      {
+        "claim": "Browser artifacts chatgpt.com/codex; Codex CLI/IDE local state (~/.codex) is separate from cloud; GitHub app 'ChatGPT Codex Connector' grant; branches/PRs",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "Tasks stored server-side and archivable; users report no true per-session deletion",
+        "confidence": "third-party",
+        "source": "https://community.openai.com/t/codex-cloud-needs-real-deletion-not-just-archive-for-developer-session-history/1382259"
+      },
+      {
+        "claim": "OpenAI Compliance Platform captures Codex task deletions (CODEX_TASK) for ChatGPT Enterprise",
+        "confidence": "third-party",
+        "source": "https://fivetran.com/docs/connectors/applications/openai-compliance-platform"
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "ChatGPT Enterprise Compliance API/Platform (ChatGPT-authenticated Codex only); eDiscovery via workspace admin; legal request",
+        "confidence": "third-party",
+        "source": "https://codex.danielvaughan.com/2026/05/11/codex-enterprise-analytics-compliance-apis-governance-dashboards/"
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "Activity logs retained 30 days (third-party claim); Business admins can delete tasks (Slack marketplace listing, unconfirmed)",
+        "confidence": "third-party",
+        "source": "https://codex.danielvaughan.com/2026/05/11/codex-enterprise-analytics-compliance-apis-governance-dashboards/"
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "PRs opened via ChatGPT Codex Connector GitHub app; branch names commonly 'codex/...' ; PR body links to chatgpt.com/codex/tasks/...",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "domains": [
+      "chatgpt.com/codex",
+      "chatgpt.com",
+      "openai.com"
+    ],
+    "gaps": [
+      "Official retention page not retrievable (redirect/403)"
+    ]
+  },
+  {
+    "name": "ChatGPT Atlas (browser) and agent mode",
+    "vendor": "OpenAI",
+    "execution": "local Chromium-based browser with server-side agent; agent mode in cloud virtual browser (third-party)",
+    "local_artifacts": [
+      {
+        "claim": "Local browser profile (history, cookies, downloads) on device; Atlas browser memories and agent data are separate from ChatGPT chats",
+        "confidence": "third-party",
+        "source": "https://tuta.com/blog/dont-install-atlas-ai-browser-heres-why"
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "Atlas does not emit Compliance API logs, no SIEM/eDiscovery integration; some data (browsing data, browser memories, agent activity) may not be covered by Enterprise retention/deletion",
+        "confidence": "official-doc",
+        "source": "https://help-lb.openai.com/en/articles/12603091-chatgpt-atlas-for-enterprise"
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "Account-level data export / privacy request to OpenAI; no enterprise audit path per OpenAI",
+        "confidence": "official-doc",
+        "source": "https://help-lb.openai.com/en/articles/12603091-chatgpt-atlas-for-enterprise"
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "Browser memories reportedly deleted after 30 days",
+        "confidence": "third-party",
+        "source": "https://tuta.com/blog/dont-install-atlas-ai-browser-heres-why"
+      },
+      {
+        "claim": "Single secondary source claims Atlas retired 9 Aug 2026 - verify",
+        "confidence": "unverified",
+        "source": "https://ecorpit.com/chatgpt-atlas-shutdown-browser-agent-migration-2026/"
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "domains": [
+      "chatgpt.com",
+      "atlas (chatgpt.com/atlas)"
+    ],
+    "gaps": [
+      "Status (retired?) and local profile paths unverified"
+    ]
+  },
+  {
+    "name": "ChatGPT Agent / Operator",
+    "vendor": "OpenAI",
+    "execution": "cloud virtual browser/computer",
+    "local_artifacts": [
+      {
+        "claim": "Browser artifacts chatgpt.com; downloaded outputs; connector OAuth grants",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "Conversation and agent activity stored in ChatGPT history",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "Enterprise Compliance API/eDiscovery; user data export",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "Standard ChatGPT retention; deleted chats removed within 30 days (general OpenAI policy)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "No git signature (not repo-centered)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "domains": [
+      "chatgpt.com",
+      "operator.chatgpt.com (legacy)"
+    ],
+    "gaps": [
+      "Agent-specific retention not verified"
+    ]
+  },
+  {
+    "name": "Devin",
+    "vendor": "Cognition AI",
+    "execution": "cloud VM workspace",
+    "local_artifacts": [
+      {
+        "claim": "Browser artifacts app.devin.ai; GitHub/GitLab app grants; Slack integration messages",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "Sessions, shell/browser logs, plans and playbooks stored server-side",
+        "confidence": "unverified",
+        "source": null
+      },
+      {
+        "claim": "Air-gapped CLI writes local audit file ~/.local/share/devin/cli-federal/audit/audit.jsonl (10 MiB rotation) - not the cloud product",
+        "confidence": "official-doc",
+        "source": "https://docs.devin.ai/federal/air-gapped/on-disk-formats.md"
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "Enterprise admin console audit logs; Devin API session export; contract/legal request",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "Bot login devin-ai-integration[bot]; PR bodies link to app.devin.ai/sessions/<id>; commits often 'Co-Authored-By: <user>' (human requester)",
+        "confidence": "third-party",
+        "source": null
+      }
+    ],
+    "domains": [
+      "devin.ai",
+      "app.devin.ai",
+      "docs.devin.ai",
+      "cognition.ai"
+    ],
+    "gaps": [
+      "Retention/audit docs 404; all claims need verification"
+    ]
+  },
+  {
+    "name": "Cursor Cloud/Background Agents",
+    "vendor": "Anysphere",
+    "execution": "cloud VM",
+    "local_artifacts": [
+      {
+        "claim": "Cursor IDE local state (state.vscdb, workspaceStorage); GitHub app 'Cursor' grant; branches prefixed cursor/",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "Only feature requiring Cursor to store code; encrypted repo copies stored temporarily and deleted after agent completes; .env.local in snapshots saved",
+        "confidence": "third-party",
+        "source": "https://zilliz.com/ai-faq/is-cursor-safe-for-proprietary-code"
+      },
+      {
+        "claim": "PRs with videos/screenshots/logs attached",
+        "confidence": "official-doc",
+        "source": "https://cursor.com/help/ai-features/background-agents.md"
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "Enterprise admin dashboard; legal request",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "Repo copies deleted after run completes (per Cursor docs via search summary); otherwise unknown",
+        "confidence": "third-party",
+        "source": "https://cursor.com/docs/enterprise/privacy-and-data-governance.md"
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "Branch prefix cursor/ and commits by 'Cursor Agent' with cursoragent@cursor.com email",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "domains": [
+      "cursor.com",
+      "cursor.sh",
+      "api2.cursor.sh"
+    ],
+    "gaps": [
+      "Commit signature unconfirmed"
+    ]
+  },
+  {
+    "name": "Jules",
+    "vendor": "Google",
+    "execution": "cloud VM",
+    "local_artifacts": [
+      {
+        "claim": "GitHub app 'Google Labs Jules' grant; browser artifacts jules.google",
+        "confidence": "official-doc",
+        "source": "https://jules.google/docs/faq"
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "Task/plan history server-side; private repos not used for training",
+        "confidence": "official-doc",
+        "source": "https://jules.google/docs/faq"
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "Google account data export (Takeout) unverified; Workspace admin/Vault unverified",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "Retention period not stated on FAQ",
+        "confidence": "official-doc",
+        "source": "https://jules.google/docs/faq"
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "Bot account google-labs-jules[bot]; branches prefixed jules/ or similar",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "domains": [
+      "jules.google",
+      "jules.google.com"
+    ],
+    "gaps": [
+      "Retention, commit signature"
+    ]
+  },
+  {
+    "name": "Manus",
+    "vendor": "Manus AI (Butterfly Effect; acquired by Meta, reported)",
+    "execution": "cloud VM agent",
+    "local_artifacts": [
+      {
+        "claim": "Browser artifacts manus.im; downloaded deliverables; connector grants",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "domains": [
+      "manus.im",
+      "manus.ai"
+    ],
+    "gaps": [
+      "Not researched via official docs (search/fetch tooling returned little); verify before use"
+    ]
+  },
+  {
+    "name": "Factory (Droids)",
+    "vendor": "Factory AI",
+    "execution": "cloud/hybrid droids",
+    "local_artifacts": [
+      {
+        "claim": "GitHub/Slack/Jira app grants; browser artifacts app.factory.ai",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "Commits by Droid bot account (name unverified)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "domains": [
+      "factory.ai",
+      "app.factory.ai"
+    ],
+    "gaps": [
+      "Not researched via official docs (search/fetch tooling returned little); verify before use"
+    ]
+  },
+  {
+    "name": "Replit Agent",
+    "vendor": "Replit",
+    "execution": "cloud IDE/agent",
+    "local_artifacts": [
+      {
+        "claim": "Browser artifacts replit.com; repl history in cloud, Git history in repl",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "Replit commits (author name unverified)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "domains": [
+      "replit.com",
+      "replit.app"
+    ],
+    "gaps": [
+      "Not researched via official docs (search/fetch tooling returned little); verify before use"
+    ]
+  },
+  {
+    "name": "Lovable",
+    "vendor": "Lovable Labs",
+    "execution": "cloud app builder",
+    "local_artifacts": [
+      {
+        "claim": "Browser artifacts lovable.dev; GitHub app 'Lovable' sync",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "Commits by gpt-engineer-app[bot] historically (unverified)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "domains": [
+      "lovable.dev",
+      "lovable.app"
+    ],
+    "gaps": [
+      "Not researched via official docs (search/fetch tooling returned little); verify before use"
+    ]
+  },
+  {
+    "name": "Bolt.new",
+    "vendor": "StackBlitz",
+    "execution": "browser WebContainer + cloud",
+    "local_artifacts": [
+      {
+        "claim": "Browser IndexedDB/WebContainer in browser; downloads; GitHub/Netlify grants",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "domains": [
+      "bolt.new",
+      "stackblitz.com"
+    ],
+    "gaps": [
+      "Not researched via official docs (search/fetch tooling returned little); verify before use"
+    ]
+  },
+  {
+    "name": "v0",
+    "vendor": "Vercel",
+    "execution": "cloud app generator",
+    "local_artifacts": [
+      {
+        "claim": "Browser artifacts v0.dev/v0.app; Vercel/GitHub grants",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "Commits via Vercel GitHub integration (unverified)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "domains": [
+      "v0.dev",
+      "v0.app",
+      "vercel.com"
+    ],
+    "gaps": [
+      "Not researched via official docs (search/fetch tooling returned little); verify before use"
+    ]
+  },
+  {
+    "name": "Genspark Super Agent",
+    "vendor": "Genspark (MainFunc)",
+    "execution": "cloud agent",
+    "local_artifacts": [
+      {
+        "claim": "Browser artifacts genspark.ai; Genspark browser",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "domains": [
+      "genspark.ai"
+    ],
+    "gaps": [
+      "Not researched via official docs (search/fetch tooling returned little); verify before use"
+    ]
+  },
+  {
+    "name": "Perplexity Comet / Labs / agents",
+    "vendor": "Perplexity AI",
+    "execution": "local Chromium browser + server agent",
+    "local_artifacts": [
+      {
+        "claim": "Local Comet browser profile (Chromium-style history/cookies); Perplexity thread history server-side",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "domains": [
+      "perplexity.ai",
+      "comet.perplexity.ai"
+    ],
+    "gaps": [
+      "Not researched via official docs (search/fetch tooling returned little); verify before use"
+    ]
+  },
+  {
+    "name": "Claude for Chrome (browser extension)",
+    "vendor": "Anthropic",
+    "execution": "local extension driving user's browser, model calls server-side",
+    "local_artifacts": [
+      {
+        "claim": "Chrome extension storage; browser history reflects agent actions; local profile",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "domains": [
+      "claude.ai",
+      "anthropic.com"
+    ],
+    "gaps": [
+      "Official extension docs not fetched"
+    ]
+  },
+  {
+    "name": "Dust",
+    "vendor": "Dust.tt",
+    "execution": "SaaS agent platform",
+    "local_artifacts": [
+      {
+        "claim": "Browser artifacts dust.tt; OAuth connectors to Slack/Notion/Drive",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "domains": [
+      "dust.tt"
+    ],
+    "gaps": [
+      "Not researched via official docs (search/fetch tooling returned little); verify before use"
+    ]
+  },
+  {
+    "name": "Zapier Agents / AI actions",
+    "vendor": "Zapier",
+    "execution": "SaaS automation",
+    "local_artifacts": [
+      {
+        "claim": "Browser artifacts zapier.com; OAuth connections in connected apps",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "Zap history in Zapier account; actions appear as actor-app API calls in target service logs",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "domains": [
+      "zapier.com"
+    ],
+    "gaps": [
+      "Not researched via official docs (search/fetch tooling returned little); verify before use"
+    ]
+  },
+  {
+    "name": "n8n AI agents",
+    "vendor": "n8n GmbH",
+    "execution": "cloud or self-hosted workflow",
+    "local_artifacts": [
+      {
+        "claim": "Self-hosted: DB (SQLite/Postgres) executions; cloud: account",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "No git signature; n8n execution history holds run data (verify)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "domains": [
+      "n8n.io",
+      "n8n.cloud"
+    ],
+    "gaps": [
+      "Not researched via official docs (search/fetch tooling returned little); verify before use"
+    ]
+  },
+  {
+    "name": "Make AI agents",
+    "vendor": "Make (Celonis)",
+    "execution": "SaaS automation",
+    "local_artifacts": [
+      {
+        "claim": "Browser artifacts make.com; scenario execution history server-side",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "domains": [
+      "make.com",
+      "integromat.com"
+    ],
+    "gaps": [
+      "Not researched via official docs (search/fetch tooling returned little); verify before use"
+    ]
+  },
+  {
+    "name": "Microsoft Copilot Studio agents",
+    "vendor": "Microsoft",
+    "execution": "cloud",
+    "local_artifacts": [
+      {
+        "claim": "Admin center; Power Platform environment; Purview",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "domains": [
+      "copilotstudio.microsoft.com",
+      "powerplatform.com"
+    ],
+    "gaps": [
+      "Likely Purview audit/Dataverse transcripts per Microsoft docs - not verified here"
+    ]
+  },
+  {
+    "name": "Gemini Enterprise / Agentspace",
+    "vendor": "Google Cloud",
+    "execution": "cloud",
+    "local_artifacts": [
+      {
+        "claim": "Workspace admin console; Cloud Audit Logs",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "server_side_evidence": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "acquisition": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "retention_deletion": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "git_github_signatures": [
+      {
+        "claim": "unknown (not found)",
+        "confidence": "unverified",
+        "source": null
+      }
+    ],
+    "domains": [
+      "cloud.google.com",
+      "gemini.google.com"
+    ],
+    "gaps": [
+      "Cloud Audit Logs likely; not verified"
+    ]
+  }
+]

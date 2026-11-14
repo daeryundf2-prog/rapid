@@ -6,14 +6,33 @@ export interface FormatOptions {
   precision?: "date" | "minute" | "second" | "ms";
 }
 
+// Building an Intl.DateTimeFormat costs ~0.1–1 ms (locale + zone data), and a grid time cell asks
+// for several per render (zone check, wall clock, the zone label's offsets): every grid row scrolled
+// in or re-rendered paid that (T-203 perf). Formatters and zone checks are cached per zone; the
+// output is the same.
+const ZONE_CACHE_MAX = 64;
+const zoneValidity = new Map<string, boolean>();
+const wallClockFormats = new Map<string, Intl.DateTimeFormat>();
+let browserZone: string | null = null;
+
+function remember<V>(cache: Map<string, V>, key: string, value: V): V {
+  if (cache.size >= ZONE_CACHE_MAX) cache.clear();
+  cache.set(key, value);
+  return value;
+}
+
 export function isValidTimezone(tz: string): boolean {
   if (tz === "utc" || tz === "local") return true;
+  const known = zoneValidity.get(tz);
+  if (known !== undefined) return known;
+  let valid: boolean;
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: tz });
-    return true;
+    valid = true;
   } catch {
-    return false;
+    valid = false;
   }
+  return remember(zoneValidity, tz, valid);
 }
 
 /** Parse ISO text (naive text counts as UTC), epoch seconds or a Date; null when invalid. */
@@ -39,17 +58,31 @@ function zoneOf(tz: string): string | undefined {
   return isValidTimezone(tz) ? tz : "UTC";
 }
 
+function wallClockFormat(tz: string): Intl.DateTimeFormat {
+  const timeZone = zoneOf(tz);
+  // "" = the browser's zone (no timeZone option).
+  const key = timeZone ?? "";
+  return (
+    wallClockFormats.get(key) ??
+    remember(
+      wallClockFormats,
+      key,
+      new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        hourCycle: "h23",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }),
+    )
+  );
+}
+
 function wallClock(date: Date, tz: string): Record<string, number> {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: zoneOf(tz),
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).formatToParts(date);
+  const parts = wallClockFormat(tz).formatToParts(date);
   const out: Record<string, number> = {};
   for (const p of parts) if (p.type !== "literal") out[p.type] = Number(p.value);
   return out;
@@ -132,11 +165,14 @@ const ZONE_ABBR: Record<string, [string, string?]> = {
 export function zoneName(tz: TimezoneChoice): string {
   if (tz === "utc") return "UTC";
   if (tz === "local") {
-    try {
-      return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-    } catch {
-      return "UTC";
+    if (browserZone === null) {
+      try {
+        browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      } catch {
+        browserZone = "UTC";
+      }
     }
+    return browserZone;
   }
   return isValidTimezone(tz) ? tz : "UTC";
 }
@@ -249,6 +285,65 @@ export function formatGridTime(value: string | number | Date | null | undefined,
   const zone = zoneLabel(tz, date);
   const short = zone === "UTC" ? "UTC" : zone.replace(/[+-]\d{2}:\d{2}$/, "") || zone;
   return `${formatTimestamp(date, tz)} ${short}`;
+}
+
+// ---------------------------------------------------------------------------
+// Run identity times (R7 L1, C-G3/C-G4): one format for a run's start / end on every screen —
+// 랜딩 · 처리 · 접수 · 케이스 선택기 · 케이스 열기 print the same string for the same run.
+// ---------------------------------------------------------------------------
+
+/** "2026-10-17 20:18" — a run's start / end (minute precision) in the display zone; "—" when missing. */
+export function formatRunTime(value: string | number | Date | null | undefined, tz: TimezoneChoice): string {
+  return formatTimestamp(value, tz, { precision: "minute" });
+}
+
+/** Windows zone names (registry `TimeZoneKeyName`) → IANA, for the evidence-system zone option. */
+const WINDOWS_ZONES: Record<string, string> = {
+  "Korea Standard Time": "Asia/Seoul",
+  "Tokyo Standard Time": "Asia/Tokyo",
+  "China Standard Time": "Asia/Shanghai",
+  "Taipei Standard Time": "Asia/Taipei",
+  "Singapore Standard Time": "Asia/Singapore",
+  UTC: "UTC",
+  "Coordinated Universal Time": "UTC",
+  "GMT Standard Time": "Europe/London",
+  "W. Europe Standard Time": "Europe/Berlin",
+  "Romance Standard Time": "Europe/Paris",
+  "Eastern Standard Time": "America/New_York",
+  "Central Standard Time": "America/Chicago",
+  "Mountain Standard Time": "America/Denver",
+  "Pacific Standard Time": "America/Los_Angeles",
+  "AUS Eastern Standard Time": "Australia/Sydney",
+};
+
+export interface EvidenceZoneOption {
+  /** Display-zone choice: an IANA name, or a fixed "Etc/GMT±N" from the bias. */
+  value: string;
+  /** "증거 시스템(KST −540)". */
+  label: string;
+}
+
+/**
+ * The status-bar option for the evidence system's zone (P6): the Windows name mapped to IANA,
+ * else a fixed offset from the bias (whole hours only); null when neither is usable.
+ */
+export function evidenceZoneOption(
+  zone: { name?: string | null; bias_minutes?: number | null } | null | undefined,
+): EvidenceZoneOption | null {
+  if (!zone) return null;
+  const bias =
+    typeof zone.bias_minutes === "number" && Number.isFinite(zone.bias_minutes) ? zone.bias_minutes : null;
+  let value = zone.name ? WINDOWS_ZONES[zone.name] : undefined;
+  if (!value && zone.name?.includes("/") && isValidTimezone(zone.name)) value = zone.name;
+  // Etc/GMT signs are inverted: UTC+09:00 (bias −540) is "Etc/GMT-9".
+  if (!value && bias !== null && bias % 60 === 0)
+    value = bias === 0 ? "UTC" : `Etc/GMT${bias > 0 ? "+" : "-"}${Math.abs(bias / 60)}`;
+  if (!value || !isValidTimezone(value)) return null;
+  const zone0 = zoneLabel(value);
+  const abbr = zone0.replace(/[+-]\d{2}:\d{2}$/, "");
+  const short = abbr && !abbr.startsWith("UTC") ? abbr : zone0;
+  const biasText = bias === null ? "" : ` ${bias < 0 ? "−" : bias > 0 ? "+" : ""}${Math.abs(bias)}`;
+  return { value, label: `증거 시스템(${short}${biasText})` };
 }
 
 /** Tooltip of an evidence time: the source text, the UTC ISO and the FILETIME (raw when known). */

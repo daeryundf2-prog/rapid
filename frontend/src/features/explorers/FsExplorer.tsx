@@ -1,3 +1,5 @@
+// biome-ignore-all lint/a11y/useSemanticElements: the sub-folder rows are an ARIA grid of CSS-grid rows (like DataGrid / DerivedPane), not a <table>
+// biome-ignore-all lint/a11y/useFocusableInteractive: roving tabindex; only the focused folder row is focusable by design
 /**
  * 파일 시스템 탐색기 (plan r4 §2.2 V2): folder tree beside the files grid.
  *
@@ -10,7 +12,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { type ReactNode, useCallback, useMemo } from "react";
+import { type KeyboardEvent, type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import { announce } from "../../a11y";
 import { FILES_INVENTORY } from "../../api/collections";
 import {
@@ -68,7 +70,7 @@ export function ancestorIds(dir: string): string[] {
   return out;
 }
 
-function useFsLevel(runId: string | null, scope: FsScope, path: string | undefined) {
+export function useFsLevel(runId: string | null, scope: FsScope, path: string | undefined) {
   return useQuery({
     queryKey: ["fs-tree", runId, scope, path ?? ""],
     queryFn: ({ signal }) => fetchFsTree(runId as string, { path, scope, limit: FS_TREE_PAGE }, signal),
@@ -78,12 +80,39 @@ function useFsLevel(runId: string | null, scope: FsScope, path: string | undefin
   });
 }
 
+/**
+ * Empty state of the explorer's files grid (C-E1): a folder with no direct files names its
+ * sub-folders instead of the generic "표시할 행이 없습니다"; null when it has direct files (the
+ * grid is empty for another reason — a filter) or the folder is not loaded yet.
+ */
+export function fsFolderEmptyText(
+  page: Pick<FsTreePage, "node" | "children" | "child_total"> | undefined,
+): string | null {
+  if (!page || page.node.direct_file_count > 0) return null;
+  const subs = page.child_total ?? page.children.length;
+  return subs > 0
+    ? `이 폴더에 직속 파일이 없습니다 — 하위 폴더 ${n(subs)}개 (위 목록에서 열거나 '하위 폴더 포함'을 켜세요)`
+    : "이 폴더에는 파일도 하위 폴더도 없습니다.";
+}
+
+/** Korean names of the special nodes (C-E2): the route's `special=` id is never shown as text. */
+export const FS_SPECIAL_LABELS: Readonly<Record<string, string>> = {
+  orphan: "고아 파일",
+  unallocated: "미할당 공간",
+  slack: "슬랙 공간",
+};
+
+/** Korean name of a special node id (the server's label when it has one, else the table's). */
+export function fsSpecialLabel(id: string, serverLabel?: string | null): string {
+  return FS_SPECIAL_LABELS[id] ?? serverLabel ?? "특수 노드";
+}
+
 function specialItem(node: FsSpecialNode): ExplorerTreeItem {
   const source =
     node.source === "files" ? "파일 목록" : node.source === "ntfs-meta" ? "NTFS 메타 분석" : "카빙 분석";
   return {
     id: `${SPECIAL_PREFIX}${node.id}`,
-    label: node.label,
+    label: fsSpecialLabel(node.id, node.label),
     badge: n(node.count),
     description: `${n(node.count)}건, 출처 ${source}`,
     hasChildren: false,
@@ -265,7 +294,7 @@ export function FsExplorerPane() {
           <ul>
             {hidden.map((node) => (
               <li key={node.id}>
-                <strong>{node.label}</strong> — {node.reason}
+                <strong>{fsSpecialLabel(node.id, node.label)}</strong> — {node.reason}
               </li>
             ))}
           </ul>
@@ -295,7 +324,7 @@ export function FsExplorerHeader() {
     return (
       <div className="explorer-header" data-testid="fs-explorer-header">
         <p className="explorer-crumbs-text">
-          특수 노드: <strong>{node?.label ?? route.special}</strong>
+          특수 노드: <strong>{fsSpecialLabel(route.special, node?.label)}</strong>
           {node ? ` · ${n(node.count)}건` : ""}
         </p>
         {closeButton}
@@ -373,13 +402,122 @@ export function FsExplorerHeader() {
   );
 }
 
-/** Explorer layout of the files collection: folder tree | header + grid. */
+/**
+ * Sub-folders of the open folder in the centre (r7 L4, C-E1 — Explorer-like): the volume root and
+ * `Users` hold folders, not files, so the files grid alone was empty there. One row per child
+ * folder (icon · name · files · sub-folders · size, the `/fs-tree` counts); double-click or Enter
+ * opens it, ↑/↓/Home/End move. The files of the folder stay in the grid below.
+ */
+export function FsFolderRows() {
+  const { route, patchRoute } = useRoute();
+  const scope = fsScopeOf(route.category);
+  const level = useFsLevel(route.runId, scope, route.dir);
+  const [focus, setFocus] = useState(0);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const folders = level.data?.children ?? [];
+  if (route.special || route.dir === undefined || !level.data || folders.length === 0) return null;
+  const total = level.data.child_total ?? folders.length;
+  const at = Math.min(focus, folders.length - 1);
+  const enter = (folder: FsFolder) => {
+    patchRoute({ dir: folder.path, row: undefined, mode: undefined });
+    announce(`${folder.name} 폴더를 엽니다`);
+  };
+  const focusRow = (index: number) => {
+    const next = Math.max(0, Math.min(folders.length - 1, index));
+    setFocus(next);
+    gridRef.current?.querySelector<HTMLElement>(`[data-folder-index="${next}"]`)?.focus();
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>, index: number) => {
+    const folder = folders[index];
+    if (!folder) return;
+    switch (event.key) {
+      case "Enter":
+        event.preventDefault();
+        enter(folder);
+        break;
+      case "ArrowDown":
+        event.preventDefault();
+        focusRow(index + 1);
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        focusRow(index - 1);
+        break;
+      case "Home":
+        event.preventDefault();
+        focusRow(0);
+        break;
+      case "End":
+        event.preventDefault();
+        focusRow(folders.length - 1);
+        break;
+      default:
+        break;
+    }
+  };
+  return (
+    <section className="fs-folder-rows" aria-label="하위 폴더" data-testid="fs-folder-rows">
+      <div
+        ref={gridRef}
+        role="grid"
+        aria-label={`하위 폴더 ${n(total)}개 — 두 번 클릭 또는 Enter로 열기`}
+        aria-rowcount={total + 1}
+        className="fs-folder-grid"
+      >
+        <div role="row" aria-rowindex={1} className="fs-folder-row fs-folder-head">
+          <div role="columnheader">이름</div>
+          <div role="columnheader">파일</div>
+          <div role="columnheader">하위 폴더</div>
+          <div role="columnheader">크기</div>
+        </div>
+        {folders.map((folder, index) => (
+          <div
+            key={folder.path}
+            role="row"
+            aria-rowindex={index + 2}
+            tabIndex={index === at ? 0 : -1}
+            aria-selected={index === at}
+            className="fs-folder-row"
+            data-folder-index={index}
+            data-testid="fs-folder-row"
+            title={`${folder.path} — 두 번 클릭하면 엽니다`}
+            onFocus={() => setFocus(index)}
+            onDoubleClick={() => enter(folder)}
+            onKeyDown={(event) => onKeyDown(event, index)}
+          >
+            <div role="gridcell" className="fs-folder-name">
+              <Icon name="folder" /> {folder.name}
+            </div>
+            <div role="gridcell" className="fs-folder-num">
+              {n(folder.file_count)}
+            </div>
+            <div role="gridcell" className="fs-folder-num">
+              {n(folder.folder_count)}
+            </div>
+            <div role="gridcell" className="fs-folder-num">
+              {formatBytes(folder.size) || "0 B"}
+            </div>
+          </div>
+        ))}
+      </div>
+      {total > folders.length ? (
+        <p className="explorer-note">
+          처음 {n(folders.length)}개 폴더만 표시합니다 (전체 {n(total)}개) — 나머지는 왼쪽 폴더 트리에서
+          여세요.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+/** Explorer layout of the files collection: folder tree | header + sub-folders + grid. */
 export function FsExplorerLayout({ children }: { children: ReactNode }) {
   return (
     <div className="explorer-layout" data-testid="fs-explorer-layout">
       <FsExplorerPane />
       <div className="explorer-main">
         <FsExplorerHeader />
+        <FsFolderRows />
         <div className="explorer-main-body">{children}</div>
       </div>
     </div>

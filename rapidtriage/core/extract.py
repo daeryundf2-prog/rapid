@@ -9,6 +9,12 @@ from pathlib import Path
 from ..artifacts.windows.antiforensics import file_holds_recovery_secret
 from ..artifacts.windows.system_extras import file_holds_store_secret
 from .audit import compute_sha256
+from .cli_constants import (
+    DEFAULT_EXTRACT_MANIFEST_NAME,  # noqa: F401 - re-exported for existing importers
+    SUPPORTED_DOC_KINDS,
+)
+from .clock import now_local_iso
+from .credential_files import BODY_WITHHELD, credential_file_reason
 from .files import (
     ALL_FILE_CATEGORIES,
     normalize_extensions,
@@ -19,33 +25,6 @@ from .files import (
 from .input_root import InputRoot, resolve_input_root
 
 SUPPORTED_EXTRACT_COMMANDS: tuple[str, ...] = ("docs", "files")
-SUPPORTED_DOC_KINDS: tuple[str, ...] = (
-    "cfg",
-    "conf",
-    "csv",
-    "docx",
-    "eml",
-    "htm",
-    "html",
-    "ini",
-    "json",
-    "jsonl",
-    "log",
-    "md",
-    "odp",
-    "ods",
-    "odt",
-    "pdf",
-    "pptx",
-    "rtf",
-    "tsv",
-    "txt",
-    "xlsx",
-    "xml",
-    "yaml",
-    "yml",
-)
-DEFAULT_EXTRACT_MANIFEST_NAME = "rapidtriage-extract-manifest.json"
 
 
 class ExtractError(ValueError):
@@ -138,6 +117,20 @@ def run_extract(
         if destination_path.exists() and not overwrite:
             skipped_entries.append({"original_path": str(source_path), "reason": "destination-exists"})
             continue
+        credential_reason = credential_file_reason(source_path)
+        if credential_reason:
+            # Credential / secret files (core/credential_files.py) are never copied, and no hash
+            # of their bytes is recorded (AI credential policy: no value, no hash).
+            skipped_entries.append(
+                {
+                    "original_path": str(source_path),
+                    "reason": "credential-file",
+                    "credential_reason": credential_reason,
+                    "coverage_status": BODY_WITHHELD,
+                    "size": source_stat.st_size,
+                }
+            )
+            continue
         if file_holds_recovery_secret(source_path) or file_holds_store_secret(source_path):
             # BitLocker key files (and small texts holding a checksum-valid recovery password),
             # wallet/credential/browser-login stores, private keys and texts holding saved passwords
@@ -180,7 +173,7 @@ def run_extract(
         "source_command": source_command,
         "input_json": str(input_json),
         "root": str(root.root_path) if root else None,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "output_dir": str(output_dir),
         "filters": {
             "name_contains": normalized_name_filters,
@@ -231,7 +224,7 @@ def build_disabled_extract_payload(
         "source_command": source_command,
         "input_json": str(input_json),
         "root": None,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": now_local_iso(),
         "output_dir": str(output_dir),
         "disabled": True,
         "disabled_reason": "extraction-disabled-by-default; rerun with --extract to copy and hash candidates",

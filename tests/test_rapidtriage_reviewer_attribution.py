@@ -159,7 +159,7 @@ class ApiReviewerAttributionTests(unittest.TestCase):
                 )
         self.assertEqual(payload["reviewer"], "explicit-reviewer")
 
-    def test_api_mark_without_reviewer_keeps_existing_behavior(self) -> None:
+    def test_api_mark_without_reviewer_never_inherits_previous_reviewer(self) -> None:
         env = {key: value for key, value in os.environ.items() if key != "RAPIDTRIAGE_REVIEWER"}
         with tempfile.TemporaryDirectory() as tmp_dir:
             db_path, target_id = _prepare_case_db(tmp_dir)
@@ -170,7 +170,8 @@ class ApiReviewerAttributionTests(unittest.TestCase):
                 kept = self._post_review(client, db_path, target_id)
         self.assertEqual(created["reviewer"], "")
         self.assertEqual(updated["reviewer"], "second-pass")
-        self.assertEqual(kept["reviewer"], "second-pass")
+        # R8 review P1-5: an unnamed action is not attributed to the previous reviewer.
+        self.assertEqual(kept["reviewer"], "")
 
 
 if __name__ == "__main__":

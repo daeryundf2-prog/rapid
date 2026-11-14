@@ -128,11 +128,15 @@ export interface RunLive {
 export function useRunLive(runId: string | null): RunLive {
   const rows = useRunsPoll().data ?? [];
   const mine = runId ? rows.find((r) => r.run_id === runId) : undefined;
-  return {
-    anyActive: rows.some(isRunActive),
-    active: isRunActive(mine),
-    completed: mine?.progress?.completed_count ?? null,
-    total: mine?.progress?.total_count ?? null,
-    errors: mine?.progress?.error_count ?? 0,
-  };
+  const anyActive = rows.some(isRunActive);
+  const active = isRunActive(mine);
+  const completed = mine?.progress?.completed_count ?? null;
+  const total = mine?.progress?.total_count ?? null;
+  const errors = mine?.progress?.error_count ?? 0;
+  // One object while the values stay: the tree model is rebuilt when `live` changes (T-203 perf —
+  // a fresh object rebuilt the whole tree on every render, e.g. on each J/K in the grid).
+  return useMemo(
+    () => ({ anyActive, active, completed, total, errors }),
+    [anyActive, active, completed, total, errors],
+  );
 }

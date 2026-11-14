@@ -50,6 +50,7 @@ from rapidtriage.core.ntfs_unalloc import (
     boot_mft_consistency,
     open_unallocated_image,
 )
+from tests._timing import time_budget
 from tests.test_r6_s2_unalloc_carve import _mft_record, boot_sector, build_ntfs_image
 
 SQLITE_DB = b"SQLite format 3\x00" + b"\x10\x00" + b"\x00" * (4096 - 18)
@@ -230,7 +231,7 @@ class BoundedStreamTests(_Temp):
         result, capped, size = ntfs_metadata.run_stream_capped(
             ntfs_metadata.default_stream_runner, self.ENDLESS, target, ntfs_metadata.BOOT_MAX_BYTES
         )
-        self.assertLess(time.monotonic() - started, 30)
+        self.assertLess(time.monotonic() - started, time_budget(30))
         self.assertTrue(capped)
         self.assertIsNone(size)
         self.assertEqual(result.returncode, 0)
@@ -330,7 +331,7 @@ class UnallocatedTests(_Temp):
         started = time.monotonic()
         result = bitmap_unallocated_runs(bitmap, len(bitmap) * 8)
         # The old per-bit loop took ~20 s here; 10 s still catches that regression on a loaded machine.
-        self.assertLess(time.monotonic() - started, 10.0)
+        self.assertLess(time.monotonic() - started, time_budget(10.0))
         self.assertTrue(result.truncated)
         self.assertEqual(len(result.runs), ntfs_unalloc.MAX_RUNS)
         self.assertEqual(result.free_clusters, len(bitmap) * 4)
@@ -480,7 +481,7 @@ class AhnLabStreamingTests(_Temp):
         started = time.monotonic()
         with mock.patch.object(av_ahnlab, "_ahnlab_root_records", counting):
             records = list(collect_ahnlab_v3(self.base, "p"))
-        self.assertLess(time.monotonic() - started, 10)
+        self.assertLess(time.monotonic() - started, time_budget(10))
         detections = [record for record in records if record.artifact_type == "av-detection-log"]
         self.assertEqual(len(detections), av_ahnlab.MAX_ROWS_PER_TYPE)
         self.assertLessEqual(len(produced), av_ahnlab.MAX_ROWS_PER_TYPE + 10)

@@ -31,6 +31,7 @@ from rapidtriage.core.ntfs_unalloc import (
     open_unallocated_image,
 )
 from rapidtriage.core.url_carving import UrlCarveState, scan_url_windows
+from tests._timing import time_budget
 from tests.test_rapidtriage_analyses import write_run
 
 TOKEN = "r6-s2-unalloc-token"
@@ -336,7 +337,7 @@ class ImageUnallocatedAnalysisTests(unittest.TestCase):
         return self.client.post(f"/api/runs/{self.run_id}/analyses", json={"kind": "url-carve", "options": options})
 
     def wait(self, analysis_id: str) -> dict[str, object]:
-        deadline = time.monotonic() + 60
+        deadline = time.monotonic() + time_budget(60)
         while True:
             state = self.client.get(f"/api/runs/{self.run_id}/analyses/{analysis_id}").json()
             if state["status"] in analyses.TERMINAL_STATUSES and state.get("finished_at"):

@@ -1,10 +1,12 @@
 // GET /api/runs with the compact `progress` block (routes_runs.compact_run_progress),
-// polled every 1.5 s while any run is queued/running and every 5 s when idle.
+// polled every 1.5 s while any run is queued/running, every 30 s when idle and not at all while
+// the document is hidden (T-130).
 
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { useAppStore } from "../state/store";
 import { api } from "./client";
+import { VISIBLE_ONLY_POLL } from "./queryPolicy";
 import type { RunListItem } from "./runs";
 
 export interface RunProgressCompact {
@@ -51,11 +53,13 @@ export interface RunWithProgress extends RunListItem {
   /** Present for queued/running runs (and interrupted ones since R4 V1). */
   progress?: RunProgressCompact | null;
   error?: string;
+  /** Exception class of a failed run (e.g. `OutputDiskFull` = OUTPUT_DISK_FULL, T-352). */
+  error_type?: string | null;
 }
 
 export const RUNS_QUERY_KEY = ["runs"] as const;
 export const ACTIVE_POLL_MS = 1500;
-export const IDLE_POLL_MS = 5000;
+export const IDLE_POLL_MS = 30_000;
 
 export async function listRunsWithProgress(): Promise<RunWithProgress[]> {
   const payload = await api<{ runs?: RunWithProgress[] }>("/api/runs");
@@ -76,6 +80,7 @@ export function useRunsPoll() {
     queryKey: RUNS_QUERY_KEY,
     queryFn: listRunsWithProgress,
     refetchInterval: (q) => runsPollInterval(q.state.data),
+    ...VISIBLE_ONLY_POLL,
   });
   const { data, isError } = query;
   useEffect(() => {

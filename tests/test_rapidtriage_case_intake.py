@@ -36,7 +36,6 @@ from rapidtriage.core.jobs import (
     RunJob,
     RunJobStore,
     RunRequest,
-    default_run_output_dir,
 )
 
 if HAS_FASTAPI:
@@ -196,11 +195,11 @@ class CaseIntakeApiTests(unittest.TestCase):
         export = self.temp / "export.zip"
         export.write_bytes(b"PK export bytes")
         md5 = hashlib.md5(export.read_bytes()).hexdigest()
-        # E01: container bytes are not the acquisition (media) hash -> no expected-hash comparison.
+        # E01 (T-181): an expected hash is accepted; the worker compares it with the recorded
+        # acquisition hash and the container bytes (tests/test_e01_recorded_hash.py covers the verdicts).
         e01_expected = self.client.post(url, json={"evidence_number": "E-09", "source_type": "e01",
                                                    "path": str(self.image), "verify_hash": True, "expected_hash": "0" * 32})
-        self.assertEqual(e01_expected.status_code, 422)
-        self.assertIn("획득(매체) 해시", e01_expected.json()["detail"])
+        self.assertEqual(e01_expected.status_code, 201, e01_expected.text)
         match = self.client.post(url, json={"evidence_number": "E-01", "source_type": "export", "path": str(export),
                                             "verify_hash": True, "expected_hash": md5.upper()})
         self.assertEqual(match.status_code, 201, match.text)
@@ -624,7 +623,7 @@ class CaseIntakeApiTests(unittest.TestCase):
         self.assertIn("인용 ID 접두", str(case_integrity_conflict(prefix_clash.exception, "different")))
 
     def test_review5_case_run_records_snapshot_file_in_audit(self) -> None:
-        case = self.create_case()
+        case = self.create_case(case_root=str(self.temp / "case-folder"))
         evidence = self.add_folder_evidence(case)
         with patch("rapidtriage.core.jobs.execute_run_request", side_effect=fake_execute):
             response = self.client.post(f"/api/cases/{case['case_id']}/runs", json={
@@ -716,23 +715,33 @@ class CaseIntakeApiTests(unittest.TestCase):
         evidence = added.json()["evidence"]
         if not evidence["runnable"]:
             self.skipTest(f"E01 reader unavailable here: {evidence['run_blocked_reason']}")
-        def execute_default(request, *, run_id=None, **_kwargs):
-            # Like the real run: no output folder given -> the default next to the evidence file.
-            output_dir = default_run_output_dir(Path(request.root), request.mode, run_id=run_id)
+        # E01 QA D4: no case folder and no output folder -> refused (never next to the evidence file).
+        refused = self.client.post(f"/api/cases/{case['case_id']}/runs", json={
+            "evidence_citation_id": evidence["citation_id"], "mode": "fraud", "wait": True})
+        self.assertEqual(refused.status_code, 422, refused.text)
+        self.assertIn("케이스 폴더가 없어 런 출력 위치를 정할 수 없습니다", refused.json()["detail"])
+        self.assertEqual(self.client.get(f"/api/cases/{case['case_id']}/runs").json()["runs"], [])
+        self.assertEqual([p.name for p in self.image.parent.iterdir() if "rapidtriage-run" in p.name], [])
+
+        def execute_given(request, *, run_id=None, **_kwargs):
+            output_dir = Path(request.output_dir)
             output_dir.mkdir(parents=True, exist_ok=True)
             return json.loads(write_run(output_dir, Path(request.root)).read_text(encoding="utf-8"))
 
-        with patch("rapidtriage.core.jobs.execute_run_request", side_effect=execute_default):
-            response = self.client.post(f"/api/cases/{case['case_id']}/runs", json={
-                "evidence_citation_id": evidence["citation_id"], "mode": "fraud", "wait": True})
+        rooted = self.create_case(case_number="2", case_root=str(self.temp / "case-folder"))
+        rooted_evidence = self.client.post(f"/api/cases/{rooted['case_id']}/evidence", json={
+            "evidence_number": "E-01", "source_type": "e01", "path": str(self.image)}).json()["evidence"]
+        with patch("rapidtriage.core.jobs.execute_run_request", side_effect=execute_given):
+            response = self.client.post(f"/api/cases/{rooted['case_id']}/runs", json={
+                "evidence_citation_id": rooted_evidence["citation_id"], "mode": "fraud", "wait": True})
         self.assertEqual(response.status_code, 202, response.text)
         run = response.json()["run"]
         self.assertEqual(run["status"], "completed")
         self.assertEqual(run["request"]["root"], str(self.image))
-        # No case folder: a file's run output goes next to the file.
+        # With a case folder: the run output goes under it, one run folder per evidence.
         snapshot_file = Path(response.json()["snapshot_file"])
-        self.assertTrue(os.path.samefile(snapshot_file.parent.parent, self.image.parent))
-        self.assertTrue(snapshot_file.parent.name.startswith("disk-rapidtriage-run-fraud-"))
+        self.assertTrue(os.path.samefile(snapshot_file.parent.parent, self.temp / "case-folder"))
+        self.assertTrue(snapshot_file.parent.name.startswith("E-01-rapidtriage-run-fraud-"))
 
     def test_review13_recorded_zero_parser_errors_skip_opening_the_output(self) -> None:
         run_dir = self.temp / "run0"

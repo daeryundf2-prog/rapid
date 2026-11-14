@@ -4,24 +4,31 @@
  * (`view=`), Alt+Shift+1–6 run the `view.*` commands, and views the routed node cannot
  * show are disabled with their reason. The column view renders `children`
  * (the DataGrid) unchanged and hands the switch to its filter-bar line
- * (visual-polish S1); a node with only the column view shows no switch (S2).
+ * (visual-polish S1); a node with only the column view shows no switch (S2). Every view but the
+ * column view is a lazy chunk (T-116, `lazyViews.ts`); hovering or focusing its button preloads it.
  */
 
 import { type ReactNode, useEffect } from "react";
 import { DisabledReason } from "../a11y";
 import { effectiveView, VIEW_DEFS, viewAvailability } from "../features/views/availability";
-import { CardView } from "../features/views/CardView";
-import { ChatView } from "../features/views/ChatView";
 import { registerViewCommands, switchView } from "../features/views/commands";
-import { HistogramView } from "../features/views/HistogramView";
-import { MapView } from "../features/views/MapView";
-import { ThumbnailView } from "../features/views/ThumbnailView";
 import { ToolbarLeadContext } from "../features/views/toolbarSlot";
 import { Icon, type IconName } from "../icons";
 import type { ExplorerView } from "../router";
 import { keyLabel } from "../shortcuts";
 import { useRoute } from "../state/hooks";
+// T-116: the non-column views are lazy chunks (lazyViews.ts); views.css stays here so the switch
+// and the column-view toolbar are styled before any chunk loads.
+import { CardView, ChatView, HistogramView, MapView, ThumbnailView } from "./lazyViews";
 import "../features/views/views.css";
+
+const LAZY_VIEWS: Partial<Record<ExplorerView, { preload: () => void }>> = {
+  thumbnails: ThumbnailView,
+  chat: ChatView,
+  histogram: HistogramView,
+  cards: CardView,
+  map: MapView,
+};
 
 const VIEW_ICONS: Record<ExplorerView, IconName> = {
   columns: "columns",
@@ -61,6 +68,8 @@ export function ViewSwitch({ children }: { children: ReactNode }) {
             aria-keyshortcuts={def.shortcut}
             title={`${def.label} (${keyLabel(def.shortcut)})`}
             onClick={() => switchView(def.id)}
+            onPointerEnter={() => LAZY_VIEWS[def.id]?.preload()}
+            onFocus={() => LAZY_VIEWS[def.id]?.preload()}
           >
             <Icon name={VIEW_ICONS[def.id]} />
           </button>

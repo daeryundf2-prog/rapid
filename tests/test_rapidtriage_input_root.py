@@ -15,7 +15,11 @@ from rapidtriage.core.input_root import (
     resolve_input_root,
 )
 from rapidtriage.core.run import run_triage_mode
+from tests import quiet_media_checks
 from tests.test_rapidtriage_run import build_run_fixture
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
 
 
 class RapidTriageInputRootTests(unittest.TestCase):

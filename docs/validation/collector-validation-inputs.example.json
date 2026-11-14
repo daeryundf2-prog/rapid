@@ -1,0 +1,36 @@
+{
+  "schema_version": "collector-validation-inputs-v1",
+  "description": "Example runtime inputs for scripts/collector-validation-matrix.py --inputs. Copy it next to the real outputs OUTSIDE Git (e.g. the QA derived folder) and fill the paths; relative paths resolve against base_dir, which is relative to this file. Keys per row match the {placeholders} and files of docs/validation/collector-validation-matrix.json. A row may say {\"not_measured\": \"reason\"} instead. extra_args is passed to the script unchanged (a list, or {run id: list}).",
+  "corpora": {
+    "C2": {
+      "base_dir": "c2",
+      "rows": {
+        "file-list": {"fls": "reference/fls-rpl.txt", "files_json": "run/files.json", "strip_prefix": "_e01/fs"},
+        "mft": {"mft": "evidence-export/MFT.bin", "ils": "reference/ils-e.txt", "fls": "reference/fls-rp.txt"},
+        "deleted": {"ours": "run/artifacts/deleted.jsonl", "reference": "reference/fls-rdp.txt", "strip_prefix": "_e01/fs"},
+        "usn": {"ours": "run/artifacts/usn-record.jsonl", "reference": "reference/usn.csv"},
+        "registry": {"hive_root": "evidence-export/hives"},
+        "amcache": {"amcache": "evidence-export/Amcache.hve"},
+        "bam-dam": {"system": "evidence-export/hives/SYSTEM"},
+        "shimcache": {"ours": "run/artifacts/shimcache.jsonl", "reference": "reference/shimcache.csv"},
+        "userassist": {"ours": "run/artifacts/userassist.jsonl", "reference": "reference/userassist.csv"},
+        "shellbags": {"ours": "run/artifacts/shellbags.jsonl", "reference": "reference/shellbags.csv"},
+        "usb": {"ours": "run/artifacts/usb.jsonl", "reference": "reference/usb.csv", "extra_args": ["--reference-tz", "UTC"]},
+        "prefetch": {"pf_root": "evidence-export/Prefetch"},
+        "lnk": {"lnk_root": "evidence-export/Recent"},
+        "jumplist": {"dir": "evidence-export/AutomaticDestinations"},
+        "eventlog": {"evtx_root": "evidence-export/winevt/Logs"},
+        "srum-search": {"ours": "run/artifacts/srum.jsonl", "reference": "reference/srum-csv"},
+        "browser": {
+          "visit_ours": "run/artifacts/browser-visit.jsonl",
+          "visit_reference": "reference/visits.csv",
+          "download_ours": "run/artifacts/browser-download.jsonl",
+          "download_reference": "reference/downloads.csv"
+        },
+        "recyclebin": {"ours": "run/artifacts/recycle-bin.jsonl", "reference": "reference/rbcmd.csv"},
+        "mail": {"not_measured": "이 코퍼스 대본에 메일 클라이언트 없음"},
+        "media-hash": {"reference": "reference/ewfverify.txt", "acquisition_log": "reference/acquisition.txt"}
+      }
+    }
+  }
+}

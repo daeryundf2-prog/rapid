@@ -4,6 +4,8 @@
 
 import type { GridRow } from "../../contracts/collection";
 import type { MarkAction, ViewerTarget } from "../../contracts/viewer";
+import { writeBlockReason } from "../../shell/readOnly";
+import { evidencePathOf } from "../../utils/pathDisplay";
 import { evidenceTime } from "../../utils/time";
 import { timestampKindLabel } from "../../utils/timeKinds";
 import { caseCitationParts } from "../case/caseLink";
@@ -36,6 +38,11 @@ export const MARK_ORDER: MarkAction[] = [
 ];
 
 export function locatorText(target: ViewerTarget): string {
+  // A search hit cites the run-output row it names (R7 S2 #8: `docs:/candidates/3`, not `search:/search/0`).
+  if (target.review) {
+    const { collection, kind, pointer } = target.review;
+    return [collection, kind, pointer].filter(Boolean).join(":");
+  }
   const { ref } = target;
   return [ref.collection, ref.kind, ref.locator].filter(Boolean).join(":");
 }
@@ -64,6 +71,26 @@ function scalarOf(value: unknown): string | number | null {
   return typeof value === "string" || typeof value === "number" ? value : null;
 }
 
+/** What a source with no path / no known original location reads (viewer 출처 · citation). */
+export const NO_SOURCE_PATH = "원본 경로 없음";
+export const SOURCE_LOCATION_UNKNOWN = "원래 위치 알 수 없음";
+
+/**
+ * The path a citation and the viewer's 원본 경로 name (T-172, r8 C.9.1 / IS-128): the path INSIDE
+ * the evidence, never the analysis PC's result folder (`…\_e01\fs\`). A recovered item in a
+ * recovery pseudo folder has no known original location.
+ */
+export function evidenceSourceText(sourcePath: string | null | undefined): string | null {
+  if (!sourcePath) return null;
+  const evidence = evidencePathOf(sourcePath);
+  return evidence.locationUnknown ? null : evidence.path;
+}
+
+function citationSourcePath(sourcePath: string | null | undefined): string {
+  if (!sourcePath) return `(${NO_SOURCE_PATH})`;
+  return evidenceSourceText(sourcePath) ?? `(${SOURCE_LOCATION_UNKNOWN})`;
+}
+
 /**
  * One-line citation: path + container sha256 + locator (+ record id + record time when the row is
  * known) + run id (+ byte range / sqlite row when highlighted).
@@ -74,11 +101,11 @@ export function buildCitation(
   row?: GridRow | null,
   tz = "utc",
 ): string {
-  const isArtifact = target.ref.collection === "artifacts";
+  const isArtifact = (target.review?.collection ?? target.ref.collection) === "artifacts";
   const parts = [
     // 사건=… 증거=… first when the run belongs to a case (AXIOM adoption E1).
     ...caseCitationParts(target.runId),
-    `원본=${target.sourcePath ?? "(원본 경로 없음)"}`,
+    `원본=${citationSourcePath(target.sourcePath)}`,
     `${row && isArtifact ? "컨테이너 sha256" : "sha256"}=${sha256 || "미계산"}`,
     `위치=${locatorText(target)}`,
     ...recordCitationParts(row, tz),
@@ -159,11 +186,13 @@ export function caseDbTargetType(target: ViewerTarget): string | null {
 
 export function markDisabledReason(target: ViewerTarget | null, action: MarkAction): string | undefined {
   if (!target) return "뷰어에 표시된 행이 없습니다.";
+  const readOnly = writeBlockReason("run"); // T-348: marks and notes write into the result
+  if (readOnly) return readOnly;
   // Same routing as the write path: a case-db id or a run-output locator the case DB resolves.
   if (reviewTargetOf(targetAsGridRow(target))) return undefined;
   return action === "bookmark"
     ? "이 행은 북마크할 수 있는 위치 정보(locator)가 없습니다."
-    : "이 행은 리뷰 표시를 저장할 위치 정보(locator)가 없습니다.";
+    : "이 행은 검토 표시를 저장할 위치 정보(locator)가 없습니다.";
 }
 
 /**
@@ -178,6 +207,13 @@ export function targetAsGridRow(target: ViewerTarget): GridRow {
   const fields: Record<string, unknown> = {};
   if (pointer) fields.pointer = pointer;
   if (target.ref.caseDbId !== undefined && targetType) fields.targetType = targetType;
+  // Search hits (R7 S2 #8): the run-output row they name is what the case DB / bookmark API
+  // resolves (reviewActions `carriedLocator`), exactly as the grid batch bar posts it.
+  if (target.review) {
+    fields.reviewCollection = target.review.collection;
+    if (target.review.kind) fields.reviewKind = target.review.kind;
+    fields.reviewPointer = target.review.pointer;
+  }
   return {
     rowKey: target.ref.kind
       ? `${target.ref.collection}:${target.ref.kind}:${target.ref.locator}`

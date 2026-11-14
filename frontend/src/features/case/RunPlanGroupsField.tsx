@@ -14,7 +14,7 @@ import { useEffect, useId, useRef } from "react";
 import { type PreviewGroup, previewRunPlan, type RunPlanPreview } from "../../api/runPlan";
 import type { RunForm } from "./runForm";
 
-export const REQUIRED_GROUP_REASON = "필수 그룹 — 건너뛸 수 없습니다";
+export const REQUIRED_GROUP_REASON = "항상 실행하는 그룹 — 건너뛸 수 없습니다";
 export const EXTRACT_GATED_REASON = "고급 옵션의 '파일 추출'을 켜면 실행됩니다";
 export const CARVE_GATED_REASON = "카빙은 이 실행에서 켤 수 없습니다 · 처리 단계의 추가 분석에서 실행하세요";
 
@@ -170,8 +170,9 @@ export function RunPlanGroupsField({
                       onChange={(event) => toggle(group, event.target.checked)}
                     />{" "}
                     {group.label}
-                    {tasks > 1 ? <span className="case-reason"> (태스크 {tasks})</span> : null}
-                    {required ? <span className="case-reason"> · 필수</span> : null}
+                    {/* Plain Korean meta (r7 L4, C-L5): how many processing steps, and that it always runs. */}
+                    {tasks > 1 ? <span className="case-reason"> (세부 처리 {tasks}개)</span> : null}
+                    {required ? <span className="case-reason"> · 항상 실행</span> : null}
                   </label>
                   {gated ? (
                     <span id={gatedId} className="case-reason" data-testid={`run-plan-gated-${group.id}`}>

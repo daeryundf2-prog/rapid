@@ -22,7 +22,8 @@ export type AnalysisNodeId =
   | "ocr-batch"
   | "memory-import"
   | "cross-case"
-  | "url-carve";
+  | "url-carve"
+  | "search-index";
 
 export interface AnalysisNodeDef {
   id: AnalysisNodeId;
@@ -80,6 +81,14 @@ export const ANALYSIS_NODES: readonly AnalysisNodeDef[] = [
       "페이지 파일·미할당 영역 덤프·메모리 덤프에서 http(s) URL 문자열(ASCII·UTF-16LE)을 찾아 URL 분류와 함께 기록합니다. 주변 바이트(페이지 본문)는 저장하지 않습니다.",
     kinds: ["url-carve"],
   },
+  {
+    // R7 P2: the console's global search answers from this index once it is built.
+    id: "search-index",
+    label: "검색 색인(v2)",
+    description:
+      "런 출력(문서·파일·아티팩트·지표)으로 검색 색인을 만듭니다. 색인이 있으면 상단 전체 검색이 색인으로 빠르게 찾고, 없으면 이전 검색(v1)을 씁니다.",
+    kinds: ["search-index"],
+  },
 ];
 
 export function isAnalysisNodeId(value: unknown): value is AnalysisNodeId {
@@ -106,6 +115,7 @@ export const KIND_LABEL: Record<AnalysisKind, string> = {
   "memory-import": "메모리 분석 가져오기",
   "cross-case": "교차 케이스 상관 분석",
   "url-carve": "URL 카빙",
+  "search-index": "검색 색인(v2)",
 };
 
 /** Server kinds that are not workbench nodes but still show up in the job list / announcements. */
@@ -120,6 +130,8 @@ export function kindLabel(kind: string): string {
 
 /** Dialog notes: expected scope and cautions ("예상 범위·주의"). */
 export const KIND_CAUTION: Record<AnalysisKind, string> = {
+  "search-index":
+    "런 출력 폴더에 rapidtriage-search.db를 씁니다(타임라인·아티팩트 크기와 비슷한 수백 MB~1 GB대). 큰 런은 수 분 걸리고, 그동안은 이전 검색(v1)이 답합니다. 색인 파일 말고 다른 런 출력은 읽기만 합니다.",
   carve:
     "소스 파일마다 최대 스캔 바이트까지 읽습니다. 파일이 많으면 수 분 이상 걸릴 수 있고, 추출을 켜면 런 출력 폴더에 파일을 씁니다.",
   "vsc-discover":
@@ -313,3 +325,28 @@ export function formatDuration(seconds: number | null | undefined): string {
   if (m < 60) return `${m}분 ${s}초`;
   return `${Math.floor(m / 60)}시간 ${m % 60}분`;
 }
+
+/** Carving signatures the 카빙 form offers (and the tree / filter model name). */
+export const CARVE_KINDS: { id: string; label: string }[] = [
+  { id: "jpeg", label: "JPEG" },
+  { id: "png", label: "PNG" },
+  { id: "gif", label: "GIF" },
+  { id: "pdf", label: "PDF" },
+  { id: "zip", label: "ZIP" },
+  { id: "7z", label: "7z" },
+  { id: "rar", label: "RAR" },
+  { id: "sqlite", label: "SQLite" },
+  // R3 §3.3 (core/carving.py SIGNATURE_KINDS).
+  { id: "wav", label: "WAV 오디오" },
+  { id: "mp3", label: "MP3 오디오" },
+  { id: "m4a", label: "M4A 오디오" },
+  { id: "mp4", label: "MP4 동영상" },
+  { id: "docx", label: "Word(DOCX)" },
+  { id: "xlsx", label: "Excel(XLSX)" },
+  { id: "pptx", label: "PowerPoint(PPTX)" },
+  { id: "hwp", label: "한글(HWP)" },
+  { id: "hwpx", label: "한글(HWPX)" },
+  { id: "eml", label: "이메일(EML)" },
+  { id: "pe", label: "실행 파일(PE)" },
+  { id: "evtx", label: "이벤트 로그(EVTX)" },
+];

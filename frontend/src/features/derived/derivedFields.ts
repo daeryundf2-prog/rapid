@@ -411,7 +411,12 @@ export function eventSummaryKo(fields: Record<string, unknown>): string {
   const where =
     `${fieldOf(fields, "channel", "Channel")}\n${fieldOf(fields, "provider_name", "ProviderName", "provider")}`.toLowerCase();
   const template = BY_ID.get(id)?.find((candidate) => candidate.scope.some((scope) => where.includes(scope)));
-  if (!template) return `요약 없음 (ID ${id})`;
+  if (!template) {
+    // No sentence for this ID: the rendered message (first 120 characters) says what happened.
+    const message = fieldOf(fields, "event_message", "message").replace(/\s+/g, " ").trim();
+    if (message) return message.length > 120 ? `${message.slice(0, 120)}…` : message;
+    return `요약 없음 (ID ${id})`;
+  }
   const get: Get = (...names) => fieldOf(fields, ...names);
   return template.text(get);
 }

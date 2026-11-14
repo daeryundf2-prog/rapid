@@ -8,7 +8,9 @@ import {
   type SourcePreview,
 } from "../../../api/viewer";
 import "../../review/review.css";
+import { evidencePathOf } from "../../../utils/pathDisplay";
 import { useViewPrefs } from "../../review/viewPrefs";
+import { ThumbGlyph } from "../../views/ThumbGlyph";
 import { errorText, useAsync, useBlobUrl } from "../useAsync";
 import { latestOcrFailure } from "./ocrFailure";
 
@@ -26,10 +28,21 @@ function AuthImage({
   className?: string;
 }) {
   const image = useBlobUrl(`${runId}|${path}`, (signal) => fetchSourceBlob(runId, path, signal));
+  // A blob the browser cannot decode: the 썸네일 보기's "미리보기 없음" glyph tile instead of the
+  // broken-image icon (r8 verify F2), once per URL (no retry).
+  const [brokenUrl, setBrokenUrl] = useState<string | null>(null);
   if (image.status === "error")
     return <span className="viewer-error">이미지를 불러오지 못했습니다: {image.error}</span>;
   if (!image.url) return <span className="viewer-note">이미지 불러오는 중…</span>;
-  return <img src={image.url} alt={alt} className={className} />;
+  if (image.url === brokenUrl) {
+    return (
+      <span className={`${className ?? ""} image-glyph`} data-testid="image-glyph">
+        <ThumbGlyph path={path} withheld={false} />
+      </span>
+    );
+  }
+  const url = image.url;
+  return <img src={url} alt={alt} className={className} onError={() => setBrokenUrl(url)} />;
 }
 
 interface ImageViewProps {
@@ -75,7 +88,7 @@ export function ImageView({ runId, preview, onOpenPath }: ImageViewProps) {
   const blur = useViewPrefs((s) => s.mediaBlur);
 
   return (
-    <div className="image-view" data-media-blur={blur ? "on" : undefined}>
+    <div className="image-view" data-testid="image-view" data-media-blur={blur ? "on" : undefined}>
       <div className="image-main">
         <figure className="image-figure">
           <AuthImage
@@ -164,7 +177,7 @@ export function ImageView({ runId, preview, onOpenPath }: ImageViewProps) {
               같은 폴더 이미지 {galleryOffset + 1}–{galleryOffset + gallery.data.items.length} /{" "}
               {gallery.data.total.toLocaleString("ko-KR")}
             </p>
-            <ul className="image-strip">
+            <ul className="image-strip" data-testid="image-strip">
               {gallery.data.items.map((item) => (
                 <li key={item.path}>
                   <button
@@ -172,7 +185,11 @@ export function ImageView({ runId, preview, onOpenPath }: ImageViewProps) {
                     className={`image-thumb${item.is_anchor ? " is-current" : ""}`}
                     aria-current={item.is_anchor ? "true" : undefined}
                     aria-disabled={item.is_anchor ? "true" : undefined}
-                    title={item.is_anchor ? "현재 보고 있는 이미지입니다." : item.path}
+                    title={
+                      item.is_anchor
+                        ? "현재 보고 있는 이미지입니다."
+                        : (evidencePathOf(item.path).path ?? item.name)
+                    }
                     onClick={() => {
                       if (!item.is_anchor) onOpenPath(item.path);
                     }}

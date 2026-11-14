@@ -25,6 +25,7 @@ import {
 import { getRelatedMedia } from "../../api/reviewTools";
 import { errorText } from "../viewer/useAsync";
 import "./explorers.css";
+import { evidencePathOf } from "../../utils/pathDisplay";
 
 export type MediaPanelMode = "related" | "similar" | "groups";
 
@@ -114,7 +115,12 @@ function ItemList({
     <ul aria-label={label}>
       {items.map((item) => (
         <li key={item.path}>
-          <button type="button" className="view-link" title={item.path} onClick={() => onPick(item)}>
+          <button
+            type="button"
+            className="view-link"
+            title={evidencePathOf(item.path).path ?? item.name}
+            onClick={() => onPick(item)}
+          >
             {item.name}
           </button>
           <span className="explorer-muted"> {item.detail}</span>

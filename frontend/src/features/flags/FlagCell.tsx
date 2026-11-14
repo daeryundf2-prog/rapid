@@ -2,14 +2,16 @@
  * 특이사항 UI (viewer-families plan U-F4): grade chips (A 빨강 · B 주황 · C 회색 — the text and
  * border use the status colours that already pass the contrast gate on every row surface), the
  * evidence popover (근거 필드 · 오탐 주의 · 출처 링크 · "검증 필요" for provisional rules) and
- * the list used by the viewer banner.
+ * the list used by the viewer banner. The popover also names what the rule was checked against
+ * (catalogue `validation`, R6 S4: "검증: 합성 픽스처만" / "검증: 실데이터 2건(…)").
  */
 
 import { useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Popover } from "../../components/Popover";
 import type { GridRow } from "../../contracts/collection";
-import { ruleById } from "./catalog";
+import { evidenceFieldLabel, evidenceValueText } from "../grid/valueLabels";
+import { familyById, ruleById } from "./catalog";
 import {
   evidenceEntries,
   flagCitation,
@@ -18,6 +20,7 @@ import {
   type RowFlag,
   rowFlags,
   topGrade,
+  validationLine,
 } from "./flags";
 import "./flags.css";
 
@@ -39,6 +42,7 @@ export function GradeChip({ flag, compact = false }: { flag: RowFlag; compact?: 
 export function FlagDetail({ flag, headingLevel = 3 }: { flag: RowFlag; headingLevel?: 3 | 4 }) {
   const rule = ruleById(flag.id);
   const evidence = evidenceEntries(flag);
+  const validation = validationLine(rule);
   const Heading = headingLevel === 3 ? "h3" : "h4";
   return (
     <section
@@ -58,12 +62,22 @@ export function FlagDetail({ flag, headingLevel = 3 }: { flag: RowFlag; headingL
       {rule?.rationale_ko ? <p className="flag-detail-text">{rule.rationale_ko}</p> : null}
       {evidence.length ? (
         <dl className="flag-evidence">
-          {evidence.map(([key, value]) => (
-            <div key={key}>
-              <dt className="mono">{key}</dt>
-              <dd className="mono">{value || "—"}</dd>
-            </div>
-          ))}
+          {evidence.map(([key, value]) => {
+            // Korean field name (catalogue column label, else the record-key label); the raw key and
+            // value stay the tooltip (R7 L3, C-R4).
+            const label = evidenceFieldLabel(rule ? familyById(rule.family) : undefined, key);
+            const shown = evidenceValueText(rule?.family, key, value);
+            return (
+              <div key={key}>
+                <dt title={key} className={label ? undefined : "mono"} data-raw-ok={label ? undefined : ""}>
+                  {label ?? key}
+                </dt>
+                <dd className="mono" title={shown !== value ? `원래 값: ${value}` : undefined}>
+                  {shown || "—"}
+                </dd>
+              </div>
+            );
+          })}
         </dl>
       ) : (
         <p className="flag-detail-text flag-muted">근거 필드가 기록되지 않았습니다.</p>
@@ -76,7 +90,7 @@ export function FlagDetail({ flag, headingLevel = 3 }: { flag: RowFlag; headingL
       ) : null}
       {rule?.sources.length ? (
         <p className="flag-detail-text flag-sources">
-          <strong>출처:</strong>{" "}
+          <strong>이 지표의 출처:</strong>{" "}
           {rule.sources.map((url, index) => (
             <span key={url}>
               {index ? " · " : ""}
@@ -87,7 +101,20 @@ export function FlagDetail({ flag, headingLevel = 3 }: { flag: RowFlag; headingL
           ))}
         </p>
       ) : null}
-      <p className="flag-detail-text flag-muted mono" title="보고서 인용 형식(지표 id@버전 + 근거)">
+      {validation ? (
+        <p
+          className="flag-detail-text flag-muted flag-validation"
+          data-testid="flag-validation"
+          title={rule?.validation?.notes_ko || undefined}
+        >
+          {validation}
+        </p>
+      ) : null}
+      <p
+        className="flag-detail-text flag-muted mono"
+        title="보고서 인용 형식(지표 id@버전 + 근거)"
+        data-raw-ok=""
+      >
         {flagCitation(flag, rule)}
       </p>
     </section>

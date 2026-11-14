@@ -12,7 +12,11 @@ from typing import Any
 
 from rapidtriage.cli import build_parser, main
 from rapidtriage.core.rules import load_rule_set
+from tests import quiet_media_checks
 from tests.test_rapidtriage_run import build_run_fixture
+
+setUpModule = quiet_media_checks.setUpModule
+tearDownModule = quiet_media_checks.tearDownModule
 
 
 def set_mtime(path: Path, value: datetime) -> None:

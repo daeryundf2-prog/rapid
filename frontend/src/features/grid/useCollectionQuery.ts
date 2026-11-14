@@ -1,7 +1,7 @@
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError } from "../../api/client";
-import type { RawPage } from "../../api/collections";
+import { type ListNotice, type RawPage, SCAN_BUDGET_STOPPED } from "../../api/collections";
 import type { TreeNode } from "../../api/runs";
 import {
   type CollectionQuery,
@@ -11,6 +11,7 @@ import {
   type ServerSortState,
 } from "../../contracts/collection";
 import { useTimezone } from "../../state/hooks";
+import { searchCancelKey, useSearchState } from "../case/searchState";
 import { applyColumnFilters } from "../filters/columnFilters";
 import {
   applyClientFilters,
@@ -25,8 +26,9 @@ import { categoryInfo, isArtifactCategoryId } from "../tree/categories";
 import { useRoute } from "./adapter";
 import { collectionDef } from "./columns";
 import { promotedColumn } from "./columns/fieldColumns";
+import { filesServerSort } from "./columns/files";
 import { serverPathFilter } from "./gridUtils";
-import { overlayReview, useReviewMap } from "./reviewMap";
+import { overlayReview, type ReviewMap, useReviewMap } from "./reviewMap";
 import type { CollectionDef, ColumnSpec } from "./types";
 
 /** Server page size (plan: 250). */
@@ -73,9 +75,20 @@ export function artifactTypesOfTree(nodes: readonly TreeNode[] | undefined, kind
 
 export interface CollectionQueryResult {
   def: CollectionDef;
+  /** The query the pages are fetched with (filters folded in: conditions, server text …). */
+  query: CollectionQuery;
   pageSize: number;
   /** Total rows after server filters; null while unknown. */
   total: number | null;
+  /**
+   * Rows the server holds for this query (after server filters, before loaded-row filters); null
+   * while unknown. The toolbar badge "불러온 N / 전체 M" reads it (plan r7 §3.2, C-D1).
+   */
+  serverTotal: number | null;
+  /** Display index of a loaded row by key (-1 when no loaded page holds it). */
+  indexOfKey: (rowKey: string) => number;
+  /** Filter-bar conditions the server cannot apply run over the loaded rows only. */
+  clientFiltering: boolean;
   /** Number of server pages (1 for whole collections); null while total is unknown. */
   pageCount: number | null;
   /** Pages currently loaded. */
@@ -85,6 +98,12 @@ export interface CollectionQueryResult {
   getRow: (index: number) => GridRow | undefined;
   /** Every loaded row in collection order (client filter/sort run over this). */
   loadedRows: GridRow[];
+  /**
+   * `loadedRows` in chunks whose array identity survives a page load (one chunk per loaded page;
+   * one chunk = `loadedRows` while client filters apply). Facts derived from the loaded rows are
+   * cached per chunk, so a new page costs that page's rows, not every loaded row again.
+   */
+  loadedPages: readonly (readonly GridRow[])[];
   /** Ask for the pages covering [start, end] (+ the next page, prefetched). */
   ensureRange: (start: number, end: number) => void;
   /** Ask for the first not-yet-loaded page after the loaded ones (compact/filter mode scrolling). */
@@ -119,6 +138,17 @@ export interface CollectionQueryResult {
    * null while unknown (more pages / scan cap), undefined when the server did not filter.
    */
   serverMatched: number | null | undefined;
+  /** The search collection's request was cancelled with Esc (nothing is requested until resubmitted). */
+  searchCancelled: boolean;
+  /**
+   * Rows the server certainly holds (T-020): `serverTotal` when counted, else the largest
+   * `total_lower_bound` of the loaded pages (never below the loaded rows). The UI reads "n건 이상".
+   */
+  totalLowerBound: number | null;
+  /** A loaded page's filter scan was stopped by the server's time budget (`budget_stopped`). */
+  budgetStopped: boolean;
+  /** The server's `notice` of the loaded pages (a budget stop first); null when every page is complete. */
+  notice: ListNotice | null;
 }
 
 /** Grid column by id for column filters: the collection's columns, else a promoted `f:<key>` column. */
@@ -136,9 +166,13 @@ export function columnResolver(
 /** Re-request interval while the server builds a sort index (plan artifact-columns §4.2). */
 export const SORT_POLL_MS = 1000;
 
-/** The sort the server applies: artifacts of exactly one kind, or one analysis job's rows. */
+/**
+ * The sort the server applies: artifacts of exactly one kind, one analysis job's rows, or the
+ * files list on its column-index keys (이름 · 경로 · 크기 · 수정 · NTFS 생성 · 특이사항).
+ */
 export function serverSortOf(query: CollectionQuery): CollectionQuery["sort"] {
   if (!query.sort) return undefined;
+  if (query.ref.id === "files") return filesServerSort(query);
   if (query.ref.id === "artifacts" && query.ref.kind) return query.sort;
   if (query.ref.id === "analysis" && query.ref.analysisId) return query.sort;
   return undefined;
@@ -151,6 +185,38 @@ export function categoryScopeText(category: NonNullable<CollectionQueryResult["c
 
 /** Row mapping is memoised per raw page object (pages are immutable in the query cache). */
 const mappedPages = new WeakMap<RawPage, GridRow[]>();
+/**
+ * Review-overlaid rows per mapped page and review map: a newly loaded page leaves the other
+ * pages' arrays (and their rows) as they were, so per-page derived data stays cached.
+ */
+const reviewedPages = new WeakMap<GridRow[], { map: ReviewMap; rows: GridRow[] }>();
+
+function reviewPage(rows: GridRow[], reviewMap: ReviewMap): GridRow[] {
+  const hit = reviewedPages.get(rows);
+  if (hit && hit.map === reviewMap) return hit.rows;
+  const out = rows.map((row) => overlayReview(row, reviewMap));
+  reviewedPages.set(rows, { map: reviewMap, rows: out });
+  return out;
+}
+
+/** Facts the filter bar's 유형 / 태그 menus read, per loaded page (merged across pages). */
+interface PageOptions {
+  types: Map<string, number>;
+  tags: Set<string>;
+}
+const pageOptions = new WeakMap<readonly GridRow[], PageOptions>();
+
+function optionsOfPage(rows: readonly GridRow[]): PageOptions {
+  const cached = pageOptions.get(rows);
+  if (cached) return cached;
+  const out: PageOptions = { types: new Map(), tags: new Set() };
+  for (const row of rows) {
+    if (row.artifactType) out.types.set(row.artifactType, (out.types.get(row.artifactType) ?? 0) + 1);
+    for (const tag of row.tags) out.tags.add(tag);
+  }
+  pageOptions.set(rows, out);
+  return out;
+}
 
 function mapPage(def: CollectionDef, page: RawPage, ref: CollectionQuery["ref"]): GridRow[] {
   const cached = mappedPages.get(page);
@@ -177,8 +243,9 @@ export function collectionQueryKey(runId: string | null, query: CollectionQuery,
     (query.ref.id === "artifacts" && !query.ref.kind) || query.ref.id === "files" || query.ref.id === "docs"
       ? (query.ref.category ?? "")
       : "",
-    def.source === "whole" ? (query.search ?? null) : null,
-    def.source === "whole" ? (query.extension ?? null) : null,
+    // The search collection pages on the server: its spec is part of every page's key.
+    def.source === "whole" || query.ref.id === "search" ? (query.search ?? null) : null,
+    def.source === "whole" || query.ref.id === "search" ? (query.extension ?? null) : null,
     query.ref.id === "analysis" ? (query.ref.analysisId ?? "") : "",
     // 파일 시스템 탐색기 folder / special node (files only): another folder is another listing.
     query.ref.id === "files" && (query.ref.dir !== undefined || query.ref.special)
@@ -203,6 +270,12 @@ export function collectionQueryKey(runId: string | null, query: CollectionQuery,
     query.ref.id === "analysis" && query.detailFilters ? JSON.stringify(query.detailFilters) : "",
     // Row conditions (r4 §2.3: time, 요일·시간대, 부분 결과, 콘텐츠 유형, 위치), artifacts · files · timeline.
     query.rowConditions ? JSON.stringify(query.rowConditions) : "",
+    // Timeline server search (`q=`) and display grouping (`group=1`, on unless false).
+    query.ref.id === "timeline"
+      ? `${query.text?.trim() ?? ""}|${query.group === true ? "group" : "flat"}`
+      : "",
+    // Files server text filter (`q=` over name/path, plan r7 §3.2 L2).
+    query.ref.id === "files" ? (query.text?.trim() ?? "") : "",
   ] as const;
 }
 
@@ -257,6 +330,7 @@ export function useCollectionQuery(
       rawQuery.sort?.key,
       rawQuery.sort?.order,
       rawQuery.rowConditions,
+      rawQuery.group,
       filters,
       serverTypes,
       timezone,
@@ -287,6 +361,12 @@ export function useCollectionQuery(
   // While the server builds a sort index, page 0 is polled and no later page is requested.
   const gateTotal = page0?.sort?.status === "building" ? null : (page0?.total ?? null);
   const sortBuilding = page0?.sort?.status === "building";
+  // R7 P2: a search cancelled with Esc in the top bar is not requested again until resubmitted.
+  const cancelledSearch = useSearchState((s) => s.cancelled);
+  const searchCancelled =
+    query.ref.id === "search" &&
+    cancelledSearch !== null &&
+    cancelledSearch === searchCancelKey(runId, query.search?.keywords ?? []);
 
   const results = useQueries({
     queries: firstPass.map((p) => ({
@@ -295,6 +375,7 @@ export function useCollectionQuery(
         def.fetch(runId as string, { ...query, offset: p * pageSize, limit: pageSize }, signal),
       enabled:
         runId !== null &&
+        !searchCancelled &&
         (p === 0 ||
           (!sortBuilding &&
             (gateTotal !== null
@@ -324,8 +405,7 @@ export function useCollectionQuery(
       const data = pageData[i];
       if (!data) return;
       const mapped = mapPage(def, data, rawQuery.ref);
-      const rows =
-        reviewMap && reviewMap.size > 0 ? mapped.map((row) => overlayReview(row, reviewMap)) : mapped;
+      const rows = reviewMap && reviewMap.size > 0 ? reviewPage(mapped, reviewMap) : mapped;
       map.set(p, def.source === "whole" ? statusFilter(rows, rawQuery.ref.status) : rows);
     });
     return map;
@@ -347,12 +427,26 @@ export function useCollectionQuery(
     [overlay, patched],
   );
 
-  const unfilteredRows = useMemo(() => {
+  // Patched pages per overlay: one optimistic mark re-maps every page once, later page loads
+  // leave the other pages' arrays alone.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new overlay starts a new cache
+  const overlaidPages = useMemo(() => new WeakMap<GridRow[], GridRow[]>(), [overlay]);
+  const unfilteredPages = useMemo(() => {
     const pages = [...mappedByPage.keys()].sort((a, b) => a - b);
-    const rows = pages.flatMap((p) => mappedByPage.get(p) ?? []);
-    if (overlay.size === 0) return rows;
-    return rows.map((row) => applyOverlay(row));
-  }, [mappedByPage, overlay, applyOverlay]);
+    return pages.map((p) => {
+      const rows = mappedByPage.get(p) ?? [];
+      if (overlay.size === 0) return rows;
+      const hit = overlaidPages.get(rows);
+      if (hit) return hit;
+      const out = rows.map((row) => applyOverlay(row));
+      overlaidPages.set(rows, out);
+      return out;
+    });
+  }, [mappedByPage, overlay, overlaidPages, applyOverlay]);
+  const unfilteredRows = useMemo(
+    () => (unfilteredPages.length === 1 ? (unfilteredPages[0] as GridRow[]) : unfilteredPages.flat()),
+    [unfilteredPages],
+  );
 
   // Client-side filters see loaded rows only; the grid then treats the result like a whole collection.
   const clientFilters = useMemo(() => clientOnlyFilters(filters, plan), [filters, plan]);
@@ -367,6 +461,10 @@ export function useCollectionQuery(
       ? applyColumnFilters(rows, clientFilters.columns, resolveColumn)
       : rows;
   }, [clientFiltering, unfilteredRows, clientFilters, resolveColumn, timezone]);
+  const loadedPages = useMemo(
+    () => (clientFiltering ? [loadedRows] : unfilteredPages),
+    [clientFiltering, loadedRows, unfilteredPages],
+  );
 
   const serverTotal =
     def.source === "whole" ? (firstData ? (mappedByPage.get(0)?.length ?? 0) : null) : total0;
@@ -412,6 +510,19 @@ export function useCollectionQuery(
     if (clientFiltering) requestPages(0, (FILTER_AUTOLOAD_PAGES - 1) * pageSize);
   }, [clientFiltering, requestPages, pageSize]);
 
+  const indexOfKey = useCallback(
+    (rowKey: string): number => {
+      if (def.source === "whole" || clientFiltering)
+        return loadedRows.findIndex((row) => row.rowKey === rowKey);
+      for (const [page, rows] of mappedByPage) {
+        const at = rows.findIndex((row) => row.rowKey === rowKey);
+        if (at >= 0) return page * pageSize + at;
+      }
+      return -1;
+    },
+    [def.source, clientFiltering, loadedRows, mappedByPage, pageSize],
+  );
+
   const lastData = pageData.filter((d): d is RawPage => !!d).at(-1);
   const canLoadMore =
     def.source === "paged" &&
@@ -444,18 +555,20 @@ export function useCollectionQuery(
     if (passive) return;
     // Server-known types first: a 유형 filter narrows the loaded rows to the picked types,
     // and the menu must still offer the others.
+    // Per loaded page (cached), merged: a new page adds its own rows' facts only.
     const types = new Set<string>(serverTypes);
     const tags = new Set<string>();
     const counts: Record<string, number> = {};
-    for (const row of unfilteredRows) {
-      if (row.artifactType) {
-        types.add(row.artifactType);
-        counts[row.artifactType] = (counts[row.artifactType] ?? 0) + 1;
+    for (const page of unfilteredPages) {
+      const facts = optionsOfPage(page);
+      for (const [type, n] of facts.types) {
+        types.add(type);
+        counts[type] = (counts[type] ?? 0) + n;
       }
-      for (const tag of row.tags) tags.add(tag);
+      for (const tag of facts.tags) tags.add(tag);
     }
     setOptions([...types].sort().slice(0, 200), [...tags].sort().slice(0, 200), counts);
-  }, [unfilteredRows, serverTypes, setOptions, passive]);
+  }, [unfilteredPages, serverTypes, setOptions, passive]);
 
   const categoryId = query.ref.id === "artifacts" && !query.ref.kind ? query.ref.category : undefined;
   const categoryKinds = firstData?.kinds?.length ?? null;
@@ -518,15 +631,36 @@ export function useCollectionQuery(
 
   const firstError = results.find((r) => r.error)?.error ?? null;
 
+  // T-020 partial results: a budget stop (any loaded page) and the server's lower bound.
+  const budgetStopped = pageData.some((d) => d?.budgetStopped === true);
+  const notice =
+    pageData.find((d) => d?.notice?.code === SCAN_BUDGET_STOPPED)?.notice ??
+    pageData.find((d) => d?.notice)?.notice ??
+    null;
+  const totalLowerBound =
+    serverTotal !== null
+      ? serverTotal
+      : firstData
+        ? Math.max(
+            unfilteredRows.length + (canLoadMore ? 1 : 0),
+            ...pageData.map((d) => d?.totalLowerBound ?? 0),
+          )
+        : null;
+
   return {
     def,
+    query,
     pageSize,
     total,
+    serverTotal,
+    indexOfKey,
+    clientFiltering,
     pageCount,
     pagesLoaded: mappedByPage.size,
     loadedCount: unfilteredRows.length,
     getRow,
     loadedRows,
+    loadedPages,
     ensureRange,
     loadMore,
     isLoading: results[0]?.isLoading ?? false,
@@ -549,5 +683,9 @@ export function useCollectionQuery(
     clientColumnFilters: plan.clientColumns.length > 0,
     serverColumnFilters: plan.serverColumns.length > 0,
     serverMatched,
+    searchCancelled,
+    totalLowerBound,
+    budgetStopped,
+    notice,
   };
 }
