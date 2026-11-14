@@ -56,6 +56,9 @@ jobs:
         run: python -m unittest tests.test_script_exec_bits tests.test_architecture
 
       - name: Run tests (full tier incl. slow modules)
+        # Same wall-clock allowance as the PR gate (tests/_timing.py).
+        env:
+          RAPIDTRIAGE_TEST_TIME_SCALE: "3"
         run: python scripts/dev/run-tests.py --tier full --workers 4 --timeout-floor 300 --timeout-factor 3 --state-dir run-tests-state --json-out run-tests-full.json
 
       - name: Upload test summary
