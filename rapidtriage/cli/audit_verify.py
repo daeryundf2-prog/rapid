@@ -1,9 +1,11 @@
 """``rapidtriage audit-verify <file> [--json]``: check an export audit chain (R8 T-359).
 
 Calls the T-029 check (``core.audit.verify_audit_chain``). Exit 0 when the chain is intact
-(lines written before the chain existed are counted as ``pre_chain_lines``, not broken), exit 3
-with ``first_broken_line`` when a line was changed, removed or cannot be read, or when the file
-holds no audit record at all, exit 4 when the file is missing or cannot be read (r8-contracts D.8).
+(R7-format lines written before the chain existed are counted as ``pre_chain_lines`` /
+``unchecked_lines``, not broken), exit 3 with ``first_broken_line`` when a line was changed,
+removed, cut from the head or cannot be read, and also exit 3 (``status: unverifiable``) when
+nothing chained could be checked (no record, no chained record in a chain-era file, a sidecar
+without its history); exit 4 when the file is missing or cannot be read (r8-contracts D.8).
 ``--expect-last <sha256>`` compares the last ``record_sha256`` with a value kept elsewhere; without
 it the output lists what the check cannot prove (``not_proven``: tail deletion, whole rewrite).
 """
@@ -36,11 +38,17 @@ def handle_audit_verify(args: argparse.Namespace, parser: argparse.ArgumentParse
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
         print(f"감사 사슬: {path}")
-        print(f"기록 {report['records']}줄 · 사슬 {report['chained']}줄 · {report['pre_chain_label']}")
+        print(
+            f"기록 {report['records']}줄 · 사슬 {report['chained']}줄 · {report['pre_chain_label']}"
+            f" · 검사하지 않은 줄 {report['unchecked_lines']}"
+        )
         if report["ok"]:
             print("결과: 온전함")
         elif report["records"] == 0 and report["first_broken_line"] == 0:
             print("결과: 확인 불가 — 감사 기록이 0줄")
+        elif report["status"] == "unverifiable":
+            for reason in [*report["unverifiable"], *(item["reason"] for item in report["broken_lines"])]:
+                print(f"결과: {reason}")
         else:
             print(f"결과: 깨짐 — 첫 번째 깨진 줄 {report['first_broken_line']}")
             for item in report["broken_lines"]:
