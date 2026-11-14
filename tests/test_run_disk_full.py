@@ -14,21 +14,25 @@ import json
 import os
 import sqlite3
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from rapidtriage.core import run as run_module
+from rapidtriage.core.audit import EXPORT_AUDIT_LOG_NAME
 from rapidtriage.core.jobs import RunJob, RunJobStore, RunRequest
 from rapidtriage.core.run import run_triage_mode
 from rapidtriage.core.run.progress import RUN_PROGRESS_FILE_NAME
 from rapidtriage.core.run.steps import (
     OUTPUT_DISK_FULL,
+    FreeSpaceSampler,
     OutputDiskFull,
     classify_step_exception,
     extraction_disk_full_error,
     is_disk_full_error,
     remove_partial_outputs,
+    snapshot_existing_outputs,
 )
 from tests import quiet_media_checks
 from tests.test_rapidtriage_run import build_run_fixture
@@ -206,14 +210,121 @@ class DiskFullClassificationTests(unittest.TestCase):
             old = out / "rapidtriage-old.json"
             old.write_text('{"a": 1', encoding="utf-8")
             os.utime(old, (1000, 1000))
-            named = out / "report.md"
+            named = out / "rapidtriage-report.md"
             named.write_text("# half", encoding="utf-8")
             error = OSError(errno.ENOSPC, "full", str(named))
             removed, removed_bytes = remove_partial_outputs(out, error, since_epoch=10_000)
-            self.assertEqual(removed, ["report.md"])
+            self.assertEqual(removed, ["rapidtriage-report.md"])
             self.assertEqual(removed_bytes, len("# half"))
             self.assertTrue(old.exists())
+            # WB-12 P1-1: a named file without the app's naming is not ours to remove.
+            foreign = out / "report.md"
+            foreign.write_text("# half", encoding="utf-8")
+            removed, _ = remove_partial_outputs(out, OSError(errno.ENOSPC, "full", str(foreign)), since_epoch=10_000)
+            self.assertEqual(removed, [])
+            self.assertTrue(foreign.exists())
 
+
+class DiskFullWb12ReviewTests(unittest.TestCase):
+    """R8 WB-12 review P1-1 (histories, filename2, pre-existing outputs) and P1-2 (sampled free space)."""
+
+    def test_torn_export_audit_history_is_kept_unchanged_and_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            history = out / EXPORT_AUDIT_LOG_NAME
+            data = b'{"command":"run","record_sha256":"aa"}\n{"command":"export","previous_rec'
+            history.write_bytes(data)
+            other = out / "rapidtriage-run.log"
+            other.write_bytes(b"started\nhalf")
+            # Named by the error too: still never removed.
+            error = OSError(errno.ENOSPC, "full", str(history))
+            failure = classify_step_exception(error, stage="report", output_dir=out, since_epoch=0)
+            self.assertEqual(history.read_bytes(), data)
+            self.assertTrue(other.exists())
+            self.assertEqual(failure.removed_files, [])
+            self.assertEqual(failure.torn_histories, sorted([EXPORT_AUDIT_LOG_NAME, "rapidtriage-run.log"]))
+            self.assertIn(f"감사 기록 마지막 줄 불완전: {EXPORT_AUDIT_LOG_NAME}", str(failure))
+
+    def test_rename_destination_and_preexisting_outputs_are_kept(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            finished = out / "rapidtriage-summary.json"
+            finished.write_text('{"done": true}', encoding="utf-8")
+            os.utime(finished, (1000, 1000))
+            temp = out / "rapidtriage-summary.json.tmp"
+            temp.write_text('{"half', encoding="utf-8")
+            # os.replace(tmp, final) failed: filename = tmp, filename2 = the finished earlier output.
+            error = OSError(errno.ENOSPC, "full", str(temp), None, str(finished))
+            removed, _ = remove_partial_outputs(out, error, since_epoch=10_000)
+            self.assertEqual(removed, ["rapidtriage-summary.json.tmp"])
+            self.assertTrue(finished.exists())
+            # Named by the error with a fresh mtime but present before the run (a resume into the
+            # same folder): kept. Only a file this run created may go by name.
+            report = out / "rapidtriage-report.csv"
+            report.write_text("a,b\n", encoding="utf-8")
+            preexisting = snapshot_existing_outputs(out)
+            report.write_text("a,b\n1,", encoding="utf-8")
+            error = OSError(errno.ENOSPC, "full", str(report))
+            removed, _ = remove_partial_outputs(out, error, since_epoch=0, preexisting=preexisting)
+            self.assertEqual(removed, [])
+            self.assertTrue(report.exists())
+            removed, _ = remove_partial_outputs(out, error, since_epoch=0)  # created by this run
+            self.assertEqual(removed, ["rapidtriage-report.csv"])
+
+    def test_sampled_minimum_catches_a_large_file_the_engine_unlinked(self) -> None:
+        result = {"command_history": [{"stage": "native-filesystem-recovery", "errors": 1}]}
+        gib = 1 << 30
+        # A 9 GiB pagefile fills the volume; the engine unlinks it; afterwards 10 GiB are free again.
+        sequence = [10 * gib, 7 * gib, 4 * gib, 1 * gib, 20 << 20, 10 * gib]
+        usage = mock.Mock(side_effect=[mock.Mock(free=value) for value in sequence])
+        sampler = FreeSpaceSampler(Path("."), interval=0, usage=usage)
+        for _ in sequence:
+            sampler.sample()
+        self.assertEqual(sampler.min_free, 20 << 20)
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            with mock.patch("rapidtriage.core.run.disk_full.shutil.disk_usage", return_value=mock.Mock(free=10 * gib)):
+                self.assertIsNone(extraction_disk_full_error(out, result))  # the old after-only signal misses it
+                error = extraction_disk_full_error(out, result, sampler=sampler)
+                self.assertIsNotNone(error)
+                failure = classify_step_exception(error, stage="prepare", output_dir=out, since_epoch=0)
+        self.assertIn("추출 중 최소 여유 20.0 MB", str(failure))
+
+    def test_sampled_minimum_below_the_observed_write_rate_is_full(self) -> None:
+        # Sampling missed the last moment: 3 GiB written per sample, last sample 2 GiB free.
+        gib = 1 << 30
+        sequence = [11 * gib, 8 * gib, 5 * gib, 2 * gib, 11 * gib]
+        sampler = FreeSpaceSampler(Path("."), interval=0, usage=mock.Mock(side_effect=[mock.Mock(free=v) for v in sequence]))
+        for _ in sequence:
+            sampler.sample()
+        self.assertEqual(sampler.near_full_threshold(), 6 * gib)
+        with mock.patch("rapidtriage.core.run.disk_full.shutil.disk_usage", return_value=mock.Mock(free=11 * gib)):
+            self.assertIsNotNone(extraction_disk_full_error(Path("."), {"command_history": [{"errors": 2}]}, sampler=sampler))
+
+    def test_room_all_along_or_no_errors_is_not_disk_full(self) -> None:
+        gib = 1 << 30
+        sequence = [100 * gib, 99 * gib, 98 * gib, 98 * gib]
+        sampler = FreeSpaceSampler(Path("."), interval=0, usage=mock.Mock(side_effect=[mock.Mock(free=v) for v in sequence]))
+        for _ in sequence:
+            sampler.sample()
+        with mock.patch("rapidtriage.core.run.disk_full.shutil.disk_usage", return_value=mock.Mock(free=98 * gib)):
+            self.assertIsNone(extraction_disk_full_error(Path("."), {"command_history": [{"errors": 3}]}, sampler=sampler))
+        low = FreeSpaceSampler(Path("."), interval=0, usage=mock.Mock(return_value=mock.Mock(free=1)))
+        low.sample()
+        self.assertIsNone(extraction_disk_full_error(Path("."), {"command_history": [{"errors": 0}]}, sampler=low))
+
+    def test_sampler_thread_samples_until_stopped(self) -> None:
+        usage = mock.Mock(return_value=mock.Mock(free=5))
+        with FreeSpaceSampler(Path("."), interval=0.01, usage=usage) as sampler:
+            deadline = 200
+            while sampler.samples < 3 and deadline:
+                deadline -= 1
+                threading.Event().wait(0.01)
+        self.assertGreaterEqual(sampler.samples, 3)
+        self.assertEqual(sampler.summary()["min_free_bytes"], 5)
+        failing = FreeSpaceSampler(Path("."), interval=0, usage=mock.Mock(side_effect=OSError("gone")))
+        self.assertIsNone(failing.sample())
+        self.assertIsNone(failing.min_free)
 
 class DiskFullRunTests(unittest.TestCase):
     def setUp(self) -> None:

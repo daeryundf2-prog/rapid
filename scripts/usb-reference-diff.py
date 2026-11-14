@@ -63,8 +63,8 @@ def build_usb_comparison(args: argparse.Namespace, warnings: list[str]) -> rd.Co
             usb_row(
                 serial,
                 rd.pick(row, *REF_NAME),
-                rd.safe_timestamp(rd.pick(row, *REF_FIRST), args.reference_tzinfo, warnings, context),
-                rd.safe_timestamp(rd.pick(row, *REF_LAST), args.reference_tzinfo, warnings, context),
+                rd.safe_timestamp(rd.pick(row, *REF_FIRST), args.reference_tzinfo, warnings, context, "first_connected"),
+                rd.safe_timestamp(rd.pick(row, *REF_LAST), args.reference_tzinfo, warnings, context, "last_connected"),
             )
         )
     ours: list[rd.KeyedRow] = []
@@ -77,8 +77,8 @@ def build_usb_comparison(args: argparse.Namespace, warnings: list[str]) -> rd.Co
         candidate = usb_row(
             serial,
             rd.rapid_field(row, "friendly_name", "device_name"),
-            rd.safe_timestamp(rd.rapid_field(row, "first_install_at"), args.ours_tzinfo, warnings, context),
-            rd.safe_timestamp(rd.rapid_field(row, "last_arrival_at"), args.ours_tzinfo, warnings, context),
+            rd.safe_timestamp(rd.rapid_field(row, "first_install_at"), args.ours_tzinfo, warnings, context, "first_connected"),
+            rd.safe_timestamp(rd.rapid_field(row, "last_arrival_at"), args.ours_tzinfo, warnings, context, "last_connected"),
         )
         kept = by_serial.get(serial)
         if kept is None:

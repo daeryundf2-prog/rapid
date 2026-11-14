@@ -5,6 +5,10 @@
  * Korean message with 다시 시도 (a fresh import, not React's cached rejection) and 새로 고침 —
  * never a blank pane. Errors thrown while *rendering* the loaded screen are not load failures:
  * they go on to the region's RegionBoundary unchanged.
+ *
+ * A dialog (R8 WB-12 review P2-13) passes `Frame` (its modal) and `closeOf`: the loading status and
+ * the failure message then render inside that frame, which has 닫기 (and Esc), never inline where the
+ * dialog host sits. A failed chunk is imported again on the next mount (P2-15), not replayed.
  */
 
 import {
@@ -42,9 +46,18 @@ export function LazyFallback({ label }: { label: string }) {
   );
 }
 
+/** What wraps the loading status and the failure message of a framed lazy component (a dialog). */
+export interface LazyFrameProps {
+  label: string;
+  onClose?: () => void;
+  children: ReactNode;
+}
+
 interface LoadBoundaryProps {
   label: string;
   onRetry: () => void;
+  Frame?: ComponentType<LazyFrameProps>;
+  onClose?: () => void;
   children: ReactNode;
 }
 
@@ -65,7 +78,8 @@ class LoadBoundary extends Component<LoadBoundaryProps, { error: Error | null }>
     if (!error) return this.props.children;
     // A render error of the loaded screen belongs to the region boundary above.
     if (!(error instanceof ChunkLoadError)) throw error;
-    return (
+    const { Frame, onClose, label } = this.props;
+    const message = (
       <div className="pane-empty pane-empty-block region-error" role="alert" data-testid="lazy-view-error">
         <p>
           <strong>{this.props.label} 화면을 불러오지 못했습니다.</strong>
@@ -80,10 +94,29 @@ class LoadBoundary extends Component<LoadBoundaryProps, { error: Error | null }>
           <button type="button" className="button ghost" onClick={() => window.location.reload()}>
             새로 고침
           </button>
+          {onClose && !Frame ? (
+            <button type="button" className="button ghost" onClick={onClose}>
+              닫기
+            </button>
+          ) : null}
         </div>
       </div>
     );
+    return Frame ? (
+      <Frame label={label} onClose={onClose}>
+        {message}
+      </Frame>
+    ) : (
+      message
+    );
   }
+}
+
+export interface LazyViewOptions<P> {
+  /** Wraps the loading status and the failure message (a dialog's modal frame). */
+  Frame?: ComponentType<LazyFrameProps>;
+  /** The component's own close action, offered by the frame / failure message (닫기). */
+  closeOf?: (props: P) => (() => void) | undefined;
 }
 
 export type LazyViewComponent<P extends object> = ((props: P) => ReactNode) & {
@@ -99,13 +132,17 @@ export type LazyViewComponent<P extends object> = ((props: P) => ReactNode) & {
 export function lazyView<P extends object>(
   label: string,
   load: () => Promise<ComponentType<P>>,
+  options: LazyViewOptions<P> = {},
 ): LazyViewComponent<P> {
+  const { Frame, closeOf } = options;
   let pending: Promise<{ default: ComponentType<P> }> | null = null;
+  let failed = false;
   const fetchChunk = () => {
     pending ??= load().then(
       (component) => ({ default: component }),
       (error: unknown) => {
         pending = null; // the next attempt imports again
+        failed = true;
         throw new ChunkLoadError(label, error);
       },
     );
@@ -115,15 +152,31 @@ export function lazyView<P extends object>(
   let Lazy = make();
 
   function LazyView(props: P) {
-    const [attempt, setAttempt] = useState(0);
+    // A remount after a failed load imports again instead of replaying React's cached rejection.
+    const [attempt, setAttempt] = useState(() => {
+      if (failed) {
+        failed = false;
+        Lazy = make();
+      }
+      return 0;
+    });
     const retry = () => {
+      failed = false;
       Lazy = make();
       setAttempt((n) => n + 1);
     };
     const Loaded = Lazy as unknown as ComponentType<P>;
+    const onClose = closeOf?.(props);
+    const fallback = Frame ? (
+      <Frame label={label} onClose={onClose}>
+        <LazyFallback label={label} />
+      </Frame>
+    ) : (
+      <LazyFallback label={label} />
+    );
     return (
-      <LoadBoundary key={attempt} label={label} onRetry={retry}>
-        <Suspense fallback={<LazyFallback label={label} />}>
+      <LoadBoundary key={attempt} label={label} onRetry={retry} Frame={Frame} onClose={onClose}>
+        <Suspense fallback={fallback}>
           <Loaded {...props} />
         </Suspense>
       </LoadBoundary>

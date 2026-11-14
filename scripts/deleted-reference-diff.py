@@ -13,7 +13,10 @@
 # * Sleuth Kit `fls -r -d -p` (optionally `-l` for sizes): every deleted, non-directory,
 #   non-ADS row is a reference row. Key = volume-relative path (case-insensitive), alias =
 #   MFT entry (`inode:<n>`) so lossy ANSI names and `$OrphanFiles` rows still pair.
-#   Compared: size (with -l).
+#   "(realloc)" rows get no entry alias (the entry now holds another file): path only.
+#   Compared: size (with -l), and the path of a pair made through the entry alias (a
+#   deleted file listed under a wrong folder is a `path` mismatch, not a match) unless the
+#   fls name is lossy or the row is under `$OrphanFiles`. `alias_matches` counts them.
 # * Truth CSV (the known-answer table): columns `path` (required), optional `inode`,
 #   `recoverable`, `sha256`, `content_state`, `size`. Compared: size, the sha256 of rows
 #   marked recoverable, and the content state (rapidtriage/core/content_state.py values).
@@ -22,8 +25,10 @@
 # whose `is_deleted` is true, whose recovery block says deleted, or whose candidate kind is
 # deleted-entry/orphan-record (`--all-rows` takes every row). Our sha256/content state come
 # from the row when present, else from the recovered file (recovery.content_path or path,
-# rebased under --content-root when relative), read only for rows the reference names.
-# Reports zero-filled rows we claim recoverable (QA-124: must be 0).
+# rebased under --content-root when relative), read for rows the reference names and, with
+# --content-root, for every row we claim recoverable (matched or extra). Reports zero-filled
+# rows we claim recoverable (QA-124: must be 0) over the rows whose content state is known
+# (`content_checked`); with no state known it is null ("미측정"), never 0.
 #
 # Shared loader/diff/report: rapidtriage/validation/reference_diff.py. Exit 0 clean,
 # 1 differences, 2 input error. Engineering measurement only; not release evidence.
@@ -124,6 +129,13 @@ def keys_for(path: str, inode: int | None) -> list[str]:
     return keys
 
 
+def alias_path_field(relative: str, *, lossy: bool) -> str:
+    """The reference path compared on a pair made through the entry alias ("" = not compared)."""
+    if lossy or not relative or relative.startswith("$orphanfiles/") or "/$orphanfiles/" in relative:
+        return ""
+    return relative
+
+
 class ContentProbe:
     """sha256 + content state of our recovered file, read lazily and only for rows the reference names."""
 
@@ -184,8 +196,9 @@ def load_fls_reference(path: Path, strip_prefix: str, encoding: str | None, warn
         relative = rd.normalize_path(entry.path, strip_prefix)
         rows.append(
             rd.KeyedRow(
-                keys=keys_for(relative, entry.inode),
-                fields={"size": entry.size},
+                # A realloc row's entry number now names another file: no alias (review P1-6).
+                keys=keys_for(relative, None if entry.realloc else entry.inode),
+                fields={"size": entry.size, "path": alias_path_field(relative, lossy=entry.name_lossy)},
                 label={"path": relative, "inode": entry.inode, "realloc": entry.realloc, "name_lossy": entry.name_lossy},
             )
         )
@@ -219,6 +232,7 @@ def load_truth_reference(path: Path, strip_prefix: str, warnings: list[str]) -> 
                 keys=keys_for(relative, inode),
                 fields={
                     "size": rd.parse_int(rd.pick(row, *REF_SIZE)),
+                    "path": alias_path_field(relative, lossy=False),
                     # Hash agreement is checked for recoverable rows only (no column = trust the hash).
                     "sha256": sha if sha and recoverable is not False else "",
                     "content_state": state,
@@ -240,30 +254,41 @@ def is_fls_listing(path: Path) -> bool:
 def build_deleted_comparison(args: argparse.Namespace, warnings: list[str]) -> rd.Comparison:
     if is_fls_listing(args.reference):
         reference, stats = load_fls_reference(args.reference, args.reference_strip_prefix, args.fls_encoding, warnings)
-        tool, compared = "Sleuth Kit fls (-r -d -p)", ["size"]
+        tool, compared = "Sleuth Kit fls (-r -d -p)", ["size", "path"]
     else:
         reference, stats = load_truth_reference(args.reference, args.reference_strip_prefix, warnings)
-        tool, compared = "known-answer truth CSV", ["size", "sha256", "content_state"]
+        tool, compared = "known-answer truth CSV", ["size", "sha256", "content_state", "path"]
     wanted = {key for row in reference for key in row.keys}
     needs_content = any(row.fields.get("sha256") or row.fields.get("content_state") for row in reference)
     probe = ContentProbe(args.content_root, warnings)
     ours: list[rd.KeyedRow] = []
-    claims: dict[str, bool] = {}
+    content_checked = claimed_recoverable = 0
+    zero_claims: list[str] = []
     for row in iter_our_rows(args.ours, warnings):
         if not args.all_rows and not is_deleted_row(row):
             continue
         keys = keys_for(our_path(row, args.strip_prefix), our_inode(row))
         if not keys:
             continue
-        sha, state = ("", "")
-        if needs_content and wanted.intersection(keys):
-            sha, state = probe.probe(row)
         recovery = _mapping(row.get("recovery"))
-        claims[keys[0]] = row.get("recoverable") is True or recovery.get("recoverable") is True
+        claimed = row.get("recoverable") is True or recovery.get("recoverable") is True
+        sha, state = ("", str(row.get("content_state") or recovery.get("content_state") or ""))
+        if (needs_content and wanted.intersection(keys)) or (claimed and not state and args.content_root is not None):
+            sha, state = probe.probe(row)
+        claimed_recoverable += int(claimed)
+        if state:
+            content_checked += 1
+            if claimed and state == ZERO_FILLED:
+                zero_claims.append(keys[0])
         ours.append(
             rd.KeyedRow(
                 keys=keys,
-                fields={"size": rd.parse_int(row.get("size")), "sha256": sha, "content_state": state},
+                fields={
+                    "size": rd.parse_int(row.get("size")),
+                    "sha256": sha,
+                    "content_state": state,
+                    "path": keys[0] if our_path(row, args.strip_prefix) else "",
+                },
                 label={"path": keys[0], "inode": our_inode(row)},
             )
         )
@@ -272,17 +297,23 @@ def build_deleted_comparison(args: argparse.Namespace, warnings: list[str]) -> r
 
     def sections(result: rd.DiffResult) -> dict[str, object]:
         states: dict[str, int] = {}
-        zero_claims: list[str] = []
-        for mine, _ in result.matched_pairs:
+        alias_matches = 0
+        for mine, reference_row in result.matched_pairs:
             state = str(mine.fields.get("content_state") or "")
             if state:
                 states[state] = states.get(state, 0) + 1
-            if state == ZERO_FILLED and claims.get(mine.keys[0]):
-                zero_claims.append(mine.keys[0])
+            alias_matches += int(mine.keys[0] != reference_row.keys[0])
+        realloc_matched = sum(1 for _, ref in result.matched_pairs if ref.label.get("realloc"))
         return {
             "reference_stats": stats,
+            "alias_matches": alias_matches,
+            "realloc_matched_by_path": realloc_matched,
             "our_content_state_counts": dict(sorted(states.items())),
-            "zero_filled_claimed_recoverable": len(zero_claims),
+            "content_checked": content_checked,
+            "claimed_recoverable": claimed_recoverable,
+            # QA-124 "must be 0" is only stated over rows whose content state is known.
+            "zero_filled_claimed_recoverable": len(zero_claims) if content_checked else None,
+            "zero_filled_claimed_recoverable_status": "measured" if content_checked else "미측정",
             "zero_filled_claimed_recoverable_keys": zero_claims[: max(args.max_list, 0) or None],
         }
 

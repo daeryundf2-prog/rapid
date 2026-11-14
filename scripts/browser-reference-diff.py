@@ -53,7 +53,9 @@ REF_START = ("starttime", "startedat")
 REF_END = ("endtime", "endedat")
 
 
-def browser_time(value: object, default_tz: dt.tzinfo, warnings: list[str], context: str) -> dt.datetime | None:
+def browser_time(
+    value: object, default_tz: dt.tzinfo, warnings: list[str], context: str, field: str = "time"
+) -> dt.datetime | None:
     """Raw WebKit/PRTime/unix ms/unix s integers by magnitude, else the shared text parser."""
     text = str(value if value is not None else "").strip()
     if text.isdigit():
@@ -69,7 +71,7 @@ def browser_time(value: object, default_tz: dt.tzinfo, warnings: list[str], cont
         if number >= 10**11:  # unix ms
             return UNIX_EPOCH + dt.timedelta(milliseconds=number)
         return UNIX_EPOCH + dt.timedelta(seconds=number)
-    return rd.safe_timestamp(value, default_tz, warnings, context)
+    return rd.safe_timestamp(value, default_tz, warnings, context, field)
 
 
 def keyed(head: str, stamp: dt.datetime | None, fields: dict[str, object]) -> rd.KeyedRow:
@@ -85,7 +87,7 @@ def build_visits(args: argparse.Namespace, warnings: list[str]) -> tuple[list[rd
         url = rd.pick(row, *REF_URL)
         if not url:
             continue
-        stamp = browser_time(rd.pick(row, *REF_VISIT_TIME), args.reference_tzinfo, warnings, f"기준 {line}행")
+        stamp = browser_time(rd.pick(row, *REF_VISIT_TIME), args.reference_tzinfo, warnings, f"기준 {line}행", "visit_time")
         reference.append(keyed(url, stamp, {"url": url, "title": rd.pick(row, *REF_TITLE)}))
     ours = []
     for row in rd.iter_rapid_rows(args.ours, VISIT_TYPES, warnings):
@@ -93,7 +95,7 @@ def build_visits(args: argparse.Namespace, warnings: list[str]) -> tuple[list[rd
         if not url:
             continue
         raw = rd.rapid_field(row, "visit_time_raw", "timestamp")
-        stamp = browser_time(raw, args.ours_tzinfo, warnings, "우리 방문 행")
+        stamp = browser_time(raw, args.ours_tzinfo, warnings, "우리 방문 행", "visit_time")
         ours.append(keyed(url, stamp, {"url": url, "title": str(rd.rapid_field(row, "title") or "").strip()}))
     return ours, reference
 
@@ -107,11 +109,11 @@ def build_downloads(args: argparse.Namespace, warnings: list[str]) -> tuple[list
         if not target:
             continue
         context = f"기준 {line}행"
-        start = browser_time(rd.pick(row, *REF_START), args.reference_tzinfo, warnings, context)
+        start = browser_time(rd.pick(row, *REF_START), args.reference_tzinfo, warnings, context, "start_time")
         fields = {
             "url": rd.pick(row, *REF_DL_URL),
             "total_bytes": rd.parse_int(rd.pick(row, *REF_BYTES)),
-            "ended": browser_time(rd.pick(row, *REF_END), args.reference_tzinfo, warnings, context),
+            "ended": browser_time(rd.pick(row, *REF_END), args.reference_tzinfo, warnings, context, "ended"),
         }
         reference.append(keyed(target, start, fields))
     ours = []
@@ -119,11 +121,11 @@ def build_downloads(args: argparse.Namespace, warnings: list[str]) -> tuple[list
         target = rd.normalize_text(str(rd.rapid_field(row, "target_path", "current_path") or "").replace("\\", "/"))
         if not target:
             continue
-        start = browser_time(rd.rapid_field(row, "started_at", "timestamp"), args.ours_tzinfo, warnings, "우리 다운로드 행")
+        start = browser_time(rd.rapid_field(row, "started_at", "timestamp"), args.ours_tzinfo, warnings, "우리 다운로드 행", "start_time")
         fields = {
             "url": str(rd.rapid_field(row, "tab_url", "source_url", "url") or "").strip(),
             "total_bytes": rd.parse_int(rd.rapid_field(row, "total_bytes")),
-            "ended": browser_time(rd.rapid_field(row, "ended_at"), args.ours_tzinfo, warnings, "우리 다운로드 행"),
+            "ended": browser_time(rd.rapid_field(row, "ended_at"), args.ours_tzinfo, warnings, "우리 다운로드 행", "ended"),
         }
         ours.append(keyed(target, start, fields))
     return ours, reference

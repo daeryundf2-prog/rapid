@@ -143,6 +143,46 @@ class DeletedReferenceDiffTests(ReferenceDiffCase):
         self.assertEqual(report["recall"], 1.0)
         self.assertEqual(len(report["extra"]), 2)
         self.assertEqual(code, 0)
+        self.assertEqual(report["alias_matches"], 1)  # lossy name: the path is not compared
+
+    def test_nothing_probed_is_not_measured_not_zero(self) -> None:
+        # WB-12 review P1-6: an fls reference reads no content, so QA-124 cannot be stated.
+        code, report, _ = self.run_diff(self.files_output(recoverable_zero=True), self.fls_listing(), "--strip-prefix", "_e01/fs")
+        self.assertEqual(code, 0)
+        self.assertIsNone(report["zero_filled_claimed_recoverable"])
+        self.assertEqual((report["zero_filled_claimed_recoverable_status"], report["content_checked"]), ("미측정", 0))
+
+    def test_recoverable_claims_are_probed_even_when_the_reference_does_not_name_them(self) -> None:
+        listing = self.tmp / "one.txt"
+        listing.write_text(f"r/r * 101-128-1:\tUsers/kim/Pictures/IMG_0001.jpg\t{TIMES}\t{len(JPEG)}\t0\t0\n", encoding="utf-8")
+        code, report, _ = self.run_diff(
+            self.files_output(recoverable_zero=True), listing, "--strip-prefix", "_e01/fs", "--content-root", str(self.recovered)
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(report["zero_filled_claimed_recoverable"], 1)
+        self.assertEqual(report["zero_filled_claimed_recoverable_keys"], ["users/kim/desktop/wiped.docx"])
+        self.assertEqual((report["content_checked"], report["claimed_recoverable"]), (1, 1))
+
+    def test_alias_pair_with_a_different_folder_is_a_path_mismatch(self) -> None:
+        listing = self.tmp / "moved.txt"
+        listing.write_text(f"r/r * 102-128-1:\tUsers/lee/Documents/회의록.txt\t{TIMES}\t{len(TEXT)}\t0\t0\n", encoding="utf-8")
+        code, report, _ = self.run_diff(self.files_output(), listing, "--strip-prefix", "_e01/fs")
+        self.assertEqual(code, 1)
+        self.assertEqual((report["recall"], report["alias_matches"]), (1.0, 1))
+        self.assertEqual(report["field_mismatch_counts"], {"path": 1})
+        self.assertEqual(
+            report["mismatched"][0]["fields"]["path"],
+            {"ours": "users/kim/documents/회의록.txt", "reference": "users/lee/documents/회의록.txt"},
+        )
+
+    def test_realloc_row_does_not_pair_by_entry_number(self) -> None:
+        listing = self.tmp / "realloc.txt"
+        listing.write_text(f"r/r * 101-128-1(realloc):\tUsers/kim/old.tmp\t{TIMES}\t5\t0\t0\n", encoding="utf-8")
+        code, report, _ = self.run_diff(self.files_output(), listing, "--strip-prefix", "_e01/fs")
+        self.assertEqual(code, 1)
+        self.assertEqual((report["matched"], report["alias_matches"]), (0, 0))
+        self.assertEqual(report["reference_stats"]["realloc"], 1)
+        self.assertEqual([item["path"] for item in report["missing"]], ["users/kim/old.tmp"])
 
     def test_missing_input_exits_2(self) -> None:
         self.assert_missing_input_exit_2(self.files_output())

@@ -298,7 +298,8 @@
           "files": ["reference"],
           "optional": [
             {"flag": "--acquisition-log", "input": "acquisition_log", "path": true},
-            {"flag": "--ours", "input": "ours", "path": true}
+            {"flag": "--ours", "input": "ours", "path": true},
+            {"flag": "--ours-key", "input": "ours_key", "path": false}
           ],
           "checks": [
             {"metric": "match", "op": "==", "value": true},

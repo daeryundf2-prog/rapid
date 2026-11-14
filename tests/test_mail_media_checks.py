@@ -152,7 +152,8 @@ class MediaHashCheckTests(ReferenceDiffCase):
         return report
 
     def test_media_hash_match(self) -> None:
-        ours = self._file("ours.json", json.dumps({"evidence": {"image": {"md5": MD5.upper(), "sha1": SHA1}}}))
+        ours = self._file("ours.json", json.dumps({"command": "source-metadata", "hash_status": "computed",
+                                                   "hashes": {"md5": MD5.upper(), "sha1": SHA1}}))
         report = self._run("--reference", self._file("ewfverify.txt", EWF_OK),
                            "--acquisition-log", self._file("image.txt", FTK_LOG, "utf-16"), "--ours", ours, expect=0)
         self.assertTrue(report["match"])
@@ -167,6 +168,37 @@ class MediaHashCheckTests(ReferenceDiffCase):
         self.assertEqual(report["sources"]["ewfverify"]["result"], "FAILURE")
         self.assertEqual({item["pair"] for item in report["mismatched"]},
                          {"ewfverify-stored-vs-calculated", "acquisition-log-vs-ewfverify-calculated"})
+
+    def test_recorded_or_expected_hash_is_never_ours(self) -> None:
+        # WB-12 review P1-5: the experiment that used to pass by comparing a recorded hash with itself.
+        circular = self._file("ours.json", json.dumps({"evidence": {
+            "expected_md5": MD5, "hash_recorded": {"md5": MD5}, "container_sha256": "ab" * 32}}))
+        ewf = self._file("ewfverify.txt", EWF_OK)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            self.assertEqual(self.module.main(["--reference", ewf, "--ours", circular]), 2)
+            self.assertIn("RapidTriage가 계산한 해시를 찾지 못했습니다", stderr.getvalue())
+            for key in ("evidence.expected_md5", "evidence.hash_recorded", "inventory_sha256", "record_sha256"):
+                self.assertEqual(self.module.main(["--reference", ewf, "--ours", circular, "--ours-key", key]), 2)
+        self.assertIn("RapidTriage가 계산한 해시가 아닙니다", stderr.getvalue())
+        computed = self._file("computed.json", json.dumps({"run": {"media": {"md5": MD5}}}))
+        report = self._run("--reference", ewf, "--ours", computed, "--ours-key", "run.media", expect=0)
+        self.assertEqual(report["sources"]["ours"]["key"], "run.media")
+        self.assertIn("컨테이너", report["sources"]["ours"]["scope"])
+        not_computed = self._file("pending.json", json.dumps({"hash_status": "not-requested", "hashes": {"md5": MD5}}))
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(self.module.main(["--reference", ewf, "--ours", not_computed]), 2)
+
+    def test_bad_blocks_in_the_acquisition_log_fail_the_match(self) -> None:
+        log = FTK_LOG.replace("No bad blocks found in image", "Bad Blocks: 37\nNo bad blocks found in segment 2")
+        report = self._run("--reference", self._file("ewfverify.txt", EWF_OK),
+                           "--acquisition-log", self._file("image.txt", log), expect=1)
+        self.assertFalse(report["match"])
+        self.assertEqual((report["bad_sectors"], report["error_chunks"]), (37, 37))
+        self.assertEqual(report["error_chunk_sources"], {"ewfverify_error_ranges": 0, "acquisition_log_bad_sectors": 37})
+        self.assertEqual(report["mismatched"], [])
+        parsed = self.module.parse_acquisition_log("Bad sectors: 2\nread errors: 3\nNo bad sectors\n")
+        self.assertEqual(parsed["bad_sectors"], 5)
 
     def test_inputs_required(self) -> None:
         only_log = self._file("only.txt", "no hashes here\n")

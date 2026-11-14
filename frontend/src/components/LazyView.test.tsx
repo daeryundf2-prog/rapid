@@ -90,6 +90,20 @@ describe("lazyView", () => {
     expect(screen.queryByRole("button", { name: "다시 시도" })).toBeNull();
   });
 
+  it("an unframed component with closeOf offers 닫기 on a failed chunk", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const onClose = vi.fn();
+    const LazyHello = lazyView<{ name: string; onClose: () => void }>(
+      "인사 보기",
+      () => Promise.reject(new Error("gone")),
+      { closeOf: (props) => props.onClose },
+    );
+    render(<LazyHello name="세계" onClose={onClose} />);
+    await screen.findByRole("alert");
+    fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("ChunkLoadError keeps the import failure as its cause", () => {
     const cause = new Error("net::ERR");
     const error = new ChunkLoadError("지도 보기", cause);

@@ -238,7 +238,7 @@ def build_userassist_comparison(args: argparse.Namespace, warnings: list[str]) -
         if not name:
             rd.add_warning(warnings, f"기준 {line}행에 프로그램 이름이 없어 건너뛰었습니다")
             continue
-        stamp = rd.safe_timestamp(rd.pick(row, *REF_TIME), args.reference_tzinfo, warnings, f"기준 {line}행")
+        stamp = rd.safe_timestamp(rd.pick(row, *REF_TIME), args.reference_tzinfo, warnings, f"기준 {line}행", "last_run")
         account = account_name(rd.pick(row, *REF_ACCOUNT), rd.pick(row, *REF_HIVE))
         reference.append(assist_row(account, [name], rd.parse_int(rd.pick(row, *REF_COUNT)), stamp))
     ours: list[rd.KeyedRow] = []
@@ -250,7 +250,7 @@ def build_userassist_comparison(args: argparse.Namespace, warnings: list[str]) -
             rd.rapid_field(row, "account", "user", "user_name", "username"),
             rd.rapid_field(row, "source_path", "path"),
         )
-        stamp = rd.safe_timestamp(rd.rapid_field(row, "timestamp", "last_run"), args.ours_tzinfo, warnings, "우리 UserAssist 행")
+        stamp = rd.safe_timestamp(rd.rapid_field(row, "timestamp", "last_run"), args.ours_tzinfo, warnings, "우리 UserAssist 행", "last_run")
         count = rd.parse_int(rd.rapid_field(row, "run_counter", "run_count"))
         ours.append(assist_row(account, names, count, stamp))
     key_fields = ["account", "decoded_name"]

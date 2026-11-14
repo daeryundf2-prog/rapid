@@ -9,15 +9,18 @@ from pathlib import Path
 from ..extract import extract_manifest_disabled
 from .disk_full import (  # R8 T-352: step exception classification (a full output volume)
     OUTPUT_DISK_FULL,
+    FreeSpaceSampler,
     OutputDiskFull,
     classify_step_exception,
     extraction_disk_full_error,
     is_disk_full_error,
     remove_partial_outputs,
+    snapshot_existing_outputs,
 )
 
 __all__ = [
     "OUTPUT_DISK_FULL",
+    "FreeSpaceSampler",
     "OutputDiskFull",
     "annotate_step",
     "apply_cap_disclosures",
@@ -42,6 +45,7 @@ __all__ = [
     "is_disk_full_error",
     "mark_reused_step",
     "remove_partial_outputs",
+    "snapshot_existing_outputs",
 ]
 
 

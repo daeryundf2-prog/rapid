@@ -1,4 +1,5 @@
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef } from "react";
+import type { LazyFrameProps } from "../../components/LazyView";
 import { Icon } from "../../icons";
 import "./case.css";
 
@@ -141,5 +142,17 @@ export function Modal({
         {footer ? <footer className="case-modal-footer">{footer}</footer> : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * The modal a lazy dialog's loading status and chunk-load failure render in (R8 WB-12 P2-13), so a
+ * failed dialog is a dialog with 닫기 / Esc, not a block where the dialog host sits.
+ */
+export function LazyDialogFrame({ label, onClose, children }: LazyFrameProps) {
+  return (
+    <Modal title={label} onClose={onClose ?? (() => undefined)}>
+      {children}
+    </Modal>
   );
 }

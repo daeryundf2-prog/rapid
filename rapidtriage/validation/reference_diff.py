@@ -22,8 +22,16 @@ the R8 task table fixes -- ``recall``, ``matched``, ``missing``, ``mismatched``,
 
 Timestamps are normalised to UTC and compared at whole-second precision (floor), within
 ``--time-tolerance`` seconds; naive timestamps take ``--ours-tz`` / ``--reference-tz``
-(default UTC). Exit codes: 0 every reference row matched without field differences,
-1 differences found, 2 input or usage error (a Korean message names the problem).
+(default UTC). Read forms: ISO-like, slashed dates (order ``--date-order mdy|dmy|ymd``, default
+the script's tool profile; a day/month-ambiguous date read by the default order is warned and
+counted), ``dd.MM.yyyy``, ``DD-Mon-YYYY`` and the Korean ``오전/오후`` form. A time value that
+cannot be read is counted per side and field (``unparsed_time_count``,
+``unparsed_time_fields``); one in a key or compared field makes the result not clean
+(``status: unparsed-time``, exit 1) -- it was not compared. Exit codes: 0 every reference row
+matched without field differences, 1 differences or unread times, 2 input or usage error or a
+reference with 0 comparable rows ("기준 행 0개 — 비교 불가"; a Korean message names the problem).
+Each input's decoding is recorded (``inputs.<name>.encoding``); the cp949 fallback and U+FFFD
+replacement characters are warned.
 
 Engineering measurement only: reports say ``engineering_check_only`` and are not release
 evidence (see AGENTS.md "RapidForensic Validation Contract").
@@ -32,6 +40,7 @@ evidence (see AGENTS.md "RapidForensic Validation Contract").
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import datetime as dt
 import hashlib
@@ -41,6 +50,7 @@ import re
 import sys
 import unicodedata
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -48,18 +58,51 @@ from rapidtriage.core.artifact_profiles import (
     PROFILE_REF_KEY,
     iter_artifact_output_rows,
 )
+from rapidtriage.validation import reference_time as _reference_time
+from rapidtriage.validation.reference_time import (  # re-exported: scripts call rd.parse_timestamp etc.
+    _DATE_ORDER,
+    DATE_ORDERS,
+    DEFAULT_DATE_ORDER,
+    ReferenceDiffInputError,
+    format_timestamp,
+    is_ambiguous_slashed_date,
+    parse_timestamp,
+    parse_tz,
+)
 
+FILETIME_EPOCH = _reference_time.FILETIME_EPOCH  # re-exported for the scripts (rd.FILETIME_EPOCH)
 SCHEMA_VERSION = "reference-diff-v1"
 EXIT_OK = 0
 EXIT_DIFF = 1
 EXIT_INPUT = 2
 DEFAULT_MAX_LIST = 1000
-FILETIME_EPOCH = dt.datetime(1601, 1, 1, tzinfo=dt.timezone.utc)
 _EMPTY = (None, "", [], (), frozenset(), set())
 
 
-class ReferenceDiffInputError(Exception):
-    """Input problem reported to the operator in Korean; the CLI exits 2."""
+NO_REFERENCE_MESSAGE = "기준 행 0개 — 비교 불가"
+#: Path -> decoding used by ``read_text`` (recorded in the report's ``inputs``).
+_DECODINGS: ContextVar[dict[str, str] | None] = ContextVar("reference_diff_decodings", default=None)
+
+
+class DiffWarnings(list):
+    """The warnings list plus the counts a capped list cannot carry (unread times, ambiguous dates)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.unparsed_time: dict[str, dict[str, int]] = {"reference": {}, "ours": {}}
+        self.ambiguous_dates = 0
+
+    def count_unparsed(self, side: str, name: str) -> None:
+        bucket = self.unparsed_time.setdefault(side, {})
+        bucket[name] = bucket.get(name, 0) + 1
+
+    @property
+    def unparsed_total(self) -> int:
+        return sum(sum(fields.values()) for fields in self.unparsed_time.values())
+
+    def unparsed_in(self, names: Iterable[str]) -> int:
+        wanted = set(names)
+        return sum(count for fields in self.unparsed_time.values() for name, count in fields.items() if name in wanted)
 
 
 @dataclass
@@ -112,101 +155,42 @@ def header_key(name: object) -> str:
     return re.sub(r"[^0-9a-z]", "", str(name or "").casefold())
 
 
-def parse_tz(text: str | None) -> dt.tzinfo:
-    """``UTC``/``Z``, a fixed offset (``+09:00``, ``-0500``) or an IANA name (``Asia/Seoul``)."""
-    raw = str(text or "UTC").strip()
-    if raw.upper() in {"UTC", "Z", "GMT"}:
-        return dt.timezone.utc
-    match = re.fullmatch(r"([+-])(\d{1,2}):?(\d{2})?", raw)
-    if match:
-        sign = -1 if match.group(1) == "-" else 1
-        offset = dt.timedelta(hours=int(match.group(2)), minutes=int(match.group(3) or 0))
-        return dt.timezone(sign * offset)
-    try:
-        from zoneinfo import ZoneInfo
+def safe_timestamp(
+    value: object,
+    default_tz: dt.tzinfo,
+    warnings: list[str],
+    context: str,
+    field: str = "time",
+    side: str | None = None,
+) -> dt.datetime | None:
+    """``parse_timestamp`` that records an unparseable value in ``warnings`` instead of raising.
 
-        return ZoneInfo(raw)
-    except Exception as exc:  # ZoneInfoNotFoundError, ValueError, missing tzdata
-        raise ReferenceDiffInputError(
-            f"시간대 '{raw}'를 알 수 없습니다. UTC 또는 +09:00 같은 고정 오프셋을 쓰세요."
-        ) from exc
-
-
-_ISO_RE = re.compile(
-    r"^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2}):(\d{2})(?:[.,:](\d+)(?::\d+)*)?\s*"
-    r"(Z|UTC|[+-]\d{2}:?\d{2})?(?:\s*\(?UTC\)?)?$",
-    re.IGNORECASE,
-)
-_US_RE = re.compile(
-    r"^(\d{1,2})/(\d{1,2})/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})(?:\.(\d+))?\s*(AM|PM)?$", re.IGNORECASE
-)
-
-
-def parse_timestamp(value: object, default_tz: dt.tzinfo = dt.timezone.utc) -> dt.datetime | None:
-    """Aware UTC datetime from ISO/space/US text, a FILETIME integer or a datetime; ``None`` when empty.
-
-    The FILETIME zero / Unix epoch placeholders some tools print for "no time" become ``None``.
-    Unparseable text raises ``ValueError``.
+    With a :class:`DiffWarnings` list the failure is also counted for ``side`` (default: from the
+    context, "기준 ..." = reference) and ``field``, and an ambiguous slashed date read by the
+    default date order is counted and warned.
     """
-    if value is None or isinstance(value, bool):
+    which = side or ("reference" if str(context).startswith("기준") else "ours")
+    try:
+        stamp = parse_timestamp(value, default_tz)
+    except (ValueError, OverflowError):
+        add_warning(warnings, f"{context}: 시각 형식을 읽지 못했습니다 ({str(value)[:60]!r}) — 비교하지 않음")
+        if isinstance(warnings, DiffWarnings):
+            warnings.count_unparsed(which, field)
         return None
-    if isinstance(value, dt.datetime):
-        stamp = value if value.tzinfo else value.replace(tzinfo=default_tz)
-    elif isinstance(value, int) or (isinstance(value, str) and value.strip().isdigit() and len(value.strip()) >= 15):
-        filetime = int(value)
-        if filetime <= 0:
-            return None
-        stamp = FILETIME_EPOCH + dt.timedelta(microseconds=filetime // 10)
-    else:
-        text = str(value).strip()
-        if not text:
-            return None
-        stamp = _parse_timestamp_text(text, default_tz)
-    stamp = stamp.astimezone(dt.timezone.utc)
-    if stamp.year in {1601, 1970} and stamp.month == 1 and stamp.day == 1 and not stamp.hour and not stamp.minute and not stamp.second:
-        return None
+    order, explicit = _DATE_ORDER.get()
+    if not explicit and isinstance(value, str) and is_ambiguous_slashed_date(value):
+        add_warning(warnings, f"날짜 순서가 모호함 ({value.strip()[:40]!r}): {order}로 읽음 — --date-order mdy|dmy로 지정하세요")
+        if isinstance(warnings, DiffWarnings):
+            warnings.ambiguous_dates += 1
     return stamp
 
 
-def _parse_timestamp_text(text: str, default_tz: dt.tzinfo) -> dt.datetime:
-    match = _ISO_RE.match(text)
-    if match:
-        year, month, day, hour, minute, second = (int(part) for part in match.groups()[:6])
-        micro = int((match.group(7) or "0")[:6].ljust(6, "0"))
-        zone = (match.group(8) or "").upper()
-        tz = default_tz if not zone else dt.timezone.utc if zone in {"Z", "UTC"} else parse_tz(zone)
-        return dt.datetime(year, month, day, hour, minute, second, micro, tzinfo=tz)
-    match = _US_RE.match(text)
-    if match:
-        month, day, year, hour, minute, second = (int(part) for part in match.groups()[:6])
-        micro = int((match.group(7) or "0")[:6].ljust(6, "0"))
-        meridiem = (match.group(8) or "").upper()
-        if meridiem == "PM" and hour < 12:
-            hour += 12
-        elif meridiem == "AM" and hour == 12:
-            hour = 0
-        return dt.datetime(year, month, day, hour, minute, second, micro, tzinfo=default_tz)
-    raise ValueError(f"unrecognised timestamp {text!r}")
-
-
-def format_timestamp(value: dt.datetime | None) -> str:
-    """``YYYY-MM-DDTHH:MM:SSZ`` (second precision, UTC) or ``""``."""
-    if value is None:
-        return ""
-    return value.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def safe_timestamp(value: object, default_tz: dt.tzinfo, warnings: list[str], context: str) -> dt.datetime | None:
-    """``parse_timestamp`` that records an unparseable value in ``warnings`` instead of raising."""
-    try:
-        return parse_timestamp(value, default_tz)
-    except (ValueError, OverflowError):
-        add_warning(warnings, f"{context}: 시각 형식을 읽지 못했습니다 ({str(value)[:60]!r})")
-        return None
+_INT_RE = re.compile(r"[+-]?\d+")
 
 
 def parse_int(value: object) -> int | None:
-    """Integer from int/decimal/hex text; ``None`` when empty or not a number."""
+    """Integer from int/decimal/hex text, exact for any size (MFT references > 2^53);
+    ``None`` when empty or not a number."""
     if value is None or isinstance(value, bool):
         return None
     if isinstance(value, int):
@@ -215,8 +199,12 @@ def parse_int(value: object) -> int | None:
     if not text:
         return None
     try:
-        return int(text, 16) if text.lower().startswith("0x") else int(float(text))
-    except ValueError:
+        if text.lower().startswith("0x"):
+            return int(text, 16)
+        if _INT_RE.fullmatch(text):
+            return int(text)
+        return int(float(text))
+    except (ValueError, OverflowError):
         return None
 
 
@@ -249,13 +237,33 @@ def require_file(path: Path, flag: str) -> Path:
 
 
 def read_text(path: Path) -> str:
+    """UTF-16 (BOM), UTF-8, else cp949 with replacement; the decoding used is recorded."""
     raw = path.read_bytes()
     if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
-        return raw.decode("utf-16")
-    try:
-        return raw.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        return raw.decode("cp949", errors="replace")
+        text, encoding = raw.decode("utf-16"), "utf-16"
+    else:
+        try:
+            text, encoding = raw.decode("utf-8-sig"), "utf-8"
+        except UnicodeDecodeError:
+            text, encoding = raw.decode("cp949", errors="replace"), "cp949-fallback"
+    if "\ufffd" in text:
+        encoding += "+replacement"
+    decodings = _DECODINGS.get()
+    if decodings is not None:
+        decodings[str(path)] = encoding
+    return text
+
+
+def decoding_warnings(decodings: Mapping[str, str]) -> list[str]:
+    """Korean warnings for inputs read through the cp949 fallback or holding U+FFFD."""
+    messages: list[str] = []
+    for path, encoding in decodings.items():
+        name = Path(path).name
+        if encoding.startswith("cp949"):
+            messages.append(f"{name}: UTF-8로 읽지 못해 cp949로 읽음 — 한글 이름이 깨졌다면 인코딩을 확인하세요")
+        if encoding.endswith("+replacement"):
+            messages.append(f"{name}: 읽을 수 없는 바이트가 대체 문자(U+FFFD)로 바뀜")
+    return messages
 
 
 def read_table(path: Path) -> tuple[list[dict[str, str]], list[str]]:
@@ -576,6 +584,24 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--ours-tz", default="UTC", help="time zone of naive RapidTriage timestamps")
     parser.add_argument("--time-tolerance", type=float, default=0.0, help="allowed difference in whole seconds (default 0)")
     parser.add_argument("--max-list", type=int, default=DEFAULT_MAX_LIST, help="cap missing/extra/mismatched lists (0 = no cap)")
+    parser.add_argument(
+        "--date-order",
+        choices=DATE_ORDERS,
+        default=None,
+        help="order of slashed dates such as 03/04/2024 (default: the tool profile's, usually mdy; ambiguous dates are warned)",
+    )
+
+
+def unparsed_time_section(warnings: list[str], unclean_fields: Iterable[str]) -> dict[str, object]:
+    """Report keys for unread time values (``unparsed_time_count`` per side and field)."""
+    if not isinstance(warnings, DiffWarnings):
+        return {"unparsed_time_count": 0, "unparsed_time_fields": {"reference": {}, "ours": {}}, "unparsed_time_uncompared": 0}
+    return {
+        "unparsed_time_count": warnings.unparsed_total,
+        "unparsed_time_fields": {side: dict(sorted(fields.items())) for side, fields in warnings.unparsed_time.items()},
+        "unparsed_time_uncompared": warnings.unparsed_in(unclean_fields),
+        "ambiguous_date_count": warnings.ambiguous_dates,
+    }
 
 
 def run_comparison_cli(
@@ -586,14 +612,44 @@ def run_comparison_cli(
     build: Callable[[argparse.Namespace, list[str]], Comparison],
     configure: Callable[[argparse.ArgumentParser], None] | None = None,
     required_inputs: Sequence[tuple[str, str]] = (("ours", "--ours"), ("reference", "--reference")),
+    default_date_order: str = DEFAULT_DATE_ORDER,
 ) -> int:
-    """Parse the uniform CLI, run ``build`` and the diff, write/print the report; return the exit code."""
+    """Parse the uniform CLI, run ``build`` and the diff, write/print the report; return the exit code.
+
+    ``default_date_order`` is the tool profile's slashed-date order (``--date-order`` overrides)."""
     parser = argparse.ArgumentParser(description=description)
     add_common_arguments(parser)
     if configure is not None:
         configure(parser)
     args = parser.parse_args(argv)
-    warnings: list[str] = []
+    warnings = DiffWarnings()
+    with comparison_scope(args.date_order, default_date_order) as (date_order, decodings):
+        return _run_comparison(args, comparison, build, required_inputs, warnings, date_order, decodings)
+
+
+@contextlib.contextmanager
+def comparison_scope(date_order_option: str | None, default_date_order: str = DEFAULT_DATE_ORDER) -> Iterator[tuple[str, dict[str, str]]]:
+    """Slashed-date order and decoding record for one comparison; yields (order, decodings)."""
+    date_order = date_order_option or default_date_order
+    order_token = _DATE_ORDER.set((date_order, date_order_option is not None))
+    decodings: dict[str, str] = {}
+    decodings_token = _DECODINGS.set(decodings)
+    try:
+        yield date_order, decodings
+    finally:
+        _DATE_ORDER.reset(order_token)
+        _DECODINGS.reset(decodings_token)
+
+
+def _run_comparison(
+    args: argparse.Namespace,
+    comparison: str,
+    build: Callable[[argparse.Namespace, list[str]], Comparison],
+    required_inputs: Sequence[tuple[str, str]],
+    warnings: DiffWarnings,
+    date_order: str,
+    decodings: Mapping[str, str],
+) -> int:
     try:
         inputs: dict[str, Path] = {}
         for dest, flag in required_inputs:
@@ -618,14 +674,28 @@ def run_comparison_cli(
             "ours_tz": args.ours_tz,
             "time_tolerance_s": args.time_tolerance,
             "time_precision": "second",
+            "date_order": date_order,
+            "date_order_source": "option" if args.date_order else "tool-default",
             "max_list": args.max_list,
         },
         key_fields=built.key_fields,
         compared_fields=built.compared_fields,
-        warnings=warnings,
+        warnings=[*warnings, *decoding_warnings(decodings)],
         max_list=args.max_list,
         extra_sections=built.extra_sections(result) if built.extra_sections else None,
     )
+    report.update(unparsed_time_section(warnings, [*built.key_fields, *built.compared_fields]))
+    for name, item in report["inputs"].items():  # type: ignore[union-attr]
+        item["encoding"] = decodings.get(str(inputs[name]), "")
+    if result.reference_count == 0:
+        status = "no-reference"
+    elif report["unparsed_time_uncompared"]:
+        status = "unparsed-time"
+    elif result.matched == result.reference_count and not result.mismatched:
+        status = "clean"
+    else:
+        status = "differences"
+    report["status"] = status
     text = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -639,7 +709,11 @@ def run_comparison_cli(
             f"recall={report['recall']} missing={counts['missing']} extra={counts['extra']} "  # type: ignore[index]
             f"mismatched={counts['mismatched']}"  # type: ignore[index]
         )
+        if report["unparsed_time_count"]:
+            print(f"읽지 못한 시각 {report['unparsed_time_count']}개 (비교하지 않음): {report['unparsed_time_fields']}")
         if args.output is not None:
             print(f"-> {args.output}")
-    clean = result.matched == result.reference_count and not result.mismatched
-    return EXIT_OK if clean else EXIT_DIFF
+    if status == "no-reference":
+        print(f"오류: {NO_REFERENCE_MESSAGE} (기준 파일의 행·열을 확인하세요)", file=sys.stderr)
+        return EXIT_INPUT
+    return EXIT_OK if status == "clean" else EXIT_DIFF

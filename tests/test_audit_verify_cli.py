@@ -208,5 +208,166 @@ class AuditVerifyCliTests(unittest.TestCase):
         self.assertEqual(sidecar[VERIFICATION_METHOD_FIELD], list(VERIFICATION_METHOD_LINES))
 
 
+def _strip_and_edit(line: str, **changes: object) -> str:
+    record = json.loads(line)
+    record.pop("record_sha256")
+    record.pop("previous_record_sha256")
+    record.update(changes)
+    return json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+class AuditVerifyWb12BypassTests(unittest.TestCase):
+    """R8 WB-12 review P0-1: bypasses A-D and the head cut (no hash recomputed by the editor)."""
+
+    def test_a_one_line_history_with_hash_keys_removed_is_broken(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "report.md"
+            output.write_text("report\n", encoding="utf-8")
+            write_audit_record(audit_path_for(output), command="export", output_files=[("report", output)])
+            log_path = export_audit_log_path(audit_path_for(output))
+            line = log_path.read_text(encoding="utf-8").splitlines()[0]
+            log_path.write_text(_strip_and_edit(line, command="EDITED") + "\n", encoding="utf-8", newline="\n")
+            code, payload = _run(str(log_path), "--json")
+        self.assertEqual(code, 3)
+        self.assertEqual((payload["pre_chain_lines"], payload["first_broken_line"]), (0, 1))
+        self.assertIn("해시 필드를 지운 줄", payload["broken_lines"][0]["reason"])
+
+    def test_b_every_line_stripped_is_broken_not_pre_chain(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = _export_four(Path(tmp))
+            lines = [_strip_and_edit(line, os_user="someone-else") for line in log_path.read_text(encoding="utf-8").splitlines()]
+            log_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+            code, payload = _run(str(log_path), "--json")
+        self.assertEqual(code, 3)
+        self.assertFalse(payload["ok"])
+        self.assertEqual((payload["pre_chain_lines"], payload["chained"]), (0, 0))
+        self.assertEqual([item["line"] for item in payload["broken_lines"]], [1, 2, 3, 4])
+
+    def test_b_chain_era_keys_removed_too_still_needs_the_r7_shape(self) -> None:
+        # Keeping only the R7 keys leaves a zone-aware generated_at: not an R7 record.
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = _export_four(Path(tmp))
+            keep = {"command", "generated_at", "provenance", "integrity"}
+            lines = [
+                json.dumps({k: v for k, v in json.loads(line).items() if k in keep}, ensure_ascii=False)
+                for line in log_path.read_text(encoding="utf-8").splitlines()
+            ]
+            log_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+            code, payload = _run(str(log_path), "--json")
+        self.assertEqual((code, payload["pre_chain_lines"]), (3, 0))
+
+    def test_c_head_cut_and_reformatted_history_is_broken_even_with_anchor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = _export_four(Path(tmp))
+            lines = log_path.read_text(encoding="utf-8").splitlines()
+            kept_last = json.loads(lines[-1])["record_sha256"]
+            log_path.write_text(
+                json.dumps(json.loads(lines[-1]), ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n"
+            )
+            code, payload = _run(str(log_path), "--json")
+            self.assertEqual((code, payload["layout"]), (3, "lines"))
+            self.assertIn("한 줄 한 기록 형식이 아님", payload["broken_lines"][0]["reason"])
+            code, payload = _run(str(log_path), "--json", "--expect-last", kept_last)
+        self.assertEqual(code, 3)
+        self.assertTrue(payload["not_proven"])
+
+    def test_c_head_cut_one_line_per_record_names_the_cut(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = _export_four(Path(tmp))
+            lines = log_path.read_text(encoding="utf-8").splitlines()
+            kept_last = json.loads(lines[-1])["record_sha256"]
+            log_path.write_text("\n".join(lines[2:]) + "\n", encoding="utf-8", newline="\n")
+            for extra in ((), ("--expect-last", kept_last)):
+                code, payload = _run(str(log_path), "--json", *extra)
+                self.assertEqual((code, payload["first_broken_line"]), (3, 1))
+                self.assertIn("앞부분 잘림 가능", payload["broken_lines"][0]["reason"])
+
+    def test_c_anchor_on_a_sidecar_does_not_clear_not_proven(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _export_four(Path(tmp))
+            sidecar = audit_path_for(Path(tmp) / "report-3.md")
+            last = json.loads(sidecar.read_text(encoding="utf-8"))["record_sha256"]
+            code, payload = _run(str(sidecar), "--json", "--expect-last", last)
+        self.assertEqual((code, payload["layout"], payload["anchor"]["matched"]), (0, "sidecar", True))
+        self.assertTrue(any("끝 줄 삭제" in item for item in payload["not_proven"]))
+        self.assertTrue(any(".audit 파일은 마지막 1건" in item for item in payload["not_proven"]))
+
+    def test_d_sidecar_with_hash_keys_removed_is_broken(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _export_four(Path(tmp))
+            sidecar = audit_path_for(Path(tmp) / "report-3.md")
+            record = json.loads(sidecar.read_text(encoding="utf-8"))
+            record.pop("record_sha256")
+            record.pop("previous_record_sha256")
+            record["command"] = "EDITED"
+            sidecar.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+            code, payload = _run(str(sidecar), "--json")
+        self.assertEqual((code, payload["pre_chain_lines"]), (3, 0))
+
+    def test_r7_shaped_sidecar_is_pre_chain_and_disclosed_as_unchecked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            sidecar = Path(tmp) / "old.audit.json"
+            old = {"command": "report", "generated_at": "2026-04-23T10:00:00", "provenance": {}, "integrity": {}}
+            sidecar.write_text(json.dumps(old, indent=2) + "\n", encoding="utf-8", newline="\n")
+            code, payload = _run(str(sidecar), "--json")
+        self.assertEqual((code, payload["unchecked_lines"]), (0, 1))
+        self.assertTrue(any("검사하지 않음" in item for item in payload["not_proven"]))
+
+    def test_chained_sidecar_without_history_is_unverifiable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = _export_four(Path(tmp))
+            sidecar = audit_path_for(Path(tmp) / "report-3.md")
+            log_path.unlink()
+            code, payload = _run(str(sidecar), "--json")
+            self.assertEqual((code, payload["status"], payload["ok"]), (3, "unverifiable", False))
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                main(["audit-verify", str(sidecar)])
+        self.assertIn("확인 불가", out.getvalue())
+
+    def test_sidecar_of_a_broken_history_is_not_intact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = _export_four(Path(tmp))
+            lines = log_path.read_text(encoding="utf-8").splitlines()
+            log_path.write_text("\n".join([lines[0], lines[2], lines[3]]) + "\n", encoding="utf-8", newline="\n")
+            code, payload = _run(str(audit_path_for(Path(tmp) / "report-3.md")), "--json")
+        self.assertEqual(code, 3)
+        self.assertFalse(payload["history_contains_sidecar"])
+
+    def test_record_with_line_separator_in_a_note_verifies(self) -> None:
+        # Review P2-1: U+2028 / U+0085 are written raw and must not split the line.
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "report.md"
+            output.write_text("report\n", encoding="utf-8")
+            for note in ("a b", "c\u0085d"):
+                write_audit_record(audit_path_for(output), command="export", notes=[note], output_files=[("report", output)])
+            code, payload = _run(str(export_audit_log_path(audit_path_for(output))), "--json")
+        self.assertEqual((code, payload["records"], payload["chained"]), (0, 2, 2))
+
+    def test_duplicate_key_line_is_broken(self) -> None:
+        # Review P2-2: a first-key-wins reader would show "EVIL".
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = _export_four(Path(tmp))
+            lines = log_path.read_text(encoding="utf-8").splitlines()
+            lines[1] = lines[1].replace("{", '{"command":"EVIL",', 1)
+            log_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+            code, payload = _run(str(log_path), "--json")
+        self.assertEqual((code, payload["first_broken_line"]), (3, 2))
+
+    def test_unchained_line_after_r7_lines_and_chain_is_broken(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "rapidtriage-export-audit.jsonl"
+            old = {"command": "report", "generated_at": "2026-04-23T10:00:00", "provenance": {}, "integrity": {}}
+            log_path.write_text(json.dumps(old) + "\n", encoding="utf-8", newline="\n")
+            output = Path(tmp) / "r.md"
+            output.write_text("r\n", encoding="utf-8")
+            write_audit_record(audit_path_for(output), command="export", output_files=[("report", output)])
+            code, payload = _run(str(log_path), "--json")
+            self.assertEqual((code, payload["pre_chain_lines"], payload["chained"]), (0, 1, 1))
+            with log_path.open("a", encoding="utf-8", newline="\n") as handle:
+                handle.write(json.dumps(old) + "\n")
+            code, payload = _run(str(log_path), "--json")
+        self.assertEqual((code, payload["first_broken_line"]), (3, 3))
+
 if __name__ == "__main__":
     unittest.main()

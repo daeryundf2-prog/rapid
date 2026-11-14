@@ -61,7 +61,7 @@ def build_recyclebin_comparison(args: argparse.Namespace, warnings: list[str]) -
         if not name:
             rd.add_warning(warnings, f"기준 {line}행에 $I 파일 이름이 없어 건너뛰었습니다")
             continue
-        deleted = rd.safe_timestamp(rd.pick(row, *REF_DELETED), args.reference_tzinfo, warnings, f"기준 {line}행")
+        deleted = rd.safe_timestamp(rd.pick(row, *REF_DELETED), args.reference_tzinfo, warnings, f"기준 {line}행", "deleted_at")
         reference.append(
             recycled_row(name, rd.pick(row, *REF_ORIGINAL), rd.parse_int(rd.pick(row, *REF_SIZE)), deleted)
         )
@@ -73,7 +73,7 @@ def build_recyclebin_comparison(args: argparse.Namespace, warnings: list[str]) -
             name = f"$i{recycle_id}" if recycle_id else ""
         if not name:
             continue
-        deleted = rd.safe_timestamp(rd.rapid_field(row, "deleted_at"), args.ours_tzinfo, warnings, "우리 휴지통 행")
+        deleted = rd.safe_timestamp(rd.rapid_field(row, "deleted_at"), args.ours_tzinfo, warnings, "우리 휴지통 행", "deleted_at")
         ours.append(
             recycled_row(
                 name,

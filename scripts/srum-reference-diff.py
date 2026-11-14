@@ -351,7 +351,7 @@ def app_key(value: object, basename: bool) -> str:
 
 
 def row_key(app: object, stamp: object, tz, warnings: list[str], context: str, basename: bool) -> str:
-    return f"{app_key(app, basename)}|{rd.format_timestamp(rd.safe_timestamp(stamp, tz, warnings, context))}"
+    return f"{app_key(app, basename)}|{rd.format_timestamp(rd.safe_timestamp(stamp, tz, warnings, context, 'timestamp'))}"
 
 
 def load_reference_tables(folder: Path) -> dict[str, list[dict[str, str]]]:
@@ -466,7 +466,12 @@ def export_main(argv: list[str] | None = None) -> int:
         help="compare the app id as a full path (default) or as its file name",
     )
     args = parser.parse_args(argv)
-    warnings: list[str] = []
+    with rd.comparison_scope(args.date_order) as (date_order, decodings):
+        return _export_run(args, date_order, decodings)
+
+
+def _export_run(args: argparse.Namespace, date_order: str, decodings: dict[str, str]) -> int:
+    warnings = rd.DiffWarnings()
     try:
         if args.ours is None or args.reference is None:
             raise rd.ReferenceDiffInputError("--ours 와 --reference(표별 CSV 폴더) 인자가 필요합니다.")
@@ -479,6 +484,15 @@ def export_main(argv: list[str] | None = None) -> int:
         print(f"오류: {exc}", file=sys.stderr)
         return rd.EXIT_INPUT
     body = compare_tables(ours_rows, tables, args, warnings)
+    unparsed = rd.unparsed_time_section(warnings, ["timestamp"])
+    if not body["counts"]["reference"]:  # type: ignore[index]
+        status = "no-reference"
+    elif unparsed["unparsed_time_uncompared"]:
+        status = "unparsed-time"
+    elif not body["missing"] and not body["mismatched"]:
+        status = "clean"
+    else:
+        status = "differences"
     report: dict[str, object] = {
         "schema_version": rd.SCHEMA_VERSION,
         "comparison": "srum-windows-search",
@@ -493,6 +507,8 @@ def export_main(argv: list[str] | None = None) -> int:
             "reference_tz": args.reference_tz,
             "ours_tz": args.ours_tz,
             "time_precision": "second",
+            "date_order": date_order,
+            "date_order_source": "option" if args.date_order else "tool-default",
             "app_match": args.app_match,
             "max_list": args.max_list,
         },
@@ -500,7 +516,9 @@ def export_main(argv: list[str] | None = None) -> int:
             "ours": {"path": str(args.ours), "sha256": rd.file_sha256(args.ours)},
             "reference": {"path": str(args.reference), "sha256": ""},
         },
-        "warnings": warnings,
+        **unparsed,
+        "status": status,
+        "warnings": [*warnings, *rd.decoding_warnings(decodings)],
     }
     text = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     if args.output is not None:
@@ -515,8 +533,10 @@ def export_main(argv: list[str] | None = None) -> int:
         )
         if args.output is not None:
             print(f"-> {args.output}")
-    clean = not body["missing"] and not body["mismatched"]
-    return rd.EXIT_OK if clean else rd.EXIT_DIFF
+    if status == "no-reference":
+        print(f"오류: {rd.NO_REFERENCE_MESSAGE} (기준 표 폴더의 표가 모두 비어 있음)", file=sys.stderr)
+        return rd.EXIT_INPUT
+    return rd.EXIT_OK if status == "clean" else rd.EXIT_DIFF
 
 
 def main(argv: list[str] | None = None) -> int:

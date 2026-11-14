@@ -145,7 +145,7 @@ class CollectorValidationMatrixTests(unittest.TestCase):
         self.assertEqual(reasons["userassist"], "기준 출력 미지정: 입력 설정에 'reference' 없음")
         self.assertIn("대조 스크립트 입력 오류(종료 2)", reasons["recyclebin"])
         self.assertIn("기준 파일이 비어 있습니다", reasons["recyclebin"])
-        self.assertEqual(reasons["usb"], "지표 값 없음(기준 행 0건?): recall")
+        self.assertEqual(reasons["usb"], "기준 행 0개 — 비교 불가")
         self.assertEqual(reasons["mft"], "기준 출력 미지정: 입력 설정에 이 행 없음")
         for row in report["rows"]:
             self.assertEqual(row["status"], "not_measured")
@@ -167,6 +167,18 @@ class CollectorValidationMatrixTests(unittest.TestCase):
         code, report, _, _ = self.run_matrix("--inputs", str(inputs), "--corpus", "C2", "--rows", "browser")
         self.assertEqual(code, 1)
         self.assertEqual(self.row(report, "browser")["status"], "fail")
+
+    def test_unread_reference_time_is_fail_not_pass(self) -> None:
+        # WB-12 P1-3: recall 1.0 but a compared time could not be read on the reference side.
+        unread = [(DEVICES[0][0], DEVICES[0][1], "sometime last spring", DEVICES[0][3]), *DEVICES[1:]]
+        inputs = self.write_inputs({"usb": self.usb_inputs(DEVICES, unread)})
+        code, report, _, _ = self.run_matrix("--inputs", str(inputs), "--corpus", "C2", "--rows", "usb")
+        self.assertEqual(code, 1)
+        row = self.row(report, "usb")
+        self.assertEqual(row["status"], "fail")
+        checks = row["cells"]["C2"]["runs"][0]["checks"]
+        self.assertEqual(checks[0]["value"], 1.0)
+        self.assertEqual((checks[-1]["metric"], checks[-1]["value"], checks[-1]["ok"]), ("unparsed_time_uncompared", 1, False))
 
     # -- helpers and config errors -------------------------------------------------------
 

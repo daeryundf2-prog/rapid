@@ -96,6 +96,25 @@ class SrumReferenceDiffTests(ReferenceDiffCase):
         self.assertEqual((code, report), (2, {}))
         self.assertIn("폴더가 없습니다", stderr)
 
+    def test_header_only_tables_exit_2(self) -> None:
+        # WB-12 review P1-4: an empty reference is not a clean result.
+        for path in self.ref.iterdir():
+            path.write_text(path.read_text(encoding="utf-8-sig").splitlines()[0] + "\n", encoding="utf-8")
+        code, report, stderr = self._diff(ours_rows())
+        self.assertEqual(code, 2)
+        self.assertIn("기준 행 0개 — 비교 불가", stderr)
+        self.assertEqual((report["status"], report["recall"]), ("no-reference", None))
+
+    def test_unreadable_reference_time_is_not_clean(self) -> None:
+        write_csv(self.ref / "20240601_SrumECmd_NetworkUsages_Output.csv", SRUM_HEADER,
+                  srum_rows([(app, "?" if index == 0 else stamp) for index, (app, stamp) in enumerate(NETWORK)]))
+        rows = [row for row in ours_rows() if row.get("details", {}).get("timestamp") != NETWORK[0][1]
+                or row["details"].get("table_name") != NETWORK_GUID]
+        code, report, _ = self._diff(rows)
+        self.assertEqual(code, 1)
+        self.assertEqual(report["unparsed_time_fields"]["reference"], {"timestamp": 1})
+        self.assertEqual(report["status"], "unparsed-time")
+
     def test_canon_table(self) -> None:
         self.assertEqual(self.module.canon_table(NETWORK_GUID), "network_usage")
         self.assertEqual(self.module.canon_table("20240601_SrumECmd_NetworkUsages_Output.csv"), "network_usage")
