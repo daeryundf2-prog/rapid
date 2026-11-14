@@ -18,8 +18,19 @@ const perfRequested =
 // Workers re-read this file with their own argv: hand them the decision through the environment.
 if (perfRequested) process.env.RAPIDTRIAGE_PERF = "1";
 const perfBaseUrl = perfRequested ? process.env.RAPIDTRIAGE_PERF_BASE_URL?.replace(/\/+$/, "") : undefined;
-if (perfBaseUrl && /:8710$/.test(perfBaseUrl)) {
+if (perfBaseUrl && targetsOperatorPort(perfBaseUrl)) {
   throw new Error("Port 8710 is the operator's RapidTriage server and is never measured; use another port.");
+}
+
+// R8 WB-13 review: a regex on the string end missed a base URL with a path (http://127.0.0.1:8710/v2).
+function targetsOperatorPort(baseUrl: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    throw new Error(`RAPIDTRIAGE_PERF_BASE_URL is not a URL: ${baseUrl}`);
+  }
+  return parsed.port === "8710";
 }
 
 const port = process.env.RAPIDTRIAGE_E2E_PORT || "8791";

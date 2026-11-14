@@ -59,14 +59,14 @@ class AuditVerifyCliTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["first_broken_line"], 2)
 
-    def test_pre_chain_file_exits_0_and_counts_lines(self) -> None:
+    def test_pre_chain_only_file_is_unverifiable_and_counts_lines(self) -> None:
+        # R8 WB-13 review P1-1: nothing chained was checked, so this is never "온전함".
         with tempfile.TemporaryDirectory() as tmp:
             log_path = Path(tmp) / "rapidtriage-export-audit.jsonl"
             old = {"command": "report", "generated_at": "2026-04-23T10:00:00", "provenance": {}, "integrity": {}}
             log_path.write_text("".join(json.dumps(old) + "\n" for _ in range(4)), encoding="utf-8", newline="\n")
             code, payload = _run(str(log_path), "--json")
-        self.assertEqual(code, 0)
-        self.assertTrue(payload["ok"])
+        self.assertEqual((code, payload["status"], payload["ok"]), (3, "unverifiable", False))
         self.assertEqual(payload["pre_chain_lines"], 4)
 
     def test_sidecar_and_missing_file(self) -> None:
@@ -256,6 +256,48 @@ class AuditVerifyWb12BypassTests(unittest.TestCase):
             code, payload = _run(str(log_path), "--json")
         self.assertEqual((code, payload["pre_chain_lines"]), (3, 0))
 
+    def test_e_history_rewritten_in_the_full_r7_shape_is_never_intact(self) -> None:
+        # R8 WB-13 review P1-1 E: R7 keys only, zone removed, output hashes edited, no hash computed.
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = _export_four(Path(tmp))
+            keep = {"command", "generated_at", "provenance", "integrity"}
+            lines = []
+            for line in log_path.read_text(encoding="utf-8").splitlines():
+                record = {k: v for k, v in json.loads(line).items() if k in keep}
+                record["generated_at"] = "2026-04-23T10:00:00"
+                record["integrity"] = {"outputs": [{"sha256": "0" * 64}]}
+                lines.append(json.dumps(record, ensure_ascii=False))
+            log_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+            code, payload = _run(str(log_path), "--json")
+            self.assertEqual((code, payload["status"], payload["ok"]), (3, "unverifiable", False))
+            self.assertEqual((payload["chained"], payload["pre_chain_lines"]), (0, 4))
+            self.assertIn("사슬 기록 0줄", payload["broken_lines"][0]["reason"])
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(main(["audit-verify", str(log_path)]), 3)
+        self.assertNotIn("온전함", out.getvalue())
+        self.assertIn("결과: 확인 불가 — 사슬 기록 0줄", out.getvalue())
+        self.assertIn("내용을 검사하지 않았음", out.getvalue())
+
+    def test_q_a_lone_command_line_is_unverifiable(self) -> None:
+        # R8 WB-13 review P1-1 Q.
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "rapidtriage-export-audit.jsonl"
+            log_path.write_text('{"command":"export"}\n', encoding="utf-8", newline="\n")
+            code, payload = _run(str(log_path), "--json")
+        self.assertEqual((code, payload["status"], payload["ok"]), (3, "unverifiable", False))
+
+    def test_k_r7_rewrite_with_anchor_is_broken(self) -> None:
+        # R8 WB-13 review P1-1 K: the kept anchor still names it broken, not merely unverifiable.
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = _export_four(Path(tmp))
+            original = log_path.read_text(encoding="utf-8").splitlines()
+            kept_last = json.loads(original[-1])["record_sha256"]
+            old = {"command": "report", "generated_at": "2026-04-23T10:00:00", "provenance": {}, "integrity": {}}
+            log_path.write_text("".join(json.dumps(old) + "\n" for _ in original), encoding="utf-8", newline="\n")
+            code, payload = _run(str(log_path), "--json", "--expect-last", kept_last)
+        self.assertEqual((code, payload["status"]), (3, "broken"))
+
     def test_c_head_cut_and_reformatted_history_is_broken_even_with_anchor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             log_path = _export_four(Path(tmp))
@@ -304,14 +346,43 @@ class AuditVerifyWb12BypassTests(unittest.TestCase):
             code, payload = _run(str(sidecar), "--json")
         self.assertEqual((code, payload["pre_chain_lines"]), (3, 0))
 
-    def test_r7_shaped_sidecar_is_pre_chain_and_disclosed_as_unchecked(self) -> None:
+    def test_r7_shaped_sidecar_alone_is_unverifiable_and_disclosed_as_unchecked(self) -> None:
+        # R8 WB-13 review P1-1: one R7 record checked nothing; it is counted, never "온전함".
         with tempfile.TemporaryDirectory() as tmp:
             sidecar = Path(tmp) / "old.audit.json"
             old = {"command": "report", "generated_at": "2026-04-23T10:00:00", "provenance": {}, "integrity": {}}
             sidecar.write_text(json.dumps(old, indent=2) + "\n", encoding="utf-8", newline="\n")
             code, payload = _run(str(sidecar), "--json")
-        self.assertEqual((code, payload["unchecked_lines"]), (0, 1))
+        self.assertEqual((code, payload["status"], payload["unchecked_lines"]), (3, "unverifiable", 1))
         self.assertTrue(any("검사하지 않음" in item for item in payload["not_proven"]))
+
+    def test_f_r7_shaped_sidecar_beside_a_chained_history_is_broken(self) -> None:
+        # R8 WB-13 review P1-1 F: the sidecar was cut to the R7 shape and edited.
+        with tempfile.TemporaryDirectory() as tmp:
+            _export_four(Path(tmp))
+            sidecar = audit_path_for(Path(tmp) / "report-3.md")
+            record = json.loads(sidecar.read_text(encoding="utf-8"))
+            forged = {k: v for k, v in record.items() if k in {"command", "generated_at", "provenance", "integrity"}}
+            forged["generated_at"] = "2026-04-23T10:00:00"
+            forged["command"] = "EDITED"
+            sidecar.write_text(json.dumps(forged, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+            code, payload = _run(str(sidecar), "--json")
+        self.assertEqual((code, payload["status"], payload["layout"]), (3, "broken", "sidecar"))
+        self.assertIs(payload["history_contains_sidecar"], False)
+        self.assertIn("사슬 이전 줄에 같은 기록이 없음", payload["broken_lines"][0]["reason"])
+
+    def test_r7_sidecar_that_is_a_pre_chain_line_of_the_history_is_unverifiable_not_broken(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            old = {"command": "report", "generated_at": "2026-04-23T10:00:00", "provenance": {}, "integrity": {}}
+            (folder / "rapidtriage-export-audit.jsonl").write_text(json.dumps(old) + "\n", encoding="utf-8", newline="\n")
+            sidecar = folder / "old.audit.json"
+            sidecar.write_text(json.dumps(old, indent=2) + "\n", encoding="utf-8", newline="\n")
+            output = folder / "r.md"
+            output.write_text("r\n", encoding="utf-8")
+            write_audit_record(audit_path_for(output), command="export", output_files=[("report", output)])
+            code, payload = _run(str(sidecar), "--json")
+        self.assertEqual((code, payload["status"], payload["history_contains_sidecar"]), (3, "unverifiable", True))
 
     def test_chained_sidecar_without_history_is_unverifiable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

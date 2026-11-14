@@ -239,14 +239,15 @@ class ExportAuditChainTests(unittest.TestCase):
             sidecar = folder / "old.audit.json"
             sidecar.write_text(json.dumps(old_record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             report = verify_audit_chain(sidecar)
-            self.assertTrue(report["ok"])
+            # R8 WB-13 review P1-1: zero chained records is never intact.
+            self.assertEqual((report["ok"], report["status"]), (False, "unverifiable"))
             self.assertEqual((report["records"], report["pre_chain_lines"]), (1, 1))
             self.assertEqual(report["pre_chain_label"], "사슬 이전 1줄")
 
             log_path = folder / "rapidtriage-export-audit.jsonl"
             log_path.write_text("".join(json.dumps(old_record) + "\n" for _ in range(4)), encoding="utf-8", newline="\n")
             report = verify_audit_chain(log_path)
-            self.assertTrue(report["ok"])
+            self.assertEqual((report["ok"], report["status"]), (False, "unverifiable"))
             self.assertEqual(report["pre_chain_lines"], 4)
             self.assertEqual(report["pre_chain_label"], "사슬 이전 4줄")
 

@@ -39,7 +39,7 @@
     {
       "id": "deleted",
       "collector": "삭제 파일 목록",
-      "pass_line": "재현율 ≥99%",
+      "pass_line": "재현율 ≥99% · 필드 불일치 0",
       "threshold_source": "T-342",
       "runs": [
         {
@@ -47,21 +47,27 @@
           "args": ["--ours", "{ours}", "--reference", "{reference}"],
           "files": ["ours", "reference"],
           "optional": [{"flag": "--strip-prefix", "input": "strip_prefix", "path": false}],
-          "checks": [{"metric": "recall", "op": ">=", "value": 0.99}]
+          "checks": [
+            {"metric": "recall", "op": ">=", "value": 0.99},
+            {"metric": "counts.mismatched", "op": "<=", "value": 0}
+          ]
         }
       ]
     },
     {
       "id": "usn",
       "collector": "USN 저널",
-      "pass_line": "재현율 ≥99%",
+      "pass_line": "재현율 ≥99% · 필드 불일치 0",
       "threshold_source": "IS-158 기본값(행별 수치 없음)",
       "runs": [
         {
           "script": "usn-reference-diff",
           "args": ["--ours", "{ours}", "--reference", "{reference}"],
           "files": ["ours", "reference"],
-          "checks": [{"metric": "recall", "op": ">=", "value": 0.99}]
+          "checks": [
+            {"metric": "recall", "op": ">=", "value": 0.99},
+            {"metric": "counts.mismatched", "op": "<=", "value": 0}
+          ]
         }
       ]
     },
@@ -110,56 +116,68 @@
     {
       "id": "shimcache",
       "collector": "ShimCache",
-      "pass_line": "재현율 ≥99%",
+      "pass_line": "재현율 ≥99% · 필드 불일치 0",
       "threshold_source": "QA-136(레지스트리 계열)",
       "runs": [
         {
           "script": "shimcache-reference-diff",
           "args": ["--ours", "{ours}", "--reference", "{reference}"],
           "files": ["ours", "reference"],
-          "checks": [{"metric": "recall", "op": ">=", "value": 0.99}]
+          "checks": [
+            {"metric": "recall", "op": ">=", "value": 0.99},
+            {"metric": "counts.mismatched", "op": "<=", "value": 0}
+          ]
         }
       ]
     },
     {
       "id": "userassist",
       "collector": "UserAssist",
-      "pass_line": "재현율 ≥99%",
+      "pass_line": "재현율 ≥99% · 필드 불일치 0",
       "threshold_source": "QA-136(레지스트리 계열)",
       "runs": [
         {
           "script": "userassist-reference-diff",
           "args": ["--ours", "{ours}", "--reference", "{reference}"],
           "files": ["ours", "reference"],
-          "checks": [{"metric": "recall", "op": ">=", "value": 0.99}]
+          "checks": [
+            {"metric": "recall", "op": ">=", "value": 0.99},
+            {"metric": "counts.mismatched", "op": "<=", "value": 0}
+          ]
         }
       ]
     },
     {
       "id": "shellbags",
       "collector": "ShellBags",
-      "pass_line": "재현율 ≥99%",
+      "pass_line": "재현율 ≥99% · 필드 불일치 0",
       "threshold_source": "QA-136(레지스트리 계열)",
       "runs": [
         {
           "script": "shellbags-reference-diff",
           "args": ["--ours", "{ours}", "--reference", "{reference}"],
           "files": ["ours", "reference"],
-          "checks": [{"metric": "recall", "op": ">=", "value": 0.99}]
+          "checks": [
+            {"metric": "recall", "op": ">=", "value": 0.99},
+            {"metric": "counts.mismatched", "op": "<=", "value": 0}
+          ]
         }
       ]
     },
     {
       "id": "usb",
       "collector": "USB 장치",
-      "pass_line": "재현율 100% (대본 USB 3대 = 3줄)",
+      "pass_line": "재현율 100% (대본 USB 3대 = 3줄) · 필드 불일치 0",
       "threshold_source": "T-208",
       "runs": [
         {
           "script": "usb-reference-diff",
           "args": ["--ours", "{ours}", "--reference", "{reference}"],
           "files": ["ours", "reference"],
-          "checks": [{"metric": "recall", "op": ">=", "value": 1.0}]
+          "checks": [
+            {"metric": "recall", "op": ">=", "value": 1.0},
+            {"metric": "counts.mismatched", "op": "<=", "value": 0}
+          ]
         }
       ]
     },
@@ -225,21 +243,24 @@
     {
       "id": "srum-search",
       "collector": "SRUM·Windows Search",
-      "pass_line": "표별 키 재현율 ≥99% (전체)",
+      "pass_line": "표별 키 재현율 ≥99% (전체) · 필드 불일치 0",
       "threshold_source": "IS-158 기본값(행별 수치 없음)",
       "runs": [
         {
           "script": "srum-reference-diff",
           "args": ["--ours", "{ours}", "--reference", "{reference}"],
           "files": ["ours", "reference"],
-          "checks": [{"metric": "recall", "op": ">=", "value": 0.99}]
+          "checks": [
+            {"metric": "recall", "op": ">=", "value": 0.99},
+            {"metric": "counts.mismatched", "op": "<=", "value": 0}
+          ]
         }
       ]
     },
     {
       "id": "browser",
       "collector": "브라우저 방문·다운로드",
-      "pass_line": "방문·다운로드 재현율 100% (대본 URL 30)",
+      "pass_line": "방문·다운로드 재현율 100% (대본 URL 30) · 필드 불일치 0",
       "threshold_source": "QA-136",
       "runs": [
         {
@@ -247,59 +268,70 @@
           "script": "browser-reference-diff",
           "args": ["--kind", "visit", "--ours", "{visit_ours}", "--reference", "{visit_reference}"],
           "files": ["visit_ours", "visit_reference"],
-          "checks": [{"metric": "recall", "op": ">=", "value": 1.0}]
+          "checks": [
+            {"metric": "recall", "op": ">=", "value": 1.0},
+            {"metric": "counts.mismatched", "op": "<=", "value": 0}
+          ]
         },
         {
           "id": "download",
           "script": "browser-reference-diff",
           "args": ["--kind", "download", "--ours", "{download_ours}", "--reference", "{download_reference}"],
           "files": ["download_ours", "download_reference"],
-          "checks": [{"metric": "recall", "op": ">=", "value": 1.0}]
+          "checks": [
+            {"metric": "recall", "op": ">=", "value": 1.0},
+            {"metric": "counts.mismatched", "op": "<=", "value": 0}
+          ]
         }
       ]
     },
     {
       "id": "recyclebin",
       "collector": "휴지통",
-      "pass_line": "재현율 100%",
+      "pass_line": "재현율 100% · 필드 불일치 0",
       "threshold_source": "QA-136",
       "runs": [
         {
           "script": "recyclebin-reference-diff",
           "args": ["--ours", "{ours}", "--reference", "{reference}"],
           "files": ["ours", "reference"],
-          "checks": [{"metric": "recall", "op": ">=", "value": 1.0}]
+          "checks": [
+            {"metric": "recall", "op": ">=", "value": 1.0},
+            {"metric": "counts.mismatched", "op": "<=", "value": 0}
+          ]
         }
       ]
     },
     {
       "id": "mail",
       "collector": "메일",
-      "pass_line": "메시지 재현율 ≥99%",
+      "pass_line": "메시지 재현율 ≥99% · 필드 불일치 0",
       "threshold_source": "IS-158 기본값(행별 수치 없음)",
       "runs": [
         {
           "script": "mail-reference-diff",
           "args": ["--ours", "{ours}", "--reference", "{reference}"],
           "files": ["ours", "reference"],
-          "checks": [{"metric": "recall", "op": ">=", "value": 0.99}]
+          "checks": [
+            {"metric": "recall", "op": ">=", "value": 0.99},
+            {"metric": "counts.mismatched", "op": "<=", "value": 0}
+          ]
         }
       ]
     },
     {
       "id": "media-hash",
-      "collector": "매체 해시(증거 무결성)",
-      "pass_line": "해시 전부 일치 · 오류 청크 0",
+      "collector": "이미지 무결성(ewfverify·획득 로그) — RapidTriage 해시 비교 아님",
+      "pass_line": "ewfverify 저장값=계산값 · 획득 로그 해시 일치 · 오류 청크 0 (수집기 검증의 전제 조건)",
       "threshold_source": "T-212 / IS-069",
+      "note": "R8 WB-13 review P1-4: RapidTriage computes no media-data hash of an E01 (its file hash is the container), so this row checks the evidence integrity only and never passes RapidTriage. A raw image's RapidTriage hash is compared by running scripts/media-hash-check.py --ours by hand.",
       "runs": [
         {
           "script": "media-hash-check",
           "args": ["--reference", "{reference}"],
           "files": ["reference"],
           "optional": [
-            {"flag": "--acquisition-log", "input": "acquisition_log", "path": true},
-            {"flag": "--ours", "input": "ours", "path": true},
-            {"flag": "--ours-key", "input": "ours_key", "path": false}
+            {"flag": "--acquisition-log", "input": "acquisition_log", "path": true}
           ],
           "checks": [
             {"metric": "match", "op": "==", "value": true},

@@ -180,6 +180,53 @@ class CollectorValidationMatrixTests(unittest.TestCase):
         self.assertEqual(checks[0]["value"], 1.0)
         self.assertEqual((checks[-1]["metric"], checks[-1]["value"], checks[-1]["ok"]), ("unparsed_time_uncompared", 1, False))
 
+    def test_usb_with_every_time_wrong_is_fail_not_pass(self) -> None:
+        # WB-13 P1-2: keys all match (recall 1.0) but every first/last connection time differs.
+        wrong = [(serial, name, "2020-01-01T00:00:00+00:00", "2020-01-02T00:00:00+00:00") for serial, name, _, _ in DEVICES]
+        inputs = self.write_inputs({"usb": self.usb_inputs(wrong, DEVICES)})
+        out = self.tmp / "out"
+        code, report, _, _ = self.run_matrix("--inputs", str(inputs), "--corpus", "C2", "--rows", "usb", "--output-dir", str(out))
+        self.assertEqual(code, 1)
+        row = self.row(report, "usb")
+        self.assertEqual((row["status"], row["label"]), ("fail", "미달"))
+        run = row["cells"]["C2"]["runs"][0]
+        self.assertEqual((run["exit_code"], run["script_status"], run["mismatched"]), (1, "differences", 3))
+        checks = {check["metric"]: check for check in run["checks"]}
+        self.assertEqual((checks["recall"]["value"], checks["recall"]["ok"]), (1.0, True))
+        self.assertEqual((checks["counts.mismatched"]["value"], checks["counts.mismatched"]["ok"]), (3, False))
+        markdown = (out / "collector-validation-matrix.md").read_text(encoding="utf-8")
+        self.assertIn("미달 counts.mismatched 3.00 (기준 <= 0)", markdown)
+
+    def test_every_reference_diff_row_checks_field_mismatches(self) -> None:
+        matrix = self.module.load_matrix(MATRIX_PATH)
+        for row in matrix["rows"]:
+            for run in row["runs"]:
+                if "--ours" in run["args"] and "--reference" in run["args"]:
+                    metrics = [check["metric"] for check in run["checks"]]
+                    self.assertIn("counts.mismatched", metrics, (row["id"], run.get("id")))
+
+    def test_media_hash_row_is_labelled_integrity_only(self) -> None:
+        # WB-13 P1-4: the row passes on ewfverify alone, so it must not read as a RapidTriage check.
+        row = next(row for row in self.module.load_matrix(MATRIX_PATH)["rows"] if row["id"] == "media-hash")
+        self.assertIn("RapidTriage 해시 비교 아님", row["collector"])
+        flags = [option["flag"] for run in row["runs"] for option in run.get("optional") or []]
+        self.assertNotIn("--ours", flags)
+
+    def test_run_without_a_mismatch_check_still_fails_on_mismatches(self) -> None:
+        # A table that forgets the field check (no explicit allowance) must not turn mismatches into 통과.
+        matrix = json.loads(MATRIX_PATH.read_text(encoding="utf-8"))
+        for row in matrix["rows"]:
+            if row["id"] == "usb":
+                row["runs"][0]["checks"] = [{"metric": "recall", "op": ">=", "value": 1.0}]
+        custom = self.tmp / "matrix.json"
+        custom.write_text(json.dumps(matrix, ensure_ascii=False), encoding="utf-8")
+        wrong = [(DEVICES[0][0], DEVICES[0][1], "2020-01-01T00:00:00+00:00", DEVICES[0][3]), *DEVICES[1:]]
+        inputs = self.write_inputs({"usb": self.usb_inputs(wrong, DEVICES)})
+        code, report, _, _ = self.run_matrix("--matrix", str(custom), "--inputs", str(inputs), "--corpus", "C2", "--rows", "usb")
+        self.assertEqual(code, 1)
+        checks = self.row(report, "usb")["cells"]["C2"]["runs"][0]["checks"]
+        self.assertEqual((checks[-1]["metric"], checks[-1]["value"], checks[-1]["ok"]), ("counts.mismatched", 1, False))
+
     # -- helpers and config errors -------------------------------------------------------
 
     def test_metric_path_walks_lists_and_aggregates(self) -> None:

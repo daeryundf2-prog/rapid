@@ -42,6 +42,7 @@ UNANCHORED_LIMITS: tuple[str, ...] = (
 SIDECAR_LIMIT = f".audit 파일은 마지막 1건 사본 — 이력 전체는 같은 폴더의 {EXPORT_AUDIT_LOG_NAME}를 검사해야 함"
 # The keys of a record written before the chain format (R7 sidecar). Any other key is chain-era.
 LEGACY_RECORD_KEYS = frozenset({"command", "generated_at", "provenance", "integrity"})
+UNVERIFIABLE_NO_CHAIN = "확인 불가 — 사슬 기록 0줄: 해시로 검사할 수 있는 줄이 하나도 없어 내용을 검사하지 않았음"
 
 
 def compute_sha256(path: Path) -> str:
@@ -300,7 +301,10 @@ def verify_audit_chain(path: Path, *, expected_last_sha256: str | None = None) -
       file must carry "" (or the hash of the pre-chain line before it), else "앞부분 잘림 가능";
     * a chain-era sidecar must equal one record of an intact history next to it; without that
       history it is "확인 불가" (not intact);
-    * zero records, or zero chained records in a chain-era file, is not intact.
+    * an R7-shaped sidecar next to a history that has chained records is broken unless that exact
+      record is a pre-chain line of the history (R8 WB-13 review P1-1: the R7 shape is easy to type);
+    * zero records, or zero chained records (an all-R7 file, a lone ``{"command": ...}`` line), is
+      never intact: nothing was checked, so the status is "확인 불가" (exit 3).
 
     ``expected_last_sha256`` (the last ``record_sha256`` kept elsewhere) closes tail deletion and
     whole rewrites of the history; on a sidecar it proves that one record only.
@@ -328,7 +332,6 @@ def verify_audit_chain(path: Path, *, expected_last_sha256: str | None = None) -
 
     previous: tuple[int, str] | None = None
     chain_started = False
-    chain_era_seen = False
     last_hash = ""
     for number, line, record in entries:
         if not isinstance(record, dict):
@@ -338,7 +341,6 @@ def verify_audit_chain(path: Path, *, expected_last_sha256: str | None = None) -
             continue
         totals["records"] += 1
         legacy = _is_legacy_record(record)
-        chain_era_seen = chain_era_seen or not legacy
         if CHAIN_FIELD not in record:
             if chain_started:
                 broken.setdefault(number, "사슬이 시작된 뒤에 사슬 필드가 없는 줄")
@@ -394,10 +396,28 @@ def verify_audit_chain(path: Path, *, expected_last_sha256: str | None = None) -
                 broken.setdefault(
                     1, f"같은 폴더의 {EXPORT_AUDIT_LOG_NAME}가 온전하지 않음(첫 번째 깨진 줄 {history_report['first_broken_line']})"
                 )
+    if layout == "sidecar" and sidecar_record is not None and _is_legacy_record(sidecar_record) and not broken:
+        # R8 WB-13 review P1-1 F: an R7-shaped copy beside a chain-era history must be one of its
+        # pre-chain lines; any other R7-shaped sidecar there was typed after the chain began.
+        history = path.with_name(EXPORT_AUDIT_LOG_NAME)
+        if history.is_file():
+            history_records = [
+                item
+                for item in (_json_or_none(line) for line in _audit_lines(history.read_text(encoding="utf-8", errors="replace")))
+                if isinstance(item, dict)
+            ]
+            if any(CHAIN_FIELD in item for item in history_records):
+                pre_chain_records = [item for item in history_records if CHAIN_FIELD not in item and _is_legacy_record(item)]
+                history_checked = sidecar_record in pre_chain_records
+                if not history_checked:
+                    broken.setdefault(
+                        1, f"사슬 이전 형식 사본인데 같은 폴더의 {EXPORT_AUDIT_LOG_NAME}(사슬 기록 있음)의 사슬 이전 줄에 같은 기록이 없음"
+                    )
     if totals["records"] == 0 and not broken:
         broken[0] = "감사 기록이 0줄 — 확인할 기록이 없음"
-    elif totals["chained"] == 0 and chain_era_seen and not broken:
-        broken[0] = "확인 불가 — 사슬 기록 0줄"
+    elif totals["chained"] == 0 and not broken:
+        # R8 WB-13 review P1-1: an all-R7 file (or a lone {"command": ...} line) checked nothing.
+        broken[0] = UNVERIFIABLE_NO_CHAIN
     anchor: dict[str, object] = {"expected_last_sha256": expected_last_sha256 or None, "matched": None}
     if expected_last_sha256:
         matched = bool(last_hash) and last_hash.lower() == expected_last_sha256.strip().lower()
