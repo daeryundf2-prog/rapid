@@ -118,7 +118,7 @@ describe("CommandPalette: executable commands only (T-035)", () => {
     for (let i = 0; i < 300; i += 1) {
       registerCommand({
         id: `review.off.${i}`,
-        label: `리뷰 동작 ${i}`,
+        label: `검토 동작 ${i}`,
         group: "review",
         run: vi.fn(),
         disabledReason: () => "선택한 행이 없습니다",
@@ -165,11 +165,11 @@ describe("CommandPalette: executable commands only (T-035)", () => {
 
   it("typing a disabled command's name still finds it with its reason, after runnable matches", () => {
     registerMany();
-    registerCommand({ id: "review.ok.x", label: "리뷰 동작 실행됨", group: "review", run: vi.fn() });
+    registerCommand({ id: "review.ok.x", label: "검토 동작 실행됨", group: "review", run: vi.fn() });
     render(<CommandPalette />);
     act(() => useAppStore.getState().setOverlay("palette", true));
-    fireEvent.change(input(), { target: { value: "리뷰 동작" } });
-    const review = options().filter((o) => o.textContent?.startsWith("리뷰 동작"));
+    fireEvent.change(input(), { target: { value: "검토 동작" } });
+    const review = options().filter((o) => o.textContent?.startsWith("검토 동작"));
     expect(review[0]?.getAttribute("aria-disabled")).toBeNull();
     expect(review[1]?.getAttribute("aria-disabled")).toBe("true");
     expect(review[1]?.textContent).toContain("선택한 행이 없습니다");

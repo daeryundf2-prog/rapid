@@ -38,28 +38,28 @@ async function showText() {
 }
 
 describe("viewer header (review #6)", () => {
-  it("one ⋯ menu holds the 리뷰 and 원본 sections; no separate 더보기 / 원본 동작 triggers", async () => {
+  it("one ⋯ menu holds the 검토 and 원본 sections; no separate 더보기 / 원본 동작 triggers", async () => {
     await showText();
     const header = screen.getByRole("region", { name: "원본 뷰어" });
-    expect(within(header).queryByRole("button", { name: "리뷰 더보기" })).toBeNull();
+    expect(within(header).queryByRole("button", { name: "검토 더보기" })).toBeNull();
     expect(within(header).queryByRole("button", { name: "원본 동작" })).toBeNull();
     const triggers = within(header)
       .getAllByRole("button")
       .filter((b) => b.getAttribute("aria-haspopup") === "menu");
     // Two menus (r7 L4, C-W9): the one review-status chip ("미검토 ▾") and ⋯ 더보기.
-    expect(triggers.map((b) => b.getAttribute("aria-label"))).toEqual(["리뷰 상태: 미검토", "더보기"]);
+    expect(triggers.map((b) => b.getAttribute("aria-label"))).toEqual(["검토 상태: 미검토", "더보기"]);
     fireEvent.click(screen.getByRole("button", { name: "더보기" }));
     const menu = screen.getByRole("menu", { name: "더보기" });
     // 같은 해시 행에 전파 (AXIOM E3): its own section, always on the viewer row.
     expect([...menu.querySelectorAll(".menu-heading")].map((h) => h.textContent)).toEqual([
-      "리뷰",
+      "검토",
       "태그 전파",
       "원본",
       "피벗",
     ]);
     expect(menu.querySelector("[data-command='review.tags.propagateByHash']")).not.toBeNull();
     const commands = [...menu.querySelectorAll<HTMLElement>("[data-command]")].map((i) => i.dataset.command);
-    // 리뷰 first (marks, then 메모…), then 원본 (source actions, 같은 출처의 다른 행, 레코드 JSON),
+    // 검토 first (marks, then 메모…), then 원본 (source actions, 같은 출처의 다른 행, 레코드 JSON),
     // then 피벗 (viewer redesign §5).
     expect(commands.indexOf("viewer.note")).toBeLessThan(commands.indexOf("viewer.open-original"));
     expect(commands.indexOf("navigate.rows-for-source")).toBeLessThan(

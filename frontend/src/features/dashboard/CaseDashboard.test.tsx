@@ -296,8 +296,8 @@ describe("CaseDashboard (접수, r7 examiner-first)", () => {
     expect(categories.querySelector("select")).toBeNull();
 
     const review = card("검토·보고서");
-    await within(review).findByRole("button", { name: "관련 있음 2건 리뷰보드에서 열기" });
-    expect(within(review).getByRole("button", { name: /리뷰보드 항목\(북마크\) 4건/ })).toBeTruthy();
+    await within(review).findByRole("button", { name: "관련 있음 2건 검토 목록에서 열기" });
+    expect(within(review).getByRole("button", { name: /검토 목록 항목\(북마크\) 4건/ })).toBeTruthy();
     await within(review).findByText("rapidtriage-case-report.pdf");
     expect(review.textContent).toContain("zip 미생성 · 3건");
     expect(review.textContent).toContain("이력 2건");
@@ -376,9 +376,9 @@ describe("CaseDashboard (접수, r7 examiner-first)", () => {
     expect(window.location.hash).toBe("#/case/r1/explore/artifacts?category=operating-system");
     expect(useAppStore.getState().route.category).toBe("operating-system");
 
-    fireEvent.click(await screen.findByRole("button", { name: "관련 있음 2건 리뷰보드에서 열기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "관련 있음 2건 검토 목록에서 열기" }));
     expect(window.location.hash).toBe("#/case/r1/review/board/relevant");
-    fireEvent.click(screen.getByRole("button", { name: /리뷰보드 항목\(북마크\)/ }));
+    fireEvent.click(screen.getByRole("button", { name: /검토 목록 항목\(북마크\)/ }));
     expect(window.location.hash).toBe("#/case/r1/review/board");
 
     const start = card("시작할 곳");
@@ -386,7 +386,7 @@ describe("CaseDashboard (접수, r7 examiner-first)", () => {
     expect(window.location.hash).toBe("#/case/r1/explore/search");
     fireEvent.click(within(start).getByRole("button", { name: /^아티팩트/ }));
     expect(window.location.hash).toBe("#/case/r1/explore/artifacts");
-    fireEvent.click(within(start).getByRole("button", { name: /리뷰보드/ }));
+    fireEvent.click(within(start).getByRole("button", { name: /검토 목록/ }));
     expect(window.location.hash).toBe("#/case/r1/review/board");
 
     fireEvent.click(screen.getByRole("button", { name: /처리 요약 보기/ }));

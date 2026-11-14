@@ -147,7 +147,7 @@ export function connectGridToShell(): () => void {
         app.route.collection === "review" &&
         ref.status !== app.route.status
       ) {
-        // 검토 toolbar 리뷰 상태: a patch of the same page, so tags / time / types / ext / path
+        // 검토 toolbar 검토 상태 filter: a patch of the same page, so tags / time / types / ext / path
         // filters stay (openCollection would start a clean route — review B2-5).
         app.patchRoute({ status: ref.status, row: undefined });
       } else if (!sameCollection(ref, gridRouteFromShell().collection)) {

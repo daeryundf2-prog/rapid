@@ -347,7 +347,7 @@ class QueryEngineTests(unittest.TestCase):
         self.assertEqual(self.total("review:unreviewed in:eventlog", review_provider=provider), 3)
         result = self.run_q("review:relevant", review_provider=lambda: None)
         self.assertEqual(result["page"]["total"], 0)
-        self.assertIn("케이스 DB가 없어 리뷰 조건과 일치하는 행이 없습니다", result["query"]["parsed"]["warnings"])
+        self.assertIn("케이스 DB가 없어 검토 조건과 일치하는 행이 없습니다", result["query"]["parsed"]["warnings"])
 
     def test_count(self) -> None:
         terms = [{"label": "급여", "q": "급여대장"}, {"label": "bad", "q": "(x"}, {"label": "usb", "q": "SanDisk"}]

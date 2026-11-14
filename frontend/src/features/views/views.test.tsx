@@ -164,7 +164,7 @@ describe("ViewSwitch", () => {
     expect(screen.getByRole("toolbar", { name: "보기 전환" }).closest(".view-switch-row")).toBeTruthy();
   });
 
-  it("a node with only the column view (리뷰보드) shows no switch (visual-polish S2)", () => {
+  it("a node with only the column view (검토 목록) shows no switch (visual-polish S2)", () => {
     routeTo("review");
     renderQ(
       <ViewSwitch>

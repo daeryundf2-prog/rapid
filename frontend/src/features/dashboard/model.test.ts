@@ -118,7 +118,7 @@ describe("reviewSummary", () => {
       ["재검토", 0, "needs-review"],
       ["제외", 1, "excluded"],
       ["보고서 포함", 3, "include-in-report"],
-      ["리뷰보드 항목(북마크)", 3, undefined],
+      ["검토 목록 항목(북마크)", 3, undefined],
     ]);
     expect(rows[0]?.color).toContain("--status-relevant");
     expect(rows[4]?.color).toContain("--status-bookmark");

@@ -25,7 +25,7 @@ export const GROUP_LABEL: Record<CommandGroup, string> = {
   case: "케이스",
   grid: "그리드",
   viewer: "뷰어",
-  review: "리뷰",
+  review: "검토",
   export: "내보내기",
   app: "앱",
 };

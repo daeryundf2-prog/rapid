@@ -192,7 +192,7 @@ export function markDisabledReason(target: ViewerTarget | null, action: MarkActi
   if (reviewTargetOf(targetAsGridRow(target))) return undefined;
   return action === "bookmark"
     ? "이 행은 북마크할 수 있는 위치 정보(locator)가 없습니다."
-    : "이 행은 리뷰 표시를 저장할 위치 정보(locator)가 없습니다.";
+    : "이 행은 검토 표시를 저장할 위치 정보(locator)가 없습니다.";
 }
 
 /**

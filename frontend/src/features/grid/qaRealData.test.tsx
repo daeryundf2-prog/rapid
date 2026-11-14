@@ -305,13 +305,13 @@ describe("pressed review toggles clear the mark (4)", () => {
     };
     const button = await waitFor(item);
     expect(button.getAttribute("aria-checked")).toBe("true");
-    expect(statusMenu().getAttribute("aria-label")).toBe("리뷰 상태: 재검토");
+    expect(statusMenu().getAttribute("aria-label")).toBe("검토 상태: 재검토");
     fireEvent.click(button);
     await waitFor(() => expect(calls.some((c) => c.url.pathname.endsWith("review-batch"))).toBe(true));
     const post = calls.find((c) => c.url.pathname.endsWith("review-batch"));
     expect(JSON.parse(String(post?.init?.body))).toMatchObject({ status: "unreviewed" });
     await waitFor(() => expect(item().getAttribute("aria-checked")).toBe("false"));
-    expect(statusMenu().getAttribute("aria-label")).toBe("리뷰 상태: 미검토");
+    expect(statusMenu().getAttribute("aria-label")).toBe("검토 상태: 미검토");
     // One un-press = one POST (no toggle re-post loop in the viewer).
     expect(calls.filter((c) => c.url.pathname.endsWith("review-batch"))).toHaveLength(1);
     expect(screen.getByTestId("viewer-review-status").textContent).toBe("미검토");

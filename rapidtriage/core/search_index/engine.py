@@ -1346,7 +1346,7 @@ class Compiler:
         if self.ctx._marks is None:
             marks = self.ctx.review_provider() if self.ctx.review_provider is not None else None
             if marks is None:
-                self.ctx.warn("케이스 DB가 없어 리뷰 조건과 일치하는 행이 없습니다")
+                self.ctx.warn("케이스 DB가 없어 검토 조건과 일치하는 행이 없습니다")
                 marks = []
             self.ctx._marks = [mark for mark in marks if mark.get("locator")]
         return self.ctx._marks

@@ -159,8 +159,8 @@ describe("EvidenceTree (탐색 domain tree)", () => {
     expect(screen.queryByText("전체 이벤트 로그(EVTX·ETL)")).toBeNull();
     fireEvent.click(item("이벤트 로그").querySelector(".case-tree-twisty") as Element);
     expect(item("전체 이벤트 로그(EVTX·ETL)").getAttribute("aria-level")).toBe("2");
-    // No workflow nodes: 접수 / 리뷰보드 / 산출물 / 분석 작업 are rail stages.
-    for (const gone of ["접수", "리뷰보드", "산출물", "분석 작업"]) {
+    // No workflow nodes: 접수 / 검토 목록 / 산출물 / 분석 작업 are rail stages.
+    for (const gone of ["접수", "검토 목록", "산출물", "분석 작업"]) {
       expect(screen.queryByRole("treeitem", { name: new RegExp(`^${gone}`) })).toBeNull();
     }
     await screen.findByText("패스워드");

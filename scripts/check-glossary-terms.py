@@ -58,16 +58,17 @@ TERMS: dict[str, tuple[str, re.Pattern[str], str]] = {
     "request-failed": ("Request failed", re.compile(r"Request failed", re.IGNORECASE), "한국어 요청 오류 문장"),
 }
 
-# Hit counts on feat/r6-ux @ 425fdb0 (T-005). Lower these as strings are fixed.
+# Hit counts on feat/r6-ux @ 425fdb0 (T-005), lowered on wb12/review-terms
+# (WB-12: 리뷰 -> 검토, 리뷰보드 -> 검토 목록). Lower these as strings are fixed.
 BASELINE: dict[str, int] = {
-    "run-ko": 213,
+    "run-ko": 210,
     "ioc": 13,
-    "web-ui": 5,
+    "web-ui": 3,
     "examiner-ko": 10,
-    "review-board": 6,
+    "review-board": 0,
     "unknown-seconds": 0,
     "failed-to-fetch": 0,
-    "request-failed": 1,
+    "request-failed": 0,
 }
 
 

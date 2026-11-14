@@ -750,7 +750,7 @@ CAPABILITY_GROUPS: tuple[dict[str, Any], ...] = (
     {
         "id": "review-report-citation",
         "catalog_id": "review-report",
-        "label": "리뷰 / 보고서",
+        "label": "검토 / 보고서",
         "capabilities": (
             {"id": "unified-search-source-viewer", "label": "통합 검색 + source viewer", "status": "usable", "terms": ("search", "keyword", "regex", "source")},
             {"id": "review-evidence-tray", "label": "Evidence tray/review status", "status": "usable", "terms": ("relevant", "excluded", "include", "tag", "note")},

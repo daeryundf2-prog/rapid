@@ -1309,8 +1309,8 @@ export function MetaView({
           </details>
         ) : null}
       </section>
-      <section aria-label="리뷰 상태">
-        <h3 className="viewer-subtitle">리뷰</h3>
+      <section aria-label="검토 상태">
+        <h3 className="viewer-subtitle">검토</h3>
         <dl className="viewer-dl">
           <dt>상태</dt>
           <dd>{row?.reviewStatus ? REVIEW_LABELS[row.reviewStatus] : "미검토"}</dd>
