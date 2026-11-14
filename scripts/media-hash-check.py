@@ -22,7 +22,8 @@ Each pair of sources is compared per algorithm. ``match`` is true only when
 every comparison is equal, ewfverify did not report FAILURE and no error
 chunk was found. Report keys: match, error_chunks, recall (equal
 comparisons / comparisons), matched, missing, mismatched, reference_tool.
-Exit 2 when an input is missing or no comparison is possible.
+Shared helpers: rapidtriage/validation/reference_diff.py. Exit 0 match,
+1 differences (or FAILURE / error chunks), 2 input error or no comparison possible.
 """
 
 from __future__ import annotations
@@ -33,9 +34,11 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-import _wc5_helpers as H
+from rapidtriage.validation import reference_diff as rd
 
 ALGORITHMS = {"md5": 32, "sha1": 40, "sha256": 64}
 _ALG_RE = r"(MD5|SHA-?1|SHA-?256)"
@@ -77,7 +80,7 @@ def parse_ewfverify(text: str) -> dict[str, object]:
         "stored": stored,
         "calculated": calculated,
         "result": result.group(1).upper() if result else "",
-        "error_ranges": ranges[: H.LIST_CAP],
+        "error_ranges": ranges[: rd.DEFAULT_MAX_LIST],
         "error_chunks": max([len(ranges), *totals]),
     }
 
@@ -159,46 +162,66 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reference", "--ewfverify", dest="reference", type=Path, help="saved ewfverify output")
     parser.add_argument("--acquisition-log", type=Path, help="acquisition tool log")
     parser.add_argument("--ours", "--rapid", dest="ours", type=Path, help="RapidTriage JSON with media hashes")
-    parser.add_argument("--output", type=Path)
-    parser.add_argument("--json", action="store_true")
-    parser.add_argument("--reference-tool", default="ewfverify+acquisition-log")
-
-    def body() -> int:
-        args = parser.parse_args(argv)
-        given = {
-            name: path
-            for name, path in (("--reference", args.reference), ("--acquisition-log", args.acquisition_log),
-                               ("--ours", args.ours))
-            if path is not None
-        }
+    parser.add_argument("--output", type=Path, help="write the JSON report here")
+    parser.add_argument("--json", action="store_true", help="print the JSON report to stdout")
+    parser.add_argument("--reference-tool", default="", help="reference tool name/version recorded in the report")
+    args = parser.parse_args(argv)
+    sources = (("reference", "--reference", args.reference), ("acquisition_log", "--acquisition-log",
+               args.acquisition_log), ("ours", "--ours", args.ours))
+    try:
         if args.reference is None and args.acquisition_log is None:
-            raise H.InputError("give --reference (ewfverify output) and/or --acquisition-log")
-        H.require_inputs(given)
-        ewf = parse_ewfverify(_read(args.reference)) if args.reference else None
-        acquisition = parse_acquisition_log(_read(args.acquisition_log)) if args.acquisition_log else None
-        ours = find_hashes(json.loads(_read(args.ours))) if args.ours else None
+            raise rd.ReferenceDiffInputError("--reference(ewfverify 출력) 또는 --acquisition-log 인자가 필요합니다.")
+        inputs = {name: rd.require_file(path, flag) for name, flag, path in sources if path is not None}
+        ewf = parse_ewfverify(rd.read_text(args.reference)) if args.reference else None
+        acquisition = parse_acquisition_log(rd.read_text(args.acquisition_log)) if args.acquisition_log else None
+        try:
+            ours = find_hashes(json.loads(rd.read_text(args.ours))) if args.ours else None
+        except ValueError as exc:
+            raise rd.ReferenceDiffInputError(f"우리 출력 파일을 읽지 못했습니다: {args.ours} ({exc})") from exc
         result = check(ewf, acquisition, ours)
         if not result["comparisons"]:
-            raise H.InputError("no hash pair to compare (need two sources with the same algorithm)")
-        inputs = {name.lstrip("-").replace("-", "_"): path for name, path in given.items()}
-        report = H.envelope("media-hash", args.reference_tool, inputs, result)
-        summary = (
-            f"match={result['match']} error_chunks={result['error_chunks']} "
+            raise rd.ReferenceDiffInputError("비교할 해시 쌍이 없습니다. 같은 알고리즘의 해시가 두 출처 이상에 있어야 합니다.")
+    except rd.ReferenceDiffInputError as exc:
+        print(f"오류: {exc}", file=sys.stderr)
+        return rd.EXIT_INPUT
+    tool = args.reference_tool or " + ".join(
+        name for name, present in (("ewfverify", ewf), ("acquisition log", acquisition)) if present is not None
+    )
+    report: dict[str, object] = {
+        "schema_version": rd.SCHEMA_VERSION,
+        "comparison": "media-hash",
+        "release_evidence_status": "engineering_check_only",
+        "report_use_warning": (
+            "Engineering check of media hashes across the acquisition log, ewfverify and RapidTriage. "
+            "Not release evidence."
+        ),
+        "reference_tool": tool,
+        **result,
+        "extra": [],
+        "counts": {
+            "comparisons": len(result["comparisons"]),
+            "matched": result["matched"],
+            "missing": len(result["missing"]),
+            "extra": 0,
+            "mismatched": len(result["mismatched"]),
+        },
+        "inputs": {name: {"path": str(path), "sha256": rd.file_sha256(path)} for name, path in inputs.items()},
+        "warnings": [],
+    }
+    text = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(text, encoding="utf-8", newline="\n")
+    if args.json:
+        sys.stdout.write(text)
+    else:
+        print(
+            f"media-hash: match={result['match']} error_chunks={result['error_chunks']} "
             f"comparisons={len(result['comparisons'])} mismatched={len(result['mismatched'])}"
         )
-        return H.emit(report, args.output, args.json, summary)
-
-    return H.run_cli(body)
-
-
-def _read(path: Path) -> str:
-    try:
-        raw = path.read_bytes()
-    except OSError as exc:
-        raise H.InputError(f"cannot read {path}: {exc}") from exc
-    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):  # some imagers write UTF-16 logs
-        return raw.decode("utf-16", errors="replace")
-    return raw.decode("utf-8-sig", errors="replace")
+        if args.output is not None:
+            print(f"-> {args.output}")
+    return rd.EXIT_OK if result["match"] else rd.EXIT_DIFF
 
 
 if __name__ == "__main__":

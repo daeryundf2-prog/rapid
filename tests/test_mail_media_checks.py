@@ -3,27 +3,11 @@
 from __future__ import annotations
 
 import contextlib
-import csv
-import importlib.util
 import io
 import json
-import tempfile
 import unittest
-from pathlib import Path
 
-SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
-
-
-def _load(name: str):
-    spec = importlib.util.spec_from_file_location(f"rt_{name.replace('-', '_')}_test", SCRIPTS / f"{name}.py")
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-mail = _load("mail-reference-diff")
-media = _load("media-hash-check")
+from tests.reference_diff_helpers import ReferenceDiffCase, write_csv, write_jsonl
 
 MESSAGES = [
     ("<m1@example.com>", "Quarterly numbers", "a@example.com", "Mon, 03 Jun 2024 09:00:00 +0900", ["q.xlsx"]),
@@ -91,102 +75,93 @@ No bad blocks found in image
 """
 
 
-class MailReferenceDiffTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name)
 
-    def tearDown(self) -> None:
-        self._tmp.cleanup()
+MAIL_HEADER = ["InternetMessageId", "Subject", "From", "Date", "Attachments"]
 
-    def _ours(self, messages):
-        return [
-            {"provider": "email", "artifact_type": "email-message", "path": "C:/synthetic/box.mbox", "supported": True,
-             "details": {"message_id": mid, "subject": subject, "from": sender, "date": date,
-                         "attachment_count": len(files), "attachments": [{"name": f} for f in files]}}
-            for mid, subject, sender, date, files in messages
-        ]
 
-    def _reference(self, messages):
-        return [{"InternetMessageId": mid.strip("<>").upper(), "Subject": subject, "From": sender, "Date": date,
-                 "Attachments": ";".join(files)}
-                for mid, subject, sender, date, files in messages]
+def ours_messages(messages):
+    return [
+        {"provider": "email", "artifact_type": "email-message", "path": "C:/synthetic/box.mbox", "supported": True,
+         "details": {"message_id": mid, "subject": subject, "from": sender, "date": date,
+                     "attachment_count": len(files), "attachments": [{"name": f} for f in files]}}
+        for mid, subject, sender, date, files in messages
+    ]
 
-    def _run(self, ours, reference):
-        ours_path = self.root / "ours.jsonl"
-        ours_path.write_text("".join(json.dumps(row) + "\n" for row in ours), encoding="utf-8")
-        ref_path = self.root / "messages.csv"
-        with ref_path.open("w", encoding="utf-8", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=list(reference[0]))
-            writer.writeheader()
-            writer.writerows(reference)
-        stdout = io.StringIO()
-        with contextlib.redirect_stdout(stdout):
-            code = mail.main(["--ours", str(ours_path), "--reference", str(ref_path), "--json"])
-        self.assertEqual(code, 0)
-        return json.loads(stdout.getvalue())
+
+def reference_messages(messages):
+    return [[mid.strip("<>").upper(), subject, sender, date, ";".join(files)]
+            for mid, subject, sender, date, files in messages]
+
+
+class MailReferenceDiffTests(ReferenceDiffCase):
+    script_name = "mail-reference-diff"
+
+    def _diff(self, ours, reference):
+        code, report, stderr = self.run_diff(
+            write_jsonl(self.tmp / "ours.jsonl", ours), write_csv(self.tmp / "messages.csv", MAIL_HEADER, reference)
+        )
+        self.assert_contract(report)
+        return code, report, stderr
 
     def test_message_count_match(self) -> None:
-        report = self._run(self._ours(MESSAGES), self._reference(MESSAGES))
+        code, report, _ = self._diff(ours_messages(MESSAGES), reference_messages(MESSAGES))
+        self.assertEqual(code, 0)
         self.assertTrue(report["match"])
         self.assertEqual(report["messages"], {"ours": 3, "reference": 3})
         self.assertEqual(report["attachments"], {"ours": 3, "reference": 3, "missing": 0})
         self.assertEqual((report["recall"], report["mismatched"]), (1.0, []))
-        for key in ("recall", "matched", "missing", "mismatched", "reference_tool"):
-            self.assertIn(key, report)
 
     def test_one_attachment_missing(self) -> None:
-        ours = self._ours(MESSAGES)
+        ours = ours_messages(MESSAGES)
         ours[2]["details"]["attachment_count"] = 1
         ours[2]["details"]["attachments"] = [{"name": "a.docx"}]
-        report = self._run(ours, self._reference(MESSAGES))
+        code, report, _ = self._diff(ours, reference_messages(MESSAGES))
+        self.assertEqual(code, 1)
         self.assertFalse(report["match"])
-        self.assertEqual(report["attachments"]["missing"], 1)
-        self.assertEqual(report["recall"], 1.0)
-        self.assertEqual(report["mismatched"], [{"key": "m3@example.com", "fields": {
-            "attachment_count": {"ours": "1", "reference": "2"}}}])
+        self.assertEqual((report["attachments"]["missing"], report["recall"]), (1, 1.0))
+        self.assertEqual([(item["key"], item["fields"]) for item in report["mismatched"]],
+                         [("m3@example.com", {"attachment_count": {"ours": 1, "reference": 2}})])
 
     def test_message_without_id_keyed_by_sender_subject_date(self) -> None:
         messages = [("", "No id", "d@example.com", "Wed, 05 Jun 2024 10:00:00 +0900", [])]
-        reference = self._reference(messages)
-        reference[0]["Date"] = "2024-06-05 01:00:00"
-        report = self._run(self._ours(messages), reference)
+        reference = reference_messages(messages)
+        reference[0][3] = "2024-06-05 01:00:00"
+        code, report, _ = self._diff(ours_messages(messages), reference)
+        self.assertEqual(code, 0)
         self.assertTrue(report["match"])
 
+    def test_missing_input_exits_2(self) -> None:
+        self.assert_missing_input_exit_2(write_csv(self.tmp / "present.csv", MAIL_HEADER, reference_messages(MESSAGES)))
 
-class MediaHashCheckTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name)
 
-    def tearDown(self) -> None:
-        self._tmp.cleanup()
+class MediaHashCheckTests(ReferenceDiffCase):
+    script_name = "media-hash-check"
 
     def _file(self, name: str, text: str, encoding: str = "utf-8") -> str:
-        path = self.root / name
+        path = self.tmp / name
         path.write_text(text, encoding=encoding)
         return str(path)
 
-    def _run(self, *argv):
+    def _run(self, *argv, expect: int):
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
-            code = media.main([*argv, "--json"])
-        self.assertEqual(code, 0)
-        return json.loads(stdout.getvalue())
+            code = self.module.main([*argv, "--json"])
+        self.assertEqual(code, expect)
+        report = json.loads(stdout.getvalue())
+        self.assert_contract(report)
+        return report
 
     def test_media_hash_match(self) -> None:
         ours = self._file("ours.json", json.dumps({"evidence": {"image": {"md5": MD5.upper(), "sha1": SHA1}}}))
         report = self._run("--reference", self._file("ewfverify.txt", EWF_OK),
-                           "--acquisition-log", self._file("image.txt", FTK_LOG, "utf-16"), "--ours", ours)
+                           "--acquisition-log", self._file("image.txt", FTK_LOG, "utf-16"), "--ours", ours, expect=0)
         self.assertTrue(report["match"])
-        self.assertEqual(report["error_chunks"], 0)
-        self.assertEqual(report["mismatched"], [])
-        self.assertEqual(len(report["comparisons"]), 6)
+        self.assertEqual((report["error_chunks"], report["mismatched"], len(report["comparisons"])), (0, [], 6))
         self.assertEqual(report["sources"]["acquisition_log"]["hashes"], {"md5": MD5, "sha1": SHA1})
 
     def test_damaged_set(self) -> None:
         report = self._run("--reference", self._file("ewfverify.txt", EWF_DAMAGED),
-                           "--acquisition-log", self._file("image.txt", FTK_LOG))
+                           "--acquisition-log", self._file("image.txt", FTK_LOG), expect=1)
         self.assertFalse(report["match"])
         self.assertGreaterEqual(report["error_chunks"], 1)
         self.assertEqual(report["sources"]["ewfverify"]["result"], "FAILURE")
@@ -194,11 +169,12 @@ class MediaHashCheckTests(unittest.TestCase):
                          {"ewfverify-stored-vs-calculated", "acquisition-log-vs-ewfverify-calculated"})
 
     def test_inputs_required(self) -> None:
-        with contextlib.redirect_stderr(io.StringIO()):
-            self.assertEqual(media.main(["--json"]), 2)
-            self.assertEqual(media.main(["--reference", str(self.root / "missing.txt")]), 2)
-            only_log = self._file("only.txt", "no hashes here\n")
-            self.assertEqual(media.main(["--acquisition-log", only_log]), 2)
+        only_log = self._file("only.txt", "no hashes here\n")
+        for argv in ([], ["--reference", str(self.tmp / "missing.txt")], ["--acquisition-log", only_log]):
+            stderr = io.StringIO()
+            with self.subTest(argv=argv), contextlib.redirect_stderr(stderr):
+                self.assertEqual(self.module.main(argv), 2)
+                self.assertIn("오류:", stderr.getvalue())
 
 
 if __name__ == "__main__":

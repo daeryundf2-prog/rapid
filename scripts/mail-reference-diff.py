@@ -1,116 +1,146 @@
 #!/usr/bin/env python3
 """Compare RapidTriage mail messages with a mailbox tool's message export (T-212).
 
-    python scripts/mail-reference-diff.py --ours <records.jsonl> \\
+    python scripts/mail-reference-diff.py --ours <run>/artifacts/<per-kind .json or JSONL> \\
         --reference <messages.csv> --output <report.json> --json
 
 Key = Message-ID (angle brackets dropped, case-insensitive); a message
-without one is keyed by sender + subject + date (UTC seconds). Compared per
-message: attachment count and subject. Totals: message count and attachment
-count on each side.
+without one is keyed by sender + subject + date (UTC whole seconds; RFC 2822
+dates are read too). Compared per message: attachment count and subject.
+The report adds message and attachment totals on each side and ``match``
+(true only when counts, keys and fields all agree).
 
-Ours: ``email-message`` records (``message_id``, ``attachment_count`` or the
+Ours: ``email-message`` rows (``message_id``, ``attachment_count`` or the
 ``attachments`` list, ``subject``, ``from``, ``date``). Reference: one row
 per message from a mailbox tool export (``Message-ID``/``InternetMessageId``,
 ``AttachmentCount`` or an ``Attachments`` name list separated by ``;``,
 ``Subject``, ``From``, ``Date``).
 
-Report keys: recall, matched, missing, mismatched, reference_tool (+ extra,
-counts, messages, attachments, match). Exit 2 when an input is missing.
+Shared loader/diff/report: rapidtriage/validation/reference_diff.py.
+Exit 0 clean, 1 differences, 2 input error.
 """
 
 from __future__ import annotations
 
+import argparse
+import datetime as dt
 import sys
-from datetime import timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-import _wc5_helpers as H
+from rapidtriage.validation import reference_diff as rd
 
-OURS_TYPES = {"email-message"}
-MSGID_OURS = ("message_id", "internet_message_id")
-MSGID_REF = ("Message-ID", "MessageId", "Message ID", "InternetMessageId", "Internet Message ID", "message_id")
-FROM_OURS = ("from", "sender", "from_address")
-FROM_REF = ("From", "Sender", "SenderEmail", "Sender Email", "from")
-SUBJECT_OURS = ("subject",)
-SUBJECT_REF = ("Subject", "subject")
-DATE_OURS = ("date", "sent_at", "timestamp")
-DATE_REF = ("Date", "Sent", "SentDate", "Sent Date", "DeliveryTime", "Delivery Time", "date")
-ATTACH_OURS = ("attachment_count", "attachments")
-ATTACH_REF = ("AttachmentCount", "Attachment Count", "NumAttachments", "attachment_count", "Attachments")
+MAIL_ARTIFACT_TYPES = ("email-message",)
+REF_MSGID = ("messageid", "internetmessageid")
+REF_FROM = ("from", "sender", "senderemail")
+REF_SUBJECT = ("subject",)
+REF_DATE = ("date", "sent", "sentdate", "deliverytime")
+REF_ATTACH_COUNT = ("attachmentcount", "numattachments")
+REF_ATTACH_LIST = ("attachments",)
 
 
-def attachment_count(value: object) -> str:
+def attachment_count(value: object) -> int:
+    """Count from a number, a list, or a ``;``-separated name list; empty means 0."""
     if isinstance(value, (list, tuple)):
-        return str(len(value))
+        return len(value)
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
     text = str(value if value is not None else "").strip()
     if not text:
-        return "0"  # an empty attachment cell means none
+        return 0
     if text.isdigit():
-        return str(int(text))
-    return str(len([part for part in text.split(";") if part.strip()]))
+        return int(text)
+    return len([part for part in text.split(";") if part.strip()])
 
 
-def key_fn(msgid, sender, subject, date, naive_tz):
-    def key(row) -> str:
-        message_id = str(H.pick(row, msgid) or "").strip().strip("<>").strip().casefold()
-        if message_id:
-            return message_id
-        parts = (H.norm_text(H.pick(row, sender)), H.norm_text(H.pick(row, subject)),
-                 H.norm_ts(H.pick(row, date), naive_tz))
-        return "no-message-id|" + "|".join(parts) if any(parts) else ""
+def mail_time(value: object, default_tz: dt.tzinfo, warnings: list[str], context: str) -> dt.datetime | None:
+    text = str(value or "").strip()
+    if text and "," in text[:5]:  # RFC 2822: "Mon, 03 Jun 2024 09:00:00 +0900"
+        try:
+            stamp = parsedate_to_datetime(text)
+            return (stamp if stamp.tzinfo else stamp.replace(tzinfo=default_tz)).astimezone(dt.timezone.utc)
+        except (TypeError, ValueError, IndexError):
+            pass
+    return rd.safe_timestamp(value, default_tz, warnings, context)
 
-    return key
 
-
-def compare(ours_rows, reference_rows, naive_tz) -> dict[str, object]:
-    ours_rows = [row for row in ours_rows if str(row.get("artifact_type") or "") in OURS_TYPES]
-    result = H.diff_keyed(
-        ours_rows,
-        reference_rows,
-        ours_key=key_fn(MSGID_OURS, FROM_OURS, SUBJECT_OURS, DATE_OURS, timezone.utc),
-        reference_key=key_fn(MSGID_REF, FROM_REF, SUBJECT_REF, DATE_REF, naive_tz),
-        fields=[
-            H.FieldSpec("attachment_count", ATTACH_OURS, ATTACH_REF, attachment_count),
-            H.FieldSpec("subject", SUBJECT_OURS, SUBJECT_REF, H.norm_text),
-        ],
+def message_row(message_id: object, sender: object, subject: object, date: object, count: int) -> rd.KeyedRow:
+    mid = rd.normalize_text(str(message_id or "").strip().strip("<>"))
+    key = mid or "no-message-id|" + "|".join(
+        (rd.normalize_text(sender), rd.normalize_text(subject), rd.format_timestamp(date))  # type: ignore[arg-type]
     )
-    ours_attachments = sum(int(attachment_count(H.pick(row, ATTACH_OURS)) or 0) for row in ours_rows)
-    ref_attachments = sum(int(attachment_count(H.pick(row, ATTACH_REF)) or 0) for row in reference_rows)
-    result["messages"] = {"ours": len(ours_rows), "reference": len(reference_rows)}
-    result["attachments"] = {
-        "ours": ours_attachments,
-        "reference": ref_attachments,
-        "missing": max(ref_attachments - ours_attachments, 0),
-    }
-    result["match"] = (
-        len(ours_rows) == len(reference_rows)
-        and ours_attachments == ref_attachments
-        and not result["missing"]
-        and not result["extra"]
-        and not result["mismatched"]
+    fields = {"attachment_count": count, "subject": rd.normalize_text(subject)}
+    return rd.KeyedRow(keys=[key], fields=fields, label={"message_id": mid, **fields})
+
+
+def build_mail_comparison(args: argparse.Namespace, warnings: list[str]) -> rd.Comparison:
+    table, header = rd.read_table(args.reference)
+    rd.require_columns(header, args.reference, message_id_or_subject=(*REF_MSGID, *REF_SUBJECT))
+    reference: list[rd.KeyedRow] = []
+    for line, row in enumerate(table, start=2):
+        count_text = rd.pick(row, *REF_ATTACH_COUNT)
+        count = attachment_count(count_text if count_text else rd.pick(row, *REF_ATTACH_LIST))
+        date = mail_time(rd.pick(row, *REF_DATE), args.reference_tzinfo, warnings, f"기준 {line}행")
+        reference.append(
+            message_row(rd.pick(row, *REF_MSGID), rd.pick(row, *REF_FROM), rd.pick(row, *REF_SUBJECT), date, count)
+        )
+    ours: list[rd.KeyedRow] = []
+    for row in rd.iter_rapid_rows(args.ours, MAIL_ARTIFACT_TYPES, warnings):
+        count_value = rd.rapid_field(row, "attachment_count")
+        count = attachment_count(count_value if count_value is not None else rd.rapid_field(row, "attachments"))
+        date = mail_time(rd.rapid_field(row, "date", "sent_at"), args.ours_tzinfo, warnings, "우리 메일 행")
+        ours.append(
+            message_row(
+                rd.rapid_field(row, "message_id", "internet_message_id"),
+                rd.rapid_field(row, "from", "sender"),
+                rd.rapid_field(row, "subject"),
+                date,
+                count,
+            )
+        )
+
+    def totals(result: rd.DiffResult) -> dict[str, object]:
+        ours_attachments = sum(int(item.fields["attachment_count"]) for item in ours)  # type: ignore[call-overload]
+        ref_attachments = sum(int(item.fields["attachment_count"]) for item in reference)  # type: ignore[call-overload]
+        return {
+            "messages": {"ours": len(ours), "reference": len(reference)},
+            "attachments": {
+                "ours": ours_attachments,
+                "reference": ref_attachments,
+                "missing": max(ref_attachments - ours_attachments, 0),
+            },
+            "match": (
+                len(ours) == len(reference)
+                and ours_attachments == ref_attachments
+                and not result.missing
+                and not result.extra
+                and not result.mismatched
+            ),
+        }
+
+    if not reference:
+        rd.add_warning(warnings, "기준 파일에 메시지 행이 없습니다")
+    return rd.Comparison(
+        ours=ours,
+        reference=reference,
+        reference_tool="mailbox tool message export (CSV)",
+        key_fields=["message_id"],
+        compared_fields=["attachment_count", "subject"],
+        extra_sections=totals,
     )
-    return result
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = H.base_parser(__doc__.splitlines()[0], "mailbox-tool-export-csv")
-
-    def body() -> int:
-        args = parser.parse_args(argv)
-        H.require_inputs({"--ours": args.ours, "--reference": args.reference})
-        naive_tz = H.parse_tz(args.reference_tz)
-        result = compare(H.load_ours(args.ours), H.load_csv(args.reference), naive_tz)
-        report = H.envelope("mail", args.reference_tool, {"ours": args.ours, "reference": args.reference}, result)
-        summary = (
-            f"match={result['match']} messages={result['messages']} attachments={result['attachments']} "
-            + H.summary_line(report)
-        )
-        return H.emit(report, args.output, args.json, summary)
-
-    return H.run_cli(body)
+    return rd.run_comparison_cli(
+        argv,
+        comparison="mail",
+        description="Diff RapidTriage email-message rows against a mailbox tool export (key = Message-ID).",
+        build=build_mail_comparison,
+    )
 
 
 if __name__ == "__main__":
