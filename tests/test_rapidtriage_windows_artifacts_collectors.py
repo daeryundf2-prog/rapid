@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import sqlite3
 import tempfile
 import unittest
 from collections import Counter
@@ -126,6 +127,38 @@ FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "rapidtriage" / "w
 
 
 class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
+    def test_legacy_profile_places_and_visits_have_source_row_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db = root / "Documents and Settings/test/Application Data/Mozilla/Firefox/Profiles/test/places.sqlite"
+            db.parent.mkdir(parents=True)
+            with sqlite3.connect(db) as connection:
+                connection.executescript("""
+                    CREATE TABLE moz_places (id INTEGER PRIMARY KEY, url TEXT, title TEXT, visit_count INTEGER);
+                    CREATE TABLE moz_historyvisits (id INTEGER PRIMARY KEY, place_id INTEGER, visit_date INTEGER);
+                    INSERT INTO moz_places VALUES (7, 'https://example.invalid/', 'sample', 1);
+                    INSERT INTO moz_historyvisits VALUES (19, 7, 1234567890000000);
+                """)
+            rows = WindowsBrowserArtifactsProvider().collect(root)
+            identities = [(r.details.get("source_table"), r.details.get("source_row_id")) for r in rows
+                          if r.artifact_type in {"browser-history", "browser-visit"} and r.details.get("source_table")]
+            self.assertCountEqual(identities, [("moz_places", 7), ("moz_historyvisits", 19)])
+
+    def test_legacy_event_log_inventory_requires_header(self) -> None:
+        from rapidtriage.artifacts.windows.eventlog import WindowsEventLogProvider
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            evt = root / "System32/config/sample.Evt"
+            evt.parent.mkdir(parents=True)
+            evt.write_bytes(b"\x30\x00\x00\x00LfLe" + bytes(40))
+            evt.with_name("other.evt").write_bytes(b"unrelated")
+            rows = [r for r in WindowsEventLogProvider().collect(root) if r.artifact_type == "eventlog-file"]
+            self.assertEqual([r.path for r in rows], [str(evt.resolve())])
+            self.assertEqual(rows[0].details["source_format"], "evt")
+            self.assertEqual(rows[0].details["reportability"], "inventory-only")
+            self.assertFalse(rows[0].supported)
+
     def test_native_evtx_binxml_decodes_misc_text_tokens(self) -> None:
         def counted_utf16(text: str) -> bytes:
             return len(text).to_bytes(2, "little") + text.encode("utf-16le")

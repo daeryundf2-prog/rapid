@@ -16,13 +16,15 @@ WINDOWS_USERS_DIRNAME = "Users"
 
 def iter_windows_user_homes(root: Path) -> Iterator[Path]:
     users_dir = root / WINDOWS_USERS_DIRNAME
+    if not users_dir.is_dir():
+        users_dir = root / "Documents and Settings"
     if users_dir.is_dir():
         for candidate in sorted(users_dir.iterdir(), key=lambda item: item.name.lower()):
             if candidate.is_dir():
                 yield candidate
         return
 
-    if (root / "AppData").is_dir():
+    if (root / "AppData").is_dir() or (root / "Application Data").is_dir():
         yield root
 
 

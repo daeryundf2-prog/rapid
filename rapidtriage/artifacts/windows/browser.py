@@ -393,6 +393,8 @@ class WindowsBrowserArtifactsProvider:
 
             firefox_root = user_root.joinpath(*FIREFOX_PROFILE_ROOT)
             if not firefox_root.is_dir():
+                firefox_root = user_root / "Application Data" / "Mozilla" / "Firefox" / "Profiles"
+            if not firefox_root.is_dir():
                 continue
             for profile_dir in sorted(firefox_root.iterdir(), key=lambda item: item.name.lower()):
                 if not profile_dir.is_dir():
