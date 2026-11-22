@@ -286,7 +286,7 @@ PY_CHECK
 
 ### Windows 10 registry values
 
-The comparison joins each live hive by relative path and SHA-256. Within each family it compares typed value tuples as multisets, using case-insensitive key paths and value names. SYSTEM projections use the control set selected by the hive. A differing pair shares its identity and disagrees on the projected values.
+The round-two comparison joined five live hives by relative path and SHA-256. Within each family it compared projected values as multisets, using case-insensitive key paths and value names. A projection such as a Run command retains text. The collector row does not preserve the original registry type tag for that field. SYSTEM projections use the control set selected by the hive. A differing pair shares its identity and disagrees on the projected values.
 
 | Artifact family and projection | Hives compared | Matched | Differing | Rapid only | Reader only |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -298,11 +298,11 @@ The comparison joins each live hive by relative path and SHA-256. Within each fa
 | Timezone key, standard name, bias and active bias | 1 | 1 | 0 | 0 | 0 |
 | Computer name | 1 | 1 | 0 | 0 | 0 |
 
-All 239 projected tuples matched. USBSTOR had no positive examples. One uninstall subkey index referenced a free cell. The reference script reconciled the remaining allocated children against the parent's declared count and checked the child links before using python-registry to read their values. All five hives were readable. The remaining registry rows, including deleted-cell candidates, are outside the comparison.
+The round-two script reported 239 matching projected tuples. The reviewed comparator checks hive allocation and value identities more strictly. Counts under those checks require a new run on the exported hives. USBSTOR had no positive examples. One uninstall subkey index referenced a free cell. The reference script reconciled the remaining allocated children against the parent's declared count and checked the child links before using python-registry to read their values. All five hives were readable. The remaining registry rows, including deleted-cell candidates, are outside the comparison.
 
 ### Windows 10 EVTX records
 
-The reference reader decoded 11,758 active events across six files. Every one paired uniquely by file and physical record offset. Record ID, event ID, provider, channel and computer matched on all pairs. The existing timestamp criterion compares UTC at millisecond precision. Named payload fields vary by family and the comparison counts fields absent on both sides separately.
+The reference reader decoded 11,758 active events across six files. Every one paired uniquely by file and physical record offset. Record ID, event ID, provider, channel and computer matched on all pairs. The round-two timestamp criterion compared UTC at millisecond precision. The table records the original named-field projections. For example, a PowerShell pair could count as a match even when its unnamed arguments differed. The reviewed comparator also checks the retained payload fields for the five named families and agreement on family assignment. Updated counts require the original log exports and collector rows.
 
 | Event family | Paired | All compared fields match | Differing or missing | Rapid only | Reader only |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -314,7 +314,7 @@ The reference reader decoded 11,758 active events across six files. Every one pa
 | Other (system fields only) | 10,763 | 10,756 | 7 | 171 | 0 |
 | **Total** | **11,758** | **10,911** | **847** | **236** | **0** |
 
-Of the paired records, 839 logon IDs had different text representations of the same integer. One PowerShell script differed by XML newline normalization. The timestamp check counted 6,464 nonzero differences below one millisecond, including nine pairs that crossed a millisecond boundary by one microsecond. On those nine, the raw FILETIME bytes agreed with Rapid's integer conversion. Two of the nine also had logon-ID text differences. The table retains every strict mismatch. All 236 additional Rapid events were labelled inactive-chunk. Their contents need a separate independent recovery check. The six selected files produced zero reference parser errors.
+Of the paired records, 839 logon IDs had different text representations of the same integer. One PowerShell script differed by XML newline normalization. The timestamp check counted 6,464 nonzero differences below one millisecond, including nine pairs that crossed a millisecond boundary by one microsecond. On those nine, the raw FILETIME bytes agreed with Rapid's integer conversion. Two of the nine also had logon-ID text differences. The table retains mismatches under the original projections and timestamp criterion. All 236 additional Rapid events were labelled inactive-chunk. Their contents need a separate independent recovery check. The six selected files produced zero reference parser errors.
 
 ### Round-one XP record decoding
 
@@ -342,21 +342,27 @@ from dissect.eventlog.evt import Evt
 from rapidtriage.artifacts.windows.eventlog import WindowsEventLogProvider
 root = Path(sys.argv[1])
 rapid = defaultdict(Counter)
+inventory = {}
 for row in WindowsEventLogProvider().collect(root):
-    if row.artifact_type == "eventlog-event":
+    if row.artifact_type == "eventlog-file":
+        path = Path(row.path)
+        assert path not in inventory and row.details["native_parse_status"] == "complete-active-record-walk"
+        inventory[path] = row.details["native_record_count"]
+    elif row.artifact_type == "eventlog-event":
         d = row.details
         key = (int(d["record_id"]), int(d["event_id"]) | (d["event_id_qualifiers"] << 16),
                d["evt_event_type"], d["evt_event_category"], d["timestamp"], d["evt_time_written"],
                d["provider_name"], d["computer"], tuple(d["data"].values()))
         rapid[Path(row.path)][key] += 1
 logs = sorted(root.glob("*"))
-assert len(logs) == 3
+assert len(logs) == 3 and set(inventory) == {path.resolve() for path in logs}
 for path in logs:
     with path.open("rb") as stream:
         ref = Counter((r.RecordNumber, r.EventID, r.EventType, r.EventCategory,
                        r.TimeGenerated.isoformat(), r.TimeWritten.isoformat(),
                        r.SourceName, r.Computername, tuple(r.Strings)) for r in Evt(stream))
     got = rapid[path.resolve()]
+    assert inventory[path.resolve()] == got.total()
     print(path.stem, got.total(), ref.total(), (got & ref).total(),
           (got - ref).total(), (ref - got).total())
 PY

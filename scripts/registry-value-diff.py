@@ -14,6 +14,7 @@ import json
 import struct
 import sys
 from collections import Counter, defaultdict
+from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 
@@ -65,22 +66,172 @@ PROJECTIONS = {
 }
 
 
+@lru_cache(maxsize=1)
+def cell_starts(data):
+    """Index physical cell boundaries once per reference hive, including merged free cells."""
+    end = 4096 + struct.unpack_from("<I", data, 40)[0]
+    if end > len(data):
+        raise ValueError("truncated hive bins")
+    starts = bytearray((end + 7) // 8)
+    base = 4096
+    while base < end:
+        size = struct.unpack_from("<I", data, base + 8)[0]
+        if data[base:base + 4] != b"hbin" or not size or size % 4096 or base + size > end:
+            raise ValueError("invalid hive bin")
+        offset = base + 32
+        while offset < base + size:
+            extent = abs(struct.unpack_from("<i", data, offset)[0])
+            if not extent:
+                break  # No subsequent cell boundaries can be established in this bin.
+            if extent % 8 or offset + extent > base + size:
+                raise ValueError("invalid hive cell extent")
+            starts[offset // 8] = 1
+            offset += extent
+        base += size
+    return starts
+
+
+def cell_size(data, offset):
+    starts = cell_starts(data)
+    if offset < 4096 or offset % 8 or offset // 8 >= len(starts) or not starts[offset // 8]:
+        raise ValueError("reference outside hive cell boundary")
+    return struct.unpack_from("<i", data, offset)[0]
+
+
+def allocated(data, offset, needed=0):
+    if -cell_size(data, offset) < needed + 4:
+        raise ValueError("free or undersized reference cell")
+
+
+def check_record(record):
+    from Registry import RegistryParse
+
+    # python-registry retains the key, index and list chain used to reach a record.
+    while isinstance(record, (RegistryParse.Record, RegistryParse.HBINCell)):
+        offset = record.offset()
+        if isinstance(record, (RegistryParse.Record, RegistryParse.ValuesList)):
+            offset -= 4
+        if isinstance(record, RegistryParse.NKRecord):
+            allocated(record._buf, offset, 76)
+            needed = 76 + record.unpack_word(72)
+        elif isinstance(record, RegistryParse.VKRecord):
+            allocated(record._buf, offset, 20)
+            needed = 20 + record.unpack_word(2)
+        elif isinstance(record, RegistryParse.ValuesList):
+            needed = 4 * record.parent().values_number()
+        elif isinstance(record, RegistryParse.SubkeyList):
+            allocated(record._buf, offset, 4)
+            stride = 8 if isinstance(record, (RegistryParse.LHRecord, RegistryParse.LFRecord)) else 4
+            needed = 4 + stride * record.unpack_word(2)
+        else:
+            needed = 0
+        allocated(record._buf, offset, needed)
+        record = record.parent()
+
+
+def check_child(key, node):
+    record = node._nkrecord
+    check_record(record)
+    if record.abs_offset_from_hbin_offset(record.unpack_dword(16)) + 4 != key._nkrecord.offset():
+        raise ValueError("invalid child key link")
+
+
 def key_at(hive, path):
     from Registry import Registry
 
-    try:
-        return hive.open(path)
-    except Registry.RegistryKeyNotFoundException:
-        return None
+    key = hive.root()
+    check_record(key._nkrecord)
+    for part in path.split("\\"):
+        if key._nkrecord.subkey_number():
+            check_record(key._nkrecord.subkey_list())
+        try:
+            node = key.subkey(part)
+        except Registry.RegistryKeyNotFoundException:
+            return None
+        check_child(key, node)
+        key = node
+    return key
+
+
+def children(key):
+    if key._nkrecord.subkey_number():
+        check_record(key._nkrecord.subkey_list())
+    nodes = key.subkeys()
+    offsets = set()
+    for node in nodes:
+        check_child(key, node)
+        offset = node._nkrecord.offset()
+        if offset in offsets:
+            raise ValueError("duplicate child key link")
+        offsets.add(offset)
+    if len(nodes) != key._nkrecord.subkey_number():
+        raise ValueError("unreconciled child count")
+    return nodes
+
+
+def value_data(value, *, raw=False):
+    """Verify backing cells before asking the independent reader for the projected value."""
+    vk = value._vkrecord
+    check_record(vk)
+    data = vk._buf
+    length = vk.data_length()
+    if vk.raw_data_length() & 0x80000000:
+        if length > 4:
+            raise ValueError("oversized inline registry value")
+        start = vk.offset() + 8
+    elif length:
+        cell = vk.abs_offset_from_hbin_offset(vk.unpack_dword(8))
+        start = cell + 4
+        if length > 16344 and data[start:start + 2] == b"db":
+            allocated(data, cell, 8)
+            segments = (length + 16343) // 16344
+            count, pointer = struct.unpack_from("<HI", data, start + 2)
+            if count != segments:
+                raise ValueError("invalid segmented reference value")
+            pointers = vk.abs_offset_from_hbin_offset(pointer)
+            allocated(data, pointers, 4 * count)
+            for i in range(count):
+                offset = struct.unpack_from("<I", data, pointers + 4 + i * 4)[0]
+                allocated(data, vk.abs_offset_from_hbin_offset(offset), min(16344, length - i * 16344))
+            start = None  # Segmented data must be assembled by the reader.
+        else:
+            allocated(data, cell, length)
+    else:
+        start = 0
+
+    kind = value.value_type()
+    if kind in (4, 5, 11) and length != (8 if kind == 11 else 4):
+        raise ValueError("invalid integer value length")
+    if raw:
+        return value.raw_data() if start is None else data[start:start + length]
+
+    # python-registry 1.3.1 assumes a specific storage mode for each DWORD
+    # byte order. The VK length flag determines whether the data is inline.
+    inline = bool(vk.raw_data_length() & 0x80000000)
+    if kind == 5 or (kind == 4 and not inline):
+        return int.from_bytes(data[start:start + length], "big" if kind == 5 else "little")
+    if kind == 3:
+        return value.value() if start is None else data[start:start + length]
+    if kind in (1, 2, 7) and length <= 4:
+        # Do not include padding or a short external value's offset in the text.
+        text = data[start:start + length].decode("utf-16-le")
+        result = text.split("\0") if kind == 7 else text.partition("\0")[0]
+    else:
+        result = value.value()
+    if kind == 7:
+        while result and result[-1] == "":
+            result.pop()
+    return result
 
 
 def field(key, name, default=""):
     from Registry import Registry
 
     try:
-        return key.value(name).value()
+        value = key.value(name)
     except Registry.RegistryValueNotFoundException:
         return default
+    return value_data(value)
 
 
 def signed_bias(value):
@@ -103,8 +254,9 @@ def live_uninstall_offsets(data, parent, index):
     parent/index are absolute record offsets (immediately after their cell sizes).
     The returned offsets are absolute cell offsets. No transaction replay or carving.
     """
+    data = bytes(data)
     slots = struct.unpack_from("<H", data, index + 2)[0]
-    list_size = -struct.unpack_from("<i", data, index - 4)[0]
+    list_size = -cell_size(data, index - 4)
     if (
         data[index:index + 2] not in (b"lf", b"lh")
         or list_size < 8 + 8 * slots
@@ -117,7 +269,7 @@ def live_uninstall_offsets(data, parent, index):
     for slot in range(slots):
         relative = struct.unpack_from("<I", data, index + 4 + 8 * slot)[0]
         offset = 4096 + relative
-        size = struct.unpack_from("<i", data, offset)[0]
+        size = cell_size(data, offset)
         if relative % 8 or abs(size) < 8 or size % 8 or offset + abs(size) > len(data):
             raise ValueError("invalid uninstall child cell extent")
         if size > 0:
@@ -140,33 +292,32 @@ def uninstall_children(key, diagnostics):
 
     parent = key._nkrecord
     try:
-        children = key.subkeys()
-        if len(children) == parent.subkey_number() and all(
-            struct.unpack_from("<i", parent._buf, k._nkrecord.offset() - 4)[0] < 0 for k in children
-        ):
-            return children
-    except RegistryParse.ParseException:
+        return children(key)
+    except (RegistryParse.ParseException, ValueError):
         pass
     index = parent.subkey_list()
     offsets, free = live_uninstall_offsets(parent._buf, parent.offset(), index.offset())
-    children = [Registry.RegistryKey(RegistryParse.HBINCell(parent._buf, offset, index).child()) for offset in offsets]
+    nodes = [Registry.RegistryKey(RegistryParse.HBINCell(parent._buf, offset, index).child()) for offset in offsets]
+    for node in nodes:
+        check_child(key, node)
     diagnostics["free_uninstall_index_entries"] += free
-    return children
+    return nodes
 
 
 def reference_rows(hive, family, leaf, diagnostics):
     """Yield (relative key, value name, fields) from the independent live tree."""
     if family == "accounts":
         names = key_at(hive, r"SAM\Domains\Account\Users\Names")
-        for user in names.subkeys() if names is not None else []:
+        for user in children(names) if names is not None else []:
             # Each Names subkey stores the RID in its default value's TYPE.
-            yield str(user.value("(default)").value_type()), "", (user.name(),)
+            entry = user.value("(default)")
+            check_record(entry._vkrecord)
+            yield str(entry._vkrecord.unpack_dword(12)), "", (user.name(),)
     elif leaf == "system":
-        current = hive.open("Select").value("Current").value()
+        current = field(key_at(hive, "Select"), "Current", None)
         control = f"ControlSet{current:03d}"
-        hive.open(
-            control
-        )  # An invalid selector cannot establish an active control set.
+        if key_at(hive, control) is None:
+            raise ValueError("invalid active control set")
         if family == "timezone":
             path = control + r"\Control\TimeZoneInformation"
             key = key_at(hive, path)
@@ -189,8 +340,8 @@ def reference_rows(hive, family, leaf, diagnostics):
         else:
             path = control + r"\Enum\USBSTOR"
             key = key_at(hive, path)
-            for model in key.subkeys() if key is not None else []:
-                for device in model.subkeys():
+            for model in children(key) if key is not None else []:
+                for device in children(model):
                     yield (
                         "\\".join((path, model.name(), device.name())),
                         "",
@@ -207,7 +358,7 @@ def reference_rows(hive, family, leaf, diagnostics):
         if key is not None:
             for node_path, node in [
                 (path, key),
-                *((path + "\\" + sub.name(), sub) for sub in key.subkeys()),
+                *((path + "\\" + sub.name(), sub) for sub in children(key)),
             ]:
                 order = {}
                 for index, (slot,) in enumerate(
@@ -221,7 +372,7 @@ def reference_rows(hive, family, leaf, diagnostics):
                         yield (
                             node_path,
                             entry.name(),
-                            (text_prefix(entry.raw_data()), order.get(entry.name())),
+                            (text_prefix(value_data(entry, raw=True)), order.get(entry.name())),
                         )
     else:
         prefix = "Software\\" if leaf == "ntuser.dat" else ""
@@ -248,7 +399,10 @@ def reference_rows(hive, family, leaf, diagnostics):
                     path = prefix + view + VERSION + "\\" + suffix
                     key = key_at(hive, path)
                     for value in key.values() if key is not None else []:
-                        yield path, value.name(), (value.value(),)
+                        if value._vkrecord.has_name() and value.name().lower() == "(default)":
+                            # Rapid uses this display label for the unnamed slot.
+                            raise ValueError("ambiguous default value name")
+                        yield path, value.name(), (value_data(value),)
 
 
 def project(row):
@@ -268,16 +422,29 @@ def project(row):
         path = str(details["rid"])
     else:
         mount = details["hive_mount"] + "\\"
-        if not details["key_path"].casefold().startswith(mount.casefold()):
+        if registry_identity(details["key_path"][:len(mount)]) != registry_identity(mount):
             raise ValueError("unexpected registry mount")
         path = details["key_path"][len(mount) :]
     name = details["value_name"] if family in {"recent_docs_mru", "run_keys"} else ""
     return family, path, name, tuple(details.get(key) for key in fields)
 
 
+def registry_identity(name):
+    # NT upcases one UTF-16 code unit at a time. Full Unicode case folding can
+    # turn a single character into several and join unrelated registry slots.
+    if name.isascii():
+        return name.upper()
+    characters = []
+    for char in name:
+        upper = char.upper()
+        characters.append(upper if ord(char) <= 0xFFFF and len(upper) == 1 else char)
+    return "".join(characters)
+
+
 def add(table, path, name, values):
-    # JSON preserves data types and supplies a hashable token for a multiset.
-    table[path.casefold(), name.casefold()][json.dumps(values, ensure_ascii=True)] += 1
+    # A bytes token cannot collide with any JSON-encoded string, number or array.
+    tokens = tuple(value if isinstance(value, bytes) else json.dumps(value, ensure_ascii=True) for value in values)
+    table[registry_identity(path), registry_identity(name)][tokens] += 1
 
 
 def summarize(left, right):
@@ -401,6 +568,7 @@ def compare(run, root):
             reference_only=0,
             compared_hives=0,
             unavailable_hives=0,
+            reference_only_hives=0,
         )
         for f in FAMILIES
     }
@@ -432,15 +600,18 @@ def compare(run, root):
                 results[family]["unavailable_hives"] += 1
                 continue
             results[family].update(summarize(rapid[parts, family], reference))
-            results[family]["compared_hives"] += 1
+            if parts in digests:
+                results[family]["compared_hives"] += 1
+            else:
+                results[family]["reference_only_hives"] += 1
     leaves = {parts[-1] for parts in hives.keys() | digests.keys()}
     for family, counts in results.items():
         counts["missing_hive_types"] = len(set(FAMILIES[family]) - leaves)
         provider = "windows-os-account" if family == "accounts" else "windows-registry"
         counts["provider_parser_errors"] = parser_errors[provider]
-        if not counts["compared_hives"]:
+        if not (counts["compared_hives"] or counts["reference_only_hives"]):
             status = "unassessed"
-        elif (counts["unavailable_hives"] or counts["missing_hive_types"]
+        elif (counts["unavailable_hives"] or counts["reference_only_hives"] or counts["missing_hive_types"]
               or counts["provider_parser_errors"] or statuses[provider] != "completed"):
             status = "partial"
         elif not any(
