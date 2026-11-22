@@ -104,6 +104,24 @@ class FlsListingParsingTests(unittest.TestCase):
         self.assertEqual(entry.mtime, "2024-10-07T22:23:30+00:00")
         self.assertEqual(classify_listing_entry(entry), "content")
 
+    def test_local_timezone_label_never_becomes_a_naive_utc_time(self) -> None:
+        entry = parse_fls_line(fls_row("r/r 9-128-1", "sample.txt", 1, ts="2009-01-01 08:08:33 (KST)"))
+        self.assertIsNotNone(entry)
+        self.assertIsNone(entry.mtime)
+
+    def test_darwin_fls_uses_child_utc_environment(self) -> None:
+        from unittest.mock import patch
+        from rapidtriage.core.extraction_failures import default_stream_runner
+
+        command = ["fls", "-r", "-p", "-l", "-z", "UTC", "-o", "0", "sample.img"]
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("sys.platform", "darwin"), patch("subprocess.run") as run:
+                run.return_value = subprocess.CompletedProcess(command, 0, b"", b"")
+                result = default_stream_runner(command, Path(tmp) / "listing.txt")
+        self.assertEqual(result.args, ["fls", "-r", "-p", "-l", "-o", "0", "sample.img"])
+        self.assertEqual(run.call_args.args[0], result.args)
+        self.assertEqual(run.call_args.kwargs["env"]["TZ"], "UTC")
+
     def test_decodes_cp949_name_hint_and_keeps_surrogateescape_path(self) -> None:
         raw = "Users/user/Downloads/\uc9c4\uc815\uc11c.pdf".encode("cp949")
         entry = parse_fls_line(fls_row("r/r 166939-128-3", raw, 1200), "cp949")
@@ -164,6 +182,20 @@ class TskRecoverStderrTests(unittest.TestCase):
 
 
 class MatchingTests(unittest.TestCase):
+    def test_reused_path_with_conflicting_size_gets_no_allocated_inode(self) -> None:
+        listing = b"".join([
+            fls_row("r/r 9-128-1", "Docs/sample.bin", 100),
+            fls_row("r/r * 8-128-1", "Docs/sample.bin", 90),
+            fls_row("r/r 10-128-1", "Docs/other.bin", 90),
+            fls_row("r/r 11-128-1", "Docs/control.txt", 1),
+        ])
+        ambiguous = ExtractedFile("Docs/sample.bin", 90)
+        matches, unmatched = match_extracted_to_listing(
+            [ExtractedFile("Docs/control.txt", 1), ambiguous], parse_fls_listing_bytes(listing)
+        )
+        self.assertEqual(list(matches), ["Docs/control.txt"])
+        self.assertEqual(unmatched, [ambiguous])
+
     def test_exact_wildcard_and_parent_size_tiers(self) -> None:
         listing = b"".join(
             [
@@ -368,6 +400,16 @@ class E01GapStageIntegrationTests(unittest.TestCase):
             self.assertEqual(details["host_url"], "https://dl.example/a.zip")
             self.assertEqual(details["source_id"], ADS_SOURCE_ID)
             self.assertTrue(records[0].path.endswith("evidence.txt:Zone.Identifier"))
+
+    def test_zero_byte_name_outside_selected_categories_remains_in_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result, _ = self._extract(Path(tmp), [])
+            payload = run_files_scan(result.extract_dir, categories=["images"], inventory_all_files=True)
+            row, = [r for r in payload["inventory"] if r["name"] == "empty.docx"]
+            self.assertEqual(row["size"], 0)
+            self.assertEqual(row["mft_ref"], 71)
+            self.assertEqual(row["fs_modified_at"], "2024-10-07T22:23:30+00:00")
+            self.assertIs(row["is_deleted"], False)
 
     def test_zero_byte_sidecar_deduped_against_on_disk_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -36,6 +36,7 @@ import locale
 import os
 import re
 import subprocess
+import sys
 import unicodedata
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -247,7 +248,11 @@ def parse_fls_timestamp(value: str) -> str | None:
     except ValueError:
         return None
     tz = (match.group("tz") or "").strip().upper()
-    suffix = "+00:00" if tz in {"UTC", "GMT", "UTC+0", "GMT+0"} else ""
+    if tz and tz not in {"UTC", "GMT", "UTC+0", "GMT+0"}:
+        # Historical listings can contain local abbreviations even when captured
+        # with -z UTC. Their offsets cannot be inferred from the label alone.
+        return None
+    suffix = "+00:00" if tz else ""
     return f"{date}T{time}{suffix}"
 
 
@@ -483,7 +488,8 @@ def match_extracted_to_listing(
 
     Only non-deleted, non-ADS regular rows are candidates (``tsk_recover -e``
     writes deleted files into the same tree; a deleted file whose path equals an
-    allocated one is attributed to the allocated row - a known limitation).
+    allocated one can have different content). A conflicting known size at
+    a reused path disqualifies the match. Equal sizes alone cannot distinguish versions.
     """
     candidates = [entry for entry in entries if entry.is_allocated_file and not entry.is_ads]
     by_key: dict[str, list[FlsEntry]] = {}
@@ -493,8 +499,18 @@ def match_extracted_to_listing(
     matches: dict[str, tuple[FlsEntry, str]] = {}
     used: set[int] = set()
     unmatched: list[ExtractedFile] = []
+    deleted_paths = {normalize_relative_key(entry.name_hint) for entry in entries if entry.deleted and entry.is_regular}
+    conflicts: list[ExtractedFile] = []
     for item in extracted:
-        rows = by_key.get(normalize_relative_key(item.relative_path))
+        key = normalize_relative_key(item.relative_path)
+        rows = by_key.get(key)
+        if rows and key in deleted_paths and item.size is not None:
+            rows = [row for row in rows if row.size == item.size]
+            if not rows:
+                # A deleted version can overwrite the allocated export. Keep
+                # it out of all inference tiers, including parent-size.
+                conflicts.append(item)
+                continue
         if rows:
             choice = next((row for row in rows if id(row) not in used), rows[0])
             used.add(id(choice))
@@ -545,7 +561,7 @@ def match_extracted_to_listing(
             else:
                 still.append(item)
         unmatched = still
-    return matches, unmatched
+    return matches, unmatched + conflicts
 
 
 # --------------------------------------------------------------------------
@@ -555,15 +571,25 @@ def match_extracted_to_listing(
 
 def default_stream_runner(command: Sequence[str], dest: Path, *, timeout_seconds: int | None = None) -> subprocess.CompletedProcess:
     """Run ``command`` streaming stdout straight into ``dest`` (no buffering in memory)."""
+    tool = Path(str(command[0])).stem.lower() if command else ""
+    env = None
+    command = list(command)
+    if tool == "fls" and sys.platform == "darwin" and "-z" in command:
+        zone_arg = command.index("-z")
+        if command[zone_arg + 1:zone_arg + 2] == ["UTC"]:
+            # TSK 4.14 on macOS prints host-local times with -z UTC. Its
+            # default timezone honors the child process's TZ environment.
+            del command[zone_arg:zone_arg + 2]
+            env = {**os.environ, "TZ": "UTC"}
     if timeout_seconds is None:
-        tool = Path(str(command[0])).stem.lower() if command else ""
         timeout_seconds = FLS_TIMEOUT_SECONDS if tool == "fls" else ICAT_TIMEOUT_SECONDS
     dest_text = extended_length_path(dest)
     os.makedirs(os.path.dirname(dest_text), exist_ok=True)
     with open(dest_text, "wb") as handle:
         try:
             completed = subprocess.run(
-                list(command),
+                command,
+                env=env,
                 stdout=handle,
                 stderr=subprocess.PIPE,
                 timeout=timeout_seconds if timeout_seconds > 0 else None,
@@ -1024,8 +1050,10 @@ def run_extraction_gap_recovery(
     if not (reuse_listing and listing_path.is_file()):
         fls_command = ["fls", "-r", "-p", "-l", "-z", "UTC", "-o", str(offset_sector), str(image)]
         fls_result = stream_runner(fls_command, listing_path)
-        commands.append({"purpose": "fls-coverage-listing", "command": fls_command, "returncode": fls_result.returncode,
+        commands.append({"purpose": "fls-coverage-listing", "command": list(fls_result.args), "returncode": fls_result.returncode,
                          "stderr_preview": str(fls_result.stderr or "")[:2000]})
+        if "-z" not in fls_result.args:
+            commands[-1]["environment"] = {"TZ": "UTC"}
         if fls_result.returncode != 0:
             warnings.append(f"fls -rpl failed (rc={fls_result.returncode}); coverage-gap recovery skipped")
             _write_json(stage / EXTRACTION_FAILURES_NAME, {"profile_version": GAP_RECOVERY_PROFILE_VERSION, "failures": failures})
