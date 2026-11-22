@@ -1146,6 +1146,45 @@ Units are in 512-byte sectors
             )
             self.assertFalse(e01_uplift["reportability_decision"]["ready_for_court_report"])
 
+    def test_ewfmount_without_mount_subsystem_uses_verified_direct_volume(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir).resolve()  # code compares canonical paths (/private/var on macOS, long names on Windows)
+            source = root / "volume.E01"
+            source.write_bytes(b"synthetic image")
+
+            def run(command):
+                if command[1:] in (["--version"], ["-V"]):
+                    return subprocess.CompletedProcess(command, 0, "tool 1.0", "")
+                if command[0] == "ewfmount":
+                    return subprocess.CompletedProcess(command, 1, "", "No sub system to mount EWF format.")
+                if command[0] == "mmls":
+                    return subprocess.CompletedProcess(command, 1, "", "")
+                if command[0] == "fsstat":
+                    self.assertEqual(command[1:], ["-o", "0", str(source)])
+                    return subprocess.CompletedProcess(command, 0, "File System Type: NTFS", "")
+                if command[0] == "tsk_recover":
+                    self.assertEqual(command[1:-1], ["-e", "-o", "0", str(source)])
+                    (Path(command[-1]) / "sample.txt").write_text("sample", encoding="utf-8")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            result = extract_e01_to_directory(
+                source, root / "stage", engine="external", runner=run,
+                tool_resolver=lambda name: name if name in {"ewfmount", "mmls", "fsstat", "tsk_recover"} else None,
+            )
+            self.assertEqual(result.mount_strategy, "sleuthkit-direct-ewf")
+            self.assertEqual(result.raw_image_path, source)
+            self.assertEqual(result.partition_start_sector, 0)
+            self.assertTrue((result.extract_dir / "sample.txt").is_file())
+            history = {row["purpose"]: row for row in result.command_history}
+            self.assertEqual(history["mount-ewf"]["returncode"], 1)
+            self.assertEqual(history["whole-volume-filesystem-detection"]["returncode"], 0)
+            resumed = extract_e01_to_directory(
+                source, root / "stage", engine="external", runner=run,
+                tool_resolver=lambda name: name if name in {"ewfmount", "mmls", "fsstat", "tsk_recover"} else None,
+            )
+            self.assertTrue(resumed.resume_status["resumed_from_checkpoint"])
+            self.assertEqual(resumed.raw_image_path, source)
+
     def test_extract_e01_direct_read_when_ewfmount_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -1707,6 +1746,35 @@ Units are in 512-byte sectors
                 "native-partition-filesystem-parser-not-implemented",
                 raw_uplift["reportability_decision"]["blockers"],
             )
+
+    def test_explicit_sector_zero_accepts_a_verified_raw_volume(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir).resolve()  # code compares canonical paths (/private/var on macOS, long names on Windows)
+            source = root / "volume.raw"
+            source.write_bytes(b"synthetic volume")
+            calls = []
+
+            def run(command):
+                calls.append(command)
+                if command[1:] in (["--version"], ["-V"]):
+                    return subprocess.CompletedProcess(command, 0, "tool 1.0", "")
+                if command[0] == "mmls":
+                    return subprocess.CompletedProcess(command, 1, "", "")
+                if command[0] == "fsstat":
+                    self.assertEqual(command[1:], ["-o", "0", str(source)])
+                    return subprocess.CompletedProcess(command, 0, "File System Type: NTFS", "")
+                if command[0] == "tsk_recover":
+                    self.assertEqual(command[1:-1], ["-e", "-o", "0", str(source)])
+                    (Path(command[-1]) / "sample.txt").write_text("sample", encoding="utf-8")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            for _ in range(2):
+                result = extract_raw_image_to_directory(
+                    source, root / "stage", partition_start_sector=0, runner=run, tool_resolver=lambda name: name
+                )
+                self.assertEqual(result.partition_start_sector, 0)
+                self.assertTrue((result.extract_dir / "sample.txt").is_file())
+            self.assertEqual(sum(cmd[:2] == ["tsk_recover", "-e"] for cmd in calls), 1)
 
     def test_extract_raw_image_falls_back_to_whole_image_recovery(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

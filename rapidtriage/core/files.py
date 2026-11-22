@@ -1110,18 +1110,23 @@ def scan_file_candidates(
                 if normalize_relative_key(sidecar.relative_path) in (on_disk_keys or ()):
                     continue
             candidate = build_sidecar_file_candidate(root, sidecar, categories)
-            if candidate is not None and candidate.is_deleted is None and sidecar.inode is not None:
-                # Deletion state comes from the fls listing of the same inode.
+            reason = EXCLUSION_CATEGORY_NOT_SELECTED if candidate is None else filter_reason(candidate)
+            if reason is not None:
+                reason_counts[reason] += 1
+                if inventory is None:
+                    continue
+                candidate = build_sidecar_file_candidate(root, sidecar, ALL_FILE_CATEGORIES)
+            if candidate is None:
+                continue
+            if candidate.is_deleted is None and sidecar.inode is not None:
                 listing = listing_times.get(sidecar.inode)
                 if listing and isinstance(listing.get("deleted"), bool):
                     candidate.is_deleted = bool(listing["deleted"])
                     sync_deletion_state(candidate)
-            if candidate is None:
-                reason_counts[EXCLUSION_CATEGORY_NOT_SELECTED] += 1
-                continue
-            reason = filter_reason(candidate)
-            if reason is not None:
-                reason_counts[reason] += 1
+            if reason is not None and inventory is not None:
+                inventory.append(file_inventory_record(candidate, reason=reason))
+                if reason == EXCLUSION_CATEGORY_NOT_SELECTED:
+                    not_selected_counts.update(candidate.categories)
                 continue
             candidates.append(candidate)
             if limit and len(candidates) >= limit:

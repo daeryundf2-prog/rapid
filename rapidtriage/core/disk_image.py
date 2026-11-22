@@ -28,6 +28,7 @@ from .e01 import (
     parse_mmls_partitions,
     recovered_inventory_fingerprint,
     select_mmls_filesystem,
+    sleuthkit_direct_fs_probe,
     stable_manifest_sha256,
     tsk_recover_tool_inputs_match,
 )
@@ -844,7 +845,7 @@ def extract_raw_image_to_directory(
         extract_dir=extract_dir,
     ) and (
         partition_start_sector is None
-        or int(checkpoint.get("partition_start_sector") or -1) == partition_start_sector
+        or checkpoint.get("partition_start_sector") == partition_start_sector
     ):
         return DiskImageExtractionResult(
             source_path=source_path,
@@ -869,7 +870,17 @@ def extract_raw_image_to_directory(
     mmls_result = runner(["mmls", *[str(path) for path in image_paths]])
     command_history = [command_record("partition-enumeration", ["mmls", *[str(path) for path in image_paths]], mmls_result)]
     partition_table = parse_mmls_partitions(mmls_result.stdout) if mmls_result.returncode == 0 else []
-    if partition_start_sector is not None:
+    volume_probe = None
+    if partition_start_sector == 0 and not partition_table:
+        volume_probe = sleuthkit_direct_fs_probe(
+            image_paths[0], additional_parts=image_paths[1:], runner=runner, tool_resolver=tool_resolver
+        )
+    if volume_probe is not None:
+        command_history.append(command_record(
+            "whole-volume-filesystem-detection", ["fsstat", "-o", "0", *map(str, image_paths)], volume_probe
+        ))
+        start_sector = 0
+    elif partition_start_sector is not None:
         if mmls_result.returncode != 0:
             detail = (mmls_result.stderr or "").strip() or (mmls_result.stdout or "").strip()
             raise DiskImageExtractionError(f"mmls failed for raw/split image: {detail}")

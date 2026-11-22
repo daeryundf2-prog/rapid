@@ -585,6 +585,7 @@ def sleuthkit_direct_e01_probe(
 def sleuthkit_direct_fs_probe(
     source_path: Path,
     *,
+    additional_parts: Sequence[Path] = (),
     runner: CommandRunner | None = None,
     tool_resolver: ToolResolver = shutil.which,
 ) -> subprocess.CompletedProcess[str] | None:
@@ -599,7 +600,7 @@ def sleuthkit_direct_fs_probe(
         return None
     run_command = runner if runner is not None else default_runner
     try:
-        result = run_command(["fsstat", "-o", "0", str(source_path)])
+        result = run_command(["fsstat", "-o", "0", str(source_path), *map(str, additional_parts)])
     except OSError:
         return None
     if result.returncode != 0:
@@ -607,6 +608,24 @@ def sleuthkit_direct_fs_probe(
     if "file system type" not in (result.stdout or "").lower():
         return None
     return result
+
+
+def _probe_direct_ewf(
+    source_path: Path,
+    runner: CommandRunner,
+    tool_resolver: ToolResolver,
+    command_history: list[dict[str, object]],
+) -> tuple[subprocess.CompletedProcess[str] | None, subprocess.CompletedProcess[str] | None]:
+    partition = sleuthkit_direct_e01_probe(source_path, runner=runner, tool_resolver=tool_resolver)
+    if partition is not None:
+        command_history.append(command_record("partition-enumeration", ["mmls", str(source_path)], partition))
+        return partition, None
+    volume = sleuthkit_direct_fs_probe(source_path, runner=runner, tool_resolver=tool_resolver)
+    if volume is not None:
+        command_history.append(
+            command_record("whole-volume-filesystem-detection", ["fsstat", "-o", "0", str(source_path)], volume)
+        )
+    return None, volume
 
 
 def fsstat_filesystem_description(stdout: str) -> str:
@@ -1694,7 +1713,7 @@ def extract_e01_to_directory(
             source_path=source_path,
             stage_dir=stage,
             mount_dir=mount_dir,
-            raw_image_path=raw_image,
+            raw_image_path=resumed_raw_image,
             extract_dir=extract_dir,
             partition_start_sector=selected_start_sector,
             source_integrity=describe_source_integrity(source_path),
@@ -1773,36 +1792,8 @@ def extract_e01_to_directory(
     if missing:
         blocked = True
         if missing == ["ewfmount"]:
-            # The canonical path mounts through ewfmount (FUSE), but Sleuth Kit
-            # builds compiled with libewf read E01/Ex01 segment sets directly.
-            # Probe with mmls before declaring the source blocked.
-            direct_ewf_probe = sleuthkit_direct_e01_probe(
-                source_path,
-                runner=runner,
-                tool_resolver=tool_resolver,
-            )
-            if direct_ewf_probe is not None:
-                command_history.append(
-                    command_record("partition-enumeration", ["mmls", str(source_path)], direct_ewf_probe)
-                )
-                blocked = False
-            else:
-                # A partitioned image probe failed; the image may carry a
-                # bare filesystem at sector 0 with no partition table.
-                direct_fs_probe = sleuthkit_direct_fs_probe(
-                    source_path,
-                    runner=runner,
-                    tool_resolver=tool_resolver,
-                )
-                if direct_fs_probe is not None:
-                    command_history.append(
-                        command_record(
-                            "whole-volume-filesystem-detection",
-                            ["fsstat", "-o", "0", str(source_path)],
-                            direct_fs_probe,
-                        )
-                    )
-                    blocked = False
+            direct_ewf_probe, direct_fs_probe = _probe_direct_ewf(source_path, runner, tool_resolver, command_history)
+            blocked = direct_ewf_probe is None and direct_fs_probe is None
         if blocked and resolved_engine == "auto" and native_enabled and native_failure is None:
             return _extract_e01_native_fallback(
                 source_path=source_path,
@@ -1868,7 +1859,7 @@ def extract_e01_to_directory(
         "recovery_scope": recovery_scope,
         "mount_strategy": mount_strategy,
         "tool_inputs": {
-            "mount_tool": "ewfmount" if direct_ewf_probe is None else "sleuthkit-libewf",
+            "mount_tool": "sleuthkit-libewf" if direct_ewf_read else "ewfmount",
             "partition_tool": "mmls",
             "recovery_tool": "tsk_recover",
             "recovery_scope": recovery_scope,
@@ -1890,6 +1881,35 @@ def extract_e01_to_directory(
     write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
 
     try:
+        if not direct_ewf_read:
+            mount_result = runner(["ewfmount", str(source_path), str(mount_dir)])
+            command_history.append(command_record("mount-ewf", ["ewfmount", str(source_path), str(mount_dir)], mount_result))
+            checkpoint_payload["command_history"] = command_history
+            checkpoint_payload["stages"] = {
+                **dict(checkpoint_payload.get("stages") or {}),
+                "mount-ewf": {"status": "completed" if mount_result.returncode == 0 else "failed"},
+            }
+            write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
+            if mount_result.returncode != 0:
+                detail = (mount_result.stderr or "").strip()
+                if "no sub system to mount ewf format" in detail.lower():
+                    direct_ewf_probe, direct_fs_probe = _probe_direct_ewf(
+                        source_path, runner, tool_resolver, command_history
+                    )
+                if direct_ewf_probe is None and direct_fs_probe is None:
+                    raise E01ExtractionError(f"ewfmount failed: {detail}")
+                direct_ewf_read = True
+                raw_image = source_path
+                mount_strategy = "sleuthkit-direct-ewf"
+                checkpoint_payload["mount_strategy"] = mount_strategy
+                checkpoint_payload["tool_inputs"]["mount_tool"] = "sleuthkit-libewf"
+                checkpoint_payload["stages"]["dependency-preflight"]["mount_strategy"] = mount_strategy
+
+        if direct_ewf_read:
+            checkpoint_payload["stages"].setdefault("mount-ewf", {
+                "status": "skipped",
+                "reason": "Sleuth Kit read the E01/Ex01 segment set directly",
+            })
         if direct_fs_probe is not None and direct_ewf_probe is None:
             mmls_result = None
             partition_table = [
@@ -1915,10 +1935,6 @@ def extract_e01_to_directory(
             checkpoint_payload["command_history"] = command_history
             checkpoint_payload["stages"] = {
                 **dict(checkpoint_payload.get("stages") or {}),
-                "mount-ewf": {
-                    "status": "skipped",
-                    "reason": "ewfmount-unavailable; Sleuth Kit read the E01/Ex01 segment set directly",
-                },
                 "partition-enumeration": {
                     "status": "skipped",
                     "reason": "no partition table; fsstat -o 0 detected a whole-volume filesystem",
@@ -1930,24 +1946,10 @@ def extract_e01_to_directory(
             checkpoint_payload["command_history"] = command_history
             checkpoint_payload["stages"] = {
                 **dict(checkpoint_payload.get("stages") or {}),
-                "mount-ewf": {
-                    "status": "skipped",
-                    "reason": "ewfmount-unavailable; Sleuth Kit read the E01/Ex01 segment set directly",
-                },
                 "partition-enumeration": {"status": "completed"},
             }
             write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
         else:
-            mount_result = runner(["ewfmount", str(source_path), str(mount_dir)])
-            command_history.append(command_record("mount-ewf", ["ewfmount", str(source_path), str(mount_dir)], mount_result))
-            checkpoint_payload["command_history"] = command_history
-            checkpoint_payload["stages"] = {
-                **dict(checkpoint_payload.get("stages") or {}),
-                "mount-ewf": {"status": "completed" if mount_result.returncode == 0 else "failed"},
-            }
-            write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
-            if mount_result.returncode != 0:
-                raise E01ExtractionError(f"ewfmount failed: {(mount_result.stderr or '').strip()}")
             if not raw_image.exists():
                 raise E01ExtractionError(f"ewfmount did not expose expected raw image: {raw_image}")
 
@@ -2059,7 +2061,7 @@ def extract_e01_to_directory(
         warnings: list[str] = []
         if direct_ewf_read:
             warnings.append(
-                "ewfmount was not installed; the installed Sleuth Kit read the E01/Ex01 segment set directly. "
+                "ewfmount was unavailable; the installed Sleuth Kit read the E01/Ex01 segment set directly. "
                 "Verify the build's EWF support and preserve command history for provenance."
             )
         if partition_selection and not partition_selection.get("selected_supported_filesystem_hint"):

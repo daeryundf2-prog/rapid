@@ -32,6 +32,7 @@ PARSER_VERSION = "eventlog-normalized-v21"
 BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v2"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 ETL_SUFFIXES = {".etl"}
+EVENTLOG_SUFFIXES = EVENT_EXPORT_SUFFIXES | ETL_SUFFIXES | {".evtx", ".evt"}
 MESSAGE_CATALOG_AUTO_SUFFIXES = {".man"}
 MESSAGE_CATALOG_AUTO_NAME_HINTS = (
     "message-catalog",
@@ -1862,6 +1863,24 @@ class WindowsEventLogProvider:
                             native_stats=native_stats,
                         )
                     )
+                elif suffix == ".evt" and read_prefix(path, 8) == b"\x30\x00\x00\x00LfLe":
+                    yield emit(ArtifactRecord(
+                        provider=self.name,
+                        artifact_type="eventlog-file",
+                        path=str(resolved),
+                        supported=False,
+                        details={
+                            "parser": "windows-eventlog-inventory",
+                            "parser_version": PARSER_VERSION,
+                            "source_format": "evt",
+                            "source_path": str(resolved),
+                            "source_hashes": file_hashes(path),
+                            "size": path.stat().st_size,
+                            "coverage_status": "detected",
+                            "reportability": "inventory-only",
+                            "native_parse_status": "legacy-evt-not-decoded",
+                        },
+                    ))
                 elif suffix in ETL_SUFFIXES:
                     yield emit(build_etl_trace_inventory_record(path))
             for record in build_logon_session_records(root, logon_inputs):
@@ -1884,16 +1903,16 @@ def candidate_eventlog_paths(root: Path) -> Iterable[Path]:
             (
                 path
                 for path in iter_evidence_paths(logs_root, "*")
-                if path.is_file() and path.suffix.lower() in EVENT_EXPORT_SUFFIXES | {".evtx"} | ETL_SUFFIXES
+                if path.is_file() and path.suffix.lower() in EVENTLOG_SUFFIXES
             ),
             key=lambda item: str(item).lower(),
         )
 
     for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
-        if not path.is_file() or path.suffix.lower() not in EVENT_EXPORT_SUFFIXES | {".evtx"} | ETL_SUFFIXES:
+        if not path.is_file() or path.suffix.lower() not in EVENTLOG_SUFFIXES:
             continue
         lowered = str(path.relative_to(root)).lower()
-        if path.suffix.lower() in ETL_SUFFIXES or any(hint in lowered for hint in EVENT_EXPORT_HINTS):
+        if path.suffix.lower() in ETL_SUFFIXES | {".evt"} or any(hint in lowered for hint in EVENT_EXPORT_HINTS):
             yield path
 
 

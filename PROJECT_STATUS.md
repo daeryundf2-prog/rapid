@@ -4,6 +4,12 @@ Date: 2026-09-09
 Branch: `codex/rapidforensic-complete`
 Tag: `v0.2.0` (restart baseline)
 
+## Public Windows image validation (2026-11-22)
+
+**Engineering baseline.** Two hash-verified public E01 images completed on macOS using direct Sleuth Kit reads. On the NTFS test volume all 19 ordinary file paths, sizes and UTC MACB tuples matched. On the Windows XP disk the reference checks matched 22 selected hive paths, three legacy event-log files, two Firefox databases, 543 places and 520 visits. Exact file paths matched for 30,939 of 30,945 allocated names. Six reused paths exported deleted-version bytes. The detailed comparison records all one-sided rows and collector limitations. [Commands and measurements](docs/public-image-validation.md)
+
+**Release evidence.** The public-image and row-comparison work adds partial evidence to the existing accuracy gate. Windows 11 and Ex01 execution, independent parser and reviewer checks, allocated-content accuracy, scale and release signoff remain open. Legacy EVT decoding was outside the presence check. `commercial_claim_allowed=false`.
+
 ## Monolith Package Split (2026-09-12)
 
 The former monolithic modules were split into packages:
