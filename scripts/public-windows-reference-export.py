@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 from collections import Counter
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
+from tempfile import TemporaryDirectory
 
 # Match only the current installation and direct profile hives. Exclude backup,
 # transaction, recovered and shadow-copy trees from the live reference set.
 LOCATIONS = re.compile(
-    r"Windows/System32/config/(?:SAM|SYSTEM|SOFTWARE)"
+    r"(?:Windows|WINNT)/System32/config/(?:SAM|SYSTEM|SOFTWARE)"
     r"|Windows/System32/winevt/Logs/[^/:\\]+\.evtx"
     r"|(?:Users|Documents and Settings)/[^/:\\]+/NTUSER\.DAT",
     re.IGNORECASE,
@@ -22,6 +24,26 @@ BROWSER = re.compile(
     r"(?:History|Web Data|Login Data|(?:Network/)?Cookies)(?:-wal|-shm|-journal)?",
     re.IGNORECASE,
 )
+
+
+def extract_stream(image: Path, sector: int, address: str, length: int, destination: Path) -> None:
+    command = ["icat", "-o", str(sector), image, address]
+    with destination.open("xb") as stream, subprocess.Popen(command, stdout=subprocess.PIPE) as process:
+        assert process.stdout is not None
+        remaining = length
+        try:
+            while chunk := process.stdout.read(min(1024 * 1024, remaining + 1)):
+                if len(chunk) > remaining:
+                    raise ValueError("reference export length exceeds listing")
+                stream.write(chunk)
+                remaining -= len(chunk)
+        except BaseException:
+            process.kill()
+            raise
+        if status := process.wait():
+            raise subprocess.CalledProcessError(status, command)
+        if remaining:
+            raise ValueError("reference export shorter than listing")
 
 
 def main() -> None:
@@ -62,14 +84,26 @@ def main() -> None:
     if args.max_bytes is not None and total > args.max_bytes:
         parser.error(f"selected {total} bytes exceeds the {args.max_bytes} byte limit")
     print(f"files={len(selected)} bytes={total}", *(f"{name}={n}" for name, n in sorted(counts.items())), flush=True)
-    args.output.mkdir(parents=True, exist_ok=False)
-    for path, address, length in selected:
-        destination = args.output / path
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        with destination.open("xb") as stream:
-            subprocess.run(["icat", "-o", str(args.sector), args.image, address], check=True, stdout=stream)
-        if destination.stat().st_size != length:
-            raise ValueError("reference export length differs from listing")
+    if args.output.exists() or args.output.is_symlink():
+        raise FileExistsError(args.output)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(dir=args.output.parent) as tmp:
+        tree = Path(tmp) / "export"
+        tree.mkdir()
+        for path, address, length in selected:
+            destination = tree / path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            extract_stream(args.image, args.sector, address, length, destination)
+        # Windows rename fails on an existing destination. POSIX can replace an
+        # empty directory, so reserve it exclusively before publishing the tree.
+        if os.name != "nt":
+            args.output.mkdir()
+        try:
+            tree.rename(args.output)
+        except OSError:
+            if os.name != "nt":
+                args.output.rmdir()
+            raise
 
 
 if __name__ == "__main__":
