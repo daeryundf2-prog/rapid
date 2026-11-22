@@ -174,3 +174,202 @@ PY_HASH
 ## Release evidence
 
 These are engineering measurements from one macOS host, two public images and one TSK build. The E01 extractor also uses TSK. The separate body-file traversal checks Rapid's handling of that listing but shares the underlying NTFS implementation. SQLite supplies an independent SQL comparison. The run adds no clean Windows 11 or Ex01 execution, independent parser implementation or reviewer signoff, contemporary EVTX validation, scale evidence or release-operations evidence. `commercial_claim_allowed=false`.
+
+## Round two — Windows 10
+
+The source is the simulated hard-drive case in NISTIR 8412. NIST supplied it for forensic examiners to analyze with tools of their choice. The archive contains an acquisition receipt and fourteen E01 segments. The NIST data terms request attribution and cover rights NIST holds. Third-party software in the image retains its own rights. Only aggregate measurements are published here. [Study and archive reference, hard-drive case and reference 12](https://doi.org/10.6028/NIST.IR.8412) · [NIST data-use terms](https://www.nist.gov/open/copyright-fair-use-and-licensing-statements-srd-data-software-and-technical-series-publications)
+
+The transport checks below use the study download signatures as reproduced in the 2020 study announcement. The independent media check uses the MD5 and SHA-1 in the acquisition receipt included with the archive. [Published archive signatures](https://dforensic.blogspot.com/2020/06/nist-scientific-foundation-study-for.html)
+
+Round two reused the 14 verified segments already in private storage. The earlier acquisition checked the 20,252,022,199-byte archive (MD5 `c1128ffc1c0582234d3a6fbb3a762d11`, SHA-1 `795c2fd3632e5dc76cb4acfc9e42a948f73599a0`, SHA-256 `8501aa9ba74fd4410489c8b2e1b120aa27c1bb8bac4c740f73ba708fff836445`). The segments total 20,473,205,185 bytes. The retained `ewfverify` log reports success and agrees with the acquisition receipt on media MD5 `b5ae724f3c01a1daf94be64aa2cde231` and SHA-1 `5275781b4e7349b289d08a3152d3b885579be762`.
+
+The acquisition contains 265,148,416 sectors of 512 bytes. Sleuth Kit recognized NTFS at sector zero. Reading the allocated SOFTWARE hive with python-registry identified Windows 10 Enterprise Evaluation, release 1903, build 18362.356.
+
+Use fresh output directories under ignored storage for the commands below. The input is the existing segment set. The commands read the NTFS listing and export selected allocated streams. The Python environment for this run included python-registry 1.3.1, python-evtx 0.8.1 and dissect.eventlog 3.11.
+
+```bash
+set -eu
+D="$PWD/.rapid-images"
+git check-ignore .rapid-images/probe
+mkdir -p "$D/tmp"
+export TMPDIR="$D/tmp" TZ=UTC
+. .venv/bin/activate
+image="$D/Logical/Strongwill.E01"
+ewfverify -q -d sha1 "$image" > "$D/win10-ewfverify.txt"
+fsstat -o 0 "$image" > "$D/win10-fsstat.txt"
+fls -r -u -m / -z UTC -o 0 "$image" > "$D/win10-allocated.body"
+# Independent export of live hives and the allocated Logs directory.
+python scripts/public-windows-reference-export.py --body "$D/win10-allocated.body" \
+  --image "$image" --sector 0 --output "$D/ref" --max-bytes 250000000
+# A separate target tree for Rapid, with browser databases and their journals.
+python scripts/public-windows-reference-export.py --body "$D/win10-allocated.body" \
+  --image "$image" --sector 0 --output "$D/win10-target-source" --max-bytes 200000000 \
+  --include-browser --event-log Security.evtx --event-log System.evtx \
+  --event-log 'Windows PowerShell.evtx' --event-log 'Microsoft-Windows-PowerShell%4Operational.evtx' \
+  --event-log 'Microsoft-Windows-Partition%4Diagnostic.evtx' --event-log 'Microsoft-Windows-Kernel-PnP%4Configuration.evtx' \
+  --event-log 'Microsoft-Windows-DriverFrameworks-UserMode%4Operational.evtx' --event-log 'Microsoft-Windows-USB-*.evtx'
+run="$D/win10-target-run"
+python -m rapidtriage run "$D/win10-target-source" --mode fraud --read-only \
+  --no-case-db --skip-task kakaotalk-windows --skip-task kakaotalk-macos --output-dir "$run"
+python scripts/registry-value-diff.py --run "$run" --hive-root "$D/ref" > "$D/a2-registry.json"
+python scripts/public-evtx-diff.py --run "$run" \
+  --reference-logs "$D/ref/Windows/System32/winevt/Logs" > "$D/a2-evtx.json"
+```
+
+The allocated `fls` traversal yielded 775,122 body rows. The exporter selected unnamed data streams, used `icat` at their attribute addresses and checked each exported length. The independent export contained SAM, SYSTEM, SOFTWARE, two profile hives and 163 EVTX files. The 19-file Rapid input contained the same five hives, six selected event logs, four Chromium databases and four rollback journals, totaling 136,964,096 bytes. All 11 overlapping hives and logs matched by SHA-256. Both exports use the same NTFS implementation. DriverFrameworks Operational and USB-prefixed channels were absent from the allocated Logs directory.
+
+### Windows 10 collector results
+
+The folder run completed through the CLI report stage. Rapid inventoried 19 files, emitted 14,140 timeline events and produced 363,701 collector rows. Each row below represents a completed provider. Zero rows apply only to the selected input. Counts include inventory, detections and summaries. The folder export preserves the selected paths and file bytes. Its host filesystem timestamps cannot validate NTFS MACB times. Two registry string-scan rows reported truncation, and 77 event rows had truncated message previews, including 49 with truncated event-data previews.
+
+| Collector | Rows | Elapsed ms | Parser errors |
+| --- | ---: | ---: | ---: |
+| windows-os-account | 26 | 181 | 0 |
+| windows-registry | 348,723 | 43,372 | 0 |
+| windows-shellbags | 3 | 367 | 0 |
+| windows-execution | 505 | 1,193 | 0 |
+| windows-prefetch | 0 | 63 | 0 |
+| recent-files | 0 | 433 | 0 |
+| eventlog | 14,441 | 29,745 | 0 |
+| windows-filesystem | 0 | 1,051 | 0 |
+| windows-search-index | 0 | 188 | 0 |
+| browser | 2 | 13,366 | 0 |
+| p2p | 0 | 254 | 0 |
+| email | 0 | 298 | 0 |
+| windows-messenger | 0 | 347 | 0 |
+| mobile-export | 0 | 161 | 0 |
+| email-clients | 0 | 233 | 0 |
+| cloud-export | 0 | 187 | 0 |
+| cloud-sync | 0 | 208 | 0 |
+| media-image | 0 | 138 | 0 |
+| generic-documents | 0 | 102 | 0 |
+| synthetic-media | 1 | 184 | 0 |
+| media-player | 0 | 274 | 0 |
+| windows-remote-access | 0 | 228 | 0 |
+| windows-system | 0 | 607 | 0 |
+| memory-volatility | 0 | 253 | 0 |
+| android-apk | 0 | 274 | 0 |
+| windows-phone-link | 0 | 300 | 0 |
+| linux-system | 0 | 378 | 0 |
+| macos-system | 0 | 301 | 0 |
+
+All four rollback journals were empty. Read-only immutable SQLite counts on the selected browser databases returned one cookie and zero rows in the URLs, visits, downloads, logins and autofill tables. Rapid emitted one cookie and one storage inventory row. This checks browser counts only.
+
+The following prints the collector table inputs and SQLite counts without emitting recovered values.
+
+```bash
+python - "$run" "$D/win10-target-source" <<'PY_CHECK'
+import json, sqlite3, sys
+from pathlib import Path
+
+run, source = map(Path, sys.argv[1:])
+plan = json.loads((run / "rapidtriage-run-plan.json").read_bytes())
+for group in plan["groups"]:
+    for task in group["tasks"]:
+        if task["type"] == "provider" and task["status"] != "skipped":
+            report = run / "artifacts" / f"rapidtriage-artifacts-{task['id']}.json"
+            totals = json.loads(report.read_bytes())["summary"]
+            print(task["id"], task["status"], totals["artifact_count"],
+                  task["duration_ms"], totals["parser_error_count"])
+tables = {"History": ("urls", "visits", "downloads"), "Login Data": ("logins",),
+          "Web Data": ("autofill",), "Cookies": ("cookies",)}
+for path in source.rglob("*"):
+    if path.name in tables and path.is_file():
+        db = sqlite3.connect(path.resolve().as_uri() + "?mode=ro&immutable=1", uri=True)
+        try:
+            for table in tables[path.name]:
+                print(table, db.execute(f"SELECT count(*) FROM {table}").fetchone()[0])
+        finally:
+            db.close()
+PY_CHECK
+```
+
+### Windows 10 registry values
+
+The comparison joins each live hive by relative path and SHA-256. Within each family it compares typed value tuples as multisets, using case-insensitive key paths and value names. SYSTEM projections use the control set selected by the hive. A differing pair shares its identity and disagrees on the projected values.
+
+| Artifact family and projection | Hives compared | Matched | Differing | Rapid only | Reader only |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| SAM account RID and name | 1 | 5 | 0 | 0 | 0 |
+| Installed program display name, version and publisher | 3 | 197 | 0 | 0 | 0 |
+| USBSTOR class, serial, friendly name and driver | 1 | 0 | 0 | 0 | 0 |
+| RecentDocs value text and MRU position | 2 | 30 | 0 | 0 | 0 |
+| Run-family value name and command | 3 | 5 | 0 | 0 | 0 |
+| Timezone key, standard name, bias and active bias | 1 | 1 | 0 | 0 | 0 |
+| Computer name | 1 | 1 | 0 | 0 | 0 |
+
+All 239 projected tuples matched. USBSTOR had no positive examples. One uninstall subkey index referenced a free cell. The reference script reconciled the remaining allocated children against the parent's declared count and checked the child links before using python-registry to read their values. All five hives were readable. The remaining registry rows, including deleted-cell candidates, are outside the comparison.
+
+### Windows 10 EVTX records
+
+The reference reader decoded 11,758 active events across six files. Every one paired uniquely by file and physical record offset. Record ID, event ID, provider, channel and computer matched on all pairs. The existing timestamp criterion compares UTC at millisecond precision. Named payload fields vary by family and the comparison counts fields absent on both sides separately.
+
+| Event family | Paired | All compared fields match | Differing or missing | Rapid only | Reader only |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Logon | 782 | 1 | 781 | 64 | 0 |
+| Logoff | 58 | 0 | 58 | 0 | 0 |
+| Service installation | 32 | 32 | 0 | 1 | 0 |
+| PowerShell | 92 | 91 | 1 | 0 | 0 |
+| USB | 31 | 31 | 0 | 0 | 0 |
+| Other (system fields only) | 10,763 | 10,756 | 7 | 171 | 0 |
+| **Total** | **11,758** | **10,911** | **847** | **236** | **0** |
+
+Of the paired records, 839 logon IDs had different text representations of the same integer. One PowerShell script differed by XML newline normalization. The timestamp check counted 6,464 nonzero differences below one millisecond, including nine pairs that crossed a millisecond boundary by one microsecond. On those nine, the raw FILETIME bytes agreed with Rapid's integer conversion. Two of the nine also had logon-ID text differences. The table retains every strict mismatch. All 236 additional Rapid events were labelled inactive-chunk. Their contents need a separate independent recovery check. The six selected files produced zero reference parser errors.
+
+### Round-one XP record decoding
+
+Use the existing round-one image in its read-only checkout. This run needs only the three allocated EVT streams. The comparison preserves multiplicity and checks record number, qualified event ID, type, category, both timestamps, source, computer and ordered insertion strings.
+
+```bash
+xp="../rapid/.rapid-images/nps-2008-jean.E01"
+mkdir "$D/xp-logs"
+fls -r -p -u -o 63 "$xp" > "$D/xp-fls.txt"
+python - "$D" "$xp" <<'PY'
+import re, subprocess, sys
+from pathlib import Path
+d = Path(sys.argv[1])
+for line in (d / "xp-fls.txt").read_text().splitlines():
+    m = re.fullmatch(r"r/r (\d+-128-\d+):\s*(.+\.evt)", line, re.I)
+    if m:
+        with (d / "xp-logs" / Path(m[2]).name).open("xb") as out:
+            subprocess.run(["icat", "-o", "63", sys.argv[2], m[1]], stdout=out, check=True)
+PY
+python - "$D/xp-logs" <<'PY'
+from collections import Counter, defaultdict
+from pathlib import Path
+import sys
+from dissect.eventlog.evt import Evt
+from rapidtriage.artifacts.windows.eventlog import WindowsEventLogProvider
+root = Path(sys.argv[1])
+rapid = defaultdict(Counter)
+for row in WindowsEventLogProvider().collect(root):
+    if row.artifact_type == "eventlog-event":
+        d = row.details
+        key = (int(d["record_id"]), int(d["event_id"]) | (d["event_id_qualifiers"] << 16),
+               d["evt_event_type"], d["evt_event_category"], d["timestamp"], d["evt_time_written"],
+               d["provider_name"], d["computer"], tuple(d["data"].values()))
+        rapid[Path(row.path)][key] += 1
+logs = sorted(root.glob("*"))
+assert len(logs) == 3
+for path in logs:
+    with path.open("rb") as stream:
+        ref = Counter((r.RecordNumber, r.EventID, r.EventType, r.EventCategory,
+                       r.TimeGenerated.isoformat(), r.TimeWritten.isoformat(),
+                       r.SourceName, r.Computername, tuple(r.Strings)) for r in Evt(stream))
+    got = rapid[path.resolve()]
+    print(path.stem, got.total(), ref.total(), (got & ref).total(),
+          (got - ref).total(), (ref - got).total())
+PY
+```
+
+| XP log | Rapid events | Independent events | Matching tuples | Rapid only | Reference only |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Application | 105 | 105 | 105 | 0 | 0 |
+| Security | 0 | 0 | 0 | 0 | 0 |
+| System | 470 | 470 | 470 | 0 | 0 |
+
+All three active walks completed. The empty Security log used different oldest-record counters in its file header and EOF record. An explicit regression covers that empty layout. Synthetic tests also cover ring wrap, damaged records, dirty-header ambiguity and a legacy event ID that collides with a modern logon ID. The comparison covers active EVT records and their insertion strings. Message-DLL rendering, SID decoding, opaque event data and slack recovery remain outside this measurement. [Event log file format](https://learn.microsoft.com/en-us/windows/win32/eventlog/event-log-file-format) · [Independent EVT reader](https://github.com/fox-it/dissect.eventlog)
+
+### Release evidence after round two
+
+The Windows 10 results cover allocated streams selected on macOS, six event channels and seven registry projections. Positive USBSTOR values, the remaining channels, deleted or slack content, full-volume behavior, a native Windows run, Ex01, scale and independent review remain open. The XP result covers the three active log walks. Release status remains `commercial_claim_allowed=false`.

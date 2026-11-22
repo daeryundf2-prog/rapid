@@ -97,7 +97,64 @@ def text_prefix(raw):
     raise ValueError("unterminated RecentDocs string")
 
 
-def reference_rows(hive, family, leaf):
+def live_uninstall_offsets(data, parent, index):
+    """Read the referenced lf/lh cells and reconcile them to the parent nk's child count.
+
+    parent/index are absolute record offsets (immediately after their cell sizes).
+    The returned offsets are absolute cell offsets. No transaction replay or carving.
+    """
+    slots = struct.unpack_from("<H", data, index + 2)[0]
+    list_size = -struct.unpack_from("<i", data, index - 4)[0]
+    if (
+        data[index:index + 2] not in (b"lf", b"lh")
+        or list_size < 8 + 8 * slots
+        or list_size % 8
+        or index - 4 + list_size > len(data)
+    ):
+        raise ValueError("invalid direct uninstall index")
+    live = set()
+    free = 0
+    for slot in range(slots):
+        relative = struct.unpack_from("<I", data, index + 4 + 8 * slot)[0]
+        offset = 4096 + relative
+        size = struct.unpack_from("<i", data, offset)[0]
+        if relative % 8 or abs(size) < 8 or size % 8 or offset + abs(size) > len(data):
+            raise ValueError("invalid uninstall child cell extent")
+        if size > 0:
+            free += 1
+            continue
+        if size > -80 or data[offset + 4:offset + 6] != b"nk" or offset in live:
+            raise ValueError("invalid allocated uninstall child")
+        backlink = struct.unpack_from("<I", data, offset + 4 + 16)[0]
+        if 4096 + backlink + 4 != parent:
+            raise ValueError("uninstall child with different parent")
+        live.add(offset)
+    declared = struct.unpack_from("<I", data, parent + 20)[0]
+    if not free or len(live) != declared:
+        raise ValueError("unreconciled uninstall index")
+    return sorted(live), free
+
+
+def uninstall_children(key, diagnostics):
+    from Registry import Registry, RegistryParse
+
+    parent = key._nkrecord
+    try:
+        children = key.subkeys()
+        if len(children) == parent.subkey_number() and all(
+            struct.unpack_from("<i", parent._buf, k._nkrecord.offset() - 4)[0] < 0 for k in children
+        ):
+            return children
+    except RegistryParse.ParseException:
+        pass
+    index = parent.subkey_list()
+    offsets, free = live_uninstall_offsets(parent._buf, parent.offset(), index.offset())
+    children = [Registry.RegistryKey(RegistryParse.HBINCell(parent._buf, offset, index).child()) for offset in offsets]
+    diagnostics["free_uninstall_index_entries"] += free
+    return children
+
+
+def reference_rows(hive, family, leaf, diagnostics):
     """Yield (relative key, value name, fields) from the independent live tree."""
     if family == "accounts":
         names = key_at(hive, r"SAM\Domains\Account\Users\Names")
@@ -173,7 +230,7 @@ def reference_rows(hive, family, leaf):
             for base in bases:
                 path = prefix + base + r"\Uninstall"
                 key = key_at(hive, path)
-                for program in key.subkeys() if key is not None else []:
+                for program in uninstall_children(key, diagnostics) if key is not None else []:
                     yield (
                         path + "\\" + program.name(),
                         "",
@@ -292,11 +349,13 @@ def rapid_tables(run):
     tables = defaultdict(lambda: defaultdict(Counter))
     digests = defaultdict(set)
     parser_errors = {}
+    statuses = {}
     for provider in ("windows-os-account", "windows-registry"):
         head = run / "artifacts" / f"rapidtriage-artifacts-{provider}.json"
         payload = json.loads(head.read_text(encoding="utf-8"))
         source_root = Path(payload["root"])
         parser_errors[provider] = payload["summary"]["parser_error_count"]
+        statuses[provider] = payload["summary"].get("collection_status", "unknown")
         count = 0
         for row in iter_payload_records(payload, payload_path=head, expand=False):
             count += 1
@@ -326,13 +385,13 @@ def rapid_tables(run):
             "record_count", count
         ):
             raise ValueError(f"incomplete {provider} row stream")
-    return tables, digests, parser_errors
+    return tables, digests, parser_errors, statuses
 
 
 def compare(run, root):
     from Registry import Registry
 
-    rapid, digests, parser_errors = rapid_tables(run)
+    rapid, digests, parser_errors, statuses = rapid_tables(run)
     hives = discover(root.resolve())
     results = {
         f: Counter(
@@ -346,6 +405,7 @@ def compare(run, root):
         for f in FAMILIES
     }
     errors = Counter()
+    diagnostics = Counter()
     for parts in sorted(hives.keys() | digests.keys()):
         families = [f for f, leaves in FAMILIES.items() if parts[-1] in leaves]
         try:
@@ -365,7 +425,7 @@ def compare(run, root):
         for family in families:
             reference = defaultdict(Counter)
             try:
-                for key, name, values in reference_rows(reader, family, parts[-1]):
+                for key, name, values in reference_rows(reader, family, parts[-1], diagnostics):
                     add(reference, key, name, values)
             except Exception as error:
                 errors[type(error).__name__] += 1
@@ -380,7 +440,8 @@ def compare(run, root):
         counts["provider_parser_errors"] = parser_errors[provider]
         if not counts["compared_hives"]:
             status = "unassessed"
-        elif counts["unavailable_hives"] or counts["missing_hive_types"] or counts["provider_parser_errors"]:
+        elif (counts["unavailable_hives"] or counts["missing_hive_types"]
+              or counts["provider_parser_errors"] or statuses[provider] != "completed"):
             status = "partial"
         elif not any(
             counts[k] for k in ("matched", "differing", "rapid_only", "reference_only")
@@ -392,7 +453,9 @@ def compare(run, root):
     return {
         "families": results,
         "reference_errors": errors,
+        "reference_diagnostics": diagnostics,
         "rapid_parser_errors": parser_errors,
+        "rapid_collector_status": statuses,
     }
 
 

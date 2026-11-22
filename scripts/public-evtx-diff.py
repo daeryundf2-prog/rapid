@@ -7,7 +7,7 @@ import hashlib
 import json
 import sys
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -134,6 +134,7 @@ def xml_fields(record):
 def rapid_fields(details):
     fields = {key: str(details.get(key) if details.get(key) is not None else "") for key in SYSTEM_FIELDS}
     fields["timestamp"] = timestamp(fields["timestamp"])
+    fields["record_state"] = details.get("evtx_record_state") or "unknown"
     data = details.get("event_data", details.get("binxml_event_data_fields", {}))
     for key in DATA_KEYS.intersection(data):
         value = data[key]
@@ -150,7 +151,10 @@ def compare(rows, references, counts):
             for side, entries in (("rapid", left), ("reference", right)):
                 status = "ambiguous" if left and right else "only"
                 for fields in entries:
-                    counts[family(fields)][f"{side}_{status}"] += 1
+                    counter = counts[family(fields)]
+                    counter[f"{side}_{status}"] += 1
+                    if side == "rapid" and status == "only":
+                        counter[f"rapid_only_state.{fields['record_state']}"] += 1
             continue
         actual, expected = left[0], right[0]
         group = family(expected)
@@ -169,11 +173,18 @@ def compare(rows, references, counts):
             if status == "compared":
                 left_value, right_value = actual.get(key), expected.get(key)
                 if key == "timestamp":
-                    if left_value != right_value and abs((left_value - right_value).total_seconds()) < 0.001:
+                    delta_us = abs(left_value - right_value) // timedelta(microseconds=1)
+                    if 0 < delta_us < 1000:
                         counter["timestamp.sub_ms_difference"] += 1
                     left_value = left_value.isoformat(timespec="milliseconds")
                     right_value = right_value.isoformat(timespec="milliseconds")
+                    if left_value != right_value:
+                        counter["timestamp.max_mismatch_delta_us"] = max(counter["timestamp.max_mismatch_delta_us"], delta_us)
                 status = "match" if left_value == right_value else "mismatch"
+                if status == "mismatch" and key in {"ScriptBlockText", "Payload"} and left_value and right_value:
+                    xml_text = tuple(s.replace("\r\n", "\n").replace("\r", "\n") for s in left_value)
+                    if xml_text == right_value:
+                        counter[f"{key}.same_after_xml_newline_normalization"] += 1
                 if (status == "mismatch" and key in {"TargetLogonId", "SubjectLogonId"}
                         and left_value and right_value):
                     try:
@@ -259,7 +270,11 @@ def compare_run(run, reference_logs=None):
                 rapid[name][offset].append(rapid_fields(details))
         else:
             audit[f"excluded_{row['artifact_type']}"] += 1
-    if audit["collector_rows_read"] != payload_record_count(payload):
+    expected_rows = payload_record_count(payload)
+    if (
+        audit["collector_rows_read"] != expected_rows
+        or payload["summary"].get("artifact_count", expected_rows) != expected_rows
+    ):
         raise ValueError("incomplete eventlog collector stream")
     counts = {kind: Counter() for kind in FAMILIES}
     files = {}
@@ -296,16 +311,26 @@ def compare_run(run, reference_logs=None):
             except Exception as exc:
                 errors[f"file.{type(exc).__name__}"] += 1
                 info["file_status"] = "reference-unreadable"
+                info["reference_file_error"] = str(exc)[:300]
                 continue
             info["rapid_rows_at_unreadable_reference_offsets"] = sum(
                 len(rows.pop(offset, [])) for offset in unreadable
             )
         info["reference_decoded"] = sum(map(len, ref.values()))
         compare(rows, ref, counts)
-    if not files:
-        raise ValueError("no selected EVTX files or rows")
+    issues = []
+    if not sources:
+        issues.append("no selected reference log files")
+    if any(info["reference_errors"] for info in files.values()):
+        issues.append("reference parser errors (see files)")
+    if payload["summary"]["collection_status"] != "completed" or payload["summary"]["parser_error_count"]:
+        issues.append("incomplete Rapid collector (see collector status and parser errors)")
+    if audit["rapid_unlocatable_events"]:
+        issues.append("Rapid event rows lack a usable byte offset")
     return {
         "engineering_check_only": True,
+        "comparison_status": "incomplete" if issues else "completed",
+        "issues": issues,
         "collector_status": payload["summary"]["collection_status"],
         "collector_parser_errors": payload["summary"]["parser_error_count"],
         "audit": audit,
@@ -314,7 +339,7 @@ def compare_run(run, reference_logs=None):
     }
 
 
-if __name__ == "__main__":
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", type=Path, required=True)
     parser.add_argument(
@@ -322,5 +347,18 @@ if __name__ == "__main__":
         type=Path,
         help="canonical Logs directory independently exported from the image",
     )
-    args = parser.parse_args()
-    print(json.dumps(compare_run(args.run, args.reference_logs), indent=2))
+    args = parser.parse_args(argv)
+    try:
+        report = compare_run(args.run, args.reference_logs)
+    except (OSError, ImportError, KeyError, TypeError, ValueError) as exc:
+        report = {
+            "engineering_check_only": True,
+            "comparison_status": "incomplete",
+            "issues": [f"{type(exc).__name__}: {exc}"],
+        }
+    print(json.dumps(report, indent=2))
+    return int(report["comparison_status"] != "completed")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
