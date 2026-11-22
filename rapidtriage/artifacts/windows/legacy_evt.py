@@ -111,13 +111,25 @@ def _decode(record: bytes) -> dict[str, object]:
         next_field = data
     insertions = []
     if count:
+        if count > 256:
+            raise EvtFormatError("invalid-string-count")
         if not RECORD_HEADER_SIZE <= strings < next_field:
             raise EvtFormatError("invalid-strings-range")
         insertions = _strings(record, strings, next_field, count)
         next_field = strings
+    user_sid = ""
     if sid_len:
         if sid < RECORD_HEADER_SIZE or sid + sid_len > next_field:
             raise EvtFormatError("invalid-sid-range")
+        if sid_len < 8 or record[sid] != 1:
+            raise EvtFormatError("invalid-sid")
+        sub_count = record[sid + 1]
+        if sub_count > 15 or sid_len != 8 + 4 * sub_count:
+            raise EvtFormatError("invalid-sid")
+        authority = int.from_bytes(record[sid + 2 : sid + 8], "big")
+        authority_text = str(authority) if authority < 2**32 else f"0x{authority:012x}"
+        sub_authorities = struct.unpack_from(f"<{sub_count}I", record, sid + 8)
+        user_sid = "-".join(("S-1", authority_text, *map(str, sub_authorities)))
         next_field = sid
     source, computer = _strings(record, RECORD_HEADER_SIZE, next_field, 2)
     generated = dt.datetime.fromtimestamp(created, dt.timezone.utc)
@@ -137,12 +149,19 @@ def _decode(record: bytes) -> dict[str, object]:
         "evt_time_written": dt.datetime.fromtimestamp(written, dt.timezone.utc).isoformat(),
         "provider_name": source,
         "computer": computer,
+        "user_sid": user_sid,
         "data": {f"Insertion{i}": s for i, s in enumerate(insertions, 1)},
     }
 
 
 def iter_evt_records(blob: mmap.mmap | bytes) -> Iterator[dict[str, object]]:
     start, end, following, expected = _bounds(blob)
+    if start == end:
+        # Both the documented empty EOF (oldest zero) and the fresh XP
+        # variant (oldest one) sit directly after the file header.
+        if start != HEADER_SIZE or following != 1 or expected not in (0, 1):
+            raise EvtFormatError("invalid-empty-log")
+        return
     offset = start
     span = len(blob) - HEADER_SIZE
     remaining = (end - offset) % span
@@ -156,6 +175,8 @@ def iter_evt_records(blob: mmap.mmap | bytes) -> Iterator[dict[str, object]]:
             remaining -= tail
             offset = HEADER_SIZE
             continue
+        if expected == following:
+            raise EvtFormatError("record-count-disagreement")
         size, magic, number = struct.unpack_from("<I4sI", blob, offset)
         if magic != b"LfLe" or size % 4 or not RECORD_HEADER_SIZE + 4 <= size <= min(remaining, MAX_RECORD_SIZE):
             raise EvtFormatError("invalid-record-header")
@@ -166,5 +187,5 @@ def iter_evt_records(blob: mmap.mmap | bytes) -> Iterator[dict[str, object]]:
         offset = HEADER_SIZE + (offset - HEADER_SIZE + size) % span
         remaining -= size
         expected = (expected + 1) & 0xFFFFFFFF
-    if expected != following and not (expected == 0 and following == 1 and start == end == HEADER_SIZE):
+    if expected != following:
         raise EvtFormatError("record-count-disagreement")

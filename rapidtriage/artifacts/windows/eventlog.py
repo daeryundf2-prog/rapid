@@ -1911,7 +1911,7 @@ def candidate_eventlog_paths(root: Path) -> Iterable[Path]:
 def collect_legacy_evt(path: Path) -> Iterable[ArtifactRecord]:
     common = {
         "parser": "windows-eventlog-evt-native",
-        "parser_version": "evt-v1",
+        "parser_version": "evt-v2",
         "source_format": "evt",
         "source_path": resolved_path_text(path),
         "source_hashes": file_hashes(path),
@@ -9133,7 +9133,10 @@ class EventlogSummaryAccumulator:
             self._timestamp(timestamp)
         # Sequence gaps only over live records with plausible timestamps;
         # slack/inactive-chunk recoveries are not part of the live sequence.
-        if record_id is not None and (not record_state or record_state in EVTX_SEQUENCED_RECORD_STATES) and timestamp_status == "ok":
+        # The classic EVT walk already checks consecutive DWORD numbers per
+        # file, including rollover. Sorting these with EVTX IDs invents gaps.
+        if (details.get("source_format") != "evt" and record_id is not None
+                and (not record_state or record_state in EVTX_SEQUENCED_RECORD_STATES) and timestamp_status == "ok"):
             self.record_ids_by_channel[channel].add(record_id)
         if int(details.get("risk_score") or 0) >= 40 or details.get("risk_flags"):
             self._high_risk(
