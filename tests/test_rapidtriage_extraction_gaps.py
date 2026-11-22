@@ -111,6 +111,7 @@ class FlsListingParsingTests(unittest.TestCase):
 
     def test_darwin_fls_uses_child_utc_environment(self) -> None:
         from unittest.mock import patch
+
         from rapidtriage.core.extraction_failures import default_stream_runner
 
         command = ["fls", "-r", "-p", "-l", "-z", "UTC", "-o", "0", "sample.img"]
