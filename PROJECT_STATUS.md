@@ -8,7 +8,9 @@ Tag: `v0.2.0` (restart baseline)
 
 **Engineering baseline.** Two hash-verified public E01 images completed on macOS using direct Sleuth Kit reads. On the NTFS test volume all 19 ordinary file paths, sizes and UTC MACB tuples matched. On the Windows XP disk the reference checks matched 22 selected hive paths, three legacy event-log files, two Firefox databases, 543 places and 520 visits. Exact file paths matched for 30,939 of 30,945 allocated names. Six reused paths exported deleted-version bytes. The detailed comparison records all one-sided rows and collector limitations. [Commands and measurements](docs/public-image-validation.md)
 
-**Release evidence.** The public-image and row-comparison work adds partial evidence to the existing accuracy gate. Windows 11 and Ex01 execution, independent parser and reviewer checks, allocated-content accuracy, scale and release signoff remain open. Legacy EVT decoding was outside the presence check. `commercial_claim_allowed=false`.
+**Round two engineering baseline.** Rapid completed all 28 in-scope collectors on 19 allocated streams selected from a verified Windows 10 E01. The original comparison reported 239 matching projected registry tuples on five hives. USBSTOR had no positive rows. Six EVTX files yielded 11,758 active pairs with matching identity fields. Under the original field selection, 10,911 agreed and 847 differed. The revised registry and EVTX comparisons await a rerun on those inputs. All 236 Rapid-only events were labelled inactive-chunk. On XP, all 575 active event tuples matched the independent EVT reader. [Scope, collector table and per-artifact results](docs/public-image-validation.md#round-two--windows-10)
+
+**Release evidence.** These measurements cover selected allocated artifacts. Windows 11 and Ex01 execution, independent confirmation of inactive records and deleted content, full-volume accuracy, scale, independent review and release signoff remain open. `commercial_claim_allowed=false`.
 
 ## Monolith Package Split (2026-09-12)
 

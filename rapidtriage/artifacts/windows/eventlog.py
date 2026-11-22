@@ -26,6 +26,7 @@ from ...core.models import ArtifactRecord
 from ...core.safe_xml import UnsafeXmlError, safe_xml_fromstring, safe_xml_parse
 from .._walk import iter_evidence_paths
 from .antiforensics import redact_recovery_passwords_in
+from .legacy_evt import EvtFormatError, iter_evt_records
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
 PARSER_VERSION = "eventlog-normalized-v21"
@@ -125,6 +126,12 @@ EVENTLOG_TRIAGE_IDENTITY_KEYS = (
     "risk_score",
     "validation_required",
     "commercial_grade_ready",
+    "evt_record_offset",
+    "evt_record_size",
+    "evt_channel_source",
+    "evt_event_type",
+    "evt_event_category",
+    "evt_time_written",
     "evtx_record_offset",
     "evtx_record_size",
     "evtx_record_sha256",
@@ -1864,23 +1871,8 @@ class WindowsEventLogProvider:
                         )
                     )
                 elif suffix == ".evt" and read_prefix(path, 8) == b"\x30\x00\x00\x00LfLe":
-                    yield emit(ArtifactRecord(
-                        provider=self.name,
-                        artifact_type="eventlog-file",
-                        path=str(resolved),
-                        supported=False,
-                        details={
-                            "parser": "windows-eventlog-inventory",
-                            "parser_version": PARSER_VERSION,
-                            "source_format": "evt",
-                            "source_path": str(resolved),
-                            "source_hashes": file_hashes(path),
-                            "size": path.stat().st_size,
-                            "coverage_status": "detected",
-                            "reportability": "inventory-only",
-                            "native_parse_status": "legacy-evt-not-decoded",
-                        },
-                    ))
+                    for record in collect_legacy_evt(path):
+                        yield emit(record)
                 elif suffix in ETL_SUFFIXES:
                     yield emit(build_etl_trace_inventory_record(path))
             for record in build_logon_session_records(root, logon_inputs):
@@ -1914,6 +1906,48 @@ def candidate_eventlog_paths(root: Path) -> Iterable[Path]:
         lowered = str(path.relative_to(root)).lower()
         if path.suffix.lower() in ETL_SUFFIXES | {".evt"} or any(hint in lowered for hint in EVENT_EXPORT_HINTS):
             yield path
+
+
+def collect_legacy_evt(path: Path) -> Iterable[ArtifactRecord]:
+    common = {
+        "parser": "windows-eventlog-evt-native",
+        "parser_version": "evt-v2",
+        "source_format": "evt",
+        "source_path": resolved_path_text(path),
+        "source_hashes": file_hashes(path),
+    }
+    channel = {"appevent": "Application", "secevent": "Security", "sysevent": "System"}.get(path.stem.lower(), "")
+    count = 0
+    status = "complete-active-record-walk"
+    try:
+        with open_evtx_binary_view(path) as blob:
+            for fields in iter_evt_records(blob):
+                yield event_record(path, "eventlog-event", {
+                    **common,
+                    **fields,
+                    "channel": channel,
+                    "evt_channel_source": "filename" if channel else "unknown",
+                    "source_index": count,
+                    "coverage_status": "native-binary-partial",
+                    "reportability": "triage",
+                })
+                count += 1
+    except EvtFormatError as exc:
+        status = str(exc)
+    yield ArtifactRecord(
+        provider=WindowsEventLogProvider.name,
+        artifact_type="eventlog-file",
+        path=resolved_path_text(path),
+        supported=False,
+        details={
+            **common,
+            "size": path.stat().st_size,
+            "coverage_status": "detected",
+            "reportability": "inventory-only",
+            "native_parse_status": status,
+            "native_record_count": count,
+        },
+    )
 
 
 def collect_xml_events(
@@ -8537,7 +8571,7 @@ def logon_session_input_record(record: ArtifactRecord) -> ArtifactRecord:
 
 def is_logon_session_event(details: Mapping[str, object]) -> bool:
     """Security-Auditing logon/logoff/privilege/reconnect events (provider-keyed)."""
-    if str(details.get("event_id") or "") not in LOGON_SESSION_EVENT_IDS:
+    if details.get("source_format") == "evt" or str(details.get("event_id") or "") not in LOGON_SESSION_EVENT_IDS:
         return False
     provider = normalize_key(details.get("provider_name") or "")
     if provider:
@@ -8799,6 +8833,9 @@ def build_builtin_detection_records(records: Sequence[ArtifactRecord]) -> list[A
     detections: list[ArtifactRecord] = []
     for record in records:
         if record.artifact_type != "eventlog-event" or not isinstance(record.details, Mapping):
+            continue
+        # Classic EVT identifiers are scoped to their source's message file.
+        if record.details.get("source_format") == "evt":
             continue
         category = str(record.details.get("event_category") or "")
         candidates = (*_BUILTIN_RULES_BY_CATEGORY.get(category, ()), *_BUILTIN_RULES_WITHOUT_CATEGORY)
@@ -9096,7 +9133,10 @@ class EventlogSummaryAccumulator:
             self._timestamp(timestamp)
         # Sequence gaps only over live records with plausible timestamps;
         # slack/inactive-chunk recoveries are not part of the live sequence.
-        if record_id is not None and (not record_state or record_state in EVTX_SEQUENCED_RECORD_STATES) and timestamp_status == "ok":
+        # The classic EVT walk already checks consecutive DWORD numbers per
+        # file, including rollover. Sorting these with EVTX IDs invents gaps.
+        if (details.get("source_format") != "evt" and record_id is not None
+                and (not record_state or record_state in EVTX_SEQUENCED_RECORD_STATES) and timestamp_status == "ok"):
             self.record_ids_by_channel[channel].add(record_id)
         if int(details.get("risk_score") or 0) >= 40 or details.get("risk_flags"):
             self._high_risk(
