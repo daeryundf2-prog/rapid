@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import shutil
@@ -132,7 +133,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             root = Path(tmp)
             db = root / "Documents and Settings/test/Application Data/Mozilla/Firefox/Profiles/test/places.sqlite"
             db.parent.mkdir(parents=True)
-            with sqlite3.connect(db) as connection:
+            with contextlib.closing(sqlite3.connect(db)) as connection, connection:
                 connection.executescript("""
                     CREATE TABLE moz_places (id INTEGER PRIMARY KEY, url TEXT, title TEXT, visit_count INTEGER);
                     CREATE TABLE moz_historyvisits (id INTEGER PRIMARY KEY, place_id INTEGER, visit_date INTEGER);

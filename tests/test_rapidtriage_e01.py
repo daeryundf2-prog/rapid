@@ -1148,7 +1148,7 @@ Units are in 512-byte sectors
 
     def test_ewfmount_without_mount_subsystem_uses_verified_direct_volume(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
+            root = Path(tmp_dir).resolve()  # code compares canonical paths (/private/var on macOS, long names on Windows)
             source = root / "volume.E01"
             source.write_bytes(b"synthetic image")
 
@@ -1749,7 +1749,7 @@ Units are in 512-byte sectors
 
     def test_explicit_sector_zero_accepts_a_verified_raw_volume(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
+            root = Path(tmp_dir).resolve()  # code compares canonical paths (/private/var on macOS, long names on Windows)
             source = root / "volume.raw"
             source.write_bytes(b"synthetic volume")
             calls = []
