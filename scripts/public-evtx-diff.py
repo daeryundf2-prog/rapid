@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
@@ -36,14 +37,17 @@ SYSTEM_FIELDS = (
     "computer",
     "timestamp",
 )
+USB_FIELDS = (
+    "DeviceInstanceId", "DeviceInstanceID", "InstanceId", "InstanceID",
+    "DeviceId", "DeviceID", "ParentId", "ParentID",
+)
 PAYLOAD_FIELDS = {
     "logon": ("TargetUserName", "TargetLogonId", "LogonType"),
     "logoff": ("TargetUserName", "TargetLogonId", "LogonType", "SubjectLogonId"),
     "service-install": ("ServiceName", "ImagePath", "ServiceFileName"),
     "powershell": ("ScriptBlockText", "Payload"),
-    "usb": ("DeviceInstanceId", "InstanceId", "DeviceId", "ParentId", "BusType"),
+    "usb": (*USB_FIELDS, "BusType"),
 }
-USB_FIELDS = ("DeviceInstanceId", "InstanceId", "DeviceId", "ParentId")
 DATA_KEYS = {key for keys in PAYLOAD_FIELDS.values() for key in keys}
 
 
@@ -102,6 +106,14 @@ def timestamp(value):
     return parsed.astimezone(timezone.utc)
 
 
+def logon_id(text):
+    if re.fullmatch(r"0[xX][0-9a-fA-F]+", text):
+        return int(text, 16)
+    if re.fullmatch("[0-9]+", text):
+        return int(text, 10)
+    raise ValueError("invalid logon ID")
+
+
 def xml_fields(record):
     system = record.find("{*}System")
     if system is None:
@@ -118,16 +130,38 @@ def xml_fields(record):
     fields["timestamp"] = (
         timestamp(created.get("SystemTime")) if created is not None else ""
     )
-    data = defaultdict(list)
-    for element in record.findall("{*}EventData/{*}Data"):
-        key = element.get("Name")
-        if key in DATA_KEYS:
-            data[key].append(element.text or "")
-    for element in record.iterfind("{*}UserData//*"):
-        key = element.tag.rsplit("}", 1)[-1]
-        if key in DATA_KEYS and not len(element):
-            data[key].append(element.text or "")
-    fields.update({key: tuple(values) for key, values in data.items()})
+    payload = {}
+    slots = defaultdict(list)
+    unnamed = 0
+    for section_name in ("EventData", "UserData", "ProcessingErrorData", "DebugData", "BinaryEventData"):
+        section = record.find("{*}" + section_name)
+        if section is None:
+            continue
+        direct_data = set(section.findall("{*}Data")) if section_name == "EventData" else set()
+        for element in section.iter():
+            if len(element):
+                continue
+            key = element.tag.rsplit("}", 1)[-1]
+            if section_name == "EventData" and element is section:
+                continue
+            if element in direct_data:
+                key = element.get("Name")
+                if not key:
+                    unnamed += 1
+                    key = f"data_{unnamed}"
+            # Rapid retains repeated names in numbered slots. Use the XML order
+            # to identify the slots even when a literal suffixed name also exists.
+            slot = key
+            suffix = max(2, len(slots[key]) + 1)
+            while slot in payload:
+                slot = f"{key}_{suffix}"
+                suffix += 1
+            payload[slot] = element.text or ""
+            slots[key].append(slot)
+    fields.update({key: tuple(payload[name] for name in slots[key]) for key in DATA_KEYS.intersection(slots)})
+    if family(fields) != "other":
+        fields["payload"] = payload
+        fields["payload_slots"] = {key: slots[key] for key in DATA_KEYS.intersection(slots) if len(slots[key]) > 1}
     return fields
 
 
@@ -140,6 +174,14 @@ def rapid_fields(details):
         value = data[key]
         fields[key] = (
             tuple(map(str, value)) if isinstance(value, list) else (str(value),)
+        )
+    if family(fields) != "other":
+        fields["payload"] = data
+        fields["payload_incomplete"] = bool(
+            details.get("event_data_truncated")
+            or details.get("event_data_key_status") == "template-undecoded"
+            or details.get("evtx_binxml_status") not in {None, "decoded"}
+            or (not data and (details.get("event_data_values") or details.get("extracted_strings")))
         )
     return fields
 
@@ -160,7 +202,24 @@ def compare(rows, references, counts):
         group = family(expected)
         counter = counts[group]
         counter["paired"] += 1
-        matched = True
+        actual_group = family(actual)
+        matched = actual_group == group
+        if not matched:
+            counter["family.mismatch"] += 1
+        if matched and group != "other":
+            left_payload, right_payload = actual["payload"], expected["payload"]
+            if actual.get("payload_incomplete"):
+                counter["payload.incomplete"] += 1
+                matched = False
+            elif left_payload or right_payload:
+                payload_match = left_payload == right_payload
+                counter["payload.match" if payload_match else "payload.mismatch"] += 1
+                matched &= payload_match
+            else:
+                counter["payload.absent_both"] += 1
+        if actual["record_state"] not in {"live", "unknown"}:
+            counter["record_state.non_live"] += 1
+            matched = False
         for key in (*SYSTEM_FIELDS, *PAYLOAD_FIELDS.get(group, ())):
             if key in SYSTEM_FIELDS:
                 status = (
@@ -172,6 +231,10 @@ def compare(rows, references, counts):
                 )
             if status == "compared":
                 left_value, right_value = actual.get(key), expected.get(key)
+                slots = expected.get("payload_slots", {}).get(key)
+                if slots:
+                    retained = actual.get("payload", {})
+                    left_value = tuple(retained[slot] for slot in slots if slot in retained)
                 if key == "timestamp":
                     delta_us = abs(left_value - right_value) // timedelta(microseconds=1)
                     if 0 < delta_us < 1000:
@@ -188,8 +251,8 @@ def compare(rows, references, counts):
                 if (status == "mismatch" and key in {"TargetLogonId", "SubjectLogonId"}
                         and left_value and right_value):
                     try:
-                        a = tuple(int(text, 0) for text in left_value)
-                        b = tuple(int(text, 0) for text in right_value)
+                        a = tuple(map(logon_id, left_value))
+                        b = tuple(map(logon_id, right_value))
                     except ValueError:
                         pass
                     else:
@@ -209,6 +272,8 @@ def reference_rows(path, errors):
         header = log.get_file_header()
         if not header.check_magic():
             raise ValueError("invalid EVTX file signature")
+        if header.header_chunk_size() != 4096 or path.stat().st_size < 4096:
+            raise ValueError("invalid EVTX file header block")
         chunks_read = 0
         for chunk in log.chunks():
             chunks_read += 1
@@ -217,9 +282,23 @@ def reference_rows(path, errors):
                 continue
             # The upstream iterator can end early on an invalid record size.
             # Compare its final cursor with the chunk's declared end of data.
+            free = chunk.next_record_offset()
+            if not 512 <= free <= 65536:
+                errors["invalid_chunk_free_offset"] += 1
+                continue
+            end = chunk.offset() + free
             cursor = chunk.offset() + 512
+            record_count = 0
+            last_offset = None
             for record in chunk.records():
-                cursor = record.offset() + record.length()
+                size = record.length()
+                if record.offset() != cursor or not 28 <= size <= end - cursor:
+                    errors["invalid_record_extent"] += 1
+                    unreadable.add(record.offset())
+                    break
+                last_offset = cursor - chunk.offset()
+                record_count += 1
+                cursor += size
                 try:
                     if record.magic() != 0x2A2A or not record.verify():
                         raise ValueError("invalid record header or length")
@@ -229,8 +308,16 @@ def reference_rows(path, errors):
                     unreadable.add(record.offset())
                 else:
                     rows[record.offset()].append(fields)
-            if cursor != chunk.offset() + chunk.next_record_offset():
-                errors["chunk_end_disagreement"] += 1
+                if end - cursor < 28:
+                    # python-evtx probes the next header before its end check.
+                    break
+            if cursor != end:
+                # Archived chunks can set the free offset past zero padding.
+                # Check the declared last record and count before accepting it.
+                if (last_offset != chunk.last_record_offset()
+                        or record_count != chunk.file_last_record_number() - chunk.file_first_record_number() + 1
+                        or any(chunk.unpack_binary(cursor - chunk.offset(), end - cursor))):
+                    errors["chunk_end_disagreement"] += 1
         if chunks_read != header.chunk_count():
             errors["missing_declared_chunks"] += header.chunk_count() - chunks_read
     return rows, unreadable

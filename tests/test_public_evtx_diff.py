@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest
 from collections import Counter
-from contextlib import redirect_stdout
+from contextlib import nullcontext, redirect_stdout
 from pathlib import Path
 from unittest.mock import Mock, patch
 from xml.etree import ElementTree as ET
@@ -119,3 +119,201 @@ class PublicEvtxDiffTests(unittest.TestCase):
             }), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "incomplete eventlog collector stream"):
                 diff["compare_run"](root)
+
+    def test_unnamed_and_repeated_payloads_count_retained_values(self):
+        details = {
+            "record_id": "1", "event_id": "400", "channel": "Windows PowerShell", "provider_name": "sample",
+            "computer": "example", "timestamp": "2024-01-01T00:00:00Z",
+            "event_data": {"data_1": "different", "Payload": "first", "Payload_2": "second"},
+        }
+        xml = ET.fromstring(
+            '<Event><System><EventRecordID>1</EventRecordID><EventID>400</EventID><Channel>Windows PowerShell</Channel>'
+            '<Provider Name="sample"/><Computer>example</Computer><TimeCreated SystemTime="2024-01-01T00:00:00Z"/>'
+            '</System><EventData><Data>original</Data><Data Name="Payload">first</Data>'
+            '<Data Name="Payload">second</Data></EventData></Event>'
+        )
+        expected = diff["xml_fields"](xml)
+        corrected = {**details, "event_data": {**details["event_data"], "data_1": "original"}}
+        counts = {name: Counter() for name in diff["FAMILIES"]}
+        diff["compare"]({1: [diff["rapid_fields"](details)], 2: [diff["rapid_fields"](corrected)]},
+                        {1: [expected], 2: [expected]}, counts)
+        group = counts["powershell"]
+        self.assertEqual(group["Payload.match"], 2)
+        self.assertEqual(group["matched"], 1)
+        self.assertEqual(group["mismatched_or_missing"], 1)
+
+    def test_unnamed_payload_mismatch_without_any_projected_fields(self):
+        details = {
+            "record_id": "2", "event_id": "400", "channel": "Windows PowerShell", "provider_name": "sample",
+            "computer": "example", "timestamp": "2024-01-01T00:00:00Z",
+        }
+        xml = ET.fromstring(
+            '<Event><System><EventRecordID>2</EventRecordID><EventID>400</EventID><Channel>Windows PowerShell</Channel>'
+            '<Provider Name="sample"/><Computer>example</Computer><TimeCreated SystemTime="2024-01-01T00:00:00Z"/>'
+            '</System><EventData><Data>original</Data></EventData></Event>'
+        )
+        counts = {name: Counter() for name in diff["FAMILIES"]}
+        diff["compare"]({1: [diff["rapid_fields"]({**details, "event_data": {"data_1": "different"}})]},
+                        {1: [diff["xml_fields"](xml)]}, counts)
+        group = counts["powershell"]
+        self.assertEqual(group["mismatched_or_missing"], 1)
+        self.assertEqual(group["matched"], 0)
+
+    def test_reference_non_usb_pair_exposes_rapid_only_usb_classification(self):
+        details = {
+            "record_id": "8", "event_id": "88", "channel": "System", "provider_name": "sample",
+            "computer": "example", "timestamp": "2024-01-01T00:00:00Z",
+        }
+        actual = diff["rapid_fields"]({**details, "event_data": {"BusType": "7"}})
+        expected = diff["rapid_fields"]({**details, "event_data": {"BusType": "11"}})
+        counts = {name: Counter() for name in diff["FAMILIES"]}
+        diff["compare"]({1: [actual]}, {1: [expected]}, counts)
+        self.assertEqual(counts["other"]["mismatched_or_missing"], 1)
+        self.assertEqual(counts["other"]["matched"], 0)
+
+    def test_usb_instance_id_spelling_from_kernel_pnp(self):
+        details = {
+            "record_id": "8", "event_id": "400", "channel": "Microsoft-Windows-Kernel-PnP/Configuration",
+            "provider_name": "sample", "computer": "example", "timestamp": "2024-01-01T00:00:00Z",
+            "event_data": {"DeviceInstanceID": r"USB\sample"},
+        }
+        self.assertEqual(diff["family"](diff["rapid_fields"](details)), "usb")
+
+    def test_padded_decimal_logon_id_preserves_strict_mismatch_and_identifies_equal_integer(self):
+        details = {
+            "record_id": "8", "event_id": "4624", "channel": "Security",
+            "provider_name": "Microsoft-Windows-Security-Auditing", "computer": "example",
+            "timestamp": "2024-01-01T00:00:00Z",
+        }
+        actual = diff["rapid_fields"]({**details, "event_data": {"TargetLogonId": "00010"}})
+        expected = diff["rapid_fields"]({**details, "event_data": {"TargetLogonId": "0xA"}})
+        counts = {name: Counter() for name in diff["FAMILIES"]}
+        diff["compare"]({1: [actual]}, {1: [expected]}, counts)
+        self.assertEqual(counts["logon"]["TargetLogonId.same_integer_different_text"], 1)
+        self.assertEqual(counts["logon"]["TargetLogonId.mismatch"], 1)
+
+    def test_python_numeric_separators_are_not_event_id_rendering(self):
+        details = {
+            "record_id": "8", "event_id": "4624", "channel": "Security",
+            "provider_name": "Microsoft-Windows-Security-Auditing", "computer": "example",
+            "timestamp": "2024-01-01T00:00:00Z",
+        }
+        actual = diff["rapid_fields"]({**details, "event_data": {"TargetLogonId": "1_0"}})
+        expected = diff["rapid_fields"]({**details, "event_data": {"TargetLogonId": "0xA"}})
+        counts = {name: Counter() for name in diff["FAMILIES"]}
+        diff["compare"]({1: [actual]}, {1: [expected]}, counts)
+        self.assertEqual(counts["logon"]["TargetLogonId.same_integer_different_text"], 0)
+        self.assertEqual(counts["logon"]["TargetLogonId.mismatch"], 1)
+
+    def test_recovery_only_state_cannot_confirm_active_reference_record(self):
+        details = {
+            "record_id": "1", "event_id": "1", "channel": "System", "provider_name": "sample",
+            "computer": "example", "timestamp": "2024-01-01T00:00:00Z",
+        }
+        expected = diff["rapid_fields"](details)
+        counts = {name: Counter() for name in diff["FAMILIES"]}
+        for state in ("slack-recovered", "inactive-chunk", "outside-chunk", "live", "unknown"):
+            actual = diff["rapid_fields"]({**details, "evtx_record_state": state})
+            diff["compare"]({1: [actual]}, {1: [expected]}, counts)
+        group = counts["other"]
+        self.assertEqual(group["matched"], 2)
+        self.assertEqual(group["mismatched_or_missing"], 3)
+        self.assertEqual(group["record_state.non_live"], 3)
+
+    def test_incomplete_payload_flags_preclude_agreement(self):
+        details = {
+            "record_id": "8", "event_id": "400", "channel": "Windows PowerShell", "provider_name": "sample",
+            "computer": "example", "timestamp": "2024-01-01T00:00:00Z",
+        }
+        for flag in ({"event_data_truncated": True}, {"event_data_key_status": "template-undecoded"},
+                     {"evtx_binxml_status": "partial-tokenized"}, {"event_data_values": ["sample"]}):
+            with self.subTest(flag=flag):
+                actual = diff["rapid_fields"]({**details, **flag})
+                expected = diff["rapid_fields"](details)
+                counts = {name: Counter() for name in diff["FAMILIES"]}
+                diff["compare"]({1: [actual]}, {1: [expected]}, counts)
+                self.assertEqual(counts["powershell"]["mismatched_or_missing"], 1)
+                self.assertEqual(counts["powershell"]["matched"], 0)
+                self.assertEqual(counts["powershell"]["payload.incomplete"], 1)
+
+    def test_truncated_reference_header_cannot_verify_empty_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "System.evtx"
+            path.write_bytes(b"ElfFile\0" + bytes(120))
+            header = Mock()
+            header.check_magic.return_value = True
+            header.chunk_count.return_value = 0
+            header.header_chunk_size.return_value = 4096
+            log = Mock()
+            log.get_file_header.return_value = header
+            log.chunks.return_value = []
+            with patch.dict(sys.modules, {"Evtx.Evtx": Mock(Evtx=lambda _path: nullcontext(log))}):
+                with self.assertRaisesRegex(ValueError, "header"):
+                    diff["reference_rows"](path, Counter())
+
+    def test_reference_chunk_honors_record_bounds_and_archive_zero_padding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "System.evtx"
+            path.write_bytes(bytes(4096 + 65536))
+            header = Mock()
+            header.check_magic.return_value = True
+            header.chunk_count.return_value = 1
+            header.header_chunk_size.return_value = 4096
+            record = Mock()
+            record.offset.return_value = 4096 + 512
+            record.length.return_value = 64
+            record.magic.return_value = 0x2A2A
+            record.verify.return_value = True
+            record.xml.return_value = "<Event><System/></Event>"
+            chunk = Mock()
+            chunk.offset.return_value = 4096
+            chunk.check_magic.return_value = True
+            chunk.records.return_value = [record]
+            chunk.last_record_offset.return_value = 512
+            chunk.file_first_record_number.return_value = 1
+            chunk.file_last_record_number.return_value = 1
+            log = Mock()
+            log.get_file_header.return_value = header
+            log.chunks.return_value = [chunk]
+            with patch.dict(sys.modules, {"Evtx.Evtx": Mock(Evtx=lambda _path: nullcontext(log))}):
+                for free, fill, usable, clean in ((65536, 0, True, True), (65536, 1, True, False),
+                                                   (550, 0, False, False), (70000, 0, False, False)):
+                    with self.subTest(free=free, fill=fill):
+                        chunk.next_record_offset.return_value = free
+                        chunk.unpack_binary.side_effect = lambda _offset, size, fill=fill: bytes([fill]) * size
+                        errors = Counter()
+                        rows, _ = diff["reference_rows"](path, errors)
+                        self.assertEqual(bool(rows), usable)
+                        self.assertEqual(not errors, clean)
+
+    def test_reference_iterator_not_advanced_past_full_final_chunk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "System.evtx"
+            path.write_bytes(bytes(4096 + 65536))
+            log = Mock()
+            header = log.get_file_header()
+            header.check_magic.return_value = True
+            header.header_chunk_size.return_value = 4096
+            header.chunk_count.return_value = 1
+            chunk = Mock()
+            log.chunks.return_value = [chunk]
+            chunk.check_magic.return_value = True
+            chunk.next_record_offset.return_value = 65536
+            chunk.offset.return_value = 4096
+            record = Mock()
+            record.offset.return_value = 4608
+            record.length.return_value = 65536 - 512
+            record.magic.return_value = 0x2A2A
+            record.verify.return_value = True
+            record.xml.return_value = "<Event><System/></Event>"
+
+            def records():
+                yield record
+                raise AssertionError("decoder read beyond final chunk")
+
+            chunk.records.side_effect = records
+            errors = Counter()
+            with patch.dict(sys.modules, {"Evtx.Evtx": Mock(Evtx=lambda _path: nullcontext(log))}):
+                rows, _ = diff["reference_rows"](path, errors)
+            self.assertEqual(list(rows), [4608])
+            self.assertEqual(errors, {})
