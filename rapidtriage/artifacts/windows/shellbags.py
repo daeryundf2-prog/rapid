@@ -11,6 +11,7 @@ from ...core.models import ArtifactRecord
 from .._walk import iter_evidence_paths
 from .registry import (
     HIVE_BIN_BASE_OFFSET,
+    RegistryValueMap,
     candidate_registry_hive_paths,
     collect_reg_export,
     file_hashes,
@@ -806,6 +807,7 @@ def collect_native_shellbag_hive(path: Path, *, context: object = None) -> Itera
                     bags_key_count += sum(1 for _ in hive.iter_keys(key)) - 1
         entry_count = 0
         kind_counts: Counter[str] = Counter()
+        reconciliation: Counter[str] = Counter()
         for components, root_key in roots:
             for record in iter_bagmru_entries(
                 path,
@@ -815,6 +817,7 @@ def collect_native_shellbag_hive(path: Path, *, context: object = None) -> Itera
                 mount=mount,
                 source_hashes=source_hashes,
                 transaction_disclosure=disclosure,
+                reconciliation=reconciliation,
             ):
                 if not record.details.get("bagmru_root"):
                     entry_count += 1
@@ -840,6 +843,15 @@ def collect_native_shellbag_hive(path: Path, *, context: object = None) -> Itera
                 "bagmru_roots": [mount["mount"] + "\\" + "\\".join(parts) for parts, _ in roots],
                 "shellbag_entry_count": entry_count,
                 "item_kind_counts": dict(sorted(kind_counts.items())),
+                "bagmru_slot_reconciliation": {
+                    "numbered_value_count": reconciliation["numbered-value"],
+                    "child_key_count": reconciliation["child-key"],
+                    "value_and_child_key_count": reconciliation["value-and-child-key"],
+                    "value_without_child_key_count": reconciliation["value-without-child-key"],
+                    "child_key_without_value_count": reconciliation["child-key-without-value"],
+                    "mru_slot_without_value_or_key_count": reconciliation["mru-slot-without-value-or-key"],
+                    "note": "번호 값과 자식 키의 합집합을 모두 항목으로 냅니다. 자식 키가 없는 번호 값은 슬롯·MRU 순위·셸 항목만 있고 최종 수정 시각은 미상입니다.",
+                },
                 "bags_view_settings_key_count_excluded": bags_key_count,
                 "bags_exclusion_note": "Bags\\* 하위 키는 폴더 보기 설정(창 크기·정렬)이라 증거 행에서 제외하고 개수만 기록합니다.",
                 "row_cap": None,
@@ -862,6 +874,7 @@ def iter_bagmru_entries(
     mount: Mapping[str, str],
     source_hashes: Mapping[str, str],
     transaction_disclosure: Mapping[str, str],
+    reconciliation: Counter[str],
 ) -> Iterable[ArtifactRecord]:
     mount_prefix = str(mount.get("mount") or path.name)
     root_relative = "\\".join(root_components)
@@ -893,31 +906,54 @@ def iter_bagmru_entries(
         if offset in visited:
             continue
         visited.add(offset)
-        values = {str(value.name): value for value in hive.values(node)}  # type: ignore[attr-defined]
+        values = RegistryValueMap((str(value.name), value) for value in hive.values(node))  # type: ignore[attr-defined]
         mru_value = values.get("MRUListEx")
         order = parse_mru_list_ex(hive.value_bytes(mru_value)) if mru_value is not None else []  # type: ignore[attr-defined]
         positions = {slot: position for position, slot in enumerate(order)}
+        child_keys = hive.subkeys(node)  # type: ignore[attr-defined]
+        child_slots = {str(child.name) for child in child_keys}
+        slot_values = {name: value for name, value in values.items() if name.isdecimal()}
+        reconciliation["numbered-value"] += len(slot_values)
+        reconciliation["child-key"] += len(child_keys)
+        reconciliation["mru-slot-without-value-or-key"] += sum(
+            1 for slot in order if str(slot) not in slot_values and str(slot) not in child_slots
+        )
+        # The union of numbered values and child keys: a value whose child key is gone still records
+        # the folder (slot, shell item, MRU rank); a child key without its value keeps its timestamp.
+        slots: list[tuple[str, object, object]] = [
+            (str(child.name), child, values.get(str(child.name))) for child in child_keys
+        ]
+        slots += [
+            (name, None, value)
+            for name, value in sorted(slot_values.items(), key=lambda item: int(item[0]))
+            if name not in child_slots
+        ]
         children = []
-        for child in hive.subkeys(node):  # type: ignore[attr-defined]
-            slot_name = str(child.name)
-            item_value = values.get(slot_name)
+        for slot_name, child, item_value in slots:
+            if child is None:
+                status = "value-without-child-key"
+            else:
+                status = "value-and-child-key" if item_value is not None else "child-key-without-value"
+            reconciliation[status] += 1
             raw = hive.value_bytes(item_value) if item_value is not None else b""  # type: ignore[attr-defined]
             items = split_shell_item_list(raw)
             decoded = decode_shell_item_entry(items[0]) if items else {}
             item_name = str(decoded.get("name") or "") or f"<슬롯 {slot_name}>"
             shell_path = join_shell_path([parent_shell_path, item_name])
-            slot_number = int(slot_name) if slot_name.isdigit() else None
+            slot_number = int(slot_name) if slot_name.isdecimal() else None
             child_relative = f"{node_relative}\\{slot_name}"
-            yield _shellbag_entry_record(
+            # Without a child key the slot exists only as a value of this node's key.
+            record_relative = child_relative if child is not None else node_relative
+            record = _shellbag_entry_record(
                 path,
                 source_hashes,
                 mount=mount,
                 transaction_disclosure=transaction_disclosure,
                 source_key_path=source_key_path,
-                node_key_path=child_relative,
-                full_key_path=f"{mount_prefix}\\{child_relative}",
+                node_key_path=record_relative,
+                full_key_path=f"{mount_prefix}\\{record_relative}",
                 key=child,
-                node_slot=_node_slot(hive, child),
+                node_slot=_node_slot(hive, child) if child is not None else None,
                 shell_path=shell_path,
                 slot_name=slot_name,
                 depth=depth + 1,
@@ -927,7 +963,13 @@ def iter_bagmru_entries(
                 item_value=item_value,
                 parent_items=parent_items,
             )
-            children.append((child, shell_path, depth + 1, child_relative, [*parent_items, decoded]))
+            record.details["slot_reconciliation"] = status
+            record.details["slot_child_key_present"] = child is not None
+            if child is None:
+                record.details["key_last_written_note"] = "자식 키 없음 — 이 슬롯의 최종 수정 시각은 미상입니다."
+            yield record
+            if child is not None:
+                children.append((child, shell_path, depth + 1, child_relative, [*parent_items, decoded]))
         stack.extend(reversed(children))
 
 
@@ -1005,7 +1047,7 @@ def _shellbag_entry_record(
         "shellitem_value_cell_offset": (HIVE_BIN_BASE_OFFSET + int(getattr(item_value, "offset", 0) or 0))
         if item_value is not None
         else 0,
-        "key_cell_offset": HIVE_BIN_BASE_OFFSET + int(getattr(key, "offset", 0) or 0),
+        "key_cell_offset": HIVE_BIN_BASE_OFFSET + int(getattr(key, "offset", 0) or 0) if key is not None else 0,
         "key_last_written_at": key_last_written_at,
         "timestamp": key_last_written_at,
         "timestamp_label": "last_written",
@@ -1017,7 +1059,7 @@ def _shellbag_entry_record(
         "transaction_log_status": transaction_disclosure.get("status", ""),
         "transaction_log_disclosure": transaction_disclosure.get("message_ko", ""),
         "validation_checks": {
-            "key_cell_parsed": True,
+            "key_cell_parsed": key is not None,
             "shellitem_value_present": bagmru_root or item_value is not None,
             "shellitem_decoded": decoded_ok,
         },

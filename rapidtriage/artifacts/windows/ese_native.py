@@ -633,6 +633,10 @@ class EseDatabase:
         self.tables: list[EseTable] = []
         self.limitations: list[str] = []
         self.errors: list[str] = []
+        # Every page reference the walk could not read, in walk order:
+        # (page number, reason). Callers slice it around a table walk to
+        # attribute losses; page() never caches a failed page.
+        self.page_failures: list[tuple[int, str]] = []
         self._page_cache: dict[int, EsePage] = {}
         self._parse_header()
         if self.page_size:
@@ -665,20 +669,57 @@ class EseDatabase:
         # page numbering starts at physical page index 2.
         return len(self.blob) // self.page_size - 2 if self.page_size else 0
 
+    @property
+    def pages_read_count(self) -> int:
+        return len(self._page_cache)
+
+    def page_file_offset(self, num: int) -> int:
+        return (num + 1) * self.page_size
+
     def page(self, num: int) -> EsePage | None:
-        if num < 1 or num > min(self.page_count, ESE_MAX_PAGES):
+        if num in self._page_cache:
+            return self._page_cache[num]
+        if num < 1:
+            self.page_failures.append((num, "invalid-page-number"))
             return None
-        if num not in self._page_cache:
-            start = (num + 1) * self.page_size
-            buf = self.blob[start : start + self.page_size]
-            if len(buf) != self.page_size or len(buf) < 44:
-                return None
-            try:
-                page = EsePage(num, buf, is_small_page=self.is_small_page)
-            except (IndexError, struct.error):
-                return None
-            self._page_cache[num] = page
-        return self._page_cache[num]
+        if num > ESE_MAX_PAGES:
+            self.page_failures.append((num, "beyond-page-limit"))
+            return None
+        if num > self.page_count:
+            self.page_failures.append((num, "beyond-file-end"))
+            return None
+        start = self.page_file_offset(num)
+        buf = self.blob[start : start + self.page_size]
+        if len(buf) != self.page_size or len(buf) < 44:
+            self.page_failures.append((num, "short-page"))
+            return None
+        try:
+            page = EsePage(num, buf, is_small_page=self.is_small_page)
+        except (IndexError, struct.error):
+            self.page_failures.append((num, "page-structure-invalid"))
+            return None
+        self._page_cache[num] = page
+        return page
+
+    def page_failure_locations(self, start: int = 0) -> list[dict[str, object]]:
+        """Distinct unreadable pages recorded since ``start``, each with the
+        byte range it would occupy and the actual file size."""
+        seen: dict[int, str] = {}
+        for num, reason in self.page_failures[start:]:
+            seen.setdefault(num, reason)
+        locations = []
+        for num, reason in seen.items():
+            offset = self.page_file_offset(num) if num >= 1 else 0
+            locations.append(
+                {
+                    "page_number": num,
+                    "reason": reason,
+                    "declared_file_offset": offset,
+                    "declared_end_offset": offset + self.page_size,
+                    "file_size": len(self.blob),
+                }
+            )
+        return locations
 
     def iter_leaf_nodes(
         self,
@@ -935,6 +976,7 @@ def decode_ese_database(blob: bytes, *, max_rows_per_table: int = 250_000) -> di
         }
         marker_counts: dict[str, int] = {}
         count = 0
+        failure_start = len(db.page_failures)
         for _node, row, markers in db.iter_table_rows(table):
             count += 1
             for marker in markers:
@@ -948,5 +990,7 @@ def decode_ese_database(blob: bytes, *, max_rows_per_table: int = 250_000) -> di
         table_entry["row_count"] = count
         table_entry["truncated"] = count > max_rows_per_table
         table_entry["marker_counts"] = marker_counts
+        table_entry["unreadable_pages"] = db.page_failure_locations(failure_start)
         result["tables"].append(table_entry)
+    result["unreadable_pages"] = db.page_failure_locations()
     return result

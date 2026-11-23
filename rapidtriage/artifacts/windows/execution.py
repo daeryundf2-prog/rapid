@@ -6,6 +6,7 @@ import csv
 import datetime as dt
 import hashlib
 import json
+import math
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -1602,6 +1603,7 @@ def build_amcache_schema_row_record(
             "key_name": row.get("key_name", ""),
             "cell_offset": row.get("cell_offset", 0),
             "allocation_status": row.get("allocation_status", ""),
+            "cell_allocation": dict(row.get("cell_allocation") or {}),
             "key_last_written_at": row.get("last_written_at", ""),
             **fields,
             "link_date": amcache_link_date_iso(fields["link_date_raw"]),
@@ -1653,13 +1655,15 @@ def amcache_us_datetime_iso(value: str) -> str:
 
 
 def amcache_masked_values(values: Mapping[str, object]) -> dict[str, str]:
-    masked: dict[str, str] = {}
+    from .registry import RegistryValueMap
+
+    masked = RegistryValueMap()
     for name, value in values.items():
         text = str(value or "")
         if name.lower() in AMCACHE_MASKED_VALUE_NAMES and text and text != "#":
             text = "*****-" * 4 + text[-5:]
         masked[name] = text
-    return masked
+    return masked  # type: ignore[return-value]
 
 
 def amcache_inventory_fields(section: str, key_name: str, values: Mapping[str, str]) -> dict[str, object]:
@@ -1785,6 +1789,7 @@ def build_amcache_inventory_record(
             "key_path": key_path,
             "cell_offset": row.get("cell_offset", 0),
             "allocation_status": row.get("allocation_status", ""),
+            "cell_allocation": dict(row.get("cell_allocation") or {}),
             "key_last_written_at": row.get("last_written_at", ""),
             **fields,
             "secondary_timestamps": secondary_times,
@@ -1812,10 +1817,14 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
         return
     source_hashes = file_hashes(path)
     schema_rows, schema_decode_profile = decode_amcache_schema_rows(path)
+    # Rows whose key, ancestor, value or data cell is free (positive cell size) are not current
+    # inventory: they are disclosed on the hive record as recovery candidates only.
+    free_cell_rows = [row for row in schema_rows if row.get("allocation_status") != "allocated"]
+    schema_rows = [row for row in schema_rows if row.get("allocation_status") == "allocated"]
     extended_rows = [row for row in schema_rows if row.get("extended_inventory")]
     schema_rows = [row for row in schema_rows if not row.get("extended_inventory")]
     # String pivots are a fallback only: skipped when the structural decode produced rows.
-    occurrences = [] if schema_rows else list(iter_registry_like_string_occurrences(blob))
+    occurrences = [] if schema_rows or free_cell_rows else list(iter_registry_like_string_occurrences(blob))
     strings = list(unique_preserve_order(item["text"] for item in occurrences))
     amcache_clusters = collect_amcache_candidate_clusters(occurrences)
     path_candidates = [
@@ -1922,6 +1931,10 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
             "sha1_candidates": sha1_candidates,
             "amcache_schema_decode": schema_decode_profile,
             "schema_row_count": len(schema_rows),
+            "free_cell_recovery_candidate_count": len(free_cell_rows),
+            "amcache_free_cell_recovery_candidates": [
+                amcache_free_cell_recovery_candidate(path, source_hashes, row) for row in free_cell_rows
+            ],
             "amcache_candidate_clusters": amcache_clusters[:100],
             "amcache_candidate_cluster_count": len(amcache_clusters),
             "amcache_hive_evidence": amcache_hive_evidence(path_candidates, sha1_candidates, strings, amcache_clusters),
@@ -2165,6 +2178,30 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
         )
 
 
+def amcache_free_cell_recovery_candidate(
+    path: Path,
+    source_hashes: Mapping[str, str],
+    row: Mapping[str, object],
+) -> dict[str, object]:
+    """A structurally decoded Amcache row that rests on a free cell: recovery candidate, not inventory."""
+    cell_offset = int(row.get("cell_offset") or 0)
+    return {
+        "section": row.get("section", ""),
+        "key_name": row.get("key_name", ""),
+        "extended_inventory": bool(row.get("extended_inventory")),
+        "cell_offset": cell_offset,
+        "cell_offset_hex": f"0x{cell_offset:x}",
+        "allocation_status": row.get("allocation_status", ""),
+        "cell_allocation": dict(row.get("cell_allocation") or {}),
+        "key_last_written_at": row.get("last_written_at", ""),
+        "decoded_values": dict(amcache_masked_values(row.get("values") if isinstance(row.get("values"), Mapping) else {})),
+        "source_path": str(path.resolve()),
+        "source_sha256": str(source_hashes.get("sha256") or ""),
+        "candidate_source": "native-amcache-parent-reference-to-free-cell",
+        "recovery_note": "해제된(양수 크기) 셀에 놓인 행이라 현재 인벤토리에서 제외한 복구 후보입니다. 전용 도구로 검증하기 전에는 보고에 쓰지 않습니다.",
+    }
+
+
 def collect_powershell_history(root: Path) -> Iterable[ArtifactRecord]:
     for user_root in iter_windows_user_homes(root):
         path = user_root.joinpath(*POWERSHELL_HISTORY)
@@ -2206,6 +2243,26 @@ def collect_powershell_history(root: Path) -> Iterable[ArtifactRecord]:
             )
 
 
+SRUM_APP_COLUMNS = ("app", "appid", "application", "applicationname", "executable", "executablepath")
+SRUM_BYTES_SENT_COLUMNS = ("bytessent", "sendbytes", "sentbytes", "networkbytessent")
+SRUM_BYTES_RECEIVED_COLUMNS = ("bytesreceived", "receivebytes", "receivedbytes", "networkbytesreceived")
+SRUM_CPU_COLUMNS = ("cputime", "cpu", "cpucycletime")
+SRUM_ENERGY_COLUMNS = ("energy", "energyusage", "energyusagemwh")
+SRUM_COUNTER_COLUMNS = (
+    *SRUM_BYTES_SENT_COLUMNS,
+    *SRUM_BYTES_RECEIVED_COLUMNS,
+    *SRUM_CPU_COLUMNS,
+    *SRUM_ENERGY_COLUMNS,
+)
+
+
+def srum_export_row_has_required_columns(row: Mapping[str, object]) -> bool:
+    """A path containing 'srum' is only a hint: the row itself must carry an
+    application column and at least one SRUM usage counter column."""
+    columns = {normalize_key(key) for key in row}
+    return bool(columns.intersection(SRUM_APP_COLUMNS)) and bool(columns.intersection(SRUM_COUNTER_COLUMNS))
+
+
 def collect_srum_imports(root: Path) -> Iterable[ArtifactRecord]:
     for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
         if not path.is_file() or path.suffix.lower() not in SRUM_IMPORT_SUFFIXES:
@@ -2214,7 +2271,7 @@ def collect_srum_imports(root: Path) -> Iterable[ArtifactRecord]:
             continue
         rows = iter_csv_rows(path) if path.suffix.lower() == ".csv" else iter_json_rows(path)
         for index, row in enumerate(rows):
-            if isinstance(row, Mapping):
+            if isinstance(row, Mapping) and srum_export_row_has_required_columns(row):
                 yield build_srum_record(path, row, index)
 
 
@@ -2327,6 +2384,8 @@ def build_srum_database_inventory_record(path: Path) -> ArtifactRecord:
             "parser_version": PARSER_VERSION,
             "coverage_status": (
                 "ese-catalog-and-rows-decoded"
+                if dict(native_validation).get("ese_decode_complete")
+                else "ese-partial-decode-pages-unreadable"
                 if dict(native_validation).get("row_level_decoding_available")
                 else "ese-header-string-scan"
                 if ese_header.get("header_readable")
@@ -2583,13 +2642,21 @@ def build_srum_database_pivot_records(path: Path, inventory_details: Mapping[str
 
 def build_srum_schema_row_records(path: Path, inventory_details: Mapping[str, object]) -> Iterable[ArtifactRecord]:
     catalog = inventory_details.get("native_ese_catalog")
-    if not isinstance(catalog, Mapping) or catalog.get("decode_status") != "decoded":
+    if not isinstance(catalog, Mapping) or catalog.get("decode_status") not in ("decoded", "partial"):
         return
+    # A partial decode still yields the rows of intact tables; each row
+    # carries its table's walk state so a lost page is never read as "no rows".
+    walk_status = {
+        str(table.get("name") or ""): str(table.get("walk_status") or "")
+        for table in catalog.get("tables") or []
+        if isinstance(table, Mapping)
+    }
     source_hashes = file_hashes(path)
     emitted = 0
     for entry in iter_srudb_schema_rows(path):
         if emitted >= MAX_NATIVE_SRUM_SCHEMA_ROWS:
             break
+        entry = {**entry, "table_walk_status": walk_status.get(str(entry.get("table_name") or ""), "")}
         yield build_srum_schema_row_record(path, source_hashes, entry, emitted)
         emitted += 1
 
@@ -2648,6 +2715,7 @@ def build_srum_schema_row_record(
             "page_num": entry.get("page_num", 0),
             "tag_num": entry.get("tag_num", 0),
             "deleted_row": bool(entry.get("deleted")),
+            "table_walk_status": str(entry.get("table_walk_status") or ""),
             "app_identity": app_identity,
             "timestamp": timestamp,
             "timestamp_source": "native-ese-row-field" if timestamp else "not-decoded",
@@ -3068,25 +3136,34 @@ def build_srum_database_row_candidate_records(path: Path, inventory_details: Map
 
 def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> ArtifactRecord:
     lowered = {normalize_key(key): value for key, value in row.items()}
-    app_id = str(first_value(lowered, "app", "appid", "application", "applicationname", "executable", "executablepath") or "")
+    app_id = str(first_value(lowered, *SRUM_APP_COLUMNS) or "")
     user = str(first_value(lowered, "user", "username", "useraccount", "sid") or "")
     timestamp = str(first_value(lowered, "timestamp", "eventtime", "starttime", "endtime", "time") or "").replace("Z", "+00:00")
-    bytes_sent = number_value(first_value(lowered, "bytessent", "sendbytes", "sentbytes", "networkbytessent"))
-    bytes_received = number_value(first_value(lowered, "bytesreceived", "receivebytes", "receivedbytes", "networkbytesreceived"))
+    raw_counters = {
+        "bytes_sent": first_value(lowered, *SRUM_BYTES_SENT_COLUMNS),
+        "bytes_received": first_value(lowered, *SRUM_BYTES_RECEIVED_COLUMNS),
+        "cpu_time": first_value(lowered, *SRUM_CPU_COLUMNS),
+        "energy_usage": first_value(lowered, *SRUM_ENERGY_COLUMNS),
+    }
+    counter_presence = {name: counter_presence_state(value) for name, value in raw_counters.items()}
+    bytes_sent = number_value(raw_counters["bytes_sent"])
+    bytes_received = number_value(raw_counters["bytes_received"])
     bytes_total = numeric_total(bytes_sent, bytes_received)
-    cpu_time = number_value(first_value(lowered, "cputime", "cpu", "cpucycletime"))
-    energy = number_value(first_value(lowered, "energy", "energyusage", "energyusagemwh"))
+    cpu_time = number_value(raw_counters["cpu_time"])
+    energy = number_value(raw_counters["energy_usage"])
     interface_luid = str(first_value(lowered, "interfaceluid", "interface", "networkinterface") or "")
     network_profile = str(first_value(lowered, "networkprofile", "profile", "ssid") or "")
-    artifact_type = "srum-network-usage" if bytes_sent or bytes_received else "srum-app-resource-usage"
+    has_network_counters = any(counter_presence[name] != "absent" for name in ("bytes_sent", "bytes_received"))
+    has_resource_counters = any(counter_presence[name] != "absent" for name in ("cpu_time", "energy_usage"))
+    artifact_type = "srum-network-usage" if has_network_counters else "srum-app-resource-usage"
     risk_flags = [f"suspicious-app:{term}" for term in SUSPICIOUS_COMMAND_TERMS if term.split()[0] in app_id.lower()]
     validation_checks = {
         "has_timestamp": bool(timestamp),
         "has_app_id": bool(app_id),
         "has_user": bool(user),
-        "has_network_counters": bool(bytes_sent or bytes_received),
-        "has_resource_counters": bool(cpu_time or energy),
-        "counter_fields_normalized": True,
+        "has_network_counters": has_network_counters,
+        "has_resource_counters": has_resource_counters,
+        "counter_fields_normalized": "invalid" not in counter_presence.values(),
         "source_tool_export_validation_required": True,
     }
     report_grade = execution_report_grade_assessment(
@@ -3136,6 +3213,10 @@ def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> Arti
         user=user,
         interface_luid=interface_luid,
         network_profile=network_profile,
+        reported_counters=[
+            *(name for name, state in counter_presence.items() if state == "present"),
+            *(["bytes_total"] if bytes_total != "" else []),
+        ],
     )
     core_accuracy_gates = execution_core_accuracy_gates(
         artifact_type,
@@ -3178,6 +3259,7 @@ def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> Arti
         "energy_usage": energy,
         "interface_luid": interface_luid,
         "network_profile": network_profile,
+        "srum_counter_presence": counter_presence,
         "srum_table_family": "network-usage" if artifact_type == "srum-network-usage" else "app-resource",
         "srum_usage_evidence": srum_usage_evidence(
             artifact_type=artifact_type,
@@ -3190,6 +3272,7 @@ def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> Arti
             energy=energy,
             interface_luid=interface_luid,
             network_profile=network_profile,
+            counter_presence=counter_presence,
         ),
         "srum_report_citation_manifest": srum_manifest,
         "srum_report_citation_manifest_hash": srum_manifest["manifest_sha256"],
@@ -3223,7 +3306,7 @@ def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> Arti
             primary_evidence=[
                 f"app={app_id}" if app_id else "",
                 f"timestamp={timestamp}" if timestamp else "",
-                f"bytes_total={bytes_total}" if bytes_total else "",
+                f"bytes_total={bytes_total}" if bytes_total != "" else "",
                 f"user={user}" if user else "",
             ],
             validation_required=False,
@@ -3315,12 +3398,13 @@ def srum_usage_evidence(
     app_id: str,
     user: str,
     timestamp: str,
-    bytes_sent: float,
-    bytes_received: float,
-    cpu_time: float,
-    energy: float,
+    bytes_sent: float | str,
+    bytes_received: float | str,
+    cpu_time: float | str,
+    energy: float | str,
     interface_luid: str,
     network_profile: str,
+    counter_presence: Mapping[str, str],
 ) -> dict[str, object]:
     return {
         "table_family": "network-usage" if artifact_type == "srum-network-usage" else "app-resource",
@@ -3328,18 +3412,13 @@ def srum_usage_evidence(
         "user": user,
         "timestamp": timestamp,
         "timestamp_source": "srum-export-row",
+        # Presence of the column value, not truthiness: a reported 0 is a
+        # present counter, an absent column is not.
         "counter_fields_present": sorted(
-            name
-            for name, value in {
-                "bytes_sent": bytes_sent,
-                "bytes_received": bytes_received,
-                "cpu_time": cpu_time,
-                "energy_usage": energy,
-                "interface_luid": interface_luid,
-                "network_profile": network_profile,
-            }.items()
-            if value
+            [name for name, state in counter_presence.items() if state == "present"]
+            + [name for name, value in (("interface_luid", interface_luid), ("network_profile", network_profile)) if value]
         ),
+        "counter_fields_invalid": sorted(name for name, state in counter_presence.items() if state == "invalid"),
         "counter_values": {
             "bytes_sent": bytes_sent,
             "bytes_received": bytes_received,
@@ -3403,9 +3482,17 @@ def srum_report_citation_manifest(
     interface_luid: str = "",
     network_profile: str = "",
     source_key: str = "",
+    reported_counters: Iterable[str] = (),
 ) -> dict[str, object]:
     normalized_app = normalize_execution_path(app_id) if looks_like_executable_path(app_id) else app_id.lower()
-    counter_map = {str(key): value for key, value in counters.items() if value not in ("", None, 0)}
+    # A 0 is dropped as "not reported" unless the caller knows the source
+    # carried that counter (reported_counters): a reported 0 is evidence.
+    reported = set(reported_counters)
+    counter_map = {
+        str(key): value
+        for key, value in counters.items()
+        if value not in ("", None) and (value != 0 or key in reported)
+    }
     trusted_diff_required_fields = execution_diff_required_fields("srum")
     row_identity = {
         "artifact_scope": artifact_scope,
@@ -6331,12 +6418,20 @@ def user_sid_from_key(key: str) -> str:
 
 
 def numeric_total(*values: object) -> int | float | str:
-    total = 0.0
+    """Sum counters exactly: integers stay integers (no binary-float rounding
+    past 2**53). Absent values ("") are skipped; any invalid value, or no
+    present value at all, yields "" (unknown) rather than 0."""
+    numbers: list[int | float] = []
     for value in values:
-        if isinstance(value, (int, float)):
-            total += float(value)
-        elif value not in ("", 0):
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            numbers.append(value)
+        elif value != "":
             return ""
+    if not numbers:
+        return ""
+    if all(isinstance(value, int) for value in numbers):
+        return sum(numbers)
+    total = math.fsum(numbers)
     return int(total) if total.is_integer() else total
 
 
@@ -6521,13 +6616,33 @@ def first_value(row: Mapping[str, object], *keys: str) -> object:
     return ""
 
 
+def counter_presence_state(value: object) -> str:
+    if value is None or value == "":
+        return "absent"
+    return "invalid" if isinstance(number_value(value), str) else "present"
+
+
 def number_value(value: object) -> int | float | str:
-    text = str(value or "").strip()
+    """Parse a counter without a float round-trip so integers above 2**53 stay
+    exact. Absent -> "", unparseable -> the original text."""
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return str(value)
+        return int(value) if value.is_integer() else value
+    text = str(value if value is not None else "").strip()
     if not text:
-        return 0
+        return ""
+    if re.fullmatch(r"[+-]?\d+", text):
+        return int(text)
     try:
         number = float(text)
     except ValueError:
+        return text
+    if not math.isfinite(number):
         return text
     return int(number) if number.is_integer() else number
 
@@ -7166,8 +7281,53 @@ def decode_userassist_schema_native(hive: object) -> tuple[list[dict[str, object
     return rows, profile
 
 
+def amcache_entry_cell_allocation(
+    hive: object,
+    ancestors: Sequence[object],
+    entry: object,
+    values: Sequence[object],
+) -> dict[str, object]:
+    """Real allocation state (cell-size sign) of an Amcache entry key, its ancestors, value list,
+    value (vk) cells and data cells. Any free cell makes the row a recovery candidate."""
+    value_list_allocated = (
+        hive.cell_allocated(int(entry.value_list_offset or 0)) if entry.value_count else None  # type: ignore[attr-defined]
+    )
+    free_parent_keys = [
+        {"key_name": str(key.name), "cell_offset": 4096 + int(key.offset or 0)}  # type: ignore[attr-defined]
+        for key in ancestors
+        if not key.allocated  # type: ignore[attr-defined]
+    ]
+    free_value_cells = [
+        {"value_name": str(value.name), "cell_offset": 4096 + int(value.offset or 0)}  # type: ignore[attr-defined]
+        for value in values
+        if not value.allocated  # type: ignore[attr-defined]
+    ]
+    free_data_cells = [
+        {"value_name": str(value.name), "cell_offset": 4096 + int(value.data_offset or 0)}  # type: ignore[attr-defined]
+        for value in values
+        if hive.value_data_allocated(value) is False  # type: ignore[attr-defined]
+    ]
+    allocated = (
+        bool(entry.allocated)  # type: ignore[attr-defined]
+        and value_list_allocated is not False
+        and not free_parent_keys
+        and not free_value_cells
+        and not free_data_cells
+    )
+    return {
+        "allocation_status": "allocated" if allocated else "free-or-deleted-candidate",
+        "source": "regf-cell-size-sign",
+        "key_cell_offset": 4096 + int(entry.offset or 0),  # type: ignore[attr-defined]
+        "key_cell_allocated": bool(entry.allocated),  # type: ignore[attr-defined]
+        "value_list_cell_allocated": value_list_allocated,
+        "free_parent_key_cells": free_parent_keys,
+        "free_value_cells": free_value_cells,
+        "free_data_cells": free_data_cells,
+    }
+
+
 def decode_amcache_schema_rows_native(hive: object) -> tuple[list[dict[str, object]], dict[str, object]]:
-    from .registry import registry_value_text
+    from .registry import RegistryValueMap, registry_value_text
 
     profile: dict[str, object] = {"decode_status": "no-key", "sections": {}, "reader": "native-regf-tree-walk"}
     rows: list[dict[str, object]] = []
@@ -7175,76 +7335,82 @@ def decode_amcache_schema_rows_native(hive: object) -> tuple[list[dict[str, obje
     if root is None:
         profile["decode_status"] = "no-root-key"
         return rows, profile
+
+    def entry_row(section: str, ancestors: Sequence[object], entry: object, key_name: str) -> dict[str, object] | None:
+        native_values = hive.values(entry)  # type: ignore[attr-defined]
+        values = RegistryValueMap(
+            ((str(value.name) or "(default)"), registry_value_text(hive.value_data(value)))  # type: ignore[attr-defined]
+            for value in native_values
+        )
+        if not values:
+            return None
+        allocation = amcache_entry_cell_allocation(hive, ancestors, entry, native_values)
+        return {
+            "section": section,
+            "key_name": key_name,
+            "cell_offset": 4096 + int(entry.offset or 0),  # type: ignore[attr-defined]
+            "last_written_at": entry.last_written_at,  # type: ignore[attr-defined]
+            "allocation_status": allocation["allocation_status"],
+            "cell_allocation": allocation,
+            "values": values,
+        }
+
+    free_count = 0
     for section in AMCACHE_INVENTORY_SECTIONS:
         node = hive.subkey(root, section)  # type: ignore[attr-defined]
         if node is None:
             continue
-        entries = list(hive.subkeys(node))  # type: ignore[attr-defined]
+        entries = [((root, node), entry) for entry in hive.subkeys(node)]  # type: ignore[attr-defined]
         if section == "File":
             # Legacy (Windows 8) layout: Root\File\<volume GUID>\<file id>.
-            entries = [entry for volume in entries for entry in hive.subkeys(volume)]  # type: ignore[attr-defined]
+            entries = [((root, node, volume), entry) for _, volume in entries for entry in hive.subkeys(volume)]  # type: ignore[attr-defined]
         decoded = 0
-        for entry in entries:
-            values = {
-                (str(value.name) or "(default)"): registry_value_text(hive.value_data(value))  # type: ignore[attr-defined]
-                for value in hive.values(entry)  # type: ignore[attr-defined]
-            }
-            if not values:
+        free_rows = 0
+        for ancestors, entry in entries:
+            row = entry_row(section, ancestors, entry, str(entry.name))
+            if row is None:
                 continue
             decoded += 1
-            rows.append(
-                {
-                    "section": section,
-                    "key_name": str(entry.name),
-                    "cell_offset": 4096 + int(entry.offset or 0),
-                    "last_written_at": entry.last_written_at,
-                    "allocation_status": "allocated",
-                    "values": values,
-                }
-            )
+            free_rows += row["allocation_status"] != "allocated"
+            rows.append(row)
+        free_count += free_rows
         profile["sections"][section] = {  # type: ignore[index]
             "declared_subkeys": int(node.subkey_count or 0),
             "decoded_subkey_offsets": len(entries),
             "decoded_rows": decoded,
+            "free_cell_candidate_rows": free_rows,
         }
     extended_count = 0
     for section in AMCACHE_EXTENDED_SECTIONS:
         node = hive.subkey(root, section)  # type: ignore[attr-defined]
         if node is None:
             continue
-        entries = list(hive.subkeys(node))  # type: ignore[attr-defined]
+        entries = [((root, node), entry) for entry in hive.subkeys(node)]  # type: ignore[attr-defined]
         if section == "DeviceCensus":
-            entries = [node, *entries]  # root values (lastFullSync, OsVersion) + one row per category
+            entries = [((root,), node), *entries]  # root values (lastFullSync, OsVersion) + one row per category
         decoded = 0
-        for entry in entries:
-            values = {
-                (str(value.name) or "(default)"): registry_value_text(hive.value_data(value))  # type: ignore[attr-defined]
-                for value in hive.values(entry)  # type: ignore[attr-defined]
-            }
-            if not values or set(values) <= {"WritePermissionsCheck", "ProviderVersion"}:
+        free_rows = 0
+        for ancestors, entry in entries:
+            row = entry_row(section, ancestors, entry, "" if entry is node else str(entry.name))
+            if row is None or set(row["values"]) <= {"WritePermissionsCheck", "ProviderVersion"}:  # type: ignore[arg-type]
                 continue
             decoded += 1
-            rows.append(
-                {
-                    "section": section,
-                    "key_name": "" if entry is node else str(entry.name),
-                    "cell_offset": 4096 + int(entry.offset or 0),
-                    "last_written_at": entry.last_written_at,
-                    "allocation_status": "allocated",
-                    "values": values,
-                    "extended_inventory": True,
-                }
-            )
+            free_rows += row["allocation_status"] != "allocated"
+            row["extended_inventory"] = True
+            rows.append(row)
         extended_count += decoded
+        free_count += free_rows
         profile["sections"][section] = {  # type: ignore[index]
             "declared_subkeys": int(node.subkey_count or 0),
             "decoded_subkey_offsets": len(entries),
             "decoded_rows": decoded,
+            "free_cell_candidate_rows": free_rows,
             "artifact_type": AMCACHE_EXTENDED_SECTIONS[section][0],
         }
     profile["decode_status"] = "decoded" if rows else "no-decodable-rows"
     profile["schema_row_count"] = len(rows) - extended_count
     profile["extended_inventory_row_count"] = extended_count
+    profile["free_cell_candidate_row_count"] = free_count
     profile["row_cap"] = None
     return rows, profile
 

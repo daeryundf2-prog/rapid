@@ -350,8 +350,7 @@ def render_run_markdown_report(report_context: Mapping[str, object]) -> str:
 
     lines.extend(["", "### Processing decisions / skipped, capped, reused", ""])
     if processing.get("decisions"):
-        for item in processing["decisions"][:30]:
-            lines.append(f"- {item}")
+        lines.extend(report_decision_lines(processing["decisions"]))
     else:
         lines.append("- No skipped, capped, or reused processing decisions were recorded.")
 
@@ -550,6 +549,24 @@ def format_bounded_names(value: object, *, limit: int) -> str:
     visible = names[:limit]
     suffix = f", +{len(names) - limit} more" if len(names) > limit else ""
     return ", ".join(visible) + suffix if visible else "none"
+
+
+REPORT_DECISION_LIMIT = 30
+
+
+def report_decision_lines(decisions: object, limit: int = REPORT_DECISION_LIMIT) -> list[str]:
+    """Markdown bullets for at most ``limit`` processing decisions.
+
+    Informational ``notice`` rows (e.g. "no rows collected") are listed after skips, failures,
+    caps and loss warnings, so a growing number of notices cannot push those out of the report;
+    omitted rows are counted, never dropped silently.
+    """
+    rows = [str(item) for item in decisions] if isinstance(decisions, list) else []
+    shown = sorted(rows, key=lambda item: "` notice: " in item)[:limit]
+    lines = [f"- {item}" for item in shown]
+    if len(rows) > len(shown):
+        lines.append(f"- … {len(rows) - len(shown)} more decision(s) not shown; see `steps` in rapidtriage-run-summary.json.")
+    return lines
 
 
 def build_processing_decision_rows(steps: object, processing: Mapping[str, object]) -> list[str]:

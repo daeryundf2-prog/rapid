@@ -16,6 +16,7 @@ from .registry_depth import (
     SECRET_PLACEHOLDER,
     SECRET_VALUE_NAMES,
     DepthStats,
+    RegistryValueMap,
     export_depth_records,
     hive_depth_records,
     hive_secret_strings,
@@ -412,6 +413,15 @@ def collect_registry_hive(
             semantic_counts[record.artifact_type] += 1
             yield record
         free_candidates, allocator_stats = iter_registry_free_cell_candidates(hive)
+        completeness = registry_hive_completeness(
+            hive,
+            file_size=stat_result.st_size,
+            allocator_stats=allocator_stats,
+            walk_errors=walk_errors,
+            key_tree_walked=include_key_tree,
+        )
+        coverage_status, parser_confidence, key_tree_status = registry_hive_coverage(completeness, include_key_tree)
+        keys_examined = key_tree_status in {"walked", "partial"}
         recovery_candidates = [*free_candidates, *native_parent_key_candidates(hive, free_candidates)]
         scan_end = min(stat_result.st_size, MAX_HIVE_STRING_SCAN_BYTES)
         strings = extract_utf16le_strings(bytes(hive._data[:scan_end]))
@@ -441,44 +451,126 @@ def collect_registry_hive(
         )
         metadata["native_walk"] = {
             "reader": "native-regf-tree-walk",
-            "key_count": key_count if include_key_tree else None,
-            "value_count": value_count if include_key_tree else None,
+            "key_tree_status": key_tree_status,
+            "key_count": key_count if keys_examined else None,
+            "value_count": value_count if keys_examined else None,
             "walk_errors": walk_errors,
             "post_walk_lookup_errors": {
                 key: count - walk_errors.get(key, 0) for key, count in hive.errors.items() if count - walk_errors.get(key, 0)
             },
             "allocator_stats": allocator_stats,
             "allocated_unreachable_nk_count": max(0, int(allocator_stats.get("allocated_nk", 0)) - key_count)
-            if include_key_tree
+            if keys_examined
             else None,
             "free_cell_candidate_count": len(free_candidates),
             "semantic_row_counts": dict(sorted(semantic_counts.items())),
             "registry_depth": depth_stats.summary(),
+            "hive_completeness": completeness,
             "read_cap_bytes": None,
             "cell_cap": None,
         }
         record = build_registry_hive_record(path, stat_result.st_size, metadata, source_hashes)
         record.details.update(
             {
-                "coverage_status": "native-hive-full-walk",
-                "parser_confidence": 0.9,
+                "coverage_status": coverage_status,
+                "parser_confidence": parser_confidence,
                 "hive_mount": row_context.mount,
                 "user_sid": row_context.user_sid,
                 "user_sid_source": mount.get("user_sid_source", ""),
                 "root_key_name": mount.get("root_key_name", ""),
-                "key_count": key_count,
-                "value_count": value_count,
+                # None = the key tree was not examined (walk not run or root cell unresolved), not "0 keys".
+                "key_count": key_count if keys_examined else None,
+                "value_count": value_count if keys_examined else None,
+                "key_tree_status": key_tree_status,
+                "hive_completeness_status": completeness["status"],
+                "hive_completeness": completeness,
                 "native_walk": metadata["native_walk"],
                 "transaction_log_disclosure": disclosure["message_ko"],
                 "transaction_log_disclosure_status": disclosure["status"],
             }
         )
+        if completeness["status"] != "complete":
+            record.details["risk_flags"] = sorted({*record.details["risk_flags"], f"registry-hive-{completeness['status']}"})
         record.details["native_header"] = {
             key: value for key, value in metadata.items() if key not in {"native_walk"}
         }
         yield record
     finally:
         hive.close()
+
+
+def registry_hive_completeness(
+    hive: NativeRegistryHive,
+    *,
+    file_size: int,
+    allocator_stats: Mapping[str, int],
+    walk_errors: Mapping[str, int],
+    key_tree_walked: bool,
+) -> dict[str, object]:
+    """Reconcile the declared hive-bin range, the bytes actually present, the bins walked, root-cell
+    resolution and tree-walk errors into one status: complete / incomplete / unreadable."""
+    declared = int(hive.header.get("hbin_data_size") or 0)
+    declared_end = HIVE_BIN_BASE_OFFSET + declared if declared else None
+    root_relative = int(hive.header.get("root_cell_offset") or 0)
+    root_resolved = hive.root is not None
+    walked_bytes = int(allocator_stats.get("hbin_walked_bytes", 0))
+    losses: list[dict[str, object]] = []
+    if declared_end is not None and file_size < declared_end:
+        losses.append(
+            {
+                "kind": "hbin-data-truncated",
+                "declared_end": declared_end,
+                "actual_end": file_size,
+                "missing_bytes": declared_end - file_size,
+            }
+        )
+    skipped_bins = int(allocator_stats.get("hbin-signature-gap", 0)) + int(allocator_stats.get("hbin-size-invalid", 0))
+    if skipped_bins:
+        losses.append(
+            {
+                "kind": "hbin-not-walked",
+                "walked_bytes": walked_bytes,
+                "readable_end": hive.hbin_end,
+                "hbin_signature_gaps": int(allocator_stats.get("hbin-signature-gap", 0)),
+                "hbin_size_invalid": int(allocator_stats.get("hbin-size-invalid", 0)),
+            }
+        )
+    if not root_resolved:
+        losses.append(
+            {
+                "kind": "root-cell-unresolved",
+                "root_cell_offset": HIVE_BIN_BASE_OFFSET + root_relative,
+                "readable_end": hive.hbin_end,
+            }
+        )
+    if walk_errors:
+        losses.append({"kind": "key-tree-walk-errors", "errors": dict(sorted(walk_errors.items()))})
+    status = "unreadable" if not root_resolved else "incomplete" if losses else "complete"
+    return {
+        "status": status,
+        "declared_hbin_data_size": declared,
+        "declared_end": declared_end,
+        "actual_end": file_size,
+        "readable_hbin_end": hive.hbin_end,
+        "hbin_count_walked": int(allocator_stats.get("hbin_count", 0)),
+        "hbin_walked_bytes": walked_bytes,
+        "root_cell_offset": HIVE_BIN_BASE_OFFSET + root_relative,
+        "root_cell_resolved": root_resolved,
+        "key_tree_walked": key_tree_walked and root_resolved,
+        "loss_locations": losses,
+    }
+
+
+def registry_hive_coverage(completeness: Mapping[str, object], include_key_tree: bool) -> tuple[str, float, str]:
+    """(coverage_status, parser_confidence, key_tree_status) that never claims a walk that did not happen."""
+    status = completeness.get("status")
+    if status == "unreadable":
+        return "native-hive-unreadable", 0.2, "root-unresolved"
+    if not include_key_tree:
+        return "native-hive-inventory", 0.72 if status == "complete" else 0.5, "not-run"
+    if status == "incomplete":
+        return "native-hive-partial-walk", 0.5, "partial"
+    return "native-hive-full-walk", 0.9, "walked"
 
 
 def parse_registry_hive_header(header: bytes) -> dict[str, object]:
@@ -2584,6 +2676,9 @@ def build_registry_summary(
                     "sha256": (details.get("source_hashes") or {}).get("sha256", "")
                     if isinstance(details.get("source_hashes"), Mapping)
                     else "",
+                    "coverage_status": details.get("coverage_status", ""),
+                    "hive_completeness_status": details.get("hive_completeness_status", ""),
+                    "key_tree_status": details.get("key_tree_status", ""),
                 }
             )
         if record.artifact_type == "registry-hive-strings":
@@ -4673,7 +4768,17 @@ class NativeRegistryKey:
 
 
 class NativeRegistryValue:
-    __slots__ = ("data_offset", "data_size", "flags", "inline", "name", "name_encoding", "offset", "value_type")
+    __slots__ = (
+        "allocated",
+        "data_offset",
+        "data_size",
+        "flags",
+        "inline",
+        "name",
+        "name_encoding",
+        "offset",
+        "value_type",
+    )
 
     def __init__(self, **fields: object) -> None:
         for slot in self.__slots__:
@@ -4895,7 +5000,7 @@ class NativeRegistryHive:
         cell = self._cell(relative_offset)
         if cell is None:
             return None
-        start, length, _allocated = cell
+        start, length, allocated = cell
         if length < 20 or self._data[start : start + 2] != b"vk":  # type: ignore[index]
             self.errors["vk-signature-mismatch"] += 1
             return None
@@ -4913,6 +5018,7 @@ class NativeRegistryHive:
             data_offset=self._u32(start + 8),
             inline=bool(raw_size & 0x80000000),
             flags=flags,
+            allocated=allocated,
         )
 
     def value(self, key: NativeRegistryKey, name: str) -> NativeRegistryValue | None:
@@ -4921,6 +5027,42 @@ class NativeRegistryHive:
             if str(value.name).casefold() == wanted:
                 return value
         return None
+
+    def cell_allocated(self, relative_offset: int) -> bool | None:
+        """Allocation state of a referenced cell (negative size = allocated); None when it cannot be
+        resolved. A read-only probe: records no walk errors."""
+        if relative_offset in (0, 0xFFFFFFFF) or relative_offset % 8:
+            return None
+        offset = HIVE_BIN_BASE_OFFSET + relative_offset
+        if offset + 8 > self.hbin_end:
+            return None
+        raw_size = int.from_bytes(self._data[offset : offset + 4], "little", signed=True)  # type: ignore[index]
+        if abs(raw_size) < 8 or offset + abs(raw_size) > self.hbin_end:
+            return None
+        return raw_size < 0
+
+    def value_data_allocated(self, value: NativeRegistryValue) -> bool | None:
+        """Allocation state of a value's data cell(s) (big-data list and segments included); None for
+        inline/empty data or an unresolvable cell."""
+        size = int(value.data_size or 0)
+        if value.inline or size <= 0:
+            return None
+        data_offset = int(value.data_offset or 0)
+        state = self.cell_allocated(data_offset)
+        if not state:
+            return state
+        start = HIVE_BIN_BASE_OFFSET + data_offset + 4
+        if size > REGF_BIG_DATA_SEGMENT_SIZE and self.minor_version >= 4 and self._data[start : start + 2] == b"db":  # type: ignore[index]
+            list_offset = self._u32(start + 4)
+            list_state = self.cell_allocated(list_offset)
+            if not list_state:
+                return list_state
+            list_start = HIVE_BIN_BASE_OFFSET + list_offset + 4
+            for index in range(self._u16(start + 2)):
+                segment = self.cell_allocated(self._u32(list_start + index * 4))
+                if not segment:
+                    return segment
+        return True
 
     def value_bytes(self, value: NativeRegistryValue) -> bytes:
         size = int(value.data_size or 0)
@@ -4961,8 +5103,8 @@ class NativeRegistryHive:
     def value_data(self, value: NativeRegistryValue) -> object:
         return decode_registry_value_data(int(value.value_type or 0), self.value_bytes(value))
 
-    def values_dict(self, key: NativeRegistryKey) -> dict[str, object]:
-        return {str(value.name): self.value_data(value) for value in self.values(key)}
+    def values_dict(self, key: NativeRegistryKey) -> RegistryValueMap:
+        return RegistryValueMap((str(value.name), self.value_data(value)) for value in self.values(key))
 
 
 def decode_native_registry_name(raw: bytes, *, compressed: bool) -> tuple[str, str]:
@@ -6244,6 +6386,7 @@ def iter_registry_free_cell_candidates(hive: NativeRegistryHive) -> tuple[list[d
             continue
         stats["hbin_count"] += 1
         hbin_end = min(end, offset + hbin_size)
+        stats["hbin_walked_bytes"] += hbin_end - offset
         cursor = offset + HIVE_BIN_HEADER_SIZE
         while cursor + 8 <= hbin_end:
             raw_size = int.from_bytes(data[cursor : cursor + 4], "little", signed=True)  # type: ignore[index]
@@ -6365,6 +6508,9 @@ def registry_native_summary_facts(records: Sequence[ArtifactRecord]) -> dict[str
                     "root_key_name": details.get("root_key_name", ""),
                     "key_count": details.get("key_count", 0),
                     "value_count": details.get("value_count", 0),
+                    "key_tree_status": details.get("key_tree_status", ""),
+                    "coverage_status": details.get("coverage_status", ""),
+                    "hive_completeness_status": details.get("hive_completeness_status", ""),
                     "transaction_log_status": details.get("transaction_log_disclosure_status", ""),
                 }
             )
