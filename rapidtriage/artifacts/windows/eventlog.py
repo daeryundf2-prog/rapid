@@ -110,6 +110,7 @@ EVENTLOG_TRIAGE_IDENTITY_KEYS = (
     "source_path",
     "source_format",
     "source_index",
+    "source_line_number",
     "timestamp",
     "event_id",
     "record_id",
@@ -151,6 +152,7 @@ EVENTLOG_TRIAGE_IDENTITY_KEYS = (
     "timestamp_utc_ticks",
     "timestamp_utc_basis",
     "event_data_source",
+    "event_data_duplicate_names",
 )
 # Pivot fields kept only when non-empty (consumers read them with .get()).
 EVENTLOG_TRIAGE_PIVOT_KEYS = (
@@ -1846,15 +1848,20 @@ class WindowsEventLogProvider:
                     continue
                 seen.add(resolved)
                 suffix = path.suffix.lower()
-                if suffix == ".xml":
-                    for record in collect_xml_events(path, message_catalog=message_catalog):
+                if suffix in EVENT_EXPORT_SUFFIXES:
+                    # Exported XML/JSON/JSONL/CSV: events, then one eventlog-file row with the
+                    # file hash (events link to it by source_path) and how completely it was read.
+                    export_stats: dict[str, object] = {}
+                    collector = (
+                        collect_xml_events
+                        if suffix == ".xml"
+                        else collect_csv_events
+                        if suffix == ".csv"
+                        else collect_json_like_events
+                    )
+                    for record in collector(path, message_catalog=message_catalog, stats=export_stats):
                         yield emit(record)
-                elif suffix in {".json", ".jsonl", ".ndjson"}:
-                    for record in collect_json_like_events(path, message_catalog=message_catalog):
-                        yield emit(record)
-                elif suffix == ".csv":
-                    for record in collect_csv_events(path, message_catalog=message_catalog):
-                        yield emit(record)
+                    yield emit(build_eventlog_export_file_record(path, stats=export_stats))
                 elif suffix == ".evtx":
                     native_stats: dict[str, int] = {}
                     for record in collect_native_evtx_events(
@@ -1959,10 +1966,14 @@ def collect_xml_events(
     path: Path,
     *,
     message_catalog: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
+    stats: dict[str, object] | None = None,
 ) -> Iterable[ArtifactRecord]:
+    """Event rows of an exported XML file; ``stats`` receives the read outcome."""
+    stats = stats if stats is not None else {}
     try:
         tree = safe_xml_parse(path)
-    except (ET.ParseError, UnsafeXmlError, OSError):
+    except (ET.ParseError, UnsafeXmlError, OSError) as exc:
+        record_export_read_error(stats, exc)
         return
     root = tree.getroot()
     events = [root] if strip_namespace(root.tag) == "Event" else root.findall(".//{*}Event")
@@ -1973,6 +1984,9 @@ def collect_xml_events(
         user_data = child_by_name(event, "UserData")
         rendering = child_by_name(event, "RenderingInfo")
         data = event_data_values(event_data)
+        data_items = event_data_items(event_data)
+        # Same-named (or colliding) Data elements cannot all live in the name->value map.
+        data_lossy = len(data) != len(data_items)
         if user_data is not None:
             data.update(prefixed_xml_values(user_data, "UserData"))
         rendered_message = text_from_child(rendering, "Message")
@@ -2001,6 +2015,12 @@ def collect_xml_events(
             keywords=text_from_child(system, "Keywords"),
             message_catalog=message_catalog,
         )
+        if data_lossy:
+            # ``data`` keeps the last value per name for single-value pivots; the
+            # ordered items keep every element and the duplicated names flag it.
+            details["event_data_items"] = data_items
+            details["event_data_duplicate_names"] = duplicate_event_data_names(data_items)
+        stats["rows_emitted"] = int(stats.get("rows_emitted") or 0) + 1
         yield event_record(path, "eventlog-event", details)
 
 
@@ -2008,9 +2028,17 @@ def collect_json_like_events(
     path: Path,
     *,
     message_catalog: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
+    stats: dict[str, object] | None = None,
 ) -> Iterable[ArtifactRecord]:
+    """Rows of an exported JSON/JSONL/NDJSON file.
+
+    ``source_index`` is the parsed-row ordinal; JSONL/NDJSON rows also carry
+    ``source_line_number`` (1-based physical line). Unparsable lines are
+    counted with their line numbers in ``stats``.
+    """
+    stats = stats if stats is not None else {}
     source_hashes = file_hashes(path)
-    for index, row in enumerate(iter_json_rows(path)):
+    for index, (line_number, row) in enumerate(iter_json_rows(path, stats)):
         details = details_from_mapping(
             row,
             parser=guess_parser_name(row, path),
@@ -2020,7 +2048,10 @@ def collect_json_like_events(
             source_hashes=source_hashes,
             message_catalog=message_catalog,
         )
+        if line_number is not None:
+            details["source_line_number"] = line_number
         artifact_type = "eventlog-detection" if is_detection_row(details) else "eventlog-event"
+        stats["rows_emitted"] = int(stats.get("rows_emitted") or 0) + 1
         yield event_record(path, artifact_type, details)
 
 
@@ -2028,7 +2059,10 @@ def collect_csv_events(
     path: Path,
     *,
     message_catalog: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
+    stats: dict[str, object] | None = None,
 ) -> Iterable[ArtifactRecord]:
+    """Rows of an exported CSV file; a read/decode error is recorded in ``stats``."""
+    stats = stats if stats is not None else {}
     source_hashes = file_hashes(path)
     try:
         with path.open("r", encoding="utf-8-sig", newline="") as handle:
@@ -2044,9 +2078,85 @@ def collect_csv_events(
                     message_catalog=message_catalog,
                 )
                 artifact_type = "eventlog-detection" if is_detection_row(details) else "eventlog-event"
+                stats["rows_emitted"] = int(stats.get("rows_emitted") or 0) + 1
                 yield event_record(path, artifact_type, details)
-    except (OSError, UnicodeError, csv.Error):
-        return
+    except (OSError, UnicodeError, csv.Error) as exc:
+        record_export_read_error(stats, exc)
+
+
+EVENTLOG_EXPORT_FAILED_LOCATIONS_MAX = 200
+
+
+def record_export_read_error(stats: dict[str, object], exc: BaseException) -> None:
+    stats["error_type"] = type(exc).__name__
+    stats["error"] = str(exc)
+
+
+def record_export_row_failure(stats: dict[str, object], location: Mapping[str, object]) -> None:
+    stats["rows_failed"] = int(stats.get("rows_failed") or 0) + 1
+    locations = stats.setdefault("failed_locations", [])
+    if isinstance(locations, list) and len(locations) < EVENTLOG_EXPORT_FAILED_LOCATIONS_MAX:
+        locations.append(dict(location))
+
+
+def build_eventlog_export_file_record(path: Path, *, stats: Mapping[str, object]) -> ArtifactRecord:
+    """``eventlog-file`` row of an exported XML/JSON/JSONL/CSV file.
+
+    Carries the file's SHA-256 (triage event rows omit per-file hashes and
+    link here by ``source_path``) and the read outcome: an unreadable file or
+    unparsable rows make it a parser-error row naming the file, the cause and
+    the missing row count (unknown when the file could not be read at all).
+    """
+    resolved = resolved_path_text(path)
+    try:
+        size: int | None = path.stat().st_size
+    except OSError:
+        size = None
+    emitted = int(stats.get("rows_emitted") or 0)
+    failed = int(stats.get("rows_failed") or 0)
+    error_type = str(stats.get("error_type") or "")
+    error = str(stats.get("error") or "")
+    locations = list(stats.get("failed_locations") or [])
+    if error_type:
+        status = "partial" if emitted else "unreadable"
+    else:
+        status = "partial" if failed else "complete"
+    details: dict[str, object] = {
+        "parser": "windows-eventlog-export-inventory",
+        "parser_version": PARSER_VERSION,
+        "coverage_status": "detected",
+        "reportability": "inventory-only",
+        "source_path": resolved,
+        "source_format": path.suffix.lower().lstrip("."),
+        "source_hashes": file_hashes(path),
+        "size": size,
+        "channel_hint": channel_hint_from_path(path),
+        "export_read_status": status,
+        "export_row_count": emitted,
+        "export_failed_row_count": failed,
+        "export_failed_locations": locations,
+        "export_failed_locations_truncated": failed > len(locations),
+        # A file that failed to read (or stopped mid-way) hides an unknown number of rows.
+        "export_missing_row_count": None if error_type else failed,
+        "export_missing_row_count_status": "unknown-read-error" if error_type else "exact",
+    }
+    if status != "complete":
+        cause = f"{error_type}: {error}" if error_type else f"{failed} unparsable row(s)"
+        missing = "an unknown number of" if error_type else str(failed)
+        details.update(
+            {
+                "parser_error": True,
+                "error_type": error_type or "unparsable-export-rows",
+                "error": f"{path.name}: {cause}; {missing} event row(s) not read ({emitted} read)",
+            }
+        )
+    return ArtifactRecord(
+        provider=WindowsEventLogProvider.name,
+        artifact_type="eventlog-file",
+        path=resolved,
+        supported=False,
+        details=details,
+    )
 
 
 def collect_native_evtx_events(
@@ -7281,27 +7391,38 @@ def native_evtx_confidence(details: Mapping[str, object]) -> float:
     return min(0.82, round(score, 2))
 
 
-def iter_json_rows(path: Path) -> Iterable[Mapping[str, object]]:
+def iter_json_rows(path: Path, stats: dict[str, object]) -> Iterable[tuple[int | None, Mapping[str, object]]]:
+    """``(physical line or None, row)`` for each event object of a JSON/JSONL/NDJSON export.
+
+    JSONL/NDJSON lines are numbered from 1 on ``\\n`` boundaries; a line that
+    is not a JSON object is recorded in ``stats`` with its line number, a
+    whole-file read/decode error as the file's read error.
+    """
     try:
         text = path.read_text(encoding="utf-8-sig")
-    except (OSError, UnicodeError):
+    except (OSError, UnicodeError) as exc:
+        record_export_read_error(stats, exc)
         return
     suffix = path.suffix.lower()
     if suffix in {".jsonl", ".ndjson"}:
-        for line in text.splitlines():
+        for line_number, line in enumerate(text.split("\n"), 1):
             line = line.strip()
             if not line:
                 continue
             try:
                 row = json.loads(line)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as exc:
+                record_export_row_failure(stats, {"line": line_number, "error": f"JSONDecodeError: {exc.msg}"})
                 continue
             if isinstance(row, Mapping):
-                yield row
+                yield line_number, row
+            else:
+                record_export_row_failure(stats, {"line": line_number, "error": "not a JSON object"})
         return
     try:
         payload = json.loads(text)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
+        record_export_read_error(stats, exc)
         return
     if isinstance(payload, list):
         rows = payload
@@ -7309,9 +7430,11 @@ def iter_json_rows(path: Path) -> Iterable[Mapping[str, object]]:
         rows = payload.get("events") or payload.get("Events") or payload.get("records") or payload.get("Rows") or [payload]
     else:
         rows = []
-    for row in rows:
+    for element, row in enumerate(rows):
         if isinstance(row, Mapping):
-            yield row
+            yield None, row
+        else:
+            record_export_row_failure(stats, {"element": element, "error": "not a JSON object"})
 
 
 def details_from_mapping(
@@ -8546,6 +8669,15 @@ def triage_eventlog_details(details: Mapping[str, object]) -> dict[str, object]:
         slim["event_message"] = message
         if cut:
             slim["event_message_truncated"] = True
+    items = details.get("event_data_items")
+    if isinstance(items, list) and items:
+        # Duplicate Data names: the ordered (name, value) list keeps every element.
+        slim["event_data_items"] = [
+            {"name": str(item.get("name") or ""), "value": _bounded_text(item.get("value") or "")[0]}
+            for item in items
+            if isinstance(item, Mapping)
+        ]
+        cap_list_field(slim, "event_data_items", EVENTLOG_TRIAGE_EVENT_DATA_MAX_ITEMS)
     is_native = details.get("parser") == "windows-eventlog-evtx-native"
     event_data: Mapping[str, object] = {}
     if is_native:
@@ -9201,6 +9333,7 @@ class EventlogSummaryAccumulator:
         self.high_risk: dict[str, list[dict[str, object]]] = {"event": [], "detection": []}
         self.truncated_files: dict[str, int] = {}
         self.truncated_fields: Counter[str] = Counter()
+        self.export_read_errors: list[dict[str, object]] = []
 
     def _inc(self, counter: str, group: str, value: str) -> None:
         if value:
@@ -9261,6 +9394,21 @@ class EventlogSummaryAccumulator:
                 for item in record.details.get("text_truncated_field_counts") or []:
                     if isinstance(item, Mapping):
                         self.truncated_fields[str(item.get("value") or "")] += int(item.get("count") or 0)
+                if record.details.get("parser_error") is True:
+                    self.export_read_errors.append(
+                        {
+                            key: record.details.get(key)
+                            for key in (
+                                "source_path",
+                                "export_read_status",
+                                "error_type",
+                                "error",
+                                "export_row_count",
+                                "export_failed_row_count",
+                                "export_missing_row_count",
+                            )
+                        }
+                    )
             return
         if not isinstance(record.details, Mapping):
             return
@@ -9508,6 +9656,9 @@ class EventlogSummaryAccumulator:
                 "payload_max_chars": EVENTLOG_TRIAGE_PAYLOAD_MAX_CHARS,
             },
             "stale_below_first_record_count": self.counts["stale_below_first_record_count"],
+            # Exported XML/JSON/JSONL/CSV inputs that could not be read completely.
+            "export_read_error_count": len(self.export_read_errors),
+            "export_read_errors": self.export_read_errors[:200],
             "native_capabilities": NATIVE_EVTX_CAPABILITIES,
             "native_report_grade_blockers": NATIVE_EVTX_REPORT_GRADE_BLOCKERS,
             "detection_level_counts": counter_items(self._merged("detection_level_counts")),
@@ -10046,6 +10197,23 @@ def event_data_values(node: ET.Element | None) -> dict[str, str]:
         key = str(child.attrib.get("Name") or f"Data{index}")
         values[key] = (child.text or "").strip()
     return values
+
+
+def event_data_items(node: ET.Element | None) -> list[dict[str, str]]:
+    """Every ``EventData/Data`` element in document order: ``Name`` (``""`` when unnamed) and value."""
+    if node is None:
+        return []
+    return [
+        {"name": str(child.attrib.get("Name") or ""), "value": (child.text or "").strip()}
+        for child in list(node)
+        if strip_namespace(child.tag) == "Data"
+    ]
+
+
+def duplicate_event_data_names(items: Sequence[Mapping[str, str]]) -> list[str]:
+    """Non-empty Data names that occur more than once (single-value fields keep only the last)."""
+    counts = Counter(str(item.get("name") or "") for item in items)
+    return sorted(name for name, count in counts.items() if name and count > 1)
 
 
 def prefixed_xml_values(node: ET.Element, prefix: str) -> dict[str, str]:

@@ -1104,6 +1104,9 @@ def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
             "size": int(stream["size"]),
             "start_sector": int(stream["start_sector"]),
             "sha256": str(stream.get("sha256") or ""),
+            "sha256_scope": str(stream.get("sha256_scope") or ""),
+            "hashed_bytes": int(stream.get("hashed_bytes") or 0),
+            "parsed_bytes": int(stream.get("parsed_bytes") or 0),
         }
         for stream in ole_streams[:MAX_OLE_STREAMS]
     ]
@@ -2213,7 +2216,10 @@ def destlist_stream_summary(stream: dict[str, object], stream_data: bytes) -> di
         "source_stream_index": int(stream.get("index") or 0),
         "source_stream_size": int(stream.get("size") or len(stream_data)),
         "source_stream_start_sector": int(stream.get("start_sector") or 0),
-        "source_stream_sha256": sha256_bytes(stream_data),
+        "source_stream_sha256": str(stream.get("sha256") or ""),
+        "source_stream_sha256_scope": str(stream.get("sha256_scope") or ""),
+        "source_stream_hashed_bytes": int(stream.get("hashed_bytes") or 0),
+        "source_stream_parsed_bytes": len(stream_data),
     }
 
 
@@ -3233,6 +3239,13 @@ def parse_ole_compound_streams(data: bytes) -> list[dict[str, object]]:
                 stream_data = read_cfb_chain(data, fat, int(entry["start_sector"]), sector_size, min(size, MAX_OLE_STREAM_BYTES))[:size]
         else:
             stream_data = read_cfb_chain(data, fat, int(entry["start_sector"]), sector_size, min(size, MAX_OLE_STREAM_BYTES))[:size]
+        if len(stream_data) == size:
+            digest_hex, hashed_bytes = sha256_bytes(stream_data), size
+        else:
+            # Parsing keeps at most MAX_OLE_STREAM_BYTES; the stream hash covers
+            # every byte of the sector chain, not the parsed prefix.
+            digest_hex, hashed_bytes = hash_cfb_chain(data, fat, int(entry["start_sector"]), sector_size, size)
+        complete = hashed_bytes == size
         streams.append(
             {
                 "index": entry_index,
@@ -3241,10 +3254,39 @@ def parse_ole_compound_streams(data: bytes) -> list[dict[str, object]]:
                 "size": size,
                 "start_sector": int(entry["start_sector"]),
                 "data": stream_data,
-                "sha256": sha256_bytes(stream_data),
+                "parsed_bytes": len(stream_data),
+                "hashed_bytes": hashed_bytes,
+                # A short/broken chain leaves the full-stream hash unconfirmed;
+                # the readable bytes keep their own, explicitly scoped hash.
+                "sha256": digest_hex if complete else "",
+                "sha256_scope": "full-stream" if complete else "readable-prefix-only",
+                **({} if complete else {"readable_prefix_sha256": digest_hex}),
             }
         )
     return streams
+
+
+def hash_cfb_chain(data: bytes, fat: Sequence[int], start_sector: int, sector_size: int, size: int) -> tuple[str, int]:
+    """SHA-256 of a regular-sector stream's first ``size`` bytes and the byte count actually hashed."""
+    digest = hashlib.sha256()
+    hashed = 0
+    seen: set[int] = set()
+    sector_id = start_sector
+    while (
+        hashed < size
+        and sector_id not in (CFB_FREESECT, CFB_ENDOFCHAIN)
+        and sector_id < len(fat)
+        and sector_id not in seen
+    ):
+        seen.add(sector_id)
+        chunk = cfb_sector(data, sector_size, sector_id)
+        if not chunk:
+            break
+        chunk = chunk[: size - hashed]
+        digest.update(chunk)
+        hashed += len(chunk)
+        sector_id = fat[sector_id]
+    return digest.hexdigest(), hashed
 
 
 def build_cfb_fat(data: bytes, sector_size: int, fat_sector_ids: Sequence[int]) -> list[int]:

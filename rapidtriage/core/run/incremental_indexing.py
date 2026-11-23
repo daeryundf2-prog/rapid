@@ -27,16 +27,19 @@ from .constants import (
 from .performance import performance_commercial_uplift_evidence
 
 __all__ = [
+    "STAGE_REUSE_PROFILE_VERSION",
     "build_incremental_indexing_manifest",
     "build_incremental_indexing_trusted_diff",
     "build_incremental_indexing_validation_plan",
     "build_incremental_reuse_decision_manifest",
     "build_incremental_reuse_plan",
+    "build_run_evidence_identity",
     "build_run_input_fingerprint",
+    "build_stage_reuse_binding",
+    "fingerprint_reuse_blockers",
     "hash_incremental_file_content",
     "incremental_file_record_index",
     "incremental_file_records_head_hash",
-    "incremental_file_records_metadata_digest",
     "incremental_fingerprint_content_hashed",
     "incremental_fingerprint_diff_value",
     "incremental_fingerprints_equivalent",
@@ -46,7 +49,11 @@ __all__ = [
     "load_reusable_json",
     "refresh_incremental_fingerprint_manifest",
     "reusable_json_max_bytes",
+    "stage_reuse_binding_matches",
 ]
+
+RUN_EVIDENCE_IDENTITY_PROFILE_VERSION = "run-evidence-identity-v1"
+STAGE_REUSE_PROFILE_VERSION = "stage-reuse-binding-v1"
 
 
 def reusable_json_max_bytes() -> int:
@@ -75,17 +82,29 @@ def load_or_build_json(
     expected_command: str | None = None,
     required_keys: Sequence[str] = (),
     max_load_bytes: int | None = None,
+    reuse_binding: Mapping[str, str] | None = None,
 ) -> tuple[dict[str, object], bool]:
+    """Reuse ``path`` on ``resume`` when it is valid, else build it with ``producer``.
+
+    With ``reuse_binding`` (``build_stage_reuse_binding``) a stored payload is
+    reused only when it carries the same binding (same evidence, same
+    content-hashed input fingerprint, same output-affecting options), and a
+    freshly built payload is stamped with it (``stage_reuse``).
+    """
     if resume:
         payload = load_reusable_json(
             path,
             expected_command=expected_command,
             required_keys=required_keys,
             max_load_bytes=max_load_bytes,
+            reuse_binding=reuse_binding,
         )
         if payload is not None:
             return payload, True
-    return producer(), False
+    payload = producer()
+    if reuse_binding is not None:
+        payload["stage_reuse"] = dict(reuse_binding)
+    return payload, False
 
 
 def load_reusable_json(
@@ -94,7 +113,15 @@ def load_reusable_json(
     expected_command: str | None,
     required_keys: Sequence[str],
     max_load_bytes: int | None = None,
+    reuse_binding: Mapping[str, str] | None = None,
+    same_input: bool = True,
 ) -> dict[str, object] | None:
+    """Valid stage payload at ``path`` or ``None``.
+
+    ``reuse_binding`` must match the payload's ``stage_reuse`` stamp; with
+    ``same_input=False`` (evidence-delta merges) the input fingerprint may
+    differ but the evidence identity and options must still match.
+    """
     if not path.is_file():
         return None
     limit = reusable_json_max_bytes() if max_load_bytes is None else max_load_bytes
@@ -111,6 +138,8 @@ def load_reusable_json(
     if any(key not in payload for key in required_keys):
         return None
     if stage_payload_incomplete(payload):
+        return None
+    if reuse_binding is not None and not stage_reuse_binding_matches(payload, reuse_binding, same_input=same_input):
         return None
     return payload
 
@@ -132,29 +161,92 @@ def stage_payload_incomplete(payload: Mapping[str, object]) -> bool:
     return False
 
 
+def _canonical_digest(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+    ).hexdigest()
+
+
+def build_run_evidence_identity(source_path: str, *, input_kind: str, scan_root: Path) -> dict[str, object]:
+    """Which evidence a run read: the analyst's input path, its kind and the scanned root.
+
+    An image/archive input also records the container file's size and
+    mtime (its extracted tree lives under the output directory, so the scan
+    root alone would not tell two images apart).
+    """
+    source = Path(source_path).expanduser()
+    try:
+        resolved = source.resolve()
+    except OSError:
+        resolved = source.absolute()
+    identity: dict[str, object] = {
+        "profile_version": RUN_EVIDENCE_IDENTITY_PROFILE_VERSION,
+        "source_path": str(resolved),
+        "input_kind": input_kind,
+        "scan_root": str(scan_root),
+    }
+    try:
+        if resolved.is_file():
+            stat = resolved.stat()
+            identity["source_size_bytes"] = stat.st_size
+            identity["source_mtime_ns"] = int(stat.st_mtime_ns)
+    except OSError:
+        identity["source_stat_error"] = True
+    return identity
+
+
+def build_stage_reuse_binding(
+    *,
+    evidence_identity: Mapping[str, object],
+    input_fingerprint: str,
+    options: Mapping[str, object],
+) -> dict[str, str]:
+    """Cache key a stage payload is stamped with and must match to be reused."""
+    return {
+        "profile_version": STAGE_REUSE_PROFILE_VERSION,
+        "evidence_identity": _canonical_digest(dict(evidence_identity)),
+        "input_fingerprint": input_fingerprint,
+        "options": _canonical_digest(dict(options)),
+    }
+
+
+def stage_reuse_binding_matches(
+    payload: Mapping[str, object],
+    binding: Mapping[str, str],
+    *,
+    same_input: bool = True,
+) -> bool:
+    stored = payload.get("stage_reuse")
+    if not isinstance(stored, Mapping):
+        return False
+    keys = ["profile_version", "evidence_identity", "options"]
+    if same_input:
+        keys.append("input_fingerprint")
+    return all(str(stored.get(key) or "") == str(binding.get(key) or "") and binding.get(key) for key in keys)
+
+
 def build_run_input_fingerprint(
     root: Path,
     *,
+    evidence_identity: Mapping[str, object] | None = None,
     max_files: int = 5000,
     max_content_hash_bytes: int = DEFAULT_INCREMENTAL_HASH_MAX_BYTES,
-    hash_contents: bool = True,
 ) -> dict[str, object]:
     """Build the bounded input fingerprint used for ``--resume`` decisions.
 
-    The payload shape is identical whether or not content hashing runs:
-    every file record carries ``relative_path``/``size_bytes``/``mtime_ns``
-    plus a ``sha256``/``hash_status`` pair. With ``hash_contents=False`` no
-    file bytes are read (``hash_status`` is ``"disabled"``) and the
-    ``fingerprint`` digest is path+size+mtime only; with
-    ``hash_contents=True`` each file up to ``max_content_hash_bytes`` is
-    SHA-256 hashed into the digest as before. The orchestrator passes
-    ``hash_contents=resume`` so non-resume runs skip hashing every file,
-    while ``--resume`` runs still build a content-hashed baseline. Both
-    digests remain deterministic for the same input state and hash policy;
-    ``incremental_fingerprints_equivalent`` compares across policies.
+    Every file record carries ``relative_path``/``size_bytes``/``mtime_ns``
+    plus a ``sha256``/``hash_status`` pair; each file up to
+    ``max_content_hash_bytes`` is SHA-256 hashed into the ``fingerprint``
+    digest together with ``evidence_identity``. A later ``--resume`` reuses
+    outputs only when this fingerprint proves the same evidence bytes
+    (``fingerprint_reuse_blockers``): files above the hash cap, unreadable
+    files and a truncated scan leave the source identity unproven.
     """
-    effective_max_content_hash_bytes = max_content_hash_bytes if hash_contents else 0
+    effective_max_content_hash_bytes = max_content_hash_bytes
     hasher = hashlib.sha256()
+    identity = dict(evidence_identity or {})
+    if identity:
+        hasher.update(_canonical_digest(identity).encode("ascii"))
     scanned_files = 0
     total_size = 0
     latest_mtime = 0.0
@@ -228,7 +320,7 @@ def build_run_input_fingerprint(
         },
         "content_hash_policy": {
             "profile_version": "incremental-content-hash-policy-v1",
-            "hash_contents": bool(hash_contents),
+            "hash_contents": True,
             "max_content_hash_bytes": effective_max_content_hash_bytes,
             "hash_algorithm": "sha256",
             "hashed_files": content_hashed_count,
@@ -238,6 +330,7 @@ def build_run_input_fingerprint(
             "commercial_claim_allowed": False,
         },
         "files": file_records,
+        "evidence_identity": identity,
         "incremental_indexing_assessment": incremental_indexing_assessment(
             scanned_files=scanned_files,
             max_files=max_files,
@@ -651,52 +744,52 @@ def incremental_fingerprint_content_hashed(payload: Mapping[str, object]) -> boo
     return not policy or int(policy.get("max_content_hash_bytes") or 0) > 0
 
 
-def incremental_file_records_metadata_digest(records: object) -> str:
-    """Recompute the path+size+mtime digest over stored file records.
+def fingerprint_reuse_blockers(
+    previous: Mapping[str, object],
+    current: Mapping[str, object],
+) -> list[str]:
+    """Why ``previous`` cannot prove it read the same evidence bytes as ``current``.
 
-    The stored ``fingerprint`` digest mixes per-file content hashes in when
-    they exist, so a metadata-only fingerprint (``hash_contents=False``)
-    can never equal a content-hashed one even for identical input. This
-    digest recomputes the metadata portion that both record sets carry.
-    A same-size/same-mtime content change is only detectable when both
-    fingerprints were content-hashed.
+    Reuse needs the same evidence identity (input path, kind, scan root,
+    image file) and a content hash for every fingerprinted file on both
+    sides; a metadata-only fingerprint, a truncated scan or a file above the
+    hash cap cannot prove identity, so the outputs are collected again.
     """
-    hasher = hashlib.sha256()
-    if isinstance(records, list):
-        for record in records:
-            if not isinstance(record, Mapping):
-                continue
-            hasher.update(
-                str(record.get("relative_path") or "").lower().encode("utf-8", errors="replace")
+    blockers: list[str] = []
+    previous_identity = previous.get("evidence_identity")
+    current_identity = current.get("evidence_identity")
+    if not isinstance(previous_identity, Mapping) or not previous_identity:
+        blockers.append("previous fingerprint records no evidence identity")
+    elif not isinstance(current_identity, Mapping) or dict(previous_identity) != dict(current_identity):
+        blockers.append("evidence identity changed (input path, input kind, scan root or image file)")
+    for label, payload in (("previous", previous), ("current", current)):
+        if not incremental_fingerprint_content_hashed(payload):
+            blockers.append(f"{label} fingerprint has no content hashes")
+            continue
+        summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
+        if summary.get("truncated"):
+            blockers.append(f"{label} fingerprint scan was truncated")
+        records = payload.get("files") if isinstance(payload.get("files"), list) else []
+        unverified = sum(
+            1 for record in records if isinstance(record, Mapping) and not str(record.get("sha256") or "")
+        )
+        if unverified:
+            blockers.append(
+                f"{label} fingerprint has {unverified} file(s) without a content hash "
+                "(above the hash cap or unreadable)"
             )
-            hasher.update(str(int(record.get("size_bytes") or 0)).encode("ascii"))
-            hasher.update(str(int(record.get("mtime_ns") or 0)).encode("ascii"))
-    return hasher.hexdigest()
+    return blockers
 
 
 def incremental_fingerprints_equivalent(
     previous: Mapping[str, object],
     current: Mapping[str, object],
 ) -> bool:
-    """Return True when two run input fingerprints describe the same input.
-
-    Stored digests are only comparable when both runs used the same
-    content-hash policy. When the policies differ (for example a
-    metadata-only baseline fingerprint compared with a ``--resume`` run's
-    content-hashed one) the comparison falls back to the metadata digest
-    so resume still reuses outputs instead of reporting a spurious change.
-    """
-    previous_digest = str(previous.get("fingerprint") or "")
-    current_digest = str(current.get("fingerprint") or "")
-    if previous_digest == current_digest:
-        return True
-    if incremental_fingerprint_content_hashed(previous) == incremental_fingerprint_content_hashed(
-        current
-    ):
+    """True only when both fingerprints prove the same evidence and the same source bytes."""
+    if fingerprint_reuse_blockers(previous, current):
         return False
-    return incremental_file_records_metadata_digest(
-        previous.get("files")
-    ) == incremental_file_records_metadata_digest(current.get("files"))
+    previous_digest = str(previous.get("fingerprint") or "")
+    return bool(previous_digest) and previous_digest == str(current.get("fingerprint") or "")
 
 
 def build_incremental_reuse_plan(
@@ -707,6 +800,7 @@ def build_incremental_reuse_plan(
     resume_effective: bool,
     resume_disabled_reason: str,
 ) -> dict[str, object]:
+    identity_blockers = fingerprint_reuse_blockers(previous_fingerprint, current_fingerprint)
     previous_files = incremental_file_record_index(previous_fingerprint)
     current_files = incremental_file_record_index(current_fingerprint)
     added = sorted(path for path in current_files if path not in previous_files)
@@ -755,11 +849,18 @@ def build_incremental_reuse_plan(
         "changed": changed[:200],
         "metadata_only": metadata_only[:200],
         "unchanged_sample": unchanged[:50],
-        "reindex_recommendation": "rebuild-affected-stages" if added or removed or changed else "safe-to-reuse-stage-outputs",
+        "identity_blockers": identity_blockers,
+        "reindex_recommendation": (
+            "rebuild-all-stages-identity-unproven"
+            if identity_blockers
+            else "rebuild-affected-stages"
+            if added or removed or changed
+            else "safe-to-reuse-stage-outputs"
+        ),
         "ready_for_commercial_claim": False,
         "blockers": [
             "stage outputs are still reused/rebuilt as whole JSON stages, not rewritten at row-level deltas",
-            "large files above content_hash_policy.max_content_hash_bytes use metadata-only comparison",
+            "files above content_hash_policy.max_content_hash_bytes cannot prove identity and disable whole-stage reuse",
             INCREMENTAL_TRUSTED_DIFF_BLOCKER_68,
         ],
     }
@@ -800,7 +901,7 @@ def incremental_indexing_assessment(
         "report_grade_blocking_slot_count": blocking_slot_count,
         "ready_for_court_report": False,
         "blockers": [
-            "large-files-above-content-hash-policy-still-use-metadata-only-delta",
+            "large-files-above-content-hash-policy-are-recollected-not-reused",
             "changed-source-disables-stage-reuse-instead-of-row-level-incremental-reindex",
             "case-db-deduplication-and-reindex-policy-require-large-corpus-validation",
             INCREMENTAL_TRUSTED_DIFF_BLOCKER_68,

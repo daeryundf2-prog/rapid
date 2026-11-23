@@ -22,13 +22,71 @@ earliest_event_at: (string | null)
 latest_event_at: (string | null)
 matched_rule_count?: number
 ioc_hit_count?: number
+timestamp_kind_counts?: {
+[k: string]: unknown | undefined
+}
+timezone?: {
+[k: string]: unknown | undefined
+}
+file_time_origin?: (string | null)
+time_policy?: {
+[k: string]: unknown | undefined
+}
+out_of_range_excluded_count?: number
+out_of_range_reason_counts?: {
+[k: string]: unknown | undefined
+}
+out_of_range_by_event_type?: {
+[k: string]: unknown | undefined
+}
+out_of_range_samples?: unknown[]
+unparseable_timestamp_count?: number
+unparseable_by_field?: {
+[k: string]: unknown | undefined
+}
+duplicate_events_removed?: number
+duplicate_events_by_type?: {
+[k: string]: unknown | undefined
+}
+eventlog_detections_merged?: number
+unmapped_artifact_type_counts?: {
+[k: string]: unknown | undefined
+}
+excluded_artifact_type_counts?: {
+[k: string]: unknown | undefined
+}
+acquisition_copy_time_candidates_not_emitted?: number
+legacy_file_time_events?: number
+valid_range?: {
+[k: string]: unknown | undefined
+}
+label_variants_merged?: (number | null)
+label_variants_merged_by_type?: ({
+[k: string]: unknown | undefined
+} | null)
+cross_record_merges?: (number | null)
+key_level_events_collapsed?: (number | null)
+key_level_events_collapsed_by_type?: ({
+[k: string]: unknown | undefined
+} | null)
+aggregate_rows_not_emitted?: ({
+[k: string]: unknown | undefined
+} | null)
+build_stamp_fields_not_emitted?: ({
+[k: string]: unknown | undefined
+} | null)
+build_stamp_note?: (string | null)
+offset_timezone_relabelled_utc?: (number | null)
+input_row_truncation?: ({
+[k: string]: unknown | undefined
+} | null)
 }
 events: {
 timestamp: string
 source: ("files" | "docs" | "artifacts")
 event_type: string
 path: string
-input_file: string
+input_file?: string
 summary: string
 details: {
 [k: string]: unknown | undefined
@@ -40,6 +98,10 @@ type: string
 value: string
 count?: number
 }[]
+timestamp_kind?: (string | null)
+timezone?: (string | null)
+record_key?: (string | null)
+labels?: (unknown[] | null)
 }[]
 rule_set?: {
 path: string
@@ -53,4 +115,10 @@ type: string
 value: string
 count?: number
 }[]
+/**
+ * Run stage reuse binding a --resume run must match: evidence identity digest, input fingerprint, stage options digest
+ */
+stage_reuse?: {
+[k: string]: string | undefined
+}
 }

@@ -292,7 +292,12 @@ class RunJob:
         if not self.request.root:
             return None
         try:
-            return default_run_output_dir(Path(self.request.root).expanduser().resolve(), self.request.mode, run_id=self.run_id)
+            return default_run_output_dir(
+                Path(self.request.root).expanduser().resolve(),
+                self.request.mode,
+                run_id=self.run_id,
+                read_only=self.request.read_only,
+            )
         except OSError:
             return None
 
@@ -2181,7 +2186,7 @@ def execute_run_request(
     output_dir = (
         Path(request.output_dir).expanduser().resolve()
         if request.output_dir
-        else default_run_output_dir(root, request.mode, run_id=run_id)
+        else default_run_output_dir(root, request.mode, run_id=run_id, read_only=request.read_only)
     )
     rule_set = None
     if request.rules:
@@ -2230,12 +2235,20 @@ def persist_step_message(summary: Mapping[str, object]) -> str:
     return "Run summary persisted; case DB index skipped, search uses scan"
 
 
-def default_run_output_dir(root: Path, mode: str, *, run_id: str | None = None) -> Path:
+def default_run_output_dir(root: Path, mode: str, *, run_id: str | None = None, read_only: bool = False) -> Path:
+    """Default run output folder.
+
+    An image file gets a sibling folder; a source folder gets a nested one,
+    except for a read-only run, whose output must not touch the source tree:
+    it goes next to the folder (``<folder>-rapidtriage-run-<mode>``).
+    """
     suffix = f"rapidtriage-run-{mode.lower()}"
     if run_id:
         suffix = f"{suffix}-{run_id}"
     if root.is_file():
         return root.parent / f"{root.stem}-{suffix}"
+    if read_only:
+        return root.parent / f"{root.name}-{suffix}"
     return root / suffix
 
 

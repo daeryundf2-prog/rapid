@@ -5,7 +5,7 @@ command: "indicators"
 generated_at: string
 run_summary: string
 options: {
-max_indicators: number
+max_indicators: (number | null)
 max_sources_per_indicator: number
 rule_set: string
 ti_feeds: string[]
@@ -29,6 +29,34 @@ enriched_indicator_count: number
 ti_feed_count: number
 commercial_gap_ids?: string[]
 commercial_grade_ready?: boolean
+total_before_cap?: number
+truncated?: boolean
+max_indicators?: (number | null)
+type_counts_before_cap?: {
+[k: string]: unknown | undefined
+}
+sources_truncated_indicator_count?: number
+max_sources_per_indicator?: number
+severity_counts?: {
+[k: string]: unknown | undefined
+}
+rejected_token_counts?: {
+[k: string]: unknown | undefined
+}
+scanned_outputs?: unknown[]
+field_policy?: (string | null)
+rule_count?: number
+rules_loaded?: boolean
+display_label?: (string | null)
+rule_status_message?: (string | null)
+yara?: {
+[k: string]: unknown | undefined
+}
+ioc_scanner_row_count_before_cap?: number
+ioc_scanner_truncated?: boolean
+cap_policy?: ({
+[k: string]: unknown | undefined
+} | null)
 }
 ti_feed_sources?: {
 path: string
@@ -53,6 +81,7 @@ ioc_scanner_hits?: {
 rule_id: string
 type: string
 value: string
+value_fold?: string
 count: number
 classification: string
 risk_flags: string[]
@@ -96,6 +125,7 @@ commercial_uplift_evidence?: {
 indicators: {
 type: ("url" | "domain" | "ip" | "md5" | "sha1" | "sha256")
 value: string
+value_fold?: string
 count: number
 classification: string
 risk_flags: string[]
@@ -113,6 +143,7 @@ indicator_row_hash?: string
 ti_enrichment?: {
 type?: string
 value?: string
+value_fold?: string
 severity?: string
 classification?: string
 source?: string
@@ -125,5 +156,13 @@ note?: string
 commercial_gap_ids?: string[]
 validation_status?: string
 }
+severity?: (string | null)
+rule_provenance?: unknown[]
 }[]
+/**
+ * Run stage reuse binding a --resume run must match: evidence identity digest, input fingerprint, stage options digest
+ */
+stage_reuse?: {
+[k: string]: string | undefined
+}
 }

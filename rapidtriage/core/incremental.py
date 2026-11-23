@@ -1,15 +1,16 @@
 """Evidence-level incremental ingest for run checkpoint/resume (R-7c).
 
 The stage-level checkpoint contract reuses a whole JSON stage output only when
-the persisted input fingerprint is unchanged. This module adds a bounded
-per-file delta layer on top of that contract: when the fingerprint changes and
-``--resume`` is requested, files that are unchanged by path+size+mtime (or by
-their bounded content hash) keep their prior artifact rows, and only
-added/changed files are recollected inside a materialized delta-scope
-directory. Removed files drop their prior rows.
+the persisted input fingerprint proves the same evidence and source bytes. This
+module adds a bounded per-file delta layer on top of that contract: when the
+fingerprint changes and ``--resume`` is requested, files whose content hash is
+unchanged keep their prior artifact rows, and added/changed files (and files
+whose identity cannot be proven by a content hash) are recollected inside a
+materialized delta-scope directory. Removed files drop their prior rows.
 
 Run profiles are unchanged; the delta layer only engages when a previous
-fingerprint with per-file records exists for the same resolved root.
+fingerprint with per-file records exists for the same evidence identity and
+resolved root.
 """
 from __future__ import annotations
 
@@ -90,7 +91,14 @@ def build_evidence_delta(
     previous_fingerprint: Mapping[str, object],
     current_fingerprint: Mapping[str, object],
 ) -> dict[str, object]:
-    """Diff two run input fingerprints into per-file delta sets."""
+    """Diff two run input fingerprints into per-file delta sets.
+
+    Prior rows are only reusable for the same evidence (``evidence_identity``)
+    and for files whose content hash matches on both sides; a file without a
+    content hash on either side (above the hash cap, unreadable, or a
+    metadata-only fingerprint) cannot prove it is unchanged and is collected
+    again (listed in ``metadata_only``).
+    """
     blockers: list[str] = []
     previous_files = fingerprint_file_index(previous_fingerprint)
     current_files = fingerprint_file_index(current_fingerprint)
@@ -106,6 +114,11 @@ def build_evidence_delta(
         blockers.append("fingerprinted input root changed between runs")
     if previous_truncated or current_truncated:
         blockers.append("fingerprint scan truncated; per-file delta is unsafe")
+    previous_identity = previous_fingerprint.get("evidence_identity")
+    if not isinstance(previous_identity, Mapping) or not previous_identity:
+        blockers.append("previous fingerprint records no evidence identity")
+    elif dict(previous_identity) != dict(current_fingerprint.get("evidence_identity") or {}):
+        blockers.append("evidence identity changed between runs")
 
     added = sorted(path for path in current_files if path not in previous_files)
     removed = sorted(path for path in previous_files if path not in current_files)
@@ -123,16 +136,9 @@ def build_evidence_delta(
             else:
                 changed.append(path)
             continue
-        metadata_changed = (
-            int(previous.get("size_bytes") or 0) != int(current.get("size_bytes") or 0)
-            or int(previous.get("mtime_ns") or 0) != int(current.get("mtime_ns") or 0)
-        )
-        if metadata_changed:
-            changed.append(path)
-            metadata_only.append(path)
-        else:
-            unchanged.append(path)
-            metadata_only.append(path)
+        # No content hash on one side: identity unproven, collect the file again.
+        changed.append(path)
+        metadata_only.append(path)
 
     scope_paths = sorted(set(added) | set(changed))
     if len(scope_paths) > EVIDENCE_DELTA_MAX_SCOPE_FILES:

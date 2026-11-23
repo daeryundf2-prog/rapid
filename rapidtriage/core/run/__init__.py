@@ -22,7 +22,7 @@ from concurrent.futures import (
     as_completed,
     wait,
 )
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from ...artifacts import all_providers, clear_collect_cache
@@ -86,6 +86,7 @@ from ..files import (
     MOBILE_INNER_INDEX_NAME,
     disable_evidence_path_cache,
     enable_evidence_path_cache,
+    path_is_within,
     register_run_output_dir,
     register_tool_output_dir,
     run_files_scan,
@@ -347,7 +348,6 @@ __all__ = [
     "highest_warning_level",
     "incremental_file_record_index",
     "incremental_file_records_head_hash",
-    "incremental_file_records_metadata_digest",
     "incremental_fingerprint_content_hashed",
     "incremental_fingerprint_diff_value",
     "incremental_fingerprints_equivalent",
@@ -496,6 +496,12 @@ def run_triage_mode(
         actor=actor,
     )
     output_dir = output_dir.expanduser().resolve()
+    source_path = Path(root.source_path if isinstance(root, InputRoot) else root).expanduser().resolve()
+    if read_only and source_path.is_dir() and path_is_within(output_dir, source_path):
+        raise RunModeError(
+            f"read-only run: output directory {output_dir} is inside the evidence source {source_path}; "
+            "choose an --output-dir outside the source folder"
+        )
     output_dir.mkdir(parents=True, exist_ok=True)
     # A resumed run reuses stage outputs (manifest/docs/files/timeline/...)
     # only when the previous run's plan finished ``complete``: after a
@@ -766,11 +772,16 @@ def _run_triage_stages(
     if isinstance(image_result, VirtualDiskExtractionResult):
         write_result(image_result.to_dict(), virtual_disk_metadata_path)
 
-    # Per-file content hashing is only needed for --resume reuse decisions;
-    # non-resume runs fingerprint on path+size+mtime metadata only.
-    if resume:
-        progress.task_set_message("fingerprint", "이어서 실행 지문 계산 중 (파일 내용 해시, 파일당 16 MB 상한)")
-    current_fingerprint = build_run_input_fingerprint(scan_root, hash_contents=resume)
+    # Every run hashes file contents (bounded per file) so that a later
+    # --resume can prove it reads the same evidence bytes; the fingerprint is
+    # also bound to the evidence identity (input path, kind, scan root).
+    progress.task_set_message("fingerprint", "입력 지문 계산 중 (파일 내용 해시, 파일당 16 MB 상한)")
+    evidence_identity = build_run_evidence_identity(
+        input_root.source_path,
+        input_kind=input_root.kind,
+        scan_root=scan_root,
+    )
+    current_fingerprint = build_run_input_fingerprint(scan_root, evidence_identity=evidence_identity)
     finish_stage("fingerprint")
     previous_fingerprint = (
         load_reusable_json(
@@ -780,6 +791,9 @@ def _run_triage_stages(
         )
         if fingerprint_path.is_file()
         else None
+    )
+    identity_blockers = (
+        fingerprint_reuse_blockers(previous_fingerprint, current_fingerprint) if previous_fingerprint is not None else []
     )
     fingerprint_changed = previous_fingerprint is not None and not incremental_fingerprints_equivalent(
         previous_fingerprint,
@@ -794,7 +808,11 @@ def _run_triage_stages(
         )
     if resume and fingerprint_changed:
         effective_resume = False
-        resume_disabled_reason = "input fingerprint changed; rebuilding stage outputs"
+        resume_disabled_reason = (
+            f"evidence identity not proven ({'; '.join(identity_blockers)}); rebuilding stage outputs"
+            if identity_blockers
+            else "input fingerprint changed; rebuilding stage outputs"
+        )
         current_fingerprint["core_accuracy_gates"] = incremental_indexing_core_accuracy_gates(
             scanned_files=int(current_fingerprint.get("summary", {}).get("scanned_file_count", 0))
             if isinstance(current_fingerprint.get("summary"), Mapping)
@@ -872,6 +890,31 @@ def _run_triage_stages(
     reused_outputs: set[str] = set()
     delta_applied_outputs: set[str] = set()
     checkpoint_records: list[dict[str, object]] = []
+    # Per-stage cache keys: a stage output is reused only with the same
+    # evidence identity, the same content-hashed input fingerprint and the
+    # same output-affecting options (e.g. --max-file-count).
+    stage_bindings = run_stage_reuse_bindings(
+        evidence_identity=evidence_identity,
+        input_fingerprint=str(current_fingerprint.get("fingerprint") or ""),
+        mode=normalized_mode,
+        input_kind=input_root.kind,
+        artifact_kinds=profile.artifacts_kinds,
+        max_file_count=run_scan_limit,
+        rule_set=rule_set,
+        collector_options=collector_options,
+        known_good={
+            "feeds": [str(Path(str(feed)).expanduser().resolve()) for feed in known_good_hash_feeds],
+            "hide": hide_known_good,
+            "max_hash_bytes": known_good_max_hash_bytes,
+        },
+        extract={
+            "enabled": extract_enabled,
+            "dry_run": dry_run,
+            "read_only": read_only,
+            "max_extract_size_bytes": max_extract_size_bytes,
+            "overwrite": overwrite,
+        },
+    )
 
     # Artifact providers run first, in parallel on the scheduler's worker
     # pool, and each provider's output file is written the moment it
@@ -894,6 +937,7 @@ def _run_triage_stages(
         progress=progress,
         memory_check=record_memory_cap,
         collector_options=collector_options,
+        reuse_bindings=stage_bindings,
     )
     write_result(artifact_scheduler_manifest, scheduler_path)
     for kind in profile.artifacts_kinds:
@@ -941,6 +985,7 @@ def _run_triage_stages(
         manifest_path,
         resume=stage_resume,
         required_keys=("providers",),
+        reuse_binding=stage_bindings["manifest"],
         producer=lambda: build_manifest(
             input_root,
             profile.keywords,
@@ -1011,6 +1056,7 @@ def _run_triage_stages(
             resume=stage_resume and docs_index_path.is_file(),
             expected_command="docs",
             required_keys=("summary", "results"),
+            reuse_binding=stage_bindings["docs"],
             producer=produce_docs_payload,
         )
     if reused:
@@ -1044,6 +1090,8 @@ def _run_triage_stages(
             files_path,
             expected_command="files",
             required_keys=("summary", "candidates"),
+            reuse_binding=stage_bindings["files"],
+            same_input=False,
         )
         if previous_files_payload is not None:
             delta_files_payload = (
@@ -1062,6 +1110,7 @@ def _run_triage_stages(
                 delta_files_payload,
                 delta=evidence_delta_context,
             )
+            files_payload["stage_reuse"] = dict(stage_bindings["files"])
             delta_applied_outputs.add("files")
     if files_payload is None:
         files_payload, reused = load_or_build_json(
@@ -1069,6 +1118,7 @@ def _run_triage_stages(
             resume=files_scan_resume,
             expected_command="files",
             required_keys=("summary", "candidates"),
+            reuse_binding=stage_bindings["files"],
             producer=lambda: run_files_scan(
                 scan_input_root,
                 categories=profile.file_scan_categories,
@@ -1131,6 +1181,7 @@ def _run_triage_stages(
             resume=stage_resume,
             expected_command="extract",
             required_keys=("summary", "entries", "skipped"),
+            reuse_binding=stage_bindings["docs-extract"],
             producer=lambda: run_extract(
                 docs_path,
                 docs_extract_dir,
@@ -1151,6 +1202,7 @@ def _run_triage_stages(
             resume=stage_resume,
             expected_command="extract",
             required_keys=("summary", "entries", "skipped"),
+            reuse_binding=stage_bindings["files-extract"],
             producer=lambda: run_extract(
                 files_path,
                 files_extract_dir,
@@ -1199,6 +1251,7 @@ def _run_triage_stages(
         resume=stage_resume,
         expected_command="timeline",
         required_keys=("summary", "events"),
+        reuse_binding=stage_bindings["timeline"],
         producer=lambda: run_timeline(
             root=input_root.root_path,
             input_kind=input_root.kind,
@@ -1255,6 +1308,7 @@ def _run_triage_stages(
         resume=stage_resume,
         expected_command="indicators",
         required_keys=("summary", "indicators"),
+        reuse_binding=stage_bindings["indicators"],
         producer=lambda: build_indicator_summary(
             {"outputs": {key: str(path) for key, path in provisional_outputs.items()}},
             rule_set=rule_set,
@@ -1746,12 +1800,85 @@ def artifact_records_path(artifact_path: Path) -> Path:
     return artifact_path.with_suffix(".jsonl")
 
 
-def load_reusable_artifact_payload(artifact_path: Path) -> dict[str, object] | None:
-    """Reusable per-kind payload, or ``None`` when its JSONL rows are missing."""
+def run_stage_reuse_bindings(
+    *,
+    evidence_identity: Mapping[str, object],
+    input_fingerprint: str,
+    mode: str,
+    input_kind: str,
+    artifact_kinds: Sequence[str],
+    max_file_count: int,
+    rule_set: RuleSet | None,
+    collector_options: Mapping[str, Mapping[str, object]] | None,
+    known_good: Mapping[str, object],
+    extract: Mapping[str, object],
+) -> dict[str, dict[str, str]]:
+    """Per-stage reuse bindings (cache keys) of one run.
+
+    Each stage's options are the run settings that change that stage's
+    output; stages built from other stages' outputs (manifest, timeline,
+    indicators) take the options of every input stage.
+    """
+    rules = (
+        hashlib.sha256(
+            json.dumps(asdict(rule_set), sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+        ).hexdigest()
+        if rule_set is not None
+        else None
+    )
+    options_by_kind = {str(kind): dict(value) for kind, value in (collector_options or {}).items()}
+    common = {"mode": mode, "input_kind": input_kind, "rule_set": rules}
+    docs = {**common, "max_file_count": max_file_count}
+    files = {**docs, "known_good": dict(known_good)}
+    stage_options: dict[str, Mapping[str, object]] = {
+        f"artifacts-{kind}": {
+            "kind": kind,
+            "input_kind": input_kind,
+            "rule_set": rules,
+            "collector_options": options_by_kind.get(kind, {}),
+        }
+        for kind in artifact_kinds
+    }
+    manifest = {**common, "artifact_kinds": list(artifact_kinds), "collector_options": options_by_kind}
+    downstream = {**files, "manifest": manifest}
+    stage_options.update(
+        {
+            "manifest": manifest,
+            "docs": docs,
+            "files": files,
+            "docs-extract": {**docs, "extract": dict(extract)},
+            "files-extract": {**files, "extract": dict(extract)},
+            "timeline": downstream,
+            "indicators": downstream,
+        }
+    )
+    return {
+        stage: build_stage_reuse_binding(
+            evidence_identity=evidence_identity,
+            input_fingerprint=input_fingerprint,
+            options=options,
+        )
+        for stage, options in stage_options.items()
+    }
+
+
+def load_reusable_artifact_payload(
+    artifact_path: Path,
+    *,
+    reuse_binding: Mapping[str, str] | None = None,
+) -> dict[str, object] | None:
+    """Reusable per-kind payload, or ``None`` when its JSONL rows are missing.
+
+    With ``reuse_binding`` the payload must come from the same evidence and
+    options; its input fingerprint may differ (evidence-delta merge), so a
+    whole-output reuse also checks ``stage_reuse_binding_matches``.
+    """
     payload = load_reusable_json(
         artifact_path,
         expected_command="artifacts",
         required_keys=("summary", "artifacts"),
+        reuse_binding=reuse_binding,
+        same_input=False,
     )
     if payload is None:
         return None
@@ -1777,6 +1904,7 @@ def collect_artifact_stages(
     progress: RunProgress | None = None,
     memory_check: Callable[[str], None] | None = None,
     collector_options: Mapping[str, Mapping[str, object]] | None = None,
+    reuse_bindings: Mapping[str, Mapping[str, str]] | None = None,
 ) -> tuple[dict[str, tuple[dict[str, object], Path, bool, bool]], dict[str, object]]:
     """Collect artifact kinds on the bounded worker pool.
 
@@ -1788,7 +1916,9 @@ def collect_artifact_stages(
     payloads are already on disk and are not rewritten. ``progress``
     (optional) receives queued/running/terminal state per kind;
     ``memory_check`` runs after every provider and fails the run fast when
-    it raises (memory cap).
+    it raises (memory cap). With ``reuse_bindings`` (``run_stage_reuse_bindings``)
+    a stored output is reused only for the same evidence, input fingerprint
+    and options, and every new output is stamped with its binding.
     """
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     results: dict[str, tuple[dict[str, object], Path, bool, bool]] = {}
@@ -1803,10 +1933,25 @@ def collect_artifact_stages(
     mobile_options = dict(options_by_kind.get("mobile-export") or {})
     mobile_options.setdefault("inner_dir", artifacts_dir.parent / MOBILE_INNER_DIR_NAME)
     options_by_kind["mobile-export"] = mobile_options
+
+    def binding_for(kind: str) -> Mapping[str, str] | None:
+        return reuse_bindings.get(f"artifacts-{kind}") if reuse_bindings is not None else None
+
+    def stamp(kind: str, payload: dict[str, object]) -> None:
+        binding = binding_for(kind)
+        if binding is not None:
+            payload["stage_reuse"] = dict(binding)
+
     for kind in kinds:
         artifact_path = artifacts_dir / f"rapidtriage-artifacts-{kind}.json"
-        reusable = load_reusable_artifact_payload(artifact_path) if (resume or delta is not None) else None
-        if reusable is not None and resume and (progress is None or progress.task_should_run(kind)):
+        binding = binding_for(kind)
+        reusable = (
+            load_reusable_artifact_payload(artifact_path, reuse_binding=binding)
+            if (resume or delta is not None)
+            else None
+        )
+        same_input = reusable is not None and (binding is None or stage_reuse_binding_matches(reusable, binding))
+        if same_input and resume and (progress is None or progress.task_should_run(kind)):
             results[kind] = (reusable, artifact_path, True, False)
             if progress is not None:
                 progress.provider_reused(
@@ -1855,6 +2000,7 @@ def collect_artifact_stages(
         )
         merged = finalize_artifact_payload(merged, records_path=artifact_records_path(artifact_path))
         results[kind] = (merged, artifact_path, False, True)
+        stamp(kind, merged)
         write_result(merged, artifact_path)
         if progress is not None:
             progress.provider_finished(
@@ -1939,6 +2085,7 @@ def collect_artifact_stages(
         # Persist each provider the moment it finishes (I4); the run does not
         # rewrite these files later. A cancelled provider's output holds the
         # rows written before the cancel (``cancelled-partial``).
+        stamp(kind, payload)
         write_result(payload, artifact_path)
         cancelled = artifact_payload_cancelled(payload)
         if progress is not None:

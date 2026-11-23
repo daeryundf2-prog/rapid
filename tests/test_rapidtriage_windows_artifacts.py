@@ -2060,7 +2060,19 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             artifacts = payload["artifacts"]
             event_rows = [item for item in artifacts if item["artifact_type"] == "eventlog-event"]
             detection_rows = [item for item in artifacts if item["artifact_type"] == "eventlog-detection"]
-            inventory_rows = [item for item in artifacts if item["artifact_type"] == "eventlog-file"]
+            # Exported XML/JSON/CSV inputs also get eventlog-file rows (export inventory); this checks the EVTX one.
+            inventory_rows = [
+                item
+                for item in artifacts
+                if item["artifact_type"] == "eventlog-file" and item["details"]["source_format"] == "evtx"
+            ]
+            export_file_rows = [
+                item
+                for item in artifacts
+                if item["artifact_type"] == "eventlog-file" and item["details"]["source_format"] != "evtx"
+            ]
+            self.assertTrue(export_file_rows)
+            self.assertTrue(all(row["details"]["source_hashes"].get("sha256") for row in export_file_rows))
             summary_rows = [item for item in artifacts if item["artifact_type"] == "eventlog-summary"]
 
             self.assertGreaterEqual(len(event_rows), 3)

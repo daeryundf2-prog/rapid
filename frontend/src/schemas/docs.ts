@@ -13,6 +13,23 @@ matched_rule_count?: number
 ioc_hit_count?: number
 extraction_error_count?: number
 skipped_document_count?: number
+text_status_counts?: {
+[k: string]: unknown | undefined
+}
+extraction_method_counts?: {
+[k: string]: unknown | undefined
+}
+indexed_with_text_count?: number
+encrypted_count?: number
+zero_text_count?: number
+zero_text_reason_counts?: {
+[k: string]: unknown | undefined
+}
+ocr_available?: boolean
+listing_contract?: (string | null)
+size_caps?: ({
+[k: string]: unknown | undefined
+} | null)
 }
 index?: {
 command: "docs-index"
@@ -55,6 +72,14 @@ path: string
 kind: string
 size: number
 modified_at: string
+text_status?: (string | null)
+extraction_method?: (string | null)
+text_length?: number
+encrypted?: boolean
+text_reason?: (string | null)
+matched?: boolean
+matched_keywords?: unknown[]
+modified_at_origin?: (string | null)
 }[]
 results: {
 path: string
@@ -92,4 +117,10 @@ type: string
 value: string
 count?: number
 }[]
+/**
+ * Run stage reuse binding a --resume run must match: evidence identity digest, input fingerprint, stage options digest
+ */
+stage_reuse?: {
+[k: string]: string | undefined
+}
 }

@@ -18,6 +18,7 @@ from ..core.doctor import format_doctor_text, run_doctor
 from ..core.enterprise import build_enterprise_policy
 from ..core.files import MOBILE_INNER_DIR_NAME, path_is_within
 from ..core.input_root import resolve_input_root
+from ..core.jobs import default_run_output_dir
 from ..core.keyword_packs import keyword_pack_library_assessment, list_keyword_packs
 from ..core.plugins import (
     PluginError,
@@ -163,7 +164,7 @@ def handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_s
         output_dir = (
             Path(args.output_dir).expanduser().resolve()
             if args.output_dir
-            else root / f"rapidtriage-run-{args.mode.lower()}"
+            else default_run_output_dir(root, args.mode, read_only=args.read_only)
         )
         skip_groups = list(getattr(args, "skip_group", None) or [])
         skip_tasks = list(getattr(args, "skip_task", None) or [])

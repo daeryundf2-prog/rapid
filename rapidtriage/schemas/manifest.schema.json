@@ -61,6 +61,13 @@
           }
         }
       }
+    },
+    "stage_reuse": {
+      "type": "object",
+      "description": "Run stage reuse binding a --resume run must match: evidence identity digest, input fingerprint, stage options digest",
+      "additionalProperties": {
+        "type": "string"
+      }
     }
   }
 }

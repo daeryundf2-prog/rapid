@@ -22,6 +22,13 @@ matched_rule_count?: number
 ioc_hit_count?: number
 artifact_record_contract_valid_count?: number
 artifact_record_contract_invalid_count?: number
+collection_notes?: unknown[]
+skipped_row_count?: number
+skip_reasons?: {
+[k: string]: unknown | undefined
+}
+export_roots?: unknown[]
+acquisition_roots?: unknown[]
 }
 artifacts: {
 provider: string
@@ -60,6 +67,7 @@ artifact_record_contract?: {
 profile_version: "artifact-output-contract-v1"
 schema: "ArtifactRecordV1"
 adapter_version: string
+artifact_id_scheme?: string
 record_count: number
 valid_count: number
 invalid_count: number
@@ -73,6 +81,9 @@ kind: string
 collector: string
 error_type: string
 message: string
+path?: (string | null)
+source?: (string | null)
+truncated_row_errors?: number
 }[]
 rule_set?: {
 path: string
@@ -135,5 +146,11 @@ records_file?: string
 records_format?: "jsonl"
 incremental_delta?: {
 [k: string]: unknown | undefined
+}
+/**
+ * Run stage reuse binding a --resume run must match: evidence identity digest, input fingerprint, stage options digest
+ */
+stage_reuse?: {
+[k: string]: string | undefined
 }
 }
