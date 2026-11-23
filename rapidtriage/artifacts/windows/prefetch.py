@@ -285,12 +285,14 @@ class WindowsPrefetchProvider:
 
 
 def build_prefetch_invalid_content_record(path: Path, header: Mapping[str, object], stat_result: os.stat_result) -> ArtifactRecord:
-    """A ``.pf`` file whose content is not Prefetch (SCCA/valid MAM).
+    """A ``.pf`` file whose content is not usable Prefetch (SCCA/valid MAM).
 
     Typical on acquired images where the Prefetch directory entry survives but
-    its clusters were reallocated (JPEG, PE, JSON, zeros ...). The row is kept
-    for provenance but carries no executable hint, run count or run time and
-    is excluded from execution summaries.
+    its clusters were reallocated (JPEG, PE, JSON, zeros ...), or where an SCCA
+    stream is cut before its header and file information end (incomplete input,
+    flagged ``parser_error`` so the collection counts it). The row is kept for
+    provenance but carries no executable hint, run count or run time and is
+    excluded from execution summaries.
     """
     try:
         with path.open("rb") as handle:
@@ -301,15 +303,52 @@ def build_prefetch_invalid_content_record(path: Path, header: Mapping[str, objec
     decompression = header.get("prefetch_decompression") if isinstance(header.get("prefetch_decompression"), Mapping) else {}
     content_kind = str(content["kind"])
     size_exceeded = bool(header.get("prefetch_size_exceeded"))
+    incomplete = header.get("prefetch_incomplete_input") if isinstance(header.get("prefetch_incomplete_input"), Mapping) else None
     if size_exceeded:
         content_kind = "size-exceeded"
         content_label = f"크기 상한 초과({MAX_PREFETCH_FILE_BYTES // (1024 * 1024)} MiB, 구조 해석 생략)"
+    elif incomplete is not None:
+        content_kind = "incomplete-prefetch"
+        content_label = (
+            f"불완전 Prefetch(v{incomplete['prefetch_version']} 필수 구조 {incomplete['required_bytes']}바이트 중 "
+            f"{incomplete['available_bytes']}바이트만 존재)"
+        )
     elif content_kind == "windows-prefetch-mam":
         content_kind = "mam-decompression-failed"
         content_label = "MAM 압축 해제 실패(손상)"
     else:
         content_label = CONTENT_KIND_LABELS_KO.get(content_kind, content_kind)
     source_path = resolved_path_text(path)
+    if incomplete is not None:
+        status_fields: dict[str, object] = {
+            "coverage_status": "incomplete-input",
+            "prefetch_parse_status": "incomplete-input",
+            "prefetch_incomplete_input": dict(incomplete),
+            "prefetch_version": incomplete["prefetch_version"],
+            # A row the collection counts as a parser error (core.artifacts.observe_parser_error_row).
+            "parser_error": True,
+            "error_type": "prefetch-incomplete-input",
+            "error": (
+                f"truncated Prefetch v{incomplete['prefetch_version']}: {incomplete['available_bytes']} of "
+                f"{incomplete['required_bytes']} bytes required for header and file information"
+            ),
+            "risk_flags": ["prefetch-incomplete-input"],
+            "note": (
+                f"SCCA 서명은 있으나 내용이 잘려 있습니다({content_label}). 실행 파일명·실행 횟수·실행 시각 영역이 없어 "
+                "실행 근거로 쓰지 않으며, 파일명에서 실행 파일명을 추정하지 않습니다. 원본 Prefetch를 다시 확보하거나 MFT/USN으로 확인하십시오."
+            ),
+        }
+    else:
+        status_fields = {
+            "coverage_status": "invalid-content",
+            "prefetch_parse_status": "size-exceeded" if size_exceeded else "invalid-content",
+            "risk_flags": ["prefetch-size-exceeded"] if size_exceeded else ["prefetch-invalid-content", "signature-extension-mismatch"],
+            "note": (
+                "파일명은 Prefetch(.pf)이지만 내용이 SCCA/MAM Prefetch 구조가 아닙니다"
+                f"({content_label}). 실행 근거·실행 횟수·실행 시각으로 쓰지 않으며, "
+                "파일명에서 실행 파일명을 추정하지 않습니다. 클러스터 재할당 잔존물인지 MFT/USN으로 확인하십시오."
+            ),
+        }
     return ArtifactRecord(
         provider=WindowsPrefetchProvider.name,
         artifact_type="prefetch-invalid-content",
@@ -319,7 +358,7 @@ def build_prefetch_invalid_content_record(path: Path, header: Mapping[str, objec
             "parser": "windows-prefetch-inventory",
             "parser_version": PARSER_VERSION,
             "artifact_type": "prefetch-invalid-content",
-            "coverage_status": "invalid-content",
+            "coverage_status": status_fields.pop("coverage_status"),
             "reportability": "excluded-from-execution-evidence",
             "parser_confidence": "high",
             "source_path": source_path,
@@ -328,7 +367,6 @@ def build_prefetch_invalid_content_record(path: Path, header: Mapping[str, objec
             "entry_name": path.name,
             "size": stat_result.st_size,
             "source_file_mtime": isoformat_from_timestamp(stat_result.st_mtime),
-            "prefetch_parse_status": "size-exceeded" if size_exceeded else "invalid-content",
             "prefetch_size_cap_bytes": MAX_PREFETCH_FILE_BYTES,
             "binary_format_detected": False,
             "detected_content_kind": content_kind,
@@ -339,13 +377,8 @@ def build_prefetch_invalid_content_record(path: Path, header: Mapping[str, objec
             "header_hex": prefix[:16].hex(),
             "prefetch_decompression": dict(decompression),
             "execution_evidence": False,
-            "risk_flags": ["prefetch-size-exceeded"] if size_exceeded else ["prefetch-invalid-content", "signature-extension-mismatch"],
             "validation_required": True,
-            "note": (
-                "파일명은 Prefetch(.pf)이지만 내용이 SCCA/MAM Prefetch 구조가 아닙니다"
-                f"({content_label}). 실행 근거·실행 횟수·실행 시각으로 쓰지 않으며, "
-                "파일명에서 실행 파일명을 추정하지 않습니다. 클러스터 재할당 잔존물인지 MFT/USN으로 확인하십시오."
-            ),
+            **status_fields,
         },
     )
 
@@ -445,6 +478,22 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
         "parser_confidence": "medium" if is_scca else "low",
     }
     if not is_scca:
+        return hints
+    required_bytes, required_basis = prefetch_required_structure(parse_blob, prefetch_version)
+    if len(parse_blob) < required_bytes:
+        # Cut before the header/file information end: nothing below may be marked decoded, and the
+        # file name alone is no execution evidence (it becomes an incomplete-input diagnostic row).
+        hints["binary_format_detected"] = False
+        hints["prefetch_parse_status"] = "incomplete-input"
+        hints["parser_confidence"] = "low"
+        hints["prefetch_incomplete_input"] = {
+            "scca_signature_detected": True,
+            "prefetch_version": prefetch_version,
+            "required_bytes": required_bytes,
+            "available_bytes": len(parse_blob),
+            "required_structure": required_basis,
+            "space": "decompressed-scca" if decompressed else "file",
+        }
         return hints
     hints["declared_file_size"] = read_u32(parse_blob, 0x0C)
     decoded = decode_scca_structure(parse_blob, prefetch_version)
@@ -556,6 +605,27 @@ PREFETCH_V30_RUN_COUNT_BY_METRICS_OFFSET = {0x128: 0xC8, 0x12C: 0xC8, 0x130: 0xD
 PREFETCH_FILE_METRICS_ENTRY_SIZE = {17: 20, 23: 32, 26: 32, 30: 32, 31: 32}
 PREFETCH_VOLUME_ENTRY_SIZE = {17: 40, 23: 104, 26: 104, 30: 96, 31: 96}
 PREFETCH_HEADER_NAME_CHARS = 29  # 60-byte UTF-16 field: 29 characters + NUL
+# The 84-byte file header, then the version's file information section (which holds the run
+# times and run count): v17 68 bytes, v23 156 bytes, v26 224 bytes, v30/31 212..224 bytes.
+PREFETCH_HEADER_SIZE = 0x54
+PREFETCH_FILE_INFORMATION_END = {17: 0x98, 23: 0xF0, 26: 0x130, 30: 0x130, 31: 0x130}
+
+
+def prefetch_required_structure(blob: bytes, version: int) -> tuple[int, str]:
+    """Bytes a ``version`` SCCA stream must hold before any field is decoded, and why.
+
+    Unknown versions need the common header only (they are inventoried, not decoded). v30/31
+    take their file information end from the recognised metrics-array offset (212/216/224-byte
+    variants) and otherwise the 224-byte default whose run count is read at 0xD0.
+    """
+    end = PREFETCH_FILE_INFORMATION_END.get(version)
+    if end is None:
+        return PREFETCH_HEADER_SIZE, "file-header"
+    if version in (30, 31):
+        metrics_offset = read_u32(blob, 0x54)
+        if metrics_offset in PREFETCH_V30_RUN_COUNT_BY_METRICS_OFFSET:
+            end = metrics_offset
+    return end, f"file-header+v{version}-file-information-{end - PREFETCH_HEADER_SIZE}-bytes"
 
 
 def decode_scca_structure(blob: bytes, version: int) -> dict[str, object]:

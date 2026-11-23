@@ -147,6 +147,26 @@ KNOWN_DLL_DIRECTORY_VALUES = frozenset({"dlldirectory", "dlldirectory32", "dlldi
 # ---------------------------------------------------------------------------
 
 
+class RegistryValueMap(dict[str, object]):
+    """Value name -> data. Keys keep the stored spelling for display; lookups follow Windows'
+    case-insensitive value-name semantics (``Current`` finds a value stored as ``CURRENT``)."""
+
+    def stored_name(self, name: object) -> object:
+        if not isinstance(name, str) or dict.__contains__(self, name):
+            return name
+        wanted = name.casefold()
+        return next((stored for stored in self if stored.casefold() == wanted), name)
+
+    def __getitem__(self, name: object) -> object:
+        return dict.__getitem__(self, self.stored_name(name))
+
+    def __contains__(self, name: object) -> bool:
+        return dict.__contains__(self, self.stored_name(name))
+
+    def get(self, name: object, default: object = None) -> object:  # type: ignore[override]
+        return dict.get(self, self.stored_name(name), default)
+
+
 @dataclass
 class KeyView:
     """One key as the decoders see it: root-relative path, values, LastWrite (hive only)."""
@@ -254,9 +274,10 @@ class ExportKeySource(KeySource):
         lowered = rel.casefold()
         existing = self.keys.get(lowered)
         if existing is not None:
-            existing.values.update(values)
+            for name, data in values.items():
+                existing.values[existing.values.stored_name(name)] = data
         else:
-            self.keys[lowered] = KeyView(rel=rel, name=parts[-1] if parts else "", values=values, line=line)
+            self.keys[lowered] = KeyView(rel=rel, name=parts[-1] if parts else "", values=RegistryValueMap(values), line=line)
         for index in range(1, len(parts) + 1):
             parent = "\\".join(parts[: index - 1]).casefold()
             child = "\\".join(parts[:index])
@@ -267,7 +288,7 @@ class ExportKeySource(KeySource):
         view = self.keys.get(lowered)
         if view is None and lowered in self.children:
             original = rel.strip("\\")
-            view = KeyView(rel=original, name=original.rsplit("\\", 1)[-1], values={})
+            view = KeyView(rel=original, name=original.rsplit("\\", 1)[-1], values=RegistryValueMap())
         return view
 
     def subkeys(self, view: KeyView) -> list[KeyView]:
@@ -276,7 +297,7 @@ class ExportKeySource(KeySource):
             return found
         children = sorted(self.children.get(view.rel.casefold(), {}).items())[:MAX_SUBKEYS_PER_LIST]
         for lowered, original in children[: self.charge(len(children))]:
-            child = self.keys.get(lowered) or KeyView(rel=original, name=original.rsplit("\\", 1)[-1], values={})
+            child = self.keys.get(lowered) or KeyView(rel=original, name=original.rsplit("\\", 1)[-1], values=RegistryValueMap())
             found.append(child)
         return found
 

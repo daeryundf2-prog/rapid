@@ -87,10 +87,17 @@ def decode_srudb_ese_catalog(path: Path, *, max_bytes: int = SRUM_NATIVE_DECODE_
     except OSError:
         return {"decode_status": "unreadable", "tables": [], "table_count": 0, "total_rows": 0}
     db = EseDatabase(blob)
+    # Page references the catalog bootstrap itself could not read.
+    loss_locations: list[dict[str, object]] = [
+        {"table": "", "scope": "catalog", **loss} for loss in db.page_failure_locations()
+    ]
     tables: list[dict[str, object]] = []
     total_rows = 0
     for table in db.tables:
+        failure_start = len(db.page_failures)
         count = sum(1 for _ in db.iter_table_rows(table))
+        losses = db.page_failure_locations(failure_start)
+        root_lost = any(loss["page_number"] == table.root_page for loss in losses)
         tables.append(
             {
                 "name": table.name,
@@ -98,20 +105,38 @@ def decode_srudb_ese_catalog(path: Path, *, max_bytes: int = SRUM_NATIVE_DECODE_
                 "column_count": len(table.columns),
                 "row_count": count,
                 "lv_root_page": table.lv_root_page,
+                "walk_status": "root-page-unreadable" if root_lost else "partial" if losses else "complete",
+                "unreadable_pages": losses,
             }
         )
+        loss_locations.extend({"table": table.name, "scope": "table", **loss} for loss in losses)
         total_rows += count
+    errors = list(db.errors) + [
+        f"{loss['scope']}-page-unreadable:{loss['table'] or '-'}:page={loss['page_number']}"
+        f":{loss['reason']}:offset={loss['declared_file_offset']}:file_size={loss['file_size']}"
+        for loss in loss_locations
+    ]
+    if not db.tables:
+        decode_status = "no-tables"
+    elif loss_locations:
+        decode_status = "partial"
+    else:
+        decode_status = "decoded"
     return {
-        "decode_status": "decoded" if db.tables else "no-tables",
+        "decode_status": decode_status,
         "page_size": db.page_size,
         "page_count": db.page_count,
+        "file_size": len(blob),
+        "pages_read": db.pages_read_count,
+        "unreadable_page_count": len({loss["page_number"] for loss in loss_locations}),
+        "loss_locations": loss_locations,
         "format_major": db.format_major,
         "format_minor": db.format_minor,
         "tables": tables,
         "table_count": len(db.tables),
         "total_rows": total_rows,
         "limitations": list(db.limitations),
-        "errors": list(db.errors),
+        "errors": errors,
     }
 
 
@@ -163,6 +188,10 @@ def build_srudb_validation(path: Path, ese_header: Mapping[str, object], blob: b
     table_count = int(decode.get("table_count") or 0)
     if status == "header-size-page-aligned" and decode_status == "decoded" and table_count:
         status = "ese-catalog-and-rows-decoded"
+    elif decode_status == "partial" and table_count:
+        # Declared page references fell outside the readable file: never a
+        # complete decode, whatever the header alignment says.
+        status = "ese-partial-decode-pages-unreadable"
     return {
         "validation_scope": "ese-header-native-catalog-row-decode-and-bounded-string-scan",
         "validation_status": status,
@@ -183,10 +212,14 @@ def build_srudb_validation(path: Path, ese_header: Mapping[str, object], blob: b
         "ese_table_count": table_count,
         "ese_total_rows": int(decode.get("total_rows") or 0),
         "ese_decode_limitations": list(decode.get("limitations") or []),
-        "catalog_decoded": decode_status == "decoded" and bool(table_count),
+        "ese_decode_complete": decode_status == "decoded" and bool(table_count),
+        "ese_pages_read": int(decode.get("pages_read") or 0),
+        "ese_unreadable_page_count": int(decode.get("unreadable_page_count") or 0),
+        "ese_loss_locations": list(decode.get("loss_locations") or []),
+        "catalog_decoded": decode_status in ("decoded", "partial") and bool(table_count),
         "table_pages_decoded": decode_status == "decoded" and bool(table_count),
         "page_checksums_verified": False,
-        "row_level_decoding_available": decode_status == "decoded" and bool(table_count),
+        "row_level_decoding_available": decode_status in ("decoded", "partial") and bool(table_count),
         "requires_dedicated_ese_srum_parser": decode_status != "decoded",
     }
 

@@ -148,6 +148,8 @@ EVENTLOG_TRIAGE_IDENTITY_KEYS = (
     "timestamp_status",
     "timestamp_filetime",
     "timestamp_100ns",
+    "timestamp_utc_ticks",
+    "timestamp_utc_basis",
     "event_data_source",
 )
 # Pivot fields kept only when non-empty (consumers read them with .get()).
@@ -161,6 +163,7 @@ EVENTLOG_TRIAGE_PIVOT_KEYS = (
     "logon_id",
     "service_account_name",
     "timestamp_raw_iso",
+    "timestamp_original",
     "evtx_decode_error",
     "source_ip",
     "source_port",
@@ -251,6 +254,8 @@ EVTX_TRUSTED_DIFF_COMPARE_FIELDS = (
     "message_sha256",
     "template_sha256",
 )
+# Record identity beyond EventRecordID (ids restart per log/channel and per host).
+EVTX_TRUSTED_DIFF_IDENTITY_FIELDS = ("source_file", "channel", "computer")
 NATIVE_EVTX_CAPABILITIES = {
     "record_header": True,
     "file_header": True,
@@ -2081,6 +2086,14 @@ def collect_native_evtx_events(
             source_hashes = file_hashes(path)
             file_header = native_evtx_file_header(blob)
             declared_chunks = read_u16(blob, 42)
+            # Header-declared active range vs bytes actually present: a file cut
+            # short (copy/acquisition loss) must not report a complete walk.
+            declared_end = EVTX_FILE_HEADER_SIZE + declared_chunks * EVTX_CHUNK_SIZE
+            counters["declared_chunk_count"] = declared_chunks
+            counters["declared_end_offset"] = declared_end
+            counters["data_end_offset"] = len(blob)
+            counters["missing_declared_byte_count"] = max(0, declared_end - len(blob))
+            walked_active_chunks: set[int] = set()
             live_ids = native_evtx_live_record_ids(blob, declared_chunks)
             first_live_id = min(live_ids) if live_ids else 0
             last_live_id = max(live_ids) if live_ids else 0
@@ -2122,6 +2135,10 @@ def collect_native_evtx_events(
                 active = chunk_index < declared_chunks
                 bump("chunk_count")
                 bump("active_chunk_count" if active else "inactive_chunk_count")
+                if active:
+                    walked_active_chunks.add(chunk_index)
+                    if len(chunk) < EVTX_CHUNK_SIZE:
+                        bump("short_active_chunk_count")
                 chunk_header = native_evtx_chunk_header(chunk, chunk_offset)
                 if structure_rows:
                     chunk_row = native_evtx_chunk_record(
@@ -2197,6 +2214,9 @@ def collect_native_evtx_events(
                     source_index += 1
                     yield record
                 counters["template_parse_count"] = counters.get("template_parse_count", 0) + decoder.template_parse_count
+            missing_chunks = [index for index in range(declared_chunks) if index not in walked_active_chunks]
+            counters["missing_declared_chunk_count"] = len(missing_chunks)
+            counters["first_missing_declared_chunk_index"] = missing_chunks[0] if missing_chunks else -1
     except OSError:
         return
 
@@ -2597,6 +2617,8 @@ def build_native_evtx_event_record(
             "event_version": str(system_fields.get("Version") or ""),
             "timestamp_filetime": created_filetime,
             "timestamp_100ns": filetime_to_iso_100ns(created_filetime),
+            "timestamp_utc_ticks": created_filetime,
+            "timestamp_utc_basis": "filetime",
             "timestamp_status": timestamp_status,
             "timestamp_source": "System/TimeCreated" if created_filetime != header_filetime or decoded is not None else "record-header",
             "record_header_filetime": header_filetime,
@@ -4106,64 +4128,90 @@ def build_evtx_trusted_tool_record_diff(
     *,
     trusted_tool: str,
 ) -> dict[str, object]:
-    """Compare normalized EVTX records against a trusted parser/export at record granularity."""
+    """Compare normalized EVTX records against a trusted parser/export at record granularity.
+
+    A record is identified by (source file name, channel, computer, EventRecordID); each
+    identity field joins the key when both sides carry it, so one record id reused by two
+    channels, hosts or logs stays two records. Both sides are multisets: duplicate rows are
+    counted separately and every keyed row ends up matched, mismatched, missing or extra.
+    Rows without a record id cannot be compared; they are counted and block a pass.
+    """
 
     tool_name = str(trusted_tool or "").strip()
-    rapid_by_key = {
-        key: normalized
-        for record in rapid_records
-        for key, normalized in [_normalize_evtx_diff_record(record)]
-        if key
-    }
-    trusted_by_key = {
-        key: normalized
-        for record in trusted_records
-        for key, normalized in [_normalize_evtx_diff_record(record)]
-        if key
-    }
+    rapid_rows = [
+        normalized for record in rapid_records for key, normalized in [_normalize_evtx_diff_record(record)] if key
+    ]
+    trusted_rows = [
+        normalized for record in trusted_records for key, normalized in [_normalize_evtx_diff_record(record)] if key
+    ]
+    rapid_unkeyed = len(rapid_records) - len(rapid_rows)
+    trusted_unkeyed = len(trusted_records) - len(trusted_rows)
+    key_fields = [
+        field
+        for field in EVTX_TRUSTED_DIFF_IDENTITY_FIELDS
+        if any(row.get(field) for row in rapid_rows) and any(row.get(field) for row in trusted_rows)
+    ]
+    rapid_by_key = _group_evtx_diff_rows(rapid_rows, key_fields)
+    trusted_by_key = _group_evtx_diff_rows(trusted_rows, key_fields)
 
-    missing_in_trusted = sorted(key for key in rapid_by_key if key not in trusted_by_key)
-    extra_in_trusted = sorted(key for key in trusted_by_key if key not in rapid_by_key)
+    missing_in_trusted: list[dict[str, str]] = []
+    extra_in_trusted: list[dict[str, str]] = []
     mismatches: list[dict[str, object]] = []
     matched_count = 0
-    for key in sorted(set(rapid_by_key) & set(trusted_by_key)):
-        rapid = rapid_by_key[key]
-        trusted = trusted_by_key[key]
-        field_diffs = []
-        for field in EVTX_TRUSTED_DIFF_COMPARE_FIELDS:
-            left = rapid.get(field, "")
-            right = trusted.get(field, "")
-            if left or right:
-                if left != right:
-                    field_diffs.append({"field": field, "rapid": left, "trusted": right})
-        if field_diffs:
-            mismatches.append({"record_key": key, "field_diffs": field_diffs})
-        else:
-            matched_count += 1
+    for key in sorted(set(rapid_by_key) | set(trusted_by_key)):
+        unmatched_rapid, unmatched_trusted, matched = _pair_identical_evtx_diff_rows(
+            rapid_by_key.get(key, []), trusted_by_key.get(key, [])
+        )
+        matched_count += matched
+        for rapid, trusted in zip(unmatched_rapid, unmatched_trusted):
+            field_diffs = [
+                {"field": field, "rapid": rapid.get(field, ""), "trusted": trusted.get(field, "")}
+                for field in EVTX_TRUSTED_DIFF_COMPARE_FIELDS
+                if rapid.get(field, "") != trusted.get(field, "")
+            ]
+            mismatches.append(
+                {
+                    "record_key": rapid["record_id"],
+                    "record_identity": _evtx_diff_identity(rapid, key_fields),
+                    "field_diffs": field_diffs,
+                }
+            )
+        paired = min(len(unmatched_rapid), len(unmatched_trusted))
+        missing_in_trusted.extend(_evtx_diff_identity(row, key_fields) for row in unmatched_rapid[paired:])
+        extra_in_trusted.extend(_evtx_diff_identity(row, key_fields) for row in unmatched_trusted[paired:])
 
     status = "pass"
-    if not tool_name or not rapid_by_key or not trusted_by_key:
+    if not tool_name or not rapid_rows or not trusted_rows:
         status = "not-enough-evidence"
-    elif missing_in_trusted or extra_in_trusted or mismatches:
+    elif missing_in_trusted or extra_in_trusted or mismatches or rapid_unkeyed or trusted_unkeyed:
         status = "diffs-present"
 
     normalized_tool = re.sub(r"[^a-z0-9]+", "", tool_name.lower())
     trusted_tool_recognized = any(hint in normalized_tool for hint in TRUSTED_EVTX_TOOL_HINTS)
     return {
-        "profile_version": "evtx-trusted-tool-record-diff-v1",
+        "profile_version": "evtx-trusted-tool-record-diff-v2",
         "trusted_tool": tool_name,
         "trusted_tool_recognized": trusted_tool_recognized,
         "compare_fields": list(EVTX_TRUSTED_DIFF_COMPARE_FIELDS),
-        "rapid_record_count": len(rapid_by_key),
-        "trusted_record_count": len(trusted_by_key),
+        "record_key_fields": [*key_fields, "record_id"],
+        "rapid_input_row_count": len(rapid_records),
+        "trusted_input_row_count": len(trusted_records),
+        "rapid_record_count": len(rapid_rows),
+        "trusted_record_count": len(trusted_rows),
+        "rapid_unkeyed_row_count": rapid_unkeyed,
+        "trusted_unkeyed_row_count": trusted_unkeyed,
+        "rapid_duplicate_key_row_count": sum(len(rows) - 1 for rows in rapid_by_key.values()),
+        "trusted_duplicate_key_row_count": sum(len(rows) - 1 for rows in trusted_by_key.values()),
         "matched_count": matched_count,
         "mismatch_count": len(mismatches),
         "missing_in_trusted_count": len(missing_in_trusted),
         "extra_in_trusted_count": len(extra_in_trusted),
         "status": status,
         "commercial_grade_evidence": status == "pass" and trusted_tool_recognized,
-        "missing_in_trusted": missing_in_trusted[:100],
-        "extra_in_trusted": extra_in_trusted[:100],
+        "missing_in_trusted": [item["record_id"] for item in missing_in_trusted[:100]],
+        "extra_in_trusted": [item["record_id"] for item in extra_in_trusted[:100]],
+        "missing_in_trusted_records": missing_in_trusted[:100],
+        "extra_in_trusted_records": extra_in_trusted[:100],
         "mismatches": mismatches[:100],
         "reportability_decision": {
             "decision": "record-diff-passed" if status == "pass" else "do-not-use-native-evtx-as-final",
@@ -4175,6 +4223,51 @@ def build_evtx_trusted_tool_record_diff(
             "blockers": [] if status == "pass" and trusted_tool_recognized else ["trusted-tool-record-diff-required"],
         },
     }
+
+
+def _evtx_diff_key_value(field: str, value: str) -> str:
+    text = str(value or "").strip()
+    if field == "source_file":
+        # Exports carry the acquiring machine's path; the log file name is the shared identity.
+        text = re.split(r"[\\/]", text)[-1]
+    return text.casefold()
+
+
+def _group_evtx_diff_rows(
+    rows: Sequence[dict[str, str]], key_fields: Sequence[str]
+) -> dict[tuple[str, ...], list[dict[str, str]]]:
+    grouped: dict[tuple[str, ...], list[dict[str, str]]] = defaultdict(list)
+    for row in rows:
+        key = (*(_evtx_diff_key_value(field, row.get(field, "")) for field in key_fields), row["record_id"])
+        grouped[key].append(row)
+    return grouped
+
+
+def _evtx_diff_identity(row: Mapping[str, str], key_fields: Sequence[str]) -> dict[str, str]:
+    return {"record_id": row["record_id"], **{field: row.get(field, "") for field in key_fields}}
+
+
+def _pair_identical_evtx_diff_rows(
+    rapid: Sequence[dict[str, str]], trusted: Sequence[dict[str, str]]
+) -> tuple[list[dict[str, str]], list[dict[str, str]], int]:
+    """Pair rows of one record key with identical compared fields first; return the leftovers."""
+
+    def signature(row: Mapping[str, str]) -> tuple[str, ...]:
+        return tuple(row.get(field, "") for field in EVTX_TRUSTED_DIFF_COMPARE_FIELDS)
+
+    common = Counter(signature(row) for row in rapid) & Counter(signature(row) for row in trusted)
+
+    def leftovers(rows: Sequence[dict[str, str]]) -> list[dict[str, str]]:
+        budget = Counter(common)
+        remaining: list[dict[str, str]] = []
+        for row in sorted(rows, key=signature):
+            if budget[signature(row)]:
+                budget[signature(row)] -= 1
+            else:
+                remaining.append(row)
+        return remaining
+
+    return leftovers(rapid), leftovers(trusted), sum(common.values())
 
 
 def build_evtx_message_rendering_diff(
@@ -4359,6 +4452,10 @@ def _normalize_evtx_diff_record(record: Mapping[str, object]) -> tuple[str, dict
         "provider_name": _first_present_string(record, ("provider_name", "provider", "providerName")),
         "channel": _first_present_string(record, ("channel", "log_name", "logname")),
         "computer": _first_present_string(record, ("computer", "computer_name", "hostname", "system_computer")),
+        "source_file": _first_present_string(
+            record,
+            ("source_file", "SourceFile", "sourcefile", "source_path", "evtx_file", "EvtxFile", "evtxfile", "file_name"),
+        ),
         "timestamp": _normalize_evtx_timestamp(
             _first_present_string(
                 record,
@@ -7869,6 +7966,15 @@ def normalize_event_details(
     reportability = "triage" if is_native_evtx else ("reportable" if source_format != "evtx" else "inventory-only")
     parser_confidence = parser_confidence_score(parser, source_format)
     normalized_timestamp = normalize_timestamp(event_created_at)
+    # Integer UTC instant (FILETIME ticks) for ordering; native EVTX rows set it from the record FILETIME.
+    timestamp_fields: dict[str, object] = {}
+    if not is_native_evtx and str(event_created_at or "").strip():
+        ticks, basis = event_timestamp_utc_ticks(event_created_at)
+        timestamp_fields["timestamp_original"] = str(event_created_at).strip()
+        timestamp_fields["timestamp_utc_basis"] = basis
+        if ticks is not None:
+            timestamp_fields["timestamp_utc_ticks"] = ticks
+            timestamp_fields["timestamp_100ns"] = filetime_to_iso_100ns(ticks)
     message_rendering = render_event_message(
         provider_name=provider_name,
         event_id=normalized_event_id,
@@ -8026,6 +8132,7 @@ def normalize_event_details(
         "keywords": keywords,
         "event_created_at": normalized_timestamp,
         "timestamp": normalized_timestamp,
+        **timestamp_fields,
         "rule": {
             "title": rule_title,
             "id": rule_id,
@@ -8189,9 +8296,40 @@ def build_eventlog_file_record(
     if native_chunk_count is not None:
         extra["native_chunk_count"] = native_chunk_count
     stats = native_stats or {}
+    missing_chunks = int(stats.get("missing_declared_chunk_count", 0))
+    missing_bytes = int(stats.get("missing_declared_byte_count", 0))
+    short_chunks = int(stats.get("short_active_chunk_count", 0))
+    declared_range_short = bool(missing_chunks or missing_bytes or short_chunks)
+    chunk_walk = "partial-chunk-walk" if declared_range_short else "complete-chunk-walk"
     if native_stats is not None:
         decoded = int(stats.get("decoded_record_count", 0))
         fallback = int(stats.get("fallback_record_count", 0))
+        if "declared_chunk_count" in stats:
+            first_missing = int(stats.get("first_missing_declared_chunk_index", -1))
+            extra.update(
+                {
+                    "native_declared_chunk_count": int(stats["declared_chunk_count"]),
+                    "native_missing_declared_chunk_count": missing_chunks,
+                    "native_short_active_chunk_count": short_chunks,
+                    "native_first_missing_chunk_index": first_missing if first_missing >= 0 else None,
+                    "native_first_missing_chunk_offset": (
+                        EVTX_FILE_HEADER_SIZE + first_missing * EVTX_CHUNK_SIZE if first_missing >= 0 else None
+                    ),
+                    "native_declared_end_offset": int(stats.get("declared_end_offset", 0)),
+                    "native_data_end_offset": int(stats.get("data_end_offset", 0)),
+                    "native_missing_declared_byte_count": missing_bytes,
+                    "native_chunk_walk_status": (
+                        "declared-range-incomplete" if declared_range_short else "declared-range-complete"
+                    ),
+                }
+            )
+            if declared_range_short:
+                extra["native_truncation_note_ko"] = (
+                    f"파일 헤더는 활성 청크 {int(stats['declared_chunk_count'])}개(끝 오프셋 "
+                    f"{int(stats.get('declared_end_offset', 0))})를 선언하지만 실제 데이터는 오프셋 "
+                    f"{int(stats.get('data_end_offset', 0))}에서 끝나며, 누락 청크 {missing_chunks}개·"
+                    f"불완전 청크 {short_chunks}개입니다. 누락 구간의 레코드는 집계되지 않았습니다."
+                )
         extra.update(
             {
                 "native_live_record_count": int(stats.get("live_record_count", 0)),
@@ -8207,7 +8345,7 @@ def build_eventlog_file_record(
                 "native_active_chunk_count": int(stats.get("active_chunk_count", 0)),
                 "native_inactive_chunk_count": int(stats.get("inactive_chunk_count", 0)),
                 "native_template_parse_count": int(stats.get("template_parse_count", 0)),
-                "native_records_truncated": False,
+                "native_records_truncated": declared_range_short,
                 "native_record_limit": None,
                 "native_decoder_version": EVTX_NATIVE_DECODER_VERSION,
                 "native_parse_note_ko": (
@@ -8239,9 +8377,9 @@ def build_eventlog_file_record(
             "native_record_candidate_count": native_record_candidate_count,
             "native_parse_status": (
                 (
-                    "complete-chunk-walk-decoded"
+                    f"{chunk_walk}-decoded"
                     if stats.get("decoded_record_count") and not stats.get("fallback_record_count")
-                    else "complete-chunk-walk-partial-decode"
+                    else f"{chunk_walk}-partial-decode"
                     if stats.get("decoded_record_count")
                     else "partial-record-scan"
                 )
@@ -8550,6 +8688,11 @@ _LOGON_SESSION_INPUT_KEYS = (
     "source_hashes",
     "timestamp",
     "event_created_at",
+    "timestamp_utc_ticks",
+    "timestamp_status",
+    "timestamp_100ns",
+    "evtx_record_state",
+    "evtx_record_offset",
 )
 _LOGON_ID_DATA_KEYS = frozenset({"targetlogonid", "logonid", "subjectlogonid"})
 
@@ -8579,16 +8722,24 @@ def is_logon_session_event(details: Mapping[str, object]) -> bool:
     return normalize_key(details.get("channel") or "") == "security"
 
 
+_LogonSessionEntry = tuple[dict[str, object], str, str]
+
+
 def build_logon_session_records(root: Path, records: Sequence[ArtifactRecord]) -> list[ArtifactRecord]:
     """Logon sessions keyed by (computer, TargetUserName, TargetLogonId).
 
     4624 opens a session and 4634/4647 close it; 4672 (SubjectUserName,
     SubjectLogonId) and 4778/4779 (AccountName, LogonID) attach to the same
     key. Logon IDs are reused (for example 0x3e7 after every boot), so a key's
-    events are split into one session per observed 4624 in time order.
+    events are split into one session per observed 4624 in UTC time order.
     Events without a logon id fall back to (computer, user, source, type).
+
+    Only active events (live EVTX records, or exports without allocation
+    state) open, close or time a session. Slack/inactive-chunk/outside-chunk
+    recoveries of the same key are listed as ``recovery_candidate_events``
+    (state, source file, offset) and never change status, end time or duration.
     """
-    groups: dict[str, dict[str, object]] = {}
+    groups: dict[str, tuple[str, list[_LogonSessionEntry], list[_LogonSessionEntry]]] = {}
     for record in records:
         if record.artifact_type != "eventlog-event" or not isinstance(record.details, Mapping):
             continue
@@ -8598,30 +8749,54 @@ def build_logon_session_records(root: Path, records: Sequence[ArtifactRecord]) -
         key, key_basis = logon_session_key_and_basis(details)
         if not key:
             continue
-        group = groups.setdefault(key, {"key_basis": key_basis, "events": []})
-        events = group["events"]
-        if isinstance(events, list):
-            events.append(
-                (
-                    logon_session_event_ref(details),
-                    str(details.get("source_path") or record.path),
-                    str((details.get("source_hashes") or {}).get("sha256") or "")
-                    if isinstance(details.get("source_hashes"), Mapping)
-                    else "",
-                )
-            )
+        _, events, candidates = groups.setdefault(key, (key_basis, [], []))
+        source_hashes = details.get("source_hashes")
+        entry = (
+            logon_session_event_ref(details),
+            str(details.get("source_path") or record.path),
+            str(source_hashes.get("sha256") or "") if isinstance(source_hashes, Mapping) else "",
+        )
+        (events if is_active_event_record(details) else candidates).append(entry)
 
     session_records: list[ArtifactRecord] = []
-    for key, group in groups.items():
-        entries = sorted(
-            [entry for entry in group.get("events", []) if isinstance(entry, tuple)],
-            key=lambda item: (str(item[0].get("timestamp") or ""), int_text(item[0].get("record_id")) or 0),
-        )
-        for occurrence, segment in enumerate(split_logon_session_segments(entries)):
+    for key, (key_basis, events, candidates) in groups.items():
+        segments = split_logon_session_segments(sorted(events, key=logon_session_entry_order))
+        candidates_by_segment = assign_logon_recovery_candidates(segments, sorted(candidates, key=logon_session_entry_order))
+        if not segments:
+            segments, candidates_by_segment = [[]], [sorted(candidates, key=logon_session_entry_order)]
+        for occurrence, segment in enumerate(segments):
             session_records.append(
-                build_logon_session_record(root, key, str(group.get("key_basis") or ""), occurrence, segment, len(session_records))
+                build_logon_session_record(
+                    root,
+                    key,
+                    key_basis,
+                    occurrence,
+                    segment,
+                    len(session_records),
+                    recovery_candidates=candidates_by_segment[occurrence],
+                )
             )
     return session_records
+
+
+def logon_session_entry_order(entry: _LogonSessionEntry) -> tuple[bool, int, int]:
+    ticks = entry[0].get("timestamp_utc_ticks")
+    return (isinstance(ticks, int), ticks if isinstance(ticks, int) else 0, int_text(entry[0].get("record_id")) or 0)
+
+
+def assign_logon_recovery_candidates(
+    segments: Sequence[Sequence[_LogonSessionEntry]], candidates: Sequence[_LogonSessionEntry]
+) -> list[list[_LogonSessionEntry]]:
+    """Each recovery candidate goes to the latest session that started at or before it (else the first)."""
+    assigned: list[list[_LogonSessionEntry]] = [[] for _ in segments]
+    if not segments:
+        return assigned
+    starts = [logon_session_entry_order(segment[0]) for segment in segments]
+    for candidate in candidates:
+        order = logon_session_entry_order(candidate)
+        position = max((index for index, start in enumerate(starts) if start <= order), default=0)
+        assigned[position].append(candidate)
+    return assigned
 
 
 def split_logon_session_segments(entries: Sequence[tuple[dict[str, object], str, str]]) -> list[list[tuple[dict[str, object], str, str]]]:
@@ -8647,10 +8822,14 @@ def build_logon_session_record(
     key: str,
     key_basis: str,
     occurrence: int,
-    segment: Sequence[tuple[dict[str, object], str, str]],
+    segment: Sequence[_LogonSessionEntry],
     index: int,
+    *,
+    recovery_candidates: Sequence[_LogonSessionEntry] = (),
 ) -> ArtifactRecord:
     events = [entry[0] for entry in segment]
+    candidates = [{**entry[0], "source_sha256": entry[2]} for entry in recovery_candidates]
+    identity_events = events or candidates
     source_files = sorted({entry[1] for entry in segment if entry[1]})
     source_hashes = {entry[1]: entry[2] for entry in segment if entry[1] and entry[2]}
     event_ids = [str(event.get("event_id") or "") for event in events]
@@ -8660,16 +8839,24 @@ def build_logon_session_record(
     ended = bool(logoff_events)
     started_at = str(logon_events[0].get("timestamp") or "") if started else ""
     ended_at = str(logoff_events[-1].get("timestamp") or "") if ended else ""
-    duration_seconds = logon_session_duration_seconds(started_at, ended_at) if started and ended else None
-    primary = logon_events[0] if started else events[0]
-    user_name = str(primary.get("user_name") or "") or first_nonempty(event.get("user_name") for event in events)
+    duration_seconds = logon_session_duration_seconds(logon_events[0], logoff_events[-1]) if started and ended else None
+    primary = logon_events[0] if started else identity_events[0]
+    user_name = str(primary.get("user_name") or "") or first_nonempty(event.get("user_name") for event in identity_events)
     logon_type = first_nonempty(event.get("logon_type") for event in logon_events) or first_nonempty(
-        event.get("logon_type") for event in events
+        event.get("logon_type") for event in identity_events
     )
     source_ip = first_nonempty(event.get("source_ip") for event in logon_events) or first_nonempty(
-        event.get("source_ip") for event in events
+        event.get("source_ip") for event in identity_events
     )
     risk_flags = logon_session_risk_flags(logon_type, source_ip, event_ids)
+    if not events:
+        risk_flags.append("recovery-candidates-only")
+        session_status = "recovery-candidates-only"
+    elif started and ended:
+        session_status = "closed"
+    else:
+        session_status = "open-or-not-observed" if started else "logoff-without-observed-logon"
+    candidate_states = Counter(str(item.get("evtx_record_state") or "") for item in candidates)
     validation_checks = {
         "has_logon_event": started,
         "has_logoff_event": ended,
@@ -8677,6 +8864,7 @@ def build_logon_session_record(
         "keyed_by_target_user_and_logon_id": key_basis == "user-and-logon-id",
         "session_duration_available": duration_seconds is not None,
         "cross_artifact_correlation_available": False,
+        "recovery_candidates_excluded": bool(candidates),
     }
     return ArtifactRecord(
         provider=WindowsEventLogProvider.name,
@@ -8696,14 +8884,14 @@ def build_logon_session_record(
             "session_key": key,
             "session_key_basis": key_basis,
             "session_occurrence": occurrence,
-            "logon_id": first_nonempty(event.get("logon_id") for event in events),
-            "session_status": "closed" if started and ended else ("open-or-not-observed" if started else "logoff-without-observed-logon"),
+            "logon_id": first_nonempty(event.get("logon_id") for event in identity_events),
+            "session_status": session_status,
             "user_name": user_name,
-            "target_domain_name": first_nonempty(event.get("target_domain_name") for event in events),
+            "target_domain_name": first_nonempty(event.get("target_domain_name") for event in identity_events),
             "logon_type": logon_type,
             "source_ip": source_ip,
-            "workstation_name": first_nonempty(event.get("workstation_name") for event in events),
-            "computer": first_nonempty(event.get("computer") for event in events),
+            "workstation_name": first_nonempty(event.get("workstation_name") for event in identity_events),
+            "computer": first_nonempty(event.get("computer") for event in identity_events),
             "started_at": started_at,
             "ended_at": ended_at,
             "duration_seconds": duration_seconds,
@@ -8711,8 +8899,17 @@ def build_logon_session_record(
             "event_count": len(events),
             "events": events[:100],
             "events_truncated": len(events) > 100,
-            "timestamp": started_at or str(events[0].get("timestamp") or ""),
-            "timestamp_source": "logon-event" if started else "first_correlated_logon_event",
+            "active_event_count": len(events),
+            "recovery_candidate_count": len(candidates),
+            "recovery_candidate_state_counts": counter_items(candidate_states),
+            "recovery_candidate_source_files": sorted({entry[1] for entry in recovery_candidates if entry[1]}),
+            "recovery_candidate_events": candidates[:100],
+            "recovery_candidate_events_truncated": len(candidates) > 100,
+            "recovery_candidate_policy": "excluded-from-session-status-time-and-duration",
+            "timestamp": started_at or (str(events[0].get("timestamp") or "") if events else ""),
+            "timestamp_source": (
+                "logon-event" if started else "first_correlated_logon_event" if events else "recovery-candidates-only"
+            ),
             "risk_flags": risk_flags,
             "validation_required": True,
             "validation_checks": validation_checks,
@@ -8771,27 +8968,20 @@ def logon_session_event_ref(details: Mapping[str, object]) -> dict[str, object]:
         "workstation_name": details.get("workstation_name") or "",
         "source_path": details.get("source_path") or "",
         "source_index": details.get("source_index") or 0,
+        "timestamp_utc_ticks": event_order_ticks(details),
+        "timestamp_100ns": details.get("timestamp_100ns") or "",
+        "evtx_record_state": details.get("evtx_record_state") or "",
+        **({"evtx_record_offset": details["evtx_record_offset"]} if details.get("evtx_record_offset") is not None else {}),
     }
 
 
-def logon_session_duration_seconds(start: object, end: object) -> int | None:
-    start_dt = parse_event_timestamp(start)
-    end_dt = parse_event_timestamp(end)
-    if start_dt is None or end_dt is None or end_dt < start_dt:
+def logon_session_duration_seconds(start: Mapping[str, object], end: Mapping[str, object]) -> int | None:
+    """Whole seconds between two session event refs from their UTC FILETIME ticks."""
+    start_ticks = start.get("timestamp_utc_ticks")
+    end_ticks = end.get("timestamp_utc_ticks")
+    if not isinstance(start_ticks, int) or not isinstance(end_ticks, int) or end_ticks < start_ticks:
         return None
-    return int((end_dt - start_dt).total_seconds())
-
-
-def parse_event_timestamp(value: object) -> dt.datetime | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    if text.endswith("Z"):
-        text = f"{text[:-1]}+00:00"
-    try:
-        return dt.datetime.fromisoformat(text)
-    except ValueError:
-        return None
+    return (end_ticks - start_ticks) // 10_000_000
 
 
 def logon_session_risk_flags(logon_type: str, source_ip: str, event_ids: Sequence[str]) -> list[str]:
@@ -8951,7 +9141,10 @@ def build_builtin_detection_record(source_record: ArtifactRecord, rule: Mapping[
         "event_created_at": details.get("event_created_at") or "",
         "timestamp": details.get("timestamp") or "",
         "timestamp_status": details.get("timestamp_status") or "ok",
+        "timestamp_utc_ticks": event_order_ticks(details),
+        "timestamp_100ns": details.get("timestamp_100ns") or "",
         "evtx_record_state": details.get("evtx_record_state") or "",
+        "evtx_record_offset": details.get("evtx_record_offset"),
         "logon_id": details.get("logon_id") or "",
         "event_label_ko": details.get("event_label_ko") or "",
         "rule": {
@@ -8972,6 +9165,8 @@ def build_builtin_detection_record(source_record: ArtifactRecord, rule: Mapping[
             "path": source_record.path,
             "source_index": details.get("source_index"),
             "record_id": details.get("record_id") or "",
+            "evtx_record_state": details.get("evtx_record_state") or "",
+            "evtx_record_offset": details.get("evtx_record_offset"),
             "source_hashes": dict(details.get("source_hashes") or {}),
         },
     }
@@ -8992,13 +9187,16 @@ class EventlogSummaryAccumulator:
 
     GROUPS = ("event", "detection", "candidate", "chunk")
     HIGH_RISK_KEEP = 50
+    RECOVERY_CANDIDATE_KEEP = 100
 
     def __init__(self) -> None:
         self.counts: Counter[str] = Counter()
         self.counters: dict[str, dict[str, Counter[str]]] = defaultdict(lambda: {group: Counter() for group in self.GROUPS})
         self.source_paths: set[str] = set()
-        self.first_timestamp: str | None = None
-        self.last_timestamp: str | None = None
+        # (UTC FILETIME ticks, timestamp text) of the earliest/latest active event.
+        self.first_event: tuple[int, str] | None = None
+        self.last_event: tuple[int, str] | None = None
+        self.recovery_candidates: list[dict[str, object]] = []
         self.record_ids_by_channel: dict[str, set[int]] = defaultdict(set)
         self.high_risk: dict[str, list[dict[str, object]]] = {"event": [], "detection": []}
         self.truncated_files: dict[str, int] = {}
@@ -9014,11 +9212,34 @@ class EventlogSummaryAccumulator:
             merged.update(self.counters[counter][group])
         return merged
 
-    def _timestamp(self, timestamp: str) -> None:
-        if self.first_timestamp is None or timestamp < self.first_timestamp:
-            self.first_timestamp = timestamp
-        if self.last_timestamp is None or timestamp > self.last_timestamp:
-            self.last_timestamp = timestamp
+    def _timestamp(self, details: Mapping[str, object], timestamp: str) -> None:
+        """Track first/last by integer UTC instant; the row's own timestamp text is reported."""
+        ticks = event_order_ticks(details)
+        if ticks is None:
+            self.counts["timestamp_unordered"] += 1
+            return
+        if self.first_event is None or ticks < self.first_event[0]:
+            self.first_event = (ticks, timestamp)
+        if self.last_event is None or ticks > self.last_event[0]:
+            self.last_event = (ticks, timestamp)
+
+    def _recovery_candidate(self, details: Mapping[str, object], source_path: str, timestamp: str) -> None:
+        """Slack/inactive/outside-chunk recoveries: counted and listed, never in the event time range."""
+        self.counts["recovery_candidate_event"] += 1
+        if len(self.recovery_candidates) < self.RECOVERY_CANDIDATE_KEEP:
+            self.recovery_candidates.append(
+                {
+                    "evtx_record_state": str(details.get("evtx_record_state") or ""),
+                    "source_path": source_path,
+                    "evtx_record_offset": details.get("evtx_record_offset"),
+                    "record_id": str(details.get("record_id") or ""),
+                    "event_id": str(details.get("event_id") or ""),
+                    "channel": str(details.get("channel") or ""),
+                    "timestamp": timestamp,
+                    "timestamp_100ns": str(details.get("timestamp_100ns") or ""),
+                    "timestamp_status": str(details.get("timestamp_status") or "ok"),
+                }
+            )
 
     def _high_risk(self, group: str, row: dict[str, object]) -> None:
         rows = self.high_risk[group]
@@ -9129,8 +9350,10 @@ class EventlogSummaryAccumulator:
         if timestamp_status != "ok":
             self.counts["timestamp_out_of_range"] += 1
             self._inc("timestamp_status_counts", "event", timestamp_status)
-        if timestamp and timestamp_status == "ok":
-            self._timestamp(timestamp)
+        if not is_active_event_record(details):
+            self._recovery_candidate(details, source_path, timestamp)
+        elif timestamp and timestamp_status == "ok":
+            self._timestamp(details, timestamp)
         # Sequence gaps only over live records with plausible timestamps;
         # slack/inactive-chunk recoveries are not part of the live sequence.
         # The classic EVT walk already checks consecutive DWORD numbers per
@@ -9153,6 +9376,7 @@ class EventlogSummaryAccumulator:
                     "risk_flags": list(details.get("risk_flags") or []),
                     "rule": details.get("rule", {}),
                     "source_path": source_path,
+                    "evtx_record_state": record_state,
                 }
             )
 
@@ -9172,8 +9396,8 @@ class EventlogSummaryAccumulator:
         self.source_paths.add(source_path)
         record_state = str(details.get("evtx_record_state") or "")
         timestamp_status = str(details.get("timestamp_status") or "ok")
-        if timestamp and timestamp_status == "ok":
-            self._timestamp(timestamp)
+        if timestamp and timestamp_status == "ok" and is_active_event_record(details):
+            self._timestamp(details, timestamp)
         if record_id is not None and (not record_state or record_state in EVTX_SEQUENCED_RECORD_STATES) and timestamp_status == "ok":
             self.record_ids_by_channel[channel].add(record_id)
         if int(details.get("risk_score") or 0) >= 40 or details.get("risk_flags"):
@@ -9287,8 +9511,15 @@ class EventlogSummaryAccumulator:
             "native_capabilities": NATIVE_EVTX_CAPABILITIES,
             "native_report_grade_blockers": NATIVE_EVTX_REPORT_GRADE_BLOCKERS,
             "detection_level_counts": counter_items(self._merged("detection_level_counts")),
-            "first_event_at": self.first_timestamp or "",
-            "last_event_at": self.last_timestamp or "",
+            "first_event_at": self.first_event[1] if self.first_event else "",
+            "last_event_at": self.last_event[1] if self.last_event else "",
+            "first_event_at_100ns": filetime_to_iso_100ns(self.first_event[0]) if self.first_event else "",
+            "last_event_at_100ns": filetime_to_iso_100ns(self.last_event[0]) if self.last_event else "",
+            "timestamp_unordered_count": self.counts["timestamp_unordered"],
+            "active_event_count": self.counts["event"] - self.counts["recovery_candidate_event"],
+            "recovery_candidate_event_count": self.counts["recovery_candidate_event"],
+            "recovery_candidate_events": list(self.recovery_candidates),
+            "recovery_candidate_events_truncated": self.counts["recovery_candidate_event"] > len(self.recovery_candidates),
             "high_risk_events": _top_risk_events([*self.high_risk["event"], *self.high_risk["detection"]]),
             "record_sequence_gaps": record_sequence_gaps(self.record_ids_by_channel),
             "summary_notes": [
@@ -9297,8 +9528,8 @@ class EventlogSummaryAccumulator:
                 "eventlog-record-candidate rows and evtx_recovery_context mark slack/deleted/corrupt candidates that require independent validation.",
                 "eventlog-chunk rows expose native chunk bounds and checksum observations so recovery candidates can be reviewed against chunk slack/structure.",
                 "Use message_rendering.validation_required and external parser exports to separate built-in fallback messages from report-grade provider resource rendering.",
-                "first_event_at/last_event_at and record_sequence_gaps exclude out-of-range timestamps (before 1980 or later than collection time + 1 day) and slack/inactive-chunk recoveries; see timestamp_status_counts and native_record_state_counts.",
-                "시각 범위(1980년 이전 또는 수집 시각+1일 이후)를 벗어난 타임스탬프와 슬랙/비활성 청크 복구 레코드는 최초/최종 시각과 레코드 ID 간격 통계에서 제외했습니다.",
+                "first_event_at/last_event_at are the earliest/latest active events by UTC instant (100 ns FILETIME ticks; first_event_at_100ns/last_event_at_100ns). They and record_sequence_gaps exclude out-of-range timestamps (before 1980 or later than collection time + 1 day); the time range also excludes slack/inactive-chunk/outside-chunk recoveries, which are counted in recovery_candidate_event_count and listed with source file and offset in recovery_candidate_events.",
+                "최초/최종 시각은 활성(live) 이벤트만 UTC 시각(100ns FILETIME 단위)으로 비교해 정했습니다. 시각 범위(1980년 이전 또는 수집 시각+1일 이후)를 벗어난 타임스탬프는 최초/최종 시각과 레코드 ID 간격 통계에서 제외했고, 슬랙·비활성 청크·청크 밖 복구 레코드는 시각 범위에 넣지 않고 복구 후보(recovery_candidate_events: 원본 파일·오프셋)로만 집계했습니다.",
             ],
         }
         return ArtifactRecord(
@@ -9375,6 +9606,59 @@ def normalize_timestamp(value: object) -> str:
     if text.endswith("Z"):
         text = f"{text[:-1]}+00:00"
     return text
+
+
+_EVENT_TIMESTAMP_RE = re.compile(
+    r"^(?P<base>\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})(?:[.,](?P<fraction>\d+))?\s*(?P<zone>[Zz]|[+-]\d{2}:?\d{2})?$"
+)
+_FILETIME_EPOCH_NAIVE = dt.datetime(1601, 1, 1)
+
+
+def event_timestamp_utc_ticks(value: object) -> tuple[int | None, str]:
+    """``(UTC FILETIME ticks, basis)`` of an ISO-8601 event time, with integer 100 ns arithmetic.
+
+    Up to seven fractional digits are kept (finer digits are below FILETIME resolution
+    and dropped); a ``Z``/``+HH:MM`` offset is applied. Text without an offset is read
+    as UTC and labelled ``iso-no-offset-assumed-utc``; other text is ``(None, "unparsed")``.
+    """
+    text = str(value or "").strip()
+    match = _EVENT_TIMESTAMP_RE.match(text)
+    if not match:
+        return None, "unparsed"
+    try:
+        base = dt.datetime.fromisoformat(match.group("base").replace(" ", "T"))
+    except ValueError:
+        return None, "unparsed"
+    zone = match.group("zone") or ""
+    offset_seconds = 0
+    if zone and zone.upper() != "Z":
+        digits = zone[1:].replace(":", "")
+        offset_seconds = (int(digits[:2]) * 3600 + int(digits[2:]) * 60) * (-1 if zone[0] == "-" else 1)
+    delta = base - _FILETIME_EPOCH_NAIVE
+    seconds = delta.days * 86400 + delta.seconds - offset_seconds
+    ticks = seconds * 10_000_000 + int((match.group("fraction") or "")[:7].ljust(7, "0"))
+    if ticks <= 0:
+        return None, "unparsed"
+    return ticks, ("iso-offset" if zone else "iso-no-offset-assumed-utc")
+
+
+def event_order_ticks(details: Mapping[str, object]) -> int | None:
+    """UTC FILETIME ticks used to order an event row (``timestamp_utc_ticks``, else its timestamp text).
+
+    ``None`` when the time is unparseable or flagged out of range (``timestamp_status``).
+    """
+    if str(details.get("timestamp_status") or "ok") != "ok":
+        return None
+    ticks = details.get("timestamp_utc_ticks")
+    if isinstance(ticks, int) and not isinstance(ticks, bool) and ticks > 0:
+        return ticks
+    return event_timestamp_utc_ticks(details.get("timestamp") or details.get("event_created_at"))[0]
+
+
+def is_active_event_record(details: Mapping[str, object]) -> bool:
+    """Live (allocated) record, or a row without allocation state (exports)."""
+    state = str(details.get("evtx_record_state") or "")
+    return not state or state == EVTX_RECORD_STATE_LIVE
 
 
 def filetime_to_iso(value: int) -> str:

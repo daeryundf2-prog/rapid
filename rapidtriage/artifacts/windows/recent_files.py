@@ -243,9 +243,14 @@ TEMPLATE_PROFILE_NAMES = {"default", "default user", "all users"}
 
 
 def iter_profile_shortcuts(user_root: Path, recent_root: Path) -> Iterable[Path]:
-    recent_prefix = str(recent_root).lower()
+    """``.lnk`` files under the profile outside the Recent folder (the Recent walk owns that subtree).
+
+    Containment is decided per path component, case-insensitively, so a sibling such as
+    ``Recent-Archive`` is not mistaken for ``Recent``.
+    """
+    recent_parts = tuple(part.lower() for part in recent_root.parts)
     for candidate in sorted(user_root.rglob("*.lnk"), key=lambda item: str(item).lower()):
-        if str(candidate).lower().startswith(recent_prefix):
+        if tuple(part.lower() for part in candidate.parts[: len(recent_parts)]) == recent_parts:
             continue
         if candidate.is_file():
             yield candidate
@@ -968,7 +973,7 @@ def parse_lnk_link_info(data: bytes, link_flags: int) -> dict[str, object]:
         result.update(parse_lnk_network_link(block, network_link_offset))
     # MS-SHLLINK: the target's full path is LocalBasePath + CommonPathSuffix,
     # or NetName (\\server\share) + "\" + CommonPathSuffix for network links.
-    # Writers that already embed the complete path are handled by the suffix check.
+    # Writers that already embed the complete path are handled by the component check.
     local_base = str(result["local_base_path"])
     suffix = str(result["common_path_suffix"])
     if local_base:
@@ -1042,10 +1047,30 @@ LNK_DRIVE_TYPES = {
 }
 
 
+def lnk_path_components(path: str) -> list[str]:
+    return [part for part in path.replace("/", "\\").split("\\") if part]
+
+
 def join_lnk_base_suffix(base: str, suffix: str) -> str:
+    """Join a LinkInfo base (LocalBasePath or NetName) and CommonPathSuffix by path components.
+
+    The suffix is treated as already embedded only when the base ends with exactly the suffix's
+    components and keeps components of its own before them; a bare UNC share root
+    (``\\\\server\\share``) never embeds its suffix, so ``\\\\srv\\data`` + ``data`` is
+    ``\\\\srv\\data\\data``.
+    """
     if not base:
         return suffix
-    if not suffix or base.lower().endswith(suffix.lower()):
+    suffix_parts = lnk_path_components(suffix)
+    if not suffix_parts:
+        return base
+    base_parts = lnk_path_components(base)
+    share_root = base.startswith("\\\\") and len(base_parts) <= 2
+    if (
+        not share_root
+        and len(base_parts) > len(suffix_parts)
+        and [part.lower() for part in base_parts[-len(suffix_parts) :]] == [part.lower() for part in suffix_parts]
+    ):
         return base
     return base.rstrip("\\") + "\\" + suffix.lstrip("\\")
 
@@ -3325,7 +3350,9 @@ def walk_cfb_directory(
 
 
 def cfb_sector(data: bytes, sector_size: int, sector_id: int) -> bytes:
-    start = 512 + sector_id * sector_size
+    # MS-CFB 2.2: the header occupies sector -1, so sector N starts at (N + 1) * sector size
+    # (offset 512 for 512-byte v3 sectors, 4096 for 4096-byte v4 sectors).
+    start = (sector_id + 1) * sector_size
     if sector_id < 0 or start >= len(data):
         return b""
     # A short final sector is returned as-is: Jump Lists are commonly written
