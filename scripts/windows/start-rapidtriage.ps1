@@ -20,23 +20,27 @@ function Write-Step {
     Write-Host "==> $Message" -ForegroundColor Cyan
 }
 
+# Native command output is sent to the host (Out-Host), never to the
+# function's output stream: a PowerShell function returns everything its
+# body writes, so a child that prints a line would otherwise turn the
+# returned exit code into an array and every caller check into a failure.
 function Invoke-SystemPython {
     param([string[]]$PythonArgs)
     if (Get-Command py -ErrorAction SilentlyContinue) {
-        & py -3 @PythonArgs
-        return $LASTEXITCODE
+        & py -3 @PythonArgs | Out-Host
+        return [int]$LASTEXITCODE
     }
     if (Get-Command python -ErrorAction SilentlyContinue) {
-        & python @PythonArgs
-        return $LASTEXITCODE
+        & python @PythonArgs | Out-Host
+        return [int]$LASTEXITCODE
     }
-    throw "Python was not found. Install Python 3.9+ from https://www.python.org/downloads/windows/ and enable 'Add python.exe to PATH'."
+    throw "Python was not found. Install Python 3.10+ from https://www.python.org/downloads/windows/ and enable 'Add python.exe to PATH'."
 }
 
 function Invoke-VenvPython {
     param([string[]]$PythonArgs)
-    & $VenvPython @PythonArgs
-    return $LASTEXITCODE
+    & $VenvPython @PythonArgs | Out-Host
+    return [int]$LASTEXITCODE
 }
 
 Set-Location $RepoRoot
@@ -86,5 +90,6 @@ if ($NoBrowser) {
 
 Write-Step "Starting rapidtriage web UI"
 Write-Host "The browser opens automatically with the API token. Press Ctrl+C in this window to stop the server."
-Invoke-VenvPython @("-m", "rapidtriage", "web", "--host", $HostName, "--port", "$Port")
+# The server stays attached to this console (no pipe) so its output is live.
+& $VenvPython @("-m", "rapidtriage", "web", "--host", $HostName, "--port", "$Port")
 exit $LASTEXITCODE

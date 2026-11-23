@@ -15,12 +15,15 @@ from rapidtriage.core.incremental import (
 )
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
 
+IDENTITY = {"profile_version": "run-evidence-identity-v1", "source_path": "/case/root", "input_kind": "windows"}
+
 
 class RapidTriageIncrementalIngestTests(unittest.TestCase):
     def test_build_evidence_delta_sets(self) -> None:
         previous = {
             "fingerprint": "prev",
             "root": "/case/root",
+            "evidence_identity": IDENTITY,
             "summary": {"truncated": False},
             "files": [
                 {"relative_path": "a.txt", "size_bytes": 3, "mtime_ns": 1, "sha256": "aaa"},
@@ -31,6 +34,7 @@ class RapidTriageIncrementalIngestTests(unittest.TestCase):
         current = {
             "fingerprint": "cur",
             "root": "/case/root",
+            "evidence_identity": IDENTITY,
             "summary": {"truncated": False},
             "files": [
                 {"relative_path": "a.txt", "size_bytes": 3, "mtime_ns": 1, "sha256": "aaa"},
@@ -53,6 +57,7 @@ class RapidTriageIncrementalIngestTests(unittest.TestCase):
         base = {
             "fingerprint": "x",
             "root": "/case/root",
+            "evidence_identity": IDENTITY,
             "summary": {"truncated": False},
             "files": [{"relative_path": "a.txt", "size_bytes": 1, "mtime_ns": 1, "sha256": "a"}],
         }
@@ -64,6 +69,27 @@ class RapidTriageIncrementalIngestTests(unittest.TestCase):
         truncated = {**base, "summary": {"truncated": True}}
         delta = build_evidence_delta(base, truncated)
         self.assertFalse(delta["usable"])
+
+        other_exhibit = {**base, "evidence_identity": {**IDENTITY, "source_path": "/other/exhibit"}}
+        delta = build_evidence_delta(base, other_exhibit)
+        self.assertFalse(delta["usable"])
+        self.assertTrue(any("evidence identity" in blocker for blocker in delta["blockers"]))
+
+        no_identity = {key: value for key, value in base.items() if key != "evidence_identity"}
+        self.assertFalse(build_evidence_delta(no_identity, base)["usable"])
+
+    def test_build_evidence_delta_recollects_files_without_a_content_hash(self) -> None:
+        previous = {
+            "fingerprint": "x",
+            "root": "/case/root",
+            "evidence_identity": IDENTITY,
+            "summary": {"truncated": False},
+            "files": [{"relative_path": "big.bin", "size_bytes": 9, "mtime_ns": 1, "sha256": None}],
+        }
+        delta = build_evidence_delta(previous, {**previous, "fingerprint": "y"})
+        self.assertTrue(delta["usable"])
+        self.assertEqual(delta["changed"], ["big.bin"])
+        self.assertEqual(delta["unchanged_paths"], [])
 
     def test_run_resume_unchanged_reuses_all_stages_without_delta(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

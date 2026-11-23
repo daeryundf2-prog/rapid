@@ -14096,6 +14096,39 @@
         },
         {
           "provider": "windows-eventlog",
+          "artifact_type": "eventlog-file",
+          "path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
+          "supported": false,
+          "details": {
+            "parser": "windows-eventlog-export-inventory",
+            "parser_version": "eventlog-normalized-v21",
+            "coverage_status": "detected",
+            "reportability": "inventory-only",
+            "source_path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
+            "source_format": "xml",
+            "source_hashes": {
+              "sha256": "3280198506b93b1d8c90fed52b92c8740c1b0ebb493bbe0d86d40941bad6f906"
+            },
+            "size": 586,
+            "channel_hint": "Security",
+            "export_read_status": "complete",
+            "export_row_count": 1,
+            "export_failed_row_count": 0,
+            "export_failed_locations": [],
+            "export_failed_locations_truncated": false,
+            "export_missing_row_count": 0,
+            "export_missing_row_count_status": "exact",
+            "text_truncated_rows": 0,
+            "payload_truncated_rows": 0,
+            "text_truncated_field_counts": [],
+            "triage_text_limits": {
+              "preview_max_chars": 512,
+              "payload_max_chars": 65536
+            }
+          }
+        },
+        {
+          "provider": "windows-eventlog",
           "artifact_type": "eventlog-logon-session",
           "path": "<ROOT>",
           "supported": true,
@@ -14201,7 +14234,7 @@
             "event_count": 1,
             "detection_count": 1,
             "parsed_row_count": 2,
-            "inventory_count": 0,
+            "inventory_count": 1,
             "native_chunk_count": 0,
             "record_candidate_count": 0,
             "source_files": [
@@ -14299,6 +14332,8 @@
               "payload_max_chars": 65536
             },
             "stale_below_first_record_count": 0,
+            "export_read_error_count": 0,
+            "export_read_errors": [],
             "native_capabilities": {
               "record_header": true,
               "file_header": true,

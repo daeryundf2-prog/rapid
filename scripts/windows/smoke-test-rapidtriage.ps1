@@ -23,23 +23,18 @@ function Write-Step {
     Write-Host "==> $Message" -ForegroundColor Cyan
 }
 
+# Child output goes to the host so the function returns only the exit code.
 function Invoke-SystemPython {
     param([string[]]$PythonArgs)
     if (Get-Command py -ErrorAction SilentlyContinue) {
-        & py -3 @PythonArgs
-        return $LASTEXITCODE
+        & py -3 @PythonArgs | Out-Host
+        return [int]$LASTEXITCODE
     }
     if (Get-Command python -ErrorAction SilentlyContinue) {
-        & python @PythonArgs
-        return $LASTEXITCODE
+        & python @PythonArgs | Out-Host
+        return [int]$LASTEXITCODE
     }
-    throw "Python was not found. Install Python 3.9+ and enable 'Add python.exe to PATH'."
-}
-
-function Invoke-VenvPython {
-    param([string[]]$PythonArgs)
-    & $VenvPython @PythonArgs
-    return $LASTEXITCODE
+    throw "Python was not found. Install Python 3.10+ and enable 'Add python.exe to PATH'."
 }
 
 function Invoke-CheckedPython {

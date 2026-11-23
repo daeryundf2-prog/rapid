@@ -1,9 +1,107 @@
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+LAUNCHER = REPO_ROOT / "scripts" / "windows" / "start-rapidtriage.ps1"
+POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
+
+# Dot-sources one helper function of a launcher script and reports what it
+# returns for children that print a line and exit with 0 or 3.
+FUNCTION_HARNESS = r"""
+param([string]$Launcher, [string]$FunctionName, [string]$Interpreter)
+$ErrorActionPreference = "Stop"
+$tokens = $null
+$parseErrors = $null
+$tree = [System.Management.Automation.Language.Parser]::ParseFile($Launcher, [ref]$tokens, [ref]$parseErrors)
+$definition = $tree.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $FunctionName
+}, $true)
+. ([scriptblock]::Create($definition.Extent.Text))
+$VenvPython = $Interpreter
+$results = @()
+foreach ($exitCode in @(0, 3)) {
+    $returned = Invoke-VenvPython @("-c", "import sys; print('child output line'); sys.exit($exitCode)")
+    $results += [pscustomobject]@{ expected = $exitCode; returned = $returned; is_int = ($returned -is [int]) }
+}
+Write-Output ("RESULT " + (ConvertTo-Json -Compress -InputObject $results))
+"""
+
+FAKE_VENV_PYTHON = """#!/bin/sh
+printf '%s\\n' "$*" >> "$FAKE_CALL_LOG"
+echo "child output: completed"
+case "$*" in
+  *doctor*) exit "${FAKE_DOCTOR_EXIT:-0}" ;;
+esac
+exit 0
+"""
+
+
+def run_powershell(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    assert POWERSHELL is not None
+    return subprocess.run(
+        [POWERSHELL, "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+        env={**os.environ, "POWERSHELL_TELEMETRY_OPTOUT": "1", **(env or {})},
+    )
+
+
+@unittest.skipIf(POWERSHELL is None, "PowerShell (pwsh/powershell) is not installed")
+class RapidTriageWindowsLauncherExitCodeTests(unittest.TestCase):
+    """D12: a child that writes to stdout must not turn the exit code into an array."""
+
+    def test_venv_helper_returns_only_the_child_exit_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            harness = Path(tmp) / "harness.ps1"
+            harness.write_text(FUNCTION_HARNESS, encoding="utf-8")
+            result = run_powershell(str(harness), str(LAUNCHER), "Invoke-VenvPython", sys.executable)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        line = next(line for line in result.stdout.splitlines() if line.startswith("RESULT "))
+        outcomes = json.loads(line.removeprefix("RESULT "))
+        self.assertEqual([(item["expected"], item["returned"], item["is_int"]) for item in outcomes], [(0, 0, True), (3, 3, True)])
+        self.assertIn("child output line", result.stdout)
+
+    @unittest.skipIf(os.name == "nt", "the stand-in .venv python is a POSIX shell script")
+    def test_launcher_runs_every_install_step_and_propagates_doctor_failure(self) -> None:
+        for doctor_exit in (0, 7):
+            with self.subTest(doctor_exit=doctor_exit), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / "install dir 한글"
+                script = root / "scripts" / "windows" / "start-rapidtriage.ps1"
+                script.parent.mkdir(parents=True)
+                shutil.copyfile(LAUNCHER, script)
+                fake_python = root / ".venv" / "Scripts" / "python.exe"
+                fake_python.parent.mkdir(parents=True)
+                fake_python.write_text(FAKE_VENV_PYTHON, encoding="utf-8")
+                fake_python.chmod(0o755)
+                call_log = Path(tmp) / "calls.txt"
+
+                result = run_powershell(
+                    str(script),
+                    "-DoctorOnly",
+                    env={"FAKE_CALL_LOG": str(call_log), "FAKE_DOCTOR_EXIT": str(doctor_exit)},
+                )
+
+                self.assertEqual(result.returncode, doctor_exit, result.stdout + result.stderr)
+                self.assertEqual(
+                    call_log.read_text(encoding="utf-8").splitlines(),
+                    [
+                        "-m pip install -U pip",
+                        "-m pip install -e .[web]",
+                        "-m rapidtriage doctor --host 127.0.0.1 --port 8765",
+                    ],
+                )
 
 
 class RapidTriageWindowsLauncherTests(unittest.TestCase):

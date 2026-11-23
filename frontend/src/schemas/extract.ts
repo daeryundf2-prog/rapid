@@ -46,4 +46,10 @@ skipped: {
 original_path: string
 reason: string
 }[]
+/**
+ * Run stage reuse binding a --resume run must match: evidence identity digest, input fingerprint, stage options digest
+ */
+stage_reuse?: {
+[k: string]: string | undefined
+}
 }

@@ -46,6 +46,42 @@ signature_unrecognized_known_extension_count?: number
 commercial_gap_ids?: string[]
 matched_rule_count?: number
 ioc_hit_count?: number
+time_origin?: (string | null)
+source_file_mtime_range?: {
+[k: string]: unknown | undefined
+}
+excluded_file_count?: number
+exclusion_reason_counts?: {
+[k: string]: unknown | undefined
+}
+excluded_category_counts?: {
+[k: string]: unknown | undefined
+}
+limit_reached?: boolean
+attribute_counts?: {
+[k: string]: unknown | undefined
+}
+deleted_flag_counts?: {
+[k: string]: unknown | undefined
+}
+duplicate_hash_profile?: {
+[k: string]: unknown | undefined
+}
+duplicate_groups_truncated?: boolean
+fuzzy_text_duplicate_profile?: {
+[k: string]: unknown | undefined
+}
+fuzzy_text_duplicates_truncated?: boolean
+mismatch_candidates_truncated?: boolean
+signature_population?: ({
+[k: string]: unknown | undefined
+} | null)
+hashed_candidate_count?: (number | null)
+inventory_count?: (number | null)
+inventory_category_counts?: ({
+[k: string]: unknown | undefined
+} | null)
+inventory_note?: (string | null)
 }
 candidates: {
 path: string
@@ -93,6 +129,33 @@ reportability: string
 commercial_claim_allowed: boolean
 [k: string]: unknown | undefined
 }
+relative_path?: (string | null)
+time_origin?: (string | null)
+modified_at_origin?: (string | null)
+source_file_mtime?: (string | null)
+source_file_ctime?: (string | null)
+source_file_atime?: (string | null)
+fs_modified_at?: (string | number | boolean | {
+[k: string]: unknown | undefined
+} | unknown[] | null)
+fs_created_at?: (string | number | boolean | {
+[k: string]: unknown | undefined
+} | unknown[] | null)
+fs_accessed_at?: (string | number | boolean | {
+[k: string]: unknown | undefined
+} | unknown[] | null)
+fs_changed_at?: (string | number | boolean | {
+[k: string]: unknown | undefined
+} | unknown[] | null)
+attributes?: unknown[]
+attributes_origin?: (string | null)
+is_deleted?: (string | number | boolean | {
+[k: string]: unknown | undefined
+} | unknown[] | null)
+hashes?: ({
+[k: string]: unknown | undefined
+} | null)
+hash_scope?: (string | null)
 }[]
 known_good_suppression_profile?: {
 [k: string]: unknown | undefined
@@ -171,4 +234,17 @@ type: string
 value: string
 count?: number
 }[]
+time_provenance?: {
+[k: string]: unknown | undefined
+}
+file_exclusions?: {
+[k: string]: unknown | undefined
+}
+inventory?: (unknown[] | null)
+/**
+ * Run stage reuse binding a --resume run must match: evidence identity digest, input fingerprint, stage options digest
+ */
+stage_reuse?: {
+[k: string]: string | undefined
+}
 }
