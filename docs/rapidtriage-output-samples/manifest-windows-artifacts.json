@@ -4195,6 +4195,7 @@
               {
                 "index": 0,
                 "lnk_offset": 14,
+                "lnk_size": 310,
                 "target_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
                 "embedded_paths": [
                   "C:\\Users\\alice\\Documents",
@@ -4829,6 +4830,7 @@
               {
                 "index": 0,
                 "lnk_offset": 16,
+                "lnk_size": 306,
                 "target_path": "C:\\Users\\alice\\Downloads\\installer.exe",
                 "embedded_paths": [
                   "C:\\Users\\alice\\Documents",
@@ -5586,8 +5588,12 @@
                   "birth_droid_volume_identifier": "89abcdef-4567-0123-1032-547698badcfe",
                   "birth_droid_file_identifier": "0df0ad0b-1234-5678-aabb-ccddeeff0011",
                   "droid_file_mac_address": "",
+                  "droid_file_node": "",
+                  "droid_file_node_kind": "not-uuid-v1",
                   "droid_file_timestamp": "",
                   "birth_droid_file_mac_address": "",
+                  "birth_droid_file_node": "",
+                  "birth_droid_file_node_kind": "not-uuid-v1",
                   "birth_droid_file_timestamp": "",
                   "validation_status": "candidate-requires-known-answer-corpus"
                 }
@@ -5602,8 +5608,12 @@
               "birth_droid_volume_identifier": "89abcdef-4567-0123-1032-547698badcfe",
               "birth_droid_file_identifier": "0df0ad0b-1234-5678-aabb-ccddeeff0011",
               "droid_file_mac_address": "",
+              "droid_file_node": "",
+              "droid_file_node_kind": "not-uuid-v1",
               "droid_file_timestamp": "",
               "birth_droid_file_mac_address": "",
+              "birth_droid_file_node": "",
+              "birth_droid_file_node_kind": "not-uuid-v1",
               "birth_droid_file_timestamp": "",
               "validation_status": "candidate-requires-known-answer-corpus"
             },
@@ -25277,6 +25287,10 @@
               "2024-04-01T09:10:11+00:00",
               "2024-03-30T08:09:10+00:00"
             ],
+            "last_run_times_100ns": [
+              "2024-04-01T09:10:11.0000000Z",
+              "2024-03-30T08:09:10.0000000Z"
+            ],
             "referenced_paths": [
               "\\DEVICE\\HARDDISKVOLUME3\\WINDOWS\\SYSTEM32\\WINDOWSPOWERSHELL\\V1.0\\POWERSHELL.EXE"
             ],
@@ -25430,8 +25444,11 @@
               133564362110000000,
               133562597500000000
             ],
+            "last_run_at_100ns": "2024-04-01T09:10:11.0000000Z",
             "run_time_1": "2024-04-01T09:10:11+00:00",
+            "run_time_1_100ns": "2024-04-01T09:10:11.0000000Z",
             "run_time_2": "2024-03-30T08:09:10+00:00",
+            "run_time_2_100ns": "2024-03-30T08:09:10.0000000Z",
             "header_executable_name_may_be_truncated": false,
             "header_prefetch_hash": "00000000",
             "referenced_path_source": "utf16-string-scan-fallback",
@@ -25461,6 +25478,7 @@
             "reference_rows_truncated": false,
             "source_file_mtime": "2024-03-05T06:13:14+00:00",
             "timestamp": "2024-04-01T09:10:11+00:00",
+            "timestamp_100ns": "2024-04-01T09:10:11.0000000Z",
             "timestamp_source": "prefetch_last_run_time",
             "timestamp_kind": "run",
             "evidence_strength": "execution-indicator",

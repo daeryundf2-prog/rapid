@@ -687,6 +687,25 @@ def parse_lnk_extra_data(data: bytes, offset: int) -> tuple[list[dict[str, objec
     return blocks, tracker_data
 
 
+def lnk_structural_length(data: bytes) -> int | None:
+    """Byte length of the Shell Link starting at ``data[0]``: header, IDList, LinkInfo,
+    StringData and ExtraData through the TerminalBlock; ``None`` when the structure overruns
+    the buffer or never terminates."""
+    if len(data) < LNK_HEADER_SIZE:
+        return None
+    _strings, offset = parse_lnk_string_data(data, read_u32(data, 0x14))
+    for _ in range(MAX_LNK_EXTRA_DATA_BLOCKS + 1):
+        if offset + 4 > len(data):
+            return None
+        block_size = read_u32(data, offset)
+        if block_size < 4:
+            return offset + 4
+        if block_size < 8 or offset + block_size > len(data):
+            return None
+        offset += block_size
+    return None
+
+
 def parse_lnk_property_store_data_block(block_data: bytes) -> dict[str, object]:
     payload = block_data[8:]
     guid_candidates = []
@@ -844,6 +863,8 @@ def parse_lnk_tracker_data_block(block_data: bytes) -> dict[str, object]:
     )
     droid_file = format_guid_le(block_data[0x30:0x40])
     birth_droid_file = format_guid_le(block_data[0x50:0x60])
+    droid_node, droid_node_kind = uuid_v1_node(block_data[0x30:0x40])
+    birth_node, birth_node_kind = uuid_v1_node(block_data[0x50:0x60])
     return {
         "parse_status": "parsed-candidate" if len(block_data) >= 0x60 else "truncated-candidate",
         "machine_id": machine_id,
@@ -852,21 +873,42 @@ def parse_lnk_tracker_data_block(block_data: bytes) -> dict[str, object]:
         "droid_file_identifier": droid_file,
         "birth_droid_volume_identifier": format_guid_le(block_data[0x40:0x50]),
         "birth_droid_file_identifier": birth_droid_file,
-        "droid_file_mac_address": uuid_v1_mac(block_data[0x30:0x40]),
+        "droid_file_mac_address": droid_node if droid_node_kind == UUID_NODE_MAC_CANDIDATE else "",
+        "droid_file_node": droid_node,
+        "droid_file_node_kind": droid_node_kind,
         "droid_file_timestamp": uuid_v1_time(block_data[0x30:0x40]),
-        "birth_droid_file_mac_address": uuid_v1_mac(block_data[0x50:0x60]),
+        "birth_droid_file_mac_address": birth_node if birth_node_kind == UUID_NODE_MAC_CANDIDATE else "",
+        "birth_droid_file_node": birth_node,
+        "birth_droid_file_node_kind": birth_node_kind,
         "birth_droid_file_timestamp": uuid_v1_time(block_data[0x50:0x60]),
         "validation_status": "candidate-requires-known-answer-corpus",
     }
 
 
-def uuid_v1_mac(raw: bytes) -> str:
+# RFC 9562 §6.10: a UUIDv1 node generated without a network card has the multicast bit (the
+# least significant bit of the first octet) set, so it does not identify any adapter. A
+# unicast node is still only an address candidate until it is matched to a seized device.
+UUID_NODE_MAC_CANDIDATE = "unicast-mac-candidate"
+UUID_NODE_RANDOM = "multicast-random-node-not-mac"
+UUID_NODE_NOT_V1 = "not-uuid-v1"
+
+
+def uuid_v1_node(raw: bytes) -> tuple[str, str]:
+    """Raw UUIDv1 node (``aa:bb:..``) and its kind; ``("", not-uuid-v1)`` for other versions."""
     if len(raw) != 16:
-        return ""
+        return "", ""
     value = uuid.UUID(bytes_le=raw)
     if value.version != 1:
-        return ""
-    return ":".join(f"{byte:02x}" for byte in value.node.to_bytes(6, "big"))
+        return "", UUID_NODE_NOT_V1
+    node = value.node.to_bytes(6, "big")
+    kind = UUID_NODE_RANDOM if node[0] & 0x01 else UUID_NODE_MAC_CANDIDATE
+    return ":".join(f"{byte:02x}" for byte in node), kind
+
+
+def uuid_v1_mac(raw: bytes) -> str:
+    """UUIDv1 node as a MAC address candidate; ``""`` for non-v1 or multicast (random) nodes."""
+    node, kind = uuid_v1_node(raw)
+    return node if kind == UUID_NODE_MAC_CANDIDATE else ""
 
 
 def uuid_v1_time(raw: bytes) -> str:
@@ -2069,6 +2111,8 @@ def parse_destlist_entries_strict(
             "birth_volume_droid": format_guid_le(data[offset + 0x28 : offset + 0x38]),
             "birth_file_droid": format_guid_le(data[offset + 0x38 : offset + 0x48]),
             "file_droid_mac_address": uuid_v1_mac(data[offset + 0x18 : offset + 0x28]),
+            "file_droid_node": uuid_v1_node(data[offset + 0x18 : offset + 0x28])[0],
+            "file_droid_node_kind": uuid_v1_node(data[offset + 0x18 : offset + 0x28])[1],
             "file_droid_timestamp": uuid_v1_time(data[offset + 0x18 : offset + 0x28]),
             "hostname": hostname,
             "hostname_encoding": hostname_encoding,
@@ -3164,8 +3208,16 @@ def append_lnk_destinations(
         )
         for destination in destinations
     }
-    for offset in find_lnk_offsets(data):
-        metadata = parse_lnk_metadata_from_bytes(data[offset:])
+    offsets = list(find_lnk_offsets(data))
+    for position, offset in enumerate(offsets):
+        # Parse only this link's own bytes: a shell-namespace link without a file path must not
+        # pick up the next link's path strings from the rest of the container (D19-1). A link
+        # whose structure does not terminate is read up to the next link header instead.
+        tail = data[offset:]
+        length = lnk_structural_length(tail)
+        if length is None:
+            length = (offsets[position + 1] if position + 1 < len(offsets) else len(data)) - offset
+        metadata = parse_lnk_metadata_from_bytes(tail[:length])
         if metadata.get("lnk_parse_status") != "parsed":
             continue
         target_path = str(metadata.get("target_path") or "")
@@ -3177,6 +3229,7 @@ def append_lnk_destinations(
         destination = {
             "index": len(destinations),
             "lnk_offset": offset,
+            "lnk_size": length,
             "target_path": target_path,
             "embedded_paths": embedded_paths,
             "target_created_at": metadata.get("target_created_at", ""),

@@ -17,7 +17,7 @@ from .._walk import iter_evidence_paths
 from .antiforensics import redact_recovery_passwords
 from .common import build_forensic_review, iter_windows_user_homes
 from .ese import ESE_SCAN_READ_SIZE, build_ese_string_pivots, probe_ese_database
-from .os_account import decode_reg_export
+from .os_account import decode_reg_export, decode_sid
 from .pca import collect_pca_text_files
 from .registry import (
     filetime_to_iso_ticks,
@@ -2695,6 +2695,7 @@ def build_srum_schema_row_record(
     table_name = str(entry.get("table_name") or "")
     record_offset = int(entry.get("record_file_offset") or 0)
     app_identity = srum_schema_row_identity(row)
+    user_sid = srum_schema_row_user_sid(row)
     timestamp = str(row.get("TimeStamp") or row.get("EndTime") or row.get("Timestamp") or "")
     validation_checks = {
         "has_table_name": bool(table_name),
@@ -2702,6 +2703,7 @@ def build_srum_schema_row_record(
         "row_level_decoding_available": True,
         "native_table_catalog_decoding_available": True,
         "has_app_identity": bool(app_identity),
+        "has_user_sid": bool(user_sid),
         "has_timestamp_candidate": bool(timestamp),
         "has_long_value_marker": any(
             "long_value" in marker or "separated" in marker or "lv-key" in marker for marker in markers
@@ -2743,6 +2745,13 @@ def build_srum_schema_row_record(
             "deleted_row": bool(entry.get("deleted")),
             "table_walk_status": str(entry.get("table_walk_status") or ""),
             "app_identity": app_identity,
+            # IdType 3 IdBlob decoded as a binary SID (the raw bytes stay in row_fields).
+            "user_sid": user_sid,
+            "id_map_identity_kind": (
+                ("user-sid" if user_sid else "user-sid-undecodable")
+                if srum_id_map_row_is_user_sid(row)
+                else ("app-identifier" if app_identity else "")
+            ),
             "timestamp": timestamp,
             "timestamp_source": "native-ese-row-field" if timestamp else "not-decoded",
             "row_fields": _json_safe_row_fields(row),
@@ -2763,6 +2772,7 @@ def build_srum_schema_row_record(
                 primary_evidence=[
                     f"table={table_name}",
                     f"identity={app_identity}" if app_identity else "",
+                    f"user_sid={user_sid}" if user_sid else "",
                     f"timestamp={timestamp}" if timestamp else "",
                 ],
                 validation_required=True,
@@ -2824,7 +2834,27 @@ def _utf16le_preview(raw: bytes) -> str:
     return text[:SRUM_ROW_FIELD_UTF16_PREVIEW_CHARS]
 
 
+# SruDbIdMapTable.IdType 3 rows map an index to a user: IdBlob is a binary SID, not UTF-16 text.
+SRUM_ID_TYPE_USER_SID = 3
+
+
+def srum_id_map_row_is_user_sid(row: Mapping[str, object]) -> bool:
+    id_type = row.get("IdType")
+    return isinstance(id_type, int) and not isinstance(id_type, bool) and id_type == SRUM_ID_TYPE_USER_SID
+
+
+def srum_schema_row_user_sid(row: Mapping[str, object]) -> str:
+    """Decoded ``S-1-...`` SID of an IdType 3 SruDbIdMapTable row (``""`` otherwise)."""
+    blob = row.get("IdBlob")
+    if not srum_id_map_row_is_user_sid(row) or not isinstance(blob, (bytes, bytearray)):
+        return ""
+    return decode_sid(bytes(blob))
+
+
 def srum_schema_row_identity(row: Mapping[str, object]) -> str:
+    """App identifier of a row; never set for an IdType 3 (user SID) row."""
+    if srum_id_map_row_is_user_sid(row):
+        return ""
     blob = row.get("IdBlob")
     if isinstance(blob, (bytes, bytearray)):
         text = bytes(blob).decode("utf-16le", errors="replace").strip("\x00")

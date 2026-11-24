@@ -11,6 +11,7 @@ from pathlib import Path, PureWindowsPath
 
 from ...core.artifact_profiles import cap_list_field
 from ...core.audit import compute_sha256
+from ...core.filetime import filetime_to_iso_7
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .common import build_forensic_review, isoformat_from_timestamp
@@ -228,6 +229,7 @@ class WindowsPrefetchProvider:
                     # Host mtime of the acquired copy is provenance only, never an event.
                     "source_file_mtime": isoformat_from_timestamp(stat_result.st_mtime),
                     "timestamp": header.get("last_run_at", ""),
+                    "timestamp_100ns": header.get("last_run_at_100ns", ""),
                     "timestamp_source": "prefetch_last_run_time" if header.get("last_run_at") else "missing_prefetch_run_time",
                     "timestamp_kind": "run",
                     "evidence_strength": "execution-indicator",
@@ -454,6 +456,7 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
         "run_count": 0,
         "last_run_at": "",
         "last_run_times": [],
+        "last_run_times_100ns": [],
         "referenced_paths": [],
         "referenced_path_count": 0,
         "volume_candidates": [],
@@ -508,11 +511,15 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
     hints["run_count_cross_check"] = decoded["run_count_cross_check"]
     hints["file_information_layout"] = decoded["file_information_layout"]
     run_times = list(decoded["run_times"])
+    run_times_100ns = list(decoded["run_times_100ns"])
     hints["last_run_times"] = run_times
+    hints["last_run_times_100ns"] = run_times_100ns
     hints["last_run_filetimes"] = list(decoded["run_filetimes"])
     hints["last_run_at"] = run_times[0] if run_times else ""
+    hints["last_run_at_100ns"] = run_times_100ns[0] if run_times_100ns else ""
     for index, value in enumerate(run_times[:8], start=1):
         hints[f"run_time_{index}"] = value
+        hints[f"run_time_{index}_100ns"] = run_times_100ns[index - 1]
     hints["header_executable_name"] = decoded["header_executable_name"]
     hints["header_executable_name_may_be_truncated"] = decoded["header_executable_name_may_be_truncated"]
     hints["header_prefetch_hash"] = decoded["header_prefetch_hash"]
@@ -652,6 +659,7 @@ def decode_scca_structure(blob: bytes, version: int) -> dict[str, object]:
         "run_count_cross_check": {},
         "file_information_layout": "",
         "run_times": [],
+        "run_times_100ns": [],
         "run_filetimes": [],
         "file_metrics": [],
         "file_metrics_count": metrics_count,
@@ -673,7 +681,17 @@ def decode_scca_structure(blob: bytes, version: int) -> dict[str, object]:
     filetimes = [read_u64(blob, run_time_offset + index * 8) for index in range(run_slots)]
     nonzero_filetimes = [value for value in filetimes if value]
     result["run_filetimes"] = nonzero_filetimes
-    result["run_times"] = [text for text in (filetime_to_iso(value) for value in nonzero_filetimes) if text]
+    # Microsecond ISO text plus the 7-digit sibling of the same slot: two runs 600 ns apart
+    # keep distinct times through the timeline (D19-8).
+    run_times: list[str] = []
+    run_times_100ns: list[str] = []
+    for value in nonzero_filetimes:
+        text = filetime_to_iso(value)
+        if text:
+            run_times.append(text)
+            run_times_100ns.append(filetime_to_iso_7(value) or "")
+    result["run_times"] = run_times
+    result["run_times_100ns"] = run_times_100ns
 
     if version in (30, 31):
         selected = PREFETCH_V30_RUN_COUNT_BY_METRICS_OFFSET.get(metrics_offset)
@@ -1814,15 +1832,32 @@ def build_prefetch_trusted_diff(
     *,
     trusted_tool: str,
 ) -> dict[str, object]:
-    return build_prefetch_diff_payload(
-        index_prefetch_rows(rapid_rows),
-        index_prefetch_rows(trusted_rows),
-        trusted_tool=trusted_tool,
-    )
+    rapid_index = index_prefetch_rows(rapid_rows)
+    trusted_index = index_prefetch_rows(trusted_rows)
+    acquisition_identity = reconcile_prefetch_acquisition_identity(rapid_index, trusted_index)
+    payload = build_prefetch_diff_payload(rapid_index, trusted_index, trusted_tool=trusted_tool)
+    payload["acquisition_identity"] = acquisition_identity
+    if acquisition_identity["ambiguous_unresolved_count"] and payload["status"] == "pass":
+        # Same executable/hash read from several acquisitions, and the rows name no source to
+        # tell them apart: a pass would rest on an unverified pairing (D19-2).
+        payload["status"] = "acquisition-identity-unresolved"
+        payload["commercial_grade_evidence"] = False
+        payload["reportability_decision"] = {
+            "decision": "do-not-use-prefetch-output-as-final",
+            "blockers": ["prefetch-acquisition-identity-required"],
+        }
+    return payload
 
 
 def index_prefetch_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
-    indexed: dict[str, dict[str, str]] = {}
+    """Index rows by executable + Prefetch hash without collapsing acquisitions.
+
+    Two acquisitions of the same Prefetch file share executable and hash, so every row is
+    kept: repeated keys are numbered (``#2``, ``#3``) after ordering by run count and source
+    SHA-256/path, so one acquisition's row cannot stand in for another's and the comparison
+    counts multiplicity regardless of input order.
+    """
+    grouped: dict[str, list[dict[str, str]]] = {}
     for row in rows:
         payload = prefetch_diff_row_payload(row)
         version_metadata = (
@@ -1847,7 +1882,8 @@ def index_prefetch_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[
         key = "|".join(item for item in (executable, pf_hash) if item)
         if not key:
             continue
-        indexed[key] = {
+        source_hashes = payload.get("source_hashes") if isinstance(payload.get("source_hashes"), Mapping) else {}
+        grouped.setdefault(key, []).append({
             "executable": executable,
             "prefetch_hash": pf_hash,
             "run_count": normalized_int_text(first_alias(payload, "run_count", "runcount")),
@@ -1894,8 +1930,57 @@ def index_prefetch_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[
                     first_alias(section_profile, "section_profile_hash"),
                 )
             ),
-        }
+            "source_sha256": normalized_diff_value(
+                first_present(first_alias(payload, "source_sha256", "sha256"), first_alias(source_hashes, "sha256"))
+            ),
+            "source_path": normalized_diff_value(
+                first_alias(payload, "source_path", "source_filename", "source_file")
+            ),
+        })
+    indexed: dict[str, dict[str, str]] = {}
+    for key, entries in grouped.items():
+        entries.sort(
+            key=lambda item: (len(item["run_count"]), item["run_count"], item["source_sha256"], item["source_path"])
+        )
+        for count, entry in enumerate(entries, start=1):
+            entry["acquisition_group_size"] = str(len(entries))
+            indexed[key if count == 1 else f"{key}#{count}"] = entry
     return indexed
+
+
+def reconcile_prefetch_acquisition_identity(
+    rapid_index: Mapping[str, dict[str, str]],
+    trusted_index: Mapping[str, dict[str, str]],
+) -> dict[str, object]:
+    """Compare each matched row's acquisition by SHA-256 when both sides name one (a relocated
+    copy of the same bytes still matches), else by source path. Rows where either side names
+    neither are identity-unresolved; when their executable/hash occurs more than once on either
+    side the pairing itself is ambiguous and is counted separately."""
+    by_sha256 = by_path = unresolved = ambiguous = 0
+    for key in set(rapid_index) & set(trusted_index):
+        rapid, trusted = rapid_index[key], trusted_index[key]
+        group_size = max(int(rapid["acquisition_group_size"]), int(trusted["acquisition_group_size"]))
+        if rapid["source_sha256"] and trusted["source_sha256"]:
+            rapid["source_path"] = trusted["source_path"] = ""
+            by_sha256 += 1
+            continue
+        rapid["source_sha256"] = trusted["source_sha256"] = ""
+        if rapid["source_path"] and trusted["source_path"]:
+            by_path += 1
+            continue
+        unresolved += 1
+        if group_size > 1:
+            ambiguous += 1
+    for index in (rapid_index, trusted_index):
+        for entry in index.values():
+            entry.pop("acquisition_group_size", None)
+    return {
+        "compared_by_sha256": by_sha256,
+        "compared_by_source_path": by_path,
+        "unresolved_count": unresolved,
+        "ambiguous_unresolved_count": ambiguous,
+        "status": "acquisition-identity-unresolved" if unresolved else "acquisition-identity-compared",
+    }
 
 
 def prefetch_diff_row_payload(row: Mapping[str, object]) -> Mapping[str, object]:
