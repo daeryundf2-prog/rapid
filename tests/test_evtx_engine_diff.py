@@ -287,7 +287,11 @@ class EngineSelectionTests(unittest.TestCase):
         self.assertIn("빌드되지 않았습니다", fields["native_evtx_engine_notice_ko"])
 
     def test_stale_module_falls_back_with_notice(self) -> None:
-        stale = types.SimpleNamespace(EvtxChunkDecoder=object, evtx_decoder_version=lambda: "evtx-chunk-binxml-decoder-v1")
+        stale = types.SimpleNamespace(
+            EvtxChunkDecoder=object,
+            evtx_decoder_version=lambda: "evtx-chunk-binxml-decoder-v1",
+            redact_recovery_passwords_in=None,
+        )
         with unittest.mock.patch("rapidtriage.core.native_accel.extension", return_value=stale):
             selection = evtx_engine.resolve_evtx_engine("rust")
         self.assertEqual(selection.active, "python")

@@ -53,8 +53,9 @@ def load_native_evtx_decoder() -> tuple[Any, str]:
     module = native_accel.extension()
     if module is None:
         return None, "rapidcore_native 확장 모듈이 빌드되지 않았습니다(scripts/build-native-accel.py)"
-    if not hasattr(module, "EvtxChunkDecoder") or not hasattr(module, "evtx_decoder_version"):
-        return None, "rapidcore_native 확장 모듈에 EVTX 디코더가 없습니다(이전 빌드)"
+    required = ("EvtxChunkDecoder", "evtx_decoder_version", "redact_recovery_passwords_in")
+    if not all(hasattr(module, name) for name in required):
+        return None, "rapidcore_native 확장 모듈에 EVTX 엔진 함수가 없습니다(이전 빌드)"
     native_version = str(module.evtx_decoder_version())
     if native_version != EVTX_NATIVE_DECODER_VERSION:
         return None, (

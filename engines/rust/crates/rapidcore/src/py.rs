@@ -9,7 +9,7 @@ use crate::evtx;
 use crate::evtx_binxml::{self, ChunkDecoder, DecodeError, DecodedRecord, Raw};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyString};
+use pyo3::types::{PyDict, PyList, PyString, PyTuple};
 use pyo3::{intern, IntoPy};
 use std::borrow::Cow;
 use std::path::Path;
@@ -156,12 +156,136 @@ impl EvtxChunkDecoder {
         )
     }
 }
+/// Nesting below this is handed to the Python walker (`redact_tree`).
+const REDACT_MAX_DEPTH: u32 = 200;
+/// `redact_recovery_passwords` only scans strings this long (code points).
+const RECOVERY_PASSWORD_MIN_CHARS: usize = 48;
+
+/// Python's `RECOVERY_PASSWORD_LOOSE` (`\d{6}(?:[-\s‐-―−]?\d{6}){7}`) matches 48
+/// digits with at most one separator between them. This scan counts digits
+/// (`char::is_numeric`, a superset of `\d`) over runs where every non-digit is a
+/// single character between digits and is not a letter (a superset of the
+/// separator class), so it never skips a string the regex could match.
+fn may_hold_recovery_password(text: &Bound<'_, PyString>) -> bool {
+    let Ok(value) = text.to_str() else {
+        // Lone surrogates: let Python decide.
+        return true;
+    };
+    let mut digits = 0usize;
+    let mut after_digit = false;
+    for character in value.chars() {
+        if character.is_numeric() {
+            digits += 1;
+            if digits >= RECOVERY_PASSWORD_MIN_CHARS {
+                return true;
+            }
+            after_digit = true;
+        } else if character.is_alphabetic() || !after_digit {
+            digits = 0;
+            after_digit = false;
+        } else {
+            after_digit = false;
+        }
+    }
+    false
+}
+
+/// `None` when `value` is unchanged (the caller keeps the same object).
+fn redact_walk(
+    value: &Bound<'_, PyAny>,
+    redact_text: &Bound<'_, PyAny>,
+    redact_tree: &Bound<'_, PyAny>,
+    depth: u32,
+) -> PyResult<Option<PyObject>> {
+    let py = value.py();
+    let replaced = |out: Bound<'_, PyAny>| -> Option<PyObject> {
+        if out.is(value) {
+            None
+        } else {
+            Some(out.unbind())
+        }
+    };
+    if let Ok(text) = value.downcast::<PyString>() {
+        if text.len()? >= RECOVERY_PASSWORD_MIN_CHARS && may_hold_recovery_password(text) {
+            return Ok(replaced(redact_text.call1((text,))?));
+        }
+        return Ok(None);
+    }
+    let container = value.is_instance_of::<PyDict>()
+        || value.is_instance_of::<PyList>()
+        || value.is_instance_of::<PyTuple>();
+    if !container {
+        return Ok(None);
+    }
+    if depth >= REDACT_MAX_DEPTH {
+        return Ok(replaced(redact_tree.call1((value,))?));
+    }
+    if let Ok(dict) = value.downcast::<PyDict>() {
+        // Copy only once something changed (most rows hold no recovery password).
+        let mut out: Option<Bound<'_, PyDict>> = None;
+        for (index, (key, item)) in dict.iter().enumerate() {
+            let new = redact_walk(&item, redact_text, redact_tree, depth + 1)?;
+            if let Some(fresh) = &out {
+                fresh.set_item(key, new.unwrap_or_else(|| item.unbind()))?;
+            } else if let Some(new) = new {
+                let fresh = PyDict::new_bound(py);
+                for (old_key, old_item) in dict.iter().take(index) {
+                    fresh.set_item(old_key, old_item)?;
+                }
+                fresh.set_item(key, new)?;
+                out = Some(fresh);
+            }
+        }
+        return Ok(out.map(|fresh| fresh.into_any().unbind()));
+    }
+    let items: Vec<Bound<'_, PyAny>> = if let Ok(list) = value.downcast::<PyList>() {
+        list.iter().collect()
+    } else {
+        value.downcast::<PyTuple>()?.iter().collect()
+    };
+    let mut out: Option<Vec<PyObject>> = None;
+    for (index, item) in items.iter().enumerate() {
+        let new = redact_walk(item, redact_text, redact_tree, depth + 1)?;
+        if let Some(fresh) = &mut out {
+            fresh.push(new.unwrap_or_else(|| item.clone().unbind()));
+        } else if let Some(new) = new {
+            let mut fresh: Vec<PyObject> = items[..index]
+                .iter()
+                .map(|old| old.clone().unbind())
+                .collect();
+            fresh.push(new);
+            out = Some(fresh);
+        }
+    }
+    let Some(fresh) = out else {
+        return Ok(None);
+    };
+    Ok(Some(if value.is_instance_of::<PyList>() {
+        PyList::new_bound(py, fresh).into_any().unbind()
+    } else {
+        PyTuple::new_bound(py, fresh).into_any().unbind()
+    }))
+}
+
+/// Native walk of `antiforensics.redact_recovery_passwords_in`: same result and
+/// the same object back when nothing changed. Every string that could hold a
+/// recovery password is passed to `redact_text` (the Python
+/// `redact_recovery_passwords`), so masking stays the Python implementation's.
+#[pyfunction]
+fn redact_recovery_passwords_in(
+    value: &Bound<'_, PyAny>,
+    redact_text: &Bound<'_, PyAny>,
+    redact_tree: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    Ok(redact_walk(value, redact_text, redact_tree, 0)?.unwrap_or_else(|| value.clone().unbind()))
+}
 
 #[pymodule]
 fn rapidcore_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(scan_evtx, module)?)?;
     module.add_function(wrap_pyfunction!(engine_version, module)?)?;
     module.add_function(wrap_pyfunction!(evtx_decoder_version, module)?)?;
+    module.add_function(wrap_pyfunction!(redact_recovery_passwords_in, module)?)?;
     module.add_class::<EvtxChunkDecoder>()?;
     Ok(())
 }

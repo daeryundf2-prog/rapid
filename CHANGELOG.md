@@ -47,3 +47,9 @@
   records why in `native_mft_engine*` / `native_usn_engine*` run metadata.
   Build with `python scripts/build-rapid-ntfs.py`. See
   `docs/architecture/rapid-ntfs.md`.
+- With the Rust EVTX engine selected, event and detection rows are walked for
+  BitLocker recovery passwords in Rust
+  (`rapidcore_native.redact_recovery_passwords_in`). Any string that could hold
+  one still goes through the Python `redact_recovery_passwords`, so the output
+  is identical (`tests/test_evtx_engine_rows_diff.py`). About 10× faster per
+  full-detail row: 580–670 µs down to 50–65 µs.

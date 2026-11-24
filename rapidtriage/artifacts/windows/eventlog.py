@@ -26,7 +26,7 @@ from ...core.json_safe import escape_lone_surrogates, json_default
 from ...core.models import ArtifactRecord
 from ...core.safe_xml import UnsafeXmlError, safe_xml_fromstring, safe_xml_parse
 from .._walk import iter_evidence_paths
-from .antiforensics import redact_recovery_passwords_in
+from .antiforensics import redact_recovery_passwords, redact_recovery_passwords_in
 from .evtx_engine import (
     NativeEvtxChunkDecoder,
     requested_evtx_engine,
@@ -1873,10 +1873,10 @@ class WindowsEventLogProvider:
                 if record.artifact_type in {"eventlog-event", "eventlog-detection"}:
                     # 4688/4104/Sysmon command lines and script blocks: a BitLocker recovery
                     # password typed on a command line is masked before any row is written.
-                    record = redact_record_secrets(record)
+                    record = redact_record_secrets(record, native=engine.native_module)
                 if record.artifact_type == "eventlog-event" and isinstance(record.details, Mapping):
                     for detection in build_builtin_detection_records([record]):
-                        detection = redact_record_secrets(detection)
+                        detection = redact_record_secrets(detection, native=engine.native_module)
                         if triage:
                             detection = triage_eventlog_record(detection)
                         detection_spool.write(json.dumps(dataclasses.asdict(detection), ensure_ascii=False, default=json_default))
@@ -8900,9 +8900,17 @@ def triage_eventlog_detection_details(details: Mapping[str, object]) -> dict[str
     return {key: value for key, value in details.items() if value != ""}
 
 
-def redact_record_secrets(record: ArtifactRecord) -> ArtifactRecord:
-    """``record`` with checksum-valid BitLocker recovery passwords masked in every string field."""
-    details = redact_recovery_passwords_in(record.details)
+def redact_record_secrets(record: ArtifactRecord, *, native: object = None) -> ArtifactRecord:
+    """``record`` with checksum-valid BitLocker recovery passwords masked in every string field.
+
+    ``native`` (``rapidcore_native``, opt-in EVTX engine) walks the row in Rust; every
+    string that could hold a recovery password still goes through the Python
+    ``redact_recovery_passwords``, so the result is identical.
+    """
+    if native is not None:
+        details = native.redact_recovery_passwords_in(record.details, redact_recovery_passwords, redact_recovery_passwords_in)
+    else:
+        details = redact_recovery_passwords_in(record.details)
     if details is record.details:
         return record
     return dataclasses.replace(record, details=details)
