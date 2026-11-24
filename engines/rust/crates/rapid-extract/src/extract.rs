@@ -2,12 +2,15 @@
 //! `_walk_ntfs_dir`, `_sweep_deleted_mft_records`, `_dump_ntfs_record`) over [`crate::ntfs`]:
 //! same visiting order, output paths, counters, caps and error accounting.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
-use crate::ntfs::{Media, Ntfs, Record};
+use crate::ntfs::{DirectReader, Media, Ntfs, Record, Stream, VolRead};
 
 const CHUNK: i128 = 8 << 20;
 const MAX_DEPTH: u32 = 64;
@@ -56,6 +59,37 @@ pub struct Options<'a> {
     /// silently: an `Err` aborts the run so the caller can fall back to the Python engine).
     pub progress: ProgressFn<'a>,
     pub progress_every: u64,
+    /// Worker threads for copying file data; 1 copies inline during the walk (no speculation).
+    pub threads: usize,
+}
+
+/// A deferred `_dump_ntfs_record` side effect of the planning walk, keyed by (target, record).
+enum Job {
+    /// `out_path.parent.mkdir(...)` for a record whose stream then failed to open.
+    Mkdir { key: JobKey, dir: PathBuf },
+    Copy {
+        key: JobKey,
+        stream: Stream,
+        size: i128,
+    },
+}
+
+type JobKey = (PathBuf, u64);
+
+/// How a deferred side effect went; a second planning walk replays these in walk order.
+#[derive(Clone, Copy)]
+enum JobOutcome {
+    Copied(i128),
+    ReadFailed,
+    MkdirFailed,
+}
+
+impl Job {
+    fn key(&self) -> &JobKey {
+        match self {
+            Job::Mkdir { key, .. } | Job::Copy { key, .. } => key,
+        }
+    }
 }
 
 /// What a Python `try` around the call site would see.
@@ -90,10 +124,15 @@ pub struct Walker<'a, M: Media> {
     progress: ProgressFn<'a>,
     progress_every: u64,
     pending: u64,
+    plan: Option<Vec<Job>>,
+    known: HashMap<JobKey, JobOutcome>,
 }
 
 impl<'a, M: Media> Walker<'a, M> {
     fn on_progress(&mut self) -> Result<(), Raised> {
+        if self.plan.is_some() {
+            return Ok(());
+        }
         self.pending += 1;
         if self.pending >= self.progress_every {
             self.flush_progress()?;
@@ -115,6 +154,33 @@ impl<'a, M: Media> Walker<'a, M> {
                 return Ok(());
             }
         };
+        if let Some(plan) = self.plan.as_mut() {
+            let key: JobKey = (out_path.to_path_buf(), record.segment);
+            let outcome = self.known.get(&key).copied();
+            match self.ntfs.data_stream(record) {
+                Ok(stream) => {
+                    plan.push(Job::Copy { key, stream, size });
+                    match outcome {
+                        None => self.stats.files += 1,
+                        Some(JobOutcome::Copied(bytes)) => {
+                            self.stats.files += 1;
+                            self.stats.bytes += bytes;
+                        }
+                        Some(JobOutcome::ReadFailed) => self.stats.errors += 1,
+                        Some(JobOutcome::MkdirFailed) => return Err(Raised::Counted),
+                    }
+                }
+                Err(_) => {
+                    let dir = out_path.parent().map(Path::to_path_buf).unwrap_or_default();
+                    plan.push(Job::Mkdir { key, dir });
+                    if let Some(JobOutcome::MkdirFailed) = outcome {
+                        return Err(Raised::Counted);
+                    }
+                    self.stats.errors += 1;
+                }
+            }
+            return Ok(());
+        }
         if let Some(parent) = out_path.parent() {
             fs::create_dir_all(parent).map_err(|_| Raised::Counted)?;
         }
@@ -125,29 +191,16 @@ impl<'a, M: Media> Walker<'a, M> {
                 return Ok(());
             }
         };
-        let mut remaining = size;
-        let copied = (|| -> Result<(), String> {
-            let mut file = fs::File::create(out_path).map_err(|e| e.to_string())?;
-            let mut pos: i128 = 0;
-            while remaining > 0 {
-                let want = CHUNK.min(remaining);
-                let chunk = stream.read(&mut self.ntfs.vol.borrow_mut(), pos, want)?;
-                pos += want.min(stream.size - pos).max(0);
-                if chunk.is_empty() {
-                    break;
-                }
-                file.write_all(&chunk).map_err(|e| e.to_string())?;
-                remaining -= chunk.len() as i128;
+        match copy_stream(&stream, size, out_path, &mut *self.ntfs.vol.borrow_mut()) {
+            Ok(copied) => {
+                self.stats.files += 1;
+                self.stats.bytes += copied;
             }
-            file.flush().map_err(|e| e.to_string())
-        })();
-        if copied.is_err() {
-            self.stats.errors += 1;
-            let _ = fs::remove_file(out_path);
-            return Ok(());
+            Err(_) => {
+                self.stats.errors += 1;
+                let _ = fs::remove_file(out_path);
+            }
         }
-        self.stats.files += 1;
-        self.stats.bytes += size - remaining.max(0);
         Ok(())
     }
 
@@ -355,20 +408,188 @@ fn fatal_message(raised: Raised) -> String {
     }
 }
 
-/// The body of `extract_e01_native` after `NTFS(reader)`: priority paths, the full tree walk,
-/// then (optionally) the deleted-record sweep. `Err` means the run must not be trusted.
-pub fn extract<M: Media>(ntfs: &Ntfs<M>, options: Options<'_>) -> Result<Stats, String> {
-    let mut walker = Walker {
+/// The read/write loop of `_dump_ntfs_record`: bytes counted as `size - max(remaining, 0)`.
+fn copy_stream<V: VolRead>(
+    stream: &Stream,
+    size: i128,
+    out_path: &Path,
+    vol: &mut V,
+) -> Result<i128, String> {
+    let mut remaining = size;
+    let mut file = fs::File::create(out_path).map_err(|e| e.to_string())?;
+    let mut pos: i128 = 0;
+    while remaining > 0 {
+        let want = CHUNK.min(remaining);
+        let chunk = stream.read(vol, pos, want)?;
+        pos += want.min(stream.size - pos).max(0);
+        if chunk.is_empty() {
+            break;
+        }
+        file.write_all(&chunk).map_err(|e| e.to_string())?;
+        remaining -= chunk.len() as i128;
+    }
+    file.flush().map_err(|e| e.to_string())?;
+    Ok(size - remaining.max(0))
+}
+
+fn fold_key(path: &Path) -> String {
+    path.to_string_lossy().to_lowercase()
+}
+
+/// Run the planned side effects on `threads` workers and return each job's outcome. Jobs whose
+/// targets fold to the same path stay in walk order on one worker (a later failure removes the
+/// file an earlier job wrote, as in Python); units start in image order.
+fn execute<M: Media>(
+    ntfs: &Ntfs<M>,
+    jobs: &[Job],
+    threads: usize,
+    stats: &Stats,
+    progress: &mut ProgressFn<'_>,
+) -> Result<Vec<JobOutcome>, String> {
+    let mut outcomes: Vec<Option<JobOutcome>> = vec![None; jobs.len()];
+    let mut units: Vec<Vec<usize>> = Vec::new();
+    let mut unit_of: HashMap<String, usize> = HashMap::new();
+    for (index, job) in jobs.iter().enumerate() {
+        match job {
+            Job::Mkdir { dir, .. } => {
+                outcomes[index] = Some(match fs::create_dir_all(dir) {
+                    Ok(()) => JobOutcome::Copied(0),
+                    Err(_) => JobOutcome::MkdirFailed,
+                });
+            }
+            Job::Copy { key, .. } => {
+                let unit = *unit_of.entry(fold_key(&key.0)).or_insert_with(|| {
+                    units.push(Vec::new());
+                    units.len() - 1
+                });
+                units[unit].push(index);
+            }
+        }
+    }
+    let start_of = |unit: &Vec<usize>| match &jobs[unit[0]] {
+        Job::Copy { stream, .. } => stream.first_lcn(),
+        Job::Mkdir { .. } => -1,
+    };
+    units.sort_by_cached_key(|unit| start_of(unit));
+    let vol = ntfs.vol.borrow();
+    let direct = vol.direct();
+    let next = AtomicUsize::new(0);
+    let copied_files = AtomicUsize::new(0);
+    let bytes = AtomicI64::new(0);
+    let results: Mutex<Vec<(usize, JobOutcome)>> = Mutex::new(Vec::new());
+    std::thread::scope(|scope| -> Result<(), String> {
+        let workers: Vec<_> = (0..threads.max(1))
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut reader = DirectReader {
+                        media: direct.media,
+                        base: direct.base,
+                        size: direct.size,
+                    };
+                    let mut local = Vec::new();
+                    loop {
+                        let unit = next.fetch_add(1, Ordering::Relaxed);
+                        if unit >= units.len() {
+                            break;
+                        }
+                        for &index in &units[unit] {
+                            let Job::Copy { key, stream, size } = &jobs[index] else {
+                                continue;
+                            };
+                            let target = &key.0;
+                            let created = target.parent().map(fs::create_dir_all).unwrap_or(Ok(()));
+                            let outcome = match created {
+                                Err(_) => JobOutcome::MkdirFailed,
+                                Ok(()) => match copy_stream(stream, *size, target, &mut reader) {
+                                    Ok(n) => {
+                                        bytes.fetch_add(n as i64, Ordering::Relaxed);
+                                        copied_files.fetch_add(1, Ordering::Relaxed);
+                                        JobOutcome::Copied(n)
+                                    }
+                                    Err(_) => {
+                                        let _ = fs::remove_file(target);
+                                        JobOutcome::ReadFailed
+                                    }
+                                },
+                            };
+                            local.push((index, outcome));
+                        }
+                    }
+                    if let Ok(mut all) = results.lock() {
+                        all.extend(local);
+                    }
+                })
+            })
+            .collect();
+        while workers.iter().any(|w| !w.is_finished()) {
+            let mut snapshot = stats.clone();
+            snapshot.files = copied_files.load(Ordering::Relaxed) as i128;
+            snapshot.bytes = bytes.load(Ordering::Relaxed) as i128;
+            progress(&snapshot)?;
+            std::thread::sleep(Duration::from_millis(250));
+        }
+        for worker in workers {
+            worker
+                .join()
+                .map_err(|_| "copy worker panicked".to_string())?;
+        }
+        Ok(())
+    })?;
+    for (index, outcome) in results
+        .into_inner()
+        .map_err(|_| "copy results poisoned".to_string())?
+    {
+        outcomes[index] = Some(outcome);
+    }
+    outcomes
+        .into_iter()
+        .map(|o| o.ok_or_else(|| "a planned copy never ran".to_string()))
+        .collect()
+}
+
+fn top_level_entries(dir: &Path) -> HashSet<PathBuf> {
+    fs::read_dir(dir)
+        .map(|it| it.filter_map(|e| e.ok().map(|e| e.path())).collect())
+        .unwrap_or_default()
+}
+
+fn discard_new_entries(dir: &Path, before: &HashSet<PathBuf>) {
+    for entry in top_level_entries(dir).difference(before) {
+        if entry.is_dir() {
+            let _ = fs::remove_dir_all(entry);
+        } else {
+            let _ = fs::remove_file(entry);
+        }
+    }
+}
+
+fn new_walker<'a, M: Media>(
+    ntfs: &'a Ntfs<M>,
+    progress: ProgressFn<'a>,
+    planning: bool,
+    limit: i128,
+    every: u64,
+) -> Walker<'a, M> {
+    Walker {
         ntfs,
         stats: Stats {
-            file_limit: options.limit,
+            file_limit: limit,
             ..Stats::default()
         },
         done: HashSet::new(),
-        progress: options.progress,
-        progress_every: options.progress_every.max(1),
+        progress,
+        progress_every: every.max(1),
         pending: 0,
-    };
+        plan: planning.then(Vec::new),
+        known: HashMap::new(),
+    }
+}
+
+fn walk_all<M: Media>(
+    walker: &mut Walker<'_, M>,
+    ntfs: &Ntfs<M>,
+    options: &Options<'_>,
+) -> Result<(), String> {
     let root = ntfs
         .mft_record(5)
         .map_err(|m| format!("root record unreadable: {m}"))?;
@@ -377,8 +598,113 @@ pub fn extract<M: Media>(ntfs: &Ntfs<M>, options: Options<'_>) -> Result<Stats, 
     if options.include_deleted {
         walker.sweep_deleted(&options.extract_dir)?;
     }
+    Ok(())
+}
+
+/// What one `extract` call did, besides the stats.
+pub struct Outcome {
+    pub stats: Stats,
+    pub walk_seconds: f64,
+    pub copy_seconds: f64,
+    /// Why the parallel plan could not be used, which made the walk run again sequentially (exact
+    /// Python order of effects); `None` when no rerun happened.
+    pub rerun_reason: Option<String>,
+}
+
+/// The body of `extract_e01_native` after `NTFS(reader)`: priority paths, the full tree walk,
+/// then (optionally) the deleted-record sweep. `Err` means the run must not be trusted.
+///
+/// With `threads > 1` a first walk plans every side effect assuming each copy succeeds; the
+/// copies then run in parallel and each one's outcome is recorded. If any failed, a second walk
+/// replays the recorded outcomes in walk order, which yields exactly the sequential counters as
+/// long as it plans the same side effects. Only when a failure moved a decision (a cap boundary,
+/// say) does the walk run again sequentially, after removing everything written.
+pub fn extract<'a, M: Media>(
+    ntfs: &'a Ntfs<M>,
+    mut options: Options<'a>,
+) -> Result<Outcome, String> {
+    let (options_limit, options_every) = (options.limit, options.progress_every);
+    let fresh = |progress: ProgressFn<'a>, planning: bool, known: HashMap<JobKey, JobOutcome>| {
+        let mut walker = new_walker(ntfs, progress, planning, options_limit, options_every);
+        walker.known = known;
+        walker
+    };
+    let started = Instant::now();
+    let mut rerun_reason = None;
+    if options.threads > 1 {
+        let before = top_level_entries(&options.extract_dir);
+        let progress = std::mem::replace(&mut options.progress, Box::new(|_| Ok(())));
+        let mut planner = fresh(progress, true, HashMap::new());
+        walk_all(&mut planner, ntfs, &options)?;
+        let jobs = planner.plan.take().unwrap_or_default();
+        let walk_seconds = started.elapsed().as_secs_f64();
+        let copying = Instant::now();
+        let outcomes = execute(
+            ntfs,
+            &jobs,
+            options.threads,
+            &planner.stats,
+            &mut planner.progress,
+        )?;
+        if outcomes.iter().all(|o| matches!(o, JobOutcome::Copied(_))) {
+            planner.stats.bytes = outcomes
+                .iter()
+                .map(|o| if let JobOutcome::Copied(n) = o { *n } else { 0 })
+                .sum();
+            planner.plan = None;
+            planner.flush_progress().map_err(fatal_message)?;
+            return Ok(Outcome {
+                stats: planner.stats,
+                walk_seconds,
+                copy_seconds: copying.elapsed().as_secs_f64(),
+                rerun_reason: None,
+            });
+        }
+        let mut known: HashMap<JobKey, JobOutcome> = HashMap::with_capacity(jobs.len());
+        for (job, outcome) in jobs.iter().zip(&outcomes) {
+            known.insert(job.key().clone(), *outcome);
+        }
+        let unique = known.len() == jobs.len();
+        let progress = std::mem::replace(&mut planner.progress, Box::new(|_| Ok(())));
+        let mut replay = fresh(progress, true, known);
+        let replayed = if unique {
+            walk_all(&mut replay, ntfs, &options)
+        } else {
+            Err("duplicate job keys".into())
+        };
+        let same_plan = replayed.is_ok()
+            && replay.plan.as_ref().is_some_and(|again| {
+                again.len() == jobs.len()
+                    && again.iter().zip(&jobs).all(|(a, b)| a.key() == b.key())
+            });
+        if same_plan {
+            replay.plan = None;
+            replay.flush_progress().map_err(fatal_message)?;
+            return Ok(Outcome {
+                stats: replay.stats,
+                walk_seconds,
+                copy_seconds: copying.elapsed().as_secs_f64(),
+                rerun_reason: None,
+            });
+        }
+        rerun_reason = Some(match replayed {
+            Err(message) => message,
+            Ok(()) => "a failed copy changed the walk's later decisions".to_string(),
+        });
+        discard_new_entries(&options.extract_dir, &before);
+        options.progress = replay.progress;
+    }
+    let sequential = Instant::now();
+    let progress = std::mem::replace(&mut options.progress, Box::new(|_| Ok(())));
+    let mut walker = fresh(progress, false, HashMap::new());
+    walk_all(&mut walker, ntfs, &options)?;
     walker.flush_progress().map_err(fatal_message)?;
-    Ok(walker.stats)
+    Ok(Outcome {
+        stats: walker.stats,
+        walk_seconds: sequential.elapsed().as_secs_f64(),
+        copy_seconds: 0.0,
+        rerun_reason,
+    })
 }
 
 #[cfg(test)]

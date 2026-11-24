@@ -5,15 +5,46 @@
 use std::cell::{OnceCell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::lznt1;
 
 pub type Res<T> = Result<T, String>;
 
-/// Byte source of the whole media (pyewf handle, raw file, or a test buffer).
-pub trait Media {
+/// Byte source of the whole media (Rust EWF reader, raw file, pyewf handle, or a test buffer).
+pub trait Media: Sync {
     /// Up to `len` bytes at `offset`; shorter only at the end of the media.
-    fn read_at(&mut self, offset: u64, len: usize) -> Res<Vec<u8>>;
+    fn read_at(&self, offset: u64, len: usize) -> Res<Vec<u8>>;
+}
+
+/// Partition-relative reads as `EwfSectorReader.read` does them; `metadata` reads may be cached.
+pub trait VolRead {
+    fn vread(&mut self, offset: i128, len: i128, metadata: bool) -> Res<Vec<u8>>;
+}
+
+fn clamp_read<M: Media>(media: &M, base: u64, size: u64, offset: i128, len: i128) -> Res<Vec<u8>> {
+    if offset < 0 {
+        return Err("negative seek position".into());
+    }
+    if len <= 0 || offset as u64 >= size {
+        return Ok(Vec::new());
+    }
+    let offset = offset as u64;
+    let want = (len as u128).min((size - offset) as u128) as usize;
+    media.read_at(base + offset, want)
+}
+
+/// Uncached partition view for worker threads.
+pub struct DirectReader<'a, M: Media> {
+    pub media: &'a M,
+    pub base: u64,
+    pub size: u64,
+}
+
+impl<M: Media> VolRead for DirectReader<'_, M> {
+    fn vread(&mut self, offset: i128, len: i128, _metadata: bool) -> Res<Vec<u8>> {
+        clamp_read(self.media, self.base, self.size, offset, len)
+    }
 }
 
 const META_BLOCK: u64 = 1 << 20;
@@ -40,18 +71,19 @@ impl<M: Media> Volume<M> {
     }
 
     pub fn read(&mut self, offset: i128, len: i128) -> Res<Vec<u8>> {
-        if offset < 0 {
-            return Err("negative seek position".into());
+        clamp_read(&self.media, self.base, self.size, offset, len)
+    }
+
+    pub fn media(&self) -> &M {
+        &self.media
+    }
+
+    pub fn direct(&self) -> DirectReader<'_, M> {
+        DirectReader {
+            media: &self.media,
+            base: self.base,
+            size: self.size,
         }
-        if len <= 0 {
-            return Ok(Vec::new());
-        }
-        let offset = offset as u64;
-        if offset >= self.size {
-            return Ok(Vec::new());
-        }
-        let want = (len as u128).min((self.size - offset) as u128) as usize;
-        self.media.read_at(self.base + offset, want)
     }
 
     /// Same bytes as `read`, served from 1 MiB blocks; used for MFT records and index buffers.
@@ -91,11 +123,21 @@ impl<M: Media> Volume<M> {
     }
 }
 
+impl<M: Media> VolRead for Volume<M> {
+    fn vread(&mut self, offset: i128, len: i128, metadata: bool) -> Res<Vec<u8>> {
+        if metadata {
+            self.read_cached(offset, len)
+        } else {
+            self.read(offset, len)
+        }
+    }
+}
+
 pub type Run = (Option<i128>, i128);
 
 #[derive(Clone)]
 enum Kind {
-    Resident(Rc<Vec<u8>>),
+    Resident(Arc<Vec<u8>>),
     Runlist {
         runs: Vec<Run>,
         offsets: Vec<i128>,
@@ -134,7 +176,7 @@ fn bisect_right(values: &[i128], x: i128) -> usize {
 impl Stream {
     fn resident(bytes: Vec<u8>, size: i128) -> Stream {
         Stream {
-            kind: Kind::Resident(Rc::new(bytes)),
+            kind: Kind::Resident(Arc::new(bytes)),
             size,
             align: 8192,
             block_size: 1,
@@ -197,16 +239,22 @@ impl Stream {
         self
     }
 
-    fn volume_read<M: Media>(&self, vol: &mut Volume<M>, offset: i128, len: i128) -> Res<Vec<u8>> {
-        if self.metadata {
-            vol.read_cached(offset, len)
-        } else {
-            vol.read(offset, len)
-        }
+    fn volume_read<V: VolRead>(&self, vol: &mut V, offset: i128, len: i128) -> Res<Vec<u8>> {
+        vol.vread(offset, len, self.metadata)
+    }
+
+    /// First cluster this stream reads from (orders copy jobs by image position).
+    pub fn first_lcn(&self) -> i128 {
+        let runs = match &self.kind {
+            Kind::Resident(_) => return -1,
+            Kind::Runlist { runs, .. } => runs.iter().collect::<Vec<_>>(),
+            Kind::Compressed { cu_blocks, .. } => cu_blocks.iter().flatten().collect(),
+        };
+        runs.into_iter().find_map(|(lcn, _)| *lcn).unwrap_or(-1)
     }
 
     /// The subclass `_read(offset, length)`.
-    fn raw_read<M: Media>(&self, vol: &mut Volume<M>, offset: i128, length: i128) -> Res<Vec<u8>> {
+    fn raw_read<V: VolRead>(&self, vol: &mut V, offset: i128, length: i128) -> Res<Vec<u8>> {
         match &self.kind {
             Kind::Resident(bytes) => {
                 let read_len = if self.size != 0 {
@@ -322,7 +370,7 @@ impl Stream {
     }
 
     /// `AlignedStream.read(n)` after `seek(pos)`.
-    pub fn read<M: Media>(&self, vol: &mut Volume<M>, pos: i128, n: i128) -> Res<Vec<u8>> {
+    pub fn read<V: VolRead>(&self, vol: &mut V, pos: i128, n: i128) -> Res<Vec<u8>> {
         let mut n = n.min(self.size - pos);
         if n <= 0 || self.size <= pos {
             return Ok(Vec::new());
@@ -862,7 +910,7 @@ impl<M: Media> Ntfs<M> {
     /// `Mft.get(segment)`.
     pub fn mft_record(&self, segment: u64) -> Res<Record> {
         let raw = self.mft.read(
-            &mut self.vol.borrow_mut(),
+            &mut *self.vol.borrow_mut(),
             segment as i128 * self.record_size,
             self.record_size,
         )?;
@@ -927,7 +975,7 @@ impl<M: Media> Ntfs<M> {
             };
             if matches!(type_code, 0x10 | 0x20 | 0x30 | 0xC0) {
                 let stream = attr.open_single(self)?;
-                let value = stream.read(&mut self.vol.borrow_mut(), 0, stream.size.max(0))?;
+                let value = stream.read(&mut *self.vol.borrow_mut(), 0, stream.size.max(0))?;
                 attr.parsed = match type_code {
                     0x20 => Parsed::AttrList(parse_attribute_list(&value)?),
                     0x30 => Parsed::FileName(parse_file_name(&value)?),
@@ -1093,7 +1141,7 @@ impl<M: Media> Ntfs<M> {
             return Err("No such stream ($I30 INDEX_ROOT)".into());
         }
         let root = collection_open(self, &root_attrs)?;
-        let header = root.read(&mut self.vol.borrow_mut(), 0, 0x20)?;
+        let header = root.read(&mut *self.vol.borrow_mut(), 0, 0x20)?;
         if header.len() < 0x20 {
             return Err("EOF reading INDEX_ROOT".into());
         }
@@ -1133,7 +1181,7 @@ impl<M: Media> Ntfs<M> {
         let mut offset = start;
         while offset < max_offset {
             let header = match source {
-                EntrySource::Root => index.root.read(&mut self.vol.borrow_mut(), offset, 0x10)?,
+                EntrySource::Root => index.root.read(&mut *self.vol.borrow_mut(), offset, 0x10)?,
                 EntrySource::Buffer(data) => slice_from(data, offset, 0x10),
             };
             if header.len() < 0x10 {
@@ -1153,7 +1201,7 @@ impl<M: Media> Ntfs<M> {
                     };
                     index
                         .root
-                        .read(&mut self.vol.borrow_mut(), offset + 0x10, n)?
+                        .read(&mut *self.vol.borrow_mut(), offset + 0x10, n)?
                 }
                 EntrySource::Buffer(data) => {
                     let n = if rest < 0 { data.len() as i128 } else { rest };
@@ -1191,7 +1239,7 @@ impl<M: Media> Ntfs<M> {
         }
         let buf = stream
             .read(
-                &mut self.vol.borrow_mut(),
+                &mut *self.vol.borrow_mut(),
                 vcn << index.vcn_shift,
                 index.buffer_size,
             )
@@ -1427,7 +1475,7 @@ mod tests {
 
     struct Mem(Vec<u8>);
     impl Media for Mem {
-        fn read_at(&mut self, offset: u64, len: usize) -> Res<Vec<u8>> {
+        fn read_at(&self, offset: u64, len: usize) -> Res<Vec<u8>> {
             let from = (offset as usize).min(self.0.len());
             let to = (from + len).min(self.0.len());
             Ok(self.0[from..to].to_vec())

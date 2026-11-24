@@ -7,10 +7,14 @@ the same stats:
   ``_sweep_deleted_mft_records`` over dissect.ntfs;
 - ``rust`` (opt-in): the ``rapid_extract_native`` PyO3 extension built from
   ``engines/rust/crates/rapid-extract`` (``python scripts/build-e01-extract-native.py``). Python
-  still opens the image (pyewf or a raw file) and selects the partition; the extension reads
-  through that same handle, walks NTFS and writes the files in one call.
+  still opens the image (pyewf or a raw file) and selects the partition; the extension reads the
+  media itself (its own EWF v1 reader with parallel chunk decoding, or the raw file), walks NTFS,
+  and copies the files on worker threads, in one call. Reads it cannot serve go through the pyewf
+  handle, and any copy that fails makes it redo the whole walk sequentially.
 
-Select with ``RAPIDTRIAGE_E01_EXTRACT_ENGINE=rust``. Both engines produce identical output
+Select with ``RAPIDTRIAGE_E01_EXTRACT_ENGINE=rust``; ``RAPIDTRIAGE_E01_EXTRACT_THREADS`` sets the
+copy/decode threads (default: CPU count, at most 8; ``1`` copies during the walk) and
+``RAPIDTRIAGE_E01_EXTRACT_READER=python`` keeps every media read on pyewf. Both engines produce identical output
 (``tests/test_e01_extract_rust_parity.py``). When ``rust`` is requested but the extension is
 missing, built for another contract, or fails on the image, the Python engine runs instead and
 the fallback is recorded (``extract_engine`` in the result, a Korean notice in the warnings).
@@ -29,10 +33,12 @@ from types import ModuleType
 from typing import Any
 
 E01_EXTRACT_ENGINE_ENV = "RAPIDTRIAGE_E01_EXTRACT_ENGINE"
+E01_EXTRACT_THREADS_ENV = "RAPIDTRIAGE_E01_EXTRACT_THREADS"
+E01_EXTRACT_READER_ENV = "RAPIDTRIAGE_E01_EXTRACT_READER"
 E01_EXTRACT_ENGINES = ("python", "rust")
 E01_EXTRACT_NATIVE_MODULE = "rapid_extract_native"
 # Must equal ABI_VERSION in engines/rust/crates/rapid-extract/src/lib.rs.
-E01_EXTRACT_NATIVE_ABI_VERSION = 1
+E01_EXTRACT_NATIVE_ABI_VERSION = 2
 E01_EXTRACT_BUILD_HINT = "python scripts/build-e01-extract-native.py"
 NATIVE_DIR = Path(__file__).resolve().parents[1] / "native"
 LOGGER = logging.getLogger(__name__)
@@ -79,10 +85,18 @@ def e01_extract_engine_status() -> dict[str, str]:
     return {"requested": "rust", "active": "rust", "notice_ko": ""}
 
 
+def e01_extract_threads() -> int:
+    raw = (os.environ.get(E01_EXTRACT_THREADS_ENV) or "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return max(1, min(os.cpu_count() or 1, 8))
+
+
 def run_rust_extraction(
-    status: dict[str, str],
+    status: dict[str, Any],
     *,
     handle: Any,
+    segments: list[Path],
     byte_offset: int,
     size: int,
     extract_dir: Path,
@@ -112,6 +126,10 @@ def run_rust_extraction(
             include_deleted,
             list(priority_paths),
             progress,
+            segments=[str(path) for path in segments],
+            media_size=int(handle.get_media_size()),
+            threads=e01_extract_threads(),
+            reader="python" if (os.environ.get(E01_EXTRACT_READER_ENV) or "").strip().lower() == "python" else "auto",
         )
     except Exception as exc:  # the Rust engine reports every failure as one exception
         _discard_new_entries(extract_dir, before)
@@ -122,7 +140,12 @@ def run_rust_extraction(
             )
         )
         return False
-    stats.update({key: int(value) for key, value in dict(result).items()})
+    stats.update({key: int(value) for key, value in dict(result["stats"]).items()})
+    status["media_reader"] = str(result["media_reader"])
+    status["python_reads"] = int(result["python_reads"])
+    status["rerun_reason"] = result["rerun_reason"]
+    status["walk_seconds"] = round(float(result["walk_seconds"]), 3)
+    status["copy_seconds"] = round(float(result["copy_seconds"]), 3)
     if on_progress is not None:
         on_progress(stats)
     return True

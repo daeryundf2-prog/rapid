@@ -947,6 +947,7 @@ def extract_e01_native(
             and run_rust_extraction(
                 extract_engine,
                 handle=handle,
+                segments=segments,
                 byte_offset=byte_offset,
                 size=partition_size,
                 extract_dir=extract_dir,

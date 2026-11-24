@@ -1,22 +1,33 @@
 // PyO3 0.22's `#[pyfunction]` expansion converts `PyErr` into itself (clippy::useless_conversion).
 #![allow(clippy::useless_conversion)]
 
+use std::fs::File;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
-use crate::extract::{extract, Options, Stats};
+use crate::ewf::EwfImage;
+use crate::extract::{extract, Options, Outcome, Stats};
 use crate::ntfs::{Media, Ntfs, Res, Volume};
 
-/// A Python object with `seek(offset)` / `read(n)` (a pyewf handle or `RawMediaHandle`).
+/// A Python object with `seek(offset)` / `read(n)` (a pyewf handle or `RawMediaHandle`). Calls
+/// are serialised: pyewf releases the GIL inside `read`, and one libewf handle must not see
+/// interleaved seek/read pairs from copy workers.
 struct PyMedia {
     handle: Py<PyAny>,
+    lock: Mutex<()>,
 }
 
 impl Media for PyMedia {
-    fn read_at(&mut self, offset: u64, len: usize) -> Res<Vec<u8>> {
+    fn read_at(&self, offset: u64, len: usize) -> Res<Vec<u8>> {
+        let _serial = self
+            .lock
+            .lock()
+            .map_err(|_| "media lock poisoned".to_string())?;
         Python::with_gil(|py| {
             let handle = self.handle.bind(py);
             handle
@@ -31,6 +42,105 @@ impl Media for PyMedia {
     }
 }
 
+fn pread(file: &File, offset: u64, buf: &mut [u8]) -> std::io::Result<usize> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileExt;
+        file.read_at(buf, offset)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileExt;
+        file.seek_read(buf, offset)
+    }
+}
+
+/// Media reads served in Rust when the container is understood, else by the Python handle.
+enum Source {
+    Ewf(EwfImage),
+    Raw(File, u64),
+    Python,
+}
+
+struct AnyMedia {
+    source: Source,
+    python: PyMedia,
+    python_reads: AtomicU64,
+}
+
+impl AnyMedia {
+    fn label(&self) -> &'static str {
+        match self.source {
+            Source::Ewf(_) => "rust-ewf",
+            Source::Raw(..) => "raw-file",
+            Source::Python => "python-handle",
+        }
+    }
+}
+
+impl Media for AnyMedia {
+    fn read_at(&self, offset: u64, len: usize) -> Res<Vec<u8>> {
+        let served = match &self.source {
+            Source::Ewf(image) => image.read_at(offset, len).ok(),
+            Source::Raw(file, size) => {
+                let want = (len as u64).min(size.saturating_sub(offset)) as usize;
+                let mut buf = vec![0u8; want];
+                let mut done = 0;
+                let mut ok = true;
+                while done < want {
+                    match pread(file, offset + done as u64, &mut buf[done..]) {
+                        Ok(0) => break,
+                        Ok(n) => done += n,
+                        Err(_) => {
+                            ok = false;
+                            break;
+                        }
+                    }
+                }
+                buf.truncate(done);
+                ok.then_some(buf)
+            }
+            Source::Python => None,
+        };
+        match served {
+            Some(data) => Ok(data),
+            None => {
+                self.python_reads.fetch_add(1, Ordering::Relaxed);
+                self.python.read_at(offset, len)
+            }
+        }
+    }
+}
+
+fn pick_source(segments: &[PathBuf], media_size: u64, reader: &str, threads: usize) -> Source {
+    if reader == "python" || segments.is_empty() {
+        return Source::Python;
+    }
+    if let Ok(image) = EwfImage::open(segments, threads) {
+        if image.media_size() == media_size {
+            return Source::Ewf(image);
+        }
+        return Source::Python;
+    }
+    if let [path] = segments {
+        if let Ok(file) = File::open(path) {
+            let mut magic = [0u8; 3];
+            let is_ewf = pread(&file, 0, &mut magic)
+                .map(|n| n == 3 && &magic == b"EVF")
+                .unwrap_or(true);
+            if !is_ewf
+                && file
+                    .metadata()
+                    .map(|m| m.len() == media_size)
+                    .unwrap_or(false)
+            {
+                return Source::Raw(file, media_size);
+            }
+        }
+    }
+    Source::Python
+}
+
 fn stats_dict<'py>(py: Python<'py>, stats: &Stats) -> PyResult<Bound<'py, PyDict>> {
     let dict = PyDict::new_bound(py);
     for (key, value) in stats.pairs() {
@@ -40,10 +150,13 @@ fn stats_dict<'py>(py: Python<'py>, stats: &Stats) -> PyResult<Bound<'py, PyDict
 }
 
 /// Run the priority pass, the tree walk and (optionally) the deleted sweep on the NTFS volume at
-/// `base` (`size` bytes) of `handle`, writing under `extract_dir`. Returns the stats dict of
-/// `extract_e01_native`; `progress(stats)` is called every `progress_every` recovered entries.
+/// `base` (`size` bytes) of the media, writing under `extract_dir`. Media bytes come from the Rust
+/// EWF reader (or the raw file) when `segments` are understood and `reader` is not "python", else
+/// from `handle`; any read the Rust reader cannot serve goes to `handle`. Returns
+/// `{"stats": <extract_e01_native stats>, "media_reader": str, "python_reads": int,
+/// "walk_seconds": float, "copy_seconds": float, "sequential_rerun": bool}`.
 #[pyfunction]
-#[pyo3(signature = (handle, base, size, extract_dir, limit, include_deleted, priority_paths, progress=None, progress_every=256))]
+#[pyo3(signature = (handle, base, size, extract_dir, limit, include_deleted, priority_paths, progress=None, progress_every=256, segments=Vec::new(), media_size=0, threads=1, reader="auto"))]
 #[allow(clippy::too_many_arguments)]
 fn extract_tree(
     py: Python<'_>,
@@ -56,9 +169,22 @@ fn extract_tree(
     priority_paths: Vec<String>,
     progress: Option<Py<PyAny>>,
     progress_every: u64,
+    segments: Vec<PathBuf>,
+    media_size: u64,
+    threads: usize,
+    reader: &str,
 ) -> PyResult<Py<PyDict>> {
+    let reader = reader.to_string();
     let outcome = py.allow_threads(move || {
-        let ntfs = Ntfs::open(Volume::new(PyMedia { handle }, base, size))?;
+        let media = AnyMedia {
+            source: pick_source(&segments, media_size, &reader, threads),
+            python: PyMedia {
+                handle,
+                lock: Mutex::new(()),
+            },
+            python_reads: AtomicU64::new(0),
+        };
+        let ntfs = Ntfs::open(Volume::new(media, base, size))?;
         let callback = move |stats: &Stats| -> Result<(), String> {
             let Some(progress) = progress.as_ref() else {
                 return Ok(());
@@ -71,7 +197,7 @@ fn extract_tree(
                     .map_err(|e| e.to_string())
             })
         };
-        extract(
+        let outcome = extract(
             &ntfs,
             Options {
                 extract_dir,
@@ -80,18 +206,64 @@ fn extract_tree(
                 priority_paths,
                 progress: Box::new(callback),
                 progress_every,
+                threads,
             },
-        )
+        )?;
+        let vol = ntfs.vol.borrow();
+        let media = vol.media();
+        Ok::<_, String>((
+            outcome,
+            media.label(),
+            media.python_reads.load(Ordering::Relaxed),
+        ))
     });
     match outcome {
-        Ok(stats) => Ok(stats_dict(py, &stats)?.unbind()),
+        Ok((
+            Outcome {
+                stats,
+                walk_seconds,
+                copy_seconds,
+                rerun_reason,
+            },
+            label,
+            python_reads,
+        )) => {
+            let dict = PyDict::new_bound(py);
+            dict.set_item("stats", stats_dict(py, &stats)?)?;
+            dict.set_item("walk_seconds", walk_seconds)?;
+            dict.set_item("copy_seconds", copy_seconds)?;
+            dict.set_item("rerun_reason", rerun_reason)?;
+            dict.set_item("media_reader", label)?;
+            dict.set_item("python_reads", python_reads)?;
+            Ok(dict.unbind())
+        }
         Err(message) => Err(PyRuntimeError::new_err(message)),
     }
+}
+
+/// Read `length` media bytes at `offset` with the Rust EWF reader (tests compare it with pyewf;
+/// `threads` > 1 decodes the chunks of one read in parallel).
+#[pyfunction]
+#[pyo3(signature = (segments, offset, length, threads=1))]
+fn ewf_read(
+    py: Python<'_>,
+    segments: Vec<PathBuf>,
+    offset: u64,
+    length: usize,
+    threads: usize,
+) -> PyResult<Py<PyBytes>> {
+    let data = py
+        .allow_threads(|| {
+            EwfImage::open(&segments, threads).and_then(|image| image.read_at(offset, length))
+        })
+        .map_err(PyRuntimeError::new_err)?;
+    Ok(PyBytes::new_bound(py, &data).unbind())
 }
 
 #[pymodule]
 fn rapid_extract_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ABI_VERSION", crate::ABI_VERSION)?;
     m.add_function(wrap_pyfunction!(extract_tree, m)?)?;
+    m.add_function(wrap_pyfunction!(ewf_read, m)?)?;
     Ok(())
 }
