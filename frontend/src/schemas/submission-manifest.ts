@@ -38,6 +38,7 @@ path: string
 name: string
 size: number
 modified_at: string
+modified_at_source?: string
 hash_source: string
 hashes: {
 md5: string

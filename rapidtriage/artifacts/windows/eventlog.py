@@ -1107,23 +1107,26 @@ BUILTIN_EVENT_RULES = (
 
 RULE_LEVEL_SCORES = {"info": 15, "low": 25, "medium": 45, "high": 70, "critical": 90}
 
-EVENT_MESSAGE_TEMPLATES = {
-    "4624": "An account successfully logged on. User={TargetUserName|SubjectUserName}; logon_type={LogonType}; source={IpAddress|SourceAddress|SourceIp|SourceNetworkAddress}.",
-    "4625": "An account failed to log on. User={TargetUserName|SubjectUserName}; status={Status|SubStatus|ErrorCode}; source={IpAddress|SourceAddress|SourceIp|SourceNetworkAddress}.",
-    "4648": "A logon used explicit credentials. Account={SubjectUserName|TargetUserName}; target={TargetServerName|TargetInfo}; process={ProcessName}.",
-    "4688": "A process was created. Process={NewProcessName|ProcessName|Image}; command={CommandLine|ProcessCommandLine}; parent={ParentProcessName|CreatorProcessName}.",
-    "4697": "A service was installed. Service={ServiceName}; image={ServiceFileName|ImagePath}.",
-    "4698": "A scheduled task was created. Task={TaskName}; content={TaskContent|CommandLine}.",
-    "4720": "A user account was created. User={TargetUserName|AccountName}; actor={SubjectUserName}.",
-    "4726": "A user account was deleted. User={TargetUserName|AccountName}; actor={SubjectUserName}.",
-    "4732": "A member was added to a local group. Member={MemberName|TargetUserName}; group={TargetUserName|GroupName}; actor={SubjectUserName}.",
-    "4738": "A user account was changed. User={TargetUserName|AccountName}; actor={SubjectUserName}.",
-    "4103": "PowerShell module logging recorded command activity. Command={CommandLine|Payload|ScriptBlockText}.",
-    "4104": "PowerShell script block was recorded. Script={ScriptBlockText|CommandLine|Payload}.",
-    "7045": "A service was installed. Service={ServiceName}; image={ServiceFileName|ImagePath}; account={AccountName|User}.",
-    "1149": "An RDP authentication succeeded. User={User|TargetUserName}; source={SourceNetworkAddress|IpAddress|SourceIp}.",
-    "1102": "The Security audit log was cleared. Subject={SubjectUserName|User}.",
-    "104": "An event log was cleared. Channel={Channel}; user={SubjectUserName|User}.",
+# Built-in message templates keyed by EventID, each bound to the category that
+# EVENT_CATEGORY_TABLE assigns from (provider, EventID). An EventID alone never
+# selects a template: a third-party provider's 104 is not "event log cleared".
+EVENT_MESSAGE_TEMPLATES: dict[str, tuple[str, str]] = {
+    "4624": ("logon-success", "An account successfully logged on. User={TargetUserName|SubjectUserName}; logon_type={LogonType}; source={IpAddress|SourceAddress|SourceIp|SourceNetworkAddress}."),
+    "4625": ("logon-failure", "An account failed to log on. User={TargetUserName|SubjectUserName}; status={Status|SubStatus|ErrorCode}; source={IpAddress|SourceAddress|SourceIp|SourceNetworkAddress}."),
+    "4648": ("explicit-credential-logon", "A logon used explicit credentials. Account={SubjectUserName|TargetUserName}; target={TargetServerName|TargetInfo}; process={ProcessName}."),
+    "4688": ("process-created", "A process was created. Process={NewProcessName|ProcessName|Image}; command={CommandLine|ProcessCommandLine}; parent={ParentProcessName|CreatorProcessName}."),
+    "4697": ("service-installed", "A service was installed. Service={ServiceName}; image={ServiceFileName|ImagePath}."),
+    "4698": ("scheduled-task-created", "A scheduled task was created. Task={TaskName}; content={TaskContent|CommandLine}."),
+    "4720": ("user-created", "A user account was created. User={TargetUserName|AccountName}; actor={SubjectUserName}."),
+    "4726": ("user-deleted", "A user account was deleted. User={TargetUserName|AccountName}; actor={SubjectUserName}."),
+    "4732": ("local-group-member-added", "A member was added to a local group. Member={MemberName|TargetUserName}; group={TargetUserName|GroupName}; actor={SubjectUserName}."),
+    "4738": ("user-changed", "A user account was changed. User={TargetUserName|AccountName}; actor={SubjectUserName}."),
+    "4103": ("powershell-module", "PowerShell module logging recorded command activity. Command={CommandLine|Payload|ScriptBlockText}."),
+    "4104": ("powershell-script-block", "PowerShell script block was recorded. Script={ScriptBlockText|CommandLine|Payload}."),
+    "7045": ("service-installed", "A service was installed. Service={ServiceName}; image={ServiceFileName|ImagePath}; account={AccountName|User}."),
+    "1149": ("rdp-authentication-succeeded", "An RDP authentication succeeded. User={User|TargetUserName}; source={SourceNetworkAddress|IpAddress|SourceIp}."),
+    "1102": ("audit-log-cleared", "The Security audit log was cleared. Subject={SubjectUserName|User}."),
+    "104": ("system-log-cleared", "An event log was cleared. Channel={Channel}; user={SubjectUserName|User}."),
 }
 
 PROVIDER_EVENT_MESSAGE_TEMPLATES = {
@@ -2007,9 +2010,9 @@ def collect_xml_events(
             for name, text in user_data_leaf_values(user_data):
                 data.setdefault(f"UserData.{name}", text)
                 data.setdefault(name, text)
+        # The rendered sentence stays apart from the payload: an EventData item
+        # that happens to be named "Message" is a data column, not the message.
         rendered_message = text_from_child(rendering, "Message")
-        if rendered_message:
-            data.setdefault("Message", rendered_message)
         details = normalize_event_details(
             parser="windows-eventlog-xml",
             source_format="xml",
@@ -2032,6 +2035,7 @@ def collect_xml_events(
             opcode=text_from_child(system, "Opcode"),
             keywords=text_from_child(system, "Keywords"),
             message_catalog=message_catalog,
+            rendered_message=rendered_message,
         )
         if data_lossy:
             # ``data`` keeps the last value per name for single-value pivots; the
@@ -7508,12 +7512,21 @@ def render_event_message(
     raw_preview: str,
     is_native_evtx: bool,
     message_catalog: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
+    rendered_message: str = "",
 ) -> dict[str, object]:
-    external_message = first_data_text(data, "RenderedMessage", "Message", "MapDescription", "EventMessage")
+    # An exported XML event's RenderingInfo/Message is the sentence the exporting
+    # system rendered; it outranks any payload item that only shares the name.
+    if rendered_message:
+        external_message = rendered_message
+        message_source = "xml-renderinginfo-message"
+        renderer = "xml-renderinginfo"
+    else:
+        external_message = first_data_text(data, "RenderedMessage", "Message", "MapDescription", "EventMessage")
+        message_source = "imported-export-field"
+        renderer = "external-export-field"
     template_ids = native_evtx_template_ids(data)
     if external_message:
-        message_source = "imported-export-field"
-        return {
+        rendering: dict[str, object] = {
             "status": "external-message",
             "message": external_message[:4000],
             "message_source": message_source,
@@ -7530,10 +7543,13 @@ def render_event_message(
                 data=data,
                 is_native_evtx=is_native_evtx,
                 message_source=message_source,
-                renderer="external-export-field",
+                renderer=renderer,
                 validation_required=False,
             ),
         }
+        if rendered_message:
+            rendering["source_xml_path"] = "Event/RenderingInfo/Message"
+        return rendering
 
     catalog_entry = event_message_catalog_entry(message_catalog or {}, provider_name, event_id)
     if catalog_entry:
@@ -7597,7 +7613,7 @@ def render_event_message(
             ),
         }
 
-    template = event_message_template(provider_name, event_id)
+    template = event_message_template(provider_name, event_id, category)
     if template:
         message, missing_fields, used_fields = render_message_template(template, data)
         message_source = "rapidtriage-builtin-event-template"
@@ -7675,7 +7691,8 @@ def event_message_provenance(
         provenance["provider_message_resource_source"] = dict(provider_message_resource_source)
     if not is_native_evtx:
         provenance["provider_message_resource_resolved"] = (
-            provider_message_resource_resolved or message_source == "imported-export-field"
+            provider_message_resource_resolved
+            or message_source in {"imported-export-field", "xml-renderinginfo-message"}
         )
         return provenance
 
@@ -7836,14 +7853,15 @@ def event_message_positional_values(data: Mapping[str, object]) -> list[str]:
     return values
 
 
-def event_message_template(provider_name: str, event_id: str) -> str:
+def event_message_template(provider_name: str, event_id: str, category: str) -> str:
     provider_key = provider_name.lower()
     provider_normalized = normalize_provider_catalog_key(provider_name)
     for marker, templates in PROVIDER_EVENT_MESSAGE_TEMPLATES.items():
         marker_normalized = normalize_provider_catalog_key(marker)
         if (marker in provider_key or marker_normalized in provider_normalized) and event_id in templates:
             return templates[event_id]
-    return EVENT_MESSAGE_TEMPLATES.get(event_id, "")
+    template_category, template = EVENT_MESSAGE_TEMPLATES.get(event_id, ("", ""))
+    return template if template_category and template_category == category else ""
 
 
 def event_message_catalog_entry(
@@ -8041,6 +8059,7 @@ def normalize_event_details(
     rule_level: str = "",
     mitre_tags: list[str] | None = None,
     message_catalog: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
+    rendered_message: str = "",
 ) -> dict[str, object]:
     normalized_event_id = normalize_event_id(event_id)
     pick_data_text = data_text_picker(data)
@@ -8124,6 +8143,7 @@ def normalize_event_details(
         raw_preview=raw_preview,
         is_native_evtx=is_native_evtx,
         message_catalog=message_catalog,
+        rendered_message=rendered_message,
     )
     source_viewer_locator = eventlog_record_source_viewer_locator(
         source_path=source_path,

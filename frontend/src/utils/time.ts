@@ -154,9 +154,15 @@ export function zoneLabel(tz: TimezoneChoice, date: Date = new Date()): string {
   const abbr = ZONE_ABBR[name];
   if (name === "UTC" || name === "Etc/UTC") return "UTC";
   if (!abbr) return `UTC${offsetText(minutes)}`;
-  // Daylight abbreviation when the offset is past the zone's January (standard) offset.
-  const january = tzOffsetMinutes(name, new Date(Date.UTC(date.getUTCFullYear(), 0, 15)));
-  const label = abbr[1] && minutes !== january ? abbr[1] : abbr[0];
+  // Daylight only when the instant's offset is past the zone's standard offset, read from the
+  // runtime's IANA zone data as the smaller of that year's January and July offsets: January is
+  // summer (daylight) in the southern hemisphere, so January alone is not the standard offset.
+  const year = date.getUTCFullYear();
+  const standard = Math.min(
+    tzOffsetMinutes(name, new Date(Date.UTC(year, 0, 15))),
+    tzOffsetMinutes(name, new Date(Date.UTC(year, 6, 15))),
+  );
+  const label = abbr[1] && minutes > standard ? abbr[1] : abbr[0];
   return `${label}${offsetText(minutes)}`;
 }
 

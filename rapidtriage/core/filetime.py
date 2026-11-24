@@ -48,6 +48,7 @@ __all__ = [
     "parse_iso_utc",
     "plausibility",
     "precise_time_value",
+    "unix_ns_to_iso",
     "unix_to_datetime",
     "unix_to_iso",
     "webkit_to_datetime",
@@ -150,6 +151,27 @@ def unix_to_datetime(value: float | None, *, unit: str = "s") -> dt.datetime | N
 def unix_to_iso(value: float | None, *, unit: str = "s") -> str | None:
     moment = unix_to_datetime(value, unit=unit)
     return iso_utc(moment) if moment is not None else None
+
+
+def unix_ns_to_iso(value: int | None) -> str | None:
+    """Integer Unix nanoseconds (``os.stat`` ``st_*_ns``) -> ISO UTC with 100 ns kept.
+
+    The text is the canonical microsecond form, extended to seven fraction
+    digits only when the 100 ns digit is set, so 100 ns and 200 ns past a
+    second stay distinct. A float ``st_mtime`` cannot carry them (a double
+    near 1.7e9 s resolves about 0.2 us).
+    """
+    if not isinstance(value, int) or isinstance(value, bool):
+        return None
+    ticks = value // 100
+    try:
+        moment = UNIX_EPOCH + dt.timedelta(microseconds=ticks // 10)
+    except OverflowError:
+        return None
+    hundreds = ticks % 10
+    if not hundreds:
+        return moment.isoformat()
+    return f"{moment.isoformat()[:19]}.{moment.microsecond:06d}{hundreds}+00:00"
 
 
 def iso_utc(moment: dt.datetime) -> str:

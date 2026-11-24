@@ -4,6 +4,7 @@ import datetime as dt
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from .filetime import unix_ns_to_iso
 from .hash_cache import compute_hashes_cached, compute_hashes_fresh
 
 HASH_ALGORITHMS = ("md5", "sha1", "sha256")
@@ -61,7 +62,9 @@ def build_submission_manifest(
                     "path": str(source_path),
                     "name": source_path.name,
                     "size": stat_result.st_size,
-                    "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, tz=dt.timezone.utc).isoformat(),
+                    # Integer nanoseconds, not the float: 100 ns apart stays apart.
+                    "modified_at": unix_ns_to_iso(stat_result.st_mtime_ns),
+                    "modified_at_source": "fresh-stat-st_mtime_ns",
                     "hashes": hashes,
                     "hash_source": "fresh-file-read",
                 },

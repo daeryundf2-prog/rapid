@@ -2268,14 +2268,35 @@ def collect_powershell_history(root: Path) -> Iterable[ArtifactRecord]:
 
 SRUM_APP_COLUMNS = ("app", "appid", "application", "applicationname", "executable", "executablepath")
 SRUM_BYTES_SENT_COLUMNS = ("bytessent", "sendbytes", "sentbytes", "networkbytessent")
-SRUM_BYTES_RECEIVED_COLUMNS = ("bytesreceived", "receivebytes", "receivedbytes", "networkbytesreceived")
+# "BytesRecvd" is the column name in the SRUM Network Data Usage table itself.
+SRUM_BYTES_RECEIVED_COLUMNS = ("bytesreceived", "bytesrecvd", "receivebytes", "receivedbytes", "networkbytesreceived")
 SRUM_CPU_COLUMNS = ("cputime", "cpu", "cpucycletime")
 SRUM_ENERGY_COLUMNS = ("energy", "energyusage", "energyusagemwh")
+# Application Resource Usage table columns, each kept under its own name and
+# unit: cycle counts are not CPU time, and FaceTime's unit is not asserted.
+SRUM_APP_RESOURCE_COUNTERS: dict[str, tuple[str, str]] = {
+    "foregroundcycletime": ("foreground_cycle_time", "cpu-cycles"),
+    "backgroundcycletime": ("background_cycle_time", "cpu-cycles"),
+    "facetime": ("face_time", "source-unit-unverified"),
+    "foregroundcontextswitches": ("foreground_context_switches", "count"),
+    "backgroundcontextswitches": ("background_context_switches", "count"),
+    "foregroundbytesread": ("foreground_bytes_read", "bytes"),
+    "foregroundbyteswritten": ("foreground_bytes_written", "bytes"),
+    "backgroundbytesread": ("background_bytes_read", "bytes"),
+    "backgroundbyteswritten": ("background_bytes_written", "bytes"),
+    "foregroundnumreadoperations": ("foreground_read_operations", "count"),
+    "foregroundnumwriteoperations": ("foreground_write_operations", "count"),
+    "backgroundnumreadoperations": ("background_read_operations", "count"),
+    "backgroundnumwriteoperations": ("background_write_operations", "count"),
+    "foregroundnumberofflushes": ("foreground_flushes", "count"),
+    "backgroundnumberofflushes": ("background_flushes", "count"),
+}
 SRUM_COUNTER_COLUMNS = (
     *SRUM_BYTES_SENT_COLUMNS,
     *SRUM_BYTES_RECEIVED_COLUMNS,
     *SRUM_CPU_COLUMNS,
     *SRUM_ENERGY_COLUMNS,
+    *SRUM_APP_RESOURCE_COUNTERS,
 )
 
 
@@ -3205,6 +3226,28 @@ def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> Arti
         "cpu_time": first_value(lowered, *SRUM_CPU_COLUMNS),
         "energy_usage": first_value(lowered, *SRUM_ENERGY_COLUMNS),
     }
+    # Which source column fed each counter, so a cited value traces back to the
+    # export's own column name (BytesRecvd vs BytesReceived).
+    original_columns = {normalize_key(key): str(key) for key in row}
+    counter_aliases = {
+        "bytes_sent": SRUM_BYTES_SENT_COLUMNS,
+        "bytes_received": SRUM_BYTES_RECEIVED_COLUMNS,
+        "cpu_time": SRUM_CPU_COLUMNS,
+        "energy_usage": SRUM_ENERGY_COLUMNS,
+    }
+    counter_source_columns = {
+        name: next(original_columns[key] for key in aliases if lowered.get(key) not in (None, ""))
+        for name, aliases in counter_aliases.items()
+        if raw_counters[name] not in (None, "")
+    }
+    app_resource_counters: dict[str, dict[str, object]] = {}
+    for column, (name, unit) in SRUM_APP_RESOURCE_COUNTERS.items():
+        value = lowered.get(column)
+        if value in (None, ""):
+            continue
+        raw_counters[name] = value
+        counter_source_columns[name] = original_columns[column]
+        app_resource_counters[name] = {"value": number_value(value), "unit": unit, "source_column": original_columns[column]}
     counter_presence = {name: counter_presence_state(value) for name, value in raw_counters.items()}
     bytes_sent = number_value(raw_counters["bytes_sent"])
     bytes_received = number_value(raw_counters["bytes_received"])
@@ -3214,7 +3257,9 @@ def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> Arti
     interface_luid = str(first_value(lowered, "interfaceluid", "interface", "networkinterface") or "")
     network_profile = str(first_value(lowered, "networkprofile", "profile", "ssid") or "")
     has_network_counters = any(counter_presence[name] != "absent" for name in ("bytes_sent", "bytes_received"))
-    has_resource_counters = any(counter_presence[name] != "absent" for name in ("cpu_time", "energy_usage"))
+    has_resource_counters = bool(app_resource_counters) or any(
+        counter_presence[name] != "absent" for name in ("cpu_time", "energy_usage")
+    )
     artifact_type = "srum-network-usage" if has_network_counters else "srum-app-resource-usage"
     risk_flags = [f"suspicious-app:{term}" for term in SUSPICIOUS_COMMAND_TERMS if term.split()[0] in app_id.lower()]
     validation_checks = {
@@ -3266,6 +3311,7 @@ def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> Arti
             "bytes_total": bytes_total,
             "cpu_time": cpu_time,
             "energy_usage": energy,
+            **{name: item["value"] for name, item in app_resource_counters.items()},
         },
         source_offset=0,
         row_cluster_evidence={},
@@ -3320,6 +3366,8 @@ def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> Arti
         "interface_luid": interface_luid,
         "network_profile": network_profile,
         "srum_counter_presence": counter_presence,
+        "srum_counter_source_columns": counter_source_columns,
+        "srum_app_resource_counters": app_resource_counters,
         "srum_table_family": "network-usage" if artifact_type == "srum-network-usage" else "app-resource",
         "srum_usage_evidence": srum_usage_evidence(
             artifact_type=artifact_type,

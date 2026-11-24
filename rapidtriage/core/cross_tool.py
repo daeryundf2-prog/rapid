@@ -648,7 +648,7 @@ ESE_FIELD_ALIASES = {
     "deleted_state": ("deleted_state", "Deleted", "IsDeleted", "is_deleted", "tombstone", "Tombstone"),
     "user_sid": ("user_sid", "UserSid", "SID", "Sid"),
     "bytes_sent": ("bytes_sent", "BytesSent", "bytes sent", "NetworkBytesSent"),
-    "bytes_received": ("bytes_received", "BytesReceived", "bytes received", "NetworkBytesReceived"),
+    "bytes_received": ("bytes_received", "BytesReceived", "BytesRecvd", "bytes received", "NetworkBytesReceived"),
     "content_hash": ("content_hash", "ContentSHA256", "sha256", "SHA256", "hash"),
     "decode_status": ("decode_status", "DecodeStatus", "row_decode_status", "RowDecodeStatus"),
 }

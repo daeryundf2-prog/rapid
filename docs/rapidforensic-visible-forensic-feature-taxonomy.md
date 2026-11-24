@@ -946,7 +946,7 @@ GUI 표기 방식:
 
 1. `$LogFile`은 8MB prefix scan으로 제한해 대형 파일에서 수집기가 멈추지 않도록 했고, `ntfs_logfile_page_profile`과 `transaction_operation_hints`는 GUI에서 바로 필터링할 수 있는 bounded triage profile로만 제공한다.
 2. `.etl`은 4MB prefix scan으로 provider/string pivot만 추출한다. 구조 decode를 가장하지 않는다.
-3. `setupapi.dev.log`는 4MB scan과 최대 500개 install context entry 제한을 두고, device profile은 SetupAPI line에서 보이는 ID만 구조화한다.
+3. `setupapi.dev.log`는 로그 전체를 줄 단위로 순차 검색하고(`scan_window_bytes`=읽은 바이트, 읽기 오류 시에만 `scan_truncated`/`unscanned_bytes`), 장치 수는 읽은 장치 전체로 세며 목록만 100개로 자른다. device profile은 SetupAPI line에서 보이는 ID만 구조화한다.
 4. Wi-Fi profile은 XML 파일 단위 정규화라 대용량 부담이 작고, keyMaterial 원문은 노출하지 않으며 연결 여부 판정은 하지 않는다.
 
 검증 포인트:
