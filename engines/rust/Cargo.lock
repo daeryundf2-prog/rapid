@@ -37,7 +37,6 @@ checksum = "626d4928326b646e70f65ed36fc7cf9f206bdb68a0019ee7c6b4709da4e084c4"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
- "zlib-rs",
 ]
 
 [[package]]
@@ -315,12 +314,6 @@ name = "unindent"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7264e107f553ccae879d21fbea1d6724ac785e8c3bfc762137959b5802826ef3"
-
-[[package]]
-name = "zlib-rs"
-version = "0.6.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa76918995d776d9dd34d371030be228d021137449771493d56e29f77e4148ac"
 
 [[package]]
 name = "zmij"

@@ -11,7 +11,7 @@ name = "rapid_extract"
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
-flate2 = "1"
+flate2 = { version = "1", default-features = false, features = ["miniz_oxide"] }
 pyo3 = { version = "0.22", features = ["extension-module"], optional = true }
 
 [build-dependencies]
