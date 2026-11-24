@@ -702,12 +702,10 @@ def collect_recycle_bin_artifacts(root: Path) -> Iterable[ArtifactRecord]:
             if not metadata_path.is_file():
                 continue
             parsed = parse_recycle_bin_i_file(metadata_path)
+            metadata_status = str(parsed["metadata_status"])
+            metadata_complete = metadata_status == "parsed"
             suffix = metadata_path.name[2:]
-            payload_candidates = [
-                metadata_path.with_name(f"$R{suffix}"),
-                metadata_path.with_name(f"$R{suffix}{metadata_path.suffix}"),
-            ]
-            paired_payload = next((candidate for candidate in payload_candidates if candidate.is_file()), None)
+            paired_payload = recycle_bin_payload_for(metadata_path)
             stat_result = metadata_path.stat()
             yield ArtifactRecord(
                 provider=WindowsFilesystemProvider.name,
@@ -717,7 +715,7 @@ def collect_recycle_bin_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                 details={
                     "parser": "windows-recycle-bin",
                     "parser_version": PARSER_VERSION,
-                    "coverage_status": "i-r-pair-mapped" if paired_payload else "i-file-only",
+                    "coverage_status": recycle_bin_coverage_status(metadata_status, paired_payload is not None),
                     "reportability": "triage",
                     "source_path": str(metadata_path.resolve()),
                     "source_format": "recycle-bin-i-file",
@@ -726,10 +724,12 @@ def collect_recycle_bin_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                     "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, dt.timezone.utc).isoformat(),
                     "recycle_id": suffix,
                     "sid_hint": metadata_path.parent.name,
-                    "original_path": parsed.get("original_path", ""),
-                    "deleted_at": parsed.get("deleted_at", ""),
-                    "deleted_file_size": parsed.get("deleted_file_size", 0),
-                    "format_version": parsed.get("format_version", 0),
+                    "original_path": parsed["original_path"],
+                    "deleted_at": parsed["deleted_at"],
+                    "deleted_file_size": parsed["deleted_file_size"],
+                    "format_version": parsed["format_version"],
+                    "metadata_status": metadata_status,
+                    "metadata_issue": parsed["metadata_issue"],
                     "paired_payload_path": str(paired_payload.resolve()) if paired_payload else "",
                     "paired_payload_hashes": file_hashes(paired_payload) if paired_payload else {},
                     "validation_required": True,
@@ -737,18 +737,12 @@ def collect_recycle_bin_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                     "recovery": build_recovery_record(
                         CANDIDATE_KIND_DELETED_ENTRY,
                         subtype="recycle-bin-i-file",
-                        confidence="high",
-                        validation_status="unverified",
-                        deletion_state="recycled",
+                        confidence="high" if metadata_complete else ("low" if metadata_status == "partial" else "unknown"),
+                        validation_status="unverified" if metadata_complete else metadata_status_validation(metadata_status),
+                        deletion_state="recycled" if metadata_complete else "unknown",
                         source_path=str(metadata_path.resolve()),
                         source_record_id=suffix,
-                        limitation=(
-                            "$I metadata confirms the file was recycled; "
-                            "content recovery requires the paired $R payload."
-                            if paired_payload
-                            else "$I metadata found without a paired $R payload; "
-                            "content bytes are not recoverable from this record."
-                        ),
+                        limitation=recycle_bin_limitation(metadata_status, parsed["metadata_issue"], paired_payload is not None),
                     ),
                     "risk_flags": ["deleted-file-recycle-bin"],
                     "commercial_grade_ready": False,
@@ -760,34 +754,96 @@ def collect_recycle_bin_artifacts(root: Path) -> Iterable[ArtifactRecord]:
             )
 
 
+def recycle_bin_payload_for(metadata_path: Path) -> Path | None:
+    """Return the ``$R`` file whose name matches the ``$I`` suffix exactly.
+
+    ``$IXXXXXX.ext`` pairs only with ``$RXXXXXX.ext`` in the same SID
+    directory. A sibling with a different suffix (e.g. a double extension) is
+    a different file and must never be offered as this entry's content.
+    """
+    expected = f"$R{metadata_path.name[2:]}"
+    exact = metadata_path.with_name(expected)
+    if exact.is_file():
+        return exact
+    folded = expected.casefold()
+    try:
+        siblings = sorted(metadata_path.parent.iterdir(), key=lambda item: item.name)
+    except OSError:
+        return None
+    return next((item for item in siblings if item.name.casefold() == folded and item.is_file()), None)
+
+
+def recycle_bin_coverage_status(metadata_status: str, paired: bool) -> str:
+    if metadata_status == "unreadable":
+        return "i-file-unreadable-r-pair-mapped" if paired else "i-file-unreadable"
+    if metadata_status == "partial":
+        return "i-file-partial-r-pair-mapped" if paired else "i-file-partial"
+    return "i-r-pair-mapped" if paired else "i-file-only"
+
+
+def metadata_status_validation(metadata_status: str) -> str:
+    return "partial" if metadata_status == "partial" else "rejected"
+
+
+def recycle_bin_limitation(metadata_status: str, issue: str, paired: bool) -> str:
+    if metadata_status != "parsed":
+        return (
+            f"$I metadata is {metadata_status} ({issue}); recycled state and original path are withheld"
+            + ("; the exact-suffix $R payload is present but its origin is unconfirmed." if paired else ".")
+        )
+    if paired:
+        return "$I metadata confirms the file was recycled; content recovery requires the paired $R payload."
+    return "$I metadata found without a paired $R payload; content bytes are not recoverable from this record."
+
+
+RECYCLE_V1_PATH_BYTES = 520
+RECYCLE_V2_MAX_PATH_CHARS = 32767
+
+
 def parse_recycle_bin_i_file(path: Path) -> dict[str, object]:
-    blob = read_prefix(path, 4096)
-    if len(blob) < 24:
-        return {"format_version": 0, "deleted_file_size": 0, "deleted_at": "", "original_path": ""}
-    version = int.from_bytes(blob[0:8], "little", signed=False)
-    deleted_file_size = int.from_bytes(blob[8:16], "little", signed=False)
-    deleted_at = filetime_to_iso(int.from_bytes(blob[16:24], "little", signed=False))
-    original_path = decode_recycle_original_path(blob)
-    return {
-        "format_version": version,
-        "deleted_file_size": deleted_file_size,
-        "deleted_at": deleted_at,
-        "original_path": original_path,
+    """Parse a ``$I`` file, validating version, minimum size and path length.
+
+    ``metadata_status`` is ``parsed`` only when the whole declared structure
+    is present; ``partial`` keeps the fixed header but withholds the path;
+    ``unreadable`` keeps nothing.
+    """
+    blob = read_prefix(path, 28 + RECYCLE_V2_MAX_PATH_CHARS * 2)
+    empty: dict[str, object] = {
+        "format_version": 0,
+        "deleted_file_size": 0,
+        "deleted_at": "",
+        "original_path": "",
+        "metadata_status": "unreadable",
     }
-
-
-def decode_recycle_original_path(blob: bytes) -> str:
-    candidates = []
-    if len(blob) >= 28:
+    if len(blob) < 24:
+        return {**empty, "metadata_issue": f"header-truncated-{len(blob)}-of-24-bytes"}
+    version = int.from_bytes(blob[0:8], "little", signed=False)
+    if version not in (1, 2):
+        return {**empty, "metadata_issue": f"unsupported-version-{version}"}
+    header: dict[str, object] = {
+        "format_version": version,
+        "deleted_file_size": int.from_bytes(blob[8:16], "little", signed=False),
+        "deleted_at": filetime_to_iso(int.from_bytes(blob[16:24], "little", signed=False)),
+        "original_path": "",
+        "metadata_status": "partial",
+    }
+    if version == 1:
+        if len(blob) < 24 + RECYCLE_V1_PATH_BYTES:
+            return {**header, "metadata_issue": f"v1-path-truncated-{len(blob) - 24}-of-{RECYCLE_V1_PATH_BYTES}-bytes"}
+        raw = blob[24 : 24 + RECYCLE_V1_PATH_BYTES]
+    else:
+        if len(blob) < 28:
+            return {**header, "metadata_issue": "v2-path-length-missing"}
         name_len = int.from_bytes(blob[24:28], "little", signed=False)
-        if 0 < name_len < 2048 and 28 + name_len * 2 <= len(blob):
-            candidates.append(blob[28 : 28 + name_len * 2])
-    candidates.append(blob[24:])
-    for candidate in candidates:
-        text = candidate.decode("utf-16le", errors="ignore").split("\x00", 1)[0].strip()
-        if text:
-            return text
-    return ""
+        if not 0 < name_len <= RECYCLE_V2_MAX_PATH_CHARS:
+            return {**header, "metadata_issue": f"v2-path-length-invalid-{name_len}"}
+        if len(blob) < 28 + name_len * 2:
+            return {**header, "metadata_issue": f"v2-path-truncated-{len(blob) - 28}-of-{name_len * 2}-bytes"}
+        raw = blob[28 : 28 + name_len * 2]
+    original_path = raw.decode("utf-16le", errors="replace").split("\x00", 1)[0].strip()
+    if not original_path:
+        return {**header, "metadata_issue": "original-path-empty"}
+    return {**header, "original_path": original_path, "metadata_status": "parsed", "metadata_issue": ""}
 
 
 def collect_signature_mismatch_artifacts(root: Path) -> Iterable[ArtifactRecord]:
@@ -1800,6 +1856,9 @@ def build_native_mft_record(
         "record_number_source": str(record.get("record_number_source") or ""),
         "record_number_header": record.get("record_number_header"),
         "record_number_header_mismatch": bool(record.get("record_number_header_mismatch")),
+        "record_number_trusted": record.get("record_number_trusted") is not False,
+        "record_geometry_status": str(record.get("record_geometry_status") or ""),
+        "record_geometry_issues": list(record.get("record_geometry_issues") or []),
         "parent_reference": str(parent_reference or ""),
         "parent_reference_decoded": dict(primary_file_name.get("parent_reference") or {})
         if isinstance(primary_file_name.get("parent_reference"), Mapping)
@@ -2193,6 +2252,11 @@ def mft_record_evidence(record: Mapping[str, object], file_path: str) -> dict[st
 def build_mft_bounded_path_cache(records: Sequence[Mapping[str, object]]) -> dict[int, dict[str, object]]:
     nodes: dict[int, dict[str, object]] = {}
     for record in records:
+        # A slot number derived from damaged geometry (truncated record, bad
+        # allocated length) may name another file's slot; such a record must
+        # never become a path-cache node that file references can link to.
+        if record.get("record_number_trusted") is False:
+            continue
         record_number = int(record.get("record_number_candidate") or 0)
         if record_number < 0:
             continue
@@ -2897,7 +2961,10 @@ def usn_bounded_mft_path_correlation(
     path_candidate = ""
     source = "none"
     status = "no-mft-path-cache-attached" if not mft_path_cache else "no-matching-frn-in-bounded-mft-cache"
-    if isinstance(current, Mapping) and current.get("path") and not file_sequence_mismatch:
+    # A historical path through the parent is only valid when the parent slot
+    # still holds the same generation; otherwise the current path is a later
+    # directory's path and is kept only as ``current_mft_path`` observation.
+    if isinstance(current, Mapping) and current.get("path") and not file_sequence_mismatch and not parent_sequence_mismatch:
         path_candidate = str(current.get("path") or "")
         source = "file-reference-cache"
         status = "matched-file-reference-cache"
@@ -2910,6 +2977,8 @@ def usn_bounded_mft_path_correlation(
         path_candidate = str(parent.get("path") or "")
         source = "parent-reference-cache-only"
         status = "partial-parent-cache-only"
+    elif parent_sequence_mismatch and not file_sequence_mismatch:
+        status = "unresolved-mft-parent-sequence-mismatch"
     elif unresolved_reasons:
         status = "unresolved-mft-sequence-mismatch"
     file_reference_link = {
@@ -5587,8 +5656,38 @@ def read_prefix(path: Path, limit: int) -> bytes:
         return b""
 
 
+def mft_volume_record_size(blob: bytes) -> int | None:
+    """Infer the MFT record size from records whose own geometry agrees.
+
+    A record votes for its allocated length only when that length is a
+    plausible record size, the whole record lies inside the blob, its offset
+    is slot-aligned and (for NTFS 3.1 headers) the header record number
+    equals the slot that length implies. One damaged record (truncated tail,
+    rewritten length) therefore cannot redefine the slot stride.
+    """
+    votes: dict[int, int] = {}
+    offset = 0
+    seen = 0
+    while seen < 5000:
+        offset = blob.find(b"FILE", offset)
+        if offset < 0:
+            break
+        if offset + 48 <= len(blob):
+            seen += 1
+            allocated = int_from(blob, offset + 0x1C, 4)
+            if allocated in (1024, 2048, 4096) and offset % allocated == 0 and offset + allocated <= len(blob):
+                header = int_from(blob, offset + 0x2C, 4) if int_from(blob, offset + 0x04, 2) >= 0x30 else None
+                if header is None or header == offset // allocated:
+                    votes[allocated] = votes.get(allocated, 0) + 1
+        offset += 4
+    if not votes:
+        return None
+    return max(votes, key=lambda size: (votes[size], size))
+
+
 def parse_mft_record_headers(blob: bytes) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
+    volume_record_size = mft_volume_record_size(blob)
     offset = 0
     while True:
         offset = blob.find(b"FILE", offset)
@@ -5597,7 +5696,24 @@ def parse_mft_record_headers(blob: bytes) -> list[dict[str, object]]:
         if offset + 48 <= len(blob):
             flags = int_from(blob, offset + 0x16, 2)
             allocated_size = int_from(blob, offset + 0x1C, 4)
-            record_size = allocated_size if 48 <= allocated_size <= 4096 and offset + allocated_size <= len(blob) else 1024
+            own_geometry_ok = 48 <= allocated_size <= 4096 and offset + allocated_size <= len(blob)
+            geometry_issues: list[str] = []
+            if volume_record_size is not None:
+                record_size = volume_record_size
+                record_number_source = "record-offset-divided-by-volume-record-size"
+                if allocated_size != volume_record_size:
+                    geometry_issues.append(
+                        f"allocated-size-{allocated_size}-disagrees-with-volume-record-size-{volume_record_size}"
+                    )
+                if offset % volume_record_size:
+                    geometry_issues.append("record-offset-not-slot-aligned")
+            else:
+                record_size = allocated_size if own_geometry_ok else 1024
+                record_number_source = "record-offset-divided-by-record-size"
+                if not 48 <= allocated_size <= 4096:
+                    geometry_issues.append(f"allocated-size-invalid-{allocated_size}")
+            if offset + record_size > len(blob):
+                geometry_issues.append(f"record-truncated-{len(blob) - offset}-of-{record_size}-bytes")
             record_blob = blob[offset : min(len(blob), offset + record_size)]
             path_candidates = extract_path_candidates(extract_utf16_strings(record_blob))
             first_attribute_offset = int_from(blob, offset + 0x14, 2)
@@ -5614,21 +5730,35 @@ def parse_mft_record_headers(blob: bytes) -> list[dict[str, object]]:
                 sequence_validation=sequence_validation,
                 attributes=attributes,
                 timestamp_validation=timestamp_validation,
-            )
+            ) + geometry_issues
             validation_status = "valid" if not validation_warnings else "valid-with-warnings"
-            # The slot index follows the record length (1 KiB or 4 KiB), not a
-            # fixed 1 KiB stride. NTFS 3.1 headers (update sequence array at
-            # 0x30 or later) also carry the record number at 0x2C; a
-            # disagreement is reported rather than silently resolved.
+            # The slot index follows the volume record size inferred from
+            # records whose geometry agrees (1 KiB or 4 KiB), not a fixed
+            # 1 KiB stride or the damaged record's own length. NTFS 3.1
+            # headers (update sequence array at 0x30 or later) also carry the
+            # record number at 0x2C; a disagreement is reported rather than
+            # silently resolved.
             record_number = offset // record_size
             header_record_number = (
                 int_from(blob, offset + 0x2C, 4) if int_from(blob, offset + 0x04, 2) >= 0x30 else None
+            )
+            # A damaged record keeps a trustworthy number only when the
+            # volume geometry places it on a slot boundary and its own header
+            # names the same slot; otherwise it cannot be linked to file
+            # references.
+            record_number_trusted = not geometry_issues or (
+                volume_record_size is not None
+                and offset % volume_record_size == 0
+                and header_record_number == record_number
             )
             records.append(
                 {
                     "record_offset": offset,
                     "record_number_candidate": record_number,
-                    "record_number_source": "record-offset-divided-by-record-size",
+                    "record_number_source": record_number_source,
+                    "record_number_trusted": record_number_trusted,
+                    "record_geometry_status": "damaged" if geometry_issues else "consistent",
+                    "record_geometry_issues": geometry_issues,
                     "record_size_used_for_slot": record_size,
                     "record_number_header": header_record_number,
                     "record_number_header_mismatch": header_record_number is not None
