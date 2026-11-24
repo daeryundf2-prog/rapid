@@ -1577,10 +1577,17 @@ def _resolve_field(
             return
         part = parts[index]
         if part.endswith("[*]"):
-            values = node.get(part[:-3]) if isinstance(node, Mapping) else None
+            name = part[:-3]
+            values = node.get(name) if isinstance(node, Mapping) else None
             if isinstance(values, list):
+                # ``<list>_100ns`` holds the 7-digit text of each element (Prefetch run slots).
+                precise = node.get(f"{name}_100ns")
+                if not isinstance(precise, list) or len(precise) != len(values):
+                    precise = None
                 for position, value in enumerate(values, start=1):
                     if value not in (None, "", 0):
+                        if precise is not None:
+                            value = precise_time_value({f"{name}_100ns": precise[position - 1]}, name, value)
                         # identity omits the position: the label carries it, so
                         # last_run_times[0] and run_time_1 dedupe to one event.
                         yield value, element, identity, f"{field.label}-{position}"
