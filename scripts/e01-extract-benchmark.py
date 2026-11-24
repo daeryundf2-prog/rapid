@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
-"""Benchmark the native E01 extraction engines (Python vs Rust) on a synthetic NTFS image.
+"""Benchmark the native E01 extraction engines on a synthetic NTFS image, stage by stage.
 
-Builds a synthetic MBR+NTFS disk (``tests/ntfs_volume_gen.py``) in a temporary directory,
-optionally wraps it in a multi-segment E01 with ``ewfacquire`` (``--e01``), runs
-``extract_e01_native`` with each engine ``--repeat`` times, checks that both engines produced
-the same tree and stats, and deletes everything it wrote.
+Builds a synthetic MBR+NTFS disk (``tests/ntfs_volume_gen.py``; ``--payload text`` makes the
+file data compressible like real documents) in a temporary directory, optionally wraps it in a
+multi-segment E01 with ``ewfacquire`` (``--e01``), and runs ``extract_e01_native`` ``--repeat``
+times per configuration:
 
-Usage: python scripts/e01-extract-benchmark.py [--files 20000] [--dirs 200] [--repeat 3] [--e01] [--json]
+- ``python``: dissect.ntfs walk, pyewf reads (the default engine);
+- ``rust-walk``: Rust walk and copy, every media read through the pyewf handle, one thread;
+- ``rust-reader``: plus the Rust EWF reader (or raw-file reads), one thread;
+- ``rust-parallel``: plus parallel chunk decoding and file copies (``--threads``).
+
+Every configuration must produce the same tree and stats as ``python``. Everything it wrote is
+deleted at the end.
+
+Usage: python scripts/e01-extract-benchmark.py [--files 20000] [--dirs 200] [--payload text]
+       [--repeat 3] [--threads 8] [--e01] [--json]
 """
 
 from __future__ import annotations
@@ -40,10 +49,28 @@ def tree_digest(root: Path) -> str:
     return digest.hexdigest()
 
 
-def run_once(engine: str, source: Path, segments: list[Path], raw: bool, work: Path) -> tuple[float, dict[str, Any], str]:
-    out = work / f"out-{engine}"
+CONFIGS: dict[str, dict[str, str]] = {
+    "python": {e01_extract_engine.E01_EXTRACT_ENGINE_ENV: "python"},
+    "rust-walk": {
+        e01_extract_engine.E01_EXTRACT_ENGINE_ENV: "rust",
+        e01_extract_engine.E01_EXTRACT_READER_ENV: "python",
+        e01_extract_engine.E01_EXTRACT_THREADS_ENV: "1",
+    },
+    "rust-reader": {
+        e01_extract_engine.E01_EXTRACT_ENGINE_ENV: "rust",
+        e01_extract_engine.E01_EXTRACT_READER_ENV: "auto",
+        e01_extract_engine.E01_EXTRACT_THREADS_ENV: "1",
+    },
+    "rust-parallel": {e01_extract_engine.E01_EXTRACT_ENGINE_ENV: "rust", e01_extract_engine.E01_EXTRACT_READER_ENV: "auto"},
+}
+
+
+def run_once(config: str, source: Path, segments: list[Path], raw: bool, work: Path) -> tuple[float, dict[str, Any], str]:
+    out = work / f"out-{config}"
     shutil.rmtree(out, ignore_errors=True)
-    os.environ[e01_extract_engine.E01_EXTRACT_ENGINE_ENV] = engine
+    for key in (e01_extract_engine.E01_EXTRACT_READER_ENV, e01_extract_engine.E01_EXTRACT_THREADS_ENV):
+        os.environ.pop(key, None)
+    os.environ.update(CONFIGS[config])
     opener = e01_native.open_ewf_segments
     if raw:
         e01_native.open_ewf_segments = lambda segs: e01_native.RawMediaHandle(segs[0])
@@ -62,7 +89,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--files", type=int, default=20_000)
     parser.add_argument("--dirs", type=int, default=200)
+    parser.add_argument("--payload", choices=("random", "text"), default="text")
     parser.add_argument("--repeat", type=int, default=3)
+    parser.add_argument("--threads", type=int, default=0, help="rust-parallel threads (default: engine default)")
     parser.add_argument("--e01", action="store_true", help="wrap the image in an E01 segment set (needs ewfacquire)")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
@@ -78,7 +107,9 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="e01-extract-bench-") as tmp:
         work = Path(tmp)
         image = work / "disk.raw"
-        info = build_disk_image(image, bulk_files=args.files, bulk_dirs=args.dirs)
+        info = build_disk_image(image, bulk_files=args.files, bulk_dirs=args.dirs, payload=args.payload)
+        if args.threads:
+            CONFIGS["rust-parallel"][e01_extract_engine.E01_EXTRACT_THREADS_ENV] = str(args.threads)
         source, segments, raw = image, [image], True
         if args.e01:
             ewfacquire = shutil.which("ewfacquire")
@@ -99,14 +130,14 @@ def main() -> int:
         digests: dict[str, str] = {}
         stats: dict[str, object] = {}
         best_seconds: dict[str, float] = {}
-        for engine in ("python", "rust"):
-            runs = [run_once(engine, source, segments, raw, work) for _ in range(max(1, args.repeat))]
+        for config in CONFIGS:
+            runs = [run_once(config, source, segments, raw, work) for _ in range(max(1, args.repeat))]
             times = [elapsed for elapsed, _result, _digest in runs]
-            _elapsed, result, digests[engine] = runs[-1]
-            stats[engine] = result["stats"]
+            _elapsed, result, digests[config] = runs[-1]
+            stats[config] = result["stats"]
             files = int(result["stats"]["files"])
-            best = best_seconds[engine] = min(times)
-            report[engine] = {
+            best = best_seconds[config] = min(times)
+            report[config] = {
                 "wall_seconds": [round(t, 3) for t in times],
                 "best_seconds": round(best, 3),
                 "median_seconds": round(statistics.median(times), 3),
@@ -114,8 +145,8 @@ def main() -> int:
                 "files_per_second": round(files / best, 1),
                 "engine": result.get("extract_engine", {"active": "python"}),
             }
-        report["identical_output"] = digests["python"] == digests["rust"] and stats["python"] == stats["rust"]
-        report["speedup_best"] = round(best_seconds["python"] / best_seconds["rust"], 2)
+        report["identical_output"] = all(digests[c] == digests["python"] and stats[c] == stats["python"] for c in CONFIGS)
+        report["speedup_vs_python"] = {c: round(best_seconds["python"] / best_seconds[c], 2) for c in CONFIGS}
 
     print(json.dumps(report, indent=None if args.json else 2, ensure_ascii=False))
     return 0 if report["identical_output"] else 1

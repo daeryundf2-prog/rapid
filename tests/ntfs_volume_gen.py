@@ -598,9 +598,25 @@ class VolumeBuilder:
         return bytes(self.volume)
 
 
-def populate(builder: VolumeBuilder, *, bulk_files: int = 400, bulk_dirs: int = 8, seed: int = 1) -> dict[str, int]:
-    """Add the edge-case tree plus ``bulk_files`` files over ``bulk_dirs`` directories."""
+def populate(
+    builder: VolumeBuilder, *, bulk_files: int = 400, bulk_dirs: int = 8, seed: int = 1, payload: str = "random"
+) -> dict[str, int]:
+    """Add the edge-case tree plus ``bulk_files`` files over ``bulk_dirs`` directories.
+
+    ``payload="text"`` fills bulk files with word text (compresses ~3x in an E01, like real
+    documents); ``"random"`` keeps them incompressible."""
     rng = random.Random(seed)
+    text_rng = random.Random(seed + 1)
+    words = [text_rng.randbytes(text_rng.randint(2, 9)).hex().encode() for _ in range(512)]
+
+    def blob(size: int) -> bytes:
+        if payload == "random":
+            return rng.randbytes(size)
+        out = bytearray()
+        while len(out) < size:
+            out += b" ".join(text_rng.choices(words, k=64)) + b"\n"
+        return bytes(out[:size])
+
     b = builder
     config = b.makedirs("Windows", "System32", "config")
     for hive in ("SYSTEM", "SOFTWARE", "SAM", "SECURITY", "DEFAULT"):
@@ -658,7 +674,7 @@ def populate(builder: VolumeBuilder, *, bulk_files: int = 400, bulk_dirs: int = 
             layout = rng.choice(layouts) if size > 400 else "auto"
             name = f"file{f:05d}.{rng.choice(('txt', 'dat', 'jpg', 'log'))}"
             deleted = rng.random() < 0.05
-            b.add_file(folder, name, rng.randbytes(size), layout=layout, deleted=deleted)
+            b.add_file(folder, name, blob(size), layout=layout, deleted=deleted)
     return {"records": b.next_record}
 
 
@@ -672,10 +688,12 @@ def junction_attr() -> bytes:
     return resident_attr(0xC0, value, instance=6)
 
 
-def build_disk_image(path: Path, *, bulk_files: int = 400, bulk_dirs: int = 8, seed: int = 1) -> dict[str, int]:
+def build_disk_image(
+    path: Path, *, bulk_files: int = 400, bulk_dirs: int = 8, seed: int = 1, payload: str = "random"
+) -> dict[str, int]:
     """Write an MBR disk (one 0x07 partition at sector 2048) holding the synthetic volume."""
     builder = VolumeBuilder(seed)
-    info = populate(builder, bulk_files=bulk_files, bulk_dirs=bulk_dirs, seed=seed)
+    info = populate(builder, bulk_files=bulk_files, bulk_dirs=bulk_dirs, seed=seed, payload=payload)
     volume = builder.build_volume()
     sectors = len(volume) // SECTOR
     mbr = bytearray(PARTITION_SECTOR * SECTOR)
@@ -699,5 +717,6 @@ if __name__ == "__main__":  # pragma: no cover - manual corpus generation
     parser.add_argument("--files", type=int, default=400)
     parser.add_argument("--dirs", type=int, default=8)
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--payload", choices=("random", "text"), default="random")
     args = parser.parse_args()
-    print(json.dumps(build_disk_image(args.output, bulk_files=args.files, bulk_dirs=args.dirs, seed=args.seed)))
+    print(json.dumps(build_disk_image(args.output, bulk_files=args.files, bulk_dirs=args.dirs, seed=args.seed, payload=args.payload)))

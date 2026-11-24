@@ -68,9 +68,13 @@ class EngineParityBase(unittest.TestCase):
         limit: int | None = None,
         include_deleted: bool = True,
         segments: list[Path] | None = None,
+        extra_env: dict[str, str] | None = None,
+        blockers: tuple[str, ...] = (),
     ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, int]]]:
         out = Path(tempfile.mkdtemp(dir=self.temp.name))
-        env = {e01_extract_engine.E01_EXTRACT_ENGINE_ENV: engine}
+        for blocker in blockers:
+            (out / "tree" / blocker).mkdir(parents=True)
+        env = {e01_extract_engine.E01_EXTRACT_ENGINE_ENV: engine, **(extra_env or {})}
         if limit is not None:
             env[e01_native.NATIVE_MAX_EXTRACT_FILES_ENV] = str(limit)
         progress: list[dict[str, int]] = []
@@ -99,10 +103,14 @@ class RustEngineParityTests(EngineParityBase):
                 self.fail(missing)
             self.skipTest(missing)
 
-    def assert_same(self, python: tuple, rust: tuple) -> None:
+    def assert_same(self, python: tuple, rust: tuple, reader: tuple[str, ...] = ("rust-ewf", "raw-file")) -> None:
         py_result, py_tree, _ = python
         rs_result, rs_tree, rs_progress = rust
-        self.assertEqual(rs_result["extract_engine"], {"requested": "rust", "active": "rust", "notice_ko": ""})
+        engine = rs_result["extract_engine"]
+        self.assertEqual((engine["requested"], engine["active"], engine["notice_ko"]), ("rust", "rust", ""))
+        self.assertIn(engine["media_reader"], reader)
+        if engine["media_reader"] != "python-handle":
+            self.assertEqual(engine["python_reads"], 0)
         self.assertNotIn("extract_engine", py_result)
         self.assertEqual(sorted(rs_tree["files"]), sorted(py_tree["files"]))
         self.assertEqual(rs_tree["files"], py_tree["files"])
@@ -133,11 +141,12 @@ class RustEngineParityTests(EngineParityBase):
 
     def test_caps_and_truncation_counters_are_identical(self) -> None:
         for limit in (5, 40, 300):
-            with self.subTest(limit=limit):
-                python = self.run_engine("python", limit=limit)
-                rust = self.run_engine("rust", limit=limit)
-                self.assert_same(python, rust)
-                self.assertGreater(python[0]["stats"]["truncated"], 0)
+            python = self.run_engine("python", limit=limit)
+            self.assertGreater(python[0]["stats"]["truncated"], 0)
+            for threads in ("1", "4"):
+                with self.subTest(limit=limit, threads=threads):
+                    rust = self.run_engine("rust", limit=limit, extra_env={e01_extract_engine.E01_EXTRACT_THREADS_ENV: threads})
+                    self.assert_same(python, rust)
         self.assertEqual(python[0]["stats"]["file_limit"], 300)
 
     def test_without_deleted_sweep_is_identical(self) -> None:
@@ -146,20 +155,76 @@ class RustEngineParityTests(EngineParityBase):
         self.assert_same(python, rust)
         self.assertEqual(python[0]["stats"]["deleted_files"], 0)
 
-    def test_e01_segment_set_is_identical(self) -> None:
+    def acquire(self, name: str, *options: str) -> list[Path]:
         ewfacquire = shutil.which("ewfacquire")
         if ewfacquire is None or e01_native.pyewf is None:
             self.skipTest("ewfacquire or pyewf unavailable")
-        target = Path(self.temp.name) / "e01" / "disk"
+        target = Path(self.temp.name) / name / "disk"
         target.parent.mkdir(exist_ok=True)
         subprocess.run(
-            [ewfacquire, "-u", "-q", "-t", str(target), "-f", "encase6", "-c", "deflate:fast", "-S", "4MiB",
+            [ewfacquire, "-u", "-q", "-t", str(target), "-f", "encase6", *options,
              "-C", "synthetic", "-D", "synthetic", "-e", "synthetic", "-E", "1", "-N", "synthetic", str(self.image)],
             check=True, capture_output=True,
         )
-        segments = sorted(target.parent.glob("disk.E*"))
+        return sorted(target.parent.glob("disk.E*"))
+
+    def test_e01_segment_set_is_identical(self) -> None:
+        segments = self.acquire("e01", "-c", "deflate:fast", "-S", "4MiB")
         self.assertGreater(len(segments), 1)
-        self.assert_same(self.run_engine("python", segments=segments), self.run_engine("rust", segments=segments))
+        python = self.run_engine("python", segments=segments)
+        rust = self.run_engine("rust", segments=segments)
+        self.assert_same(python, rust, reader=("rust-ewf",))
+        pyewf_reads = self.run_engine("rust", segments=segments, extra_env={e01_extract_engine.E01_EXTRACT_READER_ENV: "python"})
+        self.assert_same(python, pyewf_reads, reader=("python-handle",))
+
+    def test_rust_ewf_reader_returns_pyewf_bytes(self) -> None:
+        module, _ = e01_extract_engine.load_extract_extension()
+        for name, options in (
+            ("none", ("-c", "none", "-S", "4MiB")),
+            ("best", ("-c", "deflate:best", "-b", "128")),
+            ("fast", ("-c", "deflate:fast", "-S", "3MiB", "-b", "64")),
+        ):
+            with self.subTest(compression=name):
+                segments = self.acquire(f"bytes-{name}", *options)
+                handle = e01_native.open_ewf_segments(segments)
+                try:
+                    size = int(handle.get_media_size())
+                    for offset, length in ((0, size), (size - 700, 4096), (12345, 70_000)):
+                        handle.seek(offset)
+                        expected = handle.read(length)
+                        actual = module.ewf_read([str(s) for s in segments], offset, length)
+                        self.assertEqual(hashlib.sha256(actual).hexdigest(), hashlib.sha256(expected).hexdigest())
+                finally:
+                    handle.close()
+
+    def test_failed_parallel_copy_is_replayed_without_rerun(self) -> None:
+        blocker = ("Users/alice/Documents/notes.txt",)
+        python = self.run_engine("python", blockers=blocker)
+        rust = self.run_engine("rust", blockers=blocker, extra_env={e01_extract_engine.E01_EXTRACT_THREADS_ENV: "4"})
+        self.assert_same(python, rust)
+        self.assertIsNone(rust[0]["extract_engine"]["rerun_reason"])
+        clean = self.run_engine("python")
+        self.assertEqual(python[0]["stats"]["errors"], clean[0]["stats"]["errors"] + 1)
+
+    def test_failure_that_moves_the_cap_reruns_sequentially(self) -> None:
+        blocker = ("Windows/System32/config/SYSTEM",)
+        python = self.run_engine("python", limit=40, blockers=blocker)
+        rust = self.run_engine("rust", limit=40, blockers=blocker, extra_env={e01_extract_engine.E01_EXTRACT_THREADS_ENV: "4"})
+        self.assert_same(python, rust)
+        self.assertTrue(rust[0]["extract_engine"]["rerun_reason"])
+
+    def test_undecodable_compressed_file_is_identical(self) -> None:
+        image = Path(self.temp.name) / "bad-lznt1.raw"
+        build_disk_image(image, bulk_files=0, bulk_dirs=1, seed=1)
+        original, type(self).image = type(self).image, image
+        try:
+            python = self.run_engine("python")
+            rust = self.run_engine("rust", extra_env={e01_extract_engine.E01_EXTRACT_THREADS_ENV: "4"})
+        finally:
+            type(self).image = original
+        self.assert_same(python, rust)
+        self.assertNotIn("Users/alice/Documents/compressed.log", python[1]["files"])
+        self.assertIsNone(rust[0]["extract_engine"]["rerun_reason"])
 
 
 class _FailingExtension:
