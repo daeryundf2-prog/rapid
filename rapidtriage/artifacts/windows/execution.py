@@ -339,10 +339,15 @@ def parse_execution_reg_export(path: Path, text: str) -> Iterable[ArtifactRecord
         # regedit wraps long hex values over "\"-terminated continuation lines; join them so
         # multi-line binary values (UserAssist 72-byte records, BAM FILETIMEs) are not truncated.
         if pending:
-            if not stripped:
-                continue
-            stripped = pending + stripped
-            pending = ""
+            if stripped and not stripped.startswith("["):
+                stripped = pending + stripped
+                pending = ""
+            else:
+                # A cut-off export: keep the octets read so far and handle this line normally.
+                name, value = parse_reg_value(pending)
+                pending = ""
+                if current_key and name:
+                    values[name] = value
         if stripped.endswith("\\") and "=" in stripped and not stripped.startswith("["):
             pending = stripped[:-1]
             continue
@@ -1537,8 +1542,9 @@ def build_userassist_schema_entry_record(
             "source_hashes": dict(source_hashes),
             "source_key": count_key,
             # Per-value identity for timeline dedupe when no hive cell offset exists (.reg exports):
-            # an offset of 0 would make every value of the export one record.
-            "key_path": f"{count_key}\\{row.get('raw_value_name', '')}",
+            # an offset of 0 would make every value of the export one record. Not ``key_path``: that
+            # names a registry key (registry-tree links, cross-tool keys), and this is a value.
+            "registry_value_path": f"{count_key}\\{row.get('raw_value_name', '')}",
             "source_index": index,
             "guid": row.get("guid", ""),
             "count_key_cell_offset": row.get("count_key_cell_offset", ""),
@@ -6815,11 +6821,25 @@ def number_value(value: object) -> int | float | str:
 
 
 def parse_reg_value(line: str) -> tuple[str, str]:
-    if "=" not in line:
-        return "", ""
-    raw_name, raw_value = line.split("=", 1)
-    # regedit escapes \ and " inside quoted value names ("C:\\Users\\...").
-    name = raw_name.strip().strip('"').replace('\\"', '"').replace("\\\\", "\\")
+    if line.startswith('"'):
+        # Quoted value name: regedit escapes \ and " ("C:\\Users\\...", "say \"hi\""), and the
+        # name itself may contain "=". Other backslashes stay literal (hand-written exports).
+        chars: list[str] = []
+        index = 1
+        while index < len(line) and line[index] != '"':
+            if line[index] == "\\" and line[index + 1 : index + 2] in ("\\", '"'):
+                index += 1
+            chars.append(line[index])
+            index += 1
+        rest = line[index + 1 :].lstrip()
+        if index >= len(line) or not rest.startswith("="):
+            return "", ""
+        name, raw_value = "".join(chars), rest[1:]
+    else:
+        if "=" not in line:
+            return "", ""
+        raw_name, raw_value = line.split("=", 1)
+        name = raw_name.strip()
     value = raw_value.strip()
     if value.startswith('"') and value.endswith('"'):
         value = value[1:-1]

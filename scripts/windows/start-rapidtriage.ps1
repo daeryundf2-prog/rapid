@@ -42,8 +42,11 @@ function Find-SystemPython {
     if ($python) {
         return @{ Exe = $python.Source; Args = @() }
     }
+    # Python312, Python312-32, Python313-arm64: order by the minor version, not every digit
+    # in the folder name, and skip interpreters older than the 3.10 floor.
     $installed = Get-ChildItem (Join-Path $env:LOCALAPPDATA "Programs\Python\Python3*\python.exe") -ErrorAction SilentlyContinue |
-        Sort-Object { [int]($_.Directory.Name -replace "\D", "") } -Descending |
+        Where-Object { $_.Directory.Name -match "^Python3(\d+)" -and [int]$Matches[1] -ge 10 } |
+        Sort-Object { [int]($_.Directory.Name -replace "^Python3(\d+).*$", '$1') } -Descending |
         Select-Object -First 1
     if ($installed) {
         return @{ Exe = $installed.FullName; Args = @() }

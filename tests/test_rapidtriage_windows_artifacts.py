@@ -22,6 +22,8 @@ from rapidtriage.artifacts.windows.execution import (
     build_srum_database_inventory_record,
     build_srum_schema_row_record,
     build_srum_schema_row_records,
+    parse_execution_reg_export,
+    parse_reg_value,
     srum_schema_row_identity,
 )
 from rapidtriage.artifacts.windows.os_account import build_os_account_trusted_diff
@@ -3865,6 +3867,12 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(details["timestamp"], "2026-11-19T07:31:37+00:00")
             self.assertEqual(details["source_format"], "reg-export-userassist-decode")
             self.assertEqual(details["source_key"], f"{key}\\{guid}\\Count")
+            # A value is not a key: no key_path (registry-tree links, cross-tool registry keys).
+            self.assertNotIn("key_path", details)
+            self.assertEqual(
+                details["registry_value_path"],
+                f"{key}\\{guid}\\Count\\{rot13('Microsoft.WindowsCalculator_8wekyb3d8bbwe!App')}",
+            )
 
             # Both values share one last-run time and one source file: the timeline keeps both programs.
             timeline = root / "timeline.json"
@@ -3872,6 +3880,40 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             events = json.loads(timeline.read_text(encoding="utf-8"))["events"]
             last_runs = [event for event in events if event["event_type"] == "artifact-userassist-schema-entry-last-run"]
             self.assertEqual(len(last_runs), 2)
+
+    def test_reg_value_names_are_unescaped_and_may_hold_equals_or_quotes(self) -> None:
+        self.assertEqual(parse_reg_value(r'"C:\\Tools\\a=b.exe"=hex:01,02'), (r"C:\Tools\a=b.exe", "0102"))
+        self.assertEqual(parse_reg_value(r'"say \"hi\""=dword:00000010'), ('say "hi"', "16"))
+        self.assertEqual(parse_reg_value(r'"trail\\"="x"'), ("trail\\", "x"))
+        self.assertEqual(parse_reg_value('@="default"'), ("@", "default"))
+        # Hand-written exports with single backslashes keep them.
+        self.assertEqual(parse_reg_value(r'"\Device\HarddiskVolume3\a.exe"=hex:01'), (r"\Device\HarddiskVolume3\a.exe", "01"))
+        self.assertEqual(parse_reg_value('"unterminated=hex:01'), ("", ""))
+
+    def test_cut_off_reg_continuation_does_not_swallow_the_next_key(self) -> None:
+        count_key = r"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist\{GUID-A}\Count"
+        other_key = r"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist\{GUID-B}\Count"
+        text = "\r\n".join(
+            [
+                "Windows Registry Editor Version 5.00",
+                "",
+                f"[{count_key}]",
+                f'"{rot13("cut.exe")}"=hex:01,02,\\',
+                "",
+                f"[{other_key}]",
+                f'"{rot13("whole.exe")}"=hex:03,04',
+                "",
+            ]
+        )
+        rows = [
+            record.details
+            for record in parse_execution_reg_export(Path("export.reg"), text)
+            if record.artifact_type == "userassist-schema-entry"
+        ]
+        self.assertEqual(
+            [(row["source_key"], row["decoded_name"], row["value_data_size"]) for row in rows],
+            [(count_key, "cut.exe", 2), (other_key, "whole.exe", 2)],
+        )
 
     def test_execution_artifact_trusted_diff_passes_matching_rows(self) -> None:
         rapid = [

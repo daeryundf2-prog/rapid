@@ -98,7 +98,9 @@ class RapidTriageWindowsLauncherExitCodeTests(unittest.TestCase):
                 alias = local / "Microsoft" / "WindowsApps" / "python.exe"
                 installed = local / "Programs" / "Python" / "Python312" / "python.exe"
                 older = local / "Programs" / "Python" / "Python39" / "python.exe"
-                for path in (alias, installed, older):
+                # "Python311-32" has more digits than "Python312"; the minor version decides.
+                x86 = local / "Programs" / "Python" / "Python311-32" / "python.exe"
+                for path in (alias, installed, older, x86):
                     path.parent.mkdir(parents=True)
                     path.write_bytes(b"")
                 harness = Path(tmp) / "harness.ps1"

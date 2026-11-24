@@ -401,6 +401,7 @@ RECORD_IDENTITY_FIELDS: tuple[str, ...] = (
     "cell_offset",
     "entry_offset",
     "value_cell_offset",
+    "registry_value_path",
     "key_path",
     "target_path",
     "executable_path",
