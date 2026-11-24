@@ -4,7 +4,7 @@ import { runEvidenceTimezone } from "../../../state/hooks";
 import { currentRun } from "../../../state/slices/runs";
 import { useAppStore } from "../../../state/store";
 import {
-  assumedUtcOfWallClock,
+  assumedUtcCandidates,
   compareEvidenceSortKeys,
   type EvidenceSortKey,
   evidenceSortKey,
@@ -38,28 +38,6 @@ export function rowSourceTicks(row: GridRow): string | number | null {
     if (typeof value === "string" || typeof value === "number") return value;
   }
   return null;
-}
-
-const rowTimeKeys = new WeakMap<GridRow, EvidenceSortKey>();
-
-function rowTimeKey(row: GridRow): EvidenceSortKey {
-  let key = rowTimeKeys.get(row);
-  if (!key) {
-    key = evidenceSortKey(row.timestamp, rowTimeZone(row), rowSourceTicks(row));
-    rowTimeKeys.set(row, key);
-  }
-  return key;
-}
-
-/**
- * Ascending order of two rows' evidence times: UTC instants by integer 100 ns ticks, wall clocks of
- * undetermined zone as their own group after them, unparseable text next and empty times last.
- */
-export function compareRowTimes(a: GridRow, b: GridRow): number {
-  const aEmpty = !a.timestamp;
-  const bEmpty = !b.timestamp;
-  if (aEmpty || bEmpty) return aEmpty === bEmpty ? 0 : aEmpty ? 1 : -1;
-  return compareEvidenceSortKeys(rowTimeKey(a), rowTimeKey(b));
 }
 
 function pick(record: Record<string, unknown>, keys: string[]): unknown {
@@ -212,49 +190,21 @@ export const col = {
     };
   },
   timestamp(width = 170, presets: ColumnSpec["presets"] = ["analysis", "compact"]): ColumnSpec {
-    const exact = (r: GridRow) =>
-      r.timestamp
-        ? exactEvidenceTime(r.timestamp, currentTimezone(), {
-            sourceZone: rowTimeZone(r),
-            rawFiletime: rowSourceTicks(r),
-          })
-        : null;
     return {
       id: "timestamp",
       header: "시각",
       width,
       presets,
       value: (r) => r.timestamp,
-      // Integer 100 ns ticks, never the text (".000001" would sort before ".0000007").
-      compare: compareRowTimes,
       format: (r) => (r.timestamp ? formatGridTime(r.timestamp, currentTimezone(), rowTimeZone(r)) : ""),
-      // Full evidence reading (local · zone · exact UTC · FILETIME) on hover.
-      tooltip: (r) =>
-        r.timestamp
-          ? evidenceTimeTooltip(r.timestamp, currentTimezone(), rowSourceTicks(r), rowTimeZone(r))
-          : "",
-      // The CSV keeps every fraction digit and never gives an undetermined wall clock a zone.
-      exportFormat: (r) => exact(r)?.display ?? str(r.timestamp),
-      exportExtras: [
-        { header: "시각 UTC 원문", value: (r) => exact(r)?.exactUtc ?? "" },
-        { header: "FILETIME", value: (r) => exact(r)?.filetime ?? "" },
-        {
-          header: "시간대 상태",
-          value: (r) => {
-            const reading = exact(r);
-            return reading ? zoneStatusLabel(reading.zoneStatus) : "";
-          },
-        },
-        {
-          header: "가정 환산 UTC (근거)",
-          value: (r) => {
-            const reading = exact(r);
-            const zone = runEvidenceTimezone(currentRun(useAppStore.getState()));
-            const assumed = reading?.wallClock ? assumedUtcOfWallClock(reading.wallClock, zone) : null;
-            return assumed ? `${assumed} (가정: 증거 시간대 ${zone})` : "";
-          },
-        },
-      ],
+      // Integer 100 ns ticks, never the text (".000001" would sort before ".0000007").
+      ...evidenceTimeColumnParts(
+        (r) =>
+          r.timestamp
+            ? { value: r.timestamp, sourceZone: rowTimeZone(r), sourceTicks: rowSourceTicks(r) }
+            : null,
+        { utc: "시각 UTC 원문", filetime: "FILETIME", zone: "시간대 상태", assumed: "가정 환산 UTC (근거)" },
+      ),
     };
   },
   review(): ColumnSpec {
@@ -289,6 +239,91 @@ export const col = {
     return { id, header, width, presets, value: pick, ...extra };
   },
 };
+
+/** One cell's evidence time: the value as read, its source zone label and its source FILETIME. */
+export interface EvidenceTimeCell {
+  value: string;
+  sourceZone: string | null;
+  sourceTicks: string | number | null;
+}
+
+/**
+ * Order, tooltip and selection CSV of an evidence-time column (the generic 시각 column and every
+ * catalogue time column such as the analysis preset's 시각(기록)): integer 100 ns order with
+ * undetermined-zone wall clocks apart, every source fraction digit, the exact UTC text, the
+ * FILETIME with its basis, the zone status and the assumed-zone conversion of a wall clock.
+ */
+export function evidenceTimeColumnParts(
+  read: (row: GridRow) => EvidenceTimeCell | null,
+  headers: { utc: string; filetime: string; zone: string; assumed: string },
+): Required<Pick<ColumnSpec, "compare" | "tooltip" | "exportFormat" | "exportExtras">> {
+  const exact = (row: GridRow) => {
+    const cell = read(row);
+    return cell
+      ? exactEvidenceTime(cell.value, currentTimezone(), {
+          sourceZone: cell.sourceZone,
+          rawFiletime: cell.sourceTicks,
+        })
+      : null;
+  };
+  const keys = new WeakMap<GridRow, EvidenceSortKey | null>();
+  const keyOf = (row: GridRow) => {
+    if (!keys.has(row)) {
+      const cell = read(row);
+      keys.set(row, cell ? evidenceSortKey(cell.value, cell.sourceZone, cell.sourceTicks) : null);
+    }
+    return keys.get(row) ?? null;
+  };
+  return {
+    compare: (a, b) => {
+      const ka = keyOf(a);
+      const kb = keyOf(b);
+      if (!ka || !kb) return ka === kb ? 0 : ka ? -1 : 1;
+      return compareEvidenceSortKeys(ka, kb);
+    },
+    // Full evidence reading (local · zone · exact UTC · FILETIME) on hover.
+    tooltip: (row) => {
+      const cell = read(row);
+      return cell
+        ? evidenceTimeTooltip(cell.value, currentTimezone(), cell.sourceTicks, cell.sourceZone)
+        : "";
+    },
+    // The CSV keeps every fraction digit and never gives an undetermined wall clock a zone.
+    exportFormat: (row) => exact(row)?.display ?? read(row)?.value ?? "",
+    exportExtras: [
+      { header: headers.utc, value: (row) => exact(row)?.exactUtc ?? "" },
+      { header: headers.filetime, value: (row) => exact(row)?.filetime ?? "" },
+      {
+        header: headers.zone,
+        value: (row) => {
+          const reading = exact(row);
+          return reading ? zoneStatusLabel(reading.zoneStatus) : "";
+        },
+      },
+      {
+        header: headers.assumed,
+        value: (row) => {
+          const reading = exact(row);
+          const zone = runEvidenceTimezone(currentRun(useAppStore.getState()));
+          return reading?.wallClock ? assumedUtcText(reading.wallClock, zone) : "";
+        },
+      },
+    ],
+  };
+}
+
+/**
+ * CSV text of a wall clock converted under the evidence zone: the one UTC instant, both instants
+ * of a repeated hour, or why a wall clock inside a daylight-saving gap has none.
+ */
+export function assumedUtcText(wallClock: string, zone: string | null | undefined): string {
+  const candidates = assumedUtcCandidates(wallClock, zone);
+  if (!candidates) return "";
+  const basis = `가정: 증거 시간대 ${zone}`;
+  if (candidates.length === 1) return `${candidates[0]} (${basis})`;
+  if (candidates.length === 0) return `환산 불가 — 일광절약시간 전환으로 없는 현지 시각 (${basis})`;
+  return `${candidates.join(" 또는 ")} — 일광절약시간 해제로 두 번 있는 현지 시각, 후보 ${candidates.length}개 (${basis})`;
+}
 
 export function fieldStr(row: GridRow, key: string): string {
   return str(row.fields[key]);

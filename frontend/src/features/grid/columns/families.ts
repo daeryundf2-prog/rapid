@@ -11,7 +11,7 @@
 import { createElement } from "react";
 import type { GridRow } from "../../../contracts/collection";
 import { clipValue, flatValue } from "../../../utils/flatValue";
-import { formatGridTime } from "../../../utils/time";
+import { formatGridTime, preciseTimeOf } from "../../../utils/time";
 import { timestampKindLabel } from "../../../utils/timeKinds";
 import { deriveColumn, missingText } from "../../derived/derivedFields";
 import { artifactTypeLabel } from "../../filters/typeLabels";
@@ -27,7 +27,13 @@ import { flagSortValue, flagsAccessibleName, rowFlags } from "../../flags/flags"
 import { eventLevelLabel, logonTypeLabel, severityLabel } from "../../viewer/fieldFormat";
 import { EVENT_DATA_KEYS } from "../../viewer/fieldSheets";
 import type { ColumnSpec } from "../types";
-import { currentTimezone, formatBytes, isRecord } from "./common";
+import {
+  currentTimezone,
+  type EvidenceTimeCell,
+  evidenceTimeColumnParts,
+  formatBytes,
+  isRecord,
+} from "./common";
 
 /** Korean reading of a timestamp kind (chip tooltip / accessible text). */
 export const TS_KIND_LABELS: Record<string, string> = {
@@ -354,6 +360,46 @@ function derivedCatalogColumn(def: CatalogColumn & { derive: string }, aux: bool
   };
 }
 
+/**
+ * Order and selection CSV of a catalogue time column (the analysis preset's 시각(기록) …), like the
+ * generic 시각 column: the value's 100 ns sibling (EVTX `timestamp_100ns`), every fraction digit,
+ * the exact UTC text, the FILETIME with its basis and the zone status. A list of times (Prefetch
+ * run times) has no single instant and keeps its display text.
+ */
+function catalogTimeParts(
+  def: CatalogColumn,
+  read: (row: GridRow) => { value: unknown; from: string } | null,
+): Pick<ColumnSpec, "compare" | "exportFormat" | "exportExtras"> {
+  const cell = (row: GridRow): EvidenceTimeCell | null => {
+    const hit = read(row);
+    if (!hit || typeof hit.value !== "string" || !hit.value.trim()) return null;
+    const details = detailsOf(row);
+    // The row's zone label and source FILETIME describe its `timestamp` only.
+    const own = hit.from === "timestamp";
+    const ticks = own ? (details.timestamp_utc_ticks ?? details.timestamp_filetime) : null;
+    return {
+      value: preciseTimeOf(details, hit.from, hit.value),
+      sourceZone: own && typeof details.timestamp_timezone === "string" ? details.timestamp_timezone : null,
+      sourceTicks: typeof ticks === "string" || typeof ticks === "number" ? ticks : null,
+    };
+  };
+  const parts = evidenceTimeColumnParts(cell, {
+    utc: `${def.label} UTC 원문`,
+    filetime: `${def.label} FILETIME`,
+    zone: `${def.label} 시간대 상태`,
+    assumed: `${def.label} 가정 환산 UTC (근거)`,
+  });
+  return {
+    compare: parts.compare,
+    exportFormat: (row) => {
+      if (cell(row)) return parts.exportFormat(row);
+      const hit = read(row);
+      return hit ? displayValue(def, hit.value) : "";
+    },
+    exportExtras: parts.exportExtras,
+  };
+}
+
 /** Grid column of one catalogue column. `aux` columns start hidden (열 선택 › 카탈로그 보조 열). */
 export function catalogColumn(def: CatalogColumn, aux = false): ColumnSpec {
   if (def.derive) return derivedCatalogColumn({ ...def, derive: def.derive }, aux);
@@ -394,6 +440,7 @@ export function catalogColumn(def: CatalogColumn, aux = false): ColumnSpec {
       const shown = `${text}${raw}${hint}${kind}`;
       return hit.from === def.key ? shown : `${shown} — ${hit.from}`;
     },
+    ...(def.format === "time" ? catalogTimeParts(def, read) : {}),
     ...(tsKind
       ? {
           render: (row) => {

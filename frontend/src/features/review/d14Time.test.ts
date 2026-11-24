@@ -6,7 +6,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { resetAppStore } from "../../state/store";
-import { assumedUtcOfWallClock, evidenceTimeTooltip, exactEvidenceTime } from "../../utils/time";
+import { assumedUtcCandidates, evidenceTimeTooltip, exactEvidenceTime } from "../../utils/time";
 import { col, makeRef, makeRow } from "../grid/columns/common";
 import { timelineCollection } from "../grid/columns/timeline";
 import { buildSelectionCsv } from "./csv";
@@ -52,9 +52,9 @@ describe("D14 #8: undetermined-zone wall clock", () => {
   });
 
   it("puts an assumed conversion apart, with the assumed zone named", () => {
-    expect(assumedUtcOfWallClock("2024-01-02 09:00:00", "Asia/Seoul")).toBe("2024-01-02T00:00:00Z");
-    expect(assumedUtcOfWallClock("2024-01-02 09:00:00", null)).toBeNull();
-    expect(assumedUtcOfWallClock("2024-01-02 09:00:00", "local")).toBeNull();
+    expect(assumedUtcCandidates("2024-01-02 09:00:00", "Asia/Seoul")).toEqual(["2024-01-02T00:00:00Z"]);
+    expect(assumedUtcCandidates("2024-01-02 09:00:00", null)).toBeNull();
+    expect(assumedUtcCandidates("2024-01-02 09:00:00", "local")).toBeNull();
   });
 });
 

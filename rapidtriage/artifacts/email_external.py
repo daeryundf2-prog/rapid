@@ -22,6 +22,7 @@ from .email import (
     EMAIL_REQUIRED_TOOLS_BY_FORMAT,
     EMAIL_TRUSTED_DIFF_TOOLS,
     attachment_summaries,
+    message_body_parts,
 )
 
 EMAIL_EXTERNAL_PARSE_VERSION = "email-external-parser-wrapper-v2"
@@ -577,11 +578,7 @@ def external_email_message_sample(path: Path, export_row: dict[str, object], ind
 def external_email_body_preview(message: email.message.EmailMessage) -> str:
     parts: list[str] = []
     if message.is_multipart():
-        for part in message.walk():
-            if part.get_content_disposition() == "attachment":
-                continue
-            if part.get_content_type() not in {"text/plain", "text/html"}:
-                continue
+        for part in message_body_parts(message):
             try:
                 value = part.get_content()
             except Exception:

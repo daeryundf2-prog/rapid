@@ -8,7 +8,9 @@ is decoded by :mod:`.registry_depth`.
 
 Bounded: files over :data:`MAX_PCA_FILE_BYTES` are skipped, at most
 :data:`MAX_PCA_LINES` lines are read per file; malformed lines are counted on
-the rows of the same file (``malformed_line_count``), never raised.
+the rows of the same file (``malformed_line_count``), never raised. A message
+longer than :data:`MAX_PCA_MESSAGE_CHARS` is shortened only with
+``message_truncated`` set, its full ``message_length`` and ``message_sha256``.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ PCA_PARSER = "windows-pca-text"
 PCA_PARSER_VERSION = "pca-text-v1"
 MAX_PCA_FILE_BYTES = 64 * 1024 * 1024
 MAX_PCA_LINES = 200_000
+MAX_PCA_MESSAGE_CHARS = 1000
 PCA_FILE_NAMES = re.compile(r"^(pcaapplaunchdic\.txt|pcageneraldb\d\.txt)$", re.IGNORECASE)
 PCA_TIME = re.compile(r"^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,7}))?$")
 PCA_RECORD_TYPES = {"0": "실행", "1": "설치 관련", "2": "비정상 종료", "3": "호환성 문제"}
@@ -73,6 +76,7 @@ def parse_pca_file(path: Path) -> tuple[list[dict[str, object]], int, bool]:
                 malformed += 1
                 continue
             padded = parts + [""] * (8 - len(parts))
+            message = "|".join(padded[7:]).strip()
             entries.append(
                 {
                     "source_kind": "pca-general-db",
@@ -84,7 +88,10 @@ def parse_pca_file(path: Path) -> tuple[list[dict[str, object]], int, bool]:
                     "vendor": padded[4].strip(),
                     "product_version": padded[5].strip(),
                     "program_id": padded[6].strip(),
-                    "message": "|".join(padded[7:]).strip()[:1000],
+                    "message": message[:MAX_PCA_MESSAGE_CHARS],
+                    "message_length": len(message),
+                    "message_truncated": len(message) > MAX_PCA_MESSAGE_CHARS,
+                    "message_sha256": hashlib.sha256(message.encode("utf-8")).hexdigest(),
                     "source_line": number,
                 }
             )

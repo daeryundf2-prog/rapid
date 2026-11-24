@@ -13,12 +13,24 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime, timezone
 
+from .report_markdown import markdown_code, markdown_text
+
 TEMPLATE_ID = "korean-expert"
 
 
 def _text(value: object, default: str = "미기재") -> str:
     text = str(value or "").strip()
     return text or default
+
+
+def _manifest_name_and_sha256(item: Mapping[str, object]) -> tuple[str, str]:
+    """Evidence path and SHA-256 of one submission-manifest item (nested under
+    ``evidence`` in manifests; flat ``path``/``sha256`` in older callers)."""
+    evidence = item.get("evidence") if isinstance(item.get("evidence"), Mapping) else {}
+    hashes = evidence.get("hashes") if isinstance(evidence.get("hashes"), Mapping) else {}
+    name = _text(item.get("path") or evidence.get("path") or item.get("name") or evidence.get("name") or item.get("source"))
+    sha = _text(item.get("sha256") or hashes.get("sha256") or item.get("hash"), "-")
+    return name, sha
 
 
 def _bookmark_rows(case_payload: Mapping[str, object], *, limit: int = 50) -> list[dict[str, object]]:
@@ -91,27 +103,27 @@ def build_korean_expert_report(
     lines: list[str] = [
         "# 감 정 서",
         "",
-        f"- 사건번호: {case_number}",
-        f"- 사건명: {case_title}",
-        f"- 감정인: {examiner}",
-        f"- 감정기관: {organization}",
-        f"- 의뢰기관: {requester}",
-        f"- 작성일시: {generated_at}",
+        f"- 사건번호: {markdown_text(case_number)}",
+        f"- 사건명: {markdown_text(case_title)}",
+        f"- 감정인: {markdown_text(examiner)}",
+        f"- 감정기관: {markdown_text(organization)}",
+        f"- 의뢰기관: {markdown_text(requester)}",
+        f"- 작성일시: {markdown_text(generated_at)}",
         "",
         "> 본 문서는 분석 도구 산출물을 바탕으로 한 감정서 **초안**이다. "
         "감정인의 최종 검토와 서명이 있기 전까지 법적 감정서로서의 효력이 없다.",
         "",
         "## 1. 감정의 취지",
         "",
-        scope,
+        markdown_text(scope),
         "",
         "## 2. 감정물의 내역 및 인계·인수",
         "",
-        f"- 분석 대상 루트: `{_text(run_summary.get('root'), '미기재')}`",
-        f"- 분석 모드: `{_text(run_summary.get('mode'), '미기재')}`",
-        f"- 산출물 디렉터리: `{_text(run_summary.get('output_dir'), '미기재')}`",
+        f"- 분석 대상 루트: {markdown_code(_text(run_summary.get('root'), '미기재'))}",
+        f"- 분석 모드: {markdown_code(_text(run_summary.get('mode'), '미기재'))}",
+        f"- 산출물 디렉터리: {markdown_code(_text(run_summary.get('output_dir'), '미기재'))}",
         f"- 인계 증거 항목 수: {manifest_summary.get('hashed_item_count', 0)}",
-        f"- 인계 인수 시각(매니페스트 생성): {generated_at}",
+        f"- 인계 인수 시각(매니페스트 생성): {markdown_text(generated_at)}",
         "",
         "| 순번 | 증거물 | SHA-256 |",
         "|---|---|---|",
@@ -119,9 +131,8 @@ def build_korean_expert_report(
     for index, item in enumerate(manifest_items[:50], start=1):
         if not isinstance(item, Mapping):
             continue
-        name = _text(item.get("path") or item.get("name") or item.get("source"))
-        sha = _text(item.get("sha256") or item.get("hash"), "-")
-        lines.append(f"| {index} | `{name}` | `{sha}` |")
+        name, sha = _manifest_name_and_sha256(item)
+        lines.append(f"| {index} | {markdown_code(name)} | {markdown_code(sha)} |")
     if not manifest_items:
         lines.append("| - | 인계 해시 목록 없음 | - |")
 
@@ -138,8 +149,8 @@ def build_korean_expert_report(
     if steps:
         for step in steps:
             lines.append(
-                f"  - `{_text(step.get('name'))}`: {_text(step.get('status'))} "
-                f"(output=`{_text(step.get('output'), '-')}`)"
+                f"  - {markdown_code(_text(step.get('name')))}: {markdown_text(_text(step.get('status')))} "
+                f"(output={markdown_code(_text(step.get('output'), '-'))})"
             )
     else:
         lines.append("  - 절차 정보 없음")
@@ -161,8 +172,8 @@ def build_korean_expert_report(
         lines += ["| 항목 | 출처 | 상태 | 태그 | 비고 |", "|---|---|---|---|---|"]
         for row in bookmark_rows:
             lines.append(
-                f"| {row['summary']} | `{row['source']}` | {row['status']} "
-                f"| {row['tags'] or '-'} | {row['note'] or '-'} |"
+                f"| {markdown_text(row['summary'])} | {markdown_code(row['source'])} | {markdown_text(row['status'])} "
+                f"| {markdown_text(row['tags'] or '-')} | {markdown_text(row['note'] or '-')} |"
             )
     else:
         lines.append("- 보고서 포함으로 지정된 심사 항목 없음.")
@@ -186,7 +197,7 @@ def build_korean_expert_report(
         "",
         "## 7. 결론",
         "",
-        conclusion,
+        markdown_text(conclusion),
         "",
         "## 부록. 증거 해시 목록",
         "",
@@ -195,9 +206,8 @@ def build_korean_expert_report(
         for index, item in enumerate(manifest_items, start=1):
             if not isinstance(item, Mapping):
                 continue
-            name = _text(item.get("path") or item.get("name") or item.get("source"))
-            sha = _text(item.get("sha256") or item.get("hash"), "-")
-            lines.append(f"{index}. `{name}` — `{sha}`")
+            name, sha = _manifest_name_and_sha256(item)
+            lines.append(f"{index}. {markdown_code(name)} — {markdown_code(sha)}")
     else:
         lines.append("- 해시 목록 없음")
 

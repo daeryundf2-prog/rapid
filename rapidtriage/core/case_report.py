@@ -12,6 +12,7 @@ from xml.sax.saxutils import escape as xml_escape
 
 from .korean_report import TEMPLATE_ID as KOREAN_EXPERT_TEMPLATE_ID
 from .korean_report import build_korean_expert_report
+from .report_markdown import inline_segments, markdown_code, markdown_text
 
 CASE_REPORT_EXPORTS = {
     "md": "rapidtriage-case-report.md",
@@ -49,17 +50,17 @@ def build_case_report_markdown(
     lines = [
         "# 디지털 포렌식 분석 보고서",
         "",
-        f"> Report template: `{template}`",
+        f"> Report template: {markdown_code(template)}",
         f"> Noise policy: {template_noise_policy(template)}",
         "",
         "## 1. 사건 정보",
         "",
-        f"- 보고서 제목: {case_title}",
-        f"- 사건 번호: {case_id or '미기재'}",
-        f"- 분석자: {investigator or '미기재'}",
-        f"- 소속/기관: {organization or '미기재'}",
-        f"- 의뢰자/의뢰기관: {requester or '미기재'}",
-        f"- 생성 시각: `{submission_manifest.get('generated_at', '')}`",
+        f"- 보고서 제목: {markdown_text(case_title)}",
+        f"- 사건 번호: {markdown_text(case_id or '미기재')}",
+        f"- 분석자: {markdown_text(investigator or '미기재')}",
+        f"- 소속/기관: {markdown_text(organization or '미기재')}",
+        f"- 의뢰자/의뢰기관: {markdown_text(requester or '미기재')}",
+        f"- 생성 시각: {markdown_code(submission_manifest.get('generated_at', ''))}",
         "",
     ]
 
@@ -83,12 +84,12 @@ def build_case_report_markdown(
         [
             "## 2. 분석 대상 및 범위",
             "",
-            f"- 분석 모드: `{run_summary.get('mode', '')}`",
-            f"- 원본/분석 루트: `{run_summary.get('root', '')}`",
-            f"- 분석 범위 루트: `{run_summary.get('scan_scope_root', '')}`",
-            f"- 산출물 디렉터리: `{run_summary.get('output_dir', '')}`",
+            f"- 분석 모드: {markdown_code(run_summary.get('mode', ''))}",
+            f"- 원본/분석 루트: {markdown_code(run_summary.get('root', ''))}",
+            f"- 분석 범위 루트: {markdown_code(run_summary.get('scan_scope_root', ''))}",
+            f"- 산출물 디렉터리: {markdown_code(run_summary.get('output_dir', ''))}",
             "",
-            scope,
+            markdown_text(scope),
             "",
             "## 3. 분석 절차 요약",
             "",
@@ -102,8 +103,8 @@ def build_case_report_markdown(
             if not isinstance(step, Mapping):
                 continue
             lines.append(
-                f"- `{step.get('name')}`: {step.get('status')} "
-                f"(output=`{step.get('output', '')}`)"
+                f"- {markdown_code(step.get('name'))}: {markdown_text(step.get('status'))} "
+                f"(output={markdown_code(step.get('output', ''))})"
             )
         if not any(line.startswith("- `") for line in lines[-20:]):
             lines.append("- 절차 정보 없음")
@@ -130,9 +131,9 @@ def build_case_report_markdown(
     if indicator_rows:
         for item in indicator_rows:
             lines.append(
-                f"- `{item.get('summary')}` status=`{item.get('status')}`"
-                f" report={item.get('include_in_report')} tags={item.get('tags') or '없음'}"
-                f" note={item.get('note') or '없음'}"
+                f"- {markdown_code(item.get('summary'))} status={markdown_code(item.get('status'))}"
+                f" report={item.get('include_in_report')} tags={markdown_text(item.get('tags') or '없음')}"
+                f" note={markdown_text(item.get('note') or '없음')}"
             )
     else:
         lines.append("- 저장된 indicator 리뷰 항목 없음.")
@@ -143,9 +144,9 @@ def build_case_report_markdown(
     if compare_rows:
         for item in compare_rows:
             lines.append(
-                f"- `{item.get('summary')}` status=`{item.get('status')}`"
-                f" report={item.get('include_in_report')} tags={item.get('tags') or '없음'}"
-                f" note={item.get('note') or '없음'}"
+                f"- {markdown_code(item.get('summary'))} status={markdown_code(item.get('status'))}"
+                f" report={item.get('include_in_report')} tags={markdown_text(item.get('tags') or '없음')}"
+                f" note={markdown_text(item.get('note') or '없음')}"
             )
     else:
         lines.append("- 저장된 compare 리뷰 항목 없음.")
@@ -163,41 +164,41 @@ def build_case_report_markdown(
             source_hits = extract_source_hit_notes(str(item.get("note") or ""))
             lines.extend(
                 [
-                    f"### 5.{index}. {item.get('summary') or evidence.get('name') or 'Evidence'}",
+                    f"### 5.{index}. {markdown_text(item.get('summary') or evidence.get('name') or 'Evidence')}",
                     "",
-                    f"- 북마크 ID: `{item.get('bookmark_id', '')}`",
-                    f"- 파일명: `{evidence.get('name', '')}`",
-                    f"- 경로: `{evidence.get('path', '')}`",
+                    f"- 북마크 ID: {markdown_code(item.get('bookmark_id', ''))}",
+                    f"- 파일명: {markdown_code(evidence.get('name', ''))}",
+                    f"- 경로: {markdown_code(evidence.get('path', ''))}",
                     f"- 크기: {evidence.get('size', 0)} bytes",
-                    f"- 수정 시각: `{evidence.get('modified_at', '')}`",
-                    f"- 검토 상태: `{review.get('status', '')}`",
-                    f"- 태그: {', '.join(str(tag) for tag in item.get('tags', [])) or '없음'}",
-                    f"- 분석자 메모: {item.get('note') or '없음'}",
+                    f"- 수정 시각: {markdown_code(evidence.get('modified_at', ''))}",
+                    f"- 검토 상태: {markdown_code(review.get('status', ''))}",
+                    f"- 태그: {markdown_text(', '.join(str(tag) for tag in item.get('tags', [])) or '없음')}",
+                    f"- 분석자 메모: {markdown_text(item.get('note') or '없음')}",
                 ]
             )
             if source_hits:
                 lines.append("- Source-search cited hits:")
                 for hit in source_hits:
-                    lines.append(f"  - Citation: {hit.get('citation', '')}")
+                    lines.append(f"  - Citation: {markdown_text(hit.get('citation', ''))}")
                     if hit.get("source_type"):
-                        lines.append(f"    - Source type: `{hit.get('source_type')}`")
+                        lines.append(f"    - Source type: {markdown_code(hit.get('source_type'))}")
                     if hit.get("structured_citation"):
-                        lines.append(f"    - Structured citation: {hit.get('structured_citation')}")
+                        lines.append(f"    - Structured citation: {markdown_text(hit.get('structured_citation'))}")
                     if hit.get("source_locator"):
-                        lines.append(f"    - Source locator: `{hit.get('source_locator')}`")
+                        lines.append(f"    - Source locator: {markdown_code(hit.get('source_locator'))}")
                     if hit.get("matched_terms"):
-                        lines.append(f"    - Matched terms: {hit.get('matched_terms')}")
+                        lines.append(f"    - Matched terms: {markdown_text(hit.get('matched_terms'))}")
                     if hit.get("result_hash"):
-                        lines.append(f"    - Result hash: `{hit.get('result_hash')}`")
+                        lines.append(f"    - Result hash: {markdown_code(hit.get('result_hash'))}")
                     if hit.get("snippet"):
-                        lines.append(f"    - Snippet: {hit.get('snippet')}")
+                        lines.append(f"    - Snippet: {markdown_text(hit.get('snippet'))}")
                     if hit.get("review_hint"):
-                        lines.append(f"    - Review hint: {hit.get('review_hint')}")
+                        lines.append(f"    - Review hint: {markdown_text(hit.get('review_hint'))}")
             lines.extend(
                 [
-                    f"- MD5: `{hashes.get('md5', '')}`",
-                    f"- SHA1: `{hashes.get('sha1', '')}`",
-                    f"- SHA256: `{hashes.get('sha256', '')}`",
+                    f"- MD5: {markdown_code(hashes.get('md5', ''))}",
+                    f"- SHA1: {markdown_code(hashes.get('sha1', ''))}",
+                    f"- SHA256: {markdown_code(hashes.get('sha256', ''))}",
                     "",
                 ]
             )
@@ -210,7 +211,7 @@ def build_case_report_markdown(
     if isinstance(skipped, list) and skipped:
         for item in skipped:
             if isinstance(item, Mapping):
-                lines.append(f"- `{item.get('path', '')}`: {item.get('reason', '')}")
+                lines.append(f"- {markdown_code(item.get('path', ''))}: {markdown_text(item.get('reason', ''))}")
     else:
         lines.append("- 없음")
 
@@ -219,7 +220,7 @@ def build_case_report_markdown(
             "",
             "## 7. 결론 및 의견",
             "",
-            conclusion,
+            markdown_text(conclusion),
             "",
             "## 8. 첨부 산출물",
             "",
@@ -239,14 +240,14 @@ def build_case_report_markdown(
             [
                 "## 9. Technical appendix",
                 "",
-                f"- Processing profile: `{processing.get('profile_label', '')}`",
+                f"- Processing profile: {markdown_code(processing.get('profile_label', ''))}",
                 f"- Processing warning count: {processing.get('warning_count', 0)}",
-                f"- Highest warning level: `{processing.get('highest_warning_level', 'none')}`",
-                f"- Max extract bytes: `{caps.get('max_extract_size_bytes', 0)}`",
-                f"- Max extract files: `{caps.get('max_file_count', 0)}`",
-                f"- Source kind: `{source.get('kind', '')}`",
-                f"- Source path: `{source.get('source_path', '')}`",
-                f"- Scan scope root: `{run_summary.get('scan_scope_root', '')}`",
+                f"- Highest warning level: {markdown_code(processing.get('highest_warning_level', 'none'))}",
+                f"- Max extract bytes: {markdown_code(caps.get('max_extract_size_bytes', 0))}",
+                f"- Max extract files: {markdown_code(caps.get('max_file_count', 0))}",
+                f"- Source kind: {markdown_code(source.get('kind', ''))}",
+                f"- Source path: {markdown_code(source.get('source_path', ''))}",
+                f"- Scan scope root: {markdown_code(run_summary.get('scan_scope_root', ''))}",
                 "",
             ]
         )
@@ -254,7 +255,10 @@ def build_case_report_markdown(
             lines.extend(["### 9.1 Processing warnings", ""])
             for item in warnings[:20]:
                 if isinstance(item, Mapping):
-                    lines.append(f"- `{item.get('step', '')}` [{item.get('level', '')}]: {item.get('message', '')}")
+                    lines.append(
+                        f"- {markdown_code(item.get('step', ''))} [{markdown_text(item.get('level', ''))}]: "
+                        f"{markdown_text(item.get('message', ''))}"
+                    )
             lines.append("")
     return "\n".join(lines)
 
@@ -385,12 +389,12 @@ def build_hash_only_report(
             hashes = evidence.get("hashes") if isinstance(evidence.get("hashes"), Mapping) else {}
             lines.extend(
                 [
-                    f"### 2.{index}. {item.get('summary') or evidence.get('name') or 'Evidence'}",
+                    f"### 2.{index}. {markdown_text(item.get('summary') or evidence.get('name') or 'Evidence')}",
                     "",
-                    f"- 경로: `{evidence.get('path', '')}`",
-                    f"- MD5: `{hashes.get('md5', '')}`",
-                    f"- SHA1: `{hashes.get('sha1', '')}`",
-                    f"- SHA256: `{hashes.get('sha256', '')}`",
+                    f"- 경로: {markdown_code(evidence.get('path', ''))}",
+                    f"- MD5: {markdown_code(hashes.get('md5', ''))}",
+                    f"- SHA1: {markdown_code(hashes.get('sha1', ''))}",
+                    f"- SHA256: {markdown_code(hashes.get('sha256', ''))}",
                     "",
                 ]
             )
@@ -402,7 +406,7 @@ def build_hash_only_report(
     if isinstance(skipped, list) and skipped:
         for item in skipped:
             if isinstance(item, Mapping):
-                lines.append(f"- `{item.get('path', '')}`: {item.get('reason', '')}")
+                lines.append(f"- {markdown_code(item.get('path', ''))}: {markdown_text(item.get('reason', ''))}")
     else:
         lines.append("- 없음")
     lines.append("")
@@ -554,14 +558,14 @@ def close_list(body: list[str], in_list: bool) -> bool:
 
 
 def render_inline_markdown(value: str) -> str:
-    escaped = html.escape(value)
-    escaped = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
-    escaped = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", escaped)
-    return escaped
+    return "".join(
+        html.escape(text) if kind == "text" else f"<{kind}>{html.escape(text)}</{kind}>"
+        for kind, text in inline_segments(value)
+    )
 
 
 def strip_markdown_inline(value: str) -> str:
-    return value.replace("`", "").replace("**", "").strip()
+    return "".join(text for _kind, text in inline_segments(value)).strip()
 
 
 def write_case_report_docx(markdown: str, path: Path) -> None:

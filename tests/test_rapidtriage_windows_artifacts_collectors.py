@@ -2635,6 +2635,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                             "ai_service": "",
                             "source_table": "history",
                             "source_index": 0,
+                            "source_path": r"C:\Users\alice\AppData\Local\Google\Chrome\User Data\Default\History",
                         },
                         {
                             "timeline_type": "download",
@@ -2647,6 +2648,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                             "ended_at": "2024-04-01T09:09:05+00:00",
                             "source_table": "downloads",
                             "source_index": 0,
+                            "source_path": r"C:\Users\alice\AppData\Local\Google\Chrome\User Data\Default\History",
                         },
                     ],
                 },
@@ -2666,6 +2668,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 "TypedCount": "1",
                 "SourceTable": "history",
                 "SourceIndex": "0",
+                "SourcePath": r"C:\Users\alice\AppData\Local\Google\Chrome\User Data\Default\History",
             },
             {
                 "Browser": "Chrome",
@@ -2680,6 +2683,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 "EndTime": "2024-04-01T09:09:05+00:00",
                 "SourceTable": "downloads",
                 "SourceIndex": "0",
+                "SourcePath": r"C:\Users\alice\AppData\Local\Google\Chrome\User Data\Default\History",
             },
         ]
 
@@ -2785,8 +2789,8 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             trusted_tool="Hindsight",
         )
         timeline_diff = build_browser_timeline_trusted_diff(
-            [{"browser": "chrome", "profile": "Default", "timestamp": "2024-04-01T09:10:11+00:00", "url": "https://example.test"}],
-            [{"Browser": "chrome", "Profile": "Default", "VisitTime": "2024-04-01T09:10:11+00:00", "URL": "https://example.test"}],
+            [{"browser": "chrome", "profile": "Default", "timestamp": "2024-04-01T09:10:11+00:00", "url": "https://example.test", "source_sha256": "ab" * 32}],
+            [{"Browser": "chrome", "Profile": "Default", "VisitTime": "2024-04-01T09:10:11+00:00", "URL": "https://example.test", "SHA256": "ab" * 32}],
             trusted_tool="BrowserHistoryView",
         )
         self.assertEqual(storage_diff["status"], "pass")

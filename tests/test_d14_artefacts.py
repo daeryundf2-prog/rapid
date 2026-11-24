@@ -112,6 +112,8 @@ class BrowserTimelineDiffUserTests(unittest.TestCase):
         self.assertEqual(sorted(d["user"] for d in aggregates), ["profile-a", "profile-b"])
         name, _parts = browser.CHROMIUM_BROWSER_ROOTS[0]
         oracle_time = (datetime(1601, 1, 1, tzinfo=timezone.utc) + timedelta(microseconds=WEBKIT_STAMP)).isoformat()
+        # The reference names each row's acquisition (D22-4: rows without one stay unresolved).
+        databases = {d["user"]: d["source_path"] for d in aggregates}
         reference = [
             {
                 "browser": name,
@@ -123,6 +125,7 @@ class BrowserTimelineDiffUserTests(unittest.TestCase):
                 "visit_count": 2,
                 "source_table": "urls",
                 "source_index": 0,
+                "source_path": databases[user],
             }
             for user in ("profile-a", "profile-b")
         ]

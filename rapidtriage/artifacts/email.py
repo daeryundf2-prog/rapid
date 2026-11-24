@@ -4,13 +4,15 @@ import email
 import hashlib
 import json
 import os
+import plistlib
 import re
 from collections.abc import Iterable, Mapping
-from datetime import timezone
+from datetime import datetime, timezone
 from email import policy
 from email.message import EmailMessage
 from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 from pathlib import Path
+from xml.parsers.expat import ExpatError
 
 from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.models import ArtifactRecord
@@ -37,6 +39,26 @@ MAX_EXTENSIONLESS_MBOX_BYTES = 256 * 1024 * 1024
 CONTAINER_SCAN_LIMIT = 16 * 1024 * 1024
 MAX_CONTAINER_CANDIDATES = 200
 EMAIL_ATTACHMENT_PREVIEW_BYTES = 64
+# RFC 2046 5.2.1: an enclosed message (forward-as-attachment, bounce original) is its own message.
+# Its text and attachments are attributed to that attachment entry, never to the enclosing message.
+ENCLOSED_MESSAGE_TYPES = frozenset({"message/rfc822", "message/global"})
+MAX_ENCLOSURE_DEPTH = 8
+MAX_MESSAGE_ATTACHMENTS = 100
+ATTACHMENT_HASH_BASIS = {
+    "decoded-transfer-payload": "size/sha256 of the part body after Content-Transfer-Encoding decoding",
+    "enclosed-message-source-bytes": (
+        "size/sha256 of the enclosed message exactly as stored in the source: the bytes after the "
+        "message/rfc822 part's header blank line up to (not including) the line break before the next "
+        "boundary delimiter; source_byte_offset is the absolute offset in the source file"
+    ),
+    "enclosed-message-reserialized-crlf": (
+        "size/sha256 of the enclosed message re-serialised by Python email (policy SMTP, CRLF line "
+        "breaks) because its stored bytes could not be located; may differ from the source bytes"
+    ),
+}
+# Apple Mail .emlx trailer (XML property list of Mail flags/dates/ids); larger trailers are hashed only.
+EMLX_TRAILER_PARSE_LIMIT = 1024 * 1024
+EMLX_METADATA_ITEM_LIMIT = 200
 EMAIL_RE = re.compile(rb"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 SUBJECT_RE = re.compile(rb"(?:Subject|SUBJECT)\s*:\s*([^\r\n]{1,240})")
 EMAIL_NATIVE_CAPABILITIES = {
@@ -259,29 +281,40 @@ def collect_email_path(path: Path) -> Iterable[ArtifactRecord]:
 def collect_eml(path: Path) -> Iterable[ArtifactRecord]:
     source_hashes = compute_hashes(path)
     try:
-        message = email.message_from_bytes(path.read_bytes(), policy=policy.default)
+        data = path.read_bytes()
     except OSError:
         return
-    yield build_message_record(path, source_hashes, 0, message, source_format="eml")
+    message = email.message_from_bytes(data, policy=policy.default)
+    yield build_message_record(path, source_hashes, 0, message, source_format="eml", raw=data)
 
 
 def collect_emlx(path: Path) -> Iterable[ArtifactRecord]:
     source_hashes = compute_hashes(path)
     try:
-        data = strip_emlx_length_prefix(path.read_bytes())
-        message = email.message_from_bytes(data, policy=policy.default)
+        data, container = split_emlx(path.read_bytes())
     except OSError:
         return
-    yield build_message_record(path, source_hashes, 0, message, source_format="emlx")
+    message = email.message_from_bytes(data, policy=policy.default)
+    yield build_message_record(
+        path,
+        source_hashes,
+        0,
+        message,
+        source_format="emlx",
+        raw=data,
+        raw_offset=int(container["message_offset"]),
+        extra_details={"emlx_container": container},
+    )
 
 
 def collect_maildir_message(path: Path) -> Iterable[ArtifactRecord]:
     source_hashes = compute_hashes(path)
     try:
-        message = email.message_from_bytes(path.read_bytes(), policy=policy.default)
+        data = path.read_bytes()
     except OSError:
         return
-    yield build_message_record(path, source_hashes, 0, message, source_format="maildir")
+    message = email.message_from_bytes(data, policy=policy.default)
+    yield build_message_record(path, source_hashes, 0, message, source_format="maildir", raw=data)
 
 
 def collect_mbox(path: Path) -> Iterable[ArtifactRecord]:
@@ -292,13 +325,20 @@ def collect_mbox(path: Path) -> Iterable[ArtifactRecord]:
         return
     chunks = re.split(rb"\n(?=From [^\n]+\n)", data)
     emitted = 0
+    next_offset = 0
     for chunk in chunks[:MAX_MBOX_MESSAGES]:
+        chunk_offset = next_offset
+        next_offset += len(chunk) + 1  # the split consumed one "\n" between chunks
         if chunk.startswith(b"From "):
-            chunk = chunk.split(b"\n", 1)[1] if b"\n" in chunk else b""
+            line_end = chunk.find(b"\n")
+            chunk_offset += line_end + 1 if line_end >= 0 else len(chunk)
+            chunk = chunk[line_end + 1 :] if line_end >= 0 else b""
         if not chunk.strip():
             continue
         message = email.message_from_bytes(chunk, policy=policy.default)
-        yield build_message_record(path, source_hashes, emitted, message, source_format="mbox")
+        yield build_message_record(
+            path, source_hashes, emitted, message, source_format="mbox", raw=chunk, raw_offset=chunk_offset
+        )
         emitted += 1
     yield build_mailbox_record(
         path,
@@ -370,7 +410,12 @@ def build_message_record(
     message: EmailMessage,
     *,
     source_format: str,
+    raw: bytes | None = None,
+    raw_offset: int = 0,
+    extra_details: Mapping[str, object] | None = None,
 ) -> ArtifactRecord:
+    """``raw`` are the exact bytes ``message`` was parsed from, starting ``raw_offset`` bytes into the source
+    file; with them an enclosed message attachment is hashed as stored in the source."""
     body_preview, body_hash, body_truncated = message_body_summary(message)
     attachments = attach_email_attachment_locators(
         path,
@@ -378,7 +423,7 @@ def build_message_record(
         source_format=source_format,
         message_index=source_index + 1,
         message_id=header_value(message, "Message-ID"),
-        attachments=attachment_summaries(message),
+        attachments=attachment_summaries(message, raw=raw, raw_offset=raw_offset),
     )
     attachment_locator_profile = email_attachment_locator_profile(
         source_path=path,
@@ -484,6 +529,7 @@ def build_message_record(
         "body_truncated": body_truncated,
         "attachment_count": len(attachments),
         "attachments": attachments,
+        "attachment_hash_basis_definitions": dict(ATTACHMENT_HASH_BASIS) if attachments else {},
         "email_attachment_locator_profile": attachment_locator_profile,
         "email_thread_profile": thread_profile,
         "validation_checks": validation_checks,
@@ -569,6 +615,7 @@ def build_message_record(
         "commercial_grade_ready": False,
         "commercial_grade_blockers": email_blockers(source_format),
         "risk_flags": email_risk_flags(header_value(message, "Subject"), body_preview, attachments),
+        **(extra_details or {}),
     }
     return ArtifactRecord(
         provider=EmailArtifactsProvider.name,
@@ -725,20 +772,37 @@ def build_mailbox_record(
     )
 
 
-def message_body_summary(message: EmailMessage) -> tuple[str, str, bool]:
-    parts: list[str] = []
-    for part in message.walk() if message.is_multipart() else [message]:
+def own_message_parts(message: EmailMessage, *, _root: bool = True) -> Iterable[EmailMessage]:
+    """``message.walk()`` order, except that an enclosed message (a ``message/*`` part below the root) is
+    yielded without descending into it: its text and attachments belong to that enclosure, not to ``message``."""
+    yield message
+    if not message.is_multipart() or (not _root and message.get_content_maintype() == "message"):
+        return
+    for child in message.iter_parts():
+        yield from own_message_parts(child, _root=False)
+
+
+def message_body_parts(message: EmailMessage) -> Iterable[EmailMessage]:
+    """text/plain and text/html parts forming ``message``'s own body: no attachment part and nothing inside
+    an enclosed message (that text belongs to the enclosure's attachment entry)."""
+    for part in own_message_parts(message):
         if part.get_content_disposition() == "attachment":
             continue
-        content_type = part.get_content_type()
-        if content_type not in {"text/plain", "text/html"}:
+        if part is not message and part.get_content_maintype() == "message":
             continue
+        if part.get_content_type() in {"text/plain", "text/html"}:
+            yield part
+
+
+def message_body_summary(message: EmailMessage) -> tuple[str, str, bool]:
+    parts: list[str] = []
+    for part in message_body_parts(message):
         try:
             text = part.get_content()
         except (LookupError, UnicodeDecodeError, AttributeError):
             continue
         if isinstance(text, str):
-            parts.append(strip_html(text) if content_type == "text/html" else text)
+            parts.append(strip_html(text) if part.get_content_type() == "text/html" else text)
     body = "\n".join(item.strip() for item in parts if item.strip())
     preview = " ".join(body.split())[:4000]
     return preview, sha256_text(body) if body else "", len(body) > len(preview)
@@ -752,34 +816,205 @@ def sender_address_type(value: str) -> str:
     return "EX" if "/o=" in value.lower() else ""
 
 
-def attachment_summaries(message: EmailMessage) -> list[dict[str, object]]:
-    """``Content-Disposition: attachment`` parts; an image with a Content-ID (signature image) is marked ``inline``."""
+def attachment_payloads(
+    message: EmailMessage, *, raw: bytes | None = None, raw_offset: int = 0
+) -> list[tuple[EmailMessage, bytes, dict[str, object]]]:
+    """(part, hashed bytes, provenance) of every attachment of ``message``, numbered ``index = position + 1``.
+
+    The one attachment enumeration for collector rows and attachment export: ``Content-Disposition:
+    attachment`` parts and enclosed messages of ``message``'s own MIME tree (an enclosed message counts once;
+    its own attachments belong to it). ``raw`` are the bytes ``message`` was parsed from (``raw_offset`` bytes
+    into the source file); with them an enclosed message is sized and hashed as stored in the source.
+    ``provenance["hash_basis"]`` names the hashed byte range (see ``ATTACHMENT_HASH_BASIS``).
+    """
+    return _attachment_payloads(message, raw, raw_offset, stored_enclosure_spans(message, raw))
+
+
+def stored_enclosure_spans(message: EmailMessage, raw: bytes | None) -> dict[int, tuple[int, int]]:
+    stored: dict[int, tuple[int, int]] = {}
+    if raw is not None:
+        locate_enclosed_messages(message, raw, 0, len(raw), stored)
+    return stored
+
+
+def _attachment_payloads(
+    message: EmailMessage, raw: bytes | None, raw_offset: int, stored: Mapping[int, tuple[int, int]]
+) -> list[tuple[EmailMessage, bytes, dict[str, object]]]:
+    entries: list[tuple[EmailMessage, bytes, dict[str, object]]] = []
+    for part in own_message_parts(message):
+        if part is message or not (part.get_content_disposition() == "attachment" or is_enclosed_message(part)):
+            continue
+        if len(entries) >= MAX_MESSAGE_ATTACHMENTS:
+            break
+        if is_enclosed_message(part):
+            payload, basis, offset = enclosed_message_bytes(part, part.get_payload(0), raw, raw_offset, stored)
+            entries.append((part, payload, {"hash_basis": basis, "source_byte_offset": offset}))
+        else:
+            entries.append((part, part.get_payload(decode=True) or b"", {"hash_basis": "decoded-transfer-payload"}))
+    return entries
+
+
+def attachment_summaries(
+    message: EmailMessage, *, raw: bytes | None = None, raw_offset: int = 0
+) -> list[dict[str, object]]:
+    """Entries of ``attachment_payloads``; an image with a Content-ID (signature image) is marked ``inline``
+    and an enclosed message (RFC 2046 5.2.1) carries its own headers, body and attachments under
+    ``enclosed_message``."""
+    return _attachment_summaries(message, raw, raw_offset, stored_enclosure_spans(message, raw), depth=0)
+
+
+def _attachment_summaries(
+    message: EmailMessage,
+    raw: bytes | None,
+    raw_offset: int,
+    stored: Mapping[int, tuple[int, int]],
+    *,
+    depth: int,
+) -> list[dict[str, object]]:
     attachments: list[dict[str, object]] = []
-    attachment_parts = [
-        part
-        for part in (message.walk() if message.is_multipart() else [])
-        if part.get_content_disposition() == "attachment"
-    ]
-    for index, part in enumerate(attachment_parts, start=1):
-        payload = part.get_payload(decode=True) or b""
+    for index, (part, payload, provenance) in enumerate(_attachment_payloads(message, raw, raw_offset, stored), start=1):
         preview = payload[:EMAIL_ATTACHMENT_PREVIEW_BYTES]
-        attachments.append(
-            {
-                "index": index,
-                "filename": part.get_filename() or "",
-                "content_type": part.get_content_type(),
-                "content_id": str(part.get("Content-ID") or "").strip(),
-                "inline": bool(str(part.get("Content-ID") or "").strip()) and part.get_content_type().startswith("image/"),
-                "size": len(payload),
-                "sha256": hashlib.sha256(payload).hexdigest() if payload else "",
-                "bounded_preview_bytes": len(preview),
-                "bounded_preview_hex": preview.hex(),
-                "bounded_preview_sha256": hashlib.sha256(preview).hexdigest() if preview else "",
-                "bounded_preview_truncated": len(payload) > len(preview),
-                "export_warning": "Attachment export is bounded metadata/content evidence; validate against the original mailbox and trusted parser before report-grade use.",
-            }
-        )
-    return attachments[:100]
+        entry: dict[str, object] = {
+            "index": index,
+            "filename": part.get_filename() or "",
+            "content_type": part.get_content_type(),
+            "content_id": str(part.get("Content-ID") or "").strip(),
+            "inline": bool(str(part.get("Content-ID") or "").strip()) and part.get_content_type().startswith("image/"),
+            "size": len(payload),
+            "sha256": hashlib.sha256(payload).hexdigest() if payload else "",
+            **provenance,
+            "bounded_preview_bytes": len(preview),
+            "bounded_preview_hex": preview.hex(),
+            "bounded_preview_sha256": hashlib.sha256(preview).hexdigest() if preview else "",
+            "bounded_preview_truncated": len(payload) > len(preview),
+            "export_warning": "Attachment export is bounded metadata/content evidence; validate against the original mailbox and trusted parser before report-grade use.",
+        }
+        if is_enclosed_message(part):
+            entry.update(enclosed_message_summary(part.get_payload(0), raw, raw_offset, stored, depth=depth))
+        attachments.append(entry)
+    return attachments
+
+
+def is_enclosed_message(part: EmailMessage) -> bool:
+    return part.get_content_type() in ENCLOSED_MESSAGE_TYPES and part.is_multipart()
+
+
+def enclosed_message_summary(
+    enclosed: EmailMessage,
+    raw: bytes | None,
+    raw_offset: int,
+    stored: Mapping[int, tuple[int, int]],
+    *,
+    depth: int,
+) -> dict[str, object]:
+    """``enclosed_message`` (headers, body, nested attachments) of an attached message, depth-bounded."""
+    if depth >= MAX_ENCLOSURE_DEPTH:
+        return {"enclosed_message_depth_limited": True}
+    body_preview, body_hash, body_truncated = message_body_summary(enclosed)
+    nested = _attachment_summaries(enclosed, raw, raw_offset, stored, depth=depth + 1)
+    return {
+        "enclosed_message": {
+            "message_id": header_value(enclosed, "Message-ID"),
+            "subject": header_value(enclosed, "Subject"),
+            "from": header_value(enclosed, "From"),
+            "to": header_value(enclosed, "To"),
+            "cc": header_value(enclosed, "Cc"),
+            "date": header_value(enclosed, "Date"),
+            "body_preview": body_preview,
+            "body_sha256": body_hash,
+            "body_truncated": body_truncated,
+            "attachment_count": len(nested),
+            "attachments": nested,
+        }
+    }
+
+
+def enclosed_message_bytes(
+    part: EmailMessage,
+    enclosed: EmailMessage,
+    raw: bytes | None,
+    raw_offset: int,
+    stored: Mapping[int, tuple[int, int]],
+) -> tuple[bytes, str, int | None]:
+    """(bytes, hash basis, absolute source offset). The stored span is used only when it re-parses to the
+    same message the parser produced; otherwise the enclosure is re-serialised and labelled as such."""
+    span = stored.get(id(part))
+    if raw is not None and span is not None:
+        candidate = raw[span[0] : span[1]]
+        try:
+            same = email.message_from_bytes(candidate, policy=policy.default).as_bytes() == enclosed.as_bytes()
+        except (LookupError, UnicodeError, ValueError, TypeError):
+            same = False
+        if same:
+            return candidate, "enclosed-message-source-bytes", raw_offset + span[0]
+    try:
+        return enclosed.as_bytes(policy=policy.SMTP), "enclosed-message-reserialized-crlf", None
+    except (LookupError, UnicodeError, ValueError, TypeError):
+        return b"", "enclosed-message-reserialized-crlf", None
+
+
+def locate_enclosed_messages(
+    part: EmailMessage, raw: bytes, start: int, end: int, stored: dict[int, tuple[int, int]]
+) -> None:
+    """Record in ``stored`` (``id(part)`` -> span of ``raw``) where every enclosed message below ``part`` is
+    stored. ``raw[start:end]`` is the entity ``part`` was parsed from; it is split at the header blank line
+    and at RFC 2046 boundary delimiters the way the Python email parser splits it. A multipart whose span
+    count differs from its parsed part count is skipped (its enclosures fall back to re-serialisation)."""
+    if not part.is_multipart():
+        return
+    body_start = mime_body_offset(raw, start, end)
+    if part.get_content_maintype() == "message":
+        if is_enclosed_message(part):
+            stored[id(part)] = (body_start, end)
+            locate_enclosed_messages(part.get_payload(0), raw, body_start, end, stored)
+        return
+    boundary = part.get_boundary()
+    children = list(part.iter_parts())
+    if not boundary:
+        return
+    spans = mime_multipart_spans(raw, body_start, end, boundary)
+    if len(spans) != len(children):
+        return
+    for child, (child_start, child_end) in zip(children, spans):
+        locate_enclosed_messages(child, raw, child_start, child_end, stored)
+
+
+def mime_body_offset(raw: bytes, start: int, end: int) -> int:
+    """Offset just past the blank line that ends the header block of ``raw[start:end]`` (``end`` if none)."""
+    offset = start
+    for line in raw[start:end].splitlines(keepends=True):
+        offset += len(line)
+        if not line.rstrip(b"\r\n"):
+            return offset
+    return end
+
+
+def mime_multipart_spans(raw: bytes, start: int, end: int, boundary: str) -> list[tuple[int, int]]:
+    """Body parts of the multipart body ``raw[start:end]``: each span starts after a delimiter line and ends
+    before the line break that precedes the next delimiter (RFC 2046 5.1.1: that break belongs to it)."""
+    try:
+        delimiter = b"--" + boundary.encode("ascii", "surrogateescape")
+    except UnicodeError:
+        return []
+    spans: list[tuple[int, int]] = []
+    part_start: int | None = None
+    offset = start
+    previous_break = 0
+    for line in raw[start:end].splitlines(keepends=True):
+        content = line.rstrip(b"\r\n")
+        tail = content[len(delimiter) :] if content.startswith(delimiter) else None
+        closing = tail is not None and tail.startswith(b"--")
+        if tail is not None and not (tail[2:] if closing else tail).strip(b" \t"):
+            if part_start is not None:
+                spans.append((part_start, max(part_start, offset - previous_break)))
+            if closing:
+                return spans
+            part_start = offset + len(line)
+        previous_break = len(line) - len(content)
+        offset += len(line)
+    if part_start is not None:
+        spans.append((part_start, end))
+    return spans
 
 
 def attach_email_attachment_locators(
@@ -839,6 +1074,7 @@ def email_attachment_source_viewer_locator(
         "content_type": str(attachment.get("content_type") or ""),
         "size": int(attachment.get("size") or 0),
         "sha256": str(attachment.get("sha256") or ""),
+        "hash_basis": str(attachment.get("hash_basis") or ""),
         "bounded_preview_bytes": int(attachment.get("bounded_preview_bytes") or 0),
         "bounded_preview_hex": str(attachment.get("bounded_preview_hex") or ""),
         "bounded_preview_sha256": str(attachment.get("bounded_preview_sha256") or ""),
@@ -1507,6 +1743,7 @@ def email_attachment_citation(
         "content_type": str(attachment.get("content_type") or ""),
         "size": int(attachment.get("size") or 0),
         "sha256": str(attachment.get("sha256") or ""),
+        "hash_basis": str(attachment.get("hash_basis") or ""),
         "bounded_preview_sha256": str(attachment.get("bounded_preview_sha256") or ""),
         "bounded_preview_bytes": int(attachment.get("bounded_preview_bytes") or 0),
         "export_warning": str(attachment.get("export_warning") or ""),
@@ -1562,11 +1799,59 @@ def stable_email_sha256(payload: Mapping[str, object]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def strip_emlx_length_prefix(data: bytes) -> bytes:
+def split_emlx(data: bytes) -> tuple[bytes, dict[str, object]]:
+    """Apple Mail ``.emlx``: a decimal byte-count line, exactly that many bytes of RFC 5322 message, then an
+    XML property list of Mail metadata (flags, dates, ids). Returns (message bytes, container profile); the
+    trailer never reaches the parsed message, so it cannot change the body or body hash."""
     first_line, separator, rest = data.partition(b"\n")
-    if separator and first_line.strip().isdigit():
-        return rest
-    return data
+    if not (separator and first_line.strip().isdigit()):
+        return data, {
+            "length_prefix_present": False,
+            "message_offset": 0,
+            "message_length": len(data),
+            "message_sha256": hashlib.sha256(data).hexdigest(),
+            "trailer_length": 0,
+        }
+    declared = int(first_line.strip())
+    message_offset = len(first_line) + 1
+    message, trailer = rest[:declared], rest[declared:]
+    container: dict[str, object] = {
+        "length_prefix_present": True,
+        "declared_message_length": declared,
+        "declared_length_within_file": declared <= len(rest),
+        "message_offset": message_offset,
+        "message_length": len(message),
+        "message_sha256": hashlib.sha256(message).hexdigest(),
+        "trailer_offset": message_offset + len(message),
+        "trailer_length": len(trailer),
+        "trailer_sha256": hashlib.sha256(trailer).hexdigest() if trailer else "",
+    }
+    if trailer:
+        container.update(emlx_trailer_metadata(trailer))
+    return message, container
+
+
+def emlx_trailer_metadata(trailer: bytes) -> dict[str, object]:
+    """``trailer_format`` and, for a property list, its keys/values as JSON-safe data (bounded)."""
+    if len(trailer) > EMLX_TRAILER_PARSE_LIMIT:
+        return {"trailer_format": "not-parsed-size-limit"}
+    try:
+        parsed = plistlib.loads(trailer)
+    except (ValueError, ExpatError, OverflowError, TypeError):
+        return {"trailer_format": "unparsed"}
+    return {"trailer_format": "apple-property-list", "trailer_metadata": json_safe_plist(parsed)}
+
+
+def json_safe_plist(value: object) -> object:
+    if isinstance(value, dict):
+        return {str(key): json_safe_plist(item) for key, item in list(value.items())[:EMLX_METADATA_ITEM_LIMIT]}
+    if isinstance(value, list):
+        return [json_safe_plist(item) for item in value[:EMLX_METADATA_ITEM_LIMIT]]
+    if isinstance(value, bytes):
+        return {"bytes_hex": value[:EMAIL_ATTACHMENT_PREVIEW_BYTES].hex(), "length": len(value)}
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    return value.isoformat() if isinstance(value, datetime) else str(value)
 
 
 def is_maildir_message(path: Path) -> bool:
