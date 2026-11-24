@@ -416,7 +416,47 @@
                 "typed_count": 0,
                 "transition": "",
                 "visit_duration_micros": 0,
-                "query_hint": ""
+                "query_hint": "",
+                "sqlite_snapshot": {
+                  "profile_version": "sqlite-working-snapshot-v1",
+                  "source_path": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite",
+                  "files": [
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite",
+                      "exists": true,
+                      "sha256": "<DYNAMIC_FILE_META>",
+                      "st_dev": "<DYNAMIC_FILE_META>",
+                      "st_ino": "<DYNAMIC_FILE_META>",
+                      "st_size": "<DYNAMIC_FILE_META>",
+                      "st_mtime_ns": "<DYNAMIC_FILE_META>",
+                      "st_ctime_ns": "<DYNAMIC_FILE_META>",
+                      "st_mode": "<DYNAMIC_FILE_META>",
+                      "copied": true
+                    },
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite-wal",
+                      "exists": false,
+                      "copied": false
+                    },
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite-shm",
+                      "exists": false,
+                      "copied": false
+                    },
+                    {
+                      "path": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite-journal",
+                      "exists": false,
+                      "copied": false
+                    }
+                  ],
+                  "hash_scope": "individual-source-files; database hash excludes WAL",
+                  "wal_included": false,
+                  "stability_check": "before-after fingerprints and copy hashes; not atomic live acquisition",
+                  "shm_policy": "rebuilt only in private working directory",
+                  "journal_status": "absent",
+                  "journal_reason": "",
+                  "journal_policy": "hot only when magic d9d505f920a163d7 and page records present; otherwise ignored, never copied"
+                }
               }
             ],
             "downloads": [],
@@ -658,6 +698,7 @@
                 "ai_service": "",
                 "query_hint": "",
                 "source_path": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite",
+                "source_sha256": "a500ca837ddabfd418bd3103fb020923eb2d21ca85e4bfa38e2af8159573c99a",
                 "source_table": "moz_places",
                 "source_index": 0,
                 "source_row_id": 1,
@@ -697,9 +738,15 @@
                   "source_row_id": 1,
                   "source_database": "places.sqlite",
                   "source_sha256": "a500ca837ddabfd418bd3103fb020923eb2d21ca85e4bfa38e2af8159573c99a",
-                  "source_snapshot_id": "",
-                  "source_snapshot_files": [],
-                  "row_hash": "60cea26a0d9caf90234ab1e400e37a9950e56077d490dde40175215614ca47a5",
+                  "source_snapshot_id": "6e8c577c2ab203378f409c1ff221eacec561f03cdbbf1d6f0114a621923e0b7c",
+                  "source_snapshot_files": [
+                    {
+                      "name": "places.sqlite",
+                      "sha256": "a500ca837ddabfd418bd3103fb020923eb2d21ca85e4bfa38e2af8159573c99a",
+                      "size": 12288
+                    }
+                  ],
+                  "row_hash": "5414479992372c537d15632ecbb724c9ab44f65225165c842086ad0a80efe415",
                   "source_viewer_locator": {
                     "viewer": "sqlite",
                     "source_table": "moz_places",
@@ -715,7 +762,20 @@
               "timeline_row_hashes": [
                 "88ce7200efa58a952e8da8fa6619644ee9d07bc831bd03dfb27181349d77c9c2"
               ],
-              "source_snapshots": [],
+              "source_snapshots": [
+                {
+                  "snapshot_id": "6e8c577c2ab203378f409c1ff221eacec561f03cdbbf1d6f0114a621923e0b7c",
+                  "files": [
+                    {
+                      "name": "places.sqlite",
+                      "sha256": "a500ca837ddabfd418bd3103fb020923eb2d21ca85e4bfa38e2af8159573c99a",
+                      "size": 12288
+                    }
+                  ],
+                  "wal_included": false,
+                  "hash_scope": "individual-source-files; database hash excludes WAL"
+                }
+              ],
               "large_data_controls": {
                 "max_browser_timeline_rows": 1000,
                 "citation_rows_bounded": false,
@@ -1921,6 +1981,7 @@
                 "ai_service": "",
                 "query_hint": "",
                 "source_path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+                "source_sha256": "779f16740b6777f0df5007d78f4f412772a50aaa4d746ccee92293b94510aa6c",
                 "source_table": "urls",
                 "source_index": 0,
                 "source_row_id": 1,
@@ -1943,6 +2004,7 @@
                 "ai_service": "",
                 "query_hint": "",
                 "source_path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+                "source_sha256": "779f16740b6777f0df5007d78f4f412772a50aaa4d746ccee92293b94510aa6c",
                 "source_table": "urls",
                 "source_index": 1,
                 "source_row_id": 2,
@@ -3218,6 +3280,7 @@
                 "ai_service": "",
                 "query_hint": "",
                 "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
+                "source_sha256": "da647054cafa048475860030861135cdd6222712c1befd0f4e851677e6533639",
                 "source_table": "urls",
                 "source_index": 0,
                 "source_row_id": 1,
@@ -26394,6 +26457,8 @@
               "2026-04-26T01:02:04.000Z Remediation action: Quarantine",
               "2026-04-26T01:02:05.000Z Exclusion path observed: C:\\Users\\alice\\AppData\\Roaming"
             ],
+            "interesting_entries_limit": 25,
+            "interesting_entries_truncated": false,
             "coverage_status": "defender-mplog-triage",
             "reportability": "triage",
             "parser_confidence": "medium",

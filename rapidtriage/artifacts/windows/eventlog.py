@@ -580,6 +580,11 @@ EVENT_CATEGORY_LABELS_KO = {
     "local-session-logoff": "로컬 세션 로그오프",
     "local-session-disconnected": "로컬 세션 연결 끊김",
     "local-session-reconnected": "로컬 세션 재연결",
+    "terminal-session-logon": "세션 로그온(원격·로컬 미확정)",
+    "terminal-shell-start": "셸 시작(원격·로컬 미확정)",
+    "terminal-session-logoff": "세션 로그오프(원격·로컬 미확정)",
+    "terminal-session-disconnected": "세션 연결 끊김(원격·로컬 미확정)",
+    "terminal-session-reconnected": "세션 재연결(원격·로컬 미확정)",
     "defender-malware-detected": "Defender 악성코드 탐지",
     "defender-remediation-action": "Defender 조치",
     "defender-realtime-protection-disabled": "Defender 실시간 보호 해제",
@@ -623,6 +628,11 @@ EVENT_FAMILY_BY_CATEGORY = {
     "local-session-logoff": "authentication",
     "local-session-disconnected": "authentication",
     "local-session-reconnected": "authentication",
+    "terminal-session-logon": "authentication",
+    "terminal-shell-start": "authentication",
+    "terminal-session-logoff": "authentication",
+    "terminal-session-disconnected": "authentication",
+    "terminal-session-reconnected": "authentication",
     "service-crashed": "service",
     "service-state-changed": "service",
     "service-start-type-changed": "service",
@@ -1990,6 +2000,13 @@ def collect_xml_events(
         data_lossy = len(data) != len(data_items)
         if user_data is not None:
             data.update(prefixed_xml_values(user_data, "UserData"))
+            # The positional keys keep every element in document order; the
+            # semantic names (Address, User, SessionID...) are what the native
+            # EVTX decoder emits for the same UserData/EventXML, so both forms
+            # of one event classify alike. The first occurrence of a name wins.
+            for name, text in user_data_leaf_values(user_data):
+                data.setdefault(f"UserData.{name}", text)
+                data.setdefault(name, text)
         rendered_message = text_from_child(rendering, "Message")
         if rendered_message:
             data.setdefault("Message", rendered_message)
@@ -10008,9 +10025,15 @@ def event_category_for(
         category, description = found
         if category.startswith("rdp-") and category != "rdp-authentication-succeeded":
             address = first_data_text(data or {}, "Address", "UserData.Address")
-            if address.strip().upper() in {"", "LOCAL"}:
+            # LocalSessionManager writes the literal LOCAL for a console session
+            # and the client address for a remote one; a row without the field
+            # does not say which, so it is neither called remote nor local.
+            if address.strip().upper() == "LOCAL":
                 category = "local-" + category.removeprefix("rdp-")
                 description = description.replace("Terminal Services", "Local console")
+            elif not address.strip():
+                category = "terminal-" + category.removeprefix("rdp-")
+                description = description.replace("Terminal Services", "Terminal session (origin not recorded)")
         return category, description
     provider_or_channel = f"{provider_key} {channel_key}"
     if "kernelpnp" in provider_or_channel or "usbstor" in provider_or_channel:
@@ -10193,6 +10216,15 @@ def duplicate_event_data_names(items: Sequence[Mapping[str, str]]) -> list[str]:
     """Non-empty Data names that occur more than once (single-value fields keep only the last)."""
     counts = Counter(str(item.get("name") or "") for item in items)
     return sorted(name for name, count in counts.items() if name and count > 1)
+
+
+def user_data_leaf_values(node: ET.Element) -> list[tuple[str, str]]:
+    """(local name, text) of the text-bearing leaf elements under ``node``."""
+    return [
+        (strip_namespace(child.tag), (child.text or "").strip())
+        for child in node.iter()
+        if child is not node and len(child) == 0 and (child.text or "").strip()
+    ]
 
 
 def prefixed_xml_values(node: ET.Element, prefix: str) -> dict[str, str]:

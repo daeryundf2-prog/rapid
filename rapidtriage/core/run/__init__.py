@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import hashlib
 import json
 import mimetypes
 import os
+import platform
+import shutil
 import sys
 import time
 from collections import Counter
@@ -25,6 +28,7 @@ from concurrent.futures import (
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
+from ... import __version__
 from ...artifacts import all_providers, clear_collect_cache
 from ..archive_image import (
     ArchiveImageExtractionError,
@@ -604,6 +608,7 @@ def run_triage_mode(
                 stage_reuse_blocked=stage_reuse_blocked,
                 skip_groups=plan["options"]["skip_groups"],
                 skip_tasks=plan["options"]["skip_tasks"],
+                e01_partition_start_sector=e01_partition_start_sector,
             )
         finally:
             unregister_tool_output_dir(own_inner_dir)
@@ -712,6 +717,7 @@ def _run_triage_stages(
     stage_reuse_blocked: bool = False,
     skip_groups: Sequence[str] = (),
     skip_tasks: Sequence[str] = (),
+    e01_partition_start_sector: int | None = None,
 ) -> dict[str, object]:
     """Run every stage after the input root is prepared (see run_triage_mode)."""
 
@@ -775,13 +781,18 @@ def _run_triage_stages(
     # Every run hashes file contents (bounded per file) so that a later
     # --resume can prove it reads the same evidence bytes; the fingerprint is
     # also bound to the evidence identity (input path, kind, scan root).
+    # It covers the input root, not the profile's narrower scan scope: the
+    # artifact providers read the whole input (event logs, registry hives...),
+    # so a file they read must be part of the proof, or a revised log outside
+    # the scan scope would leave the previous run's rows in a resumed run.
     progress.task_set_message("fingerprint", "입력 지문 계산 중 (파일 내용 해시, 파일당 16 MB 상한)")
     evidence_identity = build_run_evidence_identity(
         input_root.source_path,
         input_kind=input_root.kind,
         scan_root=scan_root,
     )
-    current_fingerprint = build_run_input_fingerprint(scan_root, evidence_identity=evidence_identity)
+    fingerprint_root = input_root.root_path
+    current_fingerprint = build_run_input_fingerprint(fingerprint_root, evidence_identity=evidence_identity)
     finish_stage("fingerprint")
     previous_fingerprint = (
         load_reusable_json(
@@ -853,7 +864,7 @@ def _run_triage_stages(
         if evidence_delta.get("usable"):
             blockers = [str(item) for item in evidence_delta.get("blockers") or []]
             scope_manifest = materialize_delta_scope(
-                scan_root,
+                fingerprint_root,
                 output_dir / EVIDENCE_DELTA_SCOPE_DIR_NAME,
                 evidence_delta.get("scope_paths") or [],
             )
@@ -866,21 +877,22 @@ def _run_triage_stages(
                 blockers.append(
                     "known-good feeds change candidate classification; files stage delta disabled"
                 )
-            artifacts_delta_enabled = scan_root == input_root.root_path
-            if not artifacts_delta_enabled:
+            if scan_root != fingerprint_root:
+                files_delta_enabled = False
                 blockers.append(
-                    "scan scope narrows the fingerprinted root; artifact stage delta disabled"
+                    "scan scope narrower than the fingerprinted input root; files stage delta disabled"
                 )
             evidence_delta_context = EvidenceDeltaContext(
                 scope_root=Path(str(scope_manifest["scope_root"])),
-                source_root=scan_root,
+                source_root=fingerprint_root,
                 scope_file_count=int(scope_manifest.get("file_count") or 0),
                 added=frozenset(str(path) for path in (evidence_delta.get("added") or [])),
                 removed=frozenset(str(path) for path in (evidence_delta.get("removed") or [])),
                 changed=frozenset(str(path) for path in (evidence_delta.get("changed") or [])),
                 unchanged=frozenset(str(path) for path in (evidence_delta.get("unchanged_paths") or [])),
                 files_delta_enabled=files_delta_enabled,
-                artifacts_delta_enabled=artifacts_delta_enabled,
+                # Fingerprint and providers share the input root.
+                artifacts_delta_enabled=True,
                 blockers=tuple(blockers),
                 scope_manifest=scope_manifest,
             )
@@ -890,6 +902,12 @@ def _run_triage_stages(
     reused_outputs: set[str] = set()
     delta_applied_outputs: set[str] = set()
     checkpoint_records: list[dict[str, object]] = []
+    # The exact bytes of every known-good feed are kept with the outputs (named
+    # by SHA-256), so the audit can say which revision the run used and a
+    # colleague can replay with that revision after the original is updated.
+    known_good_feed_records = archive_known_good_feeds(
+        known_good_hash_feeds, output_dir / KNOWN_GOOD_FEED_ARCHIVE_DIR_NAME
+    )
     # Per-stage cache keys: a stage output is reused only with the same
     # evidence identity, the same content-hashed input fingerprint and the
     # same output-affecting options (e.g. --max-file-count).
@@ -906,7 +924,7 @@ def _run_triage_stages(
             "feeds": [str(Path(str(feed)).expanduser().resolve()) for feed in known_good_hash_feeds],
             # Content, not just path: revising a feed in place changes which
             # files are hidden/skipped, so files and files-extract must rebuild.
-            "feed_sha256": [known_good_feed_sha256(Path(str(feed)).expanduser()) for feed in known_good_hash_feeds],
+            "feed_sha256": [str(record["sha256"]) or None for record in known_good_feed_records],
             "hide": hide_known_good,
             "max_hash_bytes": known_good_max_hash_bytes,
         },
@@ -1486,7 +1504,7 @@ def _run_triage_stages(
     columnar_artifacts_sidecar: dict[str, object] | None = None
     if columnar_store:
         columnar_artifacts_sidecar = build_columnar_artifacts_sidecar(outputs=outputs, output_dir=output_dir)
-        write_result(columnar_artifacts_sidecar, output_dir / "rapidtriage-columnar-artifacts-sidecar.json")
+        write_result(columnar_artifacts_sidecar, output_dir / COLUMNAR_ARTIFACTS_SIDECAR_NAME)
         if columnar_artifacts_sidecar.get("parquet_path"):
             outputs["columnar_artifacts"] = Path(str(columnar_artifacts_sidecar["parquet_path"]))
         if columnar_artifacts_sidecar.get("jsonl_path"):
@@ -1581,6 +1599,79 @@ def _run_triage_stages(
         encoding="utf-8",
     )
     write_result(summary_payload, summary_path)
+    run_stage_output_files: list[tuple[str, Path]] = [
+        *([("e01-metadata", e01_metadata_path)] if isinstance(image_result, E01ExtractionResult) else []),
+        *(
+            [("disk-image-metadata", disk_image_metadata_path)]
+            if isinstance(image_result, DiskImageExtractionResult)
+            else []
+        ),
+        *(
+            [("archive-image-metadata", archive_image_metadata_path)]
+            if isinstance(image_result, ArchiveImageExtractionResult)
+            else []
+        ),
+        *(
+            [("virtual-disk-metadata", virtual_disk_metadata_path)]
+            if isinstance(image_result, VirtualDiskExtractionResult)
+            else []
+        ),
+        ("manifest", manifest_path),
+        ("docs", docs_path),
+        ("docs-index", docs_index_path),
+        ("files", files_path),
+        ("parser-scheduler", scheduler_path),
+        ("parser-crash-isolation", parser_crash_ledger_path),
+        ("memory-cap-enforcement", memory_cap_ledger_path),
+        ("preview-sandbox-policy", preview_sandbox_policy_path),
+        ("sqlite-fts-optimization", sqlite_fts_optimization_path),
+        ("docs-extract-manifest", docs_extract_manifest),
+        ("files-extract-manifest", files_extract_manifest),
+        ("timeline-json", timeline_path),
+        ("timeline-report", timeline_report_path),
+        ("indicators", indicators_path),
+        *[(f"artifacts-{kind}", path) for kind, path in artifact_outputs.items()],
+        # Row files carry the records the JSON summaries point to; their
+        # final bytes must be re-verifiable from the audit alone.
+        *[
+            (f"artifacts-{kind}-jsonl", artifact_records_path(path))
+            for kind, path in artifact_outputs.items()
+        ],
+        *([("evidence-delta", output_dir / EVIDENCE_DELTA_MANIFEST_NAME)] if evidence_delta_manifest else []),
+        *([("carve", carve_output_path)] if carve_payload is not None else []),
+        ("run-summary", summary_path),
+        ("run-report", report_path),
+        ("run-plan", output_dir / PLAN_FILE_NAME),
+        *[
+            (f"docs-extract:{entry['relative_path']}", Path(entry["extracted_path"]).resolve())
+            for entry in docs_extract_payload.get("entries", [])
+        ],
+        *[
+            (f"files-extract:{entry['relative_path']}", Path(entry["extracted_path"]).resolve())
+            for entry in files_extract_payload.get("entries", [])
+        ],
+    ]
+    listed_outputs: list[tuple[str, Path]] = [
+        ("run-fingerprint", fingerprint_path),
+        ("run-checkpoints", checkpoint_path),
+        *([("case-db", output_dir / CASE_DB_FILE_NAME)] if "case_db" in outputs else []),
+        *(
+            [("columnar-artifacts-sidecar", output_dir / COLUMNAR_ARTIFACTS_SIDECAR_NAME)]
+            if columnar_artifacts_sidecar is not None
+            else []
+        ),
+        *([("columnar-artifacts-parquet", outputs["columnar_artifacts"])] if "columnar_artifacts" in outputs else []),
+        *(
+            [("columnar-artifacts-jsonl", outputs["columnar_artifacts_jsonl"])]
+            if "columnar_artifacts_jsonl" in outputs
+            else []
+        ),
+        *[
+            (f"known-good-feed-copy:{Path(str(record['path'])).name}", Path(str(record["archived_copy"])))
+            for record in known_good_feed_records
+            if record["archived_copy"]
+        ],
+    ]
     write_audit_record(
         audit_output,
         command="run",
@@ -1595,12 +1686,22 @@ def _run_triage_stages(
             "max_extract_size_bytes": max_extract_size_bytes,
             "max_file_count": max_file_count,
             "memory_cap_bytes": effective_memory_cap,
+            "memory_cap_bytes_requested": memory_cap_bytes,
+            "e01_partition_start_sector": e01_partition_start_sector,
             "overwrite": overwrite,
             "resume": resume,
+            "resume_effective": effective_resume,
+            "resume_disabled_reason": resume_disabled_reason,
             "extract": extract_enabled,
             "known_good_hash_feeds": [str(path) for path in known_good_hash_feeds],
+            # Path, SHA-256, size and the archived copy of each feed revision used.
+            "known_good_hash_feed_files": known_good_feed_records,
             "hide_known_good": hide_known_good,
             "known_good_max_hash_bytes": known_good_max_hash_bytes,
+            "columnar_store": columnar_store,
+            "case_db": case_db,
+            "carve": carve,
+            "collector_options": {str(kind): dict(value) for kind, value in (collector_options or {}).items()},
             "reused_outputs": sorted(reused_outputs),
             "skip_groups": list(skip_groups),
             "skip_tasks": list(skip_tasks),
@@ -1609,64 +1710,106 @@ def _run_triage_stages(
             "image_source": str(image_result.source_path) if image_result else None,
             "image_extracted_root": str(image_result.extract_dir) if image_result else None,
             "image_extraction_command": str(image_result.to_dict().get("command")) if image_result else None,
+            "tool_build": run_tool_build_identity(),
         },
         input_root=input_root,
-        notes=plan_audit_notes(final_plan),
-        input_files=[("image-source", image_result.source_path)] if image_result else [],
-        output_files=[
-            *([("e01-metadata", e01_metadata_path)] if isinstance(image_result, E01ExtractionResult) else []),
-            *(
-                [("disk-image-metadata", disk_image_metadata_path)]
-                if isinstance(image_result, DiskImageExtractionResult)
-                else []
-            ),
-            *(
-                [("archive-image-metadata", archive_image_metadata_path)]
-                if isinstance(image_result, ArchiveImageExtractionResult)
-                else []
-            ),
-            *(
-                [("virtual-disk-metadata", virtual_disk_metadata_path)]
-                if isinstance(image_result, VirtualDiskExtractionResult)
-                else []
-            ),
-            ("manifest", manifest_path),
-            ("docs", docs_path),
-            ("docs-index", docs_index_path),
-            ("files", files_path),
-            ("parser-scheduler", scheduler_path),
-            ("parser-crash-isolation", parser_crash_ledger_path),
-            ("memory-cap-enforcement", memory_cap_ledger_path),
-            ("preview-sandbox-policy", preview_sandbox_policy_path),
-            ("sqlite-fts-optimization", sqlite_fts_optimization_path),
-            ("docs-extract-manifest", docs_extract_manifest),
-            ("files-extract-manifest", files_extract_manifest),
-            ("timeline-json", timeline_path),
-            ("timeline-report", timeline_report_path),
-            ("indicators", indicators_path),
-            *[(f"artifacts-{kind}", path) for kind, path in artifact_outputs.items()],
-            # Row files carry the records the JSON summaries point to; their
-            # final bytes must be re-verifiable from the audit alone.
-            *[
-                (f"artifacts-{kind}-jsonl", artifact_records_path(path))
-                for kind, path in artifact_outputs.items()
-            ],
-            *([("evidence-delta", output_dir / EVIDENCE_DELTA_MANIFEST_NAME)] if evidence_delta_manifest else []),
-            *([("carve", carve_output_path)] if carve_payload is not None else []),
-            ("run-summary", summary_path),
-            ("run-report", report_path),
-            ("run-plan", output_dir / PLAN_FILE_NAME),
-            *[
-                (f"docs-extract:{entry['relative_path']}", Path(entry["extracted_path"]).resolve())
-                for entry in docs_extract_payload.get("entries", [])
-            ],
-            *[
-                (f"files-extract:{entry['relative_path']}", Path(entry["extracted_path"]).resolve())
-                for entry in files_extract_payload.get("entries", [])
-            ],
+        notes=[
+            *plan_audit_notes(final_plan),
+            AUDIT_OUTPUT_SNAPSHOT_NOTE,
         ],
+        input_files=[
+            *([("image-source", image_result.source_path)] if image_result else []),
+            *[("known-good-feed", Path(str(record["path"]))) for record in known_good_feed_records],
+            *([("rules", Path(str(rule_set.path)))] if rule_set and rule_set.path else []),
+        ],
+        output_files=audited_run_outputs(
+            output_dir,
+            [*listed_outputs, *run_stage_output_files],
+            live_files=(audit_output, output_dir / RUN_PROGRESS_FILE_NAME),
+        ),
     )
     return summary_payload
+
+
+def audited_run_outputs(
+    output_dir: Path,
+    listed: Sequence[tuple[str, Path]],
+    *,
+    live_files: Sequence[Path],
+) -> list[tuple[str, Path]]:
+    """Every file in the output folder, for the audit's integrity list.
+
+    ``listed`` keeps its stage labels; any other regular file under
+    ``output_dir`` (derived analyses, row stores, earlier runs' files in a
+    resumed folder...) is added as ``output-file:<relative path>``, so the
+    receipt re-verifies every byte a recipient gets. ``live_files`` (the audit
+    itself and the progress file, still written after the audit) are left out.
+    """
+    excluded = {path.resolve() for path in live_files}
+    seen = {path.expanduser().resolve() for _label, path in listed}
+    swept = [
+        (f"output-file:{path.relative_to(output_dir).as_posix()}", path)
+        for path in sorted(output_dir.rglob("*"))
+        if path.is_file() and not path.is_symlink() and path.resolve() not in excluded and path.resolve() not in seen
+    ]
+    return [*listed, *swept]
+
+
+AUDIT_OUTPUT_SNAPSHOT_NOTE = (
+    "산출물 해시 시점: 모든 단계가 끝난 뒤 감사 기록 직전. 이후에도 갱신되는 "
+    f"{RUN_PROGRESS_FILE_NAME}와 감사 파일 자체는 목록에서 제외."
+)
+KNOWN_GOOD_FEED_ARCHIVE_DIR_NAME = "rapidtriage-known-good-feeds"
+COLUMNAR_ARTIFACTS_SIDECAR_NAME = "rapidtriage-columnar-artifacts-sidecar.json"
+
+
+def archive_known_good_feeds(feeds: Sequence[str | Path], archive_dir: Path) -> list[dict[str, object]]:
+    """Copy each known-good feed to ``archive_dir/<sha256><suffix>``.
+
+    Returns per feed its resolved path, SHA-256, size and the archived copy
+    (empty when the feed cannot be read or changed while being copied)."""
+    records: list[dict[str, object]] = []
+    for feed in feeds:
+        source = Path(str(feed)).expanduser().resolve()
+        digest = known_good_feed_sha256(source) or ""
+        record: dict[str, object] = {"path": str(source), "sha256": digest, "size": None, "archived_copy": ""}
+        if digest:
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            target = archive_dir / f"{digest}{source.suffix}"
+            if known_good_feed_sha256(target) != digest:
+                shutil.copyfile(source, target)
+            if known_good_feed_sha256(target) == digest:
+                record.update(size=target.stat().st_size, archived_copy=str(target))
+        records.append(record)
+    return records
+
+
+@functools.cache
+def run_tool_build_identity() -> dict[str, object]:
+    """Version and source digest of the rapidtriage package that ran.
+
+    The digest covers every ``.py``/``.yaml``/``.yml`` file of the package
+    (relative path and bytes), so two runs with the same version string but
+    different code are told apart."""
+    package_root = Path(__file__).resolve().parents[2]
+    digest = hashlib.sha256()
+    count = 0
+    for path in sorted(package_root.rglob("*")):
+        if path.suffix not in {".py", ".yaml", ".yml"} or not path.is_file():
+            continue
+        digest.update(path.relative_to(package_root).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+        count += 1
+    return {
+        "name": "rapidtriage",
+        "version": __version__,
+        "python_version": platform.python_version(),
+        "package_source_sha256": digest.hexdigest(),
+        "package_source_file_count": count,
+        "hash_scope": "relative path + bytes of every .py/.yaml/.yml file in the rapidtriage package",
+    }
 
 
 def plan_control_requests(plan: Mapping[str, object] | None) -> list[dict[str, object]]:

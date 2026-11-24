@@ -1996,7 +1996,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("root", help="Directory to triage")
     run.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
-    run.add_argument("--mode", required=True, choices=sorted(SUPPORTED_RUN_MODES), help="Incident mode to execute")
+    run.add_argument("--mode", choices=sorted(SUPPORTED_RUN_MODES), help="Incident mode to execute (required unless --replay-audit)")
+    run.add_argument(
+        "--replay-audit",
+        metavar="AUDIT_JSON",
+        help="Re-run ROOT with every setting recorded in an earlier run's rapidtriage-run-audit.json "
+        "(option flags are taken from the audit). Known-good feeds and the rules file are read from the "
+        "archived copy or original path only when their bytes match the audited SHA-256; a revised "
+        "input stops the replay before it starts",
+    )
     run.add_argument(
         "--output-dir",
         help="Directory that receives the generated JSON, extract manifests (with --extract), "
