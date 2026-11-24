@@ -349,3 +349,69 @@ jobs:
 
       - name: Benchmark smoke
         run: python scripts/registry-engine-benchmark.py --keys 20000 --repeat 1 --json
+
+  rust-e01-extract:
+    # Opt-in Rust engine for the native E01 -> NTFS extraction (engines/rust/crates/rapid-extract):
+    # crate checks, the PyO3 extension build, Python-vs-Rust parity on synthetic NTFS images
+    # (raw everywhere, a multi-segment E01 where ewfacquire exists), the existing E01 suite on the
+    # Rust engine, and a benchmark smoke.
+    name: Rust E01 extract engine (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check crate formatting
+        working-directory: engines/rust
+        run: cargo fmt -p rapid-extract -- --check
+
+      - name: Clippy
+        working-directory: engines/rust
+        run: |
+          cargo clippy -p rapid-extract --all-targets --locked -- -D warnings
+          cargo clippy -p rapid-extract --lib --features python --locked -- -D warnings
+
+      - name: Test crate
+        working-directory: engines/rust
+        run: cargo test -p rapid-extract --locked
+
+      - name: Install package with native E01 decoders
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e ".[web,test,native-e01]"
+
+      - name: Install ewfacquire (E01 parity)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ewf-tools
+
+      - name: Build and stage rapid_extract_native
+        run: python scripts/build-e01-extract-native.py --json
+
+      - name: Parity tests (Python vs Rust engine)
+        env:
+          RAPIDTRIAGE_REQUIRE_RUST_E01_EXTRACT: "1"
+        run: python -m unittest -v tests.test_e01_extract_rust_parity
+
+      - name: E01 suite on the Rust engine
+        env:
+          RAPIDTRIAGE_E01_EXTRACT_ENGINE: rust
+        run: python -m unittest tests.test_rapidtriage_e01
+
+      - name: Benchmark smoke
+        run: python scripts/e01-extract-benchmark.py --files 2000 --dirs 20 --repeat 1 --json
