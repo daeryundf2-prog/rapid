@@ -92,6 +92,22 @@ def _read_u64(blob: bytes, offset: int) -> int:
     return struct.unpack_from("<Q", blob, offset)[0]
 
 
+def _chunk_record_offsets(blob: bytes) -> tuple[int, int]:
+    """``(last_record_offset, free_space_offset)`` of an ElfChnk header.
+
+    Layout (libyal libevtx, "Windows XML Event Log (EVTX) format", section
+    "Chunk header"): 40 header size, 44 last event record offset, 48 free
+    space offset, 52 event records CRC32. As in the BinXML decoder
+    (``native_evtx_chunk_free_space_offset``), a zero free-space offset falls
+    back to offset 44 when that points past the 512-byte chunk header.
+    """
+    last_record_offset = _read_u32(blob, 44)
+    free_space_offset = _read_u32(blob, 48)
+    if not free_space_offset and last_record_offset >= 512:
+        free_space_offset = last_record_offset
+    return last_record_offset, free_space_offset
+
+
 def _scan_evtx_python(path: Path, max_records: int) -> dict[str, Any]:
     """Streaming pure-Python scanner mirroring rapidcore::evtx::scan_evtx."""
     with open(path, "rb") as handle:
@@ -115,6 +131,7 @@ def _scan_evtx_python(path: Path, max_records: int) -> dict[str, Any]:
             if not blob:
                 break
             if blob[0:8] == EVTX_CHUNK_SIGNATURE:
+                last_record_offset, free_space_offset = _chunk_record_offsets(blob)
                 chunk = {
                     "offset": absolute_offset,
                     "index": chunk_index,
@@ -122,8 +139,8 @@ def _scan_evtx_python(path: Path, max_records: int) -> dict[str, Any]:
                     "last_record_number": _read_u64(blob, 16),
                     "first_record_id": _read_u64(blob, 24),
                     "last_record_id": _read_u64(blob, 32),
-                    "last_record_offset": _read_u32(blob, 40),
-                    "free_space_offset": _read_u32(blob, 44),
+                    "last_record_offset": last_record_offset,
+                    "free_space_offset": free_space_offset,
                 }
                 result["chunks"].append(chunk)
                 for record in _scan_records_in_chunk(blob, chunk, max_records - len(result["records"])):

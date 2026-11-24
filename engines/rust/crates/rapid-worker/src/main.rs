@@ -455,6 +455,8 @@ fn parse_evtx_chunks(blob: &[u8]) -> Vec<EvtxChunkHeader> {
     let mut index = 0u64;
     while offset + CHUNK_SIGNATURE.len() <= blob.len() {
         if &blob[offset..offset + CHUNK_SIGNATURE.len()] == CHUNK_SIGNATURE {
+            let (last_record_offset, free_space_offset) =
+                rapidcore::evtx::chunk_record_offsets(&blob[offset..]);
             output.push(EvtxChunkHeader {
                 offset: offset as u64,
                 index,
@@ -463,8 +465,8 @@ fn parse_evtx_chunks(blob: &[u8]) -> Vec<EvtxChunkHeader> {
                 last_record_number: read_u64_le(blob, offset + 16),
                 first_record_id: read_u64_le(blob, offset + 24),
                 last_record_id: read_u64_le(blob, offset + 32),
-                last_record_offset: read_u32_le(blob, offset + 40),
-                free_space_offset: read_u32_le(blob, offset + 44),
+                last_record_offset,
+                free_space_offset,
             });
             index += 1;
             offset += CHUNK_SIZE;
@@ -533,6 +535,7 @@ fn parse_evtx_chunk_header_at(
     if blob.len() < CHUNK_SIGNATURE.len() || &blob[0..CHUNK_SIGNATURE.len()] != CHUNK_SIGNATURE {
         return None;
     }
+    let (last_record_offset, free_space_offset) = rapidcore::evtx::chunk_record_offsets(blob);
     Some(EvtxChunkHeader {
         offset: absolute_offset,
         index,
@@ -541,8 +544,8 @@ fn parse_evtx_chunk_header_at(
         last_record_number: read_u64_le(blob, 16),
         first_record_id: read_u64_le(blob, 24),
         last_record_id: read_u64_le(blob, 32),
-        last_record_offset: read_u32_le(blob, 40),
-        free_space_offset: read_u32_le(blob, 44),
+        last_record_offset,
+        free_space_offset,
     })
 }
 
@@ -1929,6 +1932,43 @@ mod tests {
         assert!(matches!(full[1], EvtxParsedItem::Record(_)));
         fs::remove_file(path).ok();
         fs::remove_dir(root).ok();
+    }
+    /// Chunk header per libyal libevtx "Windows XML Event Log (EVTX) format",
+    /// section "Chunk header": 40 header size, 44 last event record offset,
+    /// 48 free space offset. The last live record must not read as slack.
+    #[test]
+    fn evtx_record_parser_keeps_last_live_record_allocated() {
+        let mut blob = vec![0u8; 4096 + 65536];
+        let chunk_offset = 4096;
+        blob[chunk_offset..chunk_offset + 8].copy_from_slice(b"ElfChnk\0");
+        blob[chunk_offset + 40..chunk_offset + 44].copy_from_slice(&128u32.to_le_bytes());
+        blob[chunk_offset + 44..chunk_offset + 48].copy_from_slice(&576u32.to_le_bytes());
+        blob[chunk_offset + 48..chunk_offset + 52].copy_from_slice(&640u32.to_le_bytes());
+        for (relative, record_id) in [(512usize, 1u64), (576, 2), (1024, 9)] {
+            let record = chunk_offset + relative;
+            blob[record..record + 4].copy_from_slice(b"**\0\0");
+            blob[record + 4..record + 8].copy_from_slice(&64u32.to_le_bytes());
+            blob[record + 8..record + 16].copy_from_slice(&record_id.to_le_bytes());
+            blob[record + 60..record + 64].copy_from_slice(&64u32.to_le_bytes());
+        }
+
+        let chunks = parse_evtx_chunks(&blob);
+        let records = parse_evtx_record_headers(&blob);
+
+        assert_eq!(chunks[0].last_record_offset, 576);
+        assert_eq!(chunks[0].free_space_offset, 640);
+        let statuses: Vec<(u64, &str)> = records
+            .iter()
+            .map(|record| (record.record_id, record.allocation_status.as_str()))
+            .collect();
+        assert_eq!(
+            statuses,
+            vec![
+                (1, "allocated-or-live-record"),
+                (2, "allocated-or-live-record"),
+                (9, "slack-or-deleted-record-candidate"),
+            ]
+        );
     }
 
     #[test]

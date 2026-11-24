@@ -104,12 +104,29 @@ pub fn read_evtx_file_header(path: &Path) -> Result<EvtxFileHeader, String> {
     })
 }
 
+/// `(last_record_offset, free_space_offset)` from an ElfChnk header.
+///
+/// Layout (libyal libevtx, "Windows XML Event Log (EVTX) format", section
+/// "Chunk header"): 40 header size, 44 last event record offset, 48 free
+/// space offset, 52 event records CRC32. As in the Python decoder
+/// (`native_evtx_chunk_free_space_offset`), a zero free-space offset falls back
+/// to offset 44 when that points past the 512-byte chunk header.
+pub fn chunk_record_offsets(blob: &[u8]) -> (u32, u32) {
+    let last_record_offset = read_u32_le(blob, 44);
+    let mut free_space_offset = read_u32_le(blob, 48);
+    if free_space_offset == 0 && last_record_offset >= 512 {
+        free_space_offset = last_record_offset;
+    }
+    (last_record_offset, free_space_offset)
+}
+
 fn scan_chunk_header(blob: &[u8], absolute_offset: u64, index: u64) -> Option<EvtxScanChunk> {
     if blob.len() < EVTX_CHUNK_SIGNATURE.len()
         || &blob[0..EVTX_CHUNK_SIGNATURE.len()] != EVTX_CHUNK_SIGNATURE
     {
         return None;
     }
+    let (last_record_offset, free_space_offset) = chunk_record_offsets(blob);
     Some(EvtxScanChunk {
         offset: absolute_offset,
         index,
@@ -117,8 +134,8 @@ fn scan_chunk_header(blob: &[u8], absolute_offset: u64, index: u64) -> Option<Ev
         last_record_number: read_u64_le(blob, 16),
         first_record_id: read_u64_le(blob, 24),
         last_record_id: read_u64_le(blob, 32),
-        last_record_offset: read_u32_le(blob, 40),
-        free_space_offset: read_u32_le(blob, 44),
+        last_record_offset,
+        free_space_offset,
     })
 }
 
@@ -259,6 +276,42 @@ mod tests {
         assert!(result.records[0].trailing_size_valid);
         assert_eq!(result.records[0].allocation_status, "allocated");
         let _ = fs::remove_file(&dir);
+    }
+
+    /// Chunk header per libyal libevtx "Windows XML Event Log (EVTX) format",
+    /// section "Chunk header": 40 header size, 44 last event record offset,
+    /// 48 free space offset. The last live record must not read as slack.
+    #[test]
+    fn scan_keeps_last_live_record_allocated() {
+        let path = std::env::temp_dir().join("rapidcore_evtx_two_live.evtx");
+        let mut blob = vec![0u8; FILE_HEADER_SIZE as usize + CHUNK_SIZE];
+        blob[0..8].copy_from_slice(EVTX_FILE_SIGNATURE);
+        let chunk = FILE_HEADER_SIZE as usize;
+        blob[chunk..chunk + 8].copy_from_slice(EVTX_CHUNK_SIGNATURE);
+        blob[chunk + 40..chunk + 44].copy_from_slice(&128u32.to_le_bytes());
+        blob[chunk + 44..chunk + 48].copy_from_slice(&576u32.to_le_bytes());
+        blob[chunk + 48..chunk + 52].copy_from_slice(&640u32.to_le_bytes());
+        for (relative, record_id) in [(512usize, 1u64), (576, 2), (1024, 9)] {
+            let rec = chunk + relative;
+            blob[rec..rec + 4].copy_from_slice(EVTX_RECORD_MAGIC);
+            blob[rec + 4..rec + 8].copy_from_slice(&64u32.to_le_bytes());
+            blob[rec + 8..rec + 16].copy_from_slice(&record_id.to_le_bytes());
+            blob[rec + 60..rec + 64].copy_from_slice(&64u32.to_le_bytes());
+        }
+        fs::write(&path, &blob).unwrap();
+        let result = scan_evtx(&path, 1024).unwrap();
+        let _ = fs::remove_file(&path);
+        assert_eq!(result.chunks[0].last_record_offset, 576);
+        assert_eq!(result.chunks[0].free_space_offset, 640);
+        let statuses: Vec<(u64, &str)> = result
+            .records
+            .iter()
+            .map(|record| (record.record_id, record.allocation_status.as_str()))
+            .collect();
+        assert_eq!(
+            statuses,
+            vec![(1, "allocated"), (2, "allocated"), (9, "slack")]
+        );
     }
 
     #[test]
