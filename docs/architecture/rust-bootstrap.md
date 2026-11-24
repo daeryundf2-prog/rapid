@@ -71,3 +71,27 @@ python scripts/worker-case-db-smoke.py --output-dir ./worker-case-db-smoke
 ```
 
 The smoke script builds or locates `rapid-worker`, generates a tiny EVTX fixture, runs `rapidtriage worker-parse --kind evtx-records`, imports the JSONL with `case-db --import-worker-jsonl`, and verifies that `case-search` can find the `PowerShell` event artifact.
+
+## Opt-In Rust EVTX Decoder (`rapidcore_native`)
+
+The EVTX chunk BinXML decoder has a Rust port in `engines/rust/crates/rapidcore/src/evtx_binxml.rs`, exposed to Python as `rapidcore_native.EvtxChunkDecoder` (PyO3, `src/py.rs`). It is a line-for-line port of the Python `EvtxChunkDecoder` (`evtx-chunk-binxml-decoder-v2`): same value texts (Python float `repr`, 7-digit FILETIME, SID/GUID/SYSTEMTIME formatting), same EventData naming (`data_N`, `_2` de-duplication), same template/name cache and token-budget behaviour, same error types and messages. Chunk walking, slack/duplicate decisions and row building stay in Python, so the rows are identical by construction above the decoder. The mature `evtx` crate was not used: its rendering, naming and error behaviour differ from the Python decoder, and slack/garbage records would not produce the same rows.
+
+Records the port cannot reproduce byte-for-byte (non-ASCII ANSI strings that Python decodes as cp949, lone-surrogate character references, element trees deeper than 200 levels) are reported as unsupported; the bridge (`rapidtriage/artifacts/windows/evtx_engine.py`) then replays the chunk with the Python decoder, so caches and counts still match. The count of such chunks is on the eventlog-file row.
+
+Build and select it:
+
+```sh
+python scripts/build-native-accel.py            # stages rapidtriage/native/rapidcore_native.*
+RAPIDTRIAGE_EVTX_ENGINE=rust rapidtriage run ...  # or --eventlog-evtx-engine rust
+```
+
+The default stays `python`. With `rust` requested, the eventlog-file row carries `native_evtx_engine`, `native_evtx_engine_requested` and `native_evtx_engine_python_fallback_chunk_count`; when the module is missing or was built for another decoder version, Python is used and `native_evtx_engine_notice_ko` says why.
+
+Checks:
+
+```sh
+RAPIDTRIAGE_REQUIRE_NATIVE_EVTX=1 python -m unittest tests.test_evtx_engine_diff
+python scripts/evtx-engine-bench.py --records 500000
+```
+
+`tests/test_evtx_engine_diff.py` compares every row field by field (full and triage detail, structure rows, provider-level rows) over a synthetic corpus (`tests/evtx_engine_corpus.py`: multi-chunk logs, slack and inactive chunks, truncated files, every BinXML value type and token, duplicate/invalid Data names, Korean and astral text, decoder errors) and seeded byte-level fuzzing. The benchmark reports decoder-only and full-row records/s per engine (process CPU time) and fails on any row difference. CI job "Rust EVTX engine" runs both on Linux, Windows and macOS.

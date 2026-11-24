@@ -190,3 +190,54 @@ jobs:
 
       - name: Run worker Case DB smoke
         run: python scripts/worker-case-db-smoke.py --worker engines/rust/target/debug/rapid-worker
+
+  rust-evtx-engine:
+    # Opt-in Rust EVTX decoder (rapidcore_native, RAPIDTRIAGE_EVTX_ENGINE=rust):
+    # build the PyO3 extension per OS and require zero row differences
+    # against the Python decoder.
+    name: Rust EVTX engine (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        run: python -m pip install -e .
+
+      - name: Clippy (workspace and python feature)
+        working-directory: engines/rust
+        run: |
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo clippy -p rapidcore --features python --all-targets --locked -- -D warnings
+
+      - name: Test rapidcore
+        working-directory: engines/rust
+        run: cargo test -p rapidcore --locked
+
+      - name: Build rapidcore_native
+        run: python scripts/build-native-accel.py --json
+
+      - name: Python/Rust EVTX row differential
+        env:
+          RAPIDTRIAGE_REQUIRE_NATIVE_EVTX: "1"
+        run: python -m unittest -v tests.test_evtx_engine_diff tests.test_rapidtriage_native_accel
+
+      - name: EVTX engine benchmark smoke
+        run: python scripts/evtx-engine-bench.py --records 20000

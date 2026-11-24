@@ -668,10 +668,7 @@ fn parse_evtx_record_headers(blob: &[u8]) -> Vec<EvtxRecordHeader> {
 }
 
 #[cfg(test)]
-fn chunk_for_record<'a>(
-    record_offset: usize,
-    chunks: &'a [EvtxChunkHeader],
-) -> Option<&'a EvtxChunkHeader> {
+fn chunk_for_record(record_offset: usize, chunks: &[EvtxChunkHeader]) -> Option<&EvtxChunkHeader> {
     chunks.iter().find(|chunk| {
         let start = chunk.offset as usize;
         let end = start.saturating_add(65536);

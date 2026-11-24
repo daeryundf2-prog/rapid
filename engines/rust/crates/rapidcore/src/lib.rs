@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 pub mod evtx;
+pub mod evtx_binxml;
 #[cfg(feature = "python")]
 pub mod py;
 
@@ -130,6 +131,7 @@ impl ArtifactRecordV1 {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn evtx_inventory(
         case_id: String,
         source_id: String,
@@ -206,6 +208,7 @@ impl ArtifactRecordV1 {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn evtx_chunk(
         case_id: String,
         source_id: String,
@@ -298,6 +301,7 @@ impl ArtifactRecordV1 {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn evtx_record_header(
         case_id: String,
         source_id: String,

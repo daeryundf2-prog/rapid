@@ -336,7 +336,9 @@ python -m rapidtriage commercial-readiness --validation-package docs/validation/
   fixture corpus와 trusted-tool row diff가 필요합니다.
 - UI에 보이는 “사용 가능”은 “상용급 검증 완료”와 다릅니다.
 - Python hot path는 대용량 증거에서 병목이 될 수 있습니다. Rust/Go/C++
-  sidecar와 columnar storage 전환 대상이 남아 있습니다.
+  sidecar와 columnar storage 전환 대상이 남아 있습니다. EVTX BinXML 디코더는
+  Python과 같은 행을 내는 opt-in Rust 경로(`RAPIDTRIAGE_EVTX_ENGINE=rust`,
+  `docs/architecture/rust-bootstrap.md`)가 있으며 기본값은 Python입니다.
 - browser secret, cloud token, messenger key, encrypted backup, memory material은
   lawful authority, opt-in, redaction, immutable audit log가 필요합니다.
 - 외부 서명, notarization, 독립 검증, 실장비 stress 결과는 저장소 내부에서

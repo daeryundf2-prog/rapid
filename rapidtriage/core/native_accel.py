@@ -53,6 +53,11 @@ def _load_extension():
 _EXTENSION = _load_extension()
 
 
+def extension():
+    """The loaded ``rapidcore_native`` module, or None when it is not built."""
+    return _EXTENSION
+
+
 def engine() -> str:
     """Return the active acceleration engine name."""
     if _EXTENSION is not None:

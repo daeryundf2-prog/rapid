@@ -27,6 +27,12 @@ from ...core.models import ArtifactRecord
 from ...core.safe_xml import UnsafeXmlError, safe_xml_fromstring, safe_xml_parse
 from .._walk import iter_evidence_paths
 from .antiforensics import redact_recovery_passwords_in
+from .evtx_engine import (
+    NativeEvtxChunkDecoder,
+    requested_evtx_engine,
+    resolve_evtx_engine,
+    validate_evtx_engine,
+)
 from .legacy_evt import EvtFormatError, iter_evt_records
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
@@ -1773,6 +1779,7 @@ class WindowsEventLogProvider:
         *,
         structure_rows: bool = True,
         record_detail: str = EVENTLOG_RECORD_DETAIL_FULL,
+        evtx_engine: str | None = None,
     ):
         if record_detail not in EVENTLOG_RECORD_DETAILS:
             supported = ", ".join(EVENTLOG_RECORD_DETAILS)
@@ -1780,23 +1787,32 @@ class WindowsEventLogProvider:
         self.message_catalog_path = message_catalog_path
         self.structure_rows = bool(structure_rows)
         self.record_detail = record_detail
+        # None: RAPIDTRIAGE_EVTX_ENGINE decides at collect time (default python).
+        self.evtx_engine = validate_evtx_engine(evtx_engine) if evtx_engine is not None else None
         self._message_catalog: dict[str, dict[str, dict[str, object]]] | None = None
 
     @property
     def options_key(self) -> str:
         """Collect-cache discriminator for non-default output shapes."""
-        if self.structure_rows and self.record_detail == EVENTLOG_RECORD_DETAIL_FULL:
-            return ""
-        return f"structure_rows={int(self.structure_rows)};record_detail={self.record_detail}"
+        parts = []
+        if not self.structure_rows or self.record_detail != EVENTLOG_RECORD_DETAIL_FULL:
+            parts.append(f"structure_rows={int(self.structure_rows)};record_detail={self.record_detail}")
+        engine = requested_evtx_engine(self.evtx_engine)
+        if engine != "python":
+            # Same rows, but the eventlog-file row records the decoder engine.
+            parts.append(f"evtx_engine={engine}")
+        return ";".join(parts)
 
     def with_options(self, **options: object) -> WindowsEventLogProvider:
         catalog = options.get("message_catalog_path")
         structure_rows = options.get("structure_rows")
         record_detail = options.get("record_detail")
+        evtx_engine = options.get("evtx_engine")
         return WindowsEventLogProvider(
             Path(str(catalog)).expanduser().resolve() if catalog else self.message_catalog_path,
             structure_rows=self.structure_rows if structure_rows is None else bool(structure_rows),
             record_detail=self.record_detail if record_detail is None else str(record_detail),
+            evtx_engine=self.evtx_engine if evtx_engine is None else str(evtx_engine),
         )
 
     def supported(self) -> bool:
@@ -1830,6 +1846,7 @@ class WindowsEventLogProvider:
         summary = EventlogSummaryAccumulator()
         seen: set[Path] = set()
         message_catalog = self.message_catalog_for_root(root)
+        engine = resolve_evtx_engine(self.evtx_engine)
         with tempfile.TemporaryFile("w+", encoding="utf-8") as detection_spool:
 
             def emit(record: ArtifactRecord) -> ArtifactRecord:
@@ -1884,6 +1901,7 @@ class WindowsEventLogProvider:
                         structure_rows=self.structure_rows,
                         record_detail=self.record_detail,
                         stats=native_stats,
+                        native_decoder=engine.native_module,
                     ):
                         yield emit(record)
                     yield emit(
@@ -1894,6 +1912,7 @@ class WindowsEventLogProvider:
                             native_chunk_count=native_stats.get("chunk_count", 0),
                             structure_rows=self.structure_rows,
                             native_stats=native_stats,
+                            engine_fields=engine.file_row_fields(native_stats),
                         )
                     )
                 elif suffix == ".evt" and read_prefix(path, 8) == b"\x30\x00\x00\x00LfLe":
@@ -2188,6 +2207,7 @@ def collect_native_evtx_events(
     structure_rows: bool = True,
     record_detail: str = EVENTLOG_RECORD_DETAIL_FULL,
     stats: dict[str, int] | None = None,
+    native_decoder: object = None,
 ) -> Iterable[ArtifactRecord]:
     """Yield native EVTX rows, walking the file chunk by chunk (no record cap).
 
@@ -2204,6 +2224,10 @@ def collect_native_evtx_events(
     ``eventlog-record-candidate`` structural rows (still counted in
     ``stats``). ``record_detail="triage"`` skips the per-event report/
     citation/readiness blocks that the triage projection drops anyway.
+
+    ``native_decoder`` (the ``rapidcore_native`` module, see
+    :mod:`.evtx_engine`) decodes chunks with the Rust port of
+    ``EvtxChunkDecoder``; the rows are identical to the Python decoder's.
     """
     counters = stats if stats is not None else {}
     full_detail = record_detail != EVENTLOG_RECORD_DETAIL_TRIAGE
@@ -2287,7 +2311,11 @@ def collect_native_evtx_events(
                     )
                     chunk_row.details["evtx_chunk_active"] = active
                     yield chunk_row
-                decoder = EvtxChunkDecoder(chunk)
+                decoder = (
+                    NativeEvtxChunkDecoder(native_decoder, chunk, render_xml=full_detail)
+                    if native_decoder is not None
+                    else EvtxChunkDecoder(chunk)
+                )
                 context.chunk_cache = None
                 for slot in iter_evtx_chunk_record_slots(chunk, active=active):
                     absolute = chunk_offset + slot.relative_offset
@@ -2346,6 +2374,8 @@ def collect_native_evtx_events(
                     source_index += 1
                     yield record
                 counters["template_parse_count"] = counters.get("template_parse_count", 0) + decoder.template_parse_count
+                if isinstance(decoder, NativeEvtxChunkDecoder) and decoder.used_python:
+                    bump("native_decoder_python_fallback_chunk_count")
             missing_chunks = [index for index in range(declared_chunks) if index not in walked_active_chunks]
             counters["missing_declared_chunk_count"] = len(missing_chunks)
             counters["first_missing_declared_chunk_index"] = missing_chunks[0] if missing_chunks else -1
@@ -2510,6 +2540,9 @@ def native_evtx_decoded_parts(decoded: Mapping[str, object], *, render_xml: bool
     root = decoded.get("root")
     if render_xml and isinstance(root, EvtxElement):
         rendered = render_evtx_element_xml(root)
+    elif render_xml and "rendered_xml" in decoded:
+        # Native decoder: the same render_evtx_element_xml text, built in Rust.
+        rendered = str(decoded["rendered_xml"])
     else:
         # Triage rows drop the XML preview; a compact Name=Value preview is enough.
         rendered = "; ".join(f"{key}={value}" for key, value in event_data.items() if value)[:2000]
@@ -8451,9 +8484,11 @@ def build_eventlog_file_record(
     native_chunk_count: int | None = None,
     structure_rows: bool = True,
     native_stats: Mapping[str, int] | None = None,
+    engine_fields: Mapping[str, object] | None = None,
 ) -> ArtifactRecord:
     stat_result = path.stat()
-    extra: dict[str, object] = {}
+    # Decoder engine provenance (``EvtxEngineSelection.file_row_fields``).
+    extra: dict[str, object] = dict(engine_fields or {})
     if native_chunk_count is not None:
         extra["native_chunk_count"] = native_chunk_count
     stats = native_stats or {}
