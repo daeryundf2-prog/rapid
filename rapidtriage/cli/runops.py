@@ -27,7 +27,14 @@ from ..core.plugins import (
     validate_plugin_manifest,
 )
 from ..core.rearchitecture import build_rearchitecture_status
-from ..core.run import RunModeError, run_triage_mode
+from ..core.rules import RuleConfigError, load_rule_set
+from ..core.run import (
+    KNOWN_GOOD_FEED_ARCHIVE_DIR_NAME,
+    RunModeError,
+    known_good_feed_sha256,
+    run_tool_build_identity,
+    run_triage_mode,
+)
 from ..core.run.plan import (
     ControlFileError,
     PlanTargetError,
@@ -159,7 +166,94 @@ def _run_interruptibly(handlers_installed: bool, function, *args, **kwargs):
     return outcome.get("value")
 
 
+def _replay_input_file(candidates: list[Path], expected_sha256: str) -> Path | None:
+    """The first candidate whose bytes still hash to the audited SHA-256."""
+    for candidate in candidates:
+        if candidate.is_file() and known_good_feed_sha256(candidate) == expected_sha256:
+            return candidate
+    return None
+
+
+def apply_replay_audit(args: argparse.Namespace, parser: argparse.ArgumentParser):
+    """Load the run settings recorded in a run audit into ``args``.
+
+    Every recorded option replaces the command-line value (only ROOT and
+    --output-dir come from the command line), and every recorded input
+    revision is located and checked before the run starts: a known-good feed
+    is read from the archived copy beside the audit, else from its original
+    path, and only when the bytes still hash to the audited SHA-256; a rules
+    file likewise. A revised feed or rules file stops the replay here.
+    Returns the rule set to use (``None`` without rules)."""
+    audit_path = Path(args.replay_audit).expanduser().resolve()
+    try:
+        audit = json.loads(audit_path.read_text(encoding="utf-8"))
+        options = audit["provenance"]["options"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        parser.error(f"--replay-audit: 실행 감사 기록을 읽을 수 없습니다 ({exc})")
+    if audit.get("command") != "run" or not isinstance(options, Mapping):
+        parser.error("--replay-audit: rapidtriage run 감사 기록(rapidtriage-run-audit.json)이 아닙니다")
+    args.mode = options.get("mode")
+    args.input_kind = options.get("input_kind")
+    for name in ("dry_run", "read_only", "extract", "overwrite", "hide_known_good", "columnar_store", "carve"):
+        setattr(args, name, bool(options.get(name)))
+    args.case_db = bool(options.get("case_db", True))
+    for name in ("max_extract_size_bytes", "max_file_count", "known_good_max_hash_bytes"):
+        setattr(args, name, int(options.get(name) or 0))
+    args.memory_cap_bytes = int(options.get("memory_cap_bytes_requested", options.get("memory_cap_bytes")) or 0)
+    args.e01_partition_start_sector = options.get("e01_partition_start_sector")
+    args.skip_group = list(options.get("skip_groups") or [])
+    args.skip_task = list(options.get("skip_tasks") or [])
+    args.resume = False
+    eventlog_options = (options.get("collector_options") or {}).get("eventlog") or {}
+    args.eventlog_structure_rows = bool(eventlog_options.get("structure_rows"))
+    args.eventlog_record_detail = eventlog_options.get("record_detail")
+    if options.get("known_good_hash_feeds") and not options.get("known_good_hash_feed_files"):
+        parser.error("--replay-audit: 감사 기록에 알려진 정상 해시 목록의 판본(SHA-256)이 없어 같은 목록을 특정할 수 없습니다.")
+    archive_dir = audit_path.parent / KNOWN_GOOD_FEED_ARCHIVE_DIR_NAME
+    feeds: list[str] = []
+    for record in options.get("known_good_hash_feed_files") or []:
+        expected = str(record.get("sha256") or "")
+        original = Path(str(record.get("path") or ""))
+        archived = Path(str(record.get("archived_copy") or ""))
+        found = _replay_input_file(
+            [archive_dir / f"{expected}{original.suffix}", archived, original], expected
+        ) if expected else None
+        if found is None:
+            parser.error(
+                f"--replay-audit: 감사 기록의 알려진 정상 해시 목록 {original} (SHA-256 {expected or '기록 없음'})과 "
+                "같은 판본을 찾을 수 없습니다. 목록이 개정되었거나 보관 사본이 없습니다."
+            )
+        feeds.append(str(found))
+    args.known_good_hash_feed = feeds
+    rule_set = None
+    if options.get("rules"):
+        rules_record = next(
+            (item for item in audit["provenance"].get("input_files") or [] if item.get("label") == "rules"), {}
+        )
+        rules_path = _replay_input_file([Path(str(options["rules"]))], str(rules_record.get("sha256") or ""))
+        if rules_path is None:
+            parser.error(f"--replay-audit: 감사 기록의 규칙 파일 {options['rules']}과 같은 판본을 찾을 수 없습니다.")
+        try:
+            rule_set = load_rule_set(rules_path)
+        except (OSError, ValueError, RuleConfigError) as exc:
+            parser.error(f"--replay-audit: invalid rules file: {exc}")
+    recorded_build = options.get("tool_build") if isinstance(options.get("tool_build"), Mapping) else {}
+    current_build = run_tool_build_identity()
+    if recorded_build and recorded_build.get("package_source_sha256") != current_build["package_source_sha256"]:
+        print(
+            "경고: 감사 기록과 다른 rapidtriage 빌드로 재생합니다 "
+            f"(기록 {recorded_build.get('version')} {str(recorded_build.get('package_source_sha256'))[:12]}, "
+            f"현재 {current_build['version']} {str(current_build['package_source_sha256'])[:12]}).",
+            file=sys.stderr,
+        )
+    return rule_set
+
+
 def handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
+        if getattr(args, "replay_audit", None):
+            rule_set = apply_replay_audit(args, parser)
+        elif not args.mode:
+            parser.error("the following arguments are required: --mode (or --replay-audit)")
         root = Path(args.root).expanduser().resolve()
         output_dir = (
             Path(args.output_dir).expanduser().resolve()

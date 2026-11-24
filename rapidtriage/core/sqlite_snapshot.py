@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 import sqlite3
 import stat
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -148,3 +149,39 @@ def open_sqlite_snapshot(
                 connection.close()
     except OSError as exc:
         raise SqliteSnapshotError(f"SQLite snapshot filesystem failure: {exc}") from exc
+
+
+def sqlite_snapshot_reference(provenance: object) -> dict[str, object]:
+    """Compact, hashable identity of the SQLite file set a row was read from.
+
+    The database hash alone does not cover rows that exist only in the WAL, so
+    the citation names every file that was part of the read (database, WAL,
+    hot journal) by file name (siblings of the cited database), SHA-256 and
+    size under one ``snapshot_id``.
+    """
+    if not isinstance(provenance, Mapping):
+        return {}
+    files = [
+        {
+            "name": Path(str(item.get("path") or "")).name,
+            "sha256": str(item.get("sha256") or ""),
+            "size": item.get("st_size"),
+        }
+        for item in provenance.get("files") or []
+        if isinstance(item, Mapping) and item.get("exists") and item.get("sha256")
+    ]
+    if not files:
+        return {}
+    identity = json.dumps(
+        {"files": [(item["name"], item["sha256"], item["size"]) for item in files]},
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+        separators=(",", ":"),
+    )
+    return {
+        "snapshot_id": hashlib.sha256(identity.encode("utf-8")).hexdigest(),
+        "files": files,
+        "wal_included": bool(provenance.get("wal_included")),
+        "hash_scope": str(provenance.get("hash_scope") or ""),
+    }

@@ -8,7 +8,7 @@ import hashlib
 import json
 import math
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 
 from ...core.forensic_accuracy import build_accuracy_gate
@@ -2202,6 +2202,27 @@ def amcache_free_cell_recovery_candidate(
     }
 
 
+def powershell_history_entries(lines: Sequence[str]) -> Iterator[tuple[int, int, str]]:
+    """Logical PSReadLine history entries with their 1-based physical line range.
+
+    PSReadLine saves a multi-line command by ending every line but the last with
+    a backtick; reading the file back drops that backtick and joins the lines
+    with a newline (PSReadLine History.cs, ReadHistoryFile)."""
+    parts: list[str] = []
+    start = 0
+    for number, line in enumerate(lines, start=1):
+        if not parts:
+            start = number
+        if line.endswith("`"):
+            parts.append(line[:-1])
+            continue
+        parts.append(line)
+        yield start, number, "\n".join(parts)
+        parts = []
+    if parts:
+        yield start, len(lines), "\n".join(parts)
+
+
 def collect_powershell_history(root: Path) -> Iterable[ArtifactRecord]:
     for user_root in iter_windows_user_homes(root):
         path = user_root.joinpath(*POWERSHELL_HISTORY)
@@ -2212,7 +2233,7 @@ def collect_powershell_history(root: Path) -> Iterable[ArtifactRecord]:
         except OSError:
             continue
         modified_at = path_modified_at(path)
-        for index, command in enumerate(lines):
+        for index, (first_line, last_line, command) in enumerate(powershell_history_entries(lines)):
             # A BitLocker recovery password typed on the command line (manage-bde -unlock
             # -RecoveryPassword ...) is masked before the row is built.
             command = redact_recovery_passwords(command.strip())
@@ -2233,6 +2254,8 @@ def collect_powershell_history(root: Path) -> Iterable[ArtifactRecord]:
                     "source_format": "text",
                     "source_hashes": file_hashes(path),
                     "source_index": index,
+                    "source_line_start": first_line,
+                    "source_line_end": last_line,
                     "user": user_root.name,
                     "command_line": command,
                     "timestamp": modified_at,

@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, unquote_plus, urlparse
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
+from ...core.sqlite_snapshot import sqlite_snapshot_reference
 from .._walk import iter_evidence_paths
 from .browser_analytics import (
     ANALYTICS_COOKIE_NAMES,
@@ -2958,7 +2959,7 @@ def build_browser_history_download_citation_manifest(
     ]
     source_snapshots: dict[str, dict[str, object]] = {}
     for row in [*history_rows[:MAX_BROWSER_TIMELINE_ROWS], *download_rows[:MAX_BROWSER_TIMELINE_ROWS]]:
-        snapshot = browser_row_snapshot_reference(row.get("sqlite_snapshot"))
+        snapshot = sqlite_snapshot_reference(row.get("sqlite_snapshot"))
         if snapshot:
             source_snapshots.setdefault(str(snapshot["snapshot_id"]), snapshot)
     manifest: dict[str, object] = {
@@ -3399,7 +3400,7 @@ def browser_row_citation(
         "source_row_id": source_row_id,
         "source_path": str(row_source_path.resolve()),
     }
-    snapshot = browser_row_snapshot_reference(row.get("sqlite_snapshot"))
+    snapshot = sqlite_snapshot_reference(row.get("sqlite_snapshot"))
     citation_payload = {
         "row_type": row_type,
         "browser": browser,
@@ -3425,37 +3426,6 @@ def browser_row_citation(
             f"[{source_table}:{source_row_id if source_row_id is not None else source_index}]"
         ),
         "validation_status": "source-row-citation-candidate",
-    }
-
-
-def browser_row_snapshot_reference(provenance: object) -> dict[str, object]:
-    """Compact, hashable identity of the SQLite file set a row was read from.
-
-    The database hash alone does not cover rows that exist only in the WAL, so
-    the citation names every file that was part of the read (database, WAL,
-    hot journal) by file name (siblings of the cited database), SHA-256 and
-    size under one ``snapshot_id``.
-    """
-    if not isinstance(provenance, Mapping):
-        return {}
-    files = [
-        {
-            "name": Path(str(item.get("path") or "")).name,
-            "sha256": str(item.get("sha256") or ""),
-            "size": item.get("st_size"),
-        }
-        for item in provenance.get("files") or []
-        if isinstance(item, Mapping) and item.get("exists") and item.get("sha256")
-    ]
-    if not files:
-        return {}
-    return {
-        "snapshot_id": stable_browser_sha256(
-            {"files": [(item["name"], item["sha256"], item["size"]) for item in files]}
-        ),
-        "files": files,
-        "wal_included": bool(provenance.get("wal_included")),
-        "hash_scope": str(provenance.get("hash_scope") or ""),
     }
 
 
@@ -4484,14 +4454,19 @@ def build_browser_timeline_trusted_diff(
     *,
     trusted_tool: str,
 ) -> dict[str, object]:
-    return build_browser_diff_payload(
-        index_browser_timeline_rows(rapid_rows),
-        index_browser_timeline_rows(trusted_rows),
+    rapid_index = index_browser_timeline_rows(rapid_rows)
+    trusted_index = index_browser_timeline_rows(trusted_rows)
+    acquisition_identity = reconcile_browser_acquisition_identity(rapid_index, trusted_index)
+    payload = build_browser_diff_payload(
+        rapid_index,
+        trusted_index,
         trusted_tool=trusted_tool,
         mode="browser-timeline-trusted-diff-v1",
         blocker="browser-timeline-trusted-diff-required",
         key_label="timeline_key",
     )
+    payload["acquisition_identity"] = acquisition_identity
+    return payload
 
 
 def build_ai_transcript_trusted_diff(
@@ -4763,9 +4738,12 @@ def index_browser_timeline_rows(rows: Sequence[Mapping[str, object]]) -> dict[st
     The user is part of the key so one user's rows cannot stand in for another
     user's identical URL/time, and repeated keys are numbered (``#2``, ``#3``)
     so the comparison counts multiplicity instead of collapsing duplicates.
+    Each row also carries its acquisition identity -- the source database
+    SHA-256 and path and the SQLite row id -- and repeated keys are numbered in
+    that order, so two copies of one acquisition's row cannot stand in for the
+    same visit read from two different acquisitions.
     """
-    indexed: dict[str, dict[str, str]] = {}
-    occurrences: dict[str, int] = {}
+    grouped: dict[str, list[dict[str, str]]] = {}
     for row in rows:
         for payload in browser_timeline_diff_payloads(row):
             user = normalized_diff_value(first_alias(payload, "user", "user_name", "username", "profile_user"))
@@ -4777,30 +4755,64 @@ def index_browser_timeline_rows(rows: Sequence[Mapping[str, object]]) -> dict[st
             base_key = "|".join(item for item in (user, browser, profile, timeline_type, timestamp, url) if item)
             if not base_key:
                 continue
-            occurrences[base_key] = occurrences.get(base_key, 0) + 1
-            count = occurrences[base_key]
-            key = base_key if count == 1 else f"{base_key}#{count}"
-            indexed[key] = {
-                "user": user,
-                "browser": browser,
-                "profile": profile,
-                "timeline_type": timeline_type,
-                "url": url,
-                "timestamp": timestamp,
-                "title": normalized_diff_value(first_alias(payload, "title", "page_title")),
-                "domain": normalized_diff_value(first_alias(payload, "domain", "host", "hostname")),
-                "transition": normalized_diff_value(first_alias(payload, "transition", "transition_type")),
-                "visit_count": normalized_browser_int_text(first_alias(payload, "visit_count", "visitcount")),
-                "typed_count": normalized_browser_int_text(first_alias(payload, "typed_count", "typedcount")),
-                "target_path": normalized_diff_value(first_alias(payload, "target_path", "download_path", "filename")),
-                "total_bytes": normalized_browser_int_text(first_alias(payload, "total_bytes", "bytes", "size")),
-                "state": normalized_browser_int_text(first_alias(payload, "state", "download_state")),
-                "ended_at": normalized_diff_value(first_alias(payload, "ended_at", "end_time", "completed_at")),
-                "ai_service": normalized_diff_value(first_alias(payload, "ai_service", "service")),
-                "source_table": normalized_diff_value(first_alias(payload, "source_table", "table")),
-                "source_index": normalized_browser_int_text(first_alias(payload, "source_index", "row_index", "index")),
-            }
+            grouped.setdefault(base_key, []).append(
+                {
+                    "user": user,
+                    "browser": browser,
+                    "profile": profile,
+                    "timeline_type": timeline_type,
+                    "url": url,
+                    "timestamp": timestamp,
+                    "title": normalized_diff_value(first_alias(payload, "title", "page_title")),
+                    "domain": normalized_diff_value(first_alias(payload, "domain", "host", "hostname")),
+                    "transition": normalized_diff_value(first_alias(payload, "transition", "transition_type")),
+                    "visit_count": normalized_browser_int_text(first_alias(payload, "visit_count", "visitcount")),
+                    "typed_count": normalized_browser_int_text(first_alias(payload, "typed_count", "typedcount")),
+                    "target_path": normalized_diff_value(first_alias(payload, "target_path", "download_path", "filename")),
+                    "total_bytes": normalized_browser_int_text(first_alias(payload, "total_bytes", "bytes", "size")),
+                    "state": normalized_browser_int_text(first_alias(payload, "state", "download_state")),
+                    "ended_at": normalized_diff_value(first_alias(payload, "ended_at", "end_time", "completed_at")),
+                    "ai_service": normalized_diff_value(first_alias(payload, "ai_service", "service")),
+                    "source_table": normalized_diff_value(first_alias(payload, "source_table", "table")),
+                    "source_index": normalized_browser_int_text(first_alias(payload, "source_index", "row_index", "index")),
+                    "source_row_id": normalized_browser_int_text(first_alias(payload, "source_row_id", "row_id", "rowid")),
+                    "source_sha256": normalized_diff_value(first_alias(payload, "source_sha256", "sha256")),
+                    "source_path": normalized_diff_value(first_alias(payload, "source_path", "source_file")),
+                }
+            )
+    indexed: dict[str, dict[str, str]] = {}
+    for base_key, entries in grouped.items():
+        entries.sort(key=lambda item: (len(item["source_row_id"]), item["source_row_id"], item["source_sha256"], item["source_path"]))
+        for count, entry in enumerate(entries, start=1):
+            indexed[base_key if count == 1 else f"{base_key}#{count}"] = entry
     return indexed
+
+
+def reconcile_browser_acquisition_identity(
+    rapid_index: Mapping[str, dict[str, str]],
+    trusted_index: Mapping[str, dict[str, str]],
+) -> dict[str, object]:
+    """Compare each matched row's acquisition by SHA-256 when both sides name
+    one (a relocated copy of the same bytes still matches), else by source path.
+    Rows where either side names neither are counted as identity-unresolved."""
+    by_sha256 = by_path = unresolved = 0
+    for key in set(rapid_index) & set(trusted_index):
+        rapid, trusted = rapid_index[key], trusted_index[key]
+        if rapid["source_sha256"] and trusted["source_sha256"]:
+            rapid["source_path"] = trusted["source_path"] = ""
+            by_sha256 += 1
+            continue
+        rapid["source_sha256"] = trusted["source_sha256"] = ""
+        if rapid["source_path"] and trusted["source_path"]:
+            by_path += 1
+        else:
+            unresolved += 1
+    return {
+        "compared_by_sha256": by_sha256,
+        "compared_by_source_path": by_path,
+        "unresolved_count": unresolved,
+        "status": "acquisition-identity-unresolved" if unresolved else "acquisition-identity-compared",
+    }
 
 
 def browser_timeline_diff_payloads(row: Mapping[str, object]) -> list[Mapping[str, object]]:
@@ -6372,6 +6384,7 @@ def build_unified_browser_timeline(
                 "ai_service": ai_row.get("ai_service") or detect_ai_service(url, str(row.get("title") or "")),
                 "query_hint": row.get("query_hint") or extract_query_hint(url),
                 "source_path": str(source_path.resolve()),
+                "source_sha256": str(source_hashes.get("sha256") or ""),
                 "source_table": str(row.get("source_table") or "history"),
                 "source_index": index,
                 "source_row_id": row.get("source_row_id"),
@@ -6944,8 +6957,11 @@ def extract_chromium_downloads(connection: sqlite3.Connection) -> list[dict[str,
 def extract_firefox_history(
     places_db: Path, *, errors: list[dict[str, object]] | None = None
 ) -> list[dict[str, object]]:
+    # The summary cites the same file set (places.sqlite + WAL) the visit rows
+    # name, so a WAL-only visit resolves to the WAL bytes it came from.
+    provenance: dict[str, object] = {}
     try:
-        with open_sqlite_snapshot(places_db) as connection:
+        with open_sqlite_snapshot(places_db, provenance=provenance) as connection:
             if not sqlite_table_exists(connection, "moz_places"):
                 return []
             history_rows = []
@@ -6977,6 +6993,7 @@ def extract_firefox_history(
                         "transition": "",
                         "visit_duration_micros": 0,
                         "query_hint": extract_query_hint(row["url"] or ""),
+                        "sqlite_snapshot": provenance,
                     }
                 )
             return history_rows
@@ -7472,7 +7489,7 @@ def browser_sqlite_rows(
             records = reader(connection, resolved)
         # Rows that exist only in the WAL are not covered by the database hash;
         # every row names the file set (database + WAL) it was read from.
-        snapshot = browser_row_snapshot_reference(provenance)
+        snapshot = sqlite_snapshot_reference(provenance)
         for record in records:
             if isinstance(record.details, dict) and snapshot:
                 record.details.setdefault("source_snapshot_id", snapshot["snapshot_id"])

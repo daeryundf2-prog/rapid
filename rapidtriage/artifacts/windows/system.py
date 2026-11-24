@@ -15,6 +15,7 @@ from ...core.audit import compute_sha256
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from ...core.safe_xml import UnsafeXmlError, safe_xml_parse
+from ...core.sqlite_snapshot import sqlite_snapshot_reference
 from .._walk import iter_evidence_paths
 from .antiforensics import collect_bitlocker_recovery_key_files
 from .common import (
@@ -1810,10 +1811,15 @@ def activity_style_row_details(
     timeline_type = str(sample.get("timeline_type") or "generic-system-sqlite")
     decoded_text_hint = sample.get("decoded_text_hint") if isinstance(sample.get("decoded_text_hint"), Mapping) else {}
     source_locator = dict(sample.get("source_locator") or {}) if isinstance(sample.get("source_locator"), Mapping) else {}
+    schema_inventory = parent.details.get("sqlite_schema_inventory")
+    snapshot = schema_inventory.get("source_snapshot") if isinstance(schema_inventory, Mapping) else None
+    snapshot = snapshot if isinstance(snapshot, Mapping) else {}
     source_locator.update(
         {
             "source_path": str(source_path.resolve()),
             "source_sha256": source_hashes.get("sha256", ""),
+            "source_snapshot_id": snapshot.get("snapshot_id", ""),
+            "source_snapshot_files": list(snapshot.get("files") or []),
             "parent_artifact_type": parent.artifact_type,
         }
     )
@@ -1854,6 +1860,8 @@ def activity_style_row_details(
         "parent_artifact_type": parent.artifact_type,
         "table": str(table.get("name") or sample.get("table") or ""),
         "rowid": sample.get("rowid"),
+        "source_snapshot_id": snapshot.get("snapshot_id", ""),
+        "source_snapshot_files": list(snapshot.get("files") or []),
         "row_hash": sample.get("row_hash", ""),
         "timeline_type": timeline_type,
         "normalized_time": sample.get("normalized_time"),
@@ -2336,8 +2344,9 @@ def sqlite_schema_inventory(path: Path, *, max_tables: int = 40, max_columns: in
     if read_prefix(path, 16) != b"SQLite format 3\x00":
         inventory["open_status"] = "not-sqlite-header"
         return inventory
+    provenance: dict[str, object] = {}
     try:
-        with open_sqlite_snapshot(path) as connection:
+        with open_sqlite_snapshot(path, provenance=provenance) as connection:
             table_names = [
                 str(row[0])
                 for row in connection.execute(
@@ -2373,6 +2382,9 @@ def sqlite_schema_inventory(path: Path, *, max_tables: int = 40, max_columns: in
                     "total_row_count": total_rows,
                     "tables": tables,
                     "semantic_summary": sqlite_semantic_summary(tables),
+                    # Rows present only in the WAL are not covered by the database
+                    # hash; the inventory names the file set it was read from.
+                    "source_snapshot": sqlite_snapshot_reference(provenance),
                 }
             )
     except (sqlite3.Error, OSError) as exc:
@@ -3877,13 +3889,18 @@ def collect_task_scheduler(root: Path) -> Iterable[ArtifactRecord]:
         except (ET.ParseError, UnsafeXmlError, OSError):
             continue
         stat_result = path.stat()
-        command = first_text(xml_root, "Command")
-        arguments = first_text(xml_root, "Arguments")
-        working_directory = first_text(xml_root, "WorkingDirectory")
+        action_details = task_action_details(xml_root)
+        # The summary fields come from one Exec node (command, arguments and
+        # working directory together), never from the first such element in
+        # the whole document, which would splice two actions into a command
+        # line the task does not contain.
+        primary_action = next((action for action in action_details if action["command"]), {})
+        command = str(primary_action.get("command") or "")
+        arguments = str(primary_action.get("arguments") or "")
+        working_directory = str(primary_action.get("working_directory") or "")
         uri = first_text(xml_root, "URI") or "\\" + str(path.relative_to(tasks_root)).replace("/", "\\")
         triggers = [local_name(child.tag) for child in find_children(xml_root, "Triggers")]
         trigger_details = task_trigger_details(xml_root)
-        action_details = task_action_details(xml_root)
         principal_details = task_principal_details(xml_root)
         temporal_profile = task_temporal_profile(xml_root, stat_result.st_mtime, trigger_details)
         risk_flags = task_scheduler_risk_flags(command, arguments, working_directory, uri)
@@ -4191,6 +4208,9 @@ def defender_policy_risk_flags(profile: Mapping[str, object]) -> list[str]:
     return unique_preserve_order(flags)
 
 
+DEFENDER_INTERESTING_EXCERPT_LIMIT = 25
+
+
 def collect_defender_support(root: Path) -> Iterable[ArtifactRecord]:
     support_root = root.joinpath(*DEFENDER_SUPPORT_ROOT)
     if not support_root.is_dir():
@@ -4198,19 +4218,22 @@ def collect_defender_support(root: Path) -> Iterable[ArtifactRecord]:
     for path in sorted(support_root.glob("MPLog*.log"), key=lambda item: item.name.lower()):
         if not path.is_file():
             continue
-        lines = read_lines(path, limit=400)
-        interesting = [
+        # Every line is counted: the summary counts cover the whole log. Only the
+        # quoted excerpt list is bounded, and that bound is stated in the row.
+        lines = read_lines(path, limit=None)
+        all_interesting = [
             line
             for line in lines
             if any(token in line.lower() for token in ("threat", "malware", "quarantine", "exclusion", "remediation"))
-        ][:25]
+        ]
+        interesting = all_interesting[:DEFENDER_INTERESTING_EXCERPT_LIMIT]
         stat_result = path.stat()
         validation_checks = {
             "log_readable": True,
             "interesting_entries_present": bool(interesting),
             "threat_or_quarantine_terms_present": any(
                 any(token in line.lower() for token in ("threat", "malware", "quarantine"))
-                for line in interesting
+                for line in all_interesting
             ),
             "defender_eventlog_correlated": False,
             "mpcmdrun_history_correlated": False,
@@ -4224,8 +4247,10 @@ def collect_defender_support(root: Path) -> Iterable[ArtifactRecord]:
             details=with_system_deep_parser_manifest("defender", {
                 **source_details(path, "text-log"),
                 "entry_count": len(lines),
-                "interesting_entry_count": len(interesting),
+                "interesting_entry_count": len(all_interesting),
                 "interesting_entries": interesting,
+                "interesting_entries_limit": DEFENDER_INTERESTING_EXCERPT_LIMIT,
+                "interesting_entries_truncated": len(all_interesting) > len(interesting),
                 "coverage_status": "defender-mplog-triage",
                 "reportability": "triage",
                 "parser_confidence": "medium",
@@ -4255,7 +4280,7 @@ def collect_defender_support(root: Path) -> Iterable[ArtifactRecord]:
                 ),
                 "forensic_review": system_forensic_review(
                     "defender",
-                    [f"entry_count={len(lines)}", f"interesting_entry_count={len(interesting)}"],
+                    [f"entry_count={len(lines)}", f"interesting_entry_count={len(all_interesting)}"],
                     validation_checks,
                 ),
                 "commercial_grade_ready": False,
