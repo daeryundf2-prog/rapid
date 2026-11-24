@@ -372,8 +372,10 @@ pub fn utf16_strict(bytes: &[u8]) -> Res<String> {
         return Err("utf-16-le: truncated data".into());
     }
     let units: Vec<u16> = bytes
-        .chunks_exact(2)
-        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| u16::from_le_bytes(*pair))
         .collect();
     String::from_utf16(&units).map_err(|_| "utf-16-le: invalid surrogate".to_string())
 }
