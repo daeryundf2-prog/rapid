@@ -1261,17 +1261,23 @@ def setupapi_usb_review_profile(entries: Sequence[Mapping[str, object]]) -> dict
         device_id = str(entry.get("device_id") or profile.get("normalized_device_id") or "")
         if not device_id:
             continue
+        # Windows device instance IDs are case-insensitive: one device logged
+        # as ``USB\VID_..`` and ``usb\vid_..`` is still one device. Every
+        # spelling is kept as written; the first one names the device.
         existing = device_profiles.setdefault(
-            device_id,
+            device_id.casefold(),
             {
                 **profile,
                 "device_id": device_id,
+                "device_id_spellings": [],
                 "first_timestamp_hint": timestamp,
                 "last_timestamp_hint": timestamp,
                 "line_numbers": [],
                 "install_context_count": 0,
             },
         )
+        if device_id not in existing["device_id_spellings"]:
+            existing["device_id_spellings"].append(device_id)
         existing["install_context_count"] = int(existing.get("install_context_count") or 0) + 1
         if isinstance(existing.get("line_numbers"), list):
             existing["line_numbers"].append(entry.get("line_number"))

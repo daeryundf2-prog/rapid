@@ -12,6 +12,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
 from ...core.extraction_failures import ADS_SOURCE_ID, iter_recovered_ads_rows
+from ...core.filetime import filetime_to_iso_7
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from ...core.recovery import (
@@ -732,6 +733,10 @@ def collect_recycle_bin_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                     "sid_hint": metadata_path.parent.name,
                     "original_path": parsed["original_path"],
                     "deleted_at": parsed["deleted_at"],
+                    # ``deleted_at`` stops at microseconds; the 7-digit text
+                    # and the raw ticks keep 100 ns for timelines and sorting.
+                    "deleted_at_100ns": parsed["deleted_at_100ns"],
+                    "deleted_at_filetime": parsed["deleted_at_filetime"],
                     "deleted_file_size": parsed["deleted_file_size"],
                     "format_version": parsed["format_version"],
                     "metadata_status": metadata_status,
@@ -843,6 +848,8 @@ def parse_recycle_bin_i_file(path: Path) -> dict[str, object]:
         "format_version": 0,
         "deleted_file_size": 0,
         "deleted_at": "",
+        "deleted_at_100ns": "",
+        "deleted_at_filetime": 0,
         "original_path": "",
         "metadata_status": "unreadable",
     }
@@ -851,10 +858,13 @@ def parse_recycle_bin_i_file(path: Path) -> dict[str, object]:
     version = int.from_bytes(blob[0:8], "little", signed=False)
     if version not in (1, 2):
         return {**empty, "metadata_issue": f"unsupported-version-{version}"}
+    deleted_filetime = int.from_bytes(blob[16:24], "little", signed=False)
     header: dict[str, object] = {
         "format_version": version,
         "deleted_file_size": int.from_bytes(blob[8:16], "little", signed=False),
-        "deleted_at": filetime_to_iso(int.from_bytes(blob[16:24], "little", signed=False)),
+        "deleted_at": filetime_to_iso(deleted_filetime),
+        "deleted_at_100ns": filetime_to_iso_7(deleted_filetime) or "",
+        "deleted_at_filetime": deleted_filetime,
         "original_path": "",
         "metadata_status": "partial",
     }
@@ -2989,13 +2999,38 @@ def usn_bounded_mft_path_correlation(
         unresolved_reasons.append(
             f"parent-reference-sequence-mismatch:usn={parent_sequence},mft={parent_cache_sequence}"
         )
+    # The cached path is the MFT's *current* name and parent. A USN record
+    # written before a rename (or naming another hard link) carries its own
+    # name and parent at that moment; the current path then describes a
+    # later state and stays only in ``current_mft_path``.
+    current_head = (
+        next((item for item in current.get("chain") or [] if isinstance(item, Mapping)), {})
+        if isinstance(current, Mapping)
+        else {}
+    )
+    current_name = str(current_head.get("name") or "")
+    current_parent_value = current_head.get("parent_record_number")
+    current_parent = (
+        int(current_parent_value)
+        if isinstance(current_parent_value, int) or str(current_parent_value).isdigit()
+        else None
+    )
+    current_name_match = None if not file_name or not current_name else file_name == current_name
+    current_parent_match = None if parent_frn is None or current_parent is None else parent_frn == current_parent
+    current_is_record_state = current_name_match is not False and current_parent_match is not False
     path_candidate = ""
     source = "none"
     status = "no-mft-path-cache-attached" if not mft_path_cache else "no-matching-frn-in-bounded-mft-cache"
     # A historical path through the parent is only valid when the parent slot
     # still holds the same generation; otherwise the current path is a later
     # directory's path and is kept only as ``current_mft_path`` observation.
-    if isinstance(current, Mapping) and current.get("path") and not file_sequence_mismatch and not parent_sequence_mismatch:
+    if (
+        isinstance(current, Mapping)
+        and current.get("path")
+        and current_is_record_state
+        and not file_sequence_mismatch
+        and not parent_sequence_mismatch
+    ):
         path_candidate = str(current.get("path") or "")
         source = "file-reference-cache"
         status = "matched-file-reference-cache"
@@ -3012,6 +3047,8 @@ def usn_bounded_mft_path_correlation(
         status = "unresolved-mft-parent-sequence-mismatch"
     elif unresolved_reasons:
         status = "unresolved-mft-sequence-mismatch"
+    elif isinstance(current, Mapping) and current.get("path") and not current_is_record_state:
+        status = "unresolved-mft-name-or-parent-changed"
     file_reference_link = {
         "usn_sequence_number": frn_sequence if frn_sequence is not None else "",
         "mft_sequence_number": current_sequence if current_sequence is not None else "",
@@ -3024,6 +3061,8 @@ def usn_bounded_mft_path_correlation(
             None if parent_sequence is None or parent_cache_sequence is None else not parent_sequence_mismatch
         ),
         "unresolved_reasons": unresolved_reasons,
+        "current_mft_name_match": current_name_match,
+        "current_mft_parent_match": current_parent_match,
     }
     return {
         "profile_version": "usn-bounded-mft-path-correlation-v1",
@@ -5739,7 +5778,14 @@ def parse_mft_record_headers(blob: bytes) -> list[dict[str, object]]:
                 if offset % volume_record_size:
                     geometry_issues.append("record-offset-not-slot-aligned")
             else:
-                record_size = allocated_size if own_geometry_ok else 1024
+                # No intact record anywhere fixes the stride independently,
+                # so the slot can only come from this record's own length.
+                # A plausible length is still the stride when the tail is
+                # clipped (a 4 KiB record missing its last byte stays in
+                # slot 3 rather than becoming 1 KiB slot 12), but such a
+                # record is never trusted for file-reference links below.
+                plausible_size = allocated_size in (1024, 2048, 4096)
+                record_size = allocated_size if own_geometry_ok or plausible_size else 1024
                 record_number_source = "record-offset-divided-by-record-size"
                 if not 48 <= allocated_size <= 4096:
                     geometry_issues.append(f"allocated-size-invalid-{allocated_size}")
@@ -5773,15 +5819,20 @@ def parse_mft_record_headers(blob: bytes) -> list[dict[str, object]]:
             header_record_number = (
                 int_from(blob, offset + 0x2C, 4) if int_from(blob, offset + 0x04, 2) >= 0x30 else None
             )
+            # The slot is trusted for file-reference links only when the
+            # geometry and an NTFS 3.1 header (if present) name the same slot.
             # A damaged record keeps a trustworthy number only when the
             # volume geometry places it on a slot boundary and its own header
-            # names the same slot; otherwise it cannot be linked to file
-            # references.
-            record_number_trusted = not geometry_issues or (
-                volume_record_size is not None
-                and offset % volume_record_size == 0
-                and header_record_number == record_number
-            )
+            # names the same slot. Without a volume stride the record's own
+            # length is the only geometry, so it is trusted only when it is
+            # intact and its header names the same slot.
+            header_agrees = header_record_number == record_number
+            if volume_record_size is not None:
+                record_number_trusted = (header_record_number is None or header_agrees) and (
+                    not geometry_issues or (offset % volume_record_size == 0 and header_agrees)
+                )
+            else:
+                record_number_trusted = not geometry_issues and header_agrees
             records.append(
                 {
                     "record_offset": offset,

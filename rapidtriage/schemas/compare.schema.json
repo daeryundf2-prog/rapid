@@ -132,6 +132,7 @@
           "status": {
             "enum": [
               "same",
+              "same-size-content-unverified",
               "different",
               "only-in-left",
               "only-in-right",
