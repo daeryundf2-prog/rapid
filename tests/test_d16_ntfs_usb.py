@@ -216,7 +216,8 @@ def storage(hive: Key, control_set: int, name: str, instance: str, container_num
 class UsbJoinConflictTests(unittest.TestCase):
     def test_serial_and_container_conflict_is_reported(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            # Rows carry resolved paths; on Windows the temp dir may be an 8.3 short name.
+            root = Path(tmp).resolve()
             for label, current in (("A", 2), ("B", 1)):
                 hive = Key("ROOT")
                 hive.path("Select").value("Current", 4, current.to_bytes(4, "little"))

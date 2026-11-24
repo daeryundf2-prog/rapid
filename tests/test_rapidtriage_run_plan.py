@@ -754,7 +754,14 @@ class RunPlanCliTests(unittest.TestCase):
                 **kwargs,
             )
             try:
-                running = wait_for(lambda: (plan_task(output_dir, "slow-test") or {}).get("status") == "running", 120)
+                # "partial" means rows were collected before the interrupt; a task
+                # interrupted before its first row is (correctly) "cancelled". Send
+                # Ctrl-C only once the plan reports rows, not merely "running".
+                running = wait_for(
+                    lambda: (task := plan_task(output_dir, "slow-test") or {}).get("status") == "running"
+                    and int(task.get("rows_so_far") or 0) > 0,
+                    120,
+                )
                 self.assertTrue(running, "slow provider never started")
                 if sys.platform == "win32":
                     process.send_signal(signal.CTRL_BREAK_EVENT)
