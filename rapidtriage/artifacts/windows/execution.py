@@ -333,13 +333,22 @@ def collect_execution_reg_exports(root: Path) -> Iterable[ArtifactRecord]:
 def parse_execution_reg_export(path: Path, text: str) -> Iterable[ArtifactRecord]:
     current_key = ""
     values: dict[str, str] = {}
+    pending = ""
     for line in [*text.splitlines(), ""]:
         stripped = line.strip()
+        # regedit wraps long hex values over "\"-terminated continuation lines; join them so
+        # multi-line binary values (UserAssist 72-byte records, BAM FILETIMEs) are not truncated.
+        if pending:
+            if not stripped:
+                continue
+            stripped = pending + stripped
+            pending = ""
+        if stripped.endswith("\\") and "=" in stripped and not stripped.startswith("["):
+            pending = stripped[:-1]
+            continue
         if stripped.startswith("[") and stripped.endswith("]"):
             if current_key:
-                record = build_execution_registry_record(path, current_key, values)
-                if record is not None:
-                    yield record
+                yield from build_execution_registry_key_records(path, current_key, values)
             current_key = stripped.strip("[]")
             values = {}
             continue
@@ -347,9 +356,52 @@ def parse_execution_reg_export(path: Path, text: str) -> Iterable[ArtifactRecord
         if current_key and name:
             values[name] = value
     if current_key:
-        record = build_execution_registry_record(path, current_key, values)
-        if record is not None:
-            yield record
+        yield from build_execution_registry_key_records(path, current_key, values)
+
+
+def build_execution_registry_key_records(path: Path, key: str, values: Mapping[str, str]) -> Iterable[ArtifactRecord]:
+    record = build_execution_registry_record(path, key, values)
+    if record is not None:
+        yield record
+    parts = key.split("\\")
+    if len(parts) < 3 or parts[-1].casefold() != "count" or parts[-3].casefold() != "userassist":
+        return
+    source_hashes = file_hashes(path)
+    for index, row in enumerate(userassist_reg_export_rows(parts[-2], values)):
+        yield build_userassist_schema_entry_record(
+            path,
+            source_hashes,
+            row,
+            index,
+            source_format="reg-export-userassist-decode",
+            source_key=key,
+        )
+
+
+def userassist_reg_export_rows(guid: str, values: Mapping[str, str]) -> list[dict[str, object]]:
+    """Per-value UserAssist rows of one exported ``Count`` key (``hex:`` data already joined)."""
+    rows: list[dict[str, object]] = []
+    for raw_name, value in values.items():
+        decoded_name = decode_userassist_name(raw_name)
+        if decoded_name.upper() in USERASSIST_METADATA_NAMES:
+            continue
+        try:
+            data = bytes.fromhex(value)
+        except ValueError:
+            continue
+        display_name, folder_guid = resolve_userassist_known_folder(decoded_name)
+        entry: dict[str, object] = {
+            "guid": guid,
+            "raw_value_name": raw_name,
+            "decoded_name": decoded_name,
+            "display_path": display_name,
+            "known_folder_guid": folder_guid,
+            "known_folder_resolved": bool(folder_guid),
+            "value_data_size": len(data),
+            **userassist_value_layout(data),
+        }
+        rows.append(entry)
+    return rows
 
 
 def build_execution_registry_record(path: Path, key: str, values: Mapping[str, str]) -> ArtifactRecord | None:
@@ -1444,10 +1496,14 @@ def build_userassist_schema_entry_record(
     source_hashes: Mapping[str, str],
     row: Mapping[str, object],
     index: int,
+    *,
+    source_format: str = "ntuser-native-userassist-decode",
+    source_key: str = "",
 ) -> ArtifactRecord:
     display_path = str(row.get("display_path") or "")
     executable_path = display_path if looks_like_executable_path(display_path) else ""
     timestamp = str(row.get("timestamp") or "")
+    count_key = source_key or f"NTUSER\\Explorer\\UserAssist\\{row.get('guid', '')}\\Count"
     validation_checks = {
         "has_decoded_name": bool(row.get("decoded_name")),
         "has_executable_path": bool(executable_path),
@@ -1477,13 +1533,16 @@ def build_userassist_schema_entry_record(
             "coverage_status": "native-schema-decode",
             "reportability": "review",
             "source_path": str(path.resolve()),
-            "source_format": "ntuser-native-userassist-decode",
+            "source_format": source_format,
             "source_hashes": dict(source_hashes),
-            "source_key": f"NTUSER\\Explorer\\UserAssist\\{row.get('guid', '')}\\Count",
+            "source_key": count_key,
+            # Per-value identity for timeline dedupe when no hive cell offset exists (.reg exports):
+            # an offset of 0 would make every value of the export one record.
+            "key_path": f"{count_key}\\{row.get('raw_value_name', '')}",
             "source_index": index,
             "guid": row.get("guid", ""),
-            "count_key_cell_offset": row.get("count_key_cell_offset", 0),
-            "value_cell_offset": row.get("value_cell_offset", 0),
+            "count_key_cell_offset": row.get("count_key_cell_offset", ""),
+            "value_cell_offset": row.get("value_cell_offset", ""),
             "raw_value_name": row.get("raw_value_name", ""),
             "decoded_name": row.get("decoded_name", ""),
             "executable_path": executable_path,
@@ -6759,7 +6818,8 @@ def parse_reg_value(line: str) -> tuple[str, str]:
     if "=" not in line:
         return "", ""
     raw_name, raw_value = line.split("=", 1)
-    name = raw_name.strip().strip('"')
+    # regedit escapes \ and " inside quoted value names ("C:\\Users\\...").
+    name = raw_name.strip().strip('"').replace('\\"', '"').replace("\\\\", "\\")
     value = raw_value.strip()
     if value.startswith('"') and value.endswith('"'):
         value = value[1:-1]
@@ -7359,34 +7419,36 @@ def decode_userassist_schema_native(hive: object) -> tuple[list[dict[str, object
                 "known_folder_resolved": bool(folder_guid),
                 "key_last_written_at": count_key.last_written_at,
                 "value_data_size": int(value.data_size or 0),
+                **userassist_value_layout(data),
             }
-            if len(data) == 72:
-                entry.update(
-                    {
-                        "layout": "win7-plus",
-                        "session_id": int.from_bytes(data[0:4], "little"),
-                        "run_counter": int.from_bytes(data[4:8], "little"),
-                        "focus_count": int.from_bytes(data[8:12], "little"),
-                        "total_focus_time_ms": int.from_bytes(data[12:16], "little"),
-                        "timestamp": filetime_to_iso(int.from_bytes(data[60:68], "little")),
-                    }
-                )
-            elif len(data) == 16:
-                entry.update(
-                    {
-                        "layout": "winxp",
-                        "session_id": int.from_bytes(data[0:4], "little"),
-                        "run_counter": int.from_bytes(data[4:8], "little"),
-                        "timestamp": filetime_to_iso(int.from_bytes(data[8:16], "little")),
-                    }
-                )
-            else:
-                entry["layout"] = "unrecognized"
-            entry["layout_label"] = USERASSIST_LAYOUT_LABELS.get(str(entry["layout"]), "")
             rows.append(entry)
     profile["decode_status"] = "decoded" if rows else "no-decodable-rows"
     profile["schema_row_count"] = len(rows)
     return rows, profile
+
+
+def userassist_value_layout(data: bytes) -> dict[str, object]:
+    """Counters and last-run FILETIME of one UserAssist ``Count`` value (Win7+ 72-byte or XP 16-byte)."""
+    if len(data) == 72:
+        fields: dict[str, object] = {
+            "layout": "win7-plus",
+            "session_id": int.from_bytes(data[0:4], "little"),
+            "run_counter": int.from_bytes(data[4:8], "little"),
+            "focus_count": int.from_bytes(data[8:12], "little"),
+            "total_focus_time_ms": int.from_bytes(data[12:16], "little"),
+            "timestamp": filetime_to_iso(int.from_bytes(data[60:68], "little")),
+        }
+    elif len(data) == 16:
+        fields = {
+            "layout": "winxp",
+            "session_id": int.from_bytes(data[0:4], "little"),
+            "run_counter": int.from_bytes(data[4:8], "little"),
+            "timestamp": filetime_to_iso(int.from_bytes(data[8:16], "little")),
+        }
+    else:
+        fields = {"layout": "unrecognized"}
+    fields["layout_label"] = USERASSIST_LAYOUT_LABELS.get(str(fields["layout"]), "")
+    return fields
 
 
 def amcache_entry_cell_allocation(

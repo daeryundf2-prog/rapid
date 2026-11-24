@@ -3758,7 +3758,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
 
             self.assertEqual(main(["artifacts", str(root), "--kind", "windows-execution", "--output", str(output)]), 0)
             payload = json.loads(output.read_text(encoding="utf-8"))
-            rows = [item for item in payload["artifacts"] if item["artifact_type"] == "userassist-schema-entry"]
+            # The shared fixture also ships a UserAssist .reg export; keep only the NTUSER.DAT decode rows.
+            rows = [
+                item
+                for item in payload["artifacts"]
+                if item["artifact_type"] == "userassist-schema-entry"
+                and item["details"]["source_format"] == "ntuser-native-userassist-decode"
+            ]
 
             self.assertEqual(len(rows), 3)
             win7 = next(row for row in rows if row["details"]["layout"] == "win7-plus")
@@ -3794,6 +3800,78 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertFalse(truncated["details"]["validation_checks"]["layout_recognized"])
 
             self.assertFalse(any("UEME" in row["details"]["decoded_name"] for row in rows))
+
+    def test_windows_execution_collector_decodes_userassist_reg_export_continuation_lines(self) -> None:
+        def regedit_hex(name: str, data: bytes) -> str:
+            # regedit.exe escapes "\" in value names and wraps hex values at ~80 columns
+            # with "\" continuation lines.
+            escaped = name.replace("\\", "\\\\")
+            head = f'"{escaped}"=hex:'
+            octets = [f"{byte:02x}" for byte in data]
+            lines, line = [], head
+            for index, octet in enumerate(octets):
+                piece = octet + ("," if index < len(octets) - 1 else "")
+                if len(line) + len(piece) > 77:
+                    lines.append(line + "\\")
+                    line = "  "
+                line += piece
+            lines.append(line)
+            return "\r\n".join(lines)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            stamp = datetime(2026, 11, 19, 7, 31, 37, tzinfo=timezone.utc)
+            key = r"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist"
+            guid = "{CEBFF5CD-ACE2-4F4F-9178-9926F41749EA}"
+            text = "\r\n".join(
+                [
+                    "Windows Registry Editor Version 5.00",
+                    "",
+                    f"[{key}\\{guid}\\Count]",
+                    regedit_hex(
+                        rot13("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"),
+                        userassist_win7_value_data(
+                            session_id=0, run_counter=12, focus_count=18, total_focus_time_ms=500, timestamp=stamp
+                        ),
+                    ),
+                    regedit_hex(
+                        rot13(r"C:\Users\alice\Downloads\tool.exe"),
+                        userassist_win7_value_data(
+                            session_id=0, run_counter=2, focus_count=1, total_focus_time_ms=10, timestamp=stamp
+                        ),
+                    ),
+                    regedit_hex(
+                        rot13("UEME_CTLSESSION"),
+                        userassist_winxp_value_data(session_id=1, run_counter=1, timestamp=stamp),
+                    ),
+                    "",
+                ]
+            )
+            export = root / "NTUSER_UserAssist.reg"
+            export.write_bytes(b"\xff\xfe" + text.encode("utf-16-le"))
+            output = root / "execution.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "windows-execution", "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            rows = [item for item in payload["artifacts"] if item["artifact_type"] == "userassist-schema-entry"]
+
+            self.assertEqual(len(rows), 2)
+            by_name = {row["details"]["decoded_name"]: row["details"] for row in rows}
+            self.assertEqual(by_name[r"C:\Users\alice\Downloads\tool.exe"]["run_counter"], 2)
+            details = by_name["Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"]
+            self.assertEqual(details["layout"], "win7-plus")
+            self.assertEqual(details["run_counter"], 12)
+            self.assertEqual(details["focus_count"], 18)
+            self.assertEqual(details["timestamp"], "2026-11-19T07:31:37+00:00")
+            self.assertEqual(details["source_format"], "reg-export-userassist-decode")
+            self.assertEqual(details["source_key"], f"{key}\\{guid}\\Count")
+
+            # Both values share one last-run time and one source file: the timeline keeps both programs.
+            timeline = root / "timeline.json"
+            self.assertEqual(main(["timeline", str(root), "--artifacts", str(output), "--output", str(timeline)]), 0)
+            events = json.loads(timeline.read_text(encoding="utf-8"))["events"]
+            last_runs = [event for event in events if event["event_type"] == "artifact-userassist-schema-entry-last-run"]
+            self.assertEqual(len(last_runs), 2)
 
     def test_execution_artifact_trusted_diff_passes_matching_rows(self) -> None:
         rapid = [
