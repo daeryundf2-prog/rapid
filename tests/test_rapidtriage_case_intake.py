@@ -660,7 +660,9 @@ class CaseIntakeApiTests(unittest.TestCase):
         url = f"/api/cases/{case['case_id']}/evidence/{stuck['citation_id']}/hash"
         again = self.client.post(url, params={"actor": "김분석"})
         self.assertEqual(again.status_code, 202, again.text)
-        self.assertEqual(again.json()["evidence"]["hash_status"], "hashing")
+        # The response shows the state when it is built: still hashing, or already stored
+        # (pinned in test_rehash_response_shows_result_of_a_worker_that_already_finished).
+        self.assertIn(again.json()["evidence"]["hash_status"], ("hashing", "computed"))
         workspace.join_hash_jobs()
         row = self.client.get(f"/api/cases/{case['case_id']}/evidence").json()["evidence"][0]
         self.assertEqual(row["hash_status"], "computed")
@@ -669,6 +671,56 @@ class CaseIntakeApiTests(unittest.TestCase):
         not_file = self.client.post(f"/api/cases/{case['case_id']}/evidence/{folder['citation_id']}/hash")
         self.assertEqual(not_file.status_code, 422)
         self.assertEqual(self.client.post(f"/api/cases/{case['case_id']}/evidence/nope/hash").status_code, 404)
+
+    def finish_hash_before_response(self):
+        """Patch ``start_hash`` so the worker has finished before the route builds its response."""
+        original = CaseWorkspace.start_hash
+
+        def start_and_finish(workspace: CaseWorkspace, **kwargs: object) -> None:
+            original(workspace, **kwargs)
+            workspace.join_hash_jobs()
+
+        return patch.object(CaseWorkspace, "start_hash", start_and_finish)
+
+    def test_rehash_response_shows_result_of_a_worker_that_already_finished(self) -> None:
+        case = self.create_case()
+        export = self.temp / "export.bin"
+        export.write_bytes(b"bytes to hash")
+        stuck = self.client.app.state.case_workspace.intake.add_evidence(
+            case["case_id"], evidence_number="E-01", display_name="x", source_type="export", path=str(export),
+            size_bytes=1, hash_verify=True, hash_expected="", hash_status="hashing", hash_message="", actor="t")
+        self.client.close()
+        # A new server: the row is left `hashing` from the previous one, so it reads interrupted.
+        self.client, self.store = client_for(self.temp)
+        listed = self.client.get(f"/api/cases/{case['case_id']}/evidence").json()["evidence"]
+        self.assertEqual(listed[0]["hash_status"], "interrupted")
+        with self.finish_hash_before_response():
+            again = self.client.post(f"/api/cases/{case['case_id']}/evidence/{stuck['citation_id']}/hash")
+        self.assertEqual(again.status_code, 202, again.text)
+        self.assertEqual(again.json()["evidence"]["hash_status"], "computed")
+        self.assertEqual(again.json()["evidence"]["hashes"]["md5"], hashlib.md5(b"bytes to hash").hexdigest())
+
+    def test_add_response_shows_result_of_a_worker_that_already_finished(self) -> None:
+        case = self.create_case()
+        export = self.temp / "export.bin"
+        export.write_bytes(b"bytes to hash")
+        with self.finish_hash_before_response():
+            added = self.client.post(f"/api/cases/{case['case_id']}/evidence", json={
+                "evidence_number": "E-01", "source_type": "export", "path": str(export), "verify_hash": True})
+        self.assertEqual(added.status_code, 201, added.text)
+        self.assertEqual(added.json()["evidence"]["hash_status"], "computed")
+
+    def test_worker_of_this_server_that_recorded_nothing_reads_interrupted(self) -> None:
+        case = self.create_case()
+        export = self.temp / "export.bin"
+        export.write_bytes(b"bytes to hash")
+        url = f"/api/cases/{case['case_id']}/evidence"
+        with patch.object(CaseWorkspace, "_hash_worker", lambda *_args: None), self.finish_hash_before_response():
+            added = self.client.post(url, json={
+                "evidence_number": "E-01", "source_type": "export", "path": str(export), "verify_hash": True})
+        self.assertEqual(added.status_code, 201, added.text)
+        self.assertEqual(added.json()["evidence"]["hash_status"], "interrupted")
+        self.assertEqual(self.client.get(url).json()["evidence"][0]["hash_status"], "interrupted")
 
     def test_review8_note_history_rejects_delete(self) -> None:
         case = self.create_case()

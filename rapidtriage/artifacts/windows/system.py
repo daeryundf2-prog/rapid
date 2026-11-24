@@ -109,7 +109,9 @@ BITS_QMGR_SQLITE_ROW_LIMIT = 100
 SETUPAPI_SCAN_LIMIT = 4 * 1024 * 1024
 RECALL_SCAN_LIMIT = 2 * 1024 * 1024
 WIFI_PROFILE_ROOT_MARKER = "programdata/microsoft/wlansvc/profiles/interfaces"
-USB_DEVICE_RE = re.compile(r"(?i)(USBSTOR\\[^\s\]]+|USB\\VID_[0-9A-F]{4}&PID_[0-9A-F]{4}[^\s\]]*)")
+# Quotes and apostrophes delimit device strings in SetupAPI bodies
+# (``Parameter = "USB\VID_...\SERIAL"``); they are never part of the ID.
+USB_DEVICE_RE = re.compile(r"""(?i)(USBSTOR\\[^\s\]"']+|USB\\VID_[0-9A-F]{4}&PID_[0-9A-F]{4}[^\s\]"']*)""")
 USB_VID_PID_RE = re.compile(r"(?i)VID_([0-9A-F]{4})&PID_([0-9A-F]{4})")
 SETUPAPI_TIMESTAMP_RE = re.compile(r"(?P<date>\d{4}[/-]\d{2}[/-]\d{2})\s+(?P<time>\d{2}:\d{2}:\d{2}(?:\.\d+)?)")
 REMOTE_CONTROL_TIMESTAMP_RE = re.compile(
@@ -1087,6 +1089,9 @@ def collect_setupapi_usb_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                 "timestamp": entries[0].get("timestamp_hint") or isoformat_from_timestamp(stat_result.st_mtime),
                 "timestamp_source": "setupapi_context_timestamp" if entries[0].get("timestamp_hint") else "setupapi_log_modified_at",
                 "coverage_status": "setupapi-usb-bounded-context-scan",
+                "scan_window_bytes": SETUPAPI_SCAN_LIMIT,
+                "scan_truncated": stat_result.st_size > SETUPAPI_SCAN_LIMIT,
+                "unscanned_bytes": max(0, stat_result.st_size - SETUPAPI_SCAN_LIMIT),
                 "reportability": "triage",
                 "device_id_candidates": device_ids[:100],
                 "usb_device_review_profile": usb_review_profile,
@@ -1179,8 +1184,6 @@ def parse_setupapi_usb_entries(path: Path) -> list[dict[str, object]]:
         entries.append(entry)
         if section is not None:
             section["entries"].append(entry)
-        if len(entries) >= 500:
-            break
     close_section()
     return entries
 

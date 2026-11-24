@@ -172,7 +172,14 @@ class FilesystemRecoveryTests(unittest.TestCase):
         recycle_dir = root / "$Recycle.Bin" / "S-1-5-21-test"
         recycle_dir.mkdir(parents=True)
         i_file = recycle_dir / "$IABCDEF.txt"
-        blob = (2).to_bytes(8, "little") + (100).to_bytes(8, "little") + (0).to_bytes(8, "little") + b"X" * 8
+        name = "C:\\x\0".encode("utf-16le")
+        blob = (
+            (2).to_bytes(8, "little")
+            + (100).to_bytes(8, "little")
+            + (0).to_bytes(8, "little")
+            + (len(name) // 2).to_bytes(4, "little")
+            + name
+        )
         i_file.write_bytes(blob)
         if with_payload:
             (recycle_dir / "$RABCDEF.txt").write_bytes(b"payload")

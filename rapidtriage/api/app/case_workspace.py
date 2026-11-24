@@ -193,6 +193,8 @@ class CaseWorkspace:
         self._intake: CaseIntake | None = None
         self._path: Path | None = None
         self._hash_threads: dict[str, threading.Thread] = {}
+        # Citation ids whose hash worker this process started (running or finished).
+        self._hash_started: set[str] = set()
         self._readiness: dict[tuple[str, int, int], tuple[bool, str]] = {}
         # Rows saved as `hashing` before this server started have no worker any more.
         self._started_at = now_iso()
@@ -245,6 +247,7 @@ class CaseWorkspace:
         )
         with self._lock:
             self._hash_threads[citation_id] = thread
+            self._hash_started.add(citation_id)
         thread.start()
 
     def _hash_worker(self, case_id: str, citation_id: str, path: Path, expected: str) -> None:
@@ -302,14 +305,24 @@ class CaseWorkspace:
         return cached
 
     def present_evidence(self, evidence: dict[str, object]) -> dict[str, object]:
-        """Adds ``runnable``/``run_blocked_reason``; a ``hashing`` row with no live worker reads as
-        ``interrupted`` (rows from before this server started are already stored that way)."""
-        if (
-            evidence.get("hash_status") == "hashing"
-            and str(evidence.get("added_at") or "") < self._started_at
-            and not self.hash_running(str(evidence["citation_id"]))
-        ):
-            evidence = {**evidence, "hash_status": "interrupted", "hash_status_label": "해시 계산 중단됨 (서버 재시작)"}
+        """Adds ``runnable``/``run_blocked_reason`` and resolves a ``hashing`` row with no live worker.
+
+        A row whose worker this process started is re-read: the worker stores its result before
+        it stops counting as running, so a still-``hashing`` row read before it finished shows
+        the stored outcome instead of ``interrupted``. ``interrupted`` is reserved for rows this
+        process never started a worker for and that were saved before it started (restart), or a
+        worker of this process that ended without recording any outcome.
+        """
+        citation_id = str(evidence.get("citation_id") or "")
+        if evidence.get("hash_status") == "hashing" and not self.hash_running(citation_id):
+            with self._lock:
+                started_here = citation_id in self._hash_started
+            if started_here:
+                evidence = self.intake.get_evidence(str(evidence["case_id"]), citation_id)
+            if evidence.get("hash_status") == "hashing" and (
+                started_here or str(evidence.get("added_at") or "") < self._started_at
+            ):
+                evidence = {**evidence, "hash_status": "interrupted", "hash_status_label": "해시 계산 중단됨 (서버 재시작)"}
         runnable, reason = self.readiness(str(evidence.get("path") or ""))
         return {**evidence, "runnable": runnable, "run_blocked_reason": reason}
 

@@ -5763,9 +5763,31 @@ def match_usbstor_to_usb(
     the same serial, so every Enum\\USB instance carrying it is kept and, when they disagree on
     VID/PID, the USBSTOR ContainerID decides. Without a deciding ContainerID nothing is joined,
     ``join_method`` is ``"ambiguous-serial"`` and the competing instances are returned.
-    ``join_method`` is ``""`` when nothing matched.
+    A serial (or ParentIdPrefix) join is cross-checked against the USBSTOR ContainerID: when
+    that ContainerID names a different VID/PID in the same hive, nothing is joined,
+    ``join_method`` is ``"conflict-serial-vs-container-id"`` and both sides are returned.
+    A ContainerID shared by several VID/PIDs yields ``"ambiguous-container-id"`` with every
+    candidate. ``join_method`` is ``""`` when nothing matched.
     """
     container_lower = container_id.lower()
+    container_candidates = list(usb_by_container.get(container_lower, [])) if container_id else []
+    container_storage = [
+        entry for entry in container_candidates if entry.get("usb_service", "").lower() in {"usbstor", "uaspstor"}
+    ]
+    container_candidates = container_storage or container_candidates
+
+    def checked(
+        entry: Mapping[str, str], method: str, alternatives: Sequence[Mapping[str, str]]
+    ) -> tuple[Mapping[str, str], str, list[Mapping[str, str]]]:
+        if entry.get("container_id", "") == container_lower or not container_candidates:
+            return entry, method, []
+        rivals = [
+            item for item in container_candidates if (item["vid"], item["pid"]) != (entry["vid"], entry["pid"])
+        ]
+        if not rivals:
+            return entry, method, []
+        kept = list(alternatives) or [entry]
+        return {}, "conflict-serial-vs-container-id", kept + [item for item in rivals if item not in kept]
 
     def resolve(candidates: Sequence[Mapping[str, str]], method: str) -> tuple[Mapping[str, str], str] | None:
         if not candidates:
@@ -5786,7 +5808,7 @@ def match_usbstor_to_usb(
     exact = list(usb_by_serial.get(serial_lower, []))
     resolved = resolve(exact, "serial")
     if resolved:
-        return resolved[0], resolved[1], []
+        return checked(resolved[0], resolved[1], exact)
     ambiguous.extend(exact)
     if len(serial_lower) >= 16 and not exact:
         prefixed = [
@@ -5794,19 +5816,19 @@ def match_usbstor_to_usb(
         ]
         resolved = resolve(prefixed, "serial-prefix")
         if resolved:
-            return resolved[0], resolved[1], []
+            return checked(resolved[0], resolved[1], prefixed)
         ambiguous.extend(prefixed)
     for prefix in (full_serial.lower(), serial_lower):
         if prefix and prefix in usb_by_parent_prefix:
-            return usb_by_parent_prefix[prefix], "parent-id-prefix", []
-    candidates = list(usb_by_container.get(container_lower, [])) if container_id else []
-    storage = [entry for entry in candidates if entry.get("usb_service", "").lower() in {"usbstor", "uaspstor"}]
-    candidates = storage or candidates
+            return checked(usb_by_parent_prefix[prefix], "parent-id-prefix", [])
+    candidates = container_candidates
     if candidates and len({(entry["vid"], entry["pid"]) for entry in candidates}) == 1:
         usbstor_first = sorted(candidates, key=lambda entry: entry.get("usb_service", "").lower() != "usbstor")
         return usbstor_first[0], "container-id", []
     if ambiguous:
         return {}, "ambiguous-serial", ambiguous
+    if candidates:
+        return {}, "ambiguous-container-id", candidates
     return {}, "", []
 
 
