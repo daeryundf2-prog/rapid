@@ -351,18 +351,14 @@ export const filesCollection: CollectionDef = {
       },
     );
   },
-  // Default layout (visual-polish S4): 이름 · 경로 · 크기 · 수정 · NTFS 생성 · 선별. Default width =
-  // minimum width; 이름 takes the slack and a narrow grid hides columns by FILES_PRIORITY.
+  // Default layout (visual-polish S4, P1 time first): 이름 · 수정 · NTFS 생성 · 크기 · 경로 · 선별.
+  // The times sit next to 이름 so a grid wider than the pane (특이사항 shown) never scrolls them
+  // out of view. Default width = minimum width; 이름 takes the slack and a narrow grid hides
+  // columns by FILES_PRIORITY.
   columns: [
     { ...col.title("이름", 220), minWidth: 220 },
     // 특이사항 (U-F4): hidden while no loaded row carries a flag (FILES_PRIORITY empty-column rule).
     flagsColumn(["analysis", "compact"]),
-    col.path(200, ["analysis", "source"]),
-    col.field("size", "크기", 80, ["analysis", "compact"], (r) => (r.fields.size as number | null) ?? null, {
-      align: "right",
-      minWidth: 80,
-      format: (r) => formatBytes(r.fields.size),
-    }),
     {
       id: "timestamp",
       header: "수정",
@@ -387,6 +383,12 @@ export const filesCollection: CollectionDef = {
       minWidth: 150,
       presets: ["analysis", "source"],
     },
+    col.field("size", "크기", 80, ["analysis", "compact"], (r) => (r.fields.size as number | null) ?? null, {
+      align: "right",
+      minWidth: 80,
+      format: (r) => formatBytes(r.fields.size),
+    }),
+    col.path(200, ["analysis", "source"]),
     { ...col.review(), width: 88, minWidth: 88 },
     col.field("extension", "확장자", 80, ["compact"], (r) => fieldStr(r, "extension")),
     col.field("categories", "분류", 160, ["compact"], (r) => fieldStr(r, "categories")),

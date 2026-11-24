@@ -156,7 +156,7 @@ describe("loading state while a server filter scans (16)", () => {
 });
 
 describe("files default preset (17)", () => {
-  it("the default (분석) preset is 이름 · 경로 · 크기 · 수정 · NTFS 생성 · 선별 (visual-polish S4)", async () => {
+  it("the default (분석) preset is 이름 · 수정 · NTFS 생성 · 크기 · 경로 · 선별 (visual-polish S4, P1 time first)", async () => {
     setRoute(`#/case/${RUN}/explore/files`);
     installFetch({ "/files": paginatedFiles(2) });
     renderWithClient(<DataGrid />);
@@ -168,15 +168,15 @@ describe("files default preset (17)", () => {
     expect(presetColumnIds(filesCollection.columns, "analysis")).toEqual([
       "title",
       "flags",
-      "path",
-      "size",
       "timestamp",
       "ntfsCreated",
+      "size",
+      "path",
       "review",
     ]);
     // No loaded row is reviewed or flagged yet: 선별 / 특이사항 wait in the 열 menu ("값이 없어 숨김", review #9);
     // NTFS 생성 stays (its header links to the analysis that fills it).
-    expect(cols).toEqual(["title", "path", "size", "timestamp", "ntfsCreated"]);
+    expect(cols).toEqual(["title", "timestamp", "ntfsCreated", "size", "path"]);
     expect(filesCollection.columns.find((c) => c.id === "ntfsCreated")?.presets).toEqual([
       "analysis",
       "source",
