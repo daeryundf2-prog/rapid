@@ -34,9 +34,10 @@ of ``details`` among ``artifact_sort.TIME_KEYS`` (an unparseable value falls thr
 key); files = ``fs_modified_at``, else for an acquisition copy the NTFS ``$SI`` modified time of
 the joined row (none without the join; the ``/files`` route resolves it per row through
 ``ntfs_time``), else ``modified_at``; timeline = ``timestamp``. A row without a parseable time
-never passes a time condition, nor does a time the ``tz`` cannot represent (year 1 / 9999 edges).
-A row time without an offset (naive text) is read as UTC -- never in ``tz`` -- like the console's
-``parseInstant``.
+never passes a time condition, nor does a time the ``tz`` cannot represent (year 1 / 9999 edges),
+nor a timeline wall clock whose zone the evidence does not establish (``timezone`` such as
+``local-unknown``). Any other row time without an offset (naive text) is read as UTC -- never in
+``tz`` -- like the console's ``parseInstant``.
 """
 
 from __future__ import annotations
@@ -51,6 +52,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from ...core.filetime import LOCAL_TIMEZONE_LABELS
 from .artifact_sort import TIME_KEYS
 
 COLLECTIONS = ("artifacts", "files", "timeline")
@@ -302,6 +304,9 @@ def row_time(row: Mapping[str, object], collection: str, ntfs_time: NtfsTime | N
             return parse_moment(value) if _scalar(value) else None
         value = row.get("modified_at")
         return parse_moment(value) if _scalar(value) else None
+    if str(row.get("timezone") or "") in LOCAL_TIMEZONE_LABELS:
+        # A wall clock of undetermined zone is no UTC instant: no time condition decides it.
+        return None
     value = row.get("timestamp")
     return parse_moment(value) if _scalar(value) else None
 

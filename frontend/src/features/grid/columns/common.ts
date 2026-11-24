@@ -5,6 +5,9 @@ import { currentRun } from "../../../state/slices/runs";
 import { useAppStore } from "../../../state/store";
 import {
   assumedUtcOfWallClock,
+  compareEvidenceSortKeys,
+  type EvidenceSortKey,
+  evidenceSortKey,
   evidenceTimeTooltip,
   exactEvidenceTime,
   formatGridTime,
@@ -35,6 +38,28 @@ export function rowSourceTicks(row: GridRow): string | number | null {
     if (typeof value === "string" || typeof value === "number") return value;
   }
   return null;
+}
+
+const rowTimeKeys = new WeakMap<GridRow, EvidenceSortKey>();
+
+function rowTimeKey(row: GridRow): EvidenceSortKey {
+  let key = rowTimeKeys.get(row);
+  if (!key) {
+    key = evidenceSortKey(row.timestamp, rowTimeZone(row), rowSourceTicks(row));
+    rowTimeKeys.set(row, key);
+  }
+  return key;
+}
+
+/**
+ * Ascending order of two rows' evidence times: UTC instants by integer 100 ns ticks, wall clocks of
+ * undetermined zone as their own group after them, unparseable text next and empty times last.
+ */
+export function compareRowTimes(a: GridRow, b: GridRow): number {
+  const aEmpty = !a.timestamp;
+  const bEmpty = !b.timestamp;
+  if (aEmpty || bEmpty) return aEmpty === bEmpty ? 0 : aEmpty ? 1 : -1;
+  return compareEvidenceSortKeys(rowTimeKey(a), rowTimeKey(b));
 }
 
 function pick(record: Record<string, unknown>, keys: string[]): unknown {
@@ -200,6 +225,8 @@ export const col = {
       width,
       presets,
       value: (r) => r.timestamp,
+      // Integer 100 ns ticks, never the text (".000001" would sort before ".0000007").
+      compare: compareRowTimes,
       format: (r) => (r.timestamp ? formatGridTime(r.timestamp, currentTimezone(), rowTimeZone(r)) : ""),
       // Full evidence reading (local · zone · exact UTC · FILETIME) on hover.
       tooltip: (r) =>

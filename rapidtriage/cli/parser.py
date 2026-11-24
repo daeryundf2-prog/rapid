@@ -1898,6 +1898,14 @@ def build_parser() -> argparse.ArgumentParser:
     timeline_export.add_argument("--event-type", help="Filter by event type")
     timeline_export.add_argument("--reviewed-status", help="Filter by review status")
     timeline_export.add_argument("--limit", type=int, default=0, help="Maximum events to include")
+    timeline_export.add_argument(
+        "--assume-local-timezone",
+        help=(
+            "Convert wall clocks of undetermined zone under this stated assumption (+09:00 or an IANA name) "
+            "into assumed_utc for --start/--end; without it they are left out of the UTC range and listed "
+            "in zone_undetermined_events"
+        ),
+    )
     timeline_export.add_argument("--output", default="rapidtriage-timeline-export.json", help="JSON output path")
     timeline_export.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 

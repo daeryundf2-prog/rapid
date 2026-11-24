@@ -1,6 +1,6 @@
 import { fetchArtifactsPage, locateArtifactRow } from "../../../api/collections";
 import { clipValue, flatValue } from "../../../utils/flatValue";
-import { formatGridTime } from "../../../utils/time";
+import { formatGridTime, preciseTimeOf } from "../../../utils/time";
 import { artifactTypeLabel } from "../../filters/typeLabels";
 import { type CatalogFamily, familyForKind, familyForTypes } from "../../flags/catalog";
 import { parseFlags } from "../../flags/flags";
@@ -42,13 +42,17 @@ export const TIME_KEYS = [
   "target_modified_at",
 ];
 
-/** First non-empty scalar among `keys` (lists / objects are skipped, like the server's timestamp sort). */
-function firstOf(details: Record<string, unknown>, keys: string[]): string | null {
-  for (const key of keys) {
+/**
+ * Row time: the first non-empty scalar among TIME_KEYS (lists / objects are skipped), read from its
+ * 100 ns sibling (`<key>_100ns`: EVTX, LNK, DestList) when that is the same instant -- the server's
+ * `sort=timestamp` rule, so the cell, tooltip, selection CSV and sort keep every FILETIME tick.
+ */
+export function artifactRowTime(details: Record<string, unknown>): string | null {
+  for (const key of TIME_KEYS) {
     const value = details[key];
     if (typeof value !== "string" && typeof value !== "number") continue;
     const text = strOrNull(value);
-    if (text) return text;
+    if (text) return preciseTimeOf(details, key, text);
   }
   return null;
 }
@@ -714,7 +718,7 @@ export const artifactsCollection: CollectionDef = {
       {
         title: summary.title || `아티팩트 ${rowIndex + 1}`,
         sourcePath: path,
-        timestamp: firstOf(details, TIME_KEYS),
+        timestamp: artifactRowTime(details),
         artifactType,
         provider,
         sha256: sha256Of(

@@ -9,9 +9,12 @@ Windows).
 Canonical text form (round-1 convergence, agreed with W3): ISO 8601 UTC
 with a ``+00:00`` offset and microseconds exactly as ``datetime.isoformat()``
 prints them (what every provider already emits). FILETIME precision below
-1 us is not put into the text; keep the exact tick count in a sibling integer
-field named ``<field>_100ns`` (see :func:`filetime_fields`).
-``filetime_to_iso_7`` gives the 7-digit ``Z`` form for reports that want it.
+1 us is not put into the text. Providers whose rows feed the timeline or the
+artifact grid keep it in a sibling ``<field>_100ns`` holding the 7-digit
+``Z`` text (:func:`filetime_to_iso_7`; EVTX ``timestamp_100ns``, LNK and
+DestList times) and, where useful, the raw ticks in ``<field>_filetime``;
+:func:`precise_time_value` reads that sibling. (:func:`filetime_fields`
+returns the older integer-ticks sibling form.)
 
 Range policy: values outside ``[MIN_PLAUSIBLE, now + 1 day]`` are not
 "wrong" for every parser (slack, uninitialized fields), so the converters
@@ -24,10 +27,13 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+from collections.abc import Mapping
 
 __all__ = [
     "FILETIME_EPOCH",
     "FILETIME_TICKS_PER_SECOND",
+    "FILETIME_UNIX_OFFSET_TICKS",
+    "LOCAL_TIMEZONE_LABELS",
     "MIN_PLAUSIBLE",
     "UNIX_EPOCH",
     "WEBKIT_EPOCH_OFFSET_US",
@@ -41,6 +47,7 @@ __all__ = [
     "normalize_iso_utc",
     "parse_iso_utc",
     "plausibility",
+    "precise_time_value",
     "unix_to_datetime",
     "unix_to_iso",
     "webkit_to_datetime",
@@ -57,6 +64,9 @@ WEBKIT_EPOCH_OFFSET_US = 11_644_473_600_000_000
 # datetime.max in FILETIME ticks (9999-12-31T23:59:59.9999999).
 _MAX_FILETIME = 2_650_467_743_999_999_999
 MIN_PLAUSIBLE = dt.datetime(1980, 1, 1, tzinfo=dt.timezone.utc)
+# ``timezone`` labels of a wall clock whose zone the evidence does not establish:
+# never converted, ordered or range-filtered as a UTC instant.
+LOCAL_TIMEZONE_LABELS = frozenset({"local-unknown", "exif-local", "local", "device-local"})
 
 
 def filetime_to_datetime(value: int | None) -> dt.datetime | None:
@@ -211,6 +221,29 @@ def event_timestamp_utc_ticks(value: object) -> tuple[int | None, str]:
     if ticks <= 0:
         return None, "unparsed"
     return ticks, ("iso-offset" if zone else "iso-no-offset-assumed-utc")
+
+
+def precise_time_value(container: object, key: str, value: object) -> object:
+    """``container[key + "_100ns"]`` when that sibling is the 100 ns (7-digit) text of
+    the same instant as ``value``, else ``value``.
+
+    EVTX ``timestamp_100ns``, LNK ``target_*_at_100ns`` and DestList
+    ``*last_modified_at_100ns`` keep the FILETIME ticks a microsecond ISO
+    ``value`` drops; the timeline, the artifact grid's server sort and the
+    console read the sibling so two times 600 ns apart stay apart. ``value``
+    needs an explicit offset (never a wall clock of undetermined zone) and
+    the sibling must agree with it to the microsecond.
+    """
+    if not isinstance(container, Mapping):
+        return value
+    precise = container.get(f"{key}_100ns")
+    if not isinstance(precise, str) or not precise.strip():
+        return value
+    precise_ticks = event_timestamp_utc_ticks(precise)[0]
+    value_ticks, basis = event_timestamp_utc_ticks(value)
+    if precise_ticks is None or value_ticks is None or basis != "iso-offset":
+        return value
+    return precise if precise_ticks // 10 == value_ticks // 10 else value
 
 
 def normalize_iso_utc(value: object) -> str | None:
