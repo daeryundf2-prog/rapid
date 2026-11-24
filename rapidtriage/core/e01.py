@@ -2222,17 +2222,21 @@ def _extract_e01_native_fallback(
         recommended_start_sector=recommended_sector,
     )
     stats = dict(result.get("stats") or {})
+    # Present only when RAPIDTRIAGE_E01_EXTRACT_ENGINE asked for a non-default engine.
+    extract_engine = dict(result.get("extract_engine") or {})
+    engine_label = "pyewf+rapid-extract(rust)" if extract_engine.get("active") == "rust" else "pyewf+dissect.ntfs"
     recovered_manifest = build_recovered_root_manifest(extract_dir)
     recovered_manifest = {
         **recovered_manifest,
         "native_extraction_stats": stats,
-        "engine": "pyewf+dissect.ntfs",
+        "engine": engine_label,
+        **({"extract_engine": extract_engine} if extract_engine else {}),
         "system_artifacts": dict(result.get("system_artifacts") or {}),
     }
     command_history.append(
         {
             "stage": "native-filesystem-recovery",
-            "engine": "pyewf+dissect.ntfs",
+            "engine": engine_label,
             "files": stats.get("files"),
             "deleted_files": stats.get("deleted_files"),
             "errors": stats.get("errors"),
@@ -2285,6 +2289,8 @@ def _extract_e01_native_fallback(
         "best-effort deleted-record sweep; ADS streams, reparse targets, and "
         "encrypted volumes are not expanded.",
     ]
+    if extract_engine.get("notice_ko"):
+        warnings.append(str(extract_engine["notice_ko"]))
     if stats.get("truncated"):
         # The active cap, applied separately to the allocated tree and to the deleted-record
         # sweep: RAPIDTRIAGE_NATIVE_MAX_EXTRACT_FILES when set, else sized from the $MFT.
