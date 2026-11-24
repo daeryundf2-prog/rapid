@@ -1,4 +1,4 @@
-"""Time the default folder triage CLI on Unix. Use --profile on a separate run."""
+"""Time the default folder triage CLI. CPU and peak RSS need os.wait4 (POSIX); Windows records wall time and exit code only. Use --profile on a separate run."""
 
 import argparse
 import json
@@ -60,16 +60,21 @@ def run():
             *cli_args,
         ]
     start = time.perf_counter()
+    user_s = system_s = peak_rss = None
     with subprocess.Popen(command) as process:
-        _, status, usage = os.wait4(process.pid, 0)
-        process.returncode = os.waitstatus_to_exitcode(status)
+        if hasattr(os, "wait4"):
+            _, status, usage = os.wait4(process.pid, 0)
+            process.returncode = os.waitstatus_to_exitcode(status)
+            user_s, system_s = usage.ru_utime, usage.ru_stime
+            peak_rss = usage.ru_maxrss * (1 if sys.platform == "darwin" else 1024)
+        else:
+            # Windows has no wait4: record wall time and exit code only.
+            process.wait()
     metrics = {
         "wall_s": time.perf_counter() - start,
-        "user_s": usage.ru_utime,
-        "system_s": usage.ru_stime,
-        "peak_rss_bytes": usage.ru_maxrss
-        if sys.platform == "darwin"
-        else usage.ru_maxrss * 1024,
+        "user_s": user_s,
+        "system_s": system_s,
+        "peak_rss_bytes": peak_rss,
         "exit_code": process.returncode,
         "profiled": args.profile,
     }

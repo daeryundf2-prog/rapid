@@ -33,6 +33,8 @@ python -m pstats "$work/profile/threads.pstats"
 
 `perf.json`에 wall, user, system, RSS 바이트, 종료 코드가 남는다. 단계 경과 시간은 `rapidtriage-run-progress.json`의 연속 완료 시각 차이, 제공자 시간·행 수는 `rapidtriage-parser-scheduler.json`의 events에서 확인한다. 완료 판정은 run summary의 plan outcome, case DB 상태, 격리된 파서 오류 수도 확인해야 한다.
 
+Windows에는 `os.wait4`가 없어 `perf.json`의 user·system·RSS는 `null`이고 wall과 종료 코드만 남는다. `--image`는 mtools가 있는 환경에서만 쓴다. 이 도구들은 기본 CI(`python -m unittest discover -s tests`)에 포함되지 않으며 네트워크를 쓰지 않는다. 출력은 인자로 준 새 디렉터리에만 쓴다. 아래 `evtx-scan` 게이트는 여유 공간 포인터를 오프셋 44에서 읽는 알려진 결함(정답은 48) 때문에 수정 전까지 종료 코드 1로 실패하는 것이 정상이며, 수정은 별도 EVTX 작업에서 다룬다.
+
 ## 기본 실행에서 소비된 시간
 
 | 측정 단위 | 1% 교정 기본 실행 | 전체 코퍼스 기본 실행 |
