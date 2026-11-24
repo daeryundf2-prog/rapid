@@ -427,22 +427,34 @@ export function compareEvidenceSortKeys(a: EvidenceSortKey, b: EvidenceSortKey):
 }
 
 /**
- * A wall clock converted under an assumed zone (the evidence's own zone setting), or null when no
- * valid zone is given. Kept apart from the source value: the assumption is the analyst's.
+ * The UTC instants a wall clock can be under an assumed zone (the evidence's own zone setting), or
+ * null when no valid zone is given. Each candidate round-trips: read back in the zone it is the
+ * same wall clock. One candidate on an ordinary day, none in a daylight-saving gap (the wall clock
+ * never existed there) and two in a repeated hour (both kept, the earlier first). Kept apart from
+ * the source value: the assumption is the analyst's.
  */
-export function assumedUtcOfWallClock(
+export function assumedUtcCandidates(
   wallClock: string,
   assumedZone: string | null | undefined,
-): string | null {
+): string[] | null {
   if (!assumedZone || assumedZone === "local" || !isValidTimezone(assumedZone)) return null;
   const match = WALL_CLOCK_RE.exec(wallClock.trim());
   if (!match) return null;
   const asUtc = new Date(`${match[1]}T${match[2]}Z`);
   if (Number.isNaN(asUtc.getTime())) return null;
-  const offset = tzOffsetMinutes(zoneName(assumedZone), asUtc);
-  const utc = new Date(asUtc.getTime() - offset * 60_000);
+  const zone = zoneName(assumedZone);
+  const day = 86_400_000;
+  // The offsets in force a day before, at and a day after the wall clock read as UTC: every offset
+  // the wall clock can carry (zones change offset at most once within a day).
+  const offsets = new Set(
+    [-day, 0, day].map((shift) => tzOffsetMinutes(zone, new Date(asUtc.getTime() + shift))),
+  );
   const fraction = match[3] ? `.${match[3].slice(0, 7)}` : "";
-  return `${utc.toISOString().slice(0, 19)}${fraction}Z`;
+  return [...offsets]
+    .map((offset) => ({ offset, utc: new Date(asUtc.getTime() - offset * 60_000) }))
+    .filter(({ offset, utc }) => tzOffsetMinutes(zone, utc) === offset)
+    .sort((a, b) => a.utc.getTime() - b.utc.getTime())
+    .map(({ utc }) => `${utc.toISOString().slice(0, 19)}${fraction}Z`);
 }
 
 /** Grid cells: "2025-05-29 23:25:26 KST" — seconds, the zone named (the tooltip has the rest).

@@ -7,10 +7,12 @@ import re
 from collections.abc import Mapping, Sequence
 from email import policy
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import quote
 
 from fastapi import HTTPException
 
+from ...artifacts.email import attachment_payloads, message_body_parts
 from ...core.forensic_accuracy import build_accuracy_gate
 from .constants import (
     EMAIL_ATTACHMENT_EXPORT_MAX_BYTES,
@@ -40,23 +42,31 @@ from .viewer_core import (
 )
 
 
+class EmailSource(NamedTuple):
+    """A parsed message with the exact bytes it was parsed from and their offset in the source file."""
+
+    message: email.message.EmailMessage
+    raw: bytes
+    raw_offset: int
+
+
 def first_email_attachment_count(source_path: Path) -> int:
     suffix = source_path.suffix.lower()
     if suffix not in {".eml", ".mbox"}:
         return 0
     try:
-        messages = read_email_messages(source_path, suffix)
+        sources, _diagnostics = read_email_messages_with_diagnostics(source_path, suffix)
     except (OSError, LookupError, UnicodeDecodeError, ValueError):
         return 0
-    for index, message in enumerate(messages[:1], start=1):
-        summary = summarize_email_message(message, index)
+    for index, source in enumerate(sources[:1], start=1):
+        summary = summarize_email_message(source, index)
         return int(summary.get("attachment_count") or 0)
     return 0
 
 
 def build_email_preview(source_path: Path, suffix: str, *, run_id: str | None = None) -> dict[str, object]:
     try:
-        messages, diagnostics = read_email_messages_with_diagnostics(source_path, suffix)
+        sources, diagnostics = read_email_messages_with_diagnostics(source_path, suffix)
     except OSError as exc:
         return {
             "preview_type": "binary",
@@ -64,7 +74,7 @@ def build_email_preview(source_path: Path, suffix: str, *, run_id: str | None = 
             "viewer_metadata": structured_viewer_metadata("email", "bounded-email-parse", "parse-failed"),
             "email": {"error": str(exc)},
         }
-    summaries = [summarize_email_message(message, index) for index, message in enumerate(messages, start=1)]
+    summaries = [summarize_email_message(source, index) for index, source in enumerate(sources, start=1)]
     threads = build_email_threads(summaries)
     conversation = build_email_conversation_viewer(summaries, threads)
     attachment_profile = email_attachment_package_profile(
@@ -480,23 +490,27 @@ def read_bounded_email_bytes(source_path: Path, *, max_bytes: int | None = None)
 
 
 def parse_mbox_messages(source_path: Path) -> list[email.message.EmailMessage]:
-    messages, _diagnostics = parse_mbox_messages_with_diagnostics(source_path)
-    return messages
+    sources, _diagnostics = parse_mbox_messages_with_diagnostics(source_path)
+    return [source.message for source in sources]
 
 
-def parse_mbox_messages_with_diagnostics(source_path: Path) -> tuple[list[email.message.EmailMessage], dict[str, object]]:
+def parse_mbox_messages_with_diagnostics(source_path: Path) -> tuple[list[EmailSource], dict[str, object]]:
     raw, diagnostics = read_bounded_email_bytes(source_path)
-    chunks = re.split(rb"(?m)^From .*$", raw)
-    messages = []
+    separators = list(re.finditer(rb"(?m)^From .*$", raw))
+    starts = [0] + [match.end() for match in separators]
+    ends = [match.start() for match in separators] + [len(raw)]
+    messages: list[EmailSource] = []
     message_size_truncated_count = 0
-    for chunk in chunks:
+    for start, end in zip(starts, ends):
+        chunk = raw[start:end]
         if not chunk.strip():
             continue
         parse_chunk = chunk.lstrip(b"\r\n")
+        chunk_offset = start + len(chunk) - len(parse_chunk)
         if len(parse_chunk) > EMAIL_PREVIEW_MESSAGE_MAX_BYTES:
             parse_chunk = parse_chunk[:EMAIL_PREVIEW_MESSAGE_MAX_BYTES]
             message_size_truncated_count += 1
-        messages.append(email.message_from_bytes(parse_chunk, policy=policy.default))
+        messages.append(EmailSource(email.message_from_bytes(parse_chunk, policy=policy.default), parse_chunk, chunk_offset))
         if len(messages) >= EMAIL_PREVIEW_MESSAGE_LIMIT:
             break
     diagnostics.update(
@@ -512,7 +526,7 @@ def parse_mbox_messages_with_diagnostics(source_path: Path) -> tuple[list[email.
     return messages, diagnostics
 
 
-def read_email_messages_with_diagnostics(source_path: Path, suffix: str) -> tuple[list[email.message.EmailMessage], dict[str, object]]:
+def read_email_messages_with_diagnostics(source_path: Path, suffix: str) -> tuple[list[EmailSource], dict[str, object]]:
     if suffix == ".eml":
         raw, diagnostics = read_bounded_email_bytes(source_path)
         parse_raw = raw
@@ -530,44 +544,42 @@ def read_email_messages_with_diagnostics(source_path: Path, suffix: str) -> tupl
                 "parsed_message_count": 1,
             }
         )
-        return [email.message_from_bytes(parse_raw, policy=policy.default)], diagnostics
+        return [EmailSource(email.message_from_bytes(parse_raw, policy=policy.default), parse_raw, 0)], diagnostics
     return parse_mbox_messages_with_diagnostics(source_path)
 
 
 def read_email_messages(source_path: Path, suffix: str) -> list[email.message.EmailMessage]:
-    messages, _diagnostics = read_email_messages_with_diagnostics(source_path, suffix)
-    return messages
+    sources, _diagnostics = read_email_messages_with_diagnostics(source_path, suffix)
+    return [source.message for source in sources]
 
 
-def summarize_email_message(message: email.message.EmailMessage, index: int) -> dict[str, object]:
+def summarize_email_message(source: EmailSource, index: int) -> dict[str, object]:
+    """Attachments are numbered exactly like the collector row (``attachment_payloads``), so attachment
+    ``index`` k here, in the collector row and in the source-email-attachment export are the same bytes."""
+    message = source.message
     attachments = []
+    for attachment_index, (part, payload, provenance) in enumerate(
+        attachment_payloads(message, raw=source.raw, raw_offset=source.raw_offset), start=1
+    ):
+        attachments.append(
+            {
+                "index": attachment_index,
+                "filename": part.get_filename() or "",
+                "content_type": part.get_content_type(),
+                "content_id": str(part.get("content-id") or ""),
+                "size": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest() if payload else "",
+                **provenance,
+                "exportable": len(payload) <= EMAIL_ATTACHMENT_EXPORT_MAX_BYTES,
+                "export_limit": EMAIL_ATTACHMENT_EXPORT_MAX_BYTES,
+            }
+        )
     body_parts = []
-    attachment_index = 0
-    for part in message.walk():
-        content_disposition = str(part.get_content_disposition() or "")
-        filename = part.get_filename()
-        content_type = part.get_content_type()
-        if content_disposition == "attachment" or filename:
-            attachment_index += 1
-            payload = part.get_payload(decode=True) or b""
-            attachments.append(
-                {
-                    "index": attachment_index,
-                    "filename": filename or "",
-                    "content_type": content_type,
-                    "content_id": str(part.get("content-id") or ""),
-                    "size": len(payload),
-                    "sha256": hashlib.sha256(payload).hexdigest() if payload else "",
-                    "exportable": len(payload) <= EMAIL_ATTACHMENT_EXPORT_MAX_BYTES,
-                    "export_limit": EMAIL_ATTACHMENT_EXPORT_MAX_BYTES,
-                }
-            )
+    for part in message_body_parts(message):
+        try:
+            body_parts.append(part.get_content())
+        except (LookupError, UnicodeDecodeError):
             continue
-        if content_type in {"text/plain", "text/html"}:
-            try:
-                body_parts.append(part.get_content())
-            except (LookupError, UnicodeDecodeError):
-                continue
     body = "\n".join(str(part) for part in body_parts)
     return {
         "index": index,
@@ -639,24 +651,22 @@ def build_email_attachment_package(
     include_content: bool,
 ) -> dict[str, object]:
     try:
-        messages, diagnostics = read_email_messages_with_diagnostics(source_path, suffix)
+        sources, diagnostics = read_email_messages_with_diagnostics(source_path, suffix)
     except OSError as exc:
         raise HTTPException(status_code=400, detail=f"Email attachment package failed: {exc}") from exc
-    if message_index > len(messages):
+    if message_index > len(sources):
         detail = (
             "message_index not found within bounded email parse"
             if diagnostics.get("source_truncated") or diagnostics.get("message_limit_reached")
             else "message_index not found"
         )
         raise HTTPException(status_code=404, detail=detail)
-    message = messages[message_index - 1]
-    attachments: list[tuple[email.message.EmailMessage, bytes]] = []
-    for part in message.walk():
-        if str(part.get_content_disposition() or "") == "attachment" or part.get_filename():
-            attachments.append((part, part.get_payload(decode=True) or b""))
+    source = sources[message_index - 1]
+    message = source.message
+    attachments = attachment_payloads(message, raw=source.raw, raw_offset=source.raw_offset)
     if attachment_index > len(attachments):
         raise HTTPException(status_code=404, detail="attachment_index not found")
-    part, payload = attachments[attachment_index - 1]
+    part, payload, provenance = attachments[attachment_index - 1]
     hashes = compute_hashes_for_bytes(payload)
     content_b64 = ""
     content_status = "not-requested"
@@ -724,6 +734,7 @@ def build_email_attachment_package(
         "content_id": str(part.get("content-id") or ""),
         "size": len(payload),
         "hashes": hashes,
+        **provenance,
         "content_status": content_status,
         "content_base64": content_b64,
         "max_inline_content_bytes": EMAIL_ATTACHMENT_EXPORT_MAX_BYTES,

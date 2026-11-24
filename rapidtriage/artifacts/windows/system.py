@@ -2797,7 +2797,7 @@ def parse_web_server_log_lines(lines: list[str], *, max_rows: int = 200) -> dict
             methods[method] = methods.get(method, 0) + 1
         if uri and len(uri_samples) < 25:
             uri_samples.append(uri)
-        if time_profile["iso8601"] and len(timeline_samples) < 50:
+        if (time_profile["iso8601"] or time_profile.get("local_time")) and len(timeline_samples) < 50:
             timeline_samples.append(web_log_timeline_sample(row, uri, time_profile))
         suspicious_profile = web_request_suspicion_profile(row, uri, time_profile=time_profile)
         if suspicious_profile["risk_flags"] and len(suspicious_requests) < 25:
@@ -2958,7 +2958,15 @@ def normalize_web_log_time(row: Mapping[str, str]) -> dict[str, object]:
         try:
             moment = dt.datetime.fromisoformat(normalized)
             if moment.tzinfo is None:
-                moment = moment.replace(tzinfo=dt.timezone.utc)
+                # No offset in the record and no confirmed log setting: the
+                # wall clock is kept as written and never assumed to be UTC.
+                return {
+                    "raw": time_value,
+                    "iso8601": None,
+                    "local_time": moment.isoformat(),
+                    "timezone": "local-unknown",
+                    "parse_status": "json-iso8601-zone-undetermined",
+                }
             return {"raw": time_value, "iso8601": moment.astimezone(dt.timezone.utc).isoformat(), "parse_status": "json-iso8601"}
         except ValueError:
             pass
@@ -2985,6 +2993,11 @@ def web_log_timeline_sample(row: Mapping[str, str], uri: str, time_profile: Mapp
         "timeline_type": "web-request",
         "normalized_time": time_profile.get("iso8601"),
         "time_parse_status": time_profile.get("parse_status"),
+        **(
+            {"local_time": time_profile["local_time"], "timezone": time_profile.get("timezone")}
+            if time_profile.get("local_time")
+            else {}
+        ),
         "method": method,
         "status": status,
         "source_ip": source_ip,
@@ -3030,6 +3043,11 @@ def web_request_suspicion_profile(row: Mapping[str, str], uri: str, *, time_prof
         "time": current_time_profile.get("raw"),
         "normalized_time": current_time_profile.get("iso8601"),
         "time_parse_status": current_time_profile.get("parse_status"),
+        **(
+            {"local_time": current_time_profile["local_time"], "timezone": current_time_profile.get("timezone")}
+            if current_time_profile.get("local_time")
+            else {}
+        ),
     }
 
 

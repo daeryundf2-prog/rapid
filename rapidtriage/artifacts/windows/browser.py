@@ -4454,8 +4454,9 @@ def build_browser_timeline_trusted_diff(
     *,
     trusted_tool: str,
 ) -> dict[str, object]:
-    rapid_index = index_browser_timeline_rows(rapid_rows)
-    trusted_index = index_browser_timeline_rows(trusted_rows)
+    rapid_index, trusted_index = pair_browser_timeline_rows(
+        group_browser_timeline_rows(rapid_rows), group_browser_timeline_rows(trusted_rows)
+    )
     acquisition_identity = reconcile_browser_acquisition_identity(rapid_index, trusted_index)
     payload = build_browser_diff_payload(
         rapid_index,
@@ -4466,6 +4467,17 @@ def build_browser_timeline_trusted_diff(
         key_label="timeline_key",
     )
     payload["acquisition_identity"] = acquisition_identity
+    if acquisition_identity["unresolved_count"]:
+        # Equal content from an acquisition nobody can name is not a verified
+        # comparison of *this* evidence: the result stays undetermined.
+        if payload["status"] == "pass":
+            payload["status"] = "acquisition-identity-unresolved"
+        payload["commercial_grade_evidence"] = False
+        blockers = list(payload["reportability_decision"]["blockers"])
+        payload["reportability_decision"] = {
+            "decision": "do-not-use-browser-output-as-final",
+            "blockers": [*blockers, "browser-acquisition-identity-unresolved"],
+        }
     return payload
 
 
@@ -4732,16 +4744,14 @@ def expand_ai_transcript_pair_rows(
     return expanded
 
 
-def index_browser_timeline_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
-    """Index timeline rows by user, browser, profile, type, time and URL.
+def group_browser_timeline_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, list[dict[str, str]]]:
+    """Group timeline rows by user, browser, profile, type, time and URL.
 
     The user is part of the key so one user's rows cannot stand in for another
-    user's identical URL/time, and repeated keys are numbered (``#2``, ``#3``)
-    so the comparison counts multiplicity instead of collapsing duplicates.
-    Each row also carries its acquisition identity -- the source database
-    SHA-256 and path and the SQLite row id -- and repeated keys are numbered in
-    that order, so two copies of one acquisition's row cannot stand in for the
-    same visit read from two different acquisitions.
+    user's identical URL/time; rows sharing a key stay separate entries so the
+    comparison counts multiplicity instead of collapsing duplicates. Each entry
+    also carries its acquisition identity -- the source database SHA-256 and
+    path and the SQLite row id.
     """
     grouped: dict[str, list[dict[str, str]]] = {}
     for row in rows:
@@ -4780,12 +4790,53 @@ def index_browser_timeline_rows(rows: Sequence[Mapping[str, object]]) -> dict[st
                     "source_path": normalized_diff_value(first_alias(payload, "source_path", "source_file")),
                 }
             )
-    indexed: dict[str, dict[str, str]] = {}
-    for base_key, entries in grouped.items():
+    for entries in grouped.values():
         entries.sort(key=lambda item: (len(item["source_row_id"]), item["source_row_id"], item["source_sha256"], item["source_path"]))
-        for count, entry in enumerate(entries, start=1):
-            indexed[base_key if count == 1 else f"{base_key}#{count}"] = entry
-    return indexed
+    return grouped
+
+
+def pair_browser_timeline_rows(
+    rapid_groups: Mapping[str, list[dict[str, str]]],
+    trusted_groups: Mapping[str, list[dict[str, str]]],
+) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]]]:
+    """Key both sides so repeated rows of one key pair by acquisition.
+
+    Within a key, a rapid row pairs first with the trusted row of the same
+    source SHA-256, then of the same source path -- an identifier both sides
+    carry -- and only the rest pair in sorted order. Paired rows get the same
+    key (``key``, ``key#2`` ...); a side's surplus rows get keys the other side
+    lacks. Sorting each side on its own would cross two correct acquisitions
+    when one side names them by hash and the other by path.
+    """
+    rapid_index: dict[str, dict[str, str]] = {}
+    trusted_index: dict[str, dict[str, str]] = {}
+    for base_key in sorted(set(rapid_groups) | set(trusted_groups)):
+        rapid = list(rapid_groups.get(base_key, []))
+        trusted = list(trusted_groups.get(base_key, []))
+        pairs: list[tuple[dict[str, str], dict[str, str]]] = []
+        for field in ("source_sha256", "source_path"):
+            for rapid_entry in list(rapid):
+                if not rapid_entry[field]:
+                    continue
+                position = next(
+                    (index for index, entry in enumerate(trusted) if entry[field] == rapid_entry[field]),
+                    None,
+                )
+                if position is None:
+                    continue
+                pairs.append((rapid_entry, trusted.pop(position)))
+                rapid.remove(rapid_entry)
+        pairs.extend(zip(rapid, trusted))
+        surplus_rapid, surplus_trusted = rapid[len(trusted) :], trusted[len(rapid) :]
+        count = 0
+        for rapid_entry, trusted_entry in pairs:
+            count += 1
+            key = base_key if count == 1 else f"{base_key}#{count}"
+            rapid_index[key], trusted_index[key] = rapid_entry, trusted_entry
+        for side, surplus in ((rapid_index, surplus_rapid), (trusted_index, surplus_trusted)):
+            for offset, entry in enumerate(surplus, start=count + 1):
+                side[base_key if offset == 1 else f"{base_key}#{offset}"] = entry
+    return rapid_index, trusted_index
 
 
 def reconcile_browser_acquisition_identity(

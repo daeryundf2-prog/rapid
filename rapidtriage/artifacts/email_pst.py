@@ -349,7 +349,7 @@ def parse_ics_events(text: str, *, limit: int = ICS_EVENT_LIMIT) -> tuple[list[d
             if component == "VEVENT":
                 if current is not None:
                     errors += 1
-                current = {"source_char_offset": offset, "attendees": [], "attachments": []}
+                current = {"source_char_offset": offset, "attendees": [], "attachments": [], "exdates": []}
             continue
         if name == "END":
             component = value.strip().upper()
@@ -376,11 +376,28 @@ def parse_ics_events(text: str, *, limit: int = ICS_EVENT_LIMIT) -> tuple[list[d
             current["organizer"] = mail_address(value, params)
         elif name == "ATTACH":
             current["attachments"].append(params.get("FILENAME") or params.get("X-FILENAME") or value[:200])  # type: ignore[union-attr]
+        elif name == "EXDATE":
+            # Every EXDATE line and every comma-separated value, each with its original text and parameters.
+            current["exdates"].extend(ics_date_values(value, params))  # type: ignore[union-attr]
+        elif name == "RECURRENCE-ID":
+            current["recurrence_id"] = ics_date_values(value, params)[0]
         elif name in ("SUMMARY", "LOCATION", "DESCRIPTION", "UID", "STATUS", "RRULE", "DURATION", "CLASS", "URL", "SEQUENCE"):
             current[name.lower()] = unescape_text(value)
     if current is not None:
         errors += 1  # unterminated VEVENT: not emitted
     return events, errors
+
+
+def ics_date_values(value: str, params: Mapping[str, str]) -> list[dict[str, object]]:
+    """RFC 5545 DATE / DATE-TIME list property values: original text, all parameters (TZID, VALUE, RANGE)
+    and the normalised time from ``parse_ics_time``, so an occurrence can be matched to its series."""
+    items: list[dict[str, object]] = []
+    for raw in value.split(","):
+        moment, all_day, _label, tz_status = parse_ics_time(raw, params)
+        items.append(
+            {"value": raw.strip(), "params": dict(params), "time": moment, "all_day": all_day, "timezone_status": tz_status}
+        )
+    return items
 
 
 def parse_vcards(text: str, *, limit: int = EXPORT_ITEM_LIMIT) -> list[dict[str, object]]:
@@ -448,6 +465,8 @@ def calendar_record(event: Mapping[str, object], *, base: Mapping[str, object], 
         "uid": str(event.get("uid") or ""),
         "status": str(event.get("status") or ""),
         "recurrence_rule": str(event.get("rrule") or ""),
+        "recurrence_exception_dates": [dict(item) for item in event.get("exdates") or []],
+        "recurrence_id": dict(event.get("recurrence_id") or {}),
         "created": str(event.get("created") or ""),
         "last_modified": str(event.get("last_modified") or ""),
         "description_preview": " ".join(description.split())[:BODY_PREVIEW_CHARS],

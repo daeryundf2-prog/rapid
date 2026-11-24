@@ -82,6 +82,14 @@ def build_unified_timeline_export(
     for event in events:
         if not matches_filters(event, {**filters, "start": None, "end": None}):
             continue
+        candidates = event.get("assumed_utc_candidate_ticks")
+        if ranged and isinstance(candidates, list):
+            inside = [_ticks_in_range(ticks, start, end) for ticks in candidates]
+            if all(inside):
+                kept.append(event)
+            elif any(inside):
+                undetermined.append(event)
+            continue
         if ranged and event["zone_status"] == ZONE_UNDETERMINED and "assumed_utc_ticks" not in event:
             if _may_fall_in_range(event, start, end):
                 undetermined.append(event)
@@ -97,6 +105,7 @@ def build_unified_timeline_export(
         events = events[:limit]
     for event in (*events, *undetermined):
         event.pop("assumed_utc_ticks", None)
+        event.pop("assumed_utc_candidate_ticks", None)
 
     return {
         "command": "timeline-export",
@@ -161,11 +170,21 @@ def normalize_event(
         "raw": dict(event),
     }
     if zone_status == ZONE_UNDETERMINED and assumed_zone is not None:
-        ticks = _assumed_utc_ticks(timestamp, assumed_zone[0])
-        if ticks is not None:
-            normalized["assumed_utc"] = filetime_to_iso_7(ticks)
+        candidates = _assumed_utc_candidates(timestamp, assumed_zone[0])
+        if candidates is not None:
             normalized["assumed_timezone"] = assumed_zone[1]
-            normalized["assumed_utc_ticks"] = ticks
+            if len(candidates) == 1:
+                normalized["assumed_utc"] = filetime_to_iso_7(candidates[0])
+                normalized["assumed_utc_ticks"] = candidates[0]
+                normalized["assumed_utc_status"] = "single-instant"
+            elif candidates:
+                # A repeated hour: both instants, neither chosen; the range keeps
+                # the row only when every candidate is inside it.
+                normalized["assumed_utc_candidates"] = [filetime_to_iso_7(ticks) for ticks in candidates]
+                normalized["assumed_utc_candidate_ticks"] = candidates
+                normalized["assumed_utc_status"] = "ambiguous-repeated-local-time"
+            else:
+                normalized["assumed_utc_status"] = "nonexistent-local-time"
     return normalized
 
 
@@ -216,9 +235,14 @@ def _event_ticks(event: Mapping[str, object]) -> int | None:
 
 
 def _range_sort_key(event: Mapping[str, object]) -> tuple[int, int, str, str, str]:
-    if isinstance(event.get("assumed_utc_ticks"), int):
+    candidates = event.get("assumed_utc_candidate_ticks")
+    ticks = event.get("assumed_utc_ticks")
+    if isinstance(candidates, list) and candidates:
+        # A repeated hour sorts at its earlier candidate.
+        ticks = min(candidates)
+    if isinstance(ticks, int):
         base = event_sort_key(event)
-        return (1, int(event["assumed_utc_ticks"]), *base[2:])
+        return (1, ticks, *base[2:])
     return event_sort_key(event)
 
 
@@ -268,17 +292,35 @@ def _assumed_zone(value: str | None) -> tuple[dt.tzinfo, str] | None:
         raise TimelineExportError(f"assume_local_timezone is not a UTC offset or a readable time zone name: {text!r}") from exc
 
 
-def _assumed_utc_ticks(timestamp: str, zone: dt.tzinfo) -> int | None:
-    """UTC ticks of a wall clock read in ``zone`` (every fraction digit kept)."""
+def _ticks_in_range(ticks: int, start: str | None, end: str | None) -> bool:
+    start_ticks = event_utc_ticks({"timestamp": start}) if start else None
+    end_ticks = event_utc_ticks({"timestamp": end}) if end else None
+    return (start_ticks is None or ticks >= start_ticks) and (end_ticks is None or ticks <= end_ticks)
+
+
+def _assumed_utc_candidates(timestamp: str, zone: dt.tzinfo) -> list[int] | None:
+    """UTC ticks a wall clock can be when read in ``zone`` (every fraction digit kept).
+
+    Each candidate round-trips: converted back into ``zone`` it is the same wall
+    clock. One candidate on an ordinary day, none in a daylight-saving gap (the
+    wall clock never existed) and two in a repeated hour, earlier first.
+    ``None`` when the timestamp is not a wall clock.
+    """
     wall = event_timestamp_utc_ticks(timestamp)
     if wall[0] is None or wall[1] != "iso-no-offset-assumed-utc":
         return None
     seconds = wall[0] // FILETIME_TICKS_PER_SECOND
-    moment = dt.datetime(1601, 1, 1) + dt.timedelta(seconds=seconds)
-    offset = moment.replace(tzinfo=zone).utcoffset()
-    if offset is None:
-        return None
-    return wall[0] - int(offset.total_seconds()) * FILETIME_TICKS_PER_SECOND
+    local = dt.datetime(1601, 1, 1) + dt.timedelta(seconds=seconds)
+    candidates: set[int] = set()
+    for fold in (0, 1):
+        offset = local.replace(tzinfo=zone, fold=fold).utcoffset()
+        if offset is None:
+            continue
+        instant = local - offset
+        back = instant.replace(tzinfo=dt.timezone.utc).astimezone(zone).replace(tzinfo=None)
+        if back == local:
+            candidates.add(wall[0] - int(offset.total_seconds()) * FILETIME_TICKS_PER_SECOND)
+    return sorted(candidates)
 
 
 def count_by(events: list[Mapping[str, object]], field: str) -> dict[str, int]:
