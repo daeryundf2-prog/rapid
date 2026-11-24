@@ -150,6 +150,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rapid-extract"
+version = "0.1.0"
+dependencies = [
+ "pyo3",
+ "pyo3-build-config",
+]
+
+[[package]]
 name = "rapid-indicators"
 version = "0.1.0"
 
