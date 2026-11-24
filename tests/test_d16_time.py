@@ -527,6 +527,13 @@ class ShippedConsoleTests(unittest.TestCase):
             "rapidtriage/web/static/v2 is stale: rebuild it with `cd frontend && npm run build` and commit the bundle",
         )
 
+    def test_console_pages_are_revalidated_but_hashed_assets_are_not(self) -> None:
+        # A heuristically cached index.html kept serving the previous bundle after an update.
+        self.assertEqual(self.client.get("/").headers.get("cache-control"), "no-cache")
+        self.assertEqual(self.client.get("/v2/").headers.get("cache-control"), "no-cache")
+        (asset,) = re.findall(r'<script type="module"[^>]* src="([^"]+)"', self.page)
+        self.assertIsNone(self.client.get(asset).headers.get("cache-control"))
+
     def test_served_bundle_carries_the_lossless_time_code(self) -> None:
         (asset,) = re.findall(r'<script type="module"[^>]* src="([^"]+)"', self.page)
         script = self.client.get(asset)
