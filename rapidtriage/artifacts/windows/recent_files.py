@@ -10,6 +10,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from ...core.filetime import filetime_to_iso_7
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .common import (
@@ -20,7 +21,7 @@ from .common import (
 from .filesystem import CONTENT_KIND_LABELS_KO, sniff_content_kind
 
 RECENT_ROOT = ("AppData", "Roaming", "Microsoft", "Windows", "Recent")
-PARSER_VERSION = "windows-recent-files-v8"
+PARSER_VERSION = "windows-recent-files-v9"
 MAX_JUMPLIST_INLINE_DESTINATIONS = 256
 MAX_OLE_STREAMS = 128
 MAX_OLE_STREAM_BYTES = 8 * 1024 * 1024
@@ -442,6 +443,10 @@ def parse_lnk_metadata_from_bytes(data: bytes) -> dict[str, object]:
         "target_created_at": windows_filetime_to_iso(read_u64(data, 0x1C)),
         "target_accessed_at": windows_filetime_to_iso(read_u64(data, 0x24)),
         "target_modified_at": windows_filetime_to_iso(read_u64(data, 0x2C)),
+        # Every FILETIME tick (the ISO text above stops at microseconds).
+        **filetime_100ns_fields("target_created_at", read_u64(data, 0x1C)),
+        **filetime_100ns_fields("target_accessed_at", read_u64(data, 0x24)),
+        **filetime_100ns_fields("target_modified_at", read_u64(data, 0x2C)),
         "target_file_size": read_u32(data, 0x34),
         "show_command": read_u32(data, 0x3C),
         "hot_key": read_u16(data, 0x40),
@@ -1222,6 +1227,7 @@ JUMPLIST_ENTRY_DESTLIST_FIELDS = (
     ("hostname_raw_hex", "destlist_hostname_raw_hex"),
     ("last_modified_at", "destlist_last_modified_at"),
     ("last_modified_filetime", "destlist_last_modified_filetime"),
+    ("last_modified_at_100ns", "destlist_last_modified_at_100ns"),
     ("pin_status", "destlist_pin_status"),
     ("pinned", "destlist_pinned"),
     ("access_count", "destlist_access_count"),
@@ -1240,6 +1246,12 @@ JUMPLIST_ENTRY_LNK_FIELDS = (
     ("target_created_at", "target_created_at"),
     ("target_accessed_at", "target_accessed_at"),
     ("target_modified_at", "target_modified_at"),
+    ("target_created_at_100ns", "target_created_at_100ns"),
+    ("target_accessed_at_100ns", "target_accessed_at_100ns"),
+    ("target_modified_at_100ns", "target_modified_at_100ns"),
+    ("target_created_at_filetime", "target_created_at_filetime"),
+    ("target_accessed_at_filetime", "target_accessed_at_filetime"),
+    ("target_modified_at_filetime", "target_modified_at_filetime"),
     ("target_file_size", "target_file_size"),
     ("working_dir", "working_dir"),
     ("command_line_arguments", "command_line_arguments"),
@@ -1277,6 +1289,9 @@ def jumplist_entry_payloads(
             used_streams.add(stream_name)
             payload.update({target: destination.get(source) for source, target in JUMPLIST_ENTRY_LNK_FIELDS})
         payload["timestamp"] = str(entry.get("last_modified_at") or "")
+        # The DestList FILETIME to the tick (row time sort, timeline order).
+        payload["timestamp_100ns"] = str(entry.get("last_modified_at_100ns") or "")
+        payload["timestamp_filetime"] = entry.get("last_modified_filetime") or 0
         payload["timestamp_source"] = "destlist_entry_last_modified" if payload["timestamp"] else "missing_destlist_time"
         payload["timestamp_kind"] = "last-access"
         payloads.append(payload)
@@ -2078,6 +2093,7 @@ def parse_destlist_entries_strict(
             "lnk_stream_present": linked,
             "last_modified_at": windows_filetime_to_iso(last_modified_filetime),
             "last_modified_filetime": last_modified_filetime,
+            "last_modified_at_100ns": filetime_to_iso_7(last_modified_filetime) or "",
             "pin_status": pin_status,
             "pinned": pin_status != -1,
             "path": path,
@@ -3182,6 +3198,11 @@ def append_lnk_destinations(
             "target_created_at": metadata.get("target_created_at", ""),
             "target_accessed_at": metadata.get("target_accessed_at", ""),
             "target_modified_at": metadata.get("target_modified_at", ""),
+            **{
+                f"target_{name}_at_{suffix}": metadata.get(f"target_{name}_at_{suffix}", default)
+                for name in ("created", "accessed", "modified")
+                for suffix, default in (("100ns", ""), ("filetime", 0))
+            },
             "working_dir": metadata.get("working_dir", ""),
             "command_line_arguments": metadata.get("command_line_arguments", ""),
             "link_flag_names": metadata.get("link_flag_names", []),
@@ -3516,6 +3537,12 @@ def format_guid_le(data: bytes) -> str:
     first, second, third = struct.unpack_from("<IHH", data, 0)
     tail = data[8:]
     return f"{first:08x}-{second:04x}-{third:04x}-{tail[0]:02x}{tail[1]:02x}-{tail[2:].hex()}"
+
+
+def filetime_100ns_fields(name: str, value: int) -> dict[str, object]:
+    """``{name}_100ns`` (7-digit UTC text, ``""`` when unset) and ``{name}_filetime``
+    (the raw ticks) of a FILETIME field whose ISO text stops at microseconds."""
+    return {f"{name}_100ns": filetime_to_iso_7(value) or "", f"{name}_filetime": value}
 
 
 def windows_filetime_to_iso(value: int) -> str:

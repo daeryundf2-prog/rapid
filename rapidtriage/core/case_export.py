@@ -19,6 +19,7 @@ from .case_db.base import CaseDatabaseError, normalize_identifier
 from .case_db.helpers import parse_json_object
 from .case_db.schema import artifact_row_data_json, get_schema_version
 from .docs import write_result
+from .filetime import LOCAL_TIMEZONE_LABELS
 
 __all__ = [
     "CASE_UCO_CONTEXT",
@@ -176,6 +177,16 @@ def _event_node(row: Mapping[str, object]) -> dict[str, object]:
     timestamp = _iso_literal(row["timestamp"])
     if timestamp:
         node["uco-action:startTime"] = timestamp
+        # The time's zone basis travels with it: a wall clock of undetermined zone
+        # (local-unknown) is written as recorded and must not be read as UTC.
+        zone = str(row.get("timezone") or "")
+        if zone:
+            node["rapidtriage:timezone"] = zone
+            node["rapidtriage:timeZoneStatus"] = (
+                "wall-clock-zone-undetermined" if zone in LOCAL_TIMEZONE_LABELS else "utc-instant"
+            )
+        if row.get("timestamp_kind"):
+            node["rapidtriage:timestampKind"] = str(row["timestamp_kind"])
     if row["actor"]:
         node["uco-action:actor"] = {"uco-core:name": str(row["actor"])}
     if row["confidence"] is not None:

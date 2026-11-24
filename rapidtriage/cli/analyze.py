@@ -89,6 +89,7 @@ def handle_timeline_export(args: argparse.Namespace, parser: argparse.ArgumentPa
                 event_type=args.event_type,
                 reviewed_status=args.reviewed_status,
                 limit=args.limit,
+                assume_local_timezone=args.assume_local_timezone,
             )
         except (TimelineExportError, OSError, json.JSONDecodeError) as exc:
             parser.error(str(exc))

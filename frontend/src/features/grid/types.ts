@@ -40,6 +40,11 @@ export interface ColumnSpec {
   presets: GridPreset[];
   /** Raw value used for sorting and the client text filter. */
   value: (row: GridRow) => CellValue;
+  /**
+   * Ascending client-sort comparison when `value` order is not the column's order (evidence
+   * times: integer 100 ns ticks, wall clocks of undetermined zone apart). Default: compareValues.
+   */
+  compare?: (a: GridRow, b: GridRow) => number;
   /** Display text; defaults to String(value). Also the cell tooltip and the copy/filter text. */
   format?: (row: GridRow) => string;
   /** Cell tooltip when it should differ from the display text (e.g. the raw value behind a label). */

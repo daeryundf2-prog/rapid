@@ -48,6 +48,7 @@ file: string
 pointer: string
 root: (string | null)
 stable_key: string
+row_sha256?: string
 }
 snapshot: {
 path: (string | null)

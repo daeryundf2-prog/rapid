@@ -331,6 +331,95 @@ export function zoneStatusLabel(status: ZoneStatus): string {
   return status === "utc-instant" ? "UTC 기준 시각" : "현지 시각(시간대 미확정·환산 안 함)";
 }
 
+// ---------------------------------------------------------------------------
+// Integer 100 ns ticks (D16 #12, #13): order and same-instant checks never go through a Date
+// (milliseconds) or a string compare (".000001" vs ".0000007" sort wrongly as text).
+// ---------------------------------------------------------------------------
+
+const TICK_TEXT_RE =
+  /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:[.,](\d+))?\s*(Z|[+-]\d{2}:?\d{2})?$/i;
+
+/** UTC FILETIME ticks of ISO text and whether the text named its zone. */
+export interface UtcTicks {
+  ticks: bigint;
+  offset: boolean;
+}
+
+/**
+ * UTC FILETIME ticks (100 ns since 1601-01-01) of ISO text, every fraction digit up to seven
+ * kept (naive text is read as UTC, `offset: false`). Null when the text is no ISO date-time.
+ * Mirrors rapidtriage.core.filetime.event_timestamp_utc_ticks.
+ */
+export function utcTicksOf(value: unknown): UtcTicks | null {
+  if (typeof value !== "string") return null;
+  const match = TICK_TEXT_RE.exec(value.trim());
+  if (!match) return null;
+  const [, y, mo, d, h, mi, s, fraction = "", zone = ""] = match;
+  const date = new Date(0);
+  date.setUTCFullYear(Number(y), Number(mo) - 1, Number(d));
+  date.setUTCHours(Number(h), Number(mi), Number(s), 0);
+  if (Number.isNaN(date.getTime())) return null;
+  let seconds = BigInt(Math.floor(date.getTime() / 1000)) + 11_644_473_600n;
+  if (zone && zone.toUpperCase() !== "Z") {
+    const digits = zone.slice(1).replace(":", "");
+    const minutes = Number(digits.slice(0, 2)) * 60 + Number(digits.slice(2));
+    seconds -= BigInt((zone.startsWith("-") ? -1 : 1) * minutes * 60);
+  }
+  return {
+    ticks: seconds * 10_000_000n + BigInt(fraction.slice(0, 7).padEnd(7, "0")),
+    offset: zone !== "",
+  };
+}
+
+/**
+ * `fields[key + "_100ns"]` when that sibling is the 7-digit text of the same instant as `value`
+ * (EVTX `timestamp_100ns`, LNK `target_*_at_100ns`, DestList `*last_modified_at_100ns`), else
+ * `value` — the server's sort rule (rapidtriage.core.filetime.precise_time_value).
+ */
+export function preciseTimeOf(fields: Record<string, unknown>, key: string, value: string): string {
+  const precise = fields[`${key}_100ns`];
+  if (typeof precise !== "string" || !precise.trim()) return value;
+  const a = utcTicksOf(precise);
+  const b = utcTicksOf(value);
+  if (!a || !b?.offset) return value;
+  return a.ticks / 10n === b.ticks / 10n ? precise : value;
+}
+
+/**
+ * Sort key of an evidence time. Group 0: UTC instants by exact ticks (the source's decimal ticks
+ * when they agree with the text, else the text's); group 1: wall clocks of undetermined zone, a
+ * group of their own never placed among UTC instants; group 2: unparseable text.
+ */
+export interface EvidenceSortKey {
+  group: 0 | 1 | 2;
+  ticks: bigint;
+  text: string;
+}
+
+export function evidenceSortKey(
+  value: string | null | undefined,
+  sourceZone: string | null | undefined,
+  sourceTicks: string | number | null | undefined,
+): EvidenceSortKey {
+  const text = value ?? "";
+  const reading = utcTicksOf(text);
+  if (sourceZone && Object.hasOwn(WALL_CLOCK_ZONES, sourceZone) && reading && !reading.offset) {
+    return { group: 1, ticks: reading.ticks, text };
+  }
+  const exact = exactSourceFiletime(sourceTicks ?? null);
+  if (exact && reading && BigInt(exact) / 10n === reading.ticks / 10n) {
+    return { group: 0, ticks: BigInt(exact), text };
+  }
+  return reading ? { group: 0, ticks: reading.ticks, text } : { group: 2, ticks: 0n, text };
+}
+
+/** Ascending comparison of two evidence sort keys. */
+export function compareEvidenceSortKeys(a: EvidenceSortKey, b: EvidenceSortKey): number {
+  if (a.group !== b.group) return a.group - b.group;
+  if (a.ticks !== b.ticks) return a.ticks < b.ticks ? -1 : 1;
+  return a.text < b.text ? -1 : a.text > b.text ? 1 : 0;
+}
+
 /**
  * A wall clock converted under an assumed zone (the evidence's own zone setting), or null when no
  * valid zone is given. Kept apart from the source value: the assumption is the analyst's.

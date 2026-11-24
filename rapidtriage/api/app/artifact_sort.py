@@ -24,9 +24,11 @@ that tuple aligned with ``TIME_KEYS`` in
 
 Comparison:
 
-* ``timestamp`` compares chronologically (ISO-8601 with any UTC offset,
-  naive values as UTC); unparseable values follow every parsed one in both
-  orders, in JSONL order.
+* ``timestamp`` compares chronologically as integer UTC 100 ns ticks
+  (ISO-8601 with any UTC offset and up to seven fraction digits, naive
+  values as UTC; a ``<key>_100ns`` sibling of the same instant, e.g. EVTX
+  ``timestamp_100ns``, is read instead of the microsecond text);
+  unparseable values follow every parsed one in both orders, in JSONL order.
 * Other keys compare numerically when every non-empty value is a number or a
   numeric string (decimal or ``0x`` hex). Integers stay exact Python ints;
   floats only come from text containing ``.``/``e``/``E`` or JSON floats.
@@ -57,6 +59,12 @@ from pathlib import Path
 
 from ...core.artifact_profiles import payload_record_count
 from ...core.eventlog_channels import ChannelFilter
+from ...core.filetime import (
+    FILETIME_TICKS_PER_SECOND,
+    FILETIME_UNIX_OFFSET_TICKS,
+    event_timestamp_utc_ticks,
+    precise_time_value,
+)
 from .artifact_filter import filter_artifact_page
 from .jsonl_records import (
     expand_row,
@@ -166,7 +174,7 @@ def sort_value(row: Mapping[str, object], key: str) -> object:
         for name in TIME_KEYS:
             value = details.get(name)
             if not _is_empty(value) and not isinstance(value, (Mapping, list)):
-                return value
+                return precise_time_value(details, name, value)
         return None
     value = details.get(key[len(DETAILS_PREFIX):])
     if _is_empty(value):
@@ -223,6 +231,22 @@ def as_epoch(value: object) -> float | None:
         return None
 
 
+def as_utc_ticks(value: object) -> int | None:
+    """UTC 100 ns ticks since 1601 of an ISO-8601 string (naive = UTC), else ``None``.
+
+    Integer arithmetic keeps all seven fraction digits (two EVTX records 600 ns
+    apart sort apart); other ISO forms (a date alone, pre-1601) fall back to
+    the epoch reading.
+    """
+    if not isinstance(value, str):
+        return None
+    ticks = event_timestamp_utc_ticks(value)[0]
+    if ticks is not None:
+        return ticks
+    epoch = as_epoch(value)
+    return None if epoch is None else round(epoch * FILETIME_TICKS_PER_SECOND) + FILETIME_UNIX_OFFSET_TICKS
+
+
 def _text(value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -256,7 +280,7 @@ def _format_bytes(count: int) -> str:
 class SortKeyCollector:
     """Compact per-row sort keys gathered in one scan (no raw values kept).
 
-    Modes: ``chronological`` (epoch ``array('d')``), ``numeric`` (exact ints
+    Modes: ``chronological`` (UTC 100 ns ticks in ``array('q')``), ``numeric`` (exact ints
     in ``array('q')`` plus floats in ``array('d')``; raises ``_NeedsText`` on
     the first non-numeric value or an int beyond 64 bits) and ``text``
     (case-folded keys cut to ``SORT_TEXT_KEY_CHARS``, with an estimated byte
@@ -284,12 +308,12 @@ class SortKeyCollector:
             if isinstance(value, float) and not math.isfinite(value):
                 self.missing.append(index)
                 return
-            epoch = as_epoch(value)
-            if epoch is None:
+            ticks = as_utc_ticks(value)
+            if ticks is None or not _INT64_MIN <= ticks <= _INT64_MAX:
                 self.unparsed.append(index)
             else:
                 self.indices.append(index)
-                self.floats.append(epoch)
+                self.ints.append(ticks)
             return
         number = as_number(value)
         if number is NON_FINITE:
@@ -327,7 +351,9 @@ class SortKeyCollector:
     def _sort_key(self):
         if self.mode == "text":
             return self.texts.__getitem__
-        if self.mode == "chronological" or all(self.is_float):
+        if self.mode == "chronological":
+            return self.ints.__getitem__
+        if all(self.is_float):
             return self.floats.__getitem__
         if not any(self.is_float):
             return self.ints.__getitem__

@@ -227,6 +227,10 @@
               },
               "stable_key": {
                 "type": "string"
+              },
+              "row_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
               }
             }
           },

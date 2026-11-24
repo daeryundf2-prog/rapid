@@ -39,10 +39,13 @@ from .artifacts import SUPPORTED_ARTIFACT_KINDS, run_artifact_collection
 from .docs import scan_document_candidates
 from .files import run_files_scan
 from .filetime import (
+    LOCAL_TIMEZONE_LABELS,
     MIN_PLAUSIBLE,
     datetime_to_filetime,
     event_timestamp_utc_ticks,
+    filetime_to_iso_7,
     parse_iso_utc,
+    precise_time_value,
 )
 from .input_root import resolve_input_root
 from .rules import RuleSet, annotate_timeline_payload
@@ -390,7 +393,6 @@ TIMELINE_BUILD_STAMP_FIELDS: dict[str, tuple[str, ...]] = {
 BUILD_STAMP_NOTE = (
     "PE 링크/컴파일 시각(TimeDateStamp)은 재현 가능 빌드에서 해시값이 들어가므로 이벤트로 쓰지 않고 행 필드로만 둡니다."
 )
-LOCAL_TIMEZONE_LABELS = frozenset({"local-unknown", "exif-local", "local", "device-local"})
 _OFFSET_LABEL_RE = re.compile(r"^[+-]\d{2}:?\d{2}$")
 EVENTLOG_TYPES = frozenset({"eventlog-event", "eventlog-detection"})
 # Record identity used for dedupe: first present field wins.
@@ -774,9 +776,19 @@ def _event_labels(event: Mapping[str, object]) -> list[str]:
 
 
 def _instant_key(value: object) -> str:
-    """Same instant, same key (``Z``/``+00:00``/7-digit fractions agree)."""
+    """Same instant, same key: integer UTC 100 ns ticks, so ``Z``/``+00:00`` and
+    fraction lengths agree while times one tick apart stay two events."""
+    ticks = event_timestamp_utc_ticks(value)[0]
+    if ticks is not None:
+        return str(ticks)
     parsed = parse_iso_utc(value)
     return parsed.isoformat() if parsed is not None else str(value)
+
+
+def _second_key(value: object) -> str:
+    """UTC second of a time (``YYYY-MM-DDTHH:MM:SS``) for inventory grouping."""
+    parsed = parse_iso_utc(value)
+    return parsed.isoformat()[:19] if parsed is not None else str(value)[:19]
 
 
 def _merge_eventlog_detection(existing: dict[str, object], incoming: dict[str, object]) -> bool:
@@ -923,10 +935,11 @@ def normalize_event_time(
     tz_label = str(timezone or "UTC")
     source_timezone = ""
     local = tz_label in LOCAL_TIMEZONE_LABELS and not has_offset and bool(text)
+    applied_offset: dt.timedelta | None = None
     if not local and _OFFSET_LABEL_RE.match(tz_label):
         if not has_offset and text:
-            offset = _parse_offset_label(tz_label)
-            parsed = parsed.replace(tzinfo=dt.timezone(offset)).astimezone(dt.timezone.utc)
+            applied_offset = _parse_offset_label(tz_label)
+            parsed = parsed.replace(tzinfo=dt.timezone(applied_offset)).astimezone(dt.timezone.utc)
         source_timezone = tz_label
         tz_label = "UTC"
         if stats is not None:
@@ -948,11 +961,18 @@ def normalize_event_time(
             if len(stats.out_of_range_samples) < 20:
                 stats.out_of_range_samples.append({"event_type": event_type, "field": field_path, "value": str(value)})
             return None
+    # Sub-microsecond digits (100 ns ticks) that ``isoformat`` would drop are converted in ticks.
+    ticks = event_timestamp_utc_ticks(text)[0] if text else None
+    exact = None
+    if ticks is not None and ticks % 10:
+        if applied_offset is not None:
+            ticks -= int(applied_offset.total_seconds()) * 10_000_000
+        exact = filetime_to_iso_7(ticks)
     if local:
-        return parsed.replace(tzinfo=None).isoformat(), tz_label, source_timezone
+        return (exact[:-1] if exact else parsed.replace(tzinfo=None).isoformat()), tz_label, source_timezone
     if text and _is_utc_iso_text(text) and not source_timezone:
         return (text.replace("Z", "+00:00") if text.endswith("Z") else text), tz_label, source_timezone
-    return parsed.isoformat(), tz_label, source_timezone
+    return (f"{exact[:-1]}+00:00" if exact else parsed.isoformat()), tz_label, source_timezone
 
 
 _EXPLICIT_OFFSET_RE = re.compile(r"(Z|[+-]\d{2}:?\d{2})$")
@@ -1288,7 +1308,7 @@ class InventoryKeyTimes:
                 source_record=dict(source_record),
             )
             self._groups[key] = group
-        second = _instant_key(timestamp)[:19]
+        second = _second_key(timestamp)
         group.times[second] += 1
         group.first_value.setdefault(second, timestamp)
         group.sample_key.setdefault(second, str(details.get("key_name") or details.get("key_path") or ""))
@@ -1383,6 +1403,9 @@ def canonical_label(label: str, artifact_type: str = "") -> str:
 
 
 def _instant(value: object) -> str:
+    ticks = event_timestamp_utc_ticks(value)[0]
+    if ticks is not None:
+        return str(ticks)
     parsed = parse_event_timestamp(value)
     return parsed.isoformat() if parsed is not None else ""
 
@@ -1528,7 +1551,7 @@ def iter_artifact_detail_events(
 
 def explicit_row_timestamp(details: Mapping[str, object]) -> tuple[object, str, str] | None:
     """``(timestamp, kind, timezone)`` when a row declares its own evidence time."""
-    value = details.get("timestamp")
+    value = precise_time_value(details, "timestamp", details.get("timestamp"))
     kind = details.get("timestamp_kind") or details.get("timestamp_label")
     if value in (None, "", 0) or not isinstance(kind, str) or not kind.strip():
         return None
@@ -1571,6 +1594,9 @@ def _resolve_field(
                         yield from walk(item, index + 1, item, f"{identity}/{part[:-2]}:{item_identity}")
             return
         child = node.get(part) if isinstance(node, Mapping) else None
+        if index == len(parts) - 1:
+            # A 100 ns sibling (``<field>_100ns``) of the same instant keeps the FILETIME ticks.
+            child = precise_time_value(node, part, child)
         yield from walk(child, index + 1, element, identity)
 
     yield from walk(details, 0, None, "")

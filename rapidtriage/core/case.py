@@ -213,9 +213,20 @@ def upsert_bookmark(
     source_timestamp = find_first_string(item, TIMESTAMP_KEYS)
     artifact_key = find_artifact_key(item)
     summary = build_bookmark_summary(item, extracted_path, source_pointer)
+    # Two rows that share path, instant and type (two logons of one EVTX in the
+    # same 100 ns) differ in content: the row digest keeps their bookmarks apart.
+    row_sha256 = source_row_sha256(item)
     stable_key = build_stable_bookmark_key(
         source_command=source_command,
         source_file=str(source_path),
+        source_path=extracted_path,
+        source_hash=source_hash,
+        source_timestamp=source_timestamp,
+        artifact_key=artifact_key,
+        summary=summary,
+        row_sha256=row_sha256,
+    )
+    snapshot = build_bookmark_snapshot(
         source_path=extracted_path,
         source_hash=source_hash,
         source_timestamp=source_timestamp,
@@ -228,6 +239,7 @@ def upsert_bookmark(
         stable_key=stable_key,
         source_path=source_path,
         source_pointer=source_pointer,
+        snapshot=snapshot,
     )
     merged_tags = normalize_tags(tags)
     reference = build_bookmark_reference(
@@ -236,13 +248,7 @@ def upsert_bookmark(
         source_pointer=source_pointer,
         source_root=str(source_payload.get("root")) if source_payload.get("root") else None,
         stable_key=stable_key,
-    )
-    snapshot = build_bookmark_snapshot(
-        source_path=extracted_path,
-        source_hash=source_hash,
-        source_timestamp=source_timestamp,
-        artifact_key=artifact_key,
-        summary=summary,
+        row_sha256=row_sha256,
     )
 
     if existing is None:
@@ -341,7 +347,12 @@ def find_existing_bookmark(
     stable_key: str,
     source_path: Path,
     source_pointer: str,
+    snapshot: Mapping[str, object],
 ) -> dict[str, object] | None:
+    """The bookmark of this row: same ``bookmark_id``, same stable key (row content
+    included), or a bookmark saved before row digests existed that points at the
+    same output row and recorded the same snapshot. A different row at the same
+    pointer or instant never matches."""
     normalized_bookmark_id = bookmark_id.strip() if bookmark_id else None
     normalized_source_path = str(source_path)
     for item in bookmarks:
@@ -350,9 +361,16 @@ def find_existing_bookmark(
         if normalized_bookmark_id and item.get("bookmark_id") == normalized_bookmark_id:
             return item
         reference = item.get("reference")
-        if isinstance(reference, dict) and reference.get("stable_key") == stable_key:
+        if not isinstance(reference, Mapping):
+            continue
+        if reference.get("stable_key") == stable_key:
             return item
-        if item.get("source_file") == normalized_source_path and item.get("source_pointer") == source_pointer:
+        if (
+            not reference.get("row_sha256")
+            and reference.get("file") == normalized_source_path
+            and reference.get("pointer") == source_pointer
+            and item.get("snapshot") == dict(snapshot)
+        ):
             return item
     return None
 
@@ -599,14 +617,19 @@ def build_bookmark_reference(
     source_pointer: str,
     source_root: str | None,
     stable_key: str,
+    row_sha256: str | None = None,
 ) -> dict[str, str | None]:
-    return {
+    reference: dict[str, str | None] = {
         "command": source_command,
         "file": source_file,
         "pointer": source_pointer,
         "root": source_root,
         "stable_key": stable_key,
     }
+    if row_sha256:
+        # Content digest of the bookmarked row: the reviewed row can be verified later.
+        reference["row_sha256"] = row_sha256
+    return reference
 
 
 def build_bookmark_snapshot(
@@ -654,6 +677,7 @@ def build_stable_bookmark_key(
     source_timestamp: str | None,
     artifact_key: str | None,
     summary: str,
+    row_sha256: str | None = None,
 ) -> str:
     identity: dict[str, str | None] = {
         "source_command": source_command,
@@ -665,9 +689,18 @@ def build_stable_bookmark_key(
     }
     if not any(identity[key] for key in ("path", "hash", "timestamp", "artifact_key")):
         identity["summary"] = summary
+    if row_sha256:
+        identity["row_sha256"] = row_sha256
     serialized = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
     return f"bookmark-{digest}"
+
+
+def source_row_sha256(item: object) -> str:
+    """SHA-256 of the bookmarked row's canonical JSON (sorted keys, compact): the
+    row's own content, so rows equal in path, instant and type stay distinct."""
+    serialized = json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def build_bookmark_summary(item: Mapping[str, object], source_path: str | None, source_pointer: str) -> str:

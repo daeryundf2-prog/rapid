@@ -85,6 +85,7 @@ import "./grid.css";
 
 interface RowValueReader {
   getValue: (id: string) => unknown;
+  original: GridRow;
 }
 type SortingState = { id: string; desc: boolean }[];
 type VisibilityState = Record<string, boolean>;
@@ -568,7 +569,9 @@ export function DataGrid(props: DataGridProps = {}) {
         size: spec.width,
         minSize: spec.minWidth ?? 60,
         sortingFn: (a: RowValueReader, b: RowValueReader, id: string) =>
-          compareValues(a.getValue(id) as CellValue, b.getValue(id) as CellValue),
+          spec.compare
+            ? spec.compare(a.original, b.original)
+            : compareValues(a.getValue(id) as CellValue, b.getValue(id) as CellValue),
       })),
     [orderedColumns],
   );
