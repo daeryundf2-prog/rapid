@@ -337,10 +337,14 @@ def write_worker_script(root: Path, body: str) -> Path:
     if os.name == "nt":
         # Windows cannot execute shebang scripts directly; launch them through
         # a batch wrapper so the fake worker behaves like a compiled binary.
+        # cmd.exe reads .bat text in the console code page (CP949 on Korean
+        # Windows), so a non-ASCII interpreter path is passed through the
+        # inherited environment instead of the file text.
+        os.environ["RAPIDTRIAGE_FAKE_WORKER_PYTHON"] = sys.executable
         launcher = root / "fake_worker.bat"
         launcher.write_text(
-            f'@"{sys.executable}" "%~dp0fake_worker.py" %*\r\n',
-            encoding="utf-8",
+            '@"%RAPIDTRIAGE_FAKE_WORKER_PYTHON%" "%~dp0fake_worker.py" %*\r\n',
+            encoding="ascii",
         )
         return launcher
     return path

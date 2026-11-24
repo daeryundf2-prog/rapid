@@ -6,6 +6,7 @@ screen-module decomposition invariants.
 """
 from __future__ import annotations
 
+import shutil
 import subprocess
 import unittest
 from pathlib import Path
@@ -29,6 +30,8 @@ STYLES_BUNDLE = "\n".join(
 
 class RapidTriageWebVirtualScrollTests(unittest.TestCase):
     def _run_node_suite(self, script: str, marker: str) -> None:
+        if shutil.which("node") is None:
+            self.skipTest("node is required for the JavaScript console suites")
         result = subprocess.run(
             ["node", str(JS_TEST_DIR / script)],
             capture_output=True,
