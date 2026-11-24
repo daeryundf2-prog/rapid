@@ -184,6 +184,13 @@ jobs:
         working-directory: engines/rust
         run: cargo test --workspace --locked
 
+      - name: Compare Rust and Python indicator rows
+        env:
+          RAPIDTRIAGE_RUST_INDICATORS: "1"
+        run: |
+          cargo build --manifest-path engines/rust/Cargo.toml --locked --release -p rapid-indicators
+          python -m unittest tests.test_rust_indicators
+
       - name: Build rapid-worker
         working-directory: engines/rust
         run: cargo build --bin rapid-worker --locked

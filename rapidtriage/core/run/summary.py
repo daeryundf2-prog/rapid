@@ -365,6 +365,7 @@ def build_run_disclosures(
             "size_caps": dict(docs_summary["size_caps"]) if isinstance(docs_summary.get("size_caps"), Mapping) else None,
         },
         "indicators": {
+            **({"kernel": indicators_payload["indicator_kernel"]} if "indicator_kernel" in indicators_payload else {}),
             "display_label": indicator_summary.get("display_label"),
             "rule_count": indicator_summary.get("rule_count", 0),
             "total_before_cap": indicator_summary.get("total_before_cap"),

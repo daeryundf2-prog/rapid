@@ -5,6 +5,7 @@ import datetime as dt
 import hashlib
 import ipaddress
 import json
+import os
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping, MutableMapping, Sequence
@@ -13,6 +14,7 @@ from urllib.parse import urlparse
 
 from .artifact_profiles import iter_payload_records
 from .forensic_accuracy import build_accuracy_gate
+from .indicator_kernel import IndicatorBatch, Span
 from .json_stream import LazyArray, LazyObject, Scalar, open_json
 from .rules import RuleSet
 
@@ -319,7 +321,7 @@ def is_version_like_ipv4(text: str, start: int, end: int) -> bool:
     return False
 
 
-def ipv4_indicator_status(text: str, match: re.Match[str], field_key: str) -> str:
+def ipv4_indicator_status(text: str, start: int, end: int, field_key: str) -> str:
     """``accept``, ``private`` or a rejection reason for an IPv4 candidate token.
 
     Version strings are the dominant false positive (``1.0.0.30`` in paths,
@@ -330,7 +332,7 @@ def ipv4_indicator_status(text: str, match: re.Match[str], field_key: str) -> st
     address. Private/loopback addresses are kept but flagged (never
     rule-matched).
     """
-    value = match.group(0)
+    value = text[start:end]
     if not valid_ipv4(value):
         return "invalid"
     parts = value.split(".")
@@ -341,9 +343,9 @@ def ipv4_indicator_status(text: str, match: re.Match[str], field_key: str) -> st
         return "unspecified-or-broadcast"
     if VERSION_FIELD_RE.search(field_key):
         return "version-like"
-    if is_version_like_ipv4(text, match.start(), match.end()):
+    if is_version_like_ipv4(text, start, end):
         return "version-like"
-    before = text[max(0, match.start() - 48) : match.start()]
+    before = text[max(0, start - 48) : start]
     if VERSION_CONTEXT_RE.search(before):
         return "version-like"  # "Version 1.0.0.0", "ModuleVersion = '1.0.0.0'"
     has_context = has_ip_context_key(field_key) or bool(IP_CONTEXT_TEXT_RE.search(before))
@@ -354,7 +356,7 @@ def ipv4_indicator_status(text: str, match: re.Match[str], field_key: str) -> st
             return "version-like"
         if octets[0] <= 2 and octets[1] <= 39:
             return "oid-like"  # X.509/ASN.1 object identifiers (2.5.4.10, 1.3.36.3)
-        if match.start() == 0 and match.end() == len(text) and NAME_LIKE_FIELD_RE.search(field_key):
+        if start == 0 and end == len(text) and NAME_LIKE_FIELD_RE.search(field_key):
             return "name-like"  # a file/directory name that happens to be a dotted quad
     address = ipaddress.ip_address(value)
     if address.is_private or address.is_loopback or address.is_link_local:
@@ -405,6 +407,14 @@ def build_indicator_summary(
     scanner_accumulator: dict[tuple[str, str, str], dict[str, object]] = {}
     source_counts: Counter[str] = Counter()
     rejections: Counter[str] = Counter()
+
+    def apply_row(text: str, source: Mapping[str, str], spans: list[Span] | None) -> None:
+        collect_indicators_from_text(
+            text, accumulator, source=source, max_sources_per_indicator=max_sources_per_indicator,
+            rejections=rejections, spans=spans,
+        )
+
+    batch = IndicatorBatch(apply_row) if os.environ.get("RAPIDTRIAGE_RUST_INDICATORS") == "1" else None
     for output_name, output_path in iter_run_json_outputs(outputs):
         source = {
             "output": output_name,
@@ -421,6 +431,7 @@ def build_indicator_summary(
                 source=source,
                 max_sources_per_indicator=max_sources_per_indicator,
                 rejections=rejections,
+                batch=batch,
             )
             continue
         payload = (output_payloads or {}).get(output_name)
@@ -438,6 +449,7 @@ def build_indicator_summary(
                 source=source,
                 max_sources_per_indicator=max_sources_per_indicator,
                 rejections=rejections,
+                batch=batch,
             )
             continue
         collect_ioc_scanner_hits_from_payload(
@@ -457,7 +469,10 @@ def build_indicator_summary(
                 },
                 max_sources_per_indicator=max_sources_per_indicator,
                 rejections=rejections,
+                batch=batch,
             )
+    if batch is not None:
+        batch.flush()
 
     enrichment, ti_feed_sources = load_ti_feeds(ti_feeds or [])
     indicators = [
@@ -511,6 +526,7 @@ def build_indicator_summary(
     )
     return {
         "command": "indicators",
+        **({"indicator_kernel": batch.metadata} if batch is not None else {}),
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "run_summary": str(summary.get("outputs", {}).get("summary", "")),
         "options": {
@@ -642,6 +658,7 @@ def collect_indicators_from_artifact_records(
     source: Mapping[str, str],
     max_sources_per_indicator: int,
     rejections: Counter[str] | None = None,
+    batch: IndicatorBatch | None = None,
 ) -> None:
     """Scan a JSONL-backed per-kind payload one row at a time.
 
@@ -658,6 +675,7 @@ def collect_indicators_from_artifact_records(
             source={**source, "pointer": pointer, **context},
             max_sources_per_indicator=max_sources_per_indicator,
             rejections=rejections,
+            batch=batch,
         )
     for index, row in enumerate(iter_payload_records(payload, payload_path=payload_path, expand=False)):
         if str(row.get("artifact_type") or "") in INDICATOR_EXCLUDED_ARTIFACT_TYPES:
@@ -671,6 +689,7 @@ def collect_indicators_from_artifact_records(
                 source={**source, "pointer": pointer, **context},
                 max_sources_per_indicator=max_sources_per_indicator,
                 rejections=rejections,
+                batch=batch,
             )
     hit_contexts = nested_hits or list(iter_ioc_hit_contexts(head, pointer="", include_root=True))
     for pointer, hit, context in hit_contexts:
@@ -734,8 +753,21 @@ def collect_indicators_from_text(
     source: Mapping[str, str],
     max_sources_per_indicator: int,
     rejections: Counter[str] | None = None,
+    batch: IndicatorBatch | None = None,
+    spans: list[Span] | None = None,
 ) -> None:
-    for raw_url in URL_RE.findall(text):
+    if batch is not None:
+        batch.add(text, source)
+        return
+    if spans is None:
+        urls = URL_RE.findall(text)
+        ip_spans = map(re.Match.span, IP_RE.finditer(text))
+        hash_spans = map(re.Match.span, HASH_RE.finditer(text))
+    else:
+        urls = [text[start:end] for family, start, end in spans if family == 0]
+        ip_spans = ((start, end) for family, start, end in spans if family == 1)
+        hash_spans = ((start, end) for family, start, end in spans if family == 2)
+    for raw_url in urls:
         url = normalize_url(raw_url)
         if not url:
             continue
@@ -753,18 +785,18 @@ def collect_indicators_from_text(
             rejections[f"domain:{domain_status}"] += 1
     pointer = str(source.get("pointer") or "")
     field_key = pointer_field_key(pointer)
-    for match in IP_RE.finditer(text):
-        status = ipv4_indicator_status(text, match, field_key)
+    for start, end in ip_spans:
+        status = ipv4_indicator_status(text, start, end, field_key)
         if status not in {"accept", "private"}:
             if rejections is not None:
                 rejections[f"ip:{status}"] += 1
             continue
-        add_indicator(accumulator, "ip", match.group(0), source, max_sources_per_indicator=max_sources_per_indicator)
+        add_indicator(accumulator, "ip", text[start:end], source, max_sources_per_indicator=max_sources_per_indicator)
     hash_field = is_evidence_hash_field(pointer, field_key)
     name_like_field = bool(NAME_LIKE_FIELD_RE.search(field_key))
     stripped = text.strip().lower()
-    for match in HASH_RE.finditer(text):
-        raw_hash = match.group(0)
+    for start, end in hash_spans:
+        raw_hash = text[start:end]
         lowered = raw_hash.lower()
         if lowered in EMPTY_OR_PLACEHOLDER_HASHES or len(set(lowered)) <= 2:
             if rejections is not None:
@@ -774,7 +806,7 @@ def collect_indicators_from_text(
             not name_like_field
             and "/" not in field_key
             and "\\" not in field_key
-            and bool(HASH_LABEL_RE.search(text[max(0, match.start() - 8) : match.start()]))
+            and bool(HASH_LABEL_RE.search(text[max(0, start - 8) : start]))
         )
         standalone = stripped == lowered and not name_like_field
         if standalone and not hash_field:
@@ -846,6 +878,7 @@ def collect_indicators_from_stream(
     source: Mapping[str, str],
     max_sources_per_indicator: int,
     rejections: Counter[str] | None = None,
+    batch: IndicatorBatch | None = None,
 ) -> None:
     """Collect indicators and scanner IOC hits from an output too large to load.
 
@@ -870,6 +903,7 @@ def collect_indicators_from_stream(
                     source={**source, "pointer": pointer, **context},
                     max_sources_per_indicator=max_sources_per_indicator,
                     rejections=rejections,
+                    batch=batch,
                 )
             elif kind == "ioc_root":
                 _, pointer, hit, context = event

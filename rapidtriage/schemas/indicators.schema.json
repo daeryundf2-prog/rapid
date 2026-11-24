@@ -14,6 +14,18 @@
     "command": {
       "const": "indicators"
     },
+    "indicator_kernel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["native_rows", "python_rows", "fallback_reason"],
+      "properties": {
+        "native_rows": {"type": "integer", "minimum": 0},
+        "python_rows": {"type": "integer", "minimum": 0},
+        "fallback_reason": {
+          "enum": [null, "worker-unavailable", "worker-io-error", "worker-timeout", "worker-exit-error", "invalid-worker-response"]
+        }
+      }
+    },
     "generated_at": {
       "type": "string",
       "format": "date-time"

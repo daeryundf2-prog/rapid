@@ -27,3 +27,4 @@
   `--eventlog-evtx-engine rust`. The default stays Python. Rows are identical to
   the Python decoder's (`tests/test_evtx_engine_diff.py`). See
   `docs/architecture/rust-bootstrap.md`.
+- Indicator extraction can use a batched Rust worker for ASCII URLs, IPv4 addresses and hashes. Set `RAPIDTRIAGE_RUST_INDICATORS=1` to enable it. The indicator output and run disclosures record worker use and fallback. [Build and validation instructions](docs/architecture/rust-indicators.md)
