@@ -175,7 +175,10 @@ class WindowsPrefetchProvider:
         if not prefetch_root.is_dir():
             return
         MAM_RUN_BUDGET.reset()
-        for path in sorted(prefetch_root.glob("*.pf"), key=lambda item: item.name.lower()):
+        # iterdir() raises on an unreadable folder (live C:\Windows\Prefetch without admin rights);
+        # glob() would swallow the PermissionError and report a completed run with zero rows.
+        entries = [item for item in prefetch_root.iterdir() if item.suffix.lower() == ".pf"]
+        for path in sorted(entries, key=lambda item: item.name.lower()):
             if not path.is_file():
                 continue
             stat_result = path.stat()
