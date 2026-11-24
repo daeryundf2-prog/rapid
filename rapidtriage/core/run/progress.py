@@ -112,6 +112,9 @@ class RunProgress:
         self._heartbeat_thread: threading.Thread | None = None
         self._last_rows_write = 0.0
         self._plan: dict[str, object] | None = None
+        # Set by finalize_plan: the plan file then holds its final bytes (they
+        # are hashed into the run audit), so finish() must not rewrite it.
+        self._plan_finalized = False
         # RunControlWatcher of this run (set by run_triage_mode; polled by in-process writers).
         self.control_watcher: object | None = None
         # Cooperative cancel state, set from control requests.
@@ -208,7 +211,7 @@ class RunProgress:
             now = _utc_now()
             self._payload["completed_at"] = now
             self._set_stage_locked("completed", now)
-            if self._plan is not None:
+            if self._plan is not None and not self._plan_finalized:
                 for task_id in STAGE_TASKS["report"]:
                     self._task_finished_locked(task_id, status="completed")
                 refresh_plan(self._plan)
@@ -219,7 +222,8 @@ class RunProgress:
                 status = "cancelled" if outcome == "cancelled" else "completed"
             self._payload["status"] = status
             self._write_locked()
-            self._write_plan_file_locked()
+            if not self._plan_finalized:
+                self._write_plan_file_locked()
         self._deactivate()
 
     def fail(self, exc: BaseException) -> None:
@@ -431,6 +435,9 @@ class RunProgress:
             if stuck:
                 self._plan["stuck_providers"] = stuck
             self._write_locked()
+            # The final plan bytes exist before the run audit is written.
+            self._write_plan_file_locked()
+            self._plan_finalized = True
             return json.loads(json.dumps(self._plan, default=json_default))
 
     # -- providers -----------------------------------------------------
