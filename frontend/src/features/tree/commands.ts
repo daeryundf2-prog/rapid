@@ -15,9 +15,13 @@ function idOf(node: TreeModelNode): string {
 /** One `tree.goto.*` command per navigable tree node (saved searches excluded: they are search.* data). */
 export function buildTreeCommands(runId: string | null, model: TreeModelNode[]): Command[] {
   const commands: Command[] = [];
+  // Node ids come from case data; a repeated one must not reach registerCommand, which throws
+  // and (inside an effect) unmounts the whole console. The first node keeps the command.
+  const seen = new Set<string>();
   const visit = (nodes: TreeModelNode[], parentLabel?: string) => {
     for (const node of nodes) {
-      if (!node.id.startsWith("search:saved:") && !node.toggleOnly) {
+      if (!node.id.startsWith("search:saved:") && !node.toggleOnly && !seen.has(idOf(node))) {
+        seen.add(idOf(node));
         const label = parentLabel ? `${parentLabel} › ${node.label}` : node.label;
         commands.push({
           id: idOf(node),

@@ -262,8 +262,10 @@ export function evidenceNode(
   };
   if (!evidence) return root;
   const items = counts ? (counts.files ?? 0) + (counts.artifacts ?? 0) : undefined;
-  const partitions = evidence.partitions.map<TreeModelNode>((partition) => ({
-    id: `evidence:partition:${partition.number}`,
+  const partitions = evidence.partitions.map<TreeModelNode>((partition, index) => ({
+    // The start sector is unique on disk; partition numbers are not guaranteed to be (a 0-based
+    // GPT table once produced two "파티션 1" rows, and a duplicate id blanked the whole console).
+    id: `evidence:partition:${partition.start_sector ?? `#${index}`}`,
     label: partitionLabel(partition),
     icon: "partition",
     marker: partition.selected ? "선택됨" : undefined,
