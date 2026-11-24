@@ -491,6 +491,23 @@ kbd {
   flex: none;
 }
 
+/* Narrow windows: the 48px row overflowed (search over the help button, Ctrl K clipped).
+   The palette stays on Ctrl K and in the help overlay; the brand keeps its mark. */
+@media (max-width: 720px) {
+  .topbar {
+    gap: var(--space-2);
+  }
+
+  .topbar-palette,
+  .brand-word {
+    display: none;
+  }
+
+  .global-search {
+    min-width: 96px;
+  }
+}
+
 /* --- buttons: controls.css (.button .primary/.secondary/.ghost/.danger, .icon-btn) --- */
 
 /* Visible "why disabled" line next to a disabled action (not only on hover/focus). */
@@ -782,7 +799,8 @@ kbd {
 .drawer-handle {
   position: absolute;
   right: var(--space-3);
-  bottom: var(--space-3);
+  /* Above the grid footer (26px) and its horizontal scrollbar (12px): at 12px it sat on both. */
+  bottom: calc(26px + 12px + var(--space-2));
   z-index: 500;
 }
 

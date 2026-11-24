@@ -688,6 +688,11 @@ export const DOMAINS: readonly DomainDef[] = [
           "shimcache-string-candidate",
           "bam-string-candidate",
         ]),
+        typeLabels: {
+          "amcache-string-candidate": "Amcache 문자열 후보",
+          "shimcache-string-candidate": "ShimCache 문자열 후보",
+          "bam-string-candidate": "BAM 문자열 후보",
+        },
         nonEvidence: true,
       },
       {
@@ -704,12 +709,20 @@ export const DOMAINS: readonly DomainDef[] = [
         id: "exec-jumplist-files",
         label: "Jump List 파일",
         target: a("recent-files", ["jumplist-automatic", "jumplist-custom"]),
+        typeLabels: {
+          "jumplist-automatic": "자동 Jump List 파일",
+          "jumplist-custom": "사용자 지정 Jump List 파일",
+        },
         detail: true,
       },
       {
         id: "exec-lnk-invalid",
         label: "비정상 바로가기",
         target: a("recent-files", ["recent-shortcut-invalid-content", "shell-shortcut-invalid-content"]),
+        typeLabels: {
+          "recent-shortcut-invalid-content": "비정상 최근 항목 바로가기",
+          "shell-shortcut-invalid-content": "비정상 바탕화면·시작 메뉴 바로가기",
+        },
       },
       { id: "exec-search-index", label: "Windows 검색 색인", target: a("windows-search-index") },
       {
@@ -721,6 +734,10 @@ export const DOMAINS: readonly DomainDef[] = [
         id: "exec-srum",
         label: "SRUM",
         target: a("windows-execution", ["srum-row-candidate", "srum-database-file"]),
+        typeLabels: {
+          "srum-row-candidate": "SRUM 행 후보",
+          "srum-database-file": "SRUM 데이터베이스 파일",
+        },
       },
       // r3 O1: PCA (text files: windows-execution; Compatibility Assistant\Store: windows-registry) and
       // FeatureUsage. One node per kind; Korean-sorted block.
@@ -827,6 +844,11 @@ export const DOMAINS: readonly DomainDef[] = [
         id: "fs-ntfs-records",
         label: "NTFS 레코드(런)",
         target: a("windows-filesystem", ["mft-record", "usn-record", "ntfs-logfile-transaction-candidate"]),
+        typeLabels: {
+          "mft-record": "MFT 레코드",
+          "usn-record": "USN 레코드",
+          "ntfs-logfile-transaction-candidate": "$LogFile 트랜잭션 후보",
+        },
       },
       {
         id: "fs-strings",
@@ -936,6 +958,11 @@ export const DOMAINS: readonly DomainDef[] = [
           "registry-key-recovery-candidate",
           "registry-value-recovery-candidate",
         ]),
+        typeLabels: {
+          "registry-deleted-cell-candidate": "삭제된 레지스트리 셀 후보",
+          "registry-key-recovery-candidate": "레지스트리 키 복구 후보",
+          "registry-value-recovery-candidate": "레지스트리 값 복구 후보",
+        },
       },
       {
         id: "reg-strings",
@@ -1108,6 +1135,15 @@ export const DOMAINS: readonly DomainDef[] = [
           "browser-session-storage-inventory",
           "browser-sync-inventory",
         ]),
+        typeLabels: {
+          "browser-storage-inventory": "브라우저 저장소 목록",
+          "browser-cache-inventory": "브라우저 캐시 목록",
+          "browser-cookie-store-inventory": "쿠키 저장소 목록",
+          "browser-credential-store-inventory": "자격 증명 저장소 목록",
+          "browser-extension-inventory": "확장 프로그램 목록",
+          "browser-session-storage-inventory": "세션 저장소 목록",
+          "browser-sync-inventory": "동기화 데이터 목록",
+        },
         detail: true,
       },
       {
@@ -1121,6 +1157,10 @@ export const DOMAINS: readonly DomainDef[] = [
         id: "web-cloud-sync",
         label: "클라우드 저장소 동기화(브라우저 측 DB)",
         target: a("browser", ["desktop-cloud-sync-db", "desktop-cloud-sync-row-candidate"]),
+        typeLabels: {
+          "desktop-cloud-sync-db": "클라우드 동기화 DB",
+          "desktop-cloud-sync-row-candidate": "클라우드 동기화 행 후보",
+        },
         note: CLOUD_SYNC_CROSS_NOTE,
       },
       // --- R5 L3: GA cookies, P2P / torrent, URL carving --------------------------------------
@@ -1277,6 +1317,10 @@ export const DOMAINS: readonly DomainDef[] = [
         id: "msg-mobile",
         label: "모바일 메시지",
         target: a("mobile-export", ["mobile-message", "mobile-chat-database"]),
+        typeLabels: {
+          "mobile-message": "모바일 메시지",
+          "mobile-chat-database": "모바일 대화 DB",
+        },
       },
       // r2 M2: Outlook PST/OST rows (pffexport/readpst, opt-in), .eml/.msg and ICS calendars.
       {
@@ -1508,6 +1552,11 @@ export const DOMAINS: readonly DomainDef[] = [
         id: "mobile-ios",
         label: "iOS 백업",
         target: a("mobile-export", ["ios-backup-file", "ios-backup-metadata", "ios-backup-source"]),
+        typeLabels: {
+          "ios-backup-file": "iOS 백업 파일",
+          "ios-backup-metadata": "iOS 백업 메타데이터",
+          "ios-backup-source": "iOS 백업 원본",
+        },
       },
       { id: "mobile-android", label: "Android", target: a("android-apk") },
       // R5 L3: adb backup (.ab) header and its unpacked tar members.
@@ -1670,6 +1719,10 @@ export const DOMAINS: readonly DomainDef[] = [
         id: "af-ads",
         label: "ADS",
         target: a("windows-filesystem", ["ads-stream-candidate", "zone-identifier"]),
+        typeLabels: {
+          "ads-stream-candidate": "ADS 스트림 후보",
+          "zone-identifier": "Zone.Identifier(다운로드 출처)",
+        },
       },
       // r3 O1: BitLocker recovery key files (key value never stored: masked value, identifier, hashes).
       {
@@ -1681,6 +1734,10 @@ export const DOMAINS: readonly DomainDef[] = [
         id: "af-defender",
         label: "Defender 정책·로그",
         target: a("windows-system", ["defender-policy-artifact", "defender-support-log"]),
+        typeLabels: {
+          "defender-policy-artifact": "Defender 정책",
+          "defender-support-log": "Defender 지원 로그",
+        },
       },
     ],
   },
@@ -1710,6 +1767,10 @@ export const DOMAINS: readonly DomainDef[] = [
         id: "ir-bits",
         label: "BITS 작업",
         target: a("windows-system", ["bits-qmgr-transfer-candidate", "bits-qmgr-sqlite-job-candidate"]),
+        typeLabels: {
+          "bits-qmgr-transfer-candidate": "BITS 전송 후보",
+          "bits-qmgr-sqlite-job-candidate": "BITS 작업 후보(qmgr.db)",
+        },
       },
     ],
   },
@@ -1728,11 +1789,22 @@ export const DOMAINS: readonly DomainDef[] = [
           "memory-malfind",
           "memory-artifact",
         ]),
+        typeLabels: {
+          "memory-process": "메모리 프로세스",
+          "memory-network": "메모리 네트워크 연결",
+          "memory-cmdline": "메모리 명령줄",
+          "memory-malfind": "메모리 malfind 후보",
+          "memory-artifact": "메모리 기타 아티팩트",
+        },
       },
       {
         id: "mem-dump",
         label: "메모리 덤프 지표",
         target: a("memory-volatility", ["memory-dump-indicators", "disk-memory-file-indicators"]),
+        typeLabels: {
+          "memory-dump-indicators": "메모리 덤프 지표",
+          "disk-memory-file-indicators": "디스크 메모리 파일 지표(hiberfil·pagefile)",
+        },
       },
       // MDMP / WER crash dumps (stream header: time, PID, exception, modules), not Volatility.
       { id: "mem-crash", label: "크래시 덤프", target: a("memory-volatility", ["crash-dump-indicators"]) },

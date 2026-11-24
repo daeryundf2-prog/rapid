@@ -63,6 +63,25 @@ describe("timeline labels[] (parser-quality r2: one event per record and instant
     expect(cell.querySelector(".sr-only")?.textContent).toBe("(같은 시각: 수정, 접근)");
   });
 
+  it("shows 출처 and 이벤트 in Korean and keeps the raw ids as the filter value and tooltip", () => {
+    const row = mapEvent({
+      ...merged,
+      source: "artifacts",
+      event_type: "artifact-jumplist-automatic-target-accessed",
+      details: { artifact_type: "jumplist-automatic" },
+    });
+    const source = column(timelineCollection.columns, "source");
+    const event = column(timelineCollection.columns, "eventType");
+    expect(source.format?.(row)).toBe("아티팩트");
+    expect(source.value(row)).toBe("artifacts");
+    expect(event.format?.(row)).toBe("자동 Jump List 파일");
+    expect(event.value(row)).toBe("artifact-jumplist-automatic-target-accessed");
+    expect(event.tooltip?.(row)).toBe("artifact-jumplist-automatic-target-accessed");
+    // An event type with its own name wins; an unknown one stays as its id.
+    expect(event.format?.(mapEvent({ ...merged, event_type: "eventlog-event" }))).toBe("EVTX 이벤트");
+    expect(event.format?.(mapEvent({ ...merged, event_type: "no-such-event" }))).toBe("no-such-event");
+  });
+
   it("a single-kind event renders just its label (labels absent or one entry)", () => {
     const row = mapEvent({ ...merged, labels: undefined, timestamp_kind: "run-2" });
     expect(column(timelineCollection.columns, "tsKind").format?.(row)).toBe("실행 2회차");

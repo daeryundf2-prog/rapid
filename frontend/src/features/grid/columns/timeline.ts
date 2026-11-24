@@ -1,6 +1,8 @@
 import { fetchTimelinePage } from "../../../api/collections";
+import type { GridRow } from "../../../contracts/collection";
 import { exactEvidenceTime } from "../../../utils/time";
 import { timestampKindLabel } from "../../../utils/timeKinds";
+import { artifactTypeLabel } from "../../filters/typeLabels";
 import type { CollectionDef } from "../types";
 import {
   col,
@@ -17,6 +19,28 @@ import { TIME_KINDS_SEPARATOR, timeKindsCell } from "./TimelineCells";
 
 /** Time-kind labels moved to utils/timeKinds.ts (shared with the record view); re-exported. */
 export { TIMESTAMP_KIND_LABELS, timestampKindLabel } from "../../../utils/timeKinds";
+
+/** Korean names of the timeline event `source` (core/timeline.py: files, docs, artifacts). */
+export const TIMELINE_SOURCE_LABELS: Readonly<Record<string, string>> = {
+  files: "파일",
+  docs: "문서",
+  artifacts: "아티팩트",
+};
+
+/**
+ * 이벤트 column text: the event type's own Korean name (eventlog-event …), else the Korean name of
+ * the artifact row it came from (`artifact-browser-history-visit` ← browser-history), else the id.
+ * The time kind (방문·수정 …) is the 시각 종류 column.
+ */
+export function timelineEventLabel(row: GridRow): string {
+  const eventType = row.artifactType ?? "";
+  const sourceType = str(row.fields.sourceArtifactType);
+  return (
+    (eventType ? artifactTypeLabel(eventType) : null) ??
+    (sourceType ? artifactTypeLabel(sourceType) : null) ??
+    eventType
+  );
+}
 
 export function timestampKindOf(raw: Record<string, unknown>): string {
   return str(raw.timestamp_kind ?? raw.ts_kind ?? raw.timestamp_label);
@@ -142,8 +166,15 @@ export const timelineCollection: CollectionDef = {
       },
       render: timeKindsCell,
     }),
-    col.field("source", "출처", 90, ["analysis", "compact", "source"], (r) => r.provider),
-    col.field("eventType", "이벤트", 160, ["analysis", "compact"], (r) => r.artifactType),
+    // 출처 / 이벤트 read in Korean; the raw ids stay the filter value and the tooltip.
+    col.field("source", "출처", 90, ["analysis", "compact", "source"], (r) => r.provider, {
+      format: (r) => TIMELINE_SOURCE_LABELS[r.provider ?? ""] ?? r.provider ?? "",
+      tooltip: (r) => r.provider ?? "",
+    }),
+    col.field("eventType", "이벤트", 160, ["analysis", "compact"], (r) => r.artifactType, {
+      format: timelineEventLabel,
+      tooltip: (r) => r.artifactType ?? "",
+    }),
     col.title("요약", 380),
     col.review(),
     col.path(420),
