@@ -698,6 +698,7 @@ def ads_review_priority(
 def collect_recycle_bin_artifacts(root: Path) -> Iterable[ArtifactRecord]:
     recycle_roots = [path for path in iter_evidence_paths(root, "$Recycle.Bin") if path.is_dir()]
     for recycle_root in sorted(recycle_roots, key=lambda item: str(item).lower()):
+        sibling_indexes: dict[Path, dict[str, list[Path]]] = {}
         for metadata_path in sorted(iter_evidence_paths(recycle_root, "$I*"), key=lambda item: str(item).lower()):
             if not metadata_path.is_file():
                 continue
@@ -705,7 +706,12 @@ def collect_recycle_bin_artifacts(root: Path) -> Iterable[ArtifactRecord]:
             metadata_status = str(parsed["metadata_status"])
             metadata_complete = metadata_status == "parsed"
             suffix = metadata_path.name[2:]
-            paired_payload = recycle_bin_payload_for(metadata_path)
+            if metadata_path.parent not in sibling_indexes:
+                sibling_indexes[metadata_path.parent] = recycle_bin_sibling_index(metadata_path.parent)
+            paired_payload = recycle_bin_payload_for(metadata_path, sibling_indexes[metadata_path.parent])
+            # A recycled folder's $R is a directory: it is the payload (its tree),
+            # not a missing file, and it has no file hash of its own.
+            payload_kind = "" if paired_payload is None else ("directory" if paired_payload.is_dir() else "file")
             stat_result = metadata_path.stat()
             yield ArtifactRecord(
                 provider=WindowsFilesystemProvider.name,
@@ -731,7 +737,13 @@ def collect_recycle_bin_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                     "metadata_status": metadata_status,
                     "metadata_issue": parsed["metadata_issue"],
                     "paired_payload_path": str(paired_payload.resolve()) if paired_payload else "",
-                    "paired_payload_hashes": file_hashes(paired_payload) if paired_payload else {},
+                    "paired_payload_kind": payload_kind,
+                    "paired_payload_hashes": file_hashes(paired_payload) if payload_kind == "file" else {},
+                    **(
+                        {"paired_payload_entry_count": recycle_bin_directory_entry_count(paired_payload)}
+                        if payload_kind == "directory" and paired_payload is not None
+                        else {}
+                    ),
                     "validation_required": True,
                     "validation_guidance": "Recycle Bin $I metadata is mapped to the sibling $R payload when present; validate high-value deletion timelines with MFT/USN and shell activity.",
                     "recovery": build_recovery_record(
@@ -742,7 +754,7 @@ def collect_recycle_bin_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                         deletion_state="recycled" if metadata_complete else "unknown",
                         source_path=str(metadata_path.resolve()),
                         source_record_id=suffix,
-                        limitation=recycle_bin_limitation(metadata_status, parsed["metadata_issue"], paired_payload is not None),
+                        limitation=recycle_bin_limitation(metadata_status, parsed["metadata_issue"], payload_kind),
                     ),
                     "risk_flags": ["deleted-file-recycle-bin"],
                     "commercial_grade_ready": False,
@@ -754,23 +766,40 @@ def collect_recycle_bin_artifacts(root: Path) -> Iterable[ArtifactRecord]:
             )
 
 
-def recycle_bin_payload_for(metadata_path: Path) -> Path | None:
-    """Return the ``$R`` file whose name matches the ``$I`` suffix exactly.
+def recycle_bin_sibling_index(directory: Path) -> dict[str, list[Path]]:
+    """Entries of one SID directory by case-folded name, each list in name order."""
+    index: dict[str, list[Path]] = {}
+    try:
+        entries = sorted(directory.iterdir(), key=lambda item: item.name)
+    except OSError:
+        return index
+    for entry in entries:
+        index.setdefault(entry.name.casefold(), []).append(entry)
+    return index
+
+
+def recycle_bin_payload_for(metadata_path: Path, siblings: Mapping[str, list[Path]]) -> Path | None:
+    """Return the ``$R`` file or directory whose name matches the ``$I`` suffix exactly.
 
     ``$IXXXXXX.ext`` pairs only with ``$RXXXXXX.ext`` in the same SID
     directory. A sibling with a different suffix (e.g. a double extension) is
-    a different file and must never be offered as this entry's content.
+    a different file and must never be offered as this entry's content. The
+    match is taken from the directory listing, so the returned path carries
+    the name as stored; a case-only difference (Windows names are
+    case-insensitive) still pairs, the identical spelling first. A recycled
+    folder's ``$R`` is a directory.
     """
     expected = f"$R{metadata_path.name[2:]}"
-    exact = metadata_path.with_name(expected)
-    if exact.is_file():
-        return exact
-    folded = expected.casefold()
+    candidates = siblings.get(expected.casefold(), [])
+    ordered = sorted(candidates, key=lambda item: item.name != expected)
+    return next((item for item in ordered if item.is_file() or item.is_dir()), None)
+
+
+def recycle_bin_directory_entry_count(directory: Path) -> int | None:
     try:
-        siblings = sorted(metadata_path.parent.iterdir(), key=lambda item: item.name)
+        return sum(1 for _ in directory.iterdir())
     except OSError:
         return None
-    return next((item for item in siblings if item.name.casefold() == folded and item.is_file()), None)
 
 
 def recycle_bin_coverage_status(metadata_status: str, paired: bool) -> str:
@@ -785,13 +814,15 @@ def metadata_status_validation(metadata_status: str) -> str:
     return "partial" if metadata_status == "partial" else "rejected"
 
 
-def recycle_bin_limitation(metadata_status: str, issue: str, paired: bool) -> str:
+def recycle_bin_limitation(metadata_status: str, issue: str, payload_kind: str) -> str:
     if metadata_status != "parsed":
         return (
             f"$I metadata is {metadata_status} ({issue}); recycled state and original path are withheld"
-            + ("; the exact-suffix $R payload is present but its origin is unconfirmed." if paired else ".")
+            + ("; the exact-suffix $R payload is present but its origin is unconfirmed." if payload_kind else ".")
         )
-    if paired:
+    if payload_kind == "directory":
+        return "$I metadata confirms the folder was recycled; its content is the paired $R directory tree."
+    if payload_kind:
         return "$I metadata confirms the file was recycled; content recovery requires the paired $R payload."
     return "$I metadata found without a paired $R payload; content bytes are not recoverable from this record."
 

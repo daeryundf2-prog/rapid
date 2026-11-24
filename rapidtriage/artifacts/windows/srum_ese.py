@@ -23,6 +23,7 @@ SRUM_TABLE_FAMILY_MARKERS: dict[str, tuple[str, ...]] = {
         "network usage",
         "network data",
         "bytesreceived",
+        "bytesrecvd",
         "bytes received",
         "bytessent",
         "bytes sent",
@@ -373,7 +374,9 @@ def extract_candidate_fields(value: str) -> dict[str, object]:
         "timestamp": first_regex(ISO_TIMESTAMP_RE, value).replace("Z", "+00:00"),
         "url": url,
         "bytes_sent": int_key_value(key_values, "bytessent", "bytes sent", "sendbytes", "networkbytessent"),
-        "bytes_received": int_key_value(key_values, "bytesreceived", "bytes received", "receivebytes", "networkbytesreceived"),
+        "bytes_received": int_key_value(
+            key_values, "bytesreceived", "bytesrecvd", "bytes received", "receivebytes", "networkbytesreceived"
+        ),
         "energy_usage": int_key_value(key_values, "energyusage", "energy usage", "energy"),
         "cpu_time": int_key_value(key_values, "cputime", "cpu time", "cpu"),
         "interface_luid": first_key_value(key_values, "interfaceluid", "interface luid") or "",

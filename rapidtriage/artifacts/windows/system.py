@@ -106,7 +106,8 @@ REMOTE_CONTROL_SCAN_LIMIT = 2 * 1024 * 1024
 BITS_QMGR_SCAN_LIMIT = 2 * 1024 * 1024
 BITS_QMGR_SQLITE_TABLE_LIMIT = 20
 BITS_QMGR_SQLITE_ROW_LIMIT = 100
-SETUPAPI_SCAN_LIMIT = 4 * 1024 * 1024
+# Listed SetupAPI devices/entries per row; totals are always counted in full.
+SETUPAPI_DEVICE_SAMPLE_LIMIT = 100
 RECALL_SCAN_LIMIT = 2 * 1024 * 1024
 WIFI_PROFILE_ROOT_MARKER = "programdata/microsoft/wlansvc/profiles/interfaces"
 # Quotes and apostrophes delimit device strings in SetupAPI bodies
@@ -1064,7 +1065,9 @@ def collect_setupapi_usb_artifacts(root: Path) -> Iterable[ArtifactRecord]:
         if not path.is_file() or path.name.lower() != "setupapi.dev.log":
             continue
         stat_result = path.stat()
-        entries = parse_setupapi_usb_entries(path)
+        scanned = [0]
+        entries = parse_setupapi_usb_entries(path, scanned)
+        scanned_bytes = scanned[0]
         if not entries:
             continue
         device_ids = sorted({str(entry["device_id"]) for entry in entries if entry.get("device_id")})
@@ -1088,14 +1091,17 @@ def collect_setupapi_usb_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                 "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
                 "timestamp": entries[0].get("timestamp_hint") or isoformat_from_timestamp(stat_result.st_mtime),
                 "timestamp_source": "setupapi_context_timestamp" if entries[0].get("timestamp_hint") else "setupapi_log_modified_at",
-                "coverage_status": "setupapi-usb-bounded-context-scan",
-                "scan_window_bytes": SETUPAPI_SCAN_LIMIT,
-                "scan_truncated": stat_result.st_size > SETUPAPI_SCAN_LIMIT,
-                "unscanned_bytes": max(0, stat_result.st_size - SETUPAPI_SCAN_LIMIT),
+                "coverage_status": "setupapi-usb-full-log-scan",
+                # The window is the whole log, read line by line; a short
+                # read (I/O error) is the only way bytes stay unscanned.
+                "scan_window_bytes": scanned_bytes,
+                "scan_truncated": scanned_bytes < stat_result.st_size,
+                "unscanned_bytes": max(0, stat_result.st_size - scanned_bytes),
                 "reportability": "triage",
-                "device_id_candidates": device_ids[:100],
+                "device_id_candidates": device_ids[:SETUPAPI_DEVICE_SAMPLE_LIMIT],
+                "device_id_count": len(device_ids),
                 "usb_device_review_profile": usb_review_profile,
-                "install_entries": entries[:100],
+                "install_entries": entries[:SETUPAPI_DEVICE_SAMPLE_LIMIT],
                 "install_entry_count": len(entries),
                 "risk_flags": setupapi_usb_risk_flags(usb_review_profile),
                 "parser_confidence": "high"
@@ -1117,16 +1123,20 @@ def collect_setupapi_usb_artifacts(root: Path) -> Iterable[ArtifactRecord]:
         )
 
 
-def parse_setupapi_usb_entries(path: Path) -> list[dict[str, object]]:
+def parse_setupapi_usb_entries(path: Path, scanned: list[int] | None = None) -> list[dict[str, object]]:
     """Return USB device mentions with the start time of their own SetupAPI section.
 
     A section runs from its ``>>>  [header]`` through ``<<<  Section end``. The
     ``Section start`` timestamp follows the header, so entries are dated when the
     section closes; a timestamp never carries over into the next section, and a
     section without a start line leaves its entries undated.
+
+    The whole log is read line by line: a device installed after any fixed
+    prefix of a long-lived log is still found. ``scanned[0]``, when given,
+    receives the number of bytes read.
     """
-    blob = read_prefix(path, SETUPAPI_SCAN_LIMIT)
-    text = decode_best_effort(blob)
+    if scanned is None:
+        scanned = [0]
     entries: list[dict[str, object]] = []
     section: dict[str, object] | None = None
     pending_start = ""
@@ -1143,7 +1153,7 @@ def parse_setupapi_usb_entries(path: Path) -> list[dict[str, object]]:
             entry["timestamp_source"] = "setupapi-section-start" if section["start"] else "setupapi-section-start-missing"
         section = None
 
-    for line_number, line in enumerate(text.splitlines(), start=1):
+    for line_number, line in enumerate(iter_setupapi_lines(path, scanned), start=1):
         stripped = line.strip()
         timestamp_match = SETUPAPI_TIMESTAMP_RE.search(line)
         timestamp = (
@@ -1186,6 +1196,19 @@ def parse_setupapi_usb_entries(path: Path) -> list[dict[str, object]]:
             section["entries"].append(entry)
     close_section()
     return entries
+
+
+def iter_setupapi_lines(path: Path, scanned: list[int]) -> Iterable[str]:
+    """Decoded lines of a SetupAPI log; ``scanned[0]`` accumulates bytes read."""
+    try:
+        with path.open("rb") as handle:
+            for index, raw in enumerate(handle):
+                scanned[0] += len(raw)
+                if index == 0:
+                    raw = raw.removeprefix(b"\xef\xbb\xbf")
+                yield from raw.decode("utf-8", errors="ignore").splitlines()
+    except OSError:
+        return
 
 
 def parse_usb_device_id(device_id: str) -> dict[str, object]:
@@ -1257,12 +1280,16 @@ def setupapi_usb_review_profile(entries: Sequence[Mapping[str, object]]) -> dict
                 existing["first_timestamp_hint"] = timestamp
             if not existing.get("last_timestamp_hint") or timestamp > str(existing.get("last_timestamp_hint")):
                 existing["last_timestamp_hint"] = timestamp
-    devices = sorted(device_profiles.values(), key=lambda item: str(item.get("device_id") or "").lower())[:100]
-    serial_count = sum(1 for device in devices if device.get("serial_number_candidate"))
-    storage_count = sum(1 for device in devices if device.get("contains_storage_hint"))
+    # Totals cover every device read; only the listed sample stops at 100.
+    all_devices = sorted(device_profiles.values(), key=lambda item: str(item.get("device_id") or "").lower())
+    devices = all_devices[:SETUPAPI_DEVICE_SAMPLE_LIMIT]
+    serial_count = sum(1 for device in all_devices if device.get("serial_number_candidate"))
+    storage_count = sum(1 for device in all_devices if device.get("contains_storage_hint"))
     return {
         "profile_version": "setupapi-usb-review-profile-v1",
-        "device_count": len(devices),
+        "device_count": len(all_devices),
+        "devices_listed": len(devices),
+        "devices_truncated": len(all_devices) > len(devices),
         "storage_device_count": storage_count,
         "serial_number_count": serial_count,
         "first_timestamp_hint": min(timestamps) if timestamps else "",

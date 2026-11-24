@@ -76,6 +76,7 @@
               "name": { "type": "string" },
               "size": { "type": "integer" },
               "modified_at": { "type": "string", "format": "date-time" },
+              "modified_at_source": { "type": "string" },
               "hash_source": { "type": "string" },
               "hashes": {
                 "type": "object",

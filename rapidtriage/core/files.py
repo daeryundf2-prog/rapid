@@ -31,6 +31,7 @@ from .extraction_failures import (
     load_extraction_inode_index,
     normalize_relative_key,
 )
+from .filetime import unix_ns_to_iso
 from .forensic_accuracy import build_accuracy_gate
 from .hash_cache import (
     HASH_CACHE_GAP_ID,
@@ -2198,13 +2199,22 @@ def _epoch_to_iso(epoch: float | None) -> str | None:
 _UNIX_EPOCH = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
 
 
-def _stat_birth_epoch(entry_stat: os.stat_result) -> float | None:
-    birth = getattr(entry_stat, "st_birthtime", None)
-    if isinstance(birth, (int, float)):
-        return float(birth)
+def _stat_time_iso(entry_stat: os.stat_result, field: str) -> str | None:
+    """ISO text of a stat time from its integer ``<field>_ns`` (100 ns kept),
+    falling back to the float only where the platform has no ``_ns`` form."""
+    nanoseconds = getattr(entry_stat, f"{field}_ns", None)
+    if isinstance(nanoseconds, int):
+        return unix_ns_to_iso(nanoseconds)
+    value = getattr(entry_stat, field, None)
+    return _epoch_to_iso(value) if isinstance(value, (int, float)) else None
+
+
+def _stat_birth_iso(entry_stat: os.stat_result) -> str | None:
+    if isinstance(getattr(entry_stat, "st_birthtime", None), (int, float)):
+        return _stat_time_iso(entry_stat, "st_birthtime")
     if os.name == "nt":
         # Before Python 3.12 st_ctime is the creation time on Windows.
-        return float(entry_stat.st_ctime)
+        return _stat_time_iso(entry_stat, "st_ctime")
     return None
 
 
@@ -2337,7 +2347,7 @@ def build_file_candidate(
     if not matched_categories:
         return None
     reasons = {category: all_reasons[category] for category in matched_categories}
-    mtime_iso = _epoch_to_iso(entry_stat.st_mtime)
+    mtime_iso = _stat_time_iso(entry_stat, "st_mtime")
     candidate = FileCandidate(
         path=str(path),
         name=path.name,
@@ -2370,18 +2380,17 @@ def build_file_candidate(
     candidate.time_origin = time_origin
     if time_origin == TIME_ORIGIN_FILESYSTEM:
         candidate.fs_modified_at = mtime_iso
-        candidate.fs_accessed_at = _epoch_to_iso(entry_stat.st_atime)
-        candidate.fs_created_at = _epoch_to_iso(_stat_birth_epoch(entry_stat))
+        candidate.fs_accessed_at = _stat_time_iso(entry_stat, "st_atime")
+        candidate.fs_created_at = _stat_birth_iso(entry_stat)
         if os.name != "nt":
-            candidate.fs_changed_at = _epoch_to_iso(entry_stat.st_ctime)
+            candidate.fs_changed_at = _stat_time_iso(entry_stat, "st_ctime")
         candidate.modified_at_origin = TIME_ORIGIN_FILESYSTEM
         candidate.attributes_origin = TIME_ORIGIN_FILESYSTEM if candidate.attributes else ""
         candidate.is_deleted = False
     else:
         candidate.source_file_mtime = mtime_iso
-        candidate.source_file_atime = _epoch_to_iso(entry_stat.st_atime)
-        birth = _stat_birth_epoch(entry_stat)
-        candidate.source_file_ctime = _epoch_to_iso(birth if birth is not None else entry_stat.st_ctime)
+        candidate.source_file_atime = _stat_time_iso(entry_stat, "st_atime")
+        candidate.source_file_ctime = _stat_birth_iso(entry_stat) or _stat_time_iso(entry_stat, "st_ctime")
         candidate.modified_at_origin = TIME_ORIGIN_ACQUISITION_COPY
         candidate.attributes_origin = "host-copy" if candidate.attributes else ""
     sync_deletion_state(candidate)
