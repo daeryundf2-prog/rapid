@@ -184,7 +184,15 @@
             "by_extension_id": "",
             "by_extension_name": "",
             "http_method": "",
-            "server_last_modified": ""
+            "server_last_modified": "",
+            "source_snapshot_id": "fed7056612e2b90894c14a7e2ff792be51afc000cf2e2eb647d195aae4b9b736",
+            "source_snapshot_files": [
+              {
+                "name": "History",
+                "sha256": "779f16740b6777f0df5007d78f4f412772a50aaa4d746ccee92293b94510aa6c",
+                "size": 16384
+              }
+            ]
           }
         },
         {
@@ -230,7 +238,15 @@
             "by_extension_id": "",
             "by_extension_name": "",
             "http_method": "",
-            "server_last_modified": ""
+            "server_last_modified": "",
+            "source_snapshot_id": "faa3f7237548215400cb9a942e18c4c30d19345e80ebeb2f768770ff178b6753",
+            "source_snapshot_files": [
+              {
+                "name": "History",
+                "sha256": "da647054cafa048475860030861135cdd6222712c1befd0f4e851677e6533639",
+                "size": 12288
+              }
+            ]
           }
         },
         {
@@ -258,7 +274,15 @@
             "visit_count": 2,
             "typed_count": 0,
             "hidden": false,
-            "last_visit_time_raw": 13420137900000000
+            "last_visit_time_raw": 13420137900000000,
+            "source_snapshot_id": "fed7056612e2b90894c14a7e2ff792be51afc000cf2e2eb647d195aae4b9b736",
+            "source_snapshot_files": [
+              {
+                "name": "History",
+                "sha256": "779f16740b6777f0df5007d78f4f412772a50aaa4d746ccee92293b94510aa6c",
+                "size": 16384
+              }
+            ]
           }
         },
         {
@@ -286,7 +310,15 @@
             "visit_count": 4,
             "typed_count": 0,
             "hidden": false,
-            "last_visit_time_raw": 13420204200000000
+            "last_visit_time_raw": 13420204200000000,
+            "source_snapshot_id": "fed7056612e2b90894c14a7e2ff792be51afc000cf2e2eb647d195aae4b9b736",
+            "source_snapshot_files": [
+              {
+                "name": "History",
+                "sha256": "779f16740b6777f0df5007d78f4f412772a50aaa4d746ccee92293b94510aa6c",
+                "size": 16384
+              }
+            ]
           }
         },
         {
@@ -314,7 +346,15 @@
             "visit_count": 7,
             "typed_count": 0,
             "hidden": false,
-            "last_visit_time_raw": 13420026900000000
+            "last_visit_time_raw": 13420026900000000,
+            "source_snapshot_id": "faa3f7237548215400cb9a942e18c4c30d19345e80ebeb2f768770ff178b6753",
+            "source_snapshot_files": [
+              {
+                "name": "History",
+                "sha256": "da647054cafa048475860030861135cdd6222712c1befd0f4e851677e6533639",
+                "size": 12288
+              }
+            ]
           }
         },
         {
@@ -657,7 +697,9 @@
                   "source_row_id": 1,
                   "source_database": "places.sqlite",
                   "source_sha256": "a500ca837ddabfd418bd3103fb020923eb2d21ca85e4bfa38e2af8159573c99a",
-                  "row_hash": "9ea63a48dc7b11fd1339b8942cc50d42414615e032121ebeecbae6f26ee5856a",
+                  "source_snapshot_id": "",
+                  "source_snapshot_files": [],
+                  "row_hash": "60cea26a0d9caf90234ab1e400e37a9950e56077d490dde40175215614ca47a5",
                   "source_viewer_locator": {
                     "viewer": "sqlite",
                     "source_table": "moz_places",
@@ -673,6 +715,7 @@
               "timeline_row_hashes": [
                 "88ce7200efa58a952e8da8fa6619644ee9d07bc831bd03dfb27181349d77c9c2"
               ],
+              "source_snapshots": [],
               "large_data_controls": {
                 "max_browser_timeline_rows": 1000,
                 "citation_rows_bounded": false,
@@ -1379,7 +1422,15 @@
             "domain": "support.mozilla.org",
             "visit_count": 3,
             "typed_count": 0,
-            "hidden": false
+            "hidden": false,
+            "source_snapshot_id": "6e8c577c2ab203378f409c1ff221eacec561f03cdbbf1d6f0114a621923e0b7c",
+            "source_snapshot_files": [
+              {
+                "name": "places.sqlite",
+                "sha256": "a500ca837ddabfd418bd3103fb020923eb2d21ca85e4bfa38e2af8159573c99a",
+                "size": 12288
+              }
+            ]
           }
         },
         {
@@ -1955,7 +2006,15 @@
                   "source_row_id": 1,
                   "source_database": "History",
                   "source_sha256": "779f16740b6777f0df5007d78f4f412772a50aaa4d746ccee92293b94510aa6c",
-                  "row_hash": "9fda3e6e58d60d07528fa4d797f408f99088376d28d9905e9f108407a2121a96",
+                  "source_snapshot_id": "fed7056612e2b90894c14a7e2ff792be51afc000cf2e2eb647d195aae4b9b736",
+                  "source_snapshot_files": [
+                    {
+                      "name": "History",
+                      "sha256": "779f16740b6777f0df5007d78f4f412772a50aaa4d746ccee92293b94510aa6c",
+                      "size": 16384
+                    }
+                  ],
+                  "row_hash": "ea967b5447b4b6d4ec05fb4bc377fdad580aec82f14249ac4e022b6bb5222b1d",
                   "source_viewer_locator": {
                     "viewer": "sqlite",
                     "source_table": "urls",
@@ -1979,7 +2038,15 @@
                   "source_row_id": 2,
                   "source_database": "History",
                   "source_sha256": "779f16740b6777f0df5007d78f4f412772a50aaa4d746ccee92293b94510aa6c",
-                  "row_hash": "a104152322e68c90a10fecf4b6557bfcaeb774591aae5c46267a3e696d9d0f8c",
+                  "source_snapshot_id": "fed7056612e2b90894c14a7e2ff792be51afc000cf2e2eb647d195aae4b9b736",
+                  "source_snapshot_files": [
+                    {
+                      "name": "History",
+                      "sha256": "779f16740b6777f0df5007d78f4f412772a50aaa4d746ccee92293b94510aa6c",
+                      "size": 16384
+                    }
+                  ],
+                  "row_hash": "845b49aaf6daadc9db9cbd333a8f829b826607d1a394e09effce6372d664c8f8",
                   "source_viewer_locator": {
                     "viewer": "sqlite",
                     "source_table": "urls",
@@ -2005,7 +2072,15 @@
                   "source_row_id": 1,
                   "source_database": "History",
                   "source_sha256": "779f16740b6777f0df5007d78f4f412772a50aaa4d746ccee92293b94510aa6c",
-                  "row_hash": "a4b0db8fa4d5ec8e5dc2e0ad747a04861140db53294bb25345579b12bb20d9d5",
+                  "source_snapshot_id": "fed7056612e2b90894c14a7e2ff792be51afc000cf2e2eb647d195aae4b9b736",
+                  "source_snapshot_files": [
+                    {
+                      "name": "History",
+                      "sha256": "779f16740b6777f0df5007d78f4f412772a50aaa4d746ccee92293b94510aa6c",
+                      "size": 16384
+                    }
+                  ],
+                  "row_hash": "0f2d28fea57fa3d447d9d82d19a169caaf280567066604d2f13c48006f91ce32",
                   "source_viewer_locator": {
                     "viewer": "sqlite",
                     "source_table": "downloads",
@@ -2021,6 +2096,20 @@
                 "7a73e3ac428ed8beace0e528487f9000204b6603a5eefe79ab6e5f7f246b30f6",
                 "5717465f045ab6390f9b57475352cdaad3974fb53ad8546647a91678dc15047d",
                 "65ce30069b8693c00ef93dce2d12d83ff4d73d2ffd4725f669315b0476a5ba92"
+              ],
+              "source_snapshots": [
+                {
+                  "snapshot_id": "fed7056612e2b90894c14a7e2ff792be51afc000cf2e2eb647d195aae4b9b736",
+                  "files": [
+                    {
+                      "name": "History",
+                      "sha256": "779f16740b6777f0df5007d78f4f412772a50aaa4d746ccee92293b94510aa6c",
+                      "size": 16384
+                    }
+                  ],
+                  "wal_included": false,
+                  "hash_scope": "individual-source-files; database hash excludes WAL"
+                }
               ],
               "large_data_controls": {
                 "max_browser_timeline_rows": 1000,
@@ -3192,7 +3281,15 @@
                   "source_row_id": 1,
                   "source_database": "History",
                   "source_sha256": "da647054cafa048475860030861135cdd6222712c1befd0f4e851677e6533639",
-                  "row_hash": "b9dfaffa74a1bdf791f416f6f8197411ac84ad809cb63a82daaa79051824f013",
+                  "source_snapshot_id": "faa3f7237548215400cb9a942e18c4c30d19345e80ebeb2f768770ff178b6753",
+                  "source_snapshot_files": [
+                    {
+                      "name": "History",
+                      "sha256": "da647054cafa048475860030861135cdd6222712c1befd0f4e851677e6533639",
+                      "size": 12288
+                    }
+                  ],
+                  "row_hash": "7450443a4578e154690ee5f7b9654b1dc7a82c79e202d5f964e3786cb63c6df5",
                   "source_viewer_locator": {
                     "viewer": "sqlite",
                     "source_table": "urls",
@@ -3218,7 +3315,15 @@
                   "source_row_id": 1,
                   "source_database": "History",
                   "source_sha256": "da647054cafa048475860030861135cdd6222712c1befd0f4e851677e6533639",
-                  "row_hash": "935db3807ec341030eeb0924ca77cc934640bd476d4e7c23f92bf7819f2a90a1",
+                  "source_snapshot_id": "faa3f7237548215400cb9a942e18c4c30d19345e80ebeb2f768770ff178b6753",
+                  "source_snapshot_files": [
+                    {
+                      "name": "History",
+                      "sha256": "da647054cafa048475860030861135cdd6222712c1befd0f4e851677e6533639",
+                      "size": 12288
+                    }
+                  ],
+                  "row_hash": "9a901b442ba8fe0feef2410e05c4bce95eb238f6022f13f662e1c6e5a74b1f5f",
                   "source_viewer_locator": {
                     "viewer": "sqlite",
                     "source_table": "downloads",
@@ -3233,6 +3338,20 @@
               "timeline_row_hashes": [
                 "0526f1f6a4a441eef78b874b27baa76bd99c4c364187e85a1895d7fcf1462e05",
                 "31ba4d4c5501f224680aaa1bdc9053f92b8af7eadb073ec3cc4823b997604c70"
+              ],
+              "source_snapshots": [
+                {
+                  "snapshot_id": "faa3f7237548215400cb9a942e18c4c30d19345e80ebeb2f768770ff178b6753",
+                  "files": [
+                    {
+                      "name": "History",
+                      "sha256": "da647054cafa048475860030861135cdd6222712c1befd0f4e851677e6533639",
+                      "size": 12288
+                    }
+                  ],
+                  "wal_included": false,
+                  "hash_scope": "individual-source-files; database hash excludes WAL"
+                }
               ],
               "large_data_controls": {
                 "max_browser_timeline_rows": 1000,
@@ -3951,7 +4070,15 @@
             "transition_core": "LINK",
             "transition_qualifiers": [],
             "visit_duration_micros": null,
-            "url_resolved": true
+            "url_resolved": true,
+            "source_snapshot_id": "6e8c577c2ab203378f409c1ff221eacec561f03cdbbf1d6f0114a621923e0b7c",
+            "source_snapshot_files": [
+              {
+                "name": "places.sqlite",
+                "sha256": "a500ca837ddabfd418bd3103fb020923eb2d21ca85e4bfa38e2af8159573c99a",
+                "size": 12288
+              }
+            ]
           }
         }
       ]

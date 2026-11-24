@@ -2956,6 +2956,11 @@ def build_browser_history_download_citation_manifest(
         )
         for row in unified_timeline[:MAX_BROWSER_TIMELINE_ROWS]
     ]
+    source_snapshots: dict[str, dict[str, object]] = {}
+    for row in [*history_rows[:MAX_BROWSER_TIMELINE_ROWS], *download_rows[:MAX_BROWSER_TIMELINE_ROWS]]:
+        snapshot = browser_row_snapshot_reference(row.get("sqlite_snapshot"))
+        if snapshot:
+            source_snapshots.setdefault(str(snapshot["snapshot_id"]), snapshot)
     manifest: dict[str, object] = {
         "manifest_version": "browser-history-download-citation-manifest-v1",
         "item_number": 46,
@@ -2975,6 +2980,7 @@ def build_browser_history_download_citation_manifest(
         "history_citations": history_citations,
         "download_citations": download_citations,
         "timeline_row_hashes": timeline_row_hashes,
+        "source_snapshots": list(source_snapshots.values()),
         "large_data_controls": {
             "max_browser_timeline_rows": MAX_BROWSER_TIMELINE_ROWS,
             "citation_rows_bounded": len(history_rows) + len(download_rows) > len(history_citations) + len(download_citations),
@@ -3393,6 +3399,7 @@ def browser_row_citation(
         "source_row_id": source_row_id,
         "source_path": str(row_source_path.resolve()),
     }
+    snapshot = browser_row_snapshot_reference(row.get("sqlite_snapshot"))
     citation_payload = {
         "row_type": row_type,
         "browser": browser,
@@ -3406,6 +3413,8 @@ def browser_row_citation(
         "source_row_id": source_row_id,
         "source_database": str(row.get("source_database") or row_source_path.name),
         "source_sha256": row_source_hashes.get("sha256") or "",
+        "source_snapshot_id": snapshot.get("snapshot_id", ""),
+        "source_snapshot_files": snapshot.get("files", []),
     }
     return {
         **citation_payload,
@@ -3416,6 +3425,37 @@ def browser_row_citation(
             f"[{source_table}:{source_row_id if source_row_id is not None else source_index}]"
         ),
         "validation_status": "source-row-citation-candidate",
+    }
+
+
+def browser_row_snapshot_reference(provenance: object) -> dict[str, object]:
+    """Compact, hashable identity of the SQLite file set a row was read from.
+
+    The database hash alone does not cover rows that exist only in the WAL, so
+    the citation names every file that was part of the read (database, WAL,
+    hot journal) by file name (siblings of the cited database), SHA-256 and
+    size under one ``snapshot_id``.
+    """
+    if not isinstance(provenance, Mapping):
+        return {}
+    files = [
+        {
+            "name": Path(str(item.get("path") or "")).name,
+            "sha256": str(item.get("sha256") or ""),
+            "size": item.get("st_size"),
+        }
+        for item in provenance.get("files") or []
+        if isinstance(item, Mapping) and item.get("exists") and item.get("sha256")
+    ]
+    if not files:
+        return {}
+    return {
+        "snapshot_id": stable_browser_sha256(
+            {"files": [(item["name"], item["sha256"], item["size"]) for item in files]}
+        ),
+        "files": files,
+        "wal_included": bool(provenance.get("wal_included")),
+        "hash_scope": str(provenance.get("hash_scope") or ""),
     }
 
 
@@ -4718,18 +4758,30 @@ def expand_ai_transcript_pair_rows(
 
 
 def index_browser_timeline_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    """Index timeline rows by user, browser, profile, type, time and URL.
+
+    The user is part of the key so one user's rows cannot stand in for another
+    user's identical URL/time, and repeated keys are numbered (``#2``, ``#3``)
+    so the comparison counts multiplicity instead of collapsing duplicates.
+    """
     indexed: dict[str, dict[str, str]] = {}
+    occurrences: dict[str, int] = {}
     for row in rows:
         for payload in browser_timeline_diff_payloads(row):
+            user = normalized_diff_value(first_alias(payload, "user", "user_name", "username", "profile_user"))
             browser = normalized_diff_value(first_alias(payload, "browser"))
             profile = normalized_diff_value(first_alias(payload, "profile"))
             url = normalized_diff_value(first_alias(payload, "url", "source_url", "target_url"))
             timestamp = normalized_diff_value(first_alias(payload, "timestamp", "visit_time", "start_time", "started_at"))
             timeline_type = normalized_diff_value(first_alias(payload, "timeline_type", "type", "row_type"))
-            key = "|".join(item for item in (browser, profile, timeline_type, timestamp, url) if item)
-            if not key:
+            base_key = "|".join(item for item in (user, browser, profile, timeline_type, timestamp, url) if item)
+            if not base_key:
                 continue
+            occurrences[base_key] = occurrences.get(base_key, 0) + 1
+            count = occurrences[base_key]
+            key = base_key if count == 1 else f"{base_key}#{count}"
             indexed[key] = {
+                "user": user,
                 "browser": browser,
                 "profile": profile,
                 "timeline_type": timeline_type,
@@ -4762,6 +4814,7 @@ def browser_timeline_diff_payloads(row: Mapping[str, object]) -> list[Mapping[st
             child = dict(item)
             child.setdefault("browser", payload.get("browser", ""))
             child.setdefault("profile", payload.get("profile", ""))
+            child.setdefault("user", payload.get("user", ""))
             expanded.append(child)
         if expanded:
             return expanded
@@ -7413,9 +7466,18 @@ def browser_sqlite_rows(
         else:
             errors.append(browser_parse_error_record(context, resolved, reason="SQLite 헤더가 아님"))
         return []
+    provenance: dict[str, object] = {}
     try:
-        with open_sqlite_snapshot(path) as connection:
-            return reader(connection, resolved)
+        with open_sqlite_snapshot(path, provenance=provenance) as connection:
+            records = reader(connection, resolved)
+        # Rows that exist only in the WAL are not covered by the database hash;
+        # every row names the file set (database + WAL) it was read from.
+        snapshot = browser_row_snapshot_reference(provenance)
+        for record in records:
+            if isinstance(record.details, dict) and snapshot:
+                record.details.setdefault("source_snapshot_id", snapshot["snapshot_id"])
+                record.details.setdefault("source_snapshot_files", snapshot["files"])
+        return records
     except (sqlite3.DatabaseError, OSError) as exc:
         errors.append(
             browser_parse_error_record(context, resolved, reason="SQLite 스냅숏/질의 실패", error=exc)

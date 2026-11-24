@@ -1112,28 +1112,75 @@ def collect_setupapi_usb_artifacts(root: Path) -> Iterable[ArtifactRecord]:
 
 
 def parse_setupapi_usb_entries(path: Path) -> list[dict[str, object]]:
+    """Return USB device mentions with the start time of their own SetupAPI section.
+
+    A section runs from its ``>>>  [header]`` through ``<<<  Section end``. The
+    ``Section start`` timestamp follows the header, so entries are dated when the
+    section closes; a timestamp never carries over into the next section, and a
+    section without a start line leaves its entries undated.
+    """
     blob = read_prefix(path, SETUPAPI_SCAN_LIMIT)
     text = decode_best_effort(blob)
     entries: list[dict[str, object]] = []
-    current_timestamp = ""
+    section: dict[str, object] | None = None
+    pending_start = ""
+
+    def close_section() -> None:
+        nonlocal section
+        if section is None:
+            return
+        for entry in section["entries"]:
+            entry["timestamp_hint"] = section["start"]
+            entry["section_start"] = section["start"]
+            entry["section_end"] = section["end"]
+            entry["section_header_line_number"] = section["header_line_number"]
+            entry["timestamp_source"] = "setupapi-section-start" if section["start"] else "setupapi-section-start-missing"
+        section = None
+
     for line_number, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
         timestamp_match = SETUPAPI_TIMESTAMP_RE.search(line)
-        if timestamp_match:
-            current_timestamp = f"{timestamp_match.group('date').replace('/', '-')}T{timestamp_match.group('time')}"
+        timestamp = (
+            f"{timestamp_match.group('date').replace('/', '-')}T{timestamp_match.group('time')}"
+            if timestamp_match
+            else ""
+        )
+        lowered = stripped.lower()
+        if stripped.startswith(">>>") and stripped[3:].lstrip().startswith("["):
+            close_section()
+            section = {"start": pending_start, "end": "", "header_line_number": line_number, "entries": []}
+            pending_start = ""
+        elif lowered.startswith(">>>") and "section start" in lowered and timestamp:
+            if section is not None and not section["start"]:
+                section["start"] = timestamp
+            else:
+                close_section()
+                pending_start = timestamp
+        elif lowered.startswith("<<<") and "section end" in lowered:
+            if section is not None:
+                section["end"] = timestamp
+            close_section()
+            pending_start = ""
         device_match = USB_DEVICE_RE.search(line)
         if not device_match:
             continue
-        entries.append(
-            {
-                "line_number": line_number,
-                "device_id": device_match.group(0).rstrip(".,);]"),
-                "device_profile": parse_usb_device_id(device_match.group(0).rstrip(".,);]")),
-                "timestamp_hint": current_timestamp,
-                "context": line.strip()[:400],
-            }
-        )
+        entry: dict[str, object] = {
+            "line_number": line_number,
+            "device_id": device_match.group(0).rstrip(".,);]"),
+            "device_profile": parse_usb_device_id(device_match.group(0).rstrip(".,);]")),
+            "timestamp_hint": "",
+            "section_start": "",
+            "section_end": "",
+            "section_header_line_number": None,
+            "timestamp_source": "outside-setupapi-section",
+            "context": stripped[:400],
+        }
+        entries.append(entry)
+        if section is not None:
+            section["entries"].append(entry)
         if len(entries) >= 500:
             break
+    close_section()
     return entries
 
 

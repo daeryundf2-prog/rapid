@@ -5749,35 +5749,65 @@ def decode_mounted_device_data(raw: bytes) -> dict[str, object]:
 def match_usbstor_to_usb(
     serial_core: str,
     container_id: str,
-    usb_by_serial: Mapping[str, Mapping[str, str]],
+    usb_by_serial: Mapping[str, Sequence[Mapping[str, str]]],
     usb_by_parent_prefix: Mapping[str, Mapping[str, str]],
     usb_by_container: Mapping[str, Sequence[Mapping[str, str]]],
     *,
     full_serial: str = "",
-) -> tuple[Mapping[str, str], str]:
-    """Join a USBSTOR instance to its Enum\\USB parent: ``(usb_entry, join_method)``.
+) -> tuple[Mapping[str, str], str, list[Mapping[str, str]]]:
+    """Join a USBSTOR instance to its Enum\\USB parent: ``(usb_entry, join_method, ambiguous)``.
 
     Order: exact serial, truncated serial prefix (USBSTOR clips long serials), the USB
     instance's ParentIdPrefix (OS-generated ``7&...&0`` serials), then a ContainerID shared by
-    exactly one VID/PID. ``join_method`` is ``""`` when nothing matched.
+    exactly one VID/PID. A serial is not an identity on its own: different devices can report
+    the same serial, so every Enum\\USB instance carrying it is kept and, when they disagree on
+    VID/PID, the USBSTOR ContainerID decides. Without a deciding ContainerID nothing is joined,
+    ``join_method`` is ``"ambiguous-serial"`` and the competing instances are returned.
+    ``join_method`` is ``""`` when nothing matched.
     """
+    container_lower = container_id.lower()
+
+    def resolve(candidates: Sequence[Mapping[str, str]], method: str) -> tuple[Mapping[str, str], str] | None:
+        if not candidates:
+            return None
+        same_container = (
+            [entry for entry in candidates if entry.get("container_id", "") == container_lower]
+            if container_lower
+            else []
+        )
+        if len({(entry["vid"], entry["pid"]) for entry in candidates}) == 1:
+            return (same_container or candidates)[0], method
+        if same_container and len({(entry["vid"], entry["pid"]) for entry in same_container}) == 1:
+            return same_container[0], f"{method}+container-id"
+        return None
+
     serial_lower = serial_core.lower()
-    if serial_lower in usb_by_serial:
-        return usb_by_serial[serial_lower], "serial"
-    if len(serial_lower) >= 16:
-        prefixed = [entry for name, entry in usb_by_serial.items() if name.startswith(serial_lower)]
-        if len({(entry["vid"], entry["pid"]) for entry in prefixed}) == 1:
-            return prefixed[0], "serial-prefix"
+    ambiguous: list[Mapping[str, str]] = []
+    exact = list(usb_by_serial.get(serial_lower, []))
+    resolved = resolve(exact, "serial")
+    if resolved:
+        return resolved[0], resolved[1], []
+    ambiguous.extend(exact)
+    if len(serial_lower) >= 16 and not exact:
+        prefixed = [
+            entry for name, entries in usb_by_serial.items() if name.startswith(serial_lower) for entry in entries
+        ]
+        resolved = resolve(prefixed, "serial-prefix")
+        if resolved:
+            return resolved[0], resolved[1], []
+        ambiguous.extend(prefixed)
     for prefix in (full_serial.lower(), serial_lower):
         if prefix and prefix in usb_by_parent_prefix:
-            return usb_by_parent_prefix[prefix], "parent-id-prefix"
-    candidates = list(usb_by_container.get(container_id.lower(), [])) if container_id else []
+            return usb_by_parent_prefix[prefix], "parent-id-prefix", []
+    candidates = list(usb_by_container.get(container_lower, [])) if container_id else []
     storage = [entry for entry in candidates if entry.get("usb_service", "").lower() in {"usbstor", "uaspstor"}]
     candidates = storage or candidates
     if candidates and len({(entry["vid"], entry["pid"]) for entry in candidates}) == 1:
         usbstor_first = sorted(candidates, key=lambda entry: entry.get("usb_service", "").lower() != "usbstor")
-        return usbstor_first[0], "container-id"
-    return {}, ""
+        return usbstor_first[0], "container-id", []
+    if ambiguous:
+        return {}, "ambiguous-serial", ambiguous
+    return {}, "", []
 
 
 def usb_and_mounted_device_records(context: NativeHiveRowContext, ccs: str) -> Iterable[ArtifactRecord]:
@@ -5802,7 +5832,7 @@ def usb_and_mounted_device_records(context: NativeHiveRowContext, ccs: str) -> I
         class_key = hive.open_key(f"{ccs}\\Control\\DeviceClasses\\{class_guid}")
         for interface in hive.subkeys(class_key) if class_key is not None else []:
             device_class_times.setdefault(str(interface.name).lower(), []).append((class_guid, interface.last_written_at))
-    usb_by_serial: dict[str, dict[str, str]] = {}
+    usb_by_serial: dict[str, list[dict[str, str]]] = {}
     usb_by_parent_prefix: dict[str, dict[str, str]] = {}
     usb_by_container: dict[str, list[dict[str, str]]] = {}
     usb_root = hive.open_key(f"{ccs}\\Enum\\USB")
@@ -5811,6 +5841,7 @@ def usb_and_mounted_device_records(context: NativeHiveRowContext, ccs: str) -> I
         pid_match = re.search(r"PID_([0-9A-Fa-f]{4})", str(vid_pid.name))
         for instance in hive.subkeys(vid_pid):
             instance_values = hive.values_dict(instance)
+            container = registry_text(instance_values.get("ContainerID")).lower()
             entry = {
                 "vid": vid_match.group(1).upper() if vid_match else "",
                 "pid": pid_match.group(1).upper() if pid_match else "",
@@ -5818,12 +5849,12 @@ def usb_and_mounted_device_records(context: NativeHiveRowContext, ccs: str) -> I
                 "usb_key_last_written_at": instance.last_written_at,
                 "usb_instance_id": str(instance.name),
                 "usb_service": registry_text(instance_values.get("Service")),
+                "container_id": container,
             }
-            usb_by_serial.setdefault(str(instance.name).lower(), entry)
+            usb_by_serial.setdefault(str(instance.name).lower(), []).append(entry)
             parent_prefix = registry_text(instance_values.get("ParentIdPrefix")).lower()
             if parent_prefix:
                 usb_by_parent_prefix.setdefault(parent_prefix, entry)
-            container = registry_text(instance_values.get("ContainerID")).lower()
             if container and "&mi_" not in str(vid_pid.name).lower():
                 usb_by_container.setdefault(container, []).append(entry)
     usbstor = hive.open_key(f"{ccs}\\Enum\\USBSTOR")
@@ -5853,7 +5884,7 @@ def usb_and_mounted_device_records(context: NativeHiveRowContext, ccs: str) -> I
                 {stamp for name, rows in device_class_times.items() if needle in name for _guid, stamp in rows}
             )
             container_id = registry_text(values.get("ContainerID"))
-            usb, usb_join_method = match_usbstor_to_usb(
+            usb, usb_join_method, usb_ambiguous = match_usbstor_to_usb(
                 serial_core, container_id, usb_by_serial, usb_by_parent_prefix, usb_by_container, full_serial=serial
             )
             friendly = registry_text(values.get("FriendlyName"))
@@ -5874,6 +5905,15 @@ def usb_and_mounted_device_records(context: NativeHiveRowContext, ccs: str) -> I
                     "vid": usb.get("vid", ""),
                     "pid": usb.get("pid", ""),
                     "usb_join_method": usb_join_method,
+                    "usb_join_ambiguous_candidates": [
+                        {
+                            "vid": item.get("vid", ""),
+                            "pid": item.get("pid", ""),
+                            "usb_key_path": item.get("usb_key_path", ""),
+                            "container_id": item.get("container_id", ""),
+                        }
+                        for item in usb_ambiguous
+                    ],
                     "usb_instance_id": usb.get("usb_instance_id", ""),
                     "usb_key_path": usb.get("usb_key_path", ""),
                     "usb_key_last_written_at": usb.get("usb_key_last_written_at", ""),

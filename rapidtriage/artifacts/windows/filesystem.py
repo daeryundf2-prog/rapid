@@ -1797,6 +1797,9 @@ def build_native_mft_record(
         "source_index": index,
         "artifact_family": "mft",
         "record_number": str(record.get("record_number_candidate", "")),
+        "record_number_source": str(record.get("record_number_source") or ""),
+        "record_number_header": record.get("record_number_header"),
+        "record_number_header_mismatch": bool(record.get("record_number_header_mismatch")),
         "parent_reference": str(parent_reference or ""),
         "parent_reference_decoded": dict(primary_file_name.get("parent_reference") or {})
         if isinstance(primary_file_name.get("parent_reference"), Mapping)
@@ -2840,31 +2843,88 @@ def usn_record_number_from_record(record: Mapping[str, object], decoded_key: str
     return raw_int & 0x0000FFFFFFFFFFFF if raw_int > 0x0000FFFFFFFFFFFF else raw_int
 
 
+def usn_sequence_number_from_record(record: Mapping[str, object], decoded_key: str, raw_key: str) -> int | None:
+    decoded = record.get(decoded_key) if isinstance(record.get(decoded_key), Mapping) else {}
+    value = decoded.get("sequence_number") if isinstance(decoded, Mapping) else None
+    if value not in (None, ""):
+        return int(value)
+    raw_value = record.get(raw_key)
+    if raw_value in (None, ""):
+        return None
+    return (int(raw_value) >> 48) & 0xFFFF
+
+
+def mft_cache_entry_sequence(entry: Mapping[str, object]) -> int | None:
+    chain = [item for item in entry.get("chain") or [] if isinstance(item, Mapping)]
+    value = chain[0].get("sequence_number") if chain else None
+    return int(value) if isinstance(value, int) or str(value).isdigit() else None
+
+
 def usn_bounded_mft_path_correlation(
     record: Mapping[str, object],
     mft_path_cache: Mapping[int, Mapping[str, object]],
 ) -> dict[str, object]:
     frn = usn_record_number_from_record(record, "file_reference_number_decoded", "file_reference_number")
     parent_frn = usn_record_number_from_record(record, "parent_file_reference_number_decoded", "parent_file_reference_number")
+    frn_sequence = usn_sequence_number_from_record(record, "file_reference_number_decoded", "file_reference_number")
+    parent_sequence = usn_sequence_number_from_record(
+        record, "parent_file_reference_number_decoded", "parent_file_reference_number"
+    )
     file_name = str(record.get("file_name") or "")
     current = mft_path_cache.get(frn) if frn is not None else None
     parent = mft_path_cache.get(parent_frn) if parent_frn is not None else None
+    # A file reference names a slot *and* a generation (sequence number). A
+    # cached MFT entry at the same slot but another generation is a different
+    # file (the slot was reused), so its path must not be attributed to this
+    # USN record.
+    current_sequence = mft_cache_entry_sequence(current) if isinstance(current, Mapping) else None
+    parent_cache_sequence = mft_cache_entry_sequence(parent) if isinstance(parent, Mapping) else None
+    file_sequence_mismatch = (
+        frn_sequence is not None and current_sequence is not None and frn_sequence != current_sequence
+    )
+    parent_sequence_mismatch = (
+        parent_sequence is not None and parent_cache_sequence is not None and parent_sequence != parent_cache_sequence
+    )
+    unresolved_reasons: list[str] = []
+    if file_sequence_mismatch:
+        unresolved_reasons.append(
+            f"file-reference-sequence-mismatch:usn={frn_sequence},mft={current_sequence}"
+        )
+    if parent_sequence_mismatch:
+        unresolved_reasons.append(
+            f"parent-reference-sequence-mismatch:usn={parent_sequence},mft={parent_cache_sequence}"
+        )
     path_candidate = ""
     source = "none"
     status = "no-mft-path-cache-attached" if not mft_path_cache else "no-matching-frn-in-bounded-mft-cache"
-    if isinstance(current, Mapping) and current.get("path"):
+    if isinstance(current, Mapping) and current.get("path") and not file_sequence_mismatch:
         path_candidate = str(current.get("path") or "")
         source = "file-reference-cache"
         status = "matched-file-reference-cache"
-    elif isinstance(parent, Mapping) and parent.get("path") and file_name:
+    elif isinstance(parent, Mapping) and parent.get("path") and file_name and not parent_sequence_mismatch:
         parent_path = str(parent.get("path") or "").rstrip("\\")
         path_candidate = f"{parent_path}\\{file_name}" if parent_path else file_name
         source = "parent-reference-cache-plus-usn-name"
         status = "combined-parent-cache-and-usn-name"
-    elif isinstance(parent, Mapping) and parent.get("path"):
+    elif isinstance(parent, Mapping) and parent.get("path") and not parent_sequence_mismatch:
         path_candidate = str(parent.get("path") or "")
         source = "parent-reference-cache-only"
         status = "partial-parent-cache-only"
+    elif unresolved_reasons:
+        status = "unresolved-mft-sequence-mismatch"
+    file_reference_link = {
+        "usn_sequence_number": frn_sequence if frn_sequence is not None else "",
+        "mft_sequence_number": current_sequence if current_sequence is not None else "",
+        "parent_usn_sequence_number": parent_sequence if parent_sequence is not None else "",
+        "parent_mft_sequence_number": parent_cache_sequence if parent_cache_sequence is not None else "",
+        "file_sequence_match": (
+            None if frn_sequence is None or current_sequence is None else not file_sequence_mismatch
+        ),
+        "parent_sequence_match": (
+            None if parent_sequence is None or parent_cache_sequence is None else not parent_sequence_mismatch
+        ),
+        "unresolved_reasons": unresolved_reasons,
+    }
     return {
         "profile_version": "usn-bounded-mft-path-correlation-v1",
         "status": status,
@@ -2876,6 +2936,7 @@ def usn_bounded_mft_path_correlation(
         "file_reference_cache_hit": isinstance(current, Mapping),
         "parent_reference_cache_hit": isinstance(parent, Mapping),
         "cache_entry_count": len(mft_path_cache),
+        "file_reference_link": file_reference_link,
         "complete_within_bounded_mft_cache": status in {
             "matched-file-reference-cache",
             "combined-parent-cache-and-usn-name",
@@ -2899,9 +2960,20 @@ def usn_parent_name_path_candidate(
     parent_frn = usn_record_number_from_record(record, "parent_file_reference_number_decoded", "parent_file_reference_number")
     parent = mft_path_cache.get(parent_frn) if parent_frn is not None else None
     file_name = str(record.get("file_name") or "")
-    parent_path = str(parent.get("path") or "") if isinstance(parent, Mapping) else ""
+    parent_sequence = usn_sequence_number_from_record(
+        record, "parent_file_reference_number_decoded", "parent_file_reference_number"
+    )
+    parent_cache_sequence = mft_cache_entry_sequence(parent) if isinstance(parent, Mapping) else None
+    parent_sequence_mismatch = (
+        parent_sequence is not None and parent_cache_sequence is not None and parent_sequence != parent_cache_sequence
+    )
+    parent_path = (
+        str(parent.get("path") or "") if isinstance(parent, Mapping) and not parent_sequence_mismatch else ""
+    )
     path_candidate = ""
-    status = "no-parent-frn-path-cache-match"
+    status = (
+        "unresolved-parent-sequence-mismatch" if parent_sequence_mismatch else "no-parent-frn-path-cache-match"
+    )
     if parent_path and file_name:
         stripped_parent = parent_path.rstrip("\\")
         path_candidate = f"{stripped_parent}\\{file_name}" if stripped_parent else file_name
@@ -5544,10 +5616,23 @@ def parse_mft_record_headers(blob: bytes) -> list[dict[str, object]]:
                 timestamp_validation=timestamp_validation,
             )
             validation_status = "valid" if not validation_warnings else "valid-with-warnings"
+            # The slot index follows the record length (1 KiB or 4 KiB), not a
+            # fixed 1 KiB stride. NTFS 3.1 headers (update sequence array at
+            # 0x30 or later) also carry the record number at 0x2C; a
+            # disagreement is reported rather than silently resolved.
+            record_number = offset // record_size
+            header_record_number = (
+                int_from(blob, offset + 0x2C, 4) if int_from(blob, offset + 0x04, 2) >= 0x30 else None
+            )
             records.append(
                 {
                     "record_offset": offset,
-                    "record_number_candidate": offset // 1024,
+                    "record_number_candidate": record_number,
+                    "record_number_source": "record-offset-divided-by-record-size",
+                    "record_size_used_for_slot": record_size,
+                    "record_number_header": header_record_number,
+                    "record_number_header_mismatch": header_record_number is not None
+                    and header_record_number != record_number,
                     "sequence_number": int_from(blob, offset + 0x10, 2),
                     "hard_link_count": int_from(blob, offset + 0x12, 2),
                     "first_attribute_offset": first_attribute_offset,

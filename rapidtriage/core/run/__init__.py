@@ -904,6 +904,9 @@ def _run_triage_stages(
         collector_options=collector_options,
         known_good={
             "feeds": [str(Path(str(feed)).expanduser().resolve()) for feed in known_good_hash_feeds],
+            # Content, not just path: revising a feed in place changes which
+            # files are hidden/skipped, so files and files-extract must rebuild.
+            "feed_sha256": [known_good_feed_sha256(Path(str(feed)).expanduser()) for feed in known_good_hash_feeds],
             "hide": hide_known_good,
             "max_hash_bytes": known_good_max_hash_bytes,
         },
@@ -1640,7 +1643,16 @@ def _run_triage_stages(
             ("files-extract-manifest", files_extract_manifest),
             ("timeline-json", timeline_path),
             ("timeline-report", timeline_report_path),
+            ("indicators", indicators_path),
             *[(f"artifacts-{kind}", path) for kind, path in artifact_outputs.items()],
+            # Row files carry the records the JSON summaries point to; their
+            # final bytes must be re-verifiable from the audit alone.
+            *[
+                (f"artifacts-{kind}-jsonl", artifact_records_path(path))
+                for kind, path in artifact_outputs.items()
+            ],
+            *([("evidence-delta", output_dir / EVIDENCE_DELTA_MANIFEST_NAME)] if evidence_delta_manifest else []),
+            *([("carve", carve_output_path)] if carve_payload is not None else []),
             ("run-summary", summary_path),
             ("run-report", report_path),
             ("run-plan", output_dir / PLAN_FILE_NAME),
@@ -1798,6 +1810,18 @@ def artifact_output_ref(artifact_path: Path) -> dict[str, str]:
 def artifact_records_path(artifact_path: Path) -> Path:
     """JSONL row stream that sits next to a per-kind ``.json`` summary."""
     return artifact_path.with_suffix(".jsonl")
+
+
+def known_good_feed_sha256(path: Path) -> str | None:
+    """SHA-256 of a known-good hash feed file, or ``None`` when it cannot be read."""
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return digest.hexdigest()
 
 
 def run_stage_reuse_bindings(
