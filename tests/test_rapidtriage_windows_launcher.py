@@ -35,6 +35,23 @@ foreach ($exitCode in @(0, 3)) {
 Write-Output ("RESULT " + (ConvertTo-Json -Compress -InputObject $results))
 """
 
+# Dot-sources Find-SystemPython and prints the interpreter it picks.
+FIND_PYTHON_HARNESS = r"""
+param([string]$Launcher)
+$ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$tokens = $null
+$parseErrors = $null
+$tree = [System.Management.Automation.Language.Parser]::ParseFile($Launcher, [ref]$tokens, [ref]$parseErrors)
+$definition = $tree.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "Find-SystemPython"
+}, $true)
+. ([scriptblock]::Create($definition.Extent.Text))
+$found = Find-SystemPython
+Write-Output ("RESULT " + (ConvertTo-Json -Compress -InputObject @{ exe = $found.Exe; args = @($found.Args) }))
+"""
+
 FAKE_VENV_PYTHON = """#!/bin/sh
 printf '%s\\n' "$*" >> "$FAKE_CALL_LOG"
 echo "child output: completed"
@@ -72,6 +89,33 @@ class RapidTriageWindowsLauncherExitCodeTests(unittest.TestCase):
         outcomes = json.loads(line.removeprefix("RESULT "))
         self.assertEqual([(item["expected"], item["returned"], item["is_int"]) for item in outcomes], [(0, 0, True), (3, 3, True)])
         self.assertIn("child output line", result.stdout)
+
+    @unittest.skipUnless(os.name == "nt", "Store alias and per-user python.org layout are Windows-only")
+    def test_system_python_skips_store_alias_and_finds_per_user_install(self) -> None:
+        for scripts_name in ("start-rapidtriage.ps1", "smoke-test-rapidtriage.ps1"):
+            with self.subTest(script=scripts_name), tempfile.TemporaryDirectory() as tmp:
+                local = Path(tmp) / "AppData Local 한글"
+                alias = local / "Microsoft" / "WindowsApps" / "python.exe"
+                installed = local / "Programs" / "Python" / "Python312" / "python.exe"
+                older = local / "Programs" / "Python" / "Python39" / "python.exe"
+                for path in (alias, installed, older):
+                    path.parent.mkdir(parents=True)
+                    path.write_bytes(b"")
+                harness = Path(tmp) / "harness.ps1"
+                harness.write_text(FIND_PYTHON_HARNESS, encoding="utf-8")
+                env = {"LOCALAPPDATA": str(local), "PATH": str(alias.parent) + os.pathsep + os.environ.get("SystemRoot", r"C:\Windows") + r"\System32"}
+
+                result = run_powershell(str(harness), str(REPO_ROOT / "scripts" / "windows" / scripts_name), env=env)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                found = json.loads(next(line for line in result.stdout.splitlines() if line.startswith("RESULT ")).removeprefix("RESULT "))
+                self.assertEqual((found["exe"], found["args"]), (str(installed), []))
+
+                launcher = local / "Programs" / "Python" / "Launcher" / "py.exe"
+                launcher.parent.mkdir(parents=True)
+                launcher.write_bytes(b"")
+                result = run_powershell(str(harness), str(REPO_ROOT / "scripts" / "windows" / scripts_name), env=env)
+                found = json.loads(next(line for line in result.stdout.splitlines() if line.startswith("RESULT ")).removeprefix("RESULT "))
+                self.assertEqual((found["exe"], found["args"]), (str(launcher), ["-3"]))
 
     @unittest.skipIf(os.name == "nt", "the stand-in .venv python is a POSIX shell script")
     def test_launcher_runs_every_install_step_and_propagates_doctor_failure(self) -> None:

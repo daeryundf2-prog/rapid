@@ -23,18 +23,44 @@ function Write-Step {
     Write-Host "==> $Message" -ForegroundColor Cyan
 }
 
+# Python children write UTF-8 and the console decodes it as UTF-8; otherwise Korean
+# paths and messages piped through Out-Host are shown as CP949 mojibake.
+$env:PYTHONIOENCODING = "utf-8"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+# The python.org per-user installer leaves py.exe/python.exe off PATH unless the
+# PATH box is ticked, and %LOCALAPPDATA%\Microsoft\WindowsApps\python.exe is the
+# Microsoft Store alias that only prints "Python was not found" (exit 9009).
+function Find-SystemPython {
+    $py = Get-Command py -ErrorAction SilentlyContinue
+    if (-not $py) {
+        $py = Get-Item (Join-Path $env:LOCALAPPDATA "Programs\Python\Launcher\py.exe") -ErrorAction SilentlyContinue
+    }
+    if ($py) {
+        return @{ Exe = $(if ($py -is [System.IO.FileInfo]) { $py.FullName } else { $py.Source }); Args = @("-3") }
+    }
+    $python = Get-Command python -All -ErrorAction SilentlyContinue |
+        Where-Object { $_.Source -notlike "*\WindowsApps\*" } |
+        Select-Object -First 1
+    if ($python) {
+        return @{ Exe = $python.Source; Args = @() }
+    }
+    $installed = Get-ChildItem (Join-Path $env:LOCALAPPDATA "Programs\Python\Python3*\python.exe") -ErrorAction SilentlyContinue |
+        Sort-Object { [int]($_.Directory.Name -replace "\D", "") } -Descending |
+        Select-Object -First 1
+    if ($installed) {
+        return @{ Exe = $installed.FullName; Args = @() }
+    }
+    throw "Python was not found. Install Python 3.10+ and enable 'Add python.exe to PATH'."
+}
+
 # Child output goes to the host so the function returns only the exit code.
 function Invoke-SystemPython {
     param([string[]]$PythonArgs)
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        & py -3 @PythonArgs | Out-Host
-        return [int]$LASTEXITCODE
-    }
-    if (Get-Command python -ErrorAction SilentlyContinue) {
-        & python @PythonArgs | Out-Host
-        return [int]$LASTEXITCODE
-    }
-    throw "Python was not found. Install Python 3.10+ and enable 'Add python.exe to PATH'."
+    $python = Find-SystemPython
+    $allArgs = @($python.Args) + $PythonArgs
+    & $python.Exe @allArgs | Out-Host
+    return [int]$LASTEXITCODE
 }
 
 function Invoke-CheckedPython {
