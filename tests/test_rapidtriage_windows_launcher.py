@@ -94,7 +94,8 @@ class RapidTriageWindowsLauncherExitCodeTests(unittest.TestCase):
     def test_system_python_skips_store_alias_and_finds_per_user_install(self) -> None:
         for scripts_name in ("start-rapidtriage.ps1", "smoke-test-rapidtriage.ps1"):
             with self.subTest(script=scripts_name), tempfile.TemporaryDirectory() as tmp:
-                local = Path(tmp) / "AppData Local 한글"
+                # Long form: the runner TEMP can be an 8.3 short path, Get-ChildItem reports the long one.
+                local = Path(tmp).resolve() / "AppData Local 한글"
                 alias = local / "Microsoft" / "WindowsApps" / "python.exe"
                 installed = local / "Programs" / "Python" / "Python312" / "python.exe"
                 older = local / "Programs" / "Python" / "Python39" / "python.exe"

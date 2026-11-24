@@ -150,18 +150,20 @@ class TruncatedPrefetchTests(unittest.TestCase):
 
     def test_unreadable_prefetch_folder_is_a_collection_failure_not_an_empty_success(self) -> None:
         root, _ = self.collect_dir({"SAMPLE.EXE-1A2B3C4D.pf": v23_prefetch()})
-        prefetch_dir = root / "Windows" / "Prefetch"
+        # Resolved on both sides: a Windows TEMP may be an 8.3 short path (C:\Users\RUNNER~1\...)
+        # while the collector lists the long form.
+        prefetch_dir = (root / "Windows" / "Prefetch").resolve()
         real_iterdir = Path.iterdir
 
         def denied(self: Path):
-            if self == prefetch_dir:
+            if self.resolve() == prefetch_dir:
                 raise PermissionError(13, "Access is denied", str(self))
             return real_iterdir(self)
 
         real_scandir = os.scandir
 
         def denied_scandir(path="."):
-            if Path(path) == prefetch_dir:
+            if Path(path).resolve() == prefetch_dir:
                 raise PermissionError(13, "Access is denied", str(path))
             return real_scandir(path)
 
