@@ -1554,8 +1554,8 @@ export const DOMAINS: readonly DomainDef[] = [
         target: a("mobile-export", ["ios-backup-file", "ios-backup-metadata", "ios-backup-source"]),
         typeLabels: {
           "ios-backup-file": "iOS 백업 파일",
-          "ios-backup-metadata": "iOS 백업 메타데이터",
-          "ios-backup-source": "iOS 백업 원본",
+          "ios-backup-metadata": "iOS 백업 메타데이터(plist)",
+          "ios-backup-source": "iOS 백업 매니페스트(Manifest.db)",
         },
       },
       { id: "mobile-android", label: "Android", target: a("android-apk") },
@@ -1803,7 +1803,7 @@ export const DOMAINS: readonly DomainDef[] = [
         target: a("memory-volatility", ["memory-dump-indicators", "disk-memory-file-indicators"]),
         typeLabels: {
           "memory-dump-indicators": "메모리 덤프 지표",
-          "disk-memory-file-indicators": "디스크 메모리 파일 지표(hiberfil·pagefile)",
+          "disk-memory-file-indicators": "디스크 메모리 파일 지표(hiberfil·pagefile·swapfile)",
         },
       },
       // MDMP / WER crash dumps (stream header: time, PID, exception, modules), not Volatility.

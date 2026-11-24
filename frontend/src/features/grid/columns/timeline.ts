@@ -27,19 +27,32 @@ export const TIMELINE_SOURCE_LABELS: Readonly<Record<string, string>> = {
   artifacts: "아티팩트",
 };
 
+/** Korean names of the docs source's events (core/timeline.py document events). */
+const DOCUMENT_EVENT_LABELS: Readonly<Record<string, string>> = {
+  "document-modified": "문서 수정",
+  "document-keyword-hit": "문서 키워드 일치",
+};
+
 /**
- * 이벤트 column text: the event type's own Korean name (eventlog-event …), else the Korean name of
- * the artifact row it came from (`artifact-browser-history-visit` ← browser-history), else the id.
- * The time kind (방문·수정 …) is the 시각 종류 column.
+ * 이벤트 column text: the event type's own Korean name (eventlog-event …); a files event
+ * (`file-<kind>`) as 파일 · kind; else the Korean name of the artifact row it came from plus the
+ * time kind its id carries (`artifact-<type>-<kind>`, core/timeline.py:
+ * `artifact-jumplist-automatic-target-accessed` → "자동 Jump List 파일 · 대상 접근"); else the id.
+ * The kind stays in the text: 시각 종류 is not a 분석 기본 column, and two events of one record
+ * (생성 / 수정) must not read the same.
  */
 export function timelineEventLabel(row: GridRow): string {
   const eventType = row.artifactType ?? "";
+  const own = eventType ? (artifactTypeLabel(eventType) ?? DOCUMENT_EVENT_LABELS[eventType]) : null;
+  if (own) return own;
+  if (row.provider === "files" && eventType.startsWith("file-"))
+    return `파일 · ${timestampKindLabel(eventType.slice("file-".length))}`;
   const sourceType = str(row.fields.sourceArtifactType);
-  return (
-    (eventType ? artifactTypeLabel(eventType) : null) ??
-    (sourceType ? artifactTypeLabel(sourceType) : null) ??
-    eventType
-  );
+  const sourceLabel = sourceType ? artifactTypeLabel(sourceType) : null;
+  if (!sourceLabel) return eventType;
+  const prefix = `artifact-${sourceType}-`;
+  const kind = eventType.startsWith(prefix) ? eventType.slice(prefix.length) : "";
+  return kind ? `${sourceLabel} · ${timestampKindLabel(kind)}` : sourceLabel;
 }
 
 export function timestampKindOf(raw: Record<string, unknown>): string {
