@@ -287,3 +287,65 @@ jobs:
         run: |
           cargo build --manifest-path engines/rust/Cargo.toml --locked --release -p rapid-indicators
           python -m unittest tests.test_rust_indicators
+
+  rust-registry:
+    # Opt-in Rust registry hive engine (engines/rust/crates/rapid-registry): crate checks, the
+    # PyO3 extension build, the Python-vs-Rust differential suite (zero differences required),
+    # the existing registry suites re-run on the Rust engine, and a benchmark smoke.
+    name: Rust registry engine (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check crate formatting
+        working-directory: engines/rust
+        run: cargo fmt -p rapid-registry -- --check
+
+      - name: Clippy
+        working-directory: engines/rust
+        run: |
+          cargo clippy -p rapid-registry --all-targets --locked -- -D warnings
+          cargo clippy -p rapid-registry --lib --features python --locked -- -D warnings
+
+      - name: Test crate
+        working-directory: engines/rust
+        run: cargo test -p rapid-registry --locked
+
+      - name: Install package
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e ".[web,test]"
+
+      - name: Build and stage rapid_registry_native
+        run: python scripts/build-native-accel.py --crate rapid-registry --json
+
+      - name: Differential tests (Python vs Rust engine)
+        env:
+          RAPIDTRIAGE_REQUIRE_RUST_REGISTRY: "1"
+        run: python -m unittest -v tests.test_registry_rust_differential
+
+      - name: Registry suites on the Rust engine
+        env:
+          RAPIDTRIAGE_REGISTRY_ENGINE: rust
+        run: python -m unittest tests.test_d12_registry tests.test_parser_quality_registry tests.test_r3_registry_depth tests.test_parser_quality_r2_artifacts tests.test_rapidtriage_explorers_api tests.test_d16_ntfs_usb
+
+      - name: Benchmark smoke
+        run: python scripts/registry-engine-benchmark.py --keys 20000 --repeat 1 --json

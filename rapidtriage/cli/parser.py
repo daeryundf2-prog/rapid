@@ -9,6 +9,7 @@ from ..artifacts.kakaotalk_macos import (
     DEFAULT_MACOS_REPORT_MAX_CONTEXT_ROWS,
     DEFAULT_MACOS_REPORT_MAX_MESSAGES,
 )
+from ..artifacts.windows.registry_engine import REGISTRY_ENGINE_ENV, REGISTRY_ENGINES
 from ..core.artifacts import SUPPORTED_ARTIFACT_KINDS
 from ..core.benchmark import DEFAULT_BENCHMARK_FILE_COUNT, DEFAULT_BENCHMARK_KEYWORD
 from ..core.benchmark_fts import (
@@ -141,6 +142,15 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage doctor --json
               rapidtriage web --host 127.0.0.1 --port 8765
             """
+        ),
+    )
+    parser.add_argument(
+        "--registry-engine",
+        choices=REGISTRY_ENGINES,
+        default=None,
+        help=(
+            f"Registry hive reader: python (default) or rust (rapid_registry_native; overrides {REGISTRY_ENGINE_ENV}). "
+            "An unavailable Rust build falls back to Python with a notice on each registry-hive row"
         ),
     )
     sub = parser.add_subparsers(dest="command", required=True)

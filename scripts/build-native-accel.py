@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Build the rapidcore PyO3 extension and stage it for native_accel (R4-1).
+"""Build a PyO3 extension crate and stage it under rapidtriage/native/ (R4-1).
 
-Runs `cargo build -p rapidcore --features python --release` in
-`engines/rust/`, then copies the produced cdylib into
-`rapidtriage/native/rapidcore_native.<ext>` where `rapidtriage.core.native_accel`
-picks it up. The staged artifact is gitignored — rebuild after checkout.
+Runs `cargo build -p <crate> --features python --release` in `engines/rust/`, then
+copies the produced cdylib into `rapidtriage/native/<module>.<ext>`:
 
-Usage: python scripts/build-native-accel.py [--json]
+- `rapidcore` (default) -> `rapidcore_native`, picked up by `rapidtriage.core.native_accel`;
+- `rapid-registry` -> `rapid_registry_native`, the registry hive reader selected with
+  `RAPIDTRIAGE_REGISTRY_ENGINE=rust` (see `rapidtriage.artifacts.windows.registry_engine`).
+
+The staged artifact is gitignored — rebuild after checkout.
+
+Usage: python scripts/build-native-accel.py [--crate rapid-registry] [--json]
 """
 
 from __future__ import annotations
@@ -22,25 +26,36 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 RUST_ROOT = REPO_ROOT / "engines" / "rust"
 NATIVE_DIR = REPO_ROOT / "rapidtriage" / "native"
 
-EXTENSION_NAMES = {
-    "win32": ("rapidcore.dll", "rapidcore_native.pyd"),
-    "darwin": ("librapidcore.dylib", "rapidcore_native.so"),
-    "linux": ("librapidcore.so", "rapidcore_native.so"),
+# crate -> (cdylib stem, Python module name)
+EXTENSION_CRATES = {
+    "rapidcore": ("rapidcore", "rapidcore_native"),
+    "rapid-registry": ("rapid_registry", "rapid_registry_native"),
 }
+
+
+def extension_file_names(crate: str) -> tuple[str, str]:
+    """(cargo output file, staged module file) for ``crate`` on this platform."""
+    stem, module = EXTENSION_CRATES[crate]
+    if sys.platform == "win32":
+        return f"{stem}.dll", f"{module}.pyd"
+    if sys.platform == "darwin":
+        return f"lib{stem}.dylib", f"{module}.so"
+    return f"lib{stem}.so", f"{module}.so"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--crate", choices=sorted(EXTENSION_CRATES), default="rapidcore")
     args = parser.parse_args()
 
-    src_name, dst_name = EXTENSION_NAMES.get(sys.platform, EXTENSION_NAMES["linux"])
+    src_name, dst_name = extension_file_names(args.crate)
     build = subprocess.run(
         [
             "cargo",
             "build",
             "-p",
-            "rapidcore",
+            args.crate,
             "--features",
             "python",
             "--release",
