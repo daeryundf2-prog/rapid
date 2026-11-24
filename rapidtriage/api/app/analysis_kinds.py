@@ -2274,7 +2274,7 @@ def cross_case_eligibility(job) -> dict[str, object]:
 
 
 def _run_case_database(store, run_id: str) -> Path:
-    from .run_review import canonical_run_case
+    from ...core.case_db.run_locator import canonical_run_case
 
     try:
         scope = run_scope(store, run_id)
@@ -2303,7 +2303,7 @@ class _OccurrenceLocator:
         self._indexes: dict[tuple[str, str], object] = {}
 
     def _index(self, database: str, case_scope: str):
-        from .run_review import RunLocatorIndex
+        from ...core.case_db.run_locator import RunLocatorIndex
 
         key = (database, case_scope)
         if key in self._indexes:

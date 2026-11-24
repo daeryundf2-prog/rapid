@@ -11,6 +11,13 @@
     "candidates"
   ],
   "properties": {
+    "plan_status": {
+      "enum": ["skipped", "cancelled"],
+      "description": "Run plan: the files task did not run; the payload is the zero-row shape (core/run/planned_out.py)"
+    },
+    "plan_reason": {
+      "type": "string"
+    },
     "command": {
       "const": "files"
     },
@@ -101,6 +108,12 @@
         "oldest_modified_at"
       ],
       "properties": {
+        "plan_status": {
+          "enum": ["skipped", "cancelled"]
+        },
+        "plan_reason": {
+          "type": "string"
+        },
         "scanned_file_count": {
           "type": "integer"
         },

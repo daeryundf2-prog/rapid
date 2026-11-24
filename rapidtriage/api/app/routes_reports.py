@@ -45,6 +45,7 @@ from .runops import (
     build_run_case_report,
     build_run_submission_manifest,
     build_run_validation_package,
+    load_run_review_payload,
     write_case_report_audit,
     write_run_validation_package_audit,
     write_submission_audit,
@@ -169,46 +170,49 @@ def build_reports_router(
         return FileResponse(path, filename=path.name, media_type=media_types[normalized])
 
 
-    @router.post("/api/runs/{run_id}/reviewer-bundle")
-    def create_reviewer_bundle(run_id: str, request: ReviewerBundleCreateRequest) -> dict[str, object]:
+    def _build_reviewer_bundle(run_id: str, *, include_all: bool, max_items: int, title: str | None) -> dict[str, object]:
+        """Reviewer bundle of the run's review payload (case JSON + case-DB review marks).
+
+        409 with the reason when nothing is marked for the report or a marked
+        item cannot be carried (the Korean list names each one)."""
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail=run_not_finished_message(job))
-        case_path = default_case_path(store, run_id)
-        if not case_path.is_file():
-            raise HTTPException(status_code=404, detail="case review file not found")
+        case_payload = load_run_review_payload(store, run_id)
+        if not include_all and not any(
+            isinstance(item, dict) and isinstance(item.get("review"), dict) and item["review"].get("include_in_report")
+            for item in case_payload.get("bookmarks") or []
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="보고서 포함으로 지정된 검토 항목이 없어 리뷰어 번들을 만들지 않았습니다. 항목을 북마크하거나 검토 표시에서 보고서 포함을 지정하세요.",
+            )
         try:
             return build_submission_bundle(
-                case_json=case_path,
+                case_json=default_case_path(store, run_id),
+                case_payload=case_payload,
                 output_dir=default_reviewer_bundle_dir_path(store, run_id),
                 allowed_roots=allowed_source_roots(job.summary),
-                include_all=request.include_all,
-                max_items=request.max_items,
-                title=request.title,
+                include_all=include_all,
+                max_items=max_items,
+                title=title,
             )
-        except (BundleError, CaseBookmarkError, OSError) as exc:
+        except BundleError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        except (CaseBookmarkError, OSError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+
+
+    @router.post("/api/runs/{run_id}/reviewer-bundle")
+    def create_reviewer_bundle(run_id: str, request: ReviewerBundleCreateRequest) -> dict[str, object]:
+        return _build_reviewer_bundle(
+            run_id, include_all=request.include_all, max_items=request.max_items, title=request.title
+        )
 
 
     @router.get("/api/runs/{run_id}/reviewer-bundle/file")
     def download_reviewer_bundle(run_id: str) -> FileResponse:
-        job = get_job(store, run_id)
-        if job.summary is None:
-            raise HTTPException(status_code=409, detail=run_not_finished_message(job))
-        case_path = default_case_path(store, run_id)
-        if not case_path.is_file():
-            raise HTTPException(status_code=404, detail="case review file not found")
-        try:
-            payload = build_submission_bundle(
-                case_json=case_path,
-                output_dir=default_reviewer_bundle_dir_path(store, run_id),
-                allowed_roots=allowed_source_roots(job.summary),
-                include_all=False,
-                max_items=500,
-                title=None,
-            )
-        except (BundleError, CaseBookmarkError, OSError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+        payload = _build_reviewer_bundle(run_id, include_all=False, max_items=500, title=None)
         archive = Path(str(payload.get("archive") or payload.get("outputs", {}).get("archive", "")))
         return FileResponse(archive, filename=archive.name, media_type="application/zip")
 

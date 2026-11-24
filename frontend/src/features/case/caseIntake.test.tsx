@@ -87,6 +87,18 @@ describe("wizard model", () => {
     expect(validateEvidenceDraft(e01, [e01])).toEqual({});
     expect(evidenceBody(e01).expected_hash).toBe("");
     expect(evidenceBody({ ...file, verifyHash: true, expectedHash: " ab " }).expected_hash).toBe("ab");
+    // RAW images (D26 #6): the kind the support check reports registers, with an expected hash.
+    const raw = {
+      ...a,
+      sourceType: "raw" as const,
+      path: "D:\\ev\\D26.img",
+      verifyHash: true,
+      expectedHash: "f".repeat(64),
+    };
+    expect(validateEvidenceDraft(raw, [raw])).toEqual({});
+    expect(evidenceBody(raw)).toMatchObject({ source_type: "raw", expected_hash: "f".repeat(64) });
+    expect(validateEvidenceDraft({ ...raw, path: "D:\\ev\\D26.001" }, [raw])).toEqual({});
+    expect(validateEvidenceDraft({ ...raw, path: "D:\\ev\\notes.txt" }, [raw]).path).toContain("RAW");
     expect(evidenceListReason([])).toBe("증거를 하나 이상 추가하세요.");
     expect(evidenceListReason([{ ...a, path: "" }])).toBe("증거 E-01: 증거 경로를 입력하세요.");
   });

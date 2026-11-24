@@ -98,6 +98,22 @@
         },
         "acquisition_roots": {
           "type": "array"
+        },
+        "channel_counts": {
+          "type": "object",
+          "description": "EventLog kind: rows per raw channel name (core/eventlog_channels.py)",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "channel_service_control_manager_count": {
+          "type": "integer"
+        },
+        "channel_overflow_group_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
         }
       }
     },

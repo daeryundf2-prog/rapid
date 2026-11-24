@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,10 @@ HASH_KEYS = (
     "md5",
     "hash",
 )
+RECORD_STATE_KEYS = (
+    "evtx_record_state",
+    "record_state",
+)
 ARTIFACT_KEYS = (
     "artifact_key",
     "artifact_id",
@@ -64,6 +69,15 @@ CASE_SOURCE_ROWS = {
     "timeline": "events",
     "indicators": "indicators",
     "compare": "results",
+}
+# Row arrays a bookmark may also cite besides the primary one: the files
+# inventory, the docs listing (every document, not only keyword hits) and the
+# IOC scanner hits -- the rows the console grid and the case-DB review marks
+# address (core/case_db/run_locator.py).
+CASE_SOURCE_EXTRA_ROWS = {
+    "files": ("inventory",),
+    "docs": ("candidates",),
+    "indicators": ("ioc_scanner_hits",),
 }
 
 CASE_SOURCE_SCHEMAS = {
@@ -182,8 +196,33 @@ def load_source_payload(path: Path) -> dict[str, object]:
     try:
         validate(payload, load_schema(schema_name))
     except SchemaValidationError as exc:
-        raise CaseBookmarkError(f"{command} source JSON failed schema validation: {exc}") from exc
+        raise CaseBookmarkError(schema_failure_message(command, resolved, str(exc))) from exc
     return payload
+
+
+SCHEMA_REASON_LABELS = (
+    ("unexpected property", "스키마에 정의되지 않은 필드"),
+    ("missing required property", "필수 필드 없음"),
+    ("expected type", "값 형식이 다름"),
+    ("expected const", "허용되지 않는 값"),
+    ("expected one of", "허용되지 않는 값"),
+    ("expected at least", "항목 수 부족"),
+    ("invalid date-time string", "날짜·시각 형식 오류"),
+)
+
+
+def schema_failure_message(command: str, path: Path, detail: str) -> str:
+    """Korean refusal of a bookmark source that fails its output schema: where
+    (JSON path, and the row of the row array when the failure is inside one) and why."""
+    location, _, reason = detail.partition(": ")
+    label = next((korean for english, korean in SCHEMA_REASON_LABELS if reason.startswith(english)), "스키마 위반")
+    rows = (CASE_SOURCE_ROWS.get(command), *CASE_SOURCE_EXTRA_ROWS.get(command, ()))
+    row = re.match(r"^\$\.(\w+)\[(\d+)\]", location)
+    where = f"{row.group(1)} 행 {row.group(2)}번 ({location})" if row and row.group(1) in rows else location
+    return (
+        f"북마크 원본 {command} JSON이 출력 스키마 검증에 실패해 저장하지 않았습니다. "
+        f"위치: {where}, 이유: {label} — {reason} (파일 {path})"
+    )
 
 
 def upsert_bookmark(
@@ -232,6 +271,7 @@ def upsert_bookmark(
         source_timestamp=source_timestamp,
         artifact_key=artifact_key,
         summary=summary,
+        record_state=find_first_string(item, RECORD_STATE_KEYS),
     )
     existing = find_existing_bookmark(
         bookmarks,
@@ -369,10 +409,17 @@ def find_existing_bookmark(
             not reference.get("row_sha256")
             and reference.get("file") == normalized_source_path
             and reference.get("pointer") == source_pointer
-            and item.get("snapshot") == dict(snapshot)
+            # Snapshots saved before record_state existed lack that key.
+            and _without_record_state(item.get("snapshot")) == _without_record_state(snapshot)
         ):
             return item
     return None
+
+
+def _without_record_state(snapshot: object) -> object:
+    if not isinstance(snapshot, Mapping):
+        return snapshot
+    return {key: value for key, value in snapshot.items() if key != "record_state"}
 
 
 def resolve_case_source_row(
@@ -387,8 +434,11 @@ def resolve_case_source_row(
         raise CaseBookmarkError(f"unsupported bookmark source command {source_command!r}; expected one of: {supported}")
 
     tokens = split_json_pointer(source_pointer)
-    if len(tokens) < 2 or tokens[0] != collection_name:
-        raise CaseBookmarkError(f"{source_command} bookmarks require a row pointer rooted at '/{collection_name}/<index>'")
+    allowed = (collection_name, *CASE_SOURCE_EXTRA_ROWS.get(source_command, ()))
+    if len(tokens) < 2 or tokens[0] not in allowed:
+        roots = " or ".join(f"'/{name}/<index>'" for name in allowed)
+        raise CaseBookmarkError(f"{source_command} bookmarks require a row pointer rooted at {roots}")
+    collection_name = tokens[0]
 
     collection = payload.get(collection_name)
     if not isinstance(collection, list):
@@ -639,14 +689,19 @@ def build_bookmark_snapshot(
     source_timestamp: str | None,
     artifact_key: str | None,
     summary: str,
+    record_state: str | None = None,
 ) -> dict[str, str | None]:
-    return {
+    snapshot = {
         "path": source_path,
         "hash": source_hash,
         "timestamp": source_timestamp,
         "artifact_key": artifact_key,
         "summary": summary,
     }
+    if record_state:
+        # Live record vs recovered candidate (EVTX slack, ...): the report states it beside the time.
+        snapshot["record_state"] = record_state
+    return snapshot
 
 
 def find_first_string(item: object, keys: tuple[str, ...]) -> str | None:

@@ -18,6 +18,11 @@ from ...core.case_db import (
     CaseDatabase,
     CaseDatabaseError,
 )
+from ...core.case_db.run_locator import (
+    ACTIVE_MARK_SQL,
+    RunLocatorIndex,
+    canonical_run_case,
+)
 from ...core.jobs import (
     RunJobStore,
     run_output_dir,
@@ -52,13 +57,7 @@ from .models import (
     SampleCaseRunRequest,
 )
 from .routes_review_tools import apply_review_tag_batch
-from .run_review import (
-    ACTIVE_MARK_SQL,
-    RunLocatorIndex,
-    canonical_run_case,
-    review_map_entries,
-    split_batch_targets,
-)
+from .run_review import review_map_entries, split_batch_targets
 
 
 def _summary_output_dir(summary: dict[str, object]) -> Path | None:

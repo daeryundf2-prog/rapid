@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
+
+from .filetime import LOCAL_TIMEZONE_LABELS
+from .timeline import activity_count_lines
 
 
 def build_run_report_context(
@@ -135,6 +139,7 @@ def build_run_report_context(
         "preferred_location_candidates": list(highlights.get("preferred_location_candidates", [])),
         "artifact_summary": build_artifact_summary_rows(ordered_artifact_payloads),
         "timeline": build_timeline_rows(timeline_payload),
+        "activity_counts": build_activity_count_lines(timeline_payload),
         "extracts": [
             build_extract_context("### Docs extract", docs_extract_payload),
             build_extract_context("### Files extract", files_extract_payload),
@@ -295,6 +300,8 @@ def render_run_markdown_report(report_context: Mapping[str, object]) -> str:
         f"- Document matches: {overview['document_match_count']}",
         f"- File candidates: {overview['file_candidate_count']}",
         f"- Timeline events: {overview['timeline_event_count']}",
+        "",
+        *report_context.get("activity_counts", []),
         "",
         "## Mode profile",
         "",
@@ -691,9 +698,36 @@ def build_artifact_summary_rows(artifact_payloads: Mapping[str, Mapping[str, obj
                     "path": item.get("path"),
                     "provider": item.get("provider"),
                     "supported": item.get("supported"),
+                    "reading": artifact_reading_label(item.get("details")),
                 }
             )
     return rows
+
+
+RECYCLE_BODY_LABELS = {"present": "대응 $R 본문 있음", "missing": "대응 본문 없음"}
+
+
+def artifact_reading_label(details: object) -> str:
+    """Record state a reader must not miss: live vs recovered EventLog record, $R body present or missing."""
+    if not isinstance(details, Mapping):
+        return ""
+    bits: list[str] = []
+    state = str(details.get("evtx_record_state") or "")
+    if state:
+        bits.append(f"레코드 상태: {'활성' if state == 'live' else f'복원 후보({state})'}")
+        if details.get("timestamp"):
+            bits.append(f"시각: {details.get('timestamp')}")
+    body = str(details.get("recycle_body_status") or "")
+    if body:
+        label = RECYCLE_BODY_LABELS.get(body, body)
+        payload = str(details.get("paired_payload_path") or "")
+        bits.append(f"{label}: {Path(payload).name}" if body == "present" and payload else label)
+    return ", ".join(bits)
+
+
+def build_activity_count_lines(timeline_payload: Mapping[str, object]) -> list[str]:
+    events = timeline_payload.get("events")
+    return activity_count_lines([event for event in events if isinstance(event, Mapping)] if isinstance(events, list) else [])
 
 
 def build_timeline_rows(timeline_payload: Mapping[str, object]) -> list[dict[str, object]]:
@@ -704,6 +738,7 @@ def build_timeline_rows(timeline_payload: Mapping[str, object]) -> list[dict[str
         rows.append(
             {
                 "timestamp": item.get("timestamp"),
+                "timezone": item.get("timezone"),
                 "source": item.get("source"),
                 "event_type": item.get("event_type"),
                 "path": item.get("path"),
@@ -775,9 +810,10 @@ def append_artifact_rows(lines: list[str], rows: object) -> None:
         for item in rows:
             if not isinstance(item, dict):
                 continue
+            reading = f" — {item['reading']}" if item.get("reading") else ""
             lines.append(
                 f"- [{item['kind']}] `{item['artifact_type']}` `{item['path']}`"
-                f" provider=`{item['provider']}` supported={item['supported']}"
+                f" provider=`{item['provider']}` supported={item['supported']}{reading}"
             )
     else:
         lines.append("- none")
@@ -788,8 +824,9 @@ def append_timeline_section_rows(lines: list[str], rows: object) -> None:
         for item in rows:
             if not isinstance(item, dict):
                 continue
+            zone = " (시간대 미확정: 오프셋 없는 현지 시각 원문)" if item.get("timezone") in LOCAL_TIMEZONE_LABELS else ""
             lines.append(
-                f"- `{item['timestamp']}` `{item['source']}` `{item['event_type']}` `{item['path']}` — {item['summary']}"
+                f"- `{item['timestamp']}`{zone} `{item['source']}` `{item['event_type']}` `{item['path']}` — {item['summary']}"
             )
     else:
         lines.append("- none")

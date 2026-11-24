@@ -12,7 +12,7 @@
   hash (case DB file rows, else the files output's ``duplicate_content_groups``).
 
 The ``/api/cases/{case_id}`` routes find the case DB through ``run_id`` (the run's
-canonical case DB, see ``run_review.canonical_run_case``) or an explicit
+canonical case DB, see ``run_locator.canonical_run_case``) or an explicit
 ``database`` path (checked like every other case-DB route). An explicit ``database``
 must name an existing file (404 otherwise): these routes never create a case DB. Tag batches with
 hash propagation extend ``POST /api/case-db/review-batch`` (``tag_ids``,
@@ -47,6 +47,7 @@ from ...core.case_db import (
 )
 from ...core.case_db.helpers import normalize_path_for_db
 from ...core.case_db.review_schema import COLOR_TOKEN_LABELS, COLOR_TOKENS
+from ...core.case_db.run_locator import RunLocatorIndex, canonical_run_case
 from ...core.jobs import RunJobStore, run_output_dir
 from .helpers import (
     get_job,
@@ -54,7 +55,6 @@ from .helpers import (
     resolve_request_reviewer,
     run_not_finished_message,
 )
-from .run_review import RunLocatorIndex, canonical_run_case
 from .tree import build_run_tree, read_output_key
 
 # Collections counted as one bar each (artifact kinds get one bar per kind).

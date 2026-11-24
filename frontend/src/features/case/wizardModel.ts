@@ -30,12 +30,17 @@ export const EMPTY_CASE_INFO: CaseInfoForm = {
 /** Suggestions for 사건 유형 (free text; datalist). */
 export const CASE_TYPE_SUGGESTIONS = ["개인정보 유출", "기술 유출", "사기", "침해사고", "횡령·배임", "기타"];
 
+/** Registration kinds (server `EvidenceSourceType`); `raw` is what the support check calls a raw image. */
 export const EVIDENCE_TYPES: Array<{ id: EvidenceType; label: string }> = [
   { id: "e01", label: "E01 이미지" },
+  { id: "raw", label: "RAW 이미지 (.dd·.img·.raw·.001)" },
   { id: "folder", label: "폴더" },
   { id: "export", label: "내보내기 파일" },
   { id: "mobile", label: "모바일 추출물" },
 ];
+
+/** Raw/split disk image suffixes (server `core/disk_image.RAW_IMAGE_SUFFIXES`). */
+const RAW_IMAGE_PATH = /\.(dd|raw|img|ima|0{3,4}|0{2,4}1)$/i;
 
 export const EVIDENCE_TYPE_LABEL: Record<string, string> = Object.fromEntries(
   EVIDENCE_TYPES.map((t) => [t.id, t.label]),
@@ -111,6 +116,8 @@ export function validateEvidenceDraft(draft: EvidenceDraft, all: EvidenceDraft[]
     if (problem) errors.path = problem;
     else if (draft.sourceType === "e01" && !/\.(e01|ex01)$/i.test(path)) {
       errors.path = "E01 증거는 .E01/.Ex01 파일이어야 합니다.";
+    } else if (draft.sourceType === "raw" && !RAW_IMAGE_PATH.test(path)) {
+      errors.path = "RAW 증거는 .dd/.img/.raw/.001 등 RAW 디스크 이미지 파일이어야 합니다.";
     } else if (all.some((other) => other.key !== draft.key && other.path.trim() === path)) {
       errors.path = "같은 경로의 증거가 이미 있습니다.";
     }

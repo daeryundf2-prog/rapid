@@ -22,9 +22,10 @@ from fastapi import HTTPException
 from ...core.case_db import CaseDatabase
 from ...core.case_db.base import now_iso
 from ...core.case_db.intake import CaseIntake, ensure_intake_schema
+from ...core.disk_image import RAW_IMAGE_SUFFIXES, is_raw_image_path
 from ...core.e01 import is_e01_path
 from ...core.e01_hash import run_e01_streaming_hash
-from ...core.evidence import identify_evidence
+from ...core.evidence import discover_raw_parts_for_guidance, identify_evidence
 from ...core.jobs import RunJob, RunJobStore, RunRequest
 from ...core.run.profiles import RUN_PROFILES
 from .analyses import confine_path, extra_analysis_roots, lexical_absolute_path
@@ -92,13 +93,26 @@ def validate_evidence_kind(path: Path, source_type: str) -> None:
         raise HTTPException(status_code=422, detail="폴더 증거는 폴더 경로여야 합니다")
     if source_type == "e01" and not (path.is_file() and is_e01_path(path)):
         raise HTTPException(status_code=422, detail="E01 증거는 .E01/.Ex01 이미지 파일이어야 합니다")
+    if source_type == "raw" and not (path.is_file() and is_raw_image_path(path)):
+        raise HTTPException(
+            status_code=422,
+            detail=f"RAW 증거는 RAW 디스크 이미지 파일이어야 합니다 ({', '.join(RAW_IMAGE_SUFFIXES)})",
+        )
+
+
+def raw_split_part_count(path: Path) -> int:
+    """Segments of the raw split set ``path`` belongs to (1 = a single-file image)."""
+    return len(discover_raw_parts_for_guidance(path)) if path.is_file() and is_raw_image_path(path) else 1
 
 
 def infer_source_type(path: Path) -> str:
+    """Registration kind of ``path``: the same names as the support check's adapters (``raw`` = raw-image)."""
     if path.is_dir():
         return "folder"
     if is_e01_path(path):
         return "e01"
+    if is_raw_image_path(path):
+        return "raw"
     return "export"
 
 

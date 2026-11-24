@@ -965,7 +965,7 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertIsNone(page.json()["candidates"][0]["ntfs"])
 
     def test_analysis_row_locator_requires_run_output_dir(self) -> None:
-        from rapidtriage.api.app.run_review import RunLocatorIndex
+        from rapidtriage.core.case_db.run_locator import RunLocatorIndex
 
         state = self.wait(str(self.submit("carve", {"ext": ".bin"})["analysis_id"]))
         connection = sqlite3.connect(":memory:")

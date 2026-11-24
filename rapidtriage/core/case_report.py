@@ -176,6 +176,9 @@ def build_case_report_markdown(
                     f"- 분석자 메모: {markdown_text(item.get('note') or '없음')}",
                 ]
             )
+            record_time_line = bookmark_record_time_line(item)
+            if record_time_line:
+                lines.append(record_time_line)
             if source_hits:
                 lines.append("- Source-search cited hits:")
                 for hit in source_hits:
@@ -261,6 +264,22 @@ def build_case_report_markdown(
                     )
             lines.append("")
     return "\n".join(lines)
+
+
+def bookmark_record_time_line(item: Mapping[str, object]) -> str:
+    """The bookmarked row's own time with its record state (live vs recovered) next to it."""
+    snapshot = item.get("snapshot") if isinstance(item.get("snapshot"), Mapping) else {}
+    timestamp = str(snapshot.get("timestamp") or item.get("timestamp") or "")
+    state = str(snapshot.get("record_state") or item.get("record_state") or "")
+    if not timestamp and not state:
+        return ""
+    if not state:
+        state_text = ""
+    elif state == "live":
+        state_text = " (레코드 상태: 활성)"
+    else:
+        state_text = f" (레코드 상태: 복원 후보 `{state}` — 활성 기록이 아니며 활성 합계에 넣지 않음)"
+    return f"- 기록 시각: `{timestamp or '미상'}`{state_text}"
 
 
 def template_noise_policy(template: str) -> str:

@@ -11,6 +11,23 @@
     "indicators"
   ],
   "properties": {
+    "plan_status": {
+      "enum": ["skipped", "cancelled"],
+      "description": "Run plan: the indicators task did not run; the payload is the zero-row shape (core/run/planned_out.py)"
+    },
+    "plan_reason": {
+      "type": "string"
+    },
+    "inputs_partial": {
+      "const": true,
+      "description": "Built from incomplete provider inputs (a skipped, cancelled or failed provider task); never reused by --resume"
+    },
+    "partial_kinds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "command": {
       "const": "indicators"
     },
@@ -64,6 +81,21 @@
         "ti_feed_count"
       ],
       "properties": {
+        "plan_status": {
+          "enum": ["skipped", "cancelled"]
+        },
+        "plan_reason": {
+          "type": "string"
+        },
+        "inputs_partial": {
+          "const": true
+        },
+        "partial_kinds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "indicator_count": {
           "type": "integer"
         },

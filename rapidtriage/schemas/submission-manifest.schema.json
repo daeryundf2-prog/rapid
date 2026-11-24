@@ -49,8 +49,16 @@
       "required": ["case_bookmark_count", "hashed_item_count", "skipped_count", "total_size"],
       "properties": {
         "case_bookmark_count": { "type": "integer" },
+        "report_candidate_count": {
+          "type": "integer",
+          "description": "Bookmarks and case-DB review marks marked for the report (all with include_all): hashed items + missing ones"
+        },
         "hashed_item_count": { "type": "integer" },
         "skipped_count": { "type": "integer" },
+        "missing_count": {
+          "type": "integer",
+          "description": "Report candidates the submission cannot carry (listed in skipped); the case report and reviewer bundle refuse while it is not 0"
+        },
         "total_size": { "type": "integer" }
       }
     },
@@ -67,6 +75,7 @@
           "note": { "type": "string" },
           "review": { "type": "object", "additionalProperties": true },
           "reference": { "type": "object", "additionalProperties": true },
+          "snapshot": { "type": "object", "additionalProperties": true },
           "evidence": {
             "type": "object",
             "additionalProperties": false,
@@ -102,6 +111,7 @@
         "properties": {
           "bookmark_id": { "type": "string" },
           "summary": { "type": "string" },
+          "note": { "type": "string" },
           "path": { "type": "string" },
           "reason": { "type": "string" }
         }

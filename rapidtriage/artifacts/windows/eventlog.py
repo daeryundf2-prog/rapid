@@ -9490,6 +9490,12 @@ class EventlogSummaryAccumulator:
             self._inc("process_counts", "event", process_name)
         else:
             self._inc("recovery_candidate_event_id_counts", "event", event_id)
+        if category == "logon-success":
+            # Active logons and recovered (slack/inactive) logon candidates are
+            # counted apart so a recovered 4624 never adds to the active total.
+            state = "active" if is_active_event_record(details) else "recovery_candidate"
+            self.counts[f"logon_success_{state}"] += 1
+            self._inc(f"logon_success_{state}_type_counts", "event", str(details.get("logon_type") or "unknown"))
         self._inc("parser_status_counts", "event", str(details.get("coverage_status") or ""))
         self._inc("reportability_counts", "event", str(details.get("reportability") or ""))
         if details.get("parser") == "windows-eventlog-evtx-native":
@@ -9580,7 +9586,11 @@ class EventlogSummaryAccumulator:
         rule = details.get("rule") if isinstance(details.get("rule"), Mapping) else {}
         rule_id = str(rule.get("id") or rule.get("title") or "")
         rule_level = str(rule.get("level") or "")
-        self._inc("detection_rule_counts", "detection", rule_id)
+        # Live detections and detections on recovery candidates are counted apart.
+        if is_active_event_record(details):
+            self._inc("detection_rule_counts", "detection", rule_id)
+        else:
+            self._inc("recovery_candidate_detection_rule_counts", "detection", rule_id)
         self._inc("detection_level_counts", "detection", rule_level)
         self._inc("parser_status_counts", "detection", str(details.get("coverage_status") or ""))
         self._inc("reportability_counts", "detection", str(details.get("reportability") or ""))
@@ -9668,6 +9678,15 @@ class EventlogSummaryAccumulator:
             "record_candidate_count": self.counts["candidate"],
             "source_files": sorted(self.source_paths),
             "detection_rule_counts": counter_items(self._merged("detection_rule_counts")),
+            "recovery_candidate_detection_rule_counts": counter_items(self._merged("recovery_candidate_detection_rule_counts")),
+            "logon_success_counts": {
+                "active_count": self.counts["logon_success_active"],
+                "recovery_candidate_count": self.counts["logon_success_recovery_candidate"],
+                "active_logon_type_counts": counter_items(self._merged("logon_success_active_type_counts")),
+                "recovery_candidate_logon_type_counts": counter_items(
+                    self._merged("logon_success_recovery_candidate_type_counts")
+                ),
+            },
             "event_id_counts": counter_items(self._merged("event_id_counts")),
             "event_breakdown_scope": "live-records-only",
             "recovery_candidate_event_id_counts": counter_items(self._merged("recovery_candidate_event_id_counts")),
@@ -9730,7 +9749,8 @@ class EventlogSummaryAccumulator:
                 "Use message_rendering.validation_required and external parser exports to separate built-in fallback messages from report-grade provider resource rendering.",
                 "first_event_at/last_event_at are the earliest/latest active events by UTC instant (100 ns FILETIME ticks; first_event_at_100ns/last_event_at_100ns). They and record_sequence_gaps exclude out-of-range timestamps (before 1980 or later than collection time + 1 day); the time range also excludes slack/inactive-chunk/outside-chunk recoveries, which are counted in recovery_candidate_event_count and listed with source file and offset in recovery_candidate_events.",
                 "최초/최종 시각은 활성(live) 이벤트만 UTC 시각(100ns FILETIME 단위)으로 비교해 정했습니다. 시각 범위(1980년 이전 또는 수집 시각+1일 이후)를 벗어난 타임스탬프는 최초/최종 시각과 레코드 ID 간격 통계에서 제외했고, 슬랙·비활성 청크·청크 밖 복구 레코드는 시각 범위에 넣지 않고 복구 후보(recovery_candidate_events: 원본 파일·오프셋)로만 집계했습니다.",
-                "event_count counts live and recovery-candidate rows together (live_event_count / recovery_candidate_event_count state each part); event_id/category/family/channel/user/IP/process breakdowns count live records only, and recovery_candidate_event_id_counts lists the candidates by event ID.",
+                "event_count counts live and recovery-candidate rows together (live_event_count / recovery_candidate_event_count state each part); event_id/category/family/channel/user/IP/process breakdowns and detection_rule_counts count live records only, and recovery_candidate_event_id_counts / recovery_candidate_detection_rule_counts list the candidates.",
+                "logon_success_counts: 활성(live) 로그온 성공과 복원 후보(슬랙·비활성 청크) 로그온 성공을 따로 셉니다. 복원 후보는 활성 로그온 합계에 넣지 않습니다.",
             ],
         }
         return ArtifactRecord(

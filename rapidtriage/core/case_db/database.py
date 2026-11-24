@@ -127,11 +127,13 @@ from .schema import (
     register_case_db_functions,
 )
 from .search import (
+    CASE_SEARCH_HIT_TYPE_LABELS,
     attach_review_marks,
     build_case_search_execution_plan,
     build_case_search_result_window_manifest,
     case_document_extraction_errors,
     case_search_cursor_scope,
+    case_search_hit_type,
     case_search_reportability_decision,
     case_search_scan_candidate_limit,
     case_search_source_requested,
@@ -730,6 +732,10 @@ class CaseDatabase:
                     if str((match.get("review") or {}).get("verification_status") or "unverified") == verification_status
                 ]
             matches = enrich_case_search_matches(matches, normalized_keywords)
+            for match in matches:
+                # One record can hit as its raw row, a detection, a summary and a timeline event.
+                match["hit_type"] = case_search_hit_type(match)
+                match["hit_type_label"] = CASE_SEARCH_HIT_TYPE_LABELS[match["hit_type"]]
             total_returnable_count = len(matches)
             has_more = False
             next_cursor = ""
@@ -742,9 +748,11 @@ class CaseDatabase:
         source_counts: dict[str, int] = {}
         keyword_counts: dict[str, int] = {keyword.lower(): 0 for keyword in normalized_keywords}
         priority_counts: dict[str, int] = {}
+        hit_type_counts: dict[str, int] = {}
         for match in matches:
             source = str(match.get("source") or "unknown")
             source_counts[source] = source_counts.get(source, 0) + 1
+            hit_type_counts[str(match["hit_type"])] = hit_type_counts.get(str(match["hit_type"]), 0) + 1
             priority_level = str((match.get("review_priority") or {}).get("level") or "low")
             priority_counts[priority_level] = priority_counts.get(priority_level, 0) + 1
             for keyword in match.get("matched_keywords", []):
@@ -807,6 +815,7 @@ class CaseDatabase:
                 "has_more": has_more,
                 "next_cursor": next_cursor,
                 "source_counts": source_counts,
+                "hit_type_counts": hit_type_counts,
                 "keyword_counts": keyword_counts,
                 "priority_counts": priority_counts,
                 "document_error_count": len(document_errors),

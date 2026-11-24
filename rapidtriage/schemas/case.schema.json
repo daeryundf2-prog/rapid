@@ -231,6 +231,12 @@
               "row_sha256": {
                 "type": "string",
                 "pattern": "^[0-9a-f]{64}$"
+              },
+              "case_db": {
+                "type": "object",
+                "description": "Set when the bookmark stands for a case-DB review mark (submission view of the run's review marks)",
+                "additionalProperties": true,
+                "required": ["database", "case_id", "citation_id", "target_type", "target_id"]
               }
             }
           },
@@ -271,6 +277,10 @@
               },
               "summary": {
                 "type": "string"
+              },
+              "record_state": {
+                "type": "string",
+                "description": "Row record state when the source states one (EVTX: live, slack-recovered, ...)"
               }
             }
           }

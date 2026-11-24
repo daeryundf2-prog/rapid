@@ -424,7 +424,7 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
                 )
 
             self.assertEqual(exc.exception.code, 2)
-            self.assertIn("files source JSON failed schema validation", stderr.getvalue())
+            self.assertIn("북마크 원본 files JSON이 출력 스키마 검증에 실패해 저장하지 않았습니다", stderr.getvalue())
 
 
 if __name__ == "__main__":

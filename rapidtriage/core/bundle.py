@@ -17,7 +17,11 @@ from .case_report import (
 )
 from .docs import write_result
 from .forensic_accuracy import build_accuracy_gate
-from .submission import build_submission_manifest, compute_hashes
+from .submission import (
+    build_submission_manifest,
+    compute_hashes,
+    missing_submission_message,
+)
 
 COURT_EXHIBIT_EXPORT_GAP_ID = "#94"
 TAMPER_EVIDENT_AUDIT_BUNDLE_GAP_ID = "#100"
@@ -69,17 +73,28 @@ def build_submission_bundle(
     include_all: bool = False,
     max_items: int = 500,
     title: str | None = None,
+    case_payload: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    """Reviewer bundle of the case's report candidates.
+
+    ``case_payload`` is the review payload to submit when it is not only the
+    case JSON (a run's bookmarks plus its case-DB review marks); ``case_json``
+    is read otherwise and recorded either way. A report candidate the
+    manifest cannot carry stops the bundle (:class:`BundleError`)."""
     case_json = case_json.expanduser().resolve()
     output_dir = output_dir.expanduser().resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
-    case_payload = load_case_payload(case_json)
+    if case_payload is None:
+        case_payload = load_case_payload(case_json)
     manifest = build_submission_manifest(
         case_payload,
         allowed_roots=allowed_roots,
         include_all=include_all,
         max_items=max_items,
     )
+    missing = missing_submission_message(manifest)
+    if missing:
+        raise BundleError(missing)
+    output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "rapidtriage-submission-manifest.json"
     selected_path = output_dir / "rapidtriage-selected-evidence.json"
     report_path = output_dir / "rapidtriage-case-report.md"

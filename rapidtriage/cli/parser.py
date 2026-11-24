@@ -2014,6 +2014,13 @@ def build_parser() -> argparse.ArgumentParser:
         "input stops the replay before it starts",
     )
     run.add_argument(
+        "--source-image",
+        metavar="IMAGE",
+        help="Evidence image ROOT was selected/extracted from (e.g. a RAW/E01 image read with icat). "
+        "Its SHA-256 and size go into the run audit; a --replay-audit run checks the image again "
+        "(pass the image's new path here when it moved) and stops when it is missing or differs",
+    )
+    run.add_argument(
         "--output-dir",
         help="Directory that receives the generated JSON, extract manifests (with --extract), "
         "and execution report (default: ROOT/rapidtriage-run-MODE; with --read-only or an image file, "

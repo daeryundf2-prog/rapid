@@ -27,6 +27,7 @@ from ..core.plugins import (
     validate_plugin_manifest,
 )
 from ..core.rearchitecture import build_rearchitecture_status
+from ..core.review_carryover import CARRYOVER_FILE_NAME, carry_review_decisions
 from ..core.rules import RuleConfigError, load_rule_set
 from ..core.run import (
     KNOWN_GOOD_FEED_ARCHIVE_DIR_NAME,
@@ -35,6 +36,7 @@ from ..core.run import (
     run_tool_build_identity,
     run_triage_mode,
 )
+from ..core.run.markdown import document_index_counts, format_status_counts
 from ..core.run.plan import (
     ControlFileError,
     PlanTargetError,
@@ -58,6 +60,29 @@ PLAN_STATUS_LABELS = {
     "skipped": "건너뜀",
     "cancelled": "취소됨",
 }
+
+
+def format_scan_scope_line(payload: Mapping[str, object]) -> str:
+    """One-line scan scope of a finished run (D26 #6): scanned files, document indexing, matches, candidates.
+
+    ``Docs matches: 0`` alone read as "nothing was scanned"; the line separates the files
+    scanned, the documents indexed / not indexed (with the reasons) and the keyword matches.
+    """
+    summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
+    disclosures = payload.get("disclosures") if isinstance(payload.get("disclosures"), Mapping) else {}
+    documents = disclosures.get("documents") if isinstance(disclosures.get("documents"), Mapping) else {}
+    counts = document_index_counts(
+        {"candidate_count": summary.get("document_candidate_count"), "match_count": summary.get("document_match_count"), **documents}
+    )
+    reasons = format_status_counts(counts["not_indexed_status_counts"])
+    return (
+        f"Files scanned: {summary.get('scanned_file_count', 0)}  "
+        f"Doc candidates: {counts['candidate_count']}  "
+        f"Docs indexed: {counts['indexed_count']}  "
+        f"Docs not indexed: {counts['not_indexed_count']}{f' ({reasons})' if reasons else ''}  "
+        f"Docs keyword matches: {summary.get('document_match_count', 0)}  "
+        f"File candidates: {summary.get('file_candidate_count', 0)}"
+    )
 
 
 def format_plan_table(plan: Mapping[str, object]) -> str:
@@ -237,6 +262,31 @@ def apply_replay_audit(args: argparse.Namespace, parser: argparse.ArgumentParser
             rule_set = load_rule_set(rules_path)
         except (OSError, ValueError, RuleConfigError) as exc:
             parser.error(f"--replay-audit: invalid rules file: {exc}")
+    recorded_image = options.get("source_image")
+    if isinstance(recorded_image, Mapping) and recorded_image.get("sha256"):
+        expected = str(recorded_image["sha256"])
+        given = getattr(args, "source_image", None)
+        image = Path(given).expanduser().resolve() if given else Path(str(recorded_image.get("path") or ""))
+        if not image.is_file():
+            parser.error(
+                f"--replay-audit: 감사 기록의 원본 이미지 {recorded_image.get('path')} (SHA-256 {expected})를 찾을 수 없습니다. "
+                "옮긴 이미지는 --source-image 경로로 지정하세요."
+            )
+        actual = known_good_feed_sha256(image)
+        if actual != expected:
+            parser.error(
+                f"--replay-audit: 원본 이미지 {image}의 SHA-256 {actual or '읽을 수 없음'}이 감사 기록의 {expected}와 다릅니다. "
+                "같은 원본 이미지가 아니면 재생하지 않습니다."
+            )
+        args.source_image_record = {"path": str(image), "sha256": actual, "size": image.stat().st_size}
+    # The replay's audit names the audited run; its review decisions are carried after the run.
+    args.replay_of = {
+        "audit": str(audit_path),
+        "audit_sha256": known_good_feed_sha256(audit_path),
+        "output_dir": str(audit_path.parent),
+        "recorded_output_dir": str(options.get("output_dir") or ""),
+        "recorded_scan_scope_root": str(options.get("scan_scope_root") or ""),
+    }
     recorded_build = options.get("tool_build") if isinstance(options.get("tool_build"), Mapping) else {}
     current_build = run_tool_build_identity()
     if recorded_build and recorded_build.get("package_source_sha256") != current_build["package_source_sha256"]:
@@ -247,6 +297,43 @@ def apply_replay_audit(args: argparse.Namespace, parser: argparse.ArgumentParser
             file=sys.stderr,
         )
     return rule_set
+
+
+def carry_replay_review_decisions(replay_of: Mapping[str, object], output_dir: Path, summary: Mapping[str, object]) -> str:
+    """Carry the audited run's review decisions into this replay; the console line to print."""
+    original_output = Path(str(replay_of["output_dir"]))
+    record = carry_review_decisions(
+        original_output=original_output,
+        recorded_output_dir=str(replay_of.get("recorded_output_dir") or ""),
+        recorded_root=str(replay_of.get("recorded_scan_scope_root") or ""),
+        replay_output=output_dir,
+        replay_summary=summary,
+    )
+    record_path = output_dir / CARRYOVER_FILE_NAME
+    write_audit_record(
+        audit_path_for(record_path),
+        command="review-carryover",
+        options={"replay_of": dict(replay_of)},
+        input_files=[
+            ("original-case-json", original_output / "rapidtriage-case.json"),
+            ("original-case-db", original_output / "rapidtriage-case.db"),
+        ],
+        output_files=[
+            ("review-carryover", record_path),
+            ("case-json", output_dir / "rapidtriage-case.json"),
+            ("case-db", output_dir / "rapidtriage-case.db"),
+        ],
+    )
+    summary_counts = record["summary"]
+    marks, bookmarks = summary_counts["case_db_marks"], summary_counts["case_bookmarks"]
+    line = (
+        f"검토 결정 인계: 검토 표시 {marks['carried']}/{marks['found']}건, "
+        f"북마크 {bookmarks['carried']}/{bookmarks['found']}건 ({record_path})"
+    )
+    missing = marks["not_carried"] + bookmarks["not_carried"]
+    if missing:
+        line += f"\n경고: 원본 행이 달라 인계하지 못한 검토 결정 {missing}건 — 위 파일의 reason을 확인하세요."
+    return line
 
 
 def handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
@@ -279,6 +366,13 @@ def handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_s
             else:
                 print(format_plan_table(plan))
             return 0
+        source_image = getattr(args, "source_image_record", None)
+        if source_image is None and getattr(args, "source_image", None):
+            image = Path(args.source_image).expanduser().resolve()
+            if not image.is_file():
+                parser.error(f"--source-image: 원본 이미지 파일이 없습니다: {image}")
+            source_image = {"path": str(image), "sha256": known_good_feed_sha256(image), "size": image.stat().st_size}
+        replay_of = getattr(args, "replay_of", None)
         previous_handlers = _install_cancel_handlers(output_dir)
         try:
             payload = _run_interruptibly(
@@ -310,6 +404,8 @@ def handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_s
                 skip_groups=skip_groups,
                 skip_tasks=skip_tasks,
                 actor="cli",
+                source_image=source_image,
+                replay_of=replay_of,
             )
         except (RunModeError, PlanTargetError) as exc:
             parser.error(str(exc))
@@ -320,10 +416,9 @@ def handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_s
         print(f"Saved run report: {payload['outputs']['report']}")
         if payload.get("audit"):
             print(f"Saved audit JSON: {payload['audit']}")
-        print(
-            f"Docs matches: {payload['summary']['document_match_count']}  "
-            f"File candidates: {payload['summary']['file_candidate_count']}"
-        )
+        print(format_scan_scope_line(payload))
+        if replay_of:
+            print(carry_replay_review_decisions(replay_of, output_dir, payload))
         if plan.get("outcome") and plan.get("outcome") != "complete":
             print(f"Run plan outcome: {plan.get('outcome')} (see {payload['outputs'].get('plan')})")
         stuck = [item for item in plan.get("stuck_providers") or [] if isinstance(item, Mapping)]
