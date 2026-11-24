@@ -4,8 +4,10 @@
 const REPLACEMENT: char = '\u{FFFD}';
 
 fn utf16_units(raw: &[u8]) -> impl Iterator<Item = u16> + '_ {
-    raw.chunks_exact(2)
-        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+    raw.as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| u16::from_le_bytes(*pair))
 }
 
 /// `bytes.decode("utf-16-le", errors="replace")` (or `errors="ignore"` when `replace` is false).
@@ -126,8 +128,10 @@ pub fn is_plausible_cell_name(name: &str) -> bool {
 pub fn decode_registry_sz(raw: &[u8]) -> String {
     let even = &raw[..raw.len() - raw.len() % 2];
     let end = even
-        .chunks_exact(2)
-        .position(|pair| pair == [0, 0])
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .position(|pair| *pair == [0, 0])
         .map_or(even.len(), |index| index * 2);
     decode_utf16le(&even[..end], true)
 }
