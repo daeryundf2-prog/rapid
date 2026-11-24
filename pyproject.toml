@@ -58,6 +58,8 @@ test = [
   "Pillow>=10",
   "pip-audit>=2.7",
   "pycryptodome>=3.20",
+  # `python -m pytest` runner; the suites are unittest-style and also run under unittest discover.
+  "pytest>=8",
   "ruff==0.16.*",
   "vulture>=2.11",
   # dashcam_tools tests exercise cv2/numpy/tesseract paths.
