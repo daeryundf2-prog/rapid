@@ -164,6 +164,7 @@ def iter_srudb_schema_rows(path: Path, *, max_bytes: int = SRUM_NATIVE_DECODE_MA
                 "deleted": node.deleted,
                 "row": row,
                 "markers": list(markers),
+                "unreadable_values": dict(row.unreadable_values),
             }
 
 

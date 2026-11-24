@@ -23,6 +23,7 @@ dropping them.
 from __future__ import annotations
 
 import datetime as dt
+import re
 
 __all__ = [
     "FILETIME_EPOCH",
@@ -31,6 +32,7 @@ __all__ = [
     "UNIX_EPOCH",
     "WEBKIT_EPOCH_OFFSET_US",
     "datetime_to_filetime",
+    "event_timestamp_utc_ticks",
     "filetime_fields",
     "filetime_to_datetime",
     "filetime_to_iso",
@@ -175,6 +177,40 @@ def parse_iso_utc(value: object) -> dt.datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=dt.timezone.utc)
     return parsed.astimezone(dt.timezone.utc)
+
+
+_EVENT_TIMESTAMP_RE = re.compile(
+    r"^(?P<base>\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})(?:[.,](?P<fraction>\d+))?\s*(?P<zone>[Zz]|[+-]\d{2}:?\d{2})?$"
+)
+_FILETIME_EPOCH_NAIVE = dt.datetime(1601, 1, 1)
+
+
+def event_timestamp_utc_ticks(value: object) -> tuple[int | None, str]:
+    """``(UTC FILETIME ticks, basis)`` of an ISO-8601 event time, with integer 100 ns arithmetic.
+
+    Up to seven fractional digits are kept (finer digits are below FILETIME resolution
+    and dropped); a ``Z``/``+HH:MM`` offset is applied. Text without an offset is read
+    as UTC and labelled ``iso-no-offset-assumed-utc``; other text is ``(None, "unparsed")``.
+    """
+    text = str(value or "").strip()
+    match = _EVENT_TIMESTAMP_RE.match(text)
+    if not match:
+        return None, "unparsed"
+    try:
+        base = dt.datetime.fromisoformat(match.group("base").replace(" ", "T"))
+    except ValueError:
+        return None, "unparsed"
+    zone = match.group("zone") or ""
+    offset_seconds = 0
+    if zone and zone.upper() != "Z":
+        digits = zone[1:].replace(":", "")
+        offset_seconds = (int(digits[:2]) * 3600 + int(digits[2:]) * 60) * (-1 if zone[0] == "-" else 1)
+    delta = base - _FILETIME_EPOCH_NAIVE
+    seconds = delta.days * 86400 + delta.seconds - offset_seconds
+    ticks = seconds * FILETIME_TICKS_PER_SECOND + int((match.group("fraction") or "")[:7].ljust(7, "0"))
+    if ticks <= 0:
+        return None, "unparsed"
+    return ticks, ("iso-offset" if zone else "iso-no-offset-assumed-utc")
 
 
 def normalize_iso_utc(value: object) -> str | None:

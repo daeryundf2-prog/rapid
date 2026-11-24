@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from .search import load_run_summary
+from .timeline import event_sort_key, event_utc_ticks
 
 
 class TimelineExportError(ValueError):
@@ -43,7 +44,9 @@ def build_unified_timeline_export(
     }
     events = [normalize_event(event, index=index + 1) for index, event in enumerate(raw_events) if isinstance(event, Mapping)]
     events = [event for event in events if matches_filters(event, filters)]
-    events.sort(key=lambda item: str(item.get("timestamp") or ""))
+    # Integer UTC 100 ns ticks decide order (string order of ISO text with
+    # different fraction lengths/offsets is not time order).
+    events.sort(key=event_sort_key)
     if limit:
         events = events[:limit]
 
@@ -112,10 +115,9 @@ def timestamp_kind(event_type: str) -> str:
 
 
 def matches_filters(event: Mapping[str, object], filters: Mapping[str, object]) -> bool:
-    timestamp = str(event.get("timestamp") or "")
-    if filters.get("start") and timestamp < str(filters["start"]):
+    if filters.get("start") and not _not_before(event, str(filters["start"])):
         return False
-    if filters.get("end") and timestamp > str(filters["end"]):
+    if filters.get("end") and _not_before(event, str(filters["end"]), strictly_after=True):
         return False
     if filters.get("source") and str(event.get("source") or "") != str(filters["source"]):
         return False
@@ -124,6 +126,17 @@ def matches_filters(event: Mapping[str, object], filters: Mapping[str, object]) 
     if filters.get("reviewed_status") and str(event.get("review_status") or "unreviewed") != str(filters["reviewed_status"]):
         return False
     return True
+
+
+def _not_before(event: Mapping[str, object], bound: str, *, strictly_after: bool = False) -> bool:
+    """``event >= bound`` (``event > bound`` with ``strictly_after``), compared as
+    integer UTC ticks; text comparison only when either side has no instant."""
+    ticks = event_utc_ticks(event)
+    bound_ticks = event_utc_ticks({"timestamp": bound})
+    if ticks is None or bound_ticks is None:
+        timestamp = str(event.get("timestamp") or "")
+        return timestamp > bound if strictly_after else timestamp >= bound
+    return ticks > bound_ticks if strictly_after else ticks >= bound_ticks
 
 
 def count_by(events: list[Mapping[str, object]], field: str) -> dict[str, int]:

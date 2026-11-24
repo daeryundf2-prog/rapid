@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from ...core.artifact_profiles import cap_list_field
+from ...core.filetime import event_timestamp_utc_ticks
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.json_safe import json_default
 from ...core.models import ArtifactRecord
@@ -9439,14 +9440,19 @@ class EventlogSummaryAccumulator:
         timestamp = str(details.get("timestamp") or details.get("event_created_at") or "")
         record_id = int_text(details.get("record_id"))
 
-        self._inc("event_id_counts", "event", event_id)
-        self._inc("category_counts", "event", category)
-        self._inc("family_counts", "event", family)
-        self._inc("channel_counts", "event", channel)
-        self._inc("channel_family_counts", "event", channel_family_value)
-        self._inc("user_counts", "event", user_name)
-        self._inc("source_ip_counts", "event", source_ip)
-        self._inc("process_counts", "event", process_name)
+        # Breakdowns count live (allocated) records only; slack/inactive-chunk
+        # recoveries are counted apart so they never read as normal events.
+        if is_active_event_record(details):
+            self._inc("event_id_counts", "event", event_id)
+            self._inc("category_counts", "event", category)
+            self._inc("family_counts", "event", family)
+            self._inc("channel_counts", "event", channel)
+            self._inc("channel_family_counts", "event", channel_family_value)
+            self._inc("user_counts", "event", user_name)
+            self._inc("source_ip_counts", "event", source_ip)
+            self._inc("process_counts", "event", process_name)
+        else:
+            self._inc("recovery_candidate_event_id_counts", "event", event_id)
         self._inc("parser_status_counts", "event", str(details.get("coverage_status") or ""))
         self._inc("reportability_counts", "event", str(details.get("reportability") or ""))
         if details.get("parser") == "windows-eventlog-evtx-native":
@@ -9613,7 +9619,11 @@ class EventlogSummaryAccumulator:
             "reportability": "triage",
             "source_path": str(root.resolve()),
             "source_format": "summary",
+            # event_count = live + recovery-candidate rows; the live and
+            # candidate parts are always stated separately.
             "event_count": self.counts["event"],
+            "event_count_scope": "live-and-recovery-candidate-rows",
+            "live_event_count": self.counts["event"] - self.counts["recovery_candidate_event"],
             "detection_count": self.counts["detection"],
             "parsed_row_count": self.counts["event"] + self.counts["detection"] + self.counts["candidate"],
             "inventory_count": self.counts["inventory"],
@@ -9622,6 +9632,8 @@ class EventlogSummaryAccumulator:
             "source_files": sorted(self.source_paths),
             "detection_rule_counts": counter_items(self._merged("detection_rule_counts")),
             "event_id_counts": counter_items(self._merged("event_id_counts")),
+            "event_breakdown_scope": "live-records-only",
+            "recovery_candidate_event_id_counts": counter_items(self._merged("recovery_candidate_event_id_counts")),
             "event_category_counts": counter_items(self._merged("category_counts")),
             "event_family_counts": counter_items(self._merged("family_counts")),
             "channel_counts": counter_items(self._merged("channel_counts")),
@@ -9681,6 +9693,7 @@ class EventlogSummaryAccumulator:
                 "Use message_rendering.validation_required and external parser exports to separate built-in fallback messages from report-grade provider resource rendering.",
                 "first_event_at/last_event_at are the earliest/latest active events by UTC instant (100 ns FILETIME ticks; first_event_at_100ns/last_event_at_100ns). They and record_sequence_gaps exclude out-of-range timestamps (before 1980 or later than collection time + 1 day); the time range also excludes slack/inactive-chunk/outside-chunk recoveries, which are counted in recovery_candidate_event_count and listed with source file and offset in recovery_candidate_events.",
                 "최초/최종 시각은 활성(live) 이벤트만 UTC 시각(100ns FILETIME 단위)으로 비교해 정했습니다. 시각 범위(1980년 이전 또는 수집 시각+1일 이후)를 벗어난 타임스탬프는 최초/최종 시각과 레코드 ID 간격 통계에서 제외했고, 슬랙·비활성 청크·청크 밖 복구 레코드는 시각 범위에 넣지 않고 복구 후보(recovery_candidate_events: 원본 파일·오프셋)로만 집계했습니다.",
+                "event_count counts live and recovery-candidate rows together (live_event_count / recovery_candidate_event_count state each part); event_id/category/family/channel/user/IP/process breakdowns count live records only, and recovery_candidate_event_id_counts lists the candidates by event ID.",
             ],
         }
         return ArtifactRecord(
@@ -9757,40 +9770,6 @@ def normalize_timestamp(value: object) -> str:
     if text.endswith("Z"):
         text = f"{text[:-1]}+00:00"
     return text
-
-
-_EVENT_TIMESTAMP_RE = re.compile(
-    r"^(?P<base>\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})(?:[.,](?P<fraction>\d+))?\s*(?P<zone>[Zz]|[+-]\d{2}:?\d{2})?$"
-)
-_FILETIME_EPOCH_NAIVE = dt.datetime(1601, 1, 1)
-
-
-def event_timestamp_utc_ticks(value: object) -> tuple[int | None, str]:
-    """``(UTC FILETIME ticks, basis)`` of an ISO-8601 event time, with integer 100 ns arithmetic.
-
-    Up to seven fractional digits are kept (finer digits are below FILETIME resolution
-    and dropped); a ``Z``/``+HH:MM`` offset is applied. Text without an offset is read
-    as UTC and labelled ``iso-no-offset-assumed-utc``; other text is ``(None, "unparsed")``.
-    """
-    text = str(value or "").strip()
-    match = _EVENT_TIMESTAMP_RE.match(text)
-    if not match:
-        return None, "unparsed"
-    try:
-        base = dt.datetime.fromisoformat(match.group("base").replace(" ", "T"))
-    except ValueError:
-        return None, "unparsed"
-    zone = match.group("zone") or ""
-    offset_seconds = 0
-    if zone and zone.upper() != "Z":
-        digits = zone[1:].replace(":", "")
-        offset_seconds = (int(digits[:2]) * 3600 + int(digits[2:]) * 60) * (-1 if zone[0] == "-" else 1)
-    delta = base - _FILETIME_EPOCH_NAIVE
-    seconds = delta.days * 86400 + delta.seconds - offset_seconds
-    ticks = seconds * 10_000_000 + int((match.group("fraction") or "")[:7].ljust(7, "0"))
-    if ticks <= 0:
-        return None, "unparsed"
-    return ticks, ("iso-offset" if zone else "iso-no-offset-assumed-utc")
 
 
 def event_order_ticks(details: Mapping[str, object]) -> int | None:

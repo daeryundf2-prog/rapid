@@ -38,7 +38,12 @@ from .artifact_profiles import iter_payload_records
 from .artifacts import SUPPORTED_ARTIFACT_KINDS, run_artifact_collection
 from .docs import scan_document_candidates
 from .files import run_files_scan
-from .filetime import MIN_PLAUSIBLE, parse_iso_utc
+from .filetime import (
+    MIN_PLAUSIBLE,
+    datetime_to_filetime,
+    event_timestamp_utc_ticks,
+    parse_iso_utc,
+)
 from .input_root import resolve_input_root
 from .rules import RuleSet, annotate_timeline_payload
 
@@ -1192,6 +1197,12 @@ def extract_artifact_events(
                 event_details["element"] = _short(element_identity, MAX_CONTEXT_VALUE_LENGTH)
             if source_timezone:
                 event_details["source_timezone"] = source_timezone
+            if timezone not in LOCAL_TIMEZONE_LABELS:
+                # Exact UTC instant as decimal 100 ns ticks (a string: JSON
+                # readers that use doubles would round an 18-digit integer).
+                ticks = event_timestamp_utc_ticks(timestamp)[0]
+                if ticks is not None:
+                    event_details["timestamp_utc_ticks"] = str(ticks)
             event: dict[str, object] = {
                 "timestamp": timestamp,
                 "timestamp_kind": detail_event["timestamp_kind"],
@@ -1591,7 +1602,9 @@ EVENTLOG_CONTEXT_KEYS: tuple[str, ...] = (
 
 
 def eventlog_detail_event(artifact_type: str, details: Mapping[str, object]) -> dict[str, object] | None:
-    timestamp = str(details.get("event_created_at") or details.get("timestamp") or "")
+    # The 7-digit (100 ns) UTC text keeps sub-microsecond order; the
+    # microsecond ``event_created_at`` is the fallback for exports.
+    timestamp = str(details.get("timestamp_100ns") or details.get("event_created_at") or details.get("timestamp") or "")
     if not timestamp:
         return None
     category = str(details.get("event_category") or "event")
@@ -1599,13 +1612,38 @@ def eventlog_detail_event(artifact_type: str, details: Mapping[str, object]) -> 
     context = collect_selected_context(details, EVENTLOG_CONTEXT_KEYS)
     if not context.get("risk_score"):
         context.pop("risk_score", None)
+    # Slack/inactive-chunk/outside-chunk recoveries are recovery candidates,
+    # never normal events: own event type, state and source offset.
+    record_state = str(details.get("evtx_record_state") or "")
+    recovery_candidate = bool(record_state) and record_state != "live"
+    if record_state:
+        context["record_state"] = record_state
+    if recovery_candidate:
+        context["recovery_candidate"] = True
+        if details.get("evtx_record_offset") not in (None, ""):
+            context["record_offset"] = details.get("evtx_record_offset")
+    if artifact_type != "eventlog-event":
+        event_type = "eventlog-detection"
+    elif recovery_candidate:
+        event_type = "eventlog-recovery-candidate"
+    else:
+        event_type = f"eventlog-{category}"
+    if details.get("timestamp_100ns"):
+        field_path = "details.timestamp_100ns"
+    elif details.get("event_created_at"):
+        field_path = "details.event_created_at"
+    else:
+        field_path = "details.timestamp"
+    identity = f"record_id={details.get('record_id')}" if details.get("record_id") not in (None, "") else ""
+    if identity and recovery_candidate:
+        identity = f"{identity}|state={record_state}|offset={details.get('evtx_record_offset')}"
     return {
         "timestamp": timestamp,
         "timestamp_kind": "event",
         "timezone": "UTC",
-        "event_type": f"eventlog-{category}" if artifact_type == "eventlog-event" else "eventlog-detection",
-        "field_path": "details.event_created_at" if details.get("event_created_at") else "details.timestamp",
-        "identity": f"record_id={details.get('record_id')}" if details.get("record_id") not in (None, "") else "",
+        "event_type": event_type,
+        "field_path": field_path,
+        "identity": identity,
         "context": {**context, **({"timeline_family": family or category} if (family or category) != context.get("event_family") else {})},
     }
 
@@ -1760,6 +1798,8 @@ def field_label(name: str, value: object) -> str:
 def build_artifact_summary(artifact_type: str, artifact_path: str, context: Mapping[str, object]) -> str:
     if artifact_type in EVENTLOG_TYPES:
         label = "EventLog detection" if artifact_type == "eventlog-detection" else "EventLog event"
+        if context.get("recovery_candidate"):
+            label = f"EventLog recovery candidate ({context.get('record_state')}, not a live record)"
         bits = [
             field_label("id", context.get("event_id")),
             str(context.get("event_category") or ""),
@@ -1795,11 +1835,27 @@ def build_artifact_summary(artifact_type: str, artifact_path: str, context: Mapp
     return f"Artifact event: {artifact_type} {label}"
 
 
-def event_sort_key(event: Mapping[str, object]) -> tuple[float, str, str, str]:
-    timestamp_text = str(event.get("timestamp", ""))
+def event_utc_ticks(event: Mapping[str, object]) -> int | None:
+    """UTC 100 ns ticks of a timeline event: ``details.timestamp_utc_ticks``,
+    else its timestamp text (naive text is read as UTC, as before)."""
+    details = event.get("details")
+    stored = details.get("timestamp_utc_ticks") if isinstance(details, Mapping) else None
+    if isinstance(stored, (str, int)) and not isinstance(stored, bool) and str(stored).isdigit():
+        return int(stored)
+    ticks = event_timestamp_utc_ticks(event.get("timestamp"))[0]
+    if ticks is None:
+        parsed = parse_iso_utc(event.get("timestamp"))
+        ticks = datetime_to_filetime(parsed) if parsed is not None else None
+    return ticks
+
+
+def event_sort_key(event: Mapping[str, object]) -> tuple[int, int, str, str, str]:
+    """Order by integer UTC ticks (100 ns); events without a time sort first."""
+    ticks = event_utc_ticks(event)
     return (
-        timestamp_to_epoch(timestamp_text),
-        timestamp_text,
+        0 if ticks is None else 1,
+        ticks or 0,
+        str(event.get("timestamp", "")),
         str(event.get("source", "")),
         str(event.get("path", "")),
     )

@@ -24,6 +24,10 @@ PARSER_VERSION = "windows-recent-files-v8"
 MAX_JUMPLIST_INLINE_DESTINATIONS = 256
 MAX_OLE_STREAMS = 128
 MAX_OLE_STREAM_BYTES = 8 * 1024 * 1024
+# DestList entries are parsed from the whole stream (the container is already
+# in memory); 64 MiB covers far more entries than Windows keeps. A DestList
+# beyond this cap is reported as a partial parse with its unparsed entries.
+MAX_DESTLIST_STREAM_BYTES = 64 * 1024 * 1024
 MAX_LNK_EXTRA_DATA_BLOCKS = 64
 MAX_LNK_SHELL_ITEMS = 128
 MAX_LNK_PROPERTY_STORE_STRING_CANDIDATES = 12
@@ -2184,7 +2188,27 @@ def parse_destlist_metadata(ole_streams: Sequence[dict[str, object]]) -> dict[st
         for candidate in entry_candidates
         if not candidate.get("matched_lnk_stream_candidates")
     ]
+    # Declared vs parsed: a DestList read only in part (stream beyond the
+    # parse cap or a short chain) or with fewer entries than its header
+    # declares is reported as partial, never as a complete entry list.
+    declared_total = sum(declared_counts)
+    unparsed_entry_count = max(declared_total - len(entry_candidates), 0)
+    unparsed_stream_bytes = sum(
+        max(int(summary["source_stream_size"]) - int(summary["source_stream_parsed_bytes"]), 0)
+        for summary in stream_summaries
+    )
+    if unparsed_entry_count or unparsed_stream_bytes:
+        entry_coverage = "partial"
+    elif declared_total:
+        entry_coverage = "complete"
+    else:
+        entry_coverage = "declared-count-unknown"
     return {
+        "destlist_declared_entry_count": declared_total,
+        "destlist_parsed_entry_count": len(entry_candidates),
+        "destlist_unparsed_entry_count": unparsed_entry_count,
+        "destlist_unparsed_stream_bytes": unparsed_stream_bytes,
+        "destlist_entry_coverage": entry_coverage,
         "destlist_parse_status": parse_status,
         "destlist_stream_count": len(destlist_streams),
         "destlist_streams": stream_summaries,
@@ -3238,7 +3262,8 @@ def parse_ole_compound_streams(data: bytes) -> list[dict[str, object]]:
             if not stream_data and int(entry["start_sector"]) < len(fat):
                 stream_data = read_cfb_chain(data, fat, int(entry["start_sector"]), sector_size, min(size, MAX_OLE_STREAM_BYTES))[:size]
         else:
-            stream_data = read_cfb_chain(data, fat, int(entry["start_sector"]), sector_size, min(size, MAX_OLE_STREAM_BYTES))[:size]
+            stream_cap = MAX_DESTLIST_STREAM_BYTES if str(entry["name"]).lower() == "destlist" else MAX_OLE_STREAM_BYTES
+            stream_data = read_cfb_chain(data, fat, int(entry["start_sector"]), sector_size, min(size, stream_cap))[:size]
         if len(stream_data) == size:
             digest_hex, hashed_bytes = sha256_bytes(stream_data), size
         else:

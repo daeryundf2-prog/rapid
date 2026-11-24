@@ -1,9 +1,9 @@
 """D12: a CFB stream's SHA-256 covers the whole stream, not the parsed prefix.
 
-Parsing keeps at most ``MAX_OLE_STREAM_BYTES`` (8 MiB) of a stream; the
-hash recorded next to the full stream size must still be the SHA-256 of every
-stream byte, and a broken sector chain must not present a prefix hash as the
-stream hash.
+Parsing keeps at most ``MAX_OLE_STREAM_BYTES`` (8 MiB) of a stream (a DestList
+is parsed whole up to ``MAX_DESTLIST_STREAM_BYTES``, D14 #12); the hash recorded
+next to the full stream size must still be the SHA-256 of every stream byte, and
+a broken sector chain must not present a prefix hash as the stream hash.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import struct
 import unittest
 
 from rapidtriage.artifacts.windows.recent_files import (
+    MAX_DESTLIST_STREAM_BYTES,
     MAX_OLE_STREAM_BYTES,
     parse_ole_compound_streams,
 )
@@ -22,7 +23,7 @@ SECTOR = 512
 END, FREE, FATSECT, DIFSECT = 0xFFFFFFFE, 0xFFFFFFFF, 0xFFFFFFFD, 0xFFFFFFFC
 
 
-def single_stream_cfb(payload: bytes) -> bytes:
+def single_stream_cfb(payload: bytes, name: str = "DestList") -> bytes:
     """CFB v3 (512-byte sectors, one DIFAT sector) holding one regular stream."""
     data_sectors = (len(payload) + SECTOR - 1) // SECTOR
     fat_sectors = 1
@@ -42,7 +43,7 @@ def single_stream_cfb(payload: bytes) -> bytes:
     fat_entries += [FREE] * (fat_sectors * 128 - len(fat_entries))
     fat = struct.pack(f"<{len(fat_entries)}I", *fat_entries)
     directory = cfb_directory_entry("Root Entry", 5, child_id=1, start_sector=END)
-    directory += cfb_directory_entry("DestList", 2, start_sector=first_data, stream_size=len(payload))
+    directory += cfb_directory_entry(name, 2, start_sector=first_data, stream_size=len(payload))
     return bytes(header) + fat + difat + directory.ljust(SECTOR, b"\0") + payload.ljust(data_sectors * SECTOR, b"\0")
 
 
@@ -53,15 +54,16 @@ def synthetic_payload(size: int) -> bytes:
 
 class CfbStreamHashTests(unittest.TestCase):
     def test_stream_hash_covers_every_byte_at_and_above_the_parse_cap(self) -> None:
-        for size in (MAX_OLE_STREAM_BYTES, MAX_OLE_STREAM_BYTES + 1):
-            with self.subTest(size=size):
-                payload = synthetic_payload(size)
-                (stream,) = parse_ole_compound_streams(single_stream_cfb(payload))
-                self.assertEqual(stream["size"], size)
-                self.assertEqual(stream["sha256"], hashlib.sha256(payload).hexdigest())
-                self.assertEqual(stream["hashed_bytes"], size)
-                self.assertEqual(stream["sha256_scope"], "full-stream")
-                self.assertEqual(stream["parsed_bytes"], min(size, MAX_OLE_STREAM_BYTES))
+        for name, cap in (("1", MAX_OLE_STREAM_BYTES), ("DestList", MAX_DESTLIST_STREAM_BYTES)):
+            for size in (MAX_OLE_STREAM_BYTES, MAX_OLE_STREAM_BYTES + 1):
+                with self.subTest(name=name, size=size):
+                    payload = synthetic_payload(size)
+                    (stream,) = parse_ole_compound_streams(single_stream_cfb(payload, name))
+                    self.assertEqual(stream["size"], size)
+                    self.assertEqual(stream["sha256"], hashlib.sha256(payload).hexdigest())
+                    self.assertEqual(stream["hashed_bytes"], size)
+                    self.assertEqual(stream["sha256_scope"], "full-stream")
+                    self.assertEqual(stream["parsed_bytes"], min(size, cap))
 
     def test_broken_chain_reports_prefix_hash_with_its_byte_range(self) -> None:
         payload = synthetic_payload(MAX_OLE_STREAM_BYTES + 1)

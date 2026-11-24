@@ -2680,7 +2680,10 @@ def build_srum_schema_row_record(
         "native_table_catalog_decoding_available": True,
         "has_app_identity": bool(app_identity),
         "has_timestamp_candidate": bool(timestamp),
-        "has_long_value_marker": any("long_value" in marker or "separated" in marker for marker in markers),
+        "has_long_value_marker": any(
+            "long_value" in marker or "separated" in marker or "lv-key" in marker for marker in markers
+        ),
+        "requires_unreadable_value_review": bool(entry.get("unreadable_values")),
         "deleted_row": bool(entry.get("deleted")),
         "requires_correlation": True,
         "requires_second_parser_validation": True,
@@ -2721,6 +2724,10 @@ def build_srum_schema_row_record(
             "timestamp_source": "native-ese-row-field" if timestamp else "not-decoded",
             "row_fields": _json_safe_row_fields(row),
             "decode_markers": markers,
+            # Columns whose stored value could not be read (e.g. long-value
+            # pages missing): the value is unknown and absent from
+            # row_fields; the reference key and failure location live here.
+            "unreadable_fields": dict(entry.get("unreadable_values") or {}),
             "row_level_decoding_available": True,
             "evidence_strength": "srum-row-indicator-candidate",
             "validation_required": True,

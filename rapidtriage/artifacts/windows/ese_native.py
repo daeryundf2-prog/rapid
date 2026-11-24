@@ -328,6 +328,7 @@ class EseRecordData:
         "new_record_format",
         "tagged_data_start",
         "tagged_fields",
+        "unresolved_long_value_keys",
         "variable_data_start",
         "variable_offset_start",
         "variable_offsets",
@@ -354,6 +355,9 @@ class EseRecordData:
         self.fixed_null_bitmap = b""
         self.tagged_data_start = 0
         self.tagged_fields: list[EseTagField] = []
+        # Separated long-value references whose pages could not be read, by
+        # column identifier: the key is never reported as the column value.
+        self.unresolved_long_value_keys: dict[int, list[str]] = {}
         if not self.header_ok:
             return
         self.last_fixed_id = data[0]
@@ -439,14 +443,15 @@ class EseRecordData:
             return field, None, markers + ["tagged-bounds-invalid"]
         value = bytes(self.data[start:end])
         if field.flags & (TAGFLD_MULTI_VALUES | TAGFLD_TWO_VALUES):
-            elements, mv_markers = self._parse_multivalue(value, field)
+            elements, mv_markers = self._parse_multivalue(value, field, column)
             return field, elements, markers + mv_markers
         if field.flags & TAGFLD_SEPARATED:
             resolved = self.lv_getter(value) if self.lv_getter is not None else None
             if resolved is None:
                 markers.append("lv-key-unresolved")
-            else:
-                value = resolved
+                self.unresolved_long_value_keys.setdefault(column.identifier, []).append(value.hex())
+                return field, None, markers
+            value = resolved
         elif field.flags & TAGFLD_COMPRESSED:
             decompressed = decompress_ese_value(value)
             if decompressed is None:
@@ -455,14 +460,16 @@ class EseRecordData:
                 value = decompressed
         return field, value, markers
 
-    def _parse_multivalue(self, value: bytes, field: EseTagField) -> tuple[list[bytes], list[str]]:
+    def _parse_multivalue(
+        self, value: bytes, field: EseTagField, column: EseColumn
+    ) -> tuple[list[bytes | None], list[str]]:
         markers: list[str] = []
         separated_instance = 0x8000
         if field.flags & TAGFLD_TWO_VALUES:
             if not value:
                 return [], markers
             first_size = value[0]
-            elements = [value[1 : 1 + first_size], value[1 + first_size :]]
+            elements: list[bytes | None] = [value[1 : 1 + first_size], value[1 + first_size :]]
         elif field.flags & TAGFLD_MULTI_VALUES and len(value) >= 2:
             first_offset = struct.unpack("<H", value[:2])[0] & 0x7FFF
             num_values = min(first_offset // 2, 4096)
@@ -476,13 +483,15 @@ class EseRecordData:
                 if offset & separated_instance:
                     resolved = self.lv_getter(element) if self.lv_getter is not None else None
                     if resolved is None:
+                        # Unreadable instance: value unknown, key kept apart.
                         markers.append("lv-key-unresolved")
-                    else:
-                        element = resolved
+                        self.unresolved_long_value_keys.setdefault(column.identifier, []).append(element.hex())
+                    elements.append(resolved)
+                    continue
                 elements.append(element)
         else:
             elements = [value]
-        if field.flags & TAGFLD_COMPRESSED and elements:
+        if field.flags & TAGFLD_COMPRESSED and elements and elements[0] is not None:
             decompressed = decompress_ese_value(elements[0])
             if decompressed is None:
                 markers.append("compressed-value-not-decompressed")
@@ -503,7 +512,7 @@ class EseRecordData:
         if raw is None:
             return None, markers
         if isinstance(raw, list):
-            return [parse_column_value(column, element) for element in raw], markers
+            return [None if element is None else parse_column_value(column, element) for element in raw], markers
         return parse_column_value(column, raw), markers
 
 
@@ -620,6 +629,16 @@ class EseTable:
             column.fixed_offset = sum(c.size for c in self.columns if c.is_fixed)
         self.columns.append(column)
         self.column_id_map[column.identifier] = column
+
+
+class EseRow(dict):
+    """Decoded row (column name -> value) plus the columns whose value could
+    not be read: ``unreadable_values[name]`` keeps the long-value reference
+    key(s) and the unreadable page locations apart from the value."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.unreadable_values: dict[str, dict[str, object]] = {}
 
 
 class EseDatabase:
@@ -917,7 +936,7 @@ class EseDatabase:
             position = next_offset
         return b"".join(out)[:size]
 
-    def iter_table_rows(self, table: EseTable) -> Iterable[tuple[EseNode, dict[str, Any], list[str]]]:
+    def iter_table_rows(self, table: EseTable) -> Iterable[tuple[EseNode, EseRow, list[str]]]:
         root = self.page(table.root_page)
         lv_getter = (lambda key, t=table: self.get_long_value(t, key)) if table.lv_root_page else None
         for node in self.iter_leaf_nodes(root):
@@ -927,14 +946,23 @@ class EseDatabase:
                 is_small_page=self.is_small_page,
                 lv_getter=lv_getter,
             )
-            row: dict[str, Any] = {}
+            row = EseRow()
             markers: list[str] = []
             for column in table.columns:
+                failure_start = len(self.page_failures)
                 value, column_markers = record.value(column)
                 if column_markers:
                     markers.extend(f"{column.name}:{m}" for m in column_markers)
-                if value is not None:
+                if value is not None and not (isinstance(value, list) and value and all(item is None for item in value)):
                     row[column.name] = value
+                keys = record.unresolved_long_value_keys.get(column.identifier)
+                if keys:
+                    row.unreadable_values[column.name] = {
+                        "status": "long-value-unreadable",
+                        "long_value_reference_keys_hex": list(keys),
+                        "long_value_root_page": table.lv_root_page,
+                        "unreadable_pages": self.page_failure_locations(failure_start),
+                    }
             yield node, row, markers
 
 

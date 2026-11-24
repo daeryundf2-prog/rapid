@@ -44,6 +44,10 @@ export interface ColumnSpec {
   format?: (row: GridRow) => string;
   /** Cell tooltip when it should differ from the display text (e.g. the raw value behind a label). */
   tooltip?: (row: GridRow) => string;
+  /** Selection-CSV text when the display text is lossy (e.g. a time shown to the second). */
+  exportFormat?: (row: GridRow) => string;
+  /** Extra selection-CSV columns written right after this one (exact UTC, zone status, …). */
+  exportExtras?: readonly { header: string; value: (row: GridRow) => string }[];
   /** Rich cell content (chips, icons); falls back to the display text when absent. */
   render?: (row: GridRow) => ReactNode;
   /**
