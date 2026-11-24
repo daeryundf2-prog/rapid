@@ -1,7 +1,7 @@
 {
   "command": "files",
   "root": "/cases/case-001",
-  "generated_at": "2026-04-11T16:05:00",
+  "generated_at": "2026-04-11T16:05:00+00:00",
   "filters": {
     "categories": [
       "documents",
@@ -37,8 +37,8 @@
       "vehicle-images": 0,
       "images": 0
     },
-    "newest_modified_at": "2026-04-10T09:30:00",
-    "oldest_modified_at": "2026-04-08T20:00:00"
+    "newest_modified_at": "2026-04-10T09:30:00+00:00",
+    "oldest_modified_at": "2026-04-08T20:00:00+00:00"
   },
   "candidates": [
     {
@@ -46,7 +46,7 @@
       "name": "loader.exe",
       "extension": ".exe",
       "size": 20480,
-      "modified_at": "2026-04-10T09:30:00",
+      "modified_at": "2026-04-10T09:30:00+00:00",
       "modified_epoch": 1775813400.0,
       "categories": [
         "executables"
@@ -62,7 +62,7 @@
       "name": "case-notes.txt",
       "extension": ".txt",
       "size": 42,
-      "modified_at": "2026-04-10T08:15:00",
+      "modified_at": "2026-04-10T08:15:00+00:00",
       "modified_epoch": 1775808900.0,
       "categories": [
         "documents"
@@ -79,7 +79,7 @@
       "name": "bundle.zip",
       "extension": ".zip",
       "size": 1024,
-      "modified_at": "2026-04-09T12:00:00",
+      "modified_at": "2026-04-09T12:00:00+00:00",
       "modified_epoch": 1775736000.0,
       "categories": [
         "archives"
@@ -95,7 +95,7 @@
       "name": "browser.sqlite",
       "extension": ".sqlite",
       "size": 4096,
-      "modified_at": "2026-04-08T20:00:00",
+      "modified_at": "2026-04-08T20:00:00+00:00",
       "modified_epoch": 1775678400.0,
       "categories": [
         "databases"

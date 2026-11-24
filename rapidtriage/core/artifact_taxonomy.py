@@ -735,7 +735,7 @@ def build_taxonomy_audit(repo_root: Path | None = None) -> dict[str, object]:
     return {
         "command": "taxonomy-audit",
         "taxonomy_version": TAXONOMY_VERSION,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "repo_root": str(root),
         "summary": {
             "target_count": len(target_results),

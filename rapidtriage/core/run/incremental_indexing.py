@@ -304,7 +304,7 @@ def build_run_input_fingerprint(
     fingerprint_value = hasher.hexdigest()
     payload: dict[str, object] = {
         "command": "run-fingerprint",
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "root": str(root),
         "fingerprint": fingerprint_value,
         "summary": {

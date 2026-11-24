@@ -138,7 +138,7 @@ def run_artifact_collection(
     payload = {
         "command": "artifacts",
         "kind": collector_kind,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "root": str(input_root.root_path),
         "provider": {
             "name": str(collector.name),
@@ -562,7 +562,7 @@ def stream_artifact_collection(
     payload: dict[str, object] = {
         "command": "artifacts",
         "kind": collector_kind,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "root": str(input_root.root_path),
         "provider": provider,
         "summary": {

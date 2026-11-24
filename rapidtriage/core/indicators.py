@@ -511,7 +511,7 @@ def build_indicator_summary(
     )
     return {
         "command": "indicators",
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "run_summary": str(summary.get("outputs", {}).get("summary", "")),
         "options": {
             "max_indicators": max_indicators,
@@ -1384,7 +1384,7 @@ def build_indicator_ti_enrichment_package(
     return {
         "command": "indicator-ti-enrichment",
         "profile_version": "ioc-ti-enrichment-review-package-v1",
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "local_only": True,
         "no_external_calls": True,
         "options": {

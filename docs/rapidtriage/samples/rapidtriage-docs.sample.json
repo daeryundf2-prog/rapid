@@ -1,7 +1,7 @@
 {
   "command": "docs",
   "root": "/cases/case-001",
-  "generated_at": "2026-04-11T16:06:00",
+  "generated_at": "2026-04-11T16:06:00+00:00",
   "summary": {
     "candidate_count": 3,
     "match_count": 2,
@@ -37,7 +37,7 @@
     ]
   },
   "manifest": {
-    "generated_at": "2026-04-11T16:00:00",
+    "generated_at": "2026-04-11T16:00:00+00:00",
     "root": "/cases/case-001",
     "platform": "Darwin-24.4.0-arm64-arm-64bit",
     "keywords": [
@@ -253,19 +253,19 @@
       "path": "/cases/case-001/evidence/case-notes.txt",
       "kind": "txt",
       "size": 42,
-      "modified_at": "2026-04-10T08:15:00"
+      "modified_at": "2026-04-10T08:15:00+00:00"
     },
     {
       "path": "/cases/case-001/reports/summary.docx",
       "kind": "docx",
       "size": 8192,
-      "modified_at": "2026-04-10T08:30:00"
+      "modified_at": "2026-04-10T08:30:00+00:00"
     },
     {
       "path": "/cases/case-001/evidence/receipt.pdf",
       "kind": "pdf",
       "size": 16384,
-      "modified_at": "2026-04-10T08:45:00"
+      "modified_at": "2026-04-10T08:45:00+00:00"
     }
   ],
   "results": [

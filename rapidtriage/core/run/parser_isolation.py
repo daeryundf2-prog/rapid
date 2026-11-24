@@ -59,7 +59,7 @@ def isolated_parser_error_payload(kind: str, *, input_root: InputRoot, exc: Exce
         "kind": kind,
         "root": str(input_root.root_path),
         "input_kind": input_root.kind,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "summary": {
             "artifact_count": 0,
             "artifact_type_counts": {},

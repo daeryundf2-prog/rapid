@@ -180,7 +180,7 @@ def run_extract(
         "source_command": source_command,
         "input_json": str(input_json),
         "root": str(root.root_path) if root else None,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "output_dir": str(output_dir),
         "filters": {
             "name_contains": normalized_name_filters,
@@ -231,7 +231,7 @@ def build_disabled_extract_payload(
         "source_command": source_command,
         "input_json": str(input_json),
         "root": None,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "output_dir": str(output_dir),
         "disabled": True,
         "disabled_reason": "extraction-disabled-by-default; rerun with --extract to copy and hash candidates",
