@@ -442,8 +442,11 @@ def build_case_uco_document(
         node = _hash_record_node(hash_row)
         register(node)
 
-    # Evidence-source provenance records reference their child observables.
-    acquisitions_by_source: dict[str, dict[str, object]] = {}
+    # Evidence-source provenance records reference their child observables. The first
+    # acquisition of a source is summarized on its provenance node; every other acquisition
+    # (re-acquisition of the same source, unlinked control) gets its own node with its own
+    # citation and source hash, so none of the exported rows drops out of the graph.
+    embedded_acquisition_ids: set[int] = set()
     acquisition_rows = rows["acquisition_metadata"]
     evidence_rows = rows["evidence_source"]
     evidence_ids_by_citation = {
@@ -467,12 +470,12 @@ def build_case_uco_document(
         )
         register(node)
         if acquisition is not None:
-            acquisitions_by_source[citation_id] = acquisition
+            embedded_acquisition_ids.add(int(acquisition["id"]))
 
     for acquisition_row in acquisition_rows:
-        source_citation = str(acquisition_row["evidence_source_citation_id"] or "")
-        if source_citation and source_citation in acquisitions_by_source:
+        if int(acquisition_row["id"]) in embedded_acquisition_ids:
             continue
+        source_citation = str(acquisition_row["evidence_source_citation_id"] or "")
         linked_id = evidence_ids_by_citation.get(source_citation)
         node = _acquisition_provenance_node(acquisition_row, linked_id=linked_id)
         register(node)
@@ -568,13 +571,7 @@ def build_case_uco_document(
             "case_id": normalized_case_id,
             "row_counts": row_counts,
             "node_counts": {
-                "provenance": len(evidence_rows)
-                + sum(
-                    1
-                    for row in acquisition_rows
-                    if str(row["evidence_source_citation_id"] or "")
-                    not in acquisitions_by_source
-                ),
+                "provenance": len(evidence_rows) + len(acquisition_rows) - len(embedded_acquisition_ids),
                 "file": len(rows["file_record"]),
                 "artifact": len(rows["artifact"]),
                 "event": len(rows["event"]),
