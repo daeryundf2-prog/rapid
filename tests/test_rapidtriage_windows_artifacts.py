@@ -4575,7 +4575,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(usn_locator["usn"], 9001)
             self.assertIn("FILE_DELETE", usn_locator["reason_flags"])
             self.assertEqual(usn_locator["record_cursor"], 16)
-            self.assertEqual(usn_locator["path_confidence"], "no-matching-frn-in-bounded-mft-cache")
+            # The fixture's only MFT record sits in slot 0 but its header names
+            # record 4: geometry and header disagree, so it is never a path-cache
+            # node (D22 item 1) and the bounded cache is empty.
+            self.assertEqual(usn_locator["path_confidence"], "no-mft-path-cache-attached")
             self.assertIn("USN 9001", usn_locator["source_citation"])
             self.assertEqual(len(usn_locator["source_sha256"]), 64)
             self.assertEqual(native_usn[0]["details"]["source_viewer_locator"], usn_locator)

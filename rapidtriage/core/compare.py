@@ -39,6 +39,8 @@ TEXT_EXTENSIONS = {
     ".yml",
 }
 COMPARE_GAP_ID = "#52"
+# Equal sizes but no hashes on both sides: the content was not compared.
+CONTENT_UNVERIFIED_STATUS = "same-size-content-unverified"
 COMPARE_REPORT_GRADE_VALIDATION_PLAN_VERSION = "multi-evidence-compare-report-grade-validation-plan-v1"
 COMPARE_NATIVE_CAPABILITIES = {
     "a_b_file_compare": True,
@@ -94,9 +96,12 @@ def compare_paths(
     status = compare_status(left_record, right_record)
     text_diff = (
         build_text_diff(left_path, right_path, left_label=left_label, right_label=right_label, max_text_bytes=max_text_bytes, context=diff_context)
-        if include_text_diff and status == "different"
+        if include_text_diff and status in {"different", CONTENT_UNVERIFIED_STATUS}
         else {}
     )
+    if status == CONTENT_UNVERIFIED_STATUS and isinstance(text_diff, Mapping) and text_diff.get("included"):
+        # Equal lengths without hashes prove nothing; differing text lines do.
+        status = "different"
     result = {
         "comparison_id": "compare-0001",
         "status": status,
@@ -1002,7 +1007,9 @@ def compare_status(left: Mapping[str, object], right: Mapping[str, object]) -> s
     right_sha256 = right_hashes.get("sha256")
     if left_sha256 and right_sha256:
         return "same" if left_sha256 == right_sha256 else "different"
-    return "same" if left.get("size") == right.get("size") else "different"
+    # Without both hashes only the length was compared: equal lengths say
+    # nothing about the content.
+    return CONTENT_UNVERIFIED_STATUS if left.get("size") == right.get("size") else "different"
 
 
 def comparison_timestamp(left: Mapping[str, object], right: Mapping[str, object]) -> str:
@@ -1023,6 +1030,8 @@ def build_summary(left: Mapping[str, object], right: Mapping[str, object], statu
         return f"{right_name} exists only on the right side"
     if status == "both-missing":
         return "Both compare inputs are missing"
+    if status == CONTENT_UNVERIFIED_STATUS:
+        return f"{left_name} and {right_name} have the same length; content not verified (no hashes)"
     return f"{left_name} differs from {right_name}"
 
 

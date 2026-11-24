@@ -54,7 +54,8 @@ def _record_time(raw: bytes) -> str | None:
 
 
 def _volume_time(raw: bytes) -> str | None:
-    """17-byte volume descriptor time ``YYYYMMDDHHMMSScc`` + GMT offset byte."""
+    """17-byte volume descriptor time ``YYYYMMDDHHMMSScc`` + GMT offset byte (ECMA-119);
+    ``cc`` is hundredths of a second and is kept."""
     text = raw[:16].decode("ascii", errors="replace")
     if not text.isdigit() or text.startswith("0000"):
         return None
@@ -62,7 +63,14 @@ def _volume_time(raw: bytes) -> str | None:
     try:
         zone = dt.timezone(dt.timedelta(minutes=15 * offset))
         return dt.datetime(
-            int(text[0:4]), int(text[4:6]), int(text[6:8]), int(text[8:10]), int(text[10:12]), int(text[12:14]), tzinfo=zone
+            int(text[0:4]),
+            int(text[4:6]),
+            int(text[6:8]),
+            int(text[8:10]),
+            int(text[10:12]),
+            int(text[12:14]),
+            int(text[14:16]) * 10_000,
+            tzinfo=zone,
         ).isoformat()
     except ValueError:
         return None

@@ -5765,7 +5765,8 @@ def match_usbstor_to_usb(
     ``join_method`` is ``"ambiguous-serial"`` and the competing instances are returned.
     A serial (or ParentIdPrefix) join is cross-checked against the USBSTOR ContainerID: when
     that ContainerID names a different VID/PID in the same hive, nothing is joined,
-    ``join_method`` is ``"conflict-serial-vs-container-id"`` and both sides are returned.
+    ``join_method`` is ``"conflict-serial-vs-container-id"`` and both sides are returned. The
+    same holds when the serial's candidates and the ContainerID's candidates are disjoint sets.
     A ContainerID shared by several VID/PIDs yields ``"ambiguous-container-id"`` with every
     candidate. ``join_method`` is ``""`` when nothing matched.
     """
@@ -5822,6 +5823,12 @@ def match_usbstor_to_usb(
         if prefix and prefix in usb_by_parent_prefix:
             return checked(usb_by_parent_prefix[prefix], "parent-id-prefix", [])
     candidates = container_candidates
+    serial_devices = {(entry["vid"], entry["pid"]) for entry in ambiguous}
+    if serial_devices and candidates and serial_devices.isdisjoint((entry["vid"], entry["pid"]) for entry in candidates):
+        # The serial names other devices than the ContainerID does: the two
+        # identifiers disagree, so neither side is picked and both candidate
+        # sets are kept.
+        return {}, "conflict-serial-vs-container-id", ambiguous + [item for item in candidates if item not in ambiguous]
     if candidates and len({(entry["vid"], entry["pid"]) for entry in candidates}) == 1:
         usbstor_first = sorted(candidates, key=lambda entry: entry.get("usb_service", "").lower() != "usbstor")
         return usbstor_first[0], "container-id", []

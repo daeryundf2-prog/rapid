@@ -46,7 +46,7 @@ commercial_uplift_evidence?: {
 }
 results: {
 comparison_id: string
-status: ("same" | "different" | "only-in-left" | "only-in-right" | "both-missing")
+status: ("same" | "same-size-content-unverified" | "different" | "only-in-left" | "only-in-right" | "both-missing")
 timestamp: string
 path: string
 left_path: string
