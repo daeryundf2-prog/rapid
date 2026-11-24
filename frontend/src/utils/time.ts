@@ -242,8 +242,123 @@ export function formatEvidenceTime(
   return value === null || value === undefined || value === "" ? "—" : String(value);
 }
 
-/** Grid cells: "2025-05-29 23:25:26 KST" — seconds, the zone named (the tooltip has the rest). */
-export function formatGridTime(value: string | number | Date | null | undefined, tz: TimezoneChoice): string {
+// ---------------------------------------------------------------------------
+// Lossless evidence times (D14 #8, #11): one reading shared by the grid cell, its tooltip and the
+// selection CSV. A wall clock whose zone the evidence does not establish ("local-unknown") is
+// shown as written and never converted into the display zone; an instant keeps every fraction
+// digit the source wrote (100 ns ticks) in its exact UTC text, and an unsafe FILETIME number
+// (an 18-digit JSON number already rounded by the double parse) is never shown as the original.
+// ---------------------------------------------------------------------------
+
+/** Source zone labels of a wall clock with an undetermined zone (rapidtriage LOCAL_TIMEZONE_LABELS). */
+export const WALL_CLOCK_ZONES: Readonly<Record<string, true>> = {
+  "local-unknown": true,
+  "exif-local": true,
+  local: true,
+  "device-local": true,
+};
+
+const WALL_CLOCK_RE = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:[.,](\d+))?$/;
+
+export type ZoneStatus = "utc-instant" | "wall-clock-zone-undetermined";
+
+export interface ExactEvidenceTime {
+  /** Display text with every source fraction digit; a wall clock is shown as written. */
+  display: string;
+  /** Exact UTC text with the source fraction digits ("2024-01-01T00:00:00.0000007Z"); null for a wall clock. */
+  exactUtc: string | null;
+  /** The wall clock as written ("2024-01-02 09:00:00"); null for an instant. */
+  wallClock: string | null;
+  zoneStatus: ZoneStatus;
+  /** FILETIME ticks as a decimal string: the source value when exact, else derived from the text. */
+  filetime: string | null;
+  filetimeBasis: "source" | "derived" | null;
+}
+
+/** A source FILETIME the browser still holds exactly: decimal text, or a safe integer number. */
+function exactSourceFiletime(raw: string | number | null | undefined): string | null {
+  if (typeof raw === "string") return /^\d+$/.test(raw.trim()) ? raw.trim() : null;
+  if (typeof raw === "number") return Number.isSafeInteger(raw) && raw > 0 ? String(raw) : null;
+  return null;
+}
+
+/** The wall clock of naive text labelled with an undetermined zone, else null. */
+function wallClockOf(value: unknown, sourceZone: string | null | undefined): string | null {
+  if (typeof value !== "string" || !sourceZone || !Object.hasOwn(WALL_CLOCK_ZONES, sourceZone)) return null;
+  const match = WALL_CLOCK_RE.exec(value.trim());
+  if (!match) return null;
+  return `${match[1]} ${match[2]}${match[3] ? `.${match[3]}` : ""}`;
+}
+
+/** The lossless reading of an evidence time, or null when it does not parse. */
+export function exactEvidenceTime(
+  value: string | number | Date | null | undefined,
+  tz: TimezoneChoice,
+  options: { sourceZone?: string | null; rawFiletime?: string | number | null } = {},
+): ExactEvidenceTime | null {
+  const wallClock = wallClockOf(value, options.sourceZone);
+  if (wallClock) {
+    return {
+      display: `${wallClock} (현지 시각·시간대 미확정)`,
+      exactUtc: null,
+      wallClock,
+      zoneStatus: "wall-clock-zone-undetermined",
+      filetime: null,
+      filetimeBasis: null,
+    };
+  }
+  const reading = evidenceTime(value, tz);
+  const date = parseInstant(value);
+  if (!reading || !date) return null;
+  const sourceFraction =
+    typeof value === "string" ? (/\d{2}:\d{2}:\d{2}[.,](\d+)/.exec(value)?.[1] ?? "") : "";
+  const fraction = sourceFraction ? sourceFraction.slice(0, 7) : fractionDigits(value);
+  const exactUtc = `${date.toISOString().slice(0, 19)}${fraction ? `.${fraction}` : ""}Z`;
+  const source = exactSourceFiletime(options.rawFiletime);
+  const derived = filetimeOf(value);
+  return {
+    display: reading.text,
+    exactUtc,
+    wallClock: null,
+    zoneStatus: "utc-instant",
+    filetime: source ?? derived,
+    filetimeBasis: source ? "source" : derived ? "derived" : null,
+  };
+}
+
+/** Korean label of a zone status (CSV "시간대 상태" column, tooltip). */
+export function zoneStatusLabel(status: ZoneStatus): string {
+  return status === "utc-instant" ? "UTC 기준 시각" : "현지 시각(시간대 미확정·환산 안 함)";
+}
+
+/**
+ * A wall clock converted under an assumed zone (the evidence's own zone setting), or null when no
+ * valid zone is given. Kept apart from the source value: the assumption is the analyst's.
+ */
+export function assumedUtcOfWallClock(
+  wallClock: string,
+  assumedZone: string | null | undefined,
+): string | null {
+  if (!assumedZone || assumedZone === "local" || !isValidTimezone(assumedZone)) return null;
+  const match = WALL_CLOCK_RE.exec(wallClock.trim());
+  if (!match) return null;
+  const asUtc = new Date(`${match[1]}T${match[2]}Z`);
+  if (Number.isNaN(asUtc.getTime())) return null;
+  const offset = tzOffsetMinutes(zoneName(assumedZone), asUtc);
+  const utc = new Date(asUtc.getTime() - offset * 60_000);
+  const fraction = match[3] ? `.${match[3].slice(0, 7)}` : "";
+  return `${utc.toISOString().slice(0, 19)}${fraction}Z`;
+}
+
+/** Grid cells: "2025-05-29 23:25:26 KST" — seconds, the zone named (the tooltip has the rest).
+ * A wall clock of undetermined zone is shown as written, marked, never shifted into `tz`. */
+export function formatGridTime(
+  value: string | number | Date | null | undefined,
+  tz: TimezoneChoice,
+  sourceZone?: string | null,
+): string {
+  const wallClock = wallClockOf(value, sourceZone);
+  if (wallClock) return `${wallClock.slice(0, 19)} 현지(미확정)`;
   const date = parseInstant(value);
   if (!date) return value === null || value === undefined || value === "" ? "" : String(value);
   const zone = zoneLabel(tz, date);
@@ -251,17 +366,23 @@ export function formatGridTime(value: string | number | Date | null | undefined,
   return `${formatTimestamp(date, tz)} ${short}`;
 }
 
-/** Tooltip of an evidence time: the source text, the UTC ISO and the FILETIME (raw when known). */
+/** Tooltip of an evidence time: the reading, the source text, the exact UTC and the FILETIME
+ * (labelled 원문 only when the source value is exact, else 환산). */
 export function evidenceTimeTooltip(
   value: string | number | Date | null | undefined,
   tz: TimezoneChoice,
   rawFiletime?: string | number | null,
+  sourceZone?: string | null,
 ): string {
-  const reading = evidenceTime(value, tz);
+  const reading = exactEvidenceTime(value, tz, { sourceZone, rawFiletime });
   if (!reading) return value === null || value === undefined ? "" : String(value);
+  const raw = value instanceof Date ? value.toISOString() : String(value);
+  if (reading.zoneStatus === "wall-clock-zone-undetermined") {
+    return [reading.display, `원문 ${raw} (${sourceZone})`, zoneStatusLabel(reading.zoneStatus)].join("\n");
+  }
   const filetime =
-    rawFiletime !== undefined && rawFiletime !== null && rawFiletime !== ""
-      ? `FILETIME 원문 ${rawFiletime}`
-      : `FILETIME(환산) ${filetimeOf(value) ?? "—"}`;
-  return [reading.text, `원문 ${reading.raw}`, filetime].join("\n");
+    reading.filetimeBasis === "source"
+      ? `FILETIME 원문 ${reading.filetime}`
+      : `FILETIME(환산) ${reading.filetime ?? "—"}`;
+  return [reading.display, `원문 ${raw}`, `UTC ${reading.exactUtc}`, filetime].join("\n");
 }

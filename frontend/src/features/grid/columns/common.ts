@@ -3,7 +3,13 @@ import type { RowRef } from "../../../contracts/rowRef";
 import { runEvidenceTimezone } from "../../../state/hooks";
 import { currentRun } from "../../../state/slices/runs";
 import { useAppStore } from "../../../state/store";
-import { evidenceTimeTooltip, formatGridTime } from "../../../utils/time";
+import {
+  assumedUtcOfWallClock,
+  evidenceTimeTooltip,
+  exactEvidenceTime,
+  formatGridTime,
+  zoneStatusLabel,
+} from "../../../utils/time";
 import type { CellValue, ColumnSpec } from "../types";
 import { pathCell } from "./PathCell";
 import { reviewStatusCell } from "./StatusCells";
@@ -12,6 +18,23 @@ import { reviewStatusCell } from "./StatusCells";
 export function currentTimezone(): string {
   const s = useAppStore.getState();
   return s.route.tz ?? s.timezone ?? runEvidenceTimezone(currentRun(s)) ?? "local";
+}
+
+/** Source zone label of a row's time (timeline `timezone`, else `details.timestamp_timezone`). */
+export function rowTimeZone(row: GridRow): string | null {
+  const zone = str(row.fields.tsZone);
+  if (zone) return zone;
+  const details = isRecord(row.fields.details) ? row.fields.details : {};
+  return strOrNull(details.timestamp_timezone);
+}
+
+/** Source FILETIME ticks of a row's time: decimal text when the source kept it, else the raw value. */
+export function rowSourceTicks(row: GridRow): string | number | null {
+  const details = isRecord(row.fields.details) ? row.fields.details : {};
+  for (const value of [row.fields.tsTicks, details.timestamp_utc_ticks, details.timestamp_filetime]) {
+    if (typeof value === "string" || typeof value === "number") return value;
+  }
+  return null;
 }
 
 function pick(record: Record<string, unknown>, keys: string[]): unknown {
@@ -164,15 +187,47 @@ export const col = {
     };
   },
   timestamp(width = 170, presets: ColumnSpec["presets"] = ["analysis", "compact"]): ColumnSpec {
+    const exact = (r: GridRow) =>
+      r.timestamp
+        ? exactEvidenceTime(r.timestamp, currentTimezone(), {
+            sourceZone: rowTimeZone(r),
+            rawFiletime: rowSourceTicks(r),
+          })
+        : null;
     return {
       id: "timestamp",
       header: "시각",
       width,
       presets,
       value: (r) => r.timestamp,
-      format: (r) => (r.timestamp ? formatGridTime(r.timestamp, currentTimezone()) : ""),
-      // Full evidence reading (local · zone · UTC · FILETIME) on hover.
-      tooltip: (r) => (r.timestamp ? evidenceTimeTooltip(r.timestamp, currentTimezone()) : ""),
+      format: (r) => (r.timestamp ? formatGridTime(r.timestamp, currentTimezone(), rowTimeZone(r)) : ""),
+      // Full evidence reading (local · zone · exact UTC · FILETIME) on hover.
+      tooltip: (r) =>
+        r.timestamp
+          ? evidenceTimeTooltip(r.timestamp, currentTimezone(), rowSourceTicks(r), rowTimeZone(r))
+          : "",
+      // The CSV keeps every fraction digit and never gives an undetermined wall clock a zone.
+      exportFormat: (r) => exact(r)?.display ?? str(r.timestamp),
+      exportExtras: [
+        { header: "시각 UTC 원문", value: (r) => exact(r)?.exactUtc ?? "" },
+        { header: "FILETIME", value: (r) => exact(r)?.filetime ?? "" },
+        {
+          header: "시간대 상태",
+          value: (r) => {
+            const reading = exact(r);
+            return reading ? zoneStatusLabel(reading.zoneStatus) : "";
+          },
+        },
+        {
+          header: "가정 환산 UTC (근거)",
+          value: (r) => {
+            const reading = exact(r);
+            const zone = runEvidenceTimezone(currentRun(useAppStore.getState()));
+            const assumed = reading?.wallClock ? assumedUtcOfWallClock(reading.wallClock, zone) : null;
+            return assumed ? `${assumed} (가정: 증거 시간대 ${zone})` : "";
+          },
+        },
+      ],
     };
   },
   review(): ColumnSpec {

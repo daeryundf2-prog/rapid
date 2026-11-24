@@ -27,8 +27,8 @@ from xml.etree import ElementTree as ET
 from rapidtriage.artifacts.windows.eventlog import (
     WindowsEventLogProvider,
     build_evtx_trusted_tool_record_diff,
-    event_timestamp_utc_ticks,
 )
+from rapidtriage.core.filetime import event_timestamp_utc_ticks
 from rapidtriage.core.reporting import REPORT_DECISION_LIMIT, report_decision_lines
 from tests.test_parser_quality_eventlog import (
     SECURITY,

@@ -6313,7 +6313,8 @@ def build_unified_browser_timeline(
                 "domain": normalize_host(safe_parse_url(url).netloc),
                 "visit_count": int(row.get("visit_count") or 0),
                 "typed_count": int(row.get("typed_count") or 0),
-                "transition": row.get("transition") or "",
+                "transition": "" if row.get("transition") is None else row.get("transition"),
+                "transition_core": str(row.get("transition_core") or ""),
                 "visit_duration_micros": int(row.get("visit_duration_micros") or 0),
                 "ai_service": ai_row.get("ai_service") or detect_ai_service(url, str(row.get("title") or "")),
                 "query_hint": row.get("query_hint") or extract_query_hint(url),
@@ -6762,7 +6763,9 @@ def extract_chromium_history_and_downloads(
                     "typed_count": int(row["typed_count"] or 0),
                     "last_visited_at": isoformat_from_webkit_micros(row["last_visit_time"]),
                     "last_visit_time_source": "urls.last_visit_time",
-                    "transition": str(row["transition"] or ""),
+                    # 0 is Chromium's LINK core; only NULL is unknown.
+                    "transition": "" if row["transition"] is None else str(row["transition"]),
+                    "transition_core": chromium_transition_profile(row["transition"])["transition_core"],
                     "visit_duration_micros": int(row["visit_duration"] or 0),
                     "query_hint": extract_query_hint(row["url"] or ""),
                 }

@@ -2332,8 +2332,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(summary["detection_count"], 4)
             self.assertEqual(summary["parsed_row_count"], 7)
             self.assertEqual(summary["first_event_at"], "2024-04-01T01:02:03.000000+00:00")
-            self.assertIn({"value": "4104", "count": 2}, summary["event_id_counts"])
-            self.assertIn({"value": "execution", "count": 2}, summary["event_family_counts"])
+            # Breakdowns count live records only (D14 #1): the outside-chunk native
+            # 4104 is a recovery candidate, counted apart.
+            self.assertIn({"value": "4104", "count": 1}, summary["event_id_counts"])
+            self.assertIn({"value": "4104", "count": 1}, summary["recovery_candidate_event_id_counts"])
+            self.assertEqual(summary["live_event_count"], 2)
+            self.assertEqual(summary["recovery_candidate_event_count"], 1)
+            self.assertIn({"value": "execution", "count": 1}, summary["event_family_counts"])
             self.assertIn({"value": "powershell -enc", "count": 2}, summary["risk_term_counts"])
             self.assertIn({"value": "RT-EVTX-PS-ENCODED", "count": 2}, summary["detection_rule_counts"])
             self.assertIn({"value": "trailing-size-valid", "count": 1}, summary["native_integrity_counts"])
@@ -3883,7 +3888,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
         table = db.tables[0]
         rows = list(db.iter_table_rows(table))
         _node, row, markers = rows[0]
-        self.assertEqual(row.get("Blob"), b"\x01\x02\x03\x04")
+        # D14 #13: the unresolved reference key is never the value; it is kept apart.
+        self.assertNotIn("Blob", row)
+        self.assertEqual(row.unreadable_values["Blob"]["status"], "long-value-unreadable")
+        self.assertEqual(row.unreadable_values["Blob"]["long_value_reference_keys_hex"], ["01020304"])
         self.assertIn("Blob:lv-key-unresolved", markers)
 
     def test_ese_native_decoder_flags_dirty_database_state(self) -> None:

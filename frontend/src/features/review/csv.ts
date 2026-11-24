@@ -1,6 +1,8 @@
 /**
  * CSV of the grid selection (AXIOM E3, research §4 export convention): 태그 · 메모 · the grid's
- * visible columns · then seven fixed trailing columns every row carries —
+ * visible columns (a column's `exportFormat`/`exportExtras` replace a lossy display text: the
+ * 시각 column writes every fraction digit plus 시각 UTC 원문 · FILETIME · 시간대 상태 · 가정 환산,
+ * and never gives an undetermined-zone wall clock a zone) · then seven fixed trailing columns every row carries —
  * 소스 · 위치 · 복구 방법 · 증거 번호 · 사건 번호 · 항목 ID · 파서 버전 — each filled or "없음".
  * UTF-8 with BOM and CRLF rows so Excel opens Korean text correctly. A cell that Excel would
  * run as a formula (=, +, @, a tab/CR, or "-" not followed by a number) gets a leading ' so
@@ -81,9 +83,18 @@ export function trailingValues(row: GridRow, context: Partial<ExportContext> | n
 
 function columnText(column: ColumnSpec, row: GridRow): string {
   try {
+    if (column.exportFormat) return column.exportFormat(row);
     if (column.format) return column.format(row);
     const value = column.value(row);
     return value === null || value === undefined ? "" : String(value);
+  } catch {
+    return "";
+  }
+}
+
+function extraText(extra: NonNullable<ColumnSpec["exportExtras"]>[number], row: GridRow): string {
+  try {
+    return extra.value(row);
   } catch {
     return "";
   }
@@ -97,14 +108,21 @@ export function buildSelectionCsv(
 ): string {
   const reserved = new Set<string>([...LEADING_HEADERS, ...TRAILING_HEADERS]);
   const middle = columns.filter((column) => !reserved.has(column.header));
-  const header = [...LEADING_HEADERS, ...middle.map((column) => column.header), ...TRAILING_HEADERS];
+  const middleHeaders = middle.flatMap((column) => [
+    column.header,
+    ...(column.exportExtras ?? []).map((extra) => extra.header),
+  ]);
+  const header = [...LEADING_HEADERS, ...middleHeaders, ...TRAILING_HEADERS];
   const lines = [header.map(csvCell).join(",")];
   for (const row of rows) {
     const note = typeof row.fields.note === "string" ? row.fields.note : "";
     const cells = [
       row.tags.join("; "),
       note,
-      ...middle.map((column) => columnText(column, row)),
+      ...middle.flatMap((column) => [
+        columnText(column, row),
+        ...(column.exportExtras ?? []).map((extra) => extraText(extra, row)),
+      ]),
       ...trailingValues(row, context),
     ];
     lines.push(cells.map(csvCell).join(","));

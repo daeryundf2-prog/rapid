@@ -1,8 +1,18 @@
 import { fetchTimelinePage } from "../../../api/collections";
-import { formatEvidenceTime } from "../../../utils/time";
+import { exactEvidenceTime } from "../../../utils/time";
 import { timestampKindLabel } from "../../../utils/timeKinds";
 import type { CollectionDef } from "../types";
-import { col, currentTimezone, isRecord, makeRef, makeRow, str, strOrNull } from "./common";
+import {
+  col,
+  currentTimezone,
+  isRecord,
+  makeRef,
+  makeRow,
+  rowSourceTicks,
+  rowTimeZone,
+  str,
+  strOrNull,
+} from "./common";
 import { TIME_KINDS_SEPARATOR, timeKindsCell } from "./TimelineCells";
 
 /** Time-kind labels moved to utils/timeKinds.ts (shared with the record view); re-exported. */
@@ -88,6 +98,8 @@ export const timelineCollection: CollectionDef = {
         tsLabels: kinds,
         timeKinds: timeKindsText(kinds),
         tsZone: str(raw.timezone),
+        // Exact UTC instant (decimal 100 ns ticks, a string so no double rounding).
+        ...(typeof details.timestamp_utc_ticks === "string" ? { tsTicks: details.timestamp_utc_ticks } : {}),
         // The artifact row the event came from (`details.source_record` {output, row_index}) and
         // its type: the viewer's "원본 아티팩트 열기" pivot.
         ...(isRecord(details.source_record) ? { sourceRecord: details.source_record } : {}),
@@ -100,7 +112,12 @@ export const timelineCollection: CollectionDef = {
       ...col.timestamp(190, ["analysis", "compact", "source"]),
       // 시각 tooltip: the formatted time plus what it means ("수정", "실행 3회차", …) and its zone note.
       tooltip: (r) => {
-        const time = r.timestamp ? formatEvidenceTime(r.timestamp, currentTimezone()) : "";
+        const time = r.timestamp
+          ? (exactEvidenceTime(r.timestamp, currentTimezone(), {
+              sourceZone: rowTimeZone(r),
+              rawFiletime: rowSourceTicks(r),
+            })?.display ?? r.timestamp)
+          : "";
         const kind = timeKindsText(tsLabelsOf(r)) || timestampKindLabel(str(r.fields.tsKind));
         const zone = str(r.fields.tsZone);
         return [

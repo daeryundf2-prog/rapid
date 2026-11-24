@@ -260,6 +260,11 @@ def build_run_input_fingerprint(
         for path in iterator:
             if not path.is_file():
                 continue
+            if max_files and scanned_files >= max_files:
+                # Truncated only when a file exists beyond the limit: exactly
+                # max_files files is a complete scan.
+                truncated = True
+                break
             try:
                 stat = path.stat()
             except OSError:
@@ -294,9 +299,6 @@ def build_run_input_fingerprint(
             scanned_files += 1
             total_size += stat.st_size
             latest_mtime = max(latest_mtime, stat.st_mtime)
-            if max_files and scanned_files >= max_files:
-                truncated = True
-                break
     except OSError:
         truncated = True
     fingerprint_value = hasher.hexdigest()

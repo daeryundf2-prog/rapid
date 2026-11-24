@@ -8,10 +8,13 @@ downstream CASE-aware consumer can map it onto real ontology classes.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import platform
 import sqlite3
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from .. import __version__
 from .case_db.base import CaseDatabaseError, normalize_identifier
 from .case_db.helpers import parse_json_object
 from .case_db.schema import artifact_row_data_json, get_schema_version
@@ -22,6 +25,7 @@ __all__ = [
     "CASE_UCO_EXPORT_VERSION",
     "CaseExportError",
     "build_case_uco_document",
+    "build_case_uco_export_receipt",
     "case_uco_default_output",
     "export_case_uco_jsonld",
     "resolve_case_uco_output",
@@ -568,6 +572,10 @@ def build_case_uco_document(
             },
             "truncated": bool(truncated_tables),
             "truncated_tables": truncated_tables,
+            "applied_limits": {
+                "max_rows_requested": int(max_rows),
+                "max_rows_per_table": limit,
+            },
         },
     }
     return document
@@ -618,14 +626,83 @@ def export_case_uco_jsonld(
         raise CaseDatabaseError(f"unsupported case DB file: {exc}") from exc
     write_result(document, output_path)
     summary = document.get("rapidtriage:exportSummary")
+    summary = summary if isinstance(summary, dict) else {}
+    generated_at = dt.datetime.now(dt.timezone.utc).isoformat()
+    receipt = build_case_uco_export_receipt(
+        output_path,
+        case_id=normalized_case_id,
+        database_path=Path(database.path),
+        schema_version=schema_version,
+        max_rows=max_rows,
+        summary=summary,
+        generated_at=generated_at,
+    )
+    receipt_path = output_path.with_name(output_path.name + ".receipt.json")
+    write_result(receipt, receipt_path)
     return {
         "command": "case-export-uco",
         "case_id": normalized_case_id,
         "database": str(database.path),
         "output": str(output_path),
+        "output_bytes": receipt["output"]["size_bytes"],
+        "output_sha256": receipt["output"]["sha256"],
+        "receipt": str(receipt_path),
+        "receipt_sha256": _file_sha256(receipt_path),
         "schema_version": schema_version,
         "export_version": CASE_UCO_EXPORT_VERSION,
-        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "summary": summary if isinstance(summary, dict) else {},
+        "generated_at": generated_at,
+        "summary": summary,
         "document": document,
+    }
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def build_case_uco_export_receipt(
+    output_path: Path,
+    *,
+    case_id: str,
+    database_path: Path,
+    schema_version: object,
+    max_rows: int,
+    summary: Mapping[str, object],
+    generated_at: str,
+) -> dict[str, object]:
+    """Receipt written beside the JSON-LD so a recipient can check the
+    exported bytes and the settings that produced them separately: the
+    generator version and module build digest, the effective row limit and
+    truncation, and the output byte count and SHA-256."""
+    module_path = Path(__file__)
+    return {
+        "command": "case-export-uco-receipt",
+        "generated_at": generated_at,
+        "generator": {
+            "name": "rapidtriage",
+            "version": __version__,
+            "export_version": CASE_UCO_EXPORT_VERSION,
+            "build_module": module_path.name,
+            "build_module_sha256": _file_sha256(module_path),
+            "python_version": platform.python_version(),
+        },
+        "case_id": case_id,
+        "database": {"path": str(database_path), "schema_version": schema_version},
+        "options": {
+            "max_rows_requested": int(max_rows),
+            "max_rows_per_table": max(1, int(max_rows)),
+        },
+        "truncated": bool(summary.get("truncated")),
+        "truncated_tables": list(summary.get("truncated_tables") or []),
+        "row_counts": dict(summary.get("row_counts") or {}),
+        "node_counts": dict(summary.get("node_counts") or {}),
+        "output": {
+            "path": str(output_path),
+            "size_bytes": output_path.stat().st_size,
+            "sha256": _file_sha256(output_path),
+        },
     }
