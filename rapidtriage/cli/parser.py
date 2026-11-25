@@ -421,6 +421,16 @@ def build_parser() -> argparse.ArgumentParser:
     kakao_sqlcipher_probe.add_argument("--export-opened-dir", help="Optional directory to export SQLCipher-openable EDBs as plaintext SQLite")
     kakao_sqlcipher_probe.add_argument("--json", action="store_true", help="Print JSON payload to stdout")
 
+    kakao_v2_page_decrypt = sub.add_parser(
+        "kakaotalk-v2-page-decrypt",
+        help="Decrypt post-patch v2 chatLogs_*.edb as raw AES-256-CBC pages, accepted only if SQLite opens the result",
+        description="Decrypt post-patch v2 chatLogs_*.edb as raw AES-256-CBC pages, accepted only if SQLite opens the result",
+    )
+    kakao_v2_page_decrypt.add_argument("root", help="Extracted KakaoTalk folder containing appstate.dat, chatLogs_*.edb and memory dumps")
+    kakao_v2_page_decrypt.add_argument("--output", default="rapidtriage-kakaotalk-v2-page-decrypt.json", help="JSON output path")
+    kakao_v2_page_decrypt.add_argument("--export-dir", help="Optional directory for plaintext SQLite exports that passed the open+query gate")
+    kakao_v2_page_decrypt.add_argument("--json", action="store_true", help="Print JSON payload to stdout")
+
     kakao_key_store = sub.add_parser(
         "kakaotalk-key-store-inspect",
         help="Inspect post-patch KakaoTalk appstate.dat wrapped-DEK key stores without exporting secrets",
