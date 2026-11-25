@@ -6,6 +6,7 @@ import json
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
+from itertools import chain
 from pathlib import Path
 
 from ...core.forensic_accuracy import build_accuracy_gate
@@ -21,12 +22,16 @@ from .registry_depth import (
     hive_depth_records,
     hive_secret_strings,
     is_secret_value,
+    iter_export_keys,
     read_export_lines,
 )
 
 PARSER_VERSION = "registry-native-walk-v14"
 REGISTRY_EXPORT_PATTERN = re.compile(r"^\[(?P<key>.+)]$")
 REGISTRY_VALUE_PATTERN = re.compile(r'^(?P<name>@|"[^"]+")=(?P<value>.*)$')
+TIMEZONE_EXPORT_KEY_PATTERN = re.compile(
+    r"\\(?P<control_set>ControlSet\d{3}|CurrentControlSet)\\Control\\TimeZoneInformation$", re.IGNORECASE
+)
 REGISTRY_HIVE_SIGNATURE = b"regf"
 REGISTRY_HBIN_SIGNATURE = b"hbin"
 REGISTRY_HIVE_NAMES = {"NTUSER.DAT", "USRCLASS.DAT", "SYSTEM", "SOFTWARE", "SAM", "SECURITY", "DEFAULT", "COMPONENTS"}
@@ -291,7 +296,8 @@ class WindowsRegistryProvider:
                 source_hashes = source_hashes or record.details.get("source_hashes")  # type: ignore[assignment]
                 summary_records.append(record)
                 yield record
-            for record in export_depth_records(path, source_hashes or file_hashes(path)):
+            source_hashes = source_hashes or file_hashes(path)
+            for record in chain(export_depth_records(path, source_hashes), export_timezone_records(path, source_hashes)):
                 summary_records.append(record)
                 yield record
         context = RegistryCollectionContext(root)
@@ -5555,33 +5561,125 @@ def timezone_records(context: NativeHiveRowContext, ccs: str) -> Iterable[Artifa
     key = hive.open_key(relative)
     if key is None:
         return
-    values = hive.values_dict(key)
-    bias = registry_signed_dword(values.get("Bias"))
-    active_bias = registry_signed_dword(values.get("ActiveTimeBias"))
-    offset_minutes = -(active_bias if active_bias is not None else (bias or 0))
-    sign = "+" if offset_minutes >= 0 else "-"
-    utc_offset = f"{sign}{abs(offset_minutes) // 60:02d}:{abs(offset_minutes) % 60:02d}"
-    key_name = registry_text(values.get("TimeZoneKeyName"))
+    fields = timezone_fields(hive.values_dict(key))
     yield context.row(
         "windows-timezone",
         label="시간대 설정",
         relative_key=relative,
         key=key,
-        fields={
-            "time_zone_key_name": key_name,
-            "time_zone_label_ko": TIME_ZONE_KO_LABELS.get(key_name, key_name),
-            "standard_name": registry_text(values.get("StandardName")),
-            "daylight_name": registry_text(values.get("DaylightName")),
-            "bias_minutes": bias,
-            "active_time_bias_minutes": active_bias,
-            "standard_bias_minutes": registry_signed_dword(values.get("StandardBias")),
-            "daylight_bias_minutes": registry_signed_dword(values.get("DaylightBias")),
-            "dynamic_daylight_time_disabled": values.get("DynamicDaylightTimeDisabled"),
-            "utc_offset": utc_offset,
-            "utc_offset_minutes": offset_minutes,
-            "bias_semantics": "Bias = UTC − 현지시각(분). UTC 오프셋은 −ActiveTimeBias(없으면 −Bias)",
+        fields=fields,
+        raw_preview=timezone_preview(fields),
+    )
+
+
+def timezone_fields(values: Mapping[str, object]) -> dict[str, object]:
+    """Report fields of a ``TimeZoneInformation`` key (native hive or ``.reg`` export values)."""
+    bias = registry_signed_dword(values.get("Bias"))
+    active_bias = registry_signed_dword(values.get("ActiveTimeBias"))
+    effective_bias = active_bias if active_bias is not None else bias
+    offset_minutes = -effective_bias if effective_bias is not None else None
+    utc_offset = ""
+    if offset_minutes is not None:
+        sign = "+" if offset_minutes >= 0 else "-"
+        utc_offset = f"{sign}{abs(offset_minutes) // 60:02d}:{abs(offset_minutes) % 60:02d}"
+    key_name = registry_text(values.get("TimeZoneKeyName"))
+    return {
+        "time_zone_key_name": key_name,
+        "time_zone_label_ko": TIME_ZONE_KO_LABELS.get(key_name, key_name),
+        "standard_name": registry_text(values.get("StandardName")),
+        "daylight_name": registry_text(values.get("DaylightName")),
+        "bias_minutes": bias,
+        "active_time_bias_minutes": active_bias,
+        "standard_bias_minutes": registry_signed_dword(values.get("StandardBias")),
+        "daylight_bias_minutes": registry_signed_dword(values.get("DaylightBias")),
+        "standard_start": timezone_transition_rule(values.get("StandardStart")),
+        "daylight_start": timezone_transition_rule(values.get("DaylightStart")),
+        "dynamic_daylight_time_disabled": values.get("DynamicDaylightTimeDisabled"),
+        "utc_offset": utc_offset,
+        "utc_offset_minutes": offset_minutes,
+        "bias_semantics": "Bias = UTC − 현지시각(분). UTC 오프셋은 −ActiveTimeBias(없으면 −Bias)",
+    }
+
+
+def timezone_transition_rule(raw: object) -> dict[str, object] | None:
+    """``StandardStart``/``DaylightStart`` SYSTEMTIME as a DST transition rule; ``None`` = no DST.
+
+    With ``year`` 0 the rule recurs yearly and ``day`` is the week of the month (5 = last).
+    """
+    if not isinstance(raw, (bytes, bytearray)) or len(raw) < 16:
+        return None
+    year, month, day_of_week, day, hour, minute = (int.from_bytes(raw[index : index + 2], "little") for index in range(0, 12, 2))
+    if not 1 <= month <= 12:
+        return None
+    return {
+        "year": year,
+        "month": month,
+        "day_of_week": day_of_week,
+        "day": day,
+        "day_semantics": "week-of-month (5 = last)" if year == 0 else "day-of-month",
+        "hour": hour,
+        "minute": minute,
+    }
+
+
+def timezone_preview(fields: Mapping[str, object]) -> str:
+    utc_offset = fields.get("utc_offset")
+    return f"시간대: {fields.get('time_zone_key_name')}" + (f" (UTC{utc_offset})" if utc_offset else "")
+
+
+def export_timezone_records(path: Path, source_hashes: Mapping[str, str]) -> Iterable[ArtifactRecord]:
+    """``windows-timezone`` row of a ``.reg`` export of ``TimeZoneInformation``.
+
+    A live acquisition without administrator rights has no SYSTEM hive copy, only
+    ``reg export HKLM\\SYSTEM\\CurrentControlSet\\Control\\TimeZoneInformation``. One row per export:
+    ``CurrentControlSet``, else the control set named by ``Select\\Current``, else the first one.
+    """
+    keys: dict[str, tuple[str, str, dict[str, object], int]] = {}
+    current = None
+    for key, values, line in iter_export_keys(read_export_lines(path)):
+        if key.casefold().endswith("\\system\\select") and isinstance(values.get("Current"), int):
+            current = values["Current"]
+        match = TIMEZONE_EXPORT_KEY_PATTERN.search(key)
+        if match:
+            control_set = match.group("control_set")
+            keys.setdefault(control_set.casefold(), (key, control_set, values, line))
+    if not keys:
+        return
+    preferred = ("currentcontrolset", f"controlset{current:03d}" if isinstance(current, int) else "")
+    chosen = next((name for name in preferred if name in keys), next(iter(keys)))
+    key, control_set, values, line = keys[chosen]
+    fields = timezone_fields(values)
+    if not fields["time_zone_key_name"] and fields["utc_offset_minutes"] is None:
+        return
+    resolved = str(path.resolve())
+    yield ArtifactRecord(
+        provider=WindowsRegistryProvider.name,
+        artifact_type="windows-timezone",
+        path=resolved,
+        supported=True,
+        details={
+            "parser": "windows-registry-reg-export",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "mapped-reg-export",
+            "reportability": "review",
+            "label": "시간대 설정",
+            "source_path": resolved,
+            "source_format": "reg",
+            "source_hashes": dict(source_hashes),
+            "source_offset": line,
+            "source_offset_unit": "line",
+            "hive_hint": key.split("\\", 1)[0],
+            "key_path": key,
+            "key": key,
+            "key_last_written_at": "",
+            "control_set": control_set,
+            **fields,
+            "timestamp": "",
+            "timestamp_label": "",
+            "risk_flags": [],
+            "risk_score": 0,
+            "raw_preview": timezone_preview(fields),
         },
-        raw_preview=f"시간대: {key_name} (UTC{utc_offset})",
     )
 
 

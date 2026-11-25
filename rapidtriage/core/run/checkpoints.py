@@ -58,7 +58,7 @@ def record_run_checkpoint(
         "size_bytes": path.stat().st_size if path.is_file() else None,
         "reused": reused,
         **({"plan_status": plan_status, "plan_reason": plan_reason or ""} if plan_status else {}),
-        "recorded_at": dt.datetime.now().isoformat(),
+        "recorded_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "commercial_gap_ids": [CHECKPOINT_RESUME_GAP_ID],
         "core_accuracy_gates": checkpoint_resume_core_accuracy_gates(
             checkpoints=[{
@@ -139,7 +139,7 @@ def write_run_checkpoints(
     ]
     payload = {
         "command": "run-checkpoints",
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "output_dir": str(output_dir),
         "resume": {
             "requested": resume_requested,

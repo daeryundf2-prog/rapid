@@ -653,7 +653,7 @@ def run_timeline(
 
     payload = {
         "command": "timeline",
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "root": str(input_root.root_path),
         "inputs": {
             "files": [str(path) for path in normalized_files],
@@ -1805,7 +1805,14 @@ def detect_evidence_timezone(artifact_type: str, details: Mapping[str, object]) 
         name = next((mapping.get(key) for key in TIMEZONE_KEYS if isinstance(mapping.get(key), str) and mapping.get(key)), None)
         if name:
             bias = next((mapping.get(key) for key in TIMEZONE_BIAS_KEYS if isinstance(mapping.get(key), int)), None)
-            return {"name": name, "bias_minutes": bias, "artifact_type": artifact_type, "source_path": details.get("source_path")}
+            utc_offset = mapping.get("utc_offset") if isinstance(mapping.get("utc_offset"), str) else None
+            return {
+                "name": name,
+                "utc_offset": utc_offset or None,
+                "bias_minutes": bias,
+                "artifact_type": artifact_type,
+                "source_path": details.get("source_path"),
+            }
     return None
 
 
@@ -1931,7 +1938,9 @@ def build_timeline_report(payload: Mapping[str, object]) -> str:
         "",
         "- 저장 시간대: UTC (모든 이벤트 시각은 UTC ISO 8601)",
         (
-            f"- 증거 시스템 시간대: `{evidence_tz.get('name')}` (bias {evidence_tz.get('bias_minutes')} min, 레지스트리 보고)"
+            f"- 증거 시스템 시간대: `{evidence_tz.get('name')}` ("
+            + (f"UTC{evidence_tz.get('utc_offset')}, " if evidence_tz.get("utc_offset") else "")
+            + f"bias {evidence_tz.get('bias_minutes')} min, 레지스트리 보고)"
             if isinstance(evidence_tz, Mapping)
             else "- 증거 시스템 시간대: 보고되지 않음 (레지스트리 TimeZoneInformation 없음)"
         ),

@@ -164,7 +164,7 @@ def build_run_summary(
     payload = {
         "command": "run",
         "mode": profile.mode,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "root": str(root),
         "source": dict(source or {}),
         "scan_scope_root": str(files_payload.get("scan_scope_root") or docs_payload.get("scan_scope_root") or root),

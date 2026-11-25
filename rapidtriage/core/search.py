@@ -231,7 +231,7 @@ def run_unified_search(
     )
     payload: dict[str, object] = {
         "command": "search",
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "run_summary": str(summary.get("outputs", {}).get("summary", "")),
         "keywords": normalized,
         "options": {

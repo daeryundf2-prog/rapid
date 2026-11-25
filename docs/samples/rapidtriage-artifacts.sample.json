@@ -1,7 +1,7 @@
 {
   "command": "artifacts",
   "kind": "browser",
-  "generated_at": "2026-04-11T12:04:00",
+  "generated_at": "2026-04-11T12:04:00+00:00",
   "root": "/cases/case-001",
   "provider": {
     "name": "windows-browser-artifacts",

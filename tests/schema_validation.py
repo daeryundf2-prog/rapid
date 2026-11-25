@@ -71,6 +71,10 @@ def _matches_type(instance: Any, schema_type: str) -> bool:
 def _validate_datetime(value: str, path: str) -> None:
     normalized = value.replace("Z", "+00:00")
     try:
-        dt.datetime.fromisoformat(normalized)
+        parsed = dt.datetime.fromisoformat(normalized)
     except ValueError as exc:
         raise SchemaValidationError(f"{path}: invalid date-time string {value!r}") from exc
+    # JSON Schema ``format: date-time`` is RFC 3339 date-time, which requires
+    # an offset: a naive value is ambiguous once the report leaves the host.
+    if parsed.tzinfo is None:
+        raise SchemaValidationError(f"{path}: date-time {value!r} has no UTC offset")

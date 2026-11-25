@@ -1,7 +1,7 @@
 {
   "command": "run",
   "mode": "seizure",
-  "generated_at": "2026-04-11T12:05:00",
+  "generated_at": "2026-04-11T12:05:00+00:00",
   "root": "/cases/case-001",
   "scan_scope_root": "/cases/case-001/Users",
   "output_dir": "/cases/case-001/rapidtriage-run-seizure",
@@ -198,7 +198,7 @@
         ],
         "extension": ".zip",
         "size": 262148,
-        "modified_at": "2026-04-10T10:00:00"
+        "modified_at": "2026-04-10T10:00:00+00:00"
       }
     ],
     "large_file_candidates": [
@@ -208,7 +208,7 @@
           "archives"
         ],
         "size": 262148,
-        "modified_at": "2026-04-10T10:00:00"
+        "modified_at": "2026-04-10T10:00:00+00:00"
       }
     ],
     "preferred_location_candidates": [
@@ -218,7 +218,7 @@
           "documents"
         ],
         "size": 160,
-        "modified_at": "2026-04-10T09:58:00"
+        "modified_at": "2026-04-10T09:58:00+00:00"
       }
     ]
   }

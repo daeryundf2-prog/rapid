@@ -98,16 +98,19 @@ target-version = "py310"
 # Rules disabled after the 2026-09 ruff 0.16 cleanup pass, with reasons:
 # - BLE001: parsers must isolate crashes and continue runs (parser crash
 #   isolation contract); blind-except is intentional in collector loops.
-# - DTZ001/DTZ005/DTZ006/DTZ007: legacy local-time call sites were audited in
-#   the 2026-08 CI-green pass; output rendering is UTC-standardized and
-#   covered by tests. Remaining call sites feed non-output paths.
+# - DTZ001/DTZ007: parsers decode local wall-clock source values (SYSTEMTIME,
+#   PST/ICS dates, DOS times, chat-export dates) into naive datetimes on
+#   purpose; their rows carry timezone=local-unknown or are converted with an
+#   explicit offset afterwards. DTZ005/DTZ006 stay enabled: every generation
+#   or collection time written to an output (generated_at, recorded_at, ...)
+#   must be timezone-aware UTC.
 # - TRY004/TRY203/SIM101/SIM102/SIM103/SIM113/SIM115/SIM117/SIM118/C401/C405/
 #   C408/FLY002/FURB192/ISC004/PIE810/PERF402/PYI034/RUF007/RUF015/RUF046/
 #   RUF059/S112/UP007/UP022/B008/PLW1510: style/judgment calls deferred; none
 #   change behavior. Revisit individually in a dedicated review pass.
 ignore = [
   "BLE001",
-  "DTZ001", "DTZ005", "DTZ006", "DTZ007",
+  "DTZ001", "DTZ007",
   "TRY004", "TRY203",
   "S101", "S112",
   "B008",

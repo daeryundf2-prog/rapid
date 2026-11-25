@@ -821,7 +821,7 @@ def run_files_scan(
     payload = {
         "command": "files",
         "root": str(input_root.root_path),
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "filters": {
             "categories": list(selected_categories),
             "name_contains": normalized_name_filters,
@@ -1184,10 +1184,12 @@ def file_inventory_record(candidate: FileCandidate, *, reason: str) -> dict[str,
 
 
 def _naive_local_datetime(epoch: float) -> dt.datetime:
+    # --modified-after/--modified-before bounds are the analyst's local wall
+    # clock (parse_modified_bound); this comparison value is never written out.
     try:
-        return dt.datetime.fromtimestamp(epoch)
+        return dt.datetime.fromtimestamp(epoch)  # noqa: DTZ006
     except (OverflowError, OSError, ValueError):
-        return dt.datetime.fromtimestamp(0)
+        return dt.datetime.fromtimestamp(0)  # noqa: DTZ006
 
 
 _SIDECAR_LIMITATIONS = {
@@ -1392,7 +1394,7 @@ def build_known_good_index_payload(paths: Sequence[str | Path]) -> dict[str, obj
     core = {
         "command": "known-good-index",
         "profile_version": "known-good-index-v1",
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "summary": summary,
         "feed_paths": [str(path) for path in known_good_index.get("feed_paths", [])],
         "feed_summaries": known_good_index.get("feed_summaries", []),

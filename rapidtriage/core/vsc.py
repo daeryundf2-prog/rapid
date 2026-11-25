@@ -463,7 +463,7 @@ def compare_vsc_snapshots(
         exclude_dirs=exclude_dirs,
     )
     return {
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "tool": "rapidtriage-vsc-compare",
         "current_root": str(current),
         "snapshot_roots": [str(snapshot) for snapshot in snapshots],
@@ -599,7 +599,7 @@ def extract_vsc_changes(
                 }
             )
     manifest = {
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "tool": "rapidtriage-vsc-extract",
         "current_root": comparison["current_root"],
         "snapshot_roots": comparison["snapshot_roots"],

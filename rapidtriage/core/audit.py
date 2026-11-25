@@ -122,7 +122,7 @@ def write_audit_record(
 ) -> dict[str, object]:
     payload = {
         "command": command,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "provenance": {
             "options": dict(options or {}),
             "input_root": (

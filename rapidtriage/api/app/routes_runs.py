@@ -1005,7 +1005,7 @@ def build_runs_router(
             if row.locator:
                 item["locator"] = row.locator
             items.append(item)
-        name = dt.datetime.now().strftime("%Y%m%dT%H%M%S%f")
+        name = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%f")
         if request.output_name:
             if not EXTRACT_NAME_PATTERN.fullmatch(request.output_name):
                 raise HTTPException(

@@ -423,7 +423,7 @@ def run_bounded_carving(
         "command": "carve",
         "root": str(source_root),
         "input_kind": input_root.kind,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "output_dir": str(output_dir),
         "safety": {
             "extract": extract,
@@ -1048,7 +1048,7 @@ def _write_checkpoint(
         "schema": CARVE_CHECKPOINT_SCHEMA,
         "config_fingerprint": fingerprint,
         "complete": complete,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "completed_sources": sorted(completed_sources),
         "entries": list(entries),
         "skipped": list(skipped),
