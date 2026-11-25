@@ -334,3 +334,246 @@ def bench_usn(record_count: int) -> bytes:
         struct.pack_into("<Q", record, 8, reference(100 + number, 1 + number % 7))
         out.extend(record)
     return bytes(out)
+
+
+# --- Adversarial generators (seeded): structurally plausible records with hostile fields. ---
+
+_LAST_FILETIME = 2_650_467_743_999_999_990  # 9999-12-31T23:59:59.999999, the last ISO-representable tick
+_EDGE_FILETIMES = (1, 9, 10, _LAST_FILETIME, _LAST_FILETIME + 1, _LAST_FILETIME + 9, OUT_OF_RANGE_FILETIME, 2**64 - 1)
+
+
+def _random_filetime(rng: random.Random) -> int:
+    roll = rng.random()
+    if roll < 0.1:
+        return 0
+    if roll < 0.2:
+        return rng.getrandbits(64)
+    if roll < 0.25:
+        return rng.choice(_EDGE_FILETIMES)
+    return rng.randrange(1, _LAST_FILETIME)
+
+
+def _random_utf16(rng: random.Random, units: int | None = None) -> bytes:
+    """UTF-16LE with printable ASCII, Hangul, lone surrogates, surrogate pairs and arbitrary units."""
+    out: list[int] = []
+    for _ in range(rng.randrange(0, 20) if units is None else units):
+        roll = rng.random()
+        if roll < 0.6:
+            out.append(rng.randrange(32, 127))
+        elif roll < 0.7:
+            out.append(rng.choice([0xD800, 0xDBFF, 0xDC00, 0xDFFF]))
+        elif roll < 0.8:
+            out.append(rng.randrange(0xAC00, 0xD7A4))
+        elif roll < 0.85:
+            out += [0xD83D, 0xDE00]
+        else:
+            out.append(rng.randrange(0x10000))
+    return b"".join(struct.pack("<H", unit) for unit in out)
+
+
+def _random_runlist(rng: random.Random) -> bytes:
+    if rng.random() < 0.3:
+        return rng.randbytes(rng.randrange(0, 40))
+    out = bytearray()
+    for _ in range(rng.randrange(0, 80)):
+        length_size = rng.choice([1, 1, 2, 3, 4, 8, 0, 9])
+        delta_size = rng.choice([0, 1, 2, 3, 8, 9])
+        out.append((delta_size << 4) | length_size)
+        out += rng.randbytes(length_size + delta_size)
+    if rng.random() < 0.7:
+        out.append(0)
+    return bytes(out)
+
+
+def _random_resident_value(rng: random.Random, attribute_type: int) -> bytes:
+    if attribute_type == 0x10:
+        value = struct.pack("<QQQQI", *(_random_filetime(rng) for _ in range(4)), rng.getrandbits(32)) + bytes(rng.choice([0, 0, 12, 36]))
+        return value[: rng.choice([len(value), len(value), 35, 36, 20, 0])]
+    if attribute_type == 0x30:
+        name = _random_utf16(rng)
+        value = struct.pack("<QQQQQQQII", rng.getrandbits(64), *(_random_filetime(rng) for _ in range(4)), rng.getrandbits(64), rng.getrandbits(64), rng.getrandbits(32), 0)
+        name_length = rng.choice([len(name) // 2, len(name) // 2, rng.getrandbits(8)])
+        value += struct.pack("<BB", name_length, rng.choice([0, 1, 2, 3, rng.getrandbits(8)])) + name
+        return value[: rng.randrange(0, len(value) + 1)] if rng.random() < 0.1 else value
+    if attribute_type == 0x20:
+        value = bytearray()
+        for _ in range(rng.randrange(0, 8)):
+            name = _random_utf16(rng, rng.choice([0, 2, 5]))
+            entry = bytearray(max(32, 26 + len(name)))
+            struct.pack_into(
+                "<IHBBQQH",
+                entry,
+                0,
+                rng.choice([0x80, 0x30, 0x10, 0, rng.getrandbits(32)]),
+                rng.choice([32, 32, 26, 40, 0, 20, rng.getrandbits(16)]),
+                len(name) // 2 if rng.random() < 0.8 else rng.getrandbits(8),
+                rng.choice([26, 26, 0, rng.getrandbits(8)]),
+                rng.getrandbits(64),
+                rng.getrandbits(64),
+                rng.getrandbits(16),
+            )
+            entry[26 : 26 + len(name)] = name
+            value += entry
+        return bytes(value)
+    if rng.random() < 0.2:  # a resident $DATA / other value holding UTF-16 path text
+        return _random_utf16(rng, 30) + "C:\\Users\\x\\file.txt".encode("utf-16le")
+    return rng.randbytes(rng.randrange(0, 64))
+
+
+def _random_attribute(rng: random.Random) -> bytes:
+    attribute_type = rng.choice([0x10, 0x10, 0x20, 0x30, 0x30, 0x40, 0x80, 0x80, 0x90, 0xA0, 0x100, rng.getrandbits(32), 0xFFFFFFFF])
+    name = _random_utf16(rng, rng.choice([0, 0, 0, 1, 3, 6]))  # a named $DATA is an ADS
+    if rng.random() < 0.3:
+        runlist = _random_runlist(rng)
+        runlist_offset = _align8(64 + len(name)) if rng.random() < 0.9 else rng.randrange(0, 600)
+        length = _align8(max(runlist_offset, 64 + len(name)) + len(runlist))
+        blob = bytearray(max(length, 72))
+        struct.pack_into("<IIBBHHH", blob, 0, attribute_type, length, 1, len(name) // 2, 64, rng.getrandbits(16), rng.getrandbits(16))
+        struct.pack_into("<QQHHIQQQ", blob, 16, rng.getrandbits(64), rng.getrandbits(64), runlist_offset, rng.getrandbits(16), 0, rng.getrandbits(64), rng.getrandbits(64), rng.getrandbits(64))
+        blob[64 : 64 + len(name)] = name
+        if runlist_offset < len(blob):
+            blob[runlist_offset : runlist_offset + len(runlist)] = runlist[: len(blob) - runlist_offset]
+    else:
+        value = _random_resident_value(rng, attribute_type)
+        value_offset = _align8(24 + len(name))
+        length = _align8(value_offset + len(value))
+        blob = bytearray(max(length, 24))
+        declared_length = rng.getrandbits(32) if rng.random() < 0.1 else len(value)
+        declared_offset = rng.getrandbits(16) if rng.random() < 0.05 else value_offset
+        struct.pack_into("<IIBBHHH", blob, 0, attribute_type, length, 0, len(name) // 2, 24, rng.getrandbits(16), rng.getrandbits(16))
+        struct.pack_into("<IHBB", blob, 16, declared_length, declared_offset, rng.getrandbits(8), 0)
+        blob[24 : 24 + len(name)] = name
+        blob[value_offset : value_offset + len(value)] = value
+    if rng.random() < 0.05:
+        struct.pack_into("<I", blob, 4, rng.choice([0, 8, 23, 24, len(blob) + 8, rng.getrandbits(32)]))
+    if rng.random() < 0.03:
+        blob[9] = rng.getrandbits(8)
+        struct.pack_into("<H", blob, 10, rng.getrandbits(16))
+    return bytes(blob)
+
+
+def _adversarial_mft_record(rng: random.Random, size: int, number: int) -> bytes:
+    """A FILE record with hostile header, update-sequence, attribute and slack fields."""
+    record = bytearray(size)
+    record[0:4] = b"FILE"
+    sectors = size // 512
+    usa_offset = rng.choice([0x30, 0x30, 0x30, 0x28, 0, rng.getrandbits(16), size - 2])
+    usa_count = rng.choice([sectors + 1] * 4 + [0, 1, sectors, sectors + 2, rng.getrandbits(16)])
+    first = rng.choice([_align8(0x30 + 2 * (sectors + 1))] * 5 + [0, 0x30, 0x3A, size, size + 8, rng.getrandbits(16)])
+    struct.pack_into("<HHQ", record, 0x04, usa_offset, usa_count, rng.getrandbits(64))
+    struct.pack_into("<HHHH", record, 0x10, rng.getrandbits(16), rng.getrandbits(4), first, rng.choice([0, 1, 2, 3, rng.getrandbits(16)]))
+    struct.pack_into("<I", record, 0x1C, rng.choice([size] * 6 + [1024, 2048, 4096, 0, 47, 48, 4097, rng.getrandbits(32)]))
+    struct.pack_into("<Q", record, 0x20, rng.choice([0, 0, rng.getrandbits(64)]))
+    struct.pack_into("<I", record, 0x2C, rng.choice([number] * 4 + [number + 1, 0, rng.getrandbits(32)]))
+    offset = first if 0x30 <= first < size else _align8(0x30 + 2 * (sectors + 1))
+    for _ in range(rng.randrange(0, 9)):
+        attribute = _random_attribute(rng)
+        if offset + len(attribute) > size:
+            break
+        record[offset : offset + len(attribute)] = attribute
+        offset += len(attribute)
+    if offset + 8 <= size and rng.random() < 0.85:
+        struct.pack_into("<I", record, offset, 0xFFFFFFFF)
+        offset += 8
+    struct.pack_into("<I", record, 0x18, rng.choice([offset] * 5 + [0, size, size + 1, first, rng.getrandbits(32)]))
+    if rng.random() < 0.15:  # slack past the used size: stale UTF-16 path text and a stray FILE magic
+        tail = _random_utf16(rng, 20) + "C:\\Users\\x\\slack.txt".encode("utf-16le") + b"FILE" + bytes(60)
+        position = rng.randrange(min(offset, size - 1), size)
+        record[position : position + len(tail)] = tail[: size - position]
+    if 0 < usa_offset and usa_offset + 2 <= size and rng.random() < 0.9:
+        stamp = rng.getrandbits(16)
+        struct.pack_into("<H", record, usa_offset, stamp)
+        for sector in range(1, sectors + 1):
+            trailer = sector * 512 - 2
+            if usa_offset + 2 * sector + 2 <= size:
+                record[usa_offset + 2 * sector : usa_offset + 2 * sector + 2] = record[trailer : trailer + 2]
+            if rng.random() < 0.95:  # else: a torn sector (fixup trailer mismatch)
+                struct.pack_into("<H", record, trailer, stamp)
+    return bytes(record[:size])
+
+
+def adversarial_mft(seed: int) -> bytes:
+    """A $MFT blob of hostile records, zero/garbage slots, mixed strides, clipping and byte flips."""
+    rng = random.Random(seed)
+    size = rng.choice([1024, 1024, 4096, 2048])
+    out = bytearray()
+    for _ in range(rng.randrange(1, 10)):
+        roll = rng.random()
+        if roll < 0.1:
+            out += bytes(size)
+        elif roll < 0.15:
+            out += rng.randbytes(rng.randrange(0, 300))
+        elif roll < 0.2:
+            out += _adversarial_mft_record(rng, rng.choice([1024, 2048, 4096]), len(out) // size)
+        else:
+            out += _adversarial_mft_record(rng, size, len(out) // size)
+    if rng.random() < 0.3:
+        out = out[: rng.randrange(0, len(out) + 1)]
+    if rng.random() < 0.3 and out:
+        for _ in range(rng.randrange(1, 40)):
+            out[rng.randrange(len(out))] = rng.getrandbits(8)
+    if rng.random() < 0.1:
+        out += b"FILE" + rng.randbytes(rng.randrange(0, 60))
+    return bytes(out)
+
+
+def _adversarial_usn_record(rng: random.Random) -> bytes:
+    major = rng.choice([2, 2, 2, 3, 3, 4, 4, 1, 5, 0])
+    if major == 4:
+        count = rng.choice([0, 1, 2, 3, 64, 65, 100, rng.getrandbits(16)])
+        extent_size = rng.choice([16, 16, 16, 24, 15, 0, rng.getrandbits(16)])
+        extents = rng.randbytes(16 * min(count, rng.choice([count, 2, 70]), 80))
+        record = bytearray(64 + len(extents))
+        length = rng.choice([len(record)] * 4 + [60, 63, 64, rng.randrange(60, 70000)])
+        struct.pack_into("<IHH", record, 0, length, 4, rng.getrandbits(16))
+        record[8:40] = rng.randbytes(32)
+        reason = rng.choice([0, 0x100, 0x200, 0x80000000, 0x3000, rng.getrandbits(32)])
+        struct.pack_into("<QIIIHH", record, 40, rng.getrandbits(64), reason, rng.getrandbits(4), rng.getrandbits(32), count, extent_size)
+        record[64:] = extents
+        return bytes(record)
+    name = _random_utf16(rng)
+    minimum = 76 if major == 3 else 60
+    name_length = rng.choice([len(name)] * 6 + [0, len(name) + 1, 1, rng.getrandbits(16)])
+    name_offset = rng.choice([minimum] * 6 + [minimum + 1, minimum - 2, 0, rng.getrandbits(16)])
+    length = rng.choice([_align8(minimum + len(name))] * 6 + [minimum + len(name), 59, 65536, 65537, rng.getrandbits(32)])
+    reason = rng.choice([0x100, 0x200, 0x1000, 0x2000, 0x3000, 0x80000200, 0, 0x00400008, rng.getrandbits(32)])
+    record = bytearray(_align8(minimum + len(name)))
+    fields = (_random_filetime(rng), reason, rng.getrandbits(5), rng.getrandbits(32), rng.getrandbits(32), name_length, name_offset)
+    if major == 3:
+        struct.pack_into("<IHH", record, 0, length, 3, rng.getrandbits(16))
+        record[8:40] = rng.randbytes(32)
+        struct.pack_into("<QQIIIIHH", record, 40, rng.getrandbits(64), *fields)
+    else:
+        struct.pack_into("<IHHQQQ", record, 0, length, major, rng.getrandbits(16), rng.getrandbits(64), rng.getrandbits(64), rng.getrandbits(64))
+        struct.pack_into("<QIIIIHH", record, 32, *fields)
+    record[minimum : minimum + len(name)] = name
+    return bytes(record)
+
+
+def adversarial_usn(seed: int) -> tuple[bytes, dict[str, object]]:
+    """A journal of hostile v2/v3/v4 records, zero gaps, garbage and byte flips, plus a scan window."""
+    rng = random.Random(seed)
+    out = bytearray()
+    for _ in range(rng.randrange(1, 25)):
+        roll = rng.random()
+        if roll < 0.2:
+            out += bytes(rng.choice([1, 2, 3, 4, 5, 7, 8, 13, 60, 61, 512, 4096]))
+        elif roll < 0.27:
+            out += rng.randbytes(rng.randrange(1, 30))
+        elif roll < 0.3:
+            out += b"\x00\x00\x00" + bytes([rng.getrandbits(8)])
+        else:
+            out += _adversarial_usn_record(rng)
+    if rng.random() < 0.3 and out:
+        out = out[: rng.randrange(len(out))]
+    if rng.random() < 0.3 and out:
+        for _ in range(rng.randrange(1, 20)):
+            out[rng.randrange(len(out))] = rng.getrandbits(8)
+    window: dict[str, object] = {}
+    if rng.random() < 0.4:
+        window["record_limit"] = rng.choice([-3, -1, 0, 1, 2, 3, 5000, 10**6])
+    if rng.random() < 0.4:
+        window["start_offset"] = rng.choice([-10, 0, 1, 7, rng.randrange(0, len(out) + 20)])
+    if rng.random() < 0.4:
+        window["max_scan_bytes"] = rng.choice([None, -5, 0, 59, 60, 61, rng.randrange(0, len(out) + 20)])
+    return bytes(out), window

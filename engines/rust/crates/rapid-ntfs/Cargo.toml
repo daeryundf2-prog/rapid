@@ -13,5 +13,8 @@ crate-type = ["rlib", "cdylib"]
 [dependencies]
 pyo3 = { version = "0.22", features = ["extension-module"], optional = true }
 
+[build-dependencies]
+pyo3-build-config = { version = "0.22", optional = true }
+
 [features]
-python = ["dep:pyo3"]
+python = ["dep:pyo3", "dep:pyo3-build-config"]

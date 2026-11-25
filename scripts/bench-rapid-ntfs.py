@@ -73,9 +73,9 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
-    extension = ntfs_native.load_extension()
+    extension, reason = ntfs_native.load_native_ntfs_parser()
     if extension is None:
-        print("rapid_ntfs_native is not built: run python scripts/build-rapid-ntfs.py", file=sys.stderr)
+        print(f"rapid_ntfs_native is unusable: {reason}", file=sys.stderr)
         return 1
 
     with tempfile.TemporaryDirectory(prefix="rapid-ntfs-bench-") as tmp:

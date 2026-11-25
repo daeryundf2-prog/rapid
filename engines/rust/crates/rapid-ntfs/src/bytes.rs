@@ -32,8 +32,10 @@ pub fn u64_at(blob: &[u8], offset: usize) -> u64 {
 }
 
 fn utf16_units(blob: &[u8]) -> impl Iterator<Item = u16> + '_ {
-    blob.chunks_exact(2)
-        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+    blob.as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| u16::from_le_bytes(*pair))
 }
 
 /// Python `blob.decode("utf-16le", errors="ignore")`.

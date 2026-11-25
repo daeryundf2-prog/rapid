@@ -5,8 +5,11 @@
 // `PyResult` returns (fixed upstream in pyo3 0.23).
 #![allow(clippy::useless_conversion)]
 
+use std::any::Any;
 use std::collections::HashMap;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
+use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyString};
 
@@ -68,10 +71,31 @@ impl<'py> Converter<'py> {
     }
 }
 
+/// Runs `parse` without the GIL and turns a panic into `RuntimeError`.
+///
+/// pyo3 would raise `pyo3_runtime.PanicException`, a `BaseException` that the
+/// bridge's `except Exception` fallback (rapidtriage.core.ntfs_native) would
+/// not catch; a `RuntimeError` makes a parser defect fall back to Python and
+/// be recorded instead of aborting the analysis.
+fn without_gil<T: Send>(py: Python<'_>, parse: impl FnOnce() -> T + Send) -> PyResult<T> {
+    py.allow_threads(|| catch_unwind(AssertUnwindSafe(parse)))
+        .map_err(|payload| {
+            PyRuntimeError::new_err(format!("rapid-ntfs panicked: {}", panic_text(&*payload)))
+        })
+}
+
+fn panic_text(payload: &(dyn Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|text| (*text).to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_default()
+}
+
 /// Rust port of filesystem.parse_mft_record_headers (fields per docs/architecture/rapid-ntfs.md).
 #[pyfunction]
 fn parse_mft_record_headers(py: Python<'_>, blob: &[u8]) -> PyResult<PyObject> {
-    let records = py.allow_threads(|| mft::parse_mft_record_headers(blob));
+    let records = without_gil(py, || mft::parse_mft_record_headers(blob))?;
     Converter::new(py).convert(Value::List(records))
 }
 
@@ -85,17 +109,14 @@ fn parse_usn_record_scan(
     start_offset: i64,
     max_scan_bytes: Option<i64>,
 ) -> PyResult<PyObject> {
-    let scan = py.allow_threads(|| {
+    let scan = without_gil(py, || {
         usn::parse_usn_record_scan(blob, record_limit, start_offset, max_scan_bytes)
-    });
+    })?;
     Converter::new(py).convert(scan)
 }
 
-#[pyfunction]
-fn mft_volume_record_size(blob: &[u8]) -> Option<usize> {
-    mft::mft_volume_record_size(blob)
-}
-
+/// Crate version; rapidtriage.core.ntfs_native refuses a build whose version
+/// differs from `RAPID_NTFS_VERSION` (stale extension).
 #[pyfunction]
 fn engine_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
@@ -105,7 +126,6 @@ fn engine_version() -> &'static str {
 fn rapid_ntfs_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(parse_mft_record_headers, module)?)?;
     module.add_function(wrap_pyfunction!(parse_usn_record_scan, module)?)?;
-    module.add_function(wrap_pyfunction!(mft_volume_record_size, module)?)?;
     module.add_function(wrap_pyfunction!(engine_version, module)?)?;
     Ok(())
 }

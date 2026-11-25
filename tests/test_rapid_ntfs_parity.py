@@ -13,19 +13,22 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import random
 import struct
+import sys
 import tempfile
 import unittest
 import unittest.mock
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 
 from rapidtriage.api.app import analysis_kinds
 from rapidtriage.artifacts.windows import filesystem
 from rapidtriage.core import ntfs_native
 from tests import ntfs_synthetic as synth
 
-EXTENSION = ntfs_native.load_extension()
+EXTENSION, EXTENSION_REASON = ntfs_native.load_native_ntfs_parser()
 REQUIRED = os.environ.get("RAPIDTRIAGE_REQUIRE_RAPID_NTFS") == "1"
 
 # Python-only fields the Rust port leaves out (docs/architecture/rapid-ntfs.md).
@@ -61,6 +64,9 @@ def differences(left: object, right: object, path: str = "$") -> list[str]:
         return [f"{path}: {type(left).__name__} {left!r} != {type(right).__name__} {right!r}"]
     if isinstance(left, dict):
         found = [f"{path}.{key}: missing on one side" for key in sorted(set(left) ^ set(right))]
+        if not found and list(left) != list(right):
+            # Key order too: JSON written from either record must be byte-identical.
+            return [f"{path}: key order {list(left)} != {list(right)}"]
         for key in sorted(set(left) & set(right)):
             found.extend(differences(left[key], right[key], f"{path}.{key}"))
         return found
@@ -77,7 +83,7 @@ def differences(left: object, right: object, path: str = "$") -> list[str]:
 @unittest.skipIf(EXTENSION is None and not REQUIRED, "rapid_ntfs_native not built (scripts/build-rapid-ntfs.py)")
 class RapidNtfsParityTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.assertIsNotNone(EXTENSION, "RAPIDTRIAGE_REQUIRE_RAPID_NTFS=1 but rapid_ntfs_native is not importable")
+        self.assertIsNotNone(EXTENSION, f"RAPIDTRIAGE_REQUIRE_RAPID_NTFS=1 but rapid_ntfs_native is unusable: {EXTENSION_REASON}")
 
     def assert_mft_parity(self, blob: bytes) -> list[dict[str, object]]:
         python = filesystem.parse_mft_record_headers(blob)
@@ -224,25 +230,98 @@ class RapidNtfsParityTests(unittest.TestCase):
                     self.assertTrue(new["file_reference_link"]["current_mft_name_match"])
                     self.assertEqual(stale["status"], "unresolved-mft-parent-sequence-mismatch")
 
+    def test_adversarial_mft_records(self) -> None:
+        # Hostile headers, update-sequence arrays, attribute chains, runlists, ADS names,
+        # $SI/$FN times, slack and torn sectors: several hundred corrupted records.
+        records = 0
+        for seed in range(400):
+            with self.subTest(seed=seed):
+                records += len(self.assert_mft_parity(synth.adversarial_mft(seed)))
+        self.assertGreater(records, 1500)
+
+    def test_adversarial_usn_records(self) -> None:
+        records = 0
+        for seed in range(1500):
+            blob, window = synth.adversarial_usn(seed)
+            with self.subTest(seed=seed, window=window):
+                records += len(self.assert_usn_parity(blob, **window)["records"])
+        self.assertGreater(records, 1500)
+
+    def test_output_caps_match_python(self) -> None:
+        users = synth.reference(64, 2)
+        # 5,000-record scan limit (and the volume-size vote over more FILE hits).
+        spam = synth.build_mft(synth.parity_mft_specs()) + (b"FILE" + bytes(44)) * 5_200
+        self.assertEqual(len(self.assert_mft_parity(spam)), 5_000)
+        # 64-run runlist preview, 250 UTF-16 strings, 10 path candidates.
+        runs = synth.MftSpec(1, names=[("runs", synth.WIN32, users)], nonresident_runlist=bytes([0x01, 0x05]) * 100 + b"\x00")
+        record = self.assert_mft_parity(synth.build_mft([runs], size=4096))[0]
+        self.assertEqual(len(record["data_attributes"][0]["runlist_preview"]), 64)
+        words = b"".join(f"S{index:03d}".encode("utf-16le") + b"\x01\x00" for index in range(300))
+        self.assert_mft_parity(synth.build_mft([synth.MftSpec(1, names=[("w", synth.WIN32, users)], resident_data=words)], size=4096))
+        paths = b"".join(f"C:\\p{index:02d}\\f.txt".encode("utf-16le") + b"\x01\x00" for index in range(30))
+        record = self.assert_mft_parity(synth.build_mft([synth.MftSpec(1, names=[("p", synth.WIN32, users)], resident_data=paths)], size=4096))[0]
+        self.assertEqual(len(record["path_candidates"]), 10)
+        # 64-extent USN v4 preview, a 65,536-byte record, the 5,000-record USN limit.
+        extents = [(index * 4096, 4096) for index in range(100)]
+        scan = self.assert_usn_parity(synth.usn_v4(1, 2, 3, 0x100, extents))
+        self.assertEqual(len(scan["records"][0]["v4_extents"]), 64)
+        largest = bytearray(65_536)
+        head = synth.usn_v2("big.txt", 0x100, 1, 2, 3, synth.ticks(1))
+        largest[: len(head)] = head
+        struct.pack_into("<I", largest, 0, 65_536)
+        scan = self.assert_usn_parity(bytes(largest) + synth.bench_usn(5_100))
+        self.assertEqual((len(scan["records"]), scan["largest_record_length"]), (5_000, 65_536))
+        self.assertTrue(scan["record_limit_reached"])
+
+    def test_filetime_text_and_ticks_over_the_whole_range(self) -> None:
+        rng = random.Random(1601)
+        values = [rng.randrange(1, 2_650_467_743_999_999_992) for _ in range(5_000)]
+        values += [1, 9, 10, 11, 116_444_736_000_000_000, 2_650_467_743_999_999_990, 2_650_467_743_999_999_991, 2**63, 2**64 - 1]
+        journal = b"".join(synth.usn_v2("t", 0x100, 1, 2, index, value) for index, value in enumerate(values))
+        scan = self.assert_usn_parity(journal, record_limit=10**6)
+        self.assertEqual([record["timestamp_filetime"] for record in scan["records"]], values)
+
     def test_ntfs_meta_rows_identical_under_both_engines(self) -> None:
         mft_blob = synth.build_mft(synth.parity_mft_specs())
         journal, _ = synth.parity_usn_journal()
-        engines = {}
-        for engine in ("python", "rust"):
-            with tempfile.TemporaryDirectory() as tmp, unittest.mock.patch.dict(os.environ, {ntfs_native.ENGINE_ENV: engine}):
-                root = Path(tmp)
-                (root / "MFT.bin").write_bytes(mft_blob)
-                (root / "J.bin").write_bytes(journal)
-                ctx = _RowSink(root)
-                nodes = analysis_kinds._NodeView()
-                reference = dt.datetime(2030, 1, 1, tzinfo=dt.timezone.utc)
-                summary = analysis_kinds.parse_mft_file(ctx, root / "MFT.bin", nodes, 1024, mismatch_reference=reference)
-                summary.update(analysis_kinds.parse_usn_file(ctx, root / "J.bin", nodes))
-                engines[engine] = (summary, ctx.rows, ntfs_native.active_engine())
-        self.assertEqual(engines["rust"][2], "rust")
-        diff = differences(list(engines["python"][:2]), list(engines["rust"][:2]))
+        python_summary, python_rows = run_ntfs_meta(mft_blob, journal, "python")
+        rust_summary, rust_rows = run_ntfs_meta(mft_blob, journal, "rust")
+        provenance = {key: rust_summary.pop(key) for key in list(rust_summary) if key.startswith("native_")}
+        self.assertEqual(
+            provenance,
+            {
+                "native_mft_engine": "rust",
+                "native_mft_engine_requested": "rust",
+                "native_mft_engine_version": ntfs_native.RAPID_NTFS_VERSION,
+                "native_mft_engine_python_fallback_count": 0,
+                "native_usn_engine": "rust",
+                "native_usn_engine_requested": "rust",
+                "native_usn_engine_version": ntfs_native.RAPID_NTFS_VERSION,
+                "native_usn_engine_python_fallback_count": 0,
+            },
+        )
+        diff = differences([python_summary, python_rows], [rust_summary, rust_rows])
         self.assertEqual(diff, [], "\n".join(diff[:20]))
-        self.assertGreater(len(engines["rust"][1]), 30)
+        self.assertGreater(len(rust_rows), 30)
+
+    def test_extension_version_matches_the_bridge(self) -> None:
+        self.assertEqual(EXTENSION.engine_version(), ntfs_native.RAPID_NTFS_VERSION)
+        cargo = (Path(__file__).resolve().parents[1] / "engines/rust/crates/rapid-ntfs/Cargo.toml").read_text(encoding="utf-8")
+        self.assertIn(f'\nversion = "{ntfs_native.RAPID_NTFS_VERSION}"\n', cargo)
+
+
+def run_ntfs_meta(mft_blob: bytes, journal: bytes, engine: str) -> tuple[dict[str, object], list[dict[str, object]]]:
+    """The NTFS-meta analysis' $MFT and $UsnJrnl steps on synthetic files under ``engine``."""
+    with tempfile.TemporaryDirectory() as tmp, unittest.mock.patch.dict(os.environ, {ntfs_native.ENGINE_ENV: engine}):
+        root = Path(tmp)
+        (root / "MFT.bin").write_bytes(mft_blob)
+        (root / "J.bin").write_bytes(journal)
+        ctx = _RowSink(root)
+        nodes = analysis_kinds._NodeView()
+        reference = dt.datetime(2030, 1, 1, tzinfo=dt.timezone.utc)
+        summary = analysis_kinds.parse_mft_file(ctx, root / "MFT.bin", nodes, 1024, mismatch_reference=reference)  # type: ignore[arg-type]
+        summary.update(analysis_kinds.parse_usn_file(ctx, root / "J.bin", nodes))  # type: ignore[arg-type]
+        return summary, ctx.rows
 
 
 class _RowSink:
@@ -273,33 +352,145 @@ class _RowSink:
         self.rows.append(row)
 
 
+# Keys a consumer of Rust records must never read: Python-only (absent there) or Rust-only.
+UNREADABLE_KEYS = PYTHON_ONLY_MFT_KEYS | PYTHON_ONLY_CHECKS | PYTHON_ONLY_HASH_KEYS | RUST_ONLY_KEYS | {"cursor_window_profile"}
+
+
+class _ReadTracker(dict):  # type: ignore[type-arg]
+    reads: ClassVar[set[str]] = set()
+
+    def __getitem__(self, key: object) -> object:
+        self.reads.add(str(key))
+        return super().__getitem__(key)
+
+    def get(self, key: object, default: object = None) -> object:
+        self.reads.add(str(key))
+        return super().get(key, default)
+
+    def __contains__(self, key: object) -> bool:
+        self.reads.add(str(key))
+        return super().__contains__(key)
+
+
+def _tracked(value: object) -> object:
+    if isinstance(value, dict):
+        return _ReadTracker({key: _tracked(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return [_tracked(item) for item in value]
+    return value
+
+
+def _module(**parsers: object) -> SimpleNamespace:
+    return SimpleNamespace(engine_version=lambda: ntfs_native.RAPID_NTFS_VERSION, **parsers)
+
+
 class NtfsEngineSwitchTests(unittest.TestCase):
-    def test_default_engine_is_python(self) -> None:
+    def setUp(self) -> None:
+        self.mft_blob = synth.build_mft(synth.parity_mft_specs())
+        self.journal, _ = synth.parity_usn_journal()
+
+    def rust_with(self, module: object, reason: str = "") -> unittest.mock._patch:  # type: ignore[type-arg]
+        return unittest.mock.patch.object(ntfs_native, "load_native_ntfs_parser", return_value=(module, reason))
+
+    def test_default_engine_is_python_and_leaves_the_summary_unchanged(self) -> None:
         with unittest.mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop(ntfs_native.ENGINE_ENV, None)
-            self.assertEqual(ntfs_native.active_engine(), "python")
+            engine = ntfs_native.resolve_ntfs_engine()
+            self.assertEqual((engine.active, engine.provenance("mft")), ("python", {}))
+        summary, _rows = run_ntfs_meta(self.mft_blob, self.journal, "python")
+        self.assertFalse([key for key in summary if key.startswith("native_")])
 
-    def test_rust_request_without_extension_falls_back(self) -> None:
-        blob = synth.build_mft(synth.parity_mft_specs()[:3])
-        with unittest.mock.patch.dict(os.environ, {ntfs_native.ENGINE_ENV: "rust"}), unittest.mock.patch.object(
-            ntfs_native, "load_extension", return_value=None
-        ):
-            self.assertEqual(ntfs_native.active_engine(), "python")
-            self.assertEqual(ntfs_native.parse_mft_record_headers(blob), filesystem.parse_mft_record_headers(blob))
+    def test_missing_extension_falls_back_and_records_why(self) -> None:
+        with self.rust_with(None, "rapid_ntfs_native 확장 모듈이 빌드되지 않았습니다"):
+            summary, rows = run_ntfs_meta(self.mft_blob, self.journal, "rust")
+        self.assertEqual(summary["native_mft_engine"], "python")
+        self.assertEqual(summary["native_mft_engine_requested"], "rust")
+        self.assertIn("빌드되지 않았습니다", str(summary["native_mft_engine_notice_ko"]))
+        self.assertIn("빌드되지 않았습니다", str(summary["native_usn_engine_notice_ko"]))
+        self.assertEqual(rows, run_ntfs_meta(self.mft_blob, self.journal, "python")[1])
 
-    def test_rust_error_falls_back_to_python(self) -> None:
-        journal, _ = synth.parity_usn_journal()
-        broken = SimpleNamespace(parse_usn_record_scan=unittest.mock.Mock(side_effect=ValueError("boom")))
-        with unittest.mock.patch.dict(os.environ, {ntfs_native.ENGINE_ENV: "rust"}), unittest.mock.patch.object(
-            ntfs_native, "load_extension", return_value=broken
-        ):
-            scan = ntfs_native.parse_usn_record_scan(journal)
-        broken.parse_usn_record_scan.assert_called_once()
-        self.assertEqual(scan, filesystem.parse_usn_record_scan(journal))
+    def test_stale_build_is_refused(self) -> None:
+        stale = SimpleNamespace(engine_version=lambda: "0.0.0")
+        with unittest.mock.patch.dict(sys.modules, {"rapid_ntfs_native": stale}):
+            module, reason = ntfs_native.load_native_ntfs_parser.__wrapped__()
+        self.assertIsNone(module)
+        self.assertIn("0.0.0", reason)
 
-    def test_unknown_engine_value_keeps_python(self) -> None:
+    def test_rust_error_falls_back_for_the_rest_of_the_input_and_is_recorded(self) -> None:
+        broken = unittest.mock.Mock(side_effect=RuntimeError("rapid-ntfs panicked: synthetic"))
+        module = _module(parse_mft_record_headers=broken, parse_usn_record_scan=filesystem.parse_usn_record_scan)
+        with self.rust_with(module):
+            summary, rows = run_ntfs_meta(self.mft_blob, self.journal, "rust")
+            with unittest.mock.patch.dict(os.environ, {ntfs_native.ENGINE_ENV: "rust"}):
+                engine = ntfs_native.resolve_ntfs_engine()
+            engine.parse_mft_record_headers(self.mft_blob)
+            engine.parse_mft_record_headers(self.mft_blob)
+        self.assertEqual(broken.call_count, 2)  # once per input, never again after the failure
+        self.assertEqual(engine.python_fallback_count, 2)
+        self.assertEqual(summary["native_mft_engine"], "python")
+        self.assertEqual(summary["native_mft_engine_python_fallback_count"], 1)
+        self.assertIn("panicked: synthetic", str(summary["native_mft_engine_notice_ko"]))
+        self.assertEqual((summary["native_usn_engine"], summary["native_usn_engine_python_fallback_count"]), ("rust", 0))
+        self.assertEqual(rows, run_ntfs_meta(self.mft_blob, self.journal, "python")[1])
+
+    def test_unknown_engine_value_keeps_python_and_is_recorded(self) -> None:
         with unittest.mock.patch.dict(os.environ, {ntfs_native.ENGINE_ENV: "fortran"}):
-            self.assertEqual(ntfs_native.active_engine(), "python")
+            engine = ntfs_native.resolve_ntfs_engine()
+        self.assertEqual(engine.active, "python")
+        self.assertIn("fortran", str(engine.provenance("usn")["native_usn_engine_notice_ko"]))
+
+    def test_consumer_reading_python_only_fields_keeps_python(self) -> None:
+        loader = unittest.mock.Mock()
+        with unittest.mock.patch.dict(os.environ, {ntfs_native.ENGINE_ENV: "rust"}), unittest.mock.patch.object(
+            ntfs_native, "load_native_ntfs_parser", loader
+        ):
+            engine = ntfs_native.resolve_ntfs_engine(reads_python_only=["hashes", "cursor_window_profile"])
+            with self.assertRaises(ValueError):
+                ntfs_native.resolve_ntfs_engine(reads_python_only=["sha1"])
+        loader.assert_not_called()
+        fields = engine.provenance("mft")
+        self.assertEqual(fields["native_mft_engine"], "python")
+        self.assertIn("cursor_window_profile, hashes", str(fields["native_mft_engine_notice_ko"]))
+
+    def test_filesystem_collector_stays_python_and_records_why(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "$MFT").write_bytes(self.mft_blob)
+            (Path(tmp) / "$J").write_bytes(self.journal)
+            outputs = {}
+            for engine in ("python", "rust"):
+                with unittest.mock.patch.dict(os.environ, {ntfs_native.ENGINE_ENV: engine}):
+                    outputs[engine] = list(filesystem.collect_native_ntfs_artifacts(Path(tmp)))
+        inventories = {record.artifact_type: record.details for record in outputs["rust"] if record.artifact_type in {"mft-file", "usn-journal-file"}}
+        self.assertEqual(set(inventories), {"mft-file", "usn-journal-file"})
+        self.assertEqual(inventories["mft-file"]["native_mft_engine"], "python")
+        self.assertIn("hashes", str(inventories["usn-journal-file"]["native_usn_engine_notice_ko"]))
+        for record in outputs["python"]:
+            self.assertFalse([key for key in record.details if key.startswith("native_mft_engine") or key.startswith("native_usn_engine")])
+        self.assertEqual(len(outputs["python"]), len(outputs["rust"]))
+
+    def test_ntfs_meta_analysis_reads_no_python_only_or_rust_only_field(self) -> None:
+        # Every key the NTFS-meta analysis reads from a parser record or scan, on records that
+        # carry all Python fields: none may be one the Rust records lack (or only Rust has).
+        _ReadTracker.reads = set()
+        module = _module(
+            parse_mft_record_headers=lambda blob: _tracked(filesystem.parse_mft_record_headers(blob)),
+            parse_usn_record_scan=lambda blob, **window: _tracked(filesystem.parse_usn_record_scan(blob, **window)),
+        )
+        with self.rust_with(module):
+            run_ntfs_meta(self.mft_blob, self.journal, "rust")
+        reads = set(_ReadTracker.reads)
+        self.assertGreaterEqual(reads, {"records", "file_name_entries", "standard_information", "data_attributes", "file_reference_number_decoded"})
+        self.assertEqual(reads & UNREADABLE_KEYS, set())
+
+    def test_only_audited_consumers_use_the_engine_bridge(self) -> None:
+        # A new consumer must declare reads_python_only (or extend the read audit above).
+        package = Path(ntfs_native.__file__).resolve().parents[1]
+        users = sorted(
+            str(path.relative_to(package)).replace(os.sep, "/")
+            for path in package.rglob("*.py")
+            if "resolve_ntfs_engine" in path.read_text(encoding="utf-8") and path.name != "ntfs_native.py"
+        )
+        self.assertEqual(users, ["api/app/analysis_kinds.py", "artifacts/windows/filesystem.py"])
 
     def test_generator_produces_odd_tick_journal(self) -> None:
         journal, filetimes = synth.parity_usn_journal()

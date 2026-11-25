@@ -1273,7 +1273,10 @@ def parse_mft_file(
         mft_preferred_file_name_entry,
         resolve_mft_bounded_path,
     )
-    from ...core.ntfs_native import parse_mft_record_headers
+    from ...core.ntfs_native import resolve_ntfs_engine
+
+    # Reads no Python-only field (tests/test_rapid_ntfs_parity.py audits every key read).
+    engine = resolve_ntfs_engine()
 
     staging = ctx.directory / "mft-records.staging.jsonl"
     record_count = 0
@@ -1284,7 +1287,7 @@ def parse_mft_file(
             blob = handle.read(MFT_CHUNK_RECORDS * record_size)
             if not blob:
                 break
-            for record in parse_mft_record_headers(blob):
+            for record in engine.parse_mft_record_headers(blob):
                 offset = int(record.get("record_offset") or 0)
                 if offset % record_size:
                     continue  # "FILE" inside record content, not a record header
@@ -1397,6 +1400,7 @@ def parse_mft_file(
         "mft_in_use_count": in_use,
         "mft_deleted_count": record_count - in_use,
         "path_status_counts": dict(status_counts),
+        **engine.provenance("mft"),
     }
     if mismatch_reference is not None:
         result.update(
@@ -1422,7 +1426,10 @@ def parse_mft_file(
 
 def parse_usn_file(ctx: AnalysisContext, journal_path: Path, nodes: _NodeView) -> dict[str, object]:
     from ...artifacts.windows.filesystem import resolve_mft_bounded_path
-    from ...core.ntfs_native import parse_usn_record_scan
+    from ...core.ntfs_native import resolve_ntfs_engine
+
+    # Reads no Python-only field (tests/test_rapid_ntfs_parity.py audits every key read).
+    engine = resolve_ntfs_engine()
 
     size = journal_path.stat().st_size
     parent_paths: dict[int, str] = {}
@@ -1436,7 +1443,7 @@ def parse_usn_file(ctx: AnalysisContext, journal_path: Path, nodes: _NodeView) -
             if len(blob) < 60:
                 break
             last_window = position + len(blob) >= size
-            scan = parse_usn_record_scan(
+            scan = engine.parse_usn_record_scan(
                 blob,
                 record_limit=USN_RECORD_LIMIT_PER_WINDOW,
                 max_scan_bytes=None if last_window else USN_WINDOW_BYTES,
@@ -1478,7 +1485,7 @@ def parse_usn_file(ctx: AnalysisContext, journal_path: Path, nodes: _NodeView) -
             if last_window:
                 break
             position += max(int(scan.get("last_scanned_offset") or 0), 1)
-    return {"usn_record_count": count, "usn_scanned_bytes": size}
+    return {"usn_record_count": count, "usn_scanned_bytes": size, **engine.provenance("usn")}
 
 
 def ntfs_cluster_size(

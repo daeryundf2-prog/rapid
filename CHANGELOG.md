@@ -28,3 +28,12 @@
   the Python decoder's (`tests/test_evtx_engine_diff.py`). See
   `docs/architecture/rust-bootstrap.md`.
 - Indicator extraction can use a Rust worker for URLs, IPv4 addresses and hashes. Set `RAPIDTRIAGE_RUST_INDICATORS=1` to enable it. The worker reads JSONL artifact record streams itself, applying the Python field policy, and returns only scalar fields with candidates. Rows and Unicode text outside its exact subset go to Python. Other outputs send ASCII scalar fields in batches. The indicator output and run disclosures record worker use and fallback; after a worker failure Python resumes from the last applied checkpoint. [Build and validation instructions](docs/architecture/rust-indicators.md)
+- Opt-in Rust $MFT / $UsnJrnl:$J parser (`engines/rust/crates/rapid-ntfs`,
+  module `rapid_ntfs_native`), selected with `RAPIDTRIAGE_NTFS_ENGINE=rust` for
+  the NTFS-meta analysis. The default stays Python. Rows are identical to the
+  Python parser's (`tests/test_rapid_ntfs_parity.py`); a missing or stale
+  build, a Rust error, or a consumer that reads Python-only fields (hashes,
+  attribute-list resolution, USN cursor window) falls back to Python and
+  records why in `native_mft_engine*` / `native_usn_engine*` run metadata.
+  Build with `python scripts/build-rapid-ntfs.py`. See
+  `docs/architecture/rapid-ntfs.md`.

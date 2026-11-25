@@ -959,8 +959,8 @@ fn extract_utf16_strings(blob: &[u8]) -> Vec<String> {
         current.clear();
         false
     };
-    for pair in blob.chunks_exact(2) {
-        let unit = u16::from_le_bytes([pair[0], pair[1]]);
+    for pair in blob.as_chunks::<2>().0 {
+        let unit = u16::from_le_bytes(*pair);
         if (32..=126).contains(&unit) {
             current.push(char::from(unit as u8));
             continue;
