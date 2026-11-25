@@ -269,12 +269,14 @@ def find_postpatch_v2_bound_ikm_by_salt_locality(
     info: bytes,
     wrapped_dek: bytes,
     max_hits: int = V2_SALT_LOCALITY_MAX_HITS,
-) -> dict[str, object] | None:
+) -> dict[str, object]:
     """Fast v2 key confirmation: bound_ikm sits 0x20 bytes before the appstate salt in memory.
 
     Each salt hit yields one 32-byte candidate at ``hit - 0x20``; the first candidate that
     unwraps ``wrapped_dek`` through HKDF + AES-KW (whose 8-byte integrity check rejects
-    wrong keys) is confirmed. ``data`` may be ``bytes`` or an ``mmap``.
+    wrong keys) is confirmed. ``data`` may be ``bytes`` or an ``mmap``. The result always
+    carries ``salt_hits_tested`` and ``salt_hits_truncated`` (``max_hits`` reached) so a
+    miss can be recorded; ``confirmed`` is False and ``bound_ikm`` None on a miss.
     """
 
     if len(appstate_salt) != 32:
@@ -297,13 +299,47 @@ def find_postpatch_v2_bound_ikm_by_salt_locality(
                 )
                 if dek is not None:
                     return {
+                        "confirmed": True,
                         "bound_ikm": bound_ikm,
                         "salt_hit_offset": position,
                         "bound_ikm_offset": start,
                         "salt_hits_tested": hits_tested,
+                        "salt_hits_truncated": False,
                     }
         position = data.find(appstate_salt, position + 1)
-    return None
+    return {
+        "confirmed": False,
+        "bound_ikm": None,
+        "salt_hits_tested": hits_tested,
+        "salt_hits_truncated": position >= 0,
+    }
+
+
+def _v2_page_aes(dek: bytes) -> object:
+    if len(dek) != 32:
+        raise KakaoTalkAlgorithmError("Post-patch v2 DEK must be 32 bytes")
+    try:
+        from Crypto.Cipher import AES  # type: ignore[import-not-found]
+    except ImportError as exc:  # pragma: no cover - optional dependency guard
+        raise KakaoTalkAlgorithmError("pycryptodome is required: pip install pycryptodome") from exc
+    return AES
+
+
+def _check_v2_geometry(size: int) -> None:
+    if not size or size % V2_PAGE_SIZE:
+        raise KakaoTalkAlgorithmError(
+            f"Post-patch v2 chatLogs must be a whole number of {V2_PAGE_SIZE}-byte pages (got {size} bytes)"
+        )
+
+
+def _decrypt_postpatch_v2_page(page: bytes, *, first: bool, dek: bytes, aes_module: object) -> bytes:
+    iv = page[V2_PAGE_PAYLOAD_SIZE : V2_PAGE_PAYLOAD_SIZE + V2_PAGE_IV_SIZE]
+    cipher = aes_module.new(dek, aes_module.MODE_CBC, iv)  # type: ignore[attr-defined]
+    if first:
+        body = page[:V2_PAGE_HEADER_SIZE] + cipher.decrypt(page[V2_PAGE_HEADER_SIZE:V2_PAGE_PAYLOAD_SIZE])
+    else:
+        body = cipher.decrypt(page[:V2_PAGE_PAYLOAD_SIZE])
+    return body + b"\x00" * V2_PAGE_RESERVED_SIZE
 
 
 def decrypt_postpatch_v2_pages(encrypted: bytes, *, dek: bytes) -> bytes:
@@ -314,42 +350,51 @@ def decrypt_postpatch_v2_pages(encrypted: bytes, *, dek: bytes) -> bytes:
     Each decrypted 4016-byte page is padded with 80 zero bytes (SQLite reserved region).
     """
 
-    if len(dek) != 32:
-        raise KakaoTalkAlgorithmError("Post-patch v2 DEK must be 32 bytes")
-    if not encrypted or len(encrypted) % V2_PAGE_SIZE:
-        raise KakaoTalkAlgorithmError(
-            f"Post-patch v2 chatLogs must be a whole number of {V2_PAGE_SIZE}-byte pages (got {len(encrypted)} bytes)"
+    aes_module = _v2_page_aes(dek)
+    _check_v2_geometry(len(encrypted))
+    return b"".join(
+        _decrypt_postpatch_v2_page(
+            encrypted[offset : offset + V2_PAGE_SIZE], first=offset == 0, dek=dek, aes_module=aes_module
         )
-    try:
-        from Crypto.Cipher import AES  # type: ignore[import-not-found]
-    except ImportError as exc:  # pragma: no cover - optional dependency guard
-        raise KakaoTalkAlgorithmError("pycryptodome is required: pip install pycryptodome") from exc
-    reserved = b"\x00" * V2_PAGE_RESERVED_SIZE
-    output = bytearray()
-    for offset in range(0, len(encrypted), V2_PAGE_SIZE):
-        page = encrypted[offset : offset + V2_PAGE_SIZE]
-        iv = page[V2_PAGE_PAYLOAD_SIZE : V2_PAGE_PAYLOAD_SIZE + V2_PAGE_IV_SIZE]
-        cipher = AES.new(dek, AES.MODE_CBC, iv)
-        if offset == 0:
-            output.extend(page[:V2_PAGE_HEADER_SIZE])
-            output.extend(cipher.decrypt(page[V2_PAGE_HEADER_SIZE:V2_PAGE_PAYLOAD_SIZE]))
-        else:
-            output.extend(cipher.decrypt(page[:V2_PAGE_PAYLOAD_SIZE]))
-        output.extend(reserved)
-    return bytes(output)
+        for offset in range(0, len(encrypted), V2_PAGE_SIZE)
+    )
 
 
-def validate_decrypted_sqlite_bytes(plaintext: bytes) -> dict[str, object]:
+def decrypt_postpatch_v2_file(source: Path, destination: Path, *, dek: bytes) -> dict[str, object]:
+    """``decrypt_postpatch_v2_pages`` streamed page by page from ``source`` to ``destination``.
+
+    Memory stays at one page whatever the database size; the plaintext SHA-256 is
+    computed on the way.
+    """
+
+    aes_module = _v2_page_aes(dek)
+    _check_v2_geometry(source.stat().st_size)
+    digest = hashlib.sha256()
+    page_count = 0
+    with source.open("rb") as reader, destination.open("wb") as writer:
+        while page := reader.read(V2_PAGE_SIZE):
+            if len(page) != V2_PAGE_SIZE:
+                raise KakaoTalkAlgorithmError(f"Post-patch v2 chatLogs ends with a partial {len(page)}-byte page")
+            plain = _decrypt_postpatch_v2_page(page, first=page_count == 0, dek=dek, aes_module=aes_module)
+            writer.write(plain)
+            digest.update(plain)
+            page_count += 1
+    return {"page_count": page_count, "plaintext_sha256": digest.hexdigest()}
+
+
+def validate_decrypted_sqlite_file(candidate: Path) -> dict[str, object]:
     """Anti-false-positive gate: accept only if SQLite opens the image and bounded counts succeed.
 
     A raw CBC decrypt never fails on a wrong key and the v2 page-0 header is kept in
-    plaintext, so the magic alone proves nothing. The image is written to a temp file,
-    opened read-only, and ``count(*)`` runs on sqlite_master and, if present, chatLogs.
+    plaintext, so the magic alone proves nothing. The image is opened read-only and
+    ``count(*)`` runs on sqlite_master and, if present, chatLogs.
     """
 
+    with candidate.open("rb") as handle:
+        header = handle.read(len(SQLITE_MAGIC))
     result: dict[str, object] = {
         "accepted": False,
-        "sqlite_header_ok": plaintext[:16] == SQLITE_MAGIC,
+        "sqlite_header_ok": header == SQLITE_MAGIC,
         "sqlite_master_count": None,
         "chatlogs_table": "",
         "chatlogs_row_count": None,
@@ -365,21 +410,27 @@ def validate_decrypted_sqlite_bytes(plaintext: bytes) -> dict[str, object]:
         progress_calls += 1
         return 1 if progress_calls > V2_SQLITE_GATE_MAX_PROGRESS_CALLS else 0
 
+    try:
+        with closing(sqlite3.connect(f"{candidate.as_uri()}?mode=ro", uri=True)) as connection:
+            connection.set_progress_handler(abort_when_unbounded, 1000)
+            result["sqlite_master_count"] = int(connection.execute("SELECT count(*) FROM sqlite_master").fetchone()[0])
+            tables = [str(row[0]) for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")]
+            chatlogs = next((name for name in tables if name.lower() == "chatlogs"), "")
+            if chatlogs:
+                quoted = '"' + chatlogs.replace('"', '""') + '"'
+                result["chatlogs_table"] = chatlogs
+                result["chatlogs_row_count"] = int(connection.execute(f"SELECT count(*) FROM {quoted}").fetchone()[0])
+    except sqlite3.DatabaseError as exc:
+        result["error"] = str(exc)
+        return result
+    result["accepted"] = True
+    return result
+
+
+def validate_decrypted_sqlite_bytes(plaintext: bytes) -> dict[str, object]:
+    """``validate_decrypted_sqlite_file`` for an in-memory image (written to a temp file first)."""
+
     with tempfile.TemporaryDirectory(prefix="rapidtriage-kakao-v2-gate-") as temp_dir:
         candidate = Path(temp_dir) / "candidate.sqlite"
         candidate.write_bytes(plaintext)
-        try:
-            with closing(sqlite3.connect(f"{candidate.as_uri()}?mode=ro", uri=True)) as connection:
-                connection.set_progress_handler(abort_when_unbounded, 1000)
-                result["sqlite_master_count"] = int(connection.execute("SELECT count(*) FROM sqlite_master").fetchone()[0])
-                tables = [str(row[0]) for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")]
-                chatlogs = next((name for name in tables if name.lower() == "chatlogs"), "")
-                if chatlogs:
-                    quoted = '"' + chatlogs.replace('"', '""') + '"'
-                    result["chatlogs_table"] = chatlogs
-                    result["chatlogs_row_count"] = int(connection.execute(f"SELECT count(*) FROM {quoted}").fetchone()[0])
-        except sqlite3.DatabaseError as exc:
-            result["error"] = str(exc)
-            return result
-    result["accepted"] = True
-    return result
+        return validate_decrypted_sqlite_file(candidate)
