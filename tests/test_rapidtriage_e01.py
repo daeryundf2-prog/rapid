@@ -44,7 +44,13 @@ from rapidtriage.core.e01_smoke import (
     register_stage_status_with_run,
     run_windows11_e01_smoke,
 )
-from rapidtriage.core.run import run_triage_mode
+from rapidtriage.core.run import (
+    RunProgress,
+    image_extract_reporter,
+    read_run_progress,
+    run_triage_mode,
+)
+from rapidtriage.core.run.plan import PLAN_FILE_NAME, build_run_plan, find_task
 from rapidtriage.core.virtual_disk import (
     VirtualDiskExtractionResult,
     build_virtual_disk_chain_profile,
@@ -52,6 +58,40 @@ from rapidtriage.core.virtual_disk import (
     extract_virtual_disk_to_directory,
 )
 from tests.test_rapidtriage_run import build_run_fixture
+
+
+class _FakeNtfsRecord:
+    def __init__(self, segment: int, data: bytes = b"", children: dict | None = None) -> None:
+        self.segment, self._data, self._children = segment, data, children
+
+    def is_dir(self) -> bool:
+        return self._children is not None
+
+    def is_file(self) -> bool:
+        return self._children is None
+
+    def size(self) -> int:
+        return len(self._data)
+
+    def open(self) -> io.BytesIO:
+        return io.BytesIO(self._data)
+
+    def listdir(self, ignore_dos: bool = False) -> list[str]:
+        return list(self._children or {})
+
+    def get(self, name: str) -> _FakeNtfsRecord:
+        return (self._children or {})[name]
+
+
+def _fake_ntfs_tree() -> _FakeNtfsRecord:
+    return _FakeNtfsRecord(5, children={
+        "a.txt": _FakeNtfsRecord(30, b"aaaa"),
+        "Users": _FakeNtfsRecord(31, children={"b.bin": _FakeNtfsRecord(32, b"bb")}),
+    })
+
+
+def _fresh_walk_stats() -> dict[str, int]:
+    return {"files": 0, "bytes": 0, "errors": 0, "depth_skips": 0, "truncated": 0, "alias_skips": 0}
 
 
 class RapidTriageE01Tests(unittest.TestCase):
@@ -479,41 +519,15 @@ Units are in 512-byte sectors
     def test_native_walk_reports_progress_after_each_recovered_file(self) -> None:
         from rapidtriage.core.e01_native import _walk_ntfs_dir
 
-        class FakeRecord:
-            def __init__(self, segment: int, data: bytes = b"", children: dict | None = None) -> None:
-                self.segment, self._data, self._children = segment, data, children
-
-            def is_dir(self) -> bool:
-                return self._children is not None
-
-            def is_file(self) -> bool:
-                return self._children is None
-
-            def size(self) -> int:
-                return len(self._data)
-
-            def open(self) -> io.BytesIO:
-                return io.BytesIO(self._data)
-
-            def listdir(self, ignore_dos: bool = False) -> list[str]:
-                return list(self._children or {})
-
-            def get(self, name: str) -> FakeRecord:
-                return (self._children or {})[name]
-
-        root = FakeRecord(5, children={
-            "a.txt": FakeRecord(30, b"aaaa"),
-            "Users": FakeRecord(31, children={"b.bin": FakeRecord(32, b"bb")}),
-        })
-        stats = {"files": 0, "bytes": 0, "errors": 0, "depth_skips": 0, "truncated": 0, "alias_skips": 0}
+        stats = _fresh_walk_stats()
         seen: list[tuple[int, int]] = []
         with tempfile.TemporaryDirectory() as tmp_dir:
-            _walk_ntfs_dir(root, Path(tmp_dir), stats, limit=10, on_progress=lambda s: seen.append((s["files"], s["bytes"])))
+            _walk_ntfs_dir(_fake_ntfs_tree(), Path(tmp_dir), stats, limit=10, on_progress=lambda s: seen.append((s["files"], s["bytes"])))
         self.assertEqual(seen, [(1, 4), (2, 6)])
         stats.update(files=0, bytes=0)
         capped: list[int] = []
         with tempfile.TemporaryDirectory() as tmp_dir:
-            _walk_ntfs_dir(root, Path(tmp_dir), stats, limit=1, on_progress=lambda s: capped.append(s["truncated"]))
+            _walk_ntfs_dir(_fake_ntfs_tree(), Path(tmp_dir), stats, limit=1, on_progress=lambda s: capped.append(s["truncated"]))
         self.assertEqual(capped, [0, 1])  # the skipped file past the cap is reported too
 
     def test_priority_pass_recovers_hives_and_logs_before_the_cap_is_spent_on_program_files(self) -> None:
@@ -616,25 +630,96 @@ Units are in 512-byte sectors
         self.assertEqual(recovered, ["0-gone.docx", "1-gone.docx"])
         self.assertEqual(stats["truncated"], 6)  # the third deleted record is over its own budget
 
-    def test_image_extract_reporter_writes_files_and_size_to_the_running_plan_task(self) -> None:
-        from rapidtriage.core.run import RunProgress, image_extract_reporter
-        from rapidtriage.core.run.plan import build_run_plan
+    def test_native_walk_progress_observer_failure_neither_aborts_nor_skews_stats(self) -> None:
+        from rapidtriage.core.e01_native import _walk_ntfs_dir
 
+        def hostile_observer(view) -> None:
+            view["files"] = 0  # read-only view: TypeError, swallowed
+
+        def failing_observer(_view) -> None:
+            raise OSError("progress file locked")
+
+        for observer in (hostile_observer, failing_observer):
+            stats = _fresh_walk_stats()
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                _walk_ntfs_dir(_fake_ntfs_tree(), Path(tmp_dir), stats, limit=10, on_progress=observer)
+                self.assertEqual((Path(tmp_dir) / "Users" / "b.bin").read_bytes(), b"bb")
+            self.assertEqual((stats["files"], stats["bytes"], stats["errors"]), (2, 6, 0))
+
+    def test_image_extract_reporter_writes_files_and_size_to_the_running_plan_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_dir = Path(tmp_dir)
-            progress = RunProgress(output_dir)
+            progress = RunProgress(output_dir, heartbeat_interval=0)
             progress.start(stage="prepare")
             progress.set_plan(build_run_plan(mode="fraud"))
             report = image_extract_reporter(progress, interval=0.0)
             report({"files": 1234, "bytes": 3 << 30})
-            task = dict(progress.task_record("image-extract"))
+            on_disk = find_task(read_run_progress(output_dir)["plan"], "image-extract")
             report({"files": 200_000, "bytes": 3 << 30, "deleted_files": 12, "truncated": 5_000})
-            capped = dict(progress.task_record("image-extract"))
+            capped = find_task(read_run_progress(output_dir)["plan"], "image-extract")
             progress.finish(status="completed")
-        self.assertEqual(task["rows_so_far"], 1234)
-        self.assertEqual(task["message"], "파일 1,234개 · 3.0 GB 추출")
+        self.assertEqual(on_disk["status"], "running")
+        self.assertEqual(on_disk["rows_so_far"], 1234)
+        self.assertEqual(on_disk["message"], "파일 1,234개 · 3.0 GB 추출")
         # Past the cap the walk keeps going for minutes; the message must keep moving.
         self.assertEqual(capped["message"], "파일 200,000개 · 3.0 GB 추출 · 삭제 파일 12개 · 상한 초과 5,000개 건너뜀")
+
+    def test_full_walk_recovers_every_path_of_a_hard_linked_file_and_records_only_priority_segments(self) -> None:
+        from rapidtriage.core.e01_native import _walk_ntfs_dir
+
+        linked = _FakeNtfsRecord(40, b"dll")
+        root = _FakeNtfsRecord(5, children={
+            "System32": _FakeNtfsRecord(41, children={"a.dll": linked}),
+            "WinSxS": _FakeNtfsRecord(42, children={"a.dll": linked}),
+        })
+        done: set[int] = set()
+        stats = _fresh_walk_stats()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            _walk_ntfs_dir(root, Path(tmp_dir), stats, limit=10, done=done)
+            recovered = sorted(p.relative_to(tmp_dir).as_posix() for p in Path(tmp_dir).rglob("*") if p.is_file())
+        self.assertEqual(recovered, ["System32/a.dll", "WinSxS/a.dll"])
+        self.assertEqual(done, set())
+
+    def test_image_extract_reporter_throttles_and_flush_writes_the_last_stats(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            progress = RunProgress(output_dir, heartbeat_interval=0)
+            progress.start(stage="prepare")
+            progress.set_plan(build_run_plan(mode="fraud"))
+
+            def on_disk() -> dict:
+                return find_task(read_run_progress(output_dir)["plan"], "image-extract")
+
+            report = image_extract_reporter(progress, interval=3600.0)
+            report({"files": 1, "bytes": 10})
+            self.assertEqual(on_disk()["rows_so_far"], 1)
+            report({"files": 2, "bytes": 20})
+            report({"files": 3, "bytes": 30, "truncated": 4})
+            self.assertEqual(on_disk()["rows_so_far"], 1)
+            report.flush()
+            self.assertEqual(on_disk()["rows_so_far"], 3)
+            self.assertEqual(on_disk()["message"], "파일 3개 · 0.0 GB 추출 · 상한 초과 4개 건너뜀")
+            report.flush()  # nothing pending: no rewrite of an unchanged state
+            progress.finish(status="completed")
+
+    def test_image_extract_reporter_survives_a_progress_file_locked_by_a_reader(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            progress = RunProgress(output_dir, heartbeat_interval=0)
+            progress.start(stage="prepare")
+            progress.set_plan(build_run_plan(mode="fraud"))
+            report = image_extract_reporter(progress, interval=0.0)
+            # Windows: os.replace onto a file another process has open raises PermissionError.
+            with patch("rapidtriage.core.run.progress.os.replace", side_effect=PermissionError("locked")), patch(
+                "rapidtriage.core.run.progress.time.sleep"
+            ):
+                report({"files": 5, "bytes": 50})
+            self.assertEqual(find_task(read_run_progress(output_dir)["plan"], "image-extract")["rows_so_far"], 0)
+            report({"files": 7, "bytes": 70})
+            payload = read_run_progress(output_dir)
+            progress.finish(status="completed")
+        self.assertEqual(find_task(payload["plan"], "image-extract")["rows_so_far"], 7)
+        self.assertEqual([error["error_type"] for error in payload["write_errors"]], ["PermissionError"])
 
     def _fake_native_result(self) -> dict:
         partition_row = {
@@ -2582,6 +2667,9 @@ Units are in 512-byte sectors
                 extract_dir = stage_dir / "filesystem"
                 extract_dir.mkdir(parents=True, exist_ok=True)
                 build_run_fixture(extract_dir)
+                # Two updates inside one throttle window: only the end-of-extraction flush writes the second.
+                on_progress({"files": 1, "bytes": 4})
+                on_progress({"files": 2, "bytes": 6})
                 return E01ExtractionResult(
                     source_path=source_path,
                     stage_dir=stage_dir,
@@ -2599,6 +2687,11 @@ Units are in 512-byte sectors
                     e01_partition_start_sector=4096,
                 )
 
+            plan = json.loads((output_dir / PLAN_FILE_NAME).read_text(encoding="utf-8"))
+            image_task = find_task(plan, "image-extract")
+            self.assertEqual(image_task["status"], "completed")
+            self.assertEqual(image_task["rows_so_far"], 2)
+            self.assertEqual(image_task["message"], "파일 2개 · 0.0 GB 추출")
             self.assertEqual(payload["source"]["type"], "e01")
             self.assertEqual(Path(payload["source"]["source_path"]), e01_path.resolve())
             self.assertEqual(payload["source"]["workflow_status"]["profile_version"], "windows11-e01-run-workflow-v1")

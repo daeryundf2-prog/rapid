@@ -359,11 +359,14 @@ class RunProgress:
             )
             self._write_locked()
 
-    def task_set_message(self, task_id: str, message: str) -> None:
+    def task_set_message(self, task_id: str, message: str, *, rows: int | None = None) -> None:
+        """Set a task's message (and ``rows_so_far`` when given) in one unthrottled write."""
         with self._lock:
             task = find_task(self._plan, task_id) if self._plan is not None else None
             if task is not None:
                 task["message"] = message
+                if rows is not None:
+                    task["rows_so_far"] = int(rows)
                 self._write_locked()
 
     def stage_tasks_finished(self, stage: str, *, status: str, reason: str | None = None) -> None:

@@ -1737,9 +1737,9 @@ def extract_e01_to_directory(
 
     if resolved_engine == "native":
         if not native_enabled:
-            from .e01_native import native_e01_missing_modules
+            from .e01_native import native_e01_status
 
-            missing_modules = ", ".join(native_e01_missing_modules())
+            missing_modules = "; ".join(native_e01_status()["problems"])
             raise E01ExtractionError(
                 f"native E01 engine requested but modules are unavailable: {missing_modules}. "
                 "Install the `native-e01` extra (pyewf + dissect.ntfs), select engine=external, "
@@ -4385,6 +4385,8 @@ def image_workflow_analyst_review_profile(number: int, details: Mapping[str, obj
                 and not bool(native_capabilities.get("direct_ad1_l01_lx01_aff_aff4_parser")),
                 "encrypted-or-corrupt-corpus-required": any("encrypted" in item or "corrupt" in item for item in blockers),
                 "vendor-export-required": number == 25 or scan_strategy == "vendor-export-first",
+                # In-process pyewf + dissect.ntfs recovery is engineering-grade: the card must disclose it.
+                "engineering-grade-native-decoder": bool(native_capabilities.get("python_native_ewf_extraction")),
             }.items()
             if enabled
         ],

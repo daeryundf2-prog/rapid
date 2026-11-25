@@ -223,6 +223,33 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertFalse(result["ingest_workflow"]["operator_runbook"]["direct_extract_ready"])
             self.assertIn("WSL2", " ".join(result["failure_guidance"]["next_actions"]))
 
+    def test_e01_review_profile_follows_native_decoder_readiness(self) -> None:
+        from types import SimpleNamespace
+
+        from rapidtriage.core import e01_native
+
+        def broken_handle() -> object:
+            raise OSError("libewf binding failed to initialise")
+
+        all_missing = ["ewfmount", "mmls", "tsk_recover"]
+        cases = {
+            "working": (SimpleNamespace(get_version=lambda: "20240506", handle=object), "direct-extract", True),
+            "importable-but-broken": (SimpleNamespace(get_version=lambda: "20240506", handle=broken_handle), "tooling-required", False),
+        }
+        for label, (fake_pyewf, support_level, can_extract) in cases.items():
+            with self.subTest(label), tempfile.TemporaryDirectory() as tmp_dir:
+                image_path = Path(tmp_dir) / "case.E01"
+                image_path.write_bytes(b"EVF")
+                with patch("rapidtriage.core.evidence.missing_e01_tools", return_value=all_missing), patch.object(
+                    e01_native, "pyewf", fake_pyewf
+                ), patch.object(e01_native, "NTFS", object), patch.object(e01_native, "_distribution_version", return_value="3.16"):
+                    result = identify_evidence(image_path).to_dict()
+                review = result["image_analyst_review_profile"]
+                self.assertEqual(result["can_extract"], can_extract)
+                self.assertEqual(result["support_level"], support_level)
+                self.assertEqual(review["source_field_values"]["support_level"], support_level)
+                self.assertEqual("engineering-grade-native-decoder" in review["risk_tags"], can_extract)
+
     def test_identifies_raw_image_as_direct_extract_when_sleuthkit_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             image_path = Path(tmp_dir) / "disk.001"

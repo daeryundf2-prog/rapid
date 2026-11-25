@@ -12,7 +12,9 @@ trusted-tool extraction (ewfmount/tsk_recover) and native decode.
 from __future__ import annotations
 
 import contextlib
+import importlib.metadata
 import io
+import itertools
 import os
 import shutil
 import struct
@@ -20,6 +22,7 @@ import sys
 import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 try:  # optional native decoders
@@ -180,17 +183,58 @@ class ExtractSpaceGuard:
         return True
 
 
-def native_e01_available() -> bool:
-    return pyewf is not None and NTFS is not None
+# pyproject `native-e01` extra: dissect.ntfs>=3.10.
+NATIVE_NTFS_MIN_VERSION = (3, 10)
 
 
-def native_e01_missing_modules() -> list[str]:
-    missing = []
+def _version_tuple(text: str | None) -> tuple[int, ...] | None:
+    parts: list[int] = []
+    for piece in (text or "").split("."):
+        digits = "".join(itertools.takewhile(str.isdigit, piece))
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts) or None
+
+
+def _distribution_version(name: str) -> str | None:
+    """Installed version, or None for vendored/frozen builds without dist metadata."""
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def native_e01_status() -> dict[str, Any]:
+    """Import + smoke check of the native-e01 extra, with the versions in use.
+
+    ``problems`` is empty only when both modules import, a pyewf handle can be
+    constructed (exercises the libewf binding) and dissect.ntfs is not older
+    than the declared minimum; doctor, the evidence adapter and ``run`` gate on it.
+    """
+    problems: list[str] = []
+    versions: dict[str, str | None] = {"pyewf": None, "dissect.ntfs": None}
     if pyewf is None:
-        missing.append("pyewf")
+        problems.append("pyewf is not importable")
+    else:
+        try:
+            versions["pyewf"] = str(pyewf.get_version())
+            pyewf.handle()
+        except Exception as exc:
+            problems.append(f"pyewf is importable but unusable ({type(exc).__name__}: {exc})")
     if NTFS is None:
-        missing.append("dissect.ntfs")
-    return missing
+        problems.append("dissect.ntfs is not importable")
+    else:
+        versions["dissect.ntfs"] = _distribution_version("dissect.ntfs")
+        parsed = _version_tuple(versions["dissect.ntfs"])
+        if parsed is not None and parsed < NATIVE_NTFS_MIN_VERSION:
+            minimum = ".".join(map(str, NATIVE_NTFS_MIN_VERSION))
+            problems.append(f"dissect.ntfs {versions['dissect.ntfs']} is older than the required {minimum}")
+    return {"available": not problems, "versions": versions, "problems": problems}
+
+
+def native_e01_available() -> bool:
+    return bool(native_e01_status()["available"])
 
 
 class EwfSectorReader(io.RawIOBase):
@@ -609,6 +653,15 @@ ExtractProgress = Callable[[Mapping[str, int]], None]
 """Called after each recovered file with the running stats (files, bytes, errors, …)."""
 
 
+def _notify_progress(on_progress: ExtractProgress | None, stats: dict[str, int]) -> None:
+    """Hand the observer a read-only view; progress is advisory, so an observer that
+    raises must neither abort recovery nor be counted as an unreadable file."""
+    if on_progress is None:
+        return
+    with contextlib.suppress(Exception):
+        on_progress(MappingProxyType(stats))
+
+
 def _walk_ntfs_dir(
     node: Any,
     out_dir: Path,
@@ -618,7 +671,12 @@ def _walk_ntfs_dir(
     on_progress: ExtractProgress | None = None,
     done: set[int] | None = None,
     guard: ExtractSpaceGuard | None = None,
+    record_done: bool = False,
 ) -> None:
+    # ``done``: MFT segments the priority pass recovered; the full walk skips them. Only the
+    # priority pass records into it (``record_done``): recording every file of the full walk
+    # would hold one entry per file of the volume and silently drop the other paths of a
+    # hard-linked file (WinSxS / System32), which the walk has always recovered at each path.
     if depth > 64:
         stats["depth_skips"] += 1
         return
@@ -654,20 +712,18 @@ def _walk_ntfs_dir(
         target = out_dir / _safe_component(name)
         try:
             if rec.is_dir():
-                _walk_ntfs_dir(rec, target, stats, depth + 1, limit, on_progress, done, guard)
+                _walk_ntfs_dir(rec, target, stats, depth + 1, limit, on_progress, done, guard, record_done)
             elif rec.is_file():
                 if done is not None and segment is not None and segment in done:
                     continue  # already recovered by the priority pass
                 if stats["files"] >= limit:
                     stats["truncated"] += 1
-                    if on_progress is not None:
-                        on_progress(stats)  # the walk past the cap still takes minutes on a full volume
+                    _notify_progress(on_progress, stats)  # the walk past the cap still takes minutes on a full volume
                     continue
                 _dump_ntfs_record(rec, target, stats, guard)
-                if done is not None and segment is not None:
+                if record_done and done is not None and segment is not None:
                     done.add(segment)
-                if on_progress is not None:
-                    on_progress(stats)
+                _notify_progress(on_progress, stats)
         except Exception:
             stats["errors"] += 1
             continue
@@ -736,7 +792,9 @@ def _recover_priority_paths(
             target = extract_dir.joinpath(*(_safe_component(part) for part in rel.split("/")))
             try:
                 if rec.is_dir():
-                    _walk_ntfs_dir(rec, target, stats, limit=sys.maxsize, on_progress=on_progress, done=done, guard=guard)
+                    _walk_ntfs_dir(
+                        rec, target, stats, limit=sys.maxsize, on_progress=on_progress, done=done, guard=guard, record_done=True
+                    )
                 elif rec.is_file():
                     segment = getattr(rec, "segment", None)
                     if segment is not None and segment in done:
@@ -744,8 +802,7 @@ def _recover_priority_paths(
                     _dump_ntfs_record(rec, target, stats, guard)
                     if segment is not None:
                         done.add(segment)
-                    if on_progress is not None:
-                        on_progress(stats)
+                    _notify_progress(on_progress, stats)
             except Exception:
                 stats["errors"] += 1
 
@@ -800,8 +857,7 @@ def _sweep_deleted_mft_records(
         # shared cap (reached by the live tree on any full Windows volume) recovered none of them.
         if stats["deleted_files"] + stats["deleted_read_errors"] >= limit:
             stats["truncated"] += 1
-            if on_progress is not None:
-                on_progress(stats)
+            _notify_progress(on_progress, stats)
             continue
         target = deleted_dir / f"{index}-{_safe_component(filename)}"
         before_files, before_errors = stats["files"], stats["errors"]
@@ -810,8 +866,7 @@ def _sweep_deleted_mft_records(
             stats["deleted_files"] += 1
         elif stats["errors"] != before_errors:
             stats["deleted_read_errors"] += 1
-        if on_progress is not None:
-            on_progress(stats)
+        _notify_progress(on_progress, stats)
 
 
 def _dump_ntfs_system_record(rec: Any, out_path: Path) -> int:

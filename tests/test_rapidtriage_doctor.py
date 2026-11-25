@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 HAS_FASTAPI = True
@@ -50,7 +51,7 @@ class RapidTriageDoctorTests(unittest.TestCase):
             app_data_dir = Path(tmp_dir) / "app-data"
             make_static_assets(static_dir)
 
-            with patch("rapidtriage.core.e01_native.native_e01_available", return_value=False):
+            with patch("rapidtriage.core.e01_native.pyewf", None), patch("rapidtriage.core.e01_native.NTFS", None):
                 payload = run_doctor(
                     static_dir=static_dir,
                     app_data_dir=app_data_dir,
@@ -70,21 +71,60 @@ class RapidTriageDoctorTests(unittest.TestCase):
         self.assertEqual(checks["tools:email-pst"]["status"], WARN)
         self.assertIn("pffexport", checks["tools:email-pst"]["summary"])
 
-    def test_doctor_reports_native_e01_decoder_when_external_tools_are_absent(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
+    def _doctor_e01_check(self, *, pyewf: object, ntfs: object, ntfs_version: str | None = "3.16") -> dict:
+        from rapidtriage.core import e01_native
+
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.object(e01_native, "pyewf", pyewf), patch.object(
+            e01_native, "NTFS", ntfs
+        ), patch.object(e01_native, "_distribution_version", return_value=ntfs_version):
             static_dir = Path(tmp_dir) / "static"
             make_static_assets(static_dir)
-            with patch("rapidtriage.core.e01_native.native_e01_available", return_value=True):
-                payload = run_doctor(
-                    static_dir=static_dir,
-                    app_data_dir=Path(tmp_dir) / "app-data",
-                    tool_resolver=lambda _name: None,
-                    include_port_check=False,
-                )
-        e01 = {check["name"]: check for check in payload["checks"]}["tools:e01"]
+            payload = run_doctor(
+                static_dir=static_dir,
+                app_data_dir=Path(tmp_dir) / "app-data",
+                tool_resolver=lambda _name: None,
+                include_port_check=False,
+            )
+        return {check["name"]: check for check in payload["checks"]}["tools:e01"]
+
+    def test_doctor_reports_native_e01_decoder_when_external_tools_are_absent(self) -> None:
+        working = SimpleNamespace(get_version=lambda: "20240506", handle=object)
+        e01 = self._doctor_e01_check(pyewf=working, ntfs=object)
         self.assertEqual(e01["status"], OK)
         self.assertTrue(e01["details"]["native_decoder"])
+        self.assertEqual(e01["details"]["native_versions"], {"pyewf": "20240506", "dissect.ntfs": "3.16"})
+        self.assertEqual(e01["details"]["native_problems"], [])
         self.assertEqual(e01["details"]["missing"], ["ewfmount", "mmls", "tsk_recover"])
+        self.assertIn("pyewf 20240506, dissect.ntfs 3.16", e01["summary"])
+
+        # Frozen/vendored builds may lack dist metadata: importable and working, version unknown.
+        unknown = self._doctor_e01_check(pyewf=working, ntfs=object, ntfs_version=None)
+        self.assertEqual(unknown["status"], OK)
+        self.assertIn("dissect.ntfs unknown", unknown["summary"])
+
+    def test_doctor_does_not_claim_native_e01_decoder_when_the_extra_is_importable_but_broken(self) -> None:
+        def broken_handle() -> object:
+            raise OSError("libewf binding failed to initialise")
+
+        broken = SimpleNamespace(get_version=lambda: "20240506", handle=broken_handle)
+        e01 = self._doctor_e01_check(pyewf=broken, ntfs=object)
+        self.assertEqual(e01["status"], WARN)
+        self.assertFalse(e01["details"]["native_decoder"])
+        self.assertIn("installed but unusable", e01["summary"])
+        self.assertIn("libewf binding failed to initialise", e01["details"]["native_problems"][0])
+
+        working = SimpleNamespace(get_version=lambda: "20240506", handle=object)
+        too_old = self._doctor_e01_check(pyewf=working, ntfs=object, ntfs_version="3.9.1")
+        self.assertEqual(too_old["status"], WARN)
+        self.assertEqual(too_old["details"]["native_problems"], ["dissect.ntfs 3.9.1 is older than the required 3.10"])
+
+        half_installed = self._doctor_e01_check(pyewf=working, ntfs=None)
+        self.assertEqual(half_installed["status"], WARN)
+        self.assertEqual(half_installed["details"]["native_problems"], ["dissect.ntfs is not importable"])
+
+        absent = self._doctor_e01_check(pyewf=None, ntfs=None)
+        self.assertEqual(absent["status"], WARN)
+        self.assertEqual(absent["summary"], "E01 direct extraction tools are incomplete.")
 
     def test_doctor_reports_email_pst_tool_when_present(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

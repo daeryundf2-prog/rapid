@@ -561,13 +561,18 @@ def run_triage_mode(
 
     try:
         record_memory_cap("prepare")
-        input_root, image_result = prepare_run_input_root(
-            root,
-            input_kind=input_kind,
-            output_dir=output_dir,
-            e01_partition_start_sector=e01_partition_start_sector,
-            on_extract_progress=image_extract_reporter(progress),
-        )
+        extract_reporter = image_extract_reporter(progress)
+        try:
+            input_root, image_result = prepare_run_input_root(
+                root,
+                input_kind=input_kind,
+                output_dir=output_dir,
+                e01_partition_start_sector=e01_partition_start_sector,
+                on_extract_progress=extract_reporter,
+            )
+        finally:
+            # The last throttled-away update: the task ends on the recovered tree's real counts.
+            extract_reporter.flush()
         progress.set_run_root(str(input_root.root_path))
         if image_result is None:
             progress.task_finished("image-extract", status="skipped", reason=REASON_FOLDER_INPUT)
@@ -2454,35 +2459,47 @@ def timed_artifact_collection(
     return payload, started_at, completed_at, duration_ms
 
 
-def image_extract_reporter(progress: RunProgress, *, interval: float = 1.0) -> Callable[[Mapping[str, int]], None]:
+class _ImageExtractReporter:
     """Native E01 recovery progress -> the plan's image-extract task (files so far + a GB message).
 
     The prepare stage can run for an hour on a large image; without this the progress file (and the
-    console) showed 0/0 until extraction ended. Throttled to one update per `interval` seconds.
+    console) showed 0/0 until extraction ended. One progress write per `interval` seconds at most;
+    :meth:`flush` writes the last throttled-away stats once extraction returns or fails.
     """
-    last = [0.0]
 
-    def report(stats: Mapping[str, int]) -> None:
+    def __init__(self, progress: RunProgress, *, interval: float = 1.0) -> None:
+        self._progress = progress
+        self._interval = interval
+        self._last_write = float("-inf")
+        self._pending: tuple[int, ...] | None = None
+
+    def __call__(self, stats: Mapping[str, int]) -> None:
+        self._pending = tuple(
+            int(stats.get(key) or 0) for key in ("files", "bytes", "deleted_files", "truncated", "disk_space_skips")
+        )
         now = time.monotonic()
-        if now - last[0] < interval:
+        if now - self._last_write >= self._interval:
+            self._last_write = now
+            self.flush()
+
+    def flush(self) -> None:
+        if self._pending is None:
             return
-        last[0] = now
-        files = int(stats.get("files") or 0)
-        gib = int(stats.get("bytes") or 0) / (1 << 30)
-        progress.task_rows("image-extract", files)
-        skipped = int(stats.get("truncated") or 0)
-        deleted = int(stats.get("deleted_files") or 0)
-        message = f"파일 {files:,}개 · {gib:.1f} GB 추출"
+        files, size, deleted, skipped, no_space = self._pending
+        self._pending = None
+        message = f"파일 {files:,}개 · {size / (1 << 30):.1f} GB 추출"
         if deleted:
             message += f" · 삭제 파일 {deleted:,}개"
         if skipped:
             message += f" · 상한 초과 {skipped:,}개 건너뜀"
-        no_space = int(stats.get("disk_space_skips") or 0)
         if no_space:
             message += f" · 디스크 여유 공간 부족으로 {no_space:,}개 중단"
-        progress.task_set_message("image-extract", message)
+        self._progress.task_set_message("image-extract", message, rows=files)
 
-    return report
+
+def image_extract_reporter(progress: RunProgress, *, interval: float = 1.0) -> _ImageExtractReporter:
+    """``on_progress`` callable for native E01 extraction; call ``flush()`` when extraction ends."""
+    return _ImageExtractReporter(progress, interval=interval)
 
 
 def prepare_run_input_root(
