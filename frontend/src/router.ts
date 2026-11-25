@@ -186,6 +186,11 @@ function hasKindSort(route: Pick<Route, "collection" | "kind">): boolean {
   return (route.collection === "artifacts" || route.collection === "analysis") && Boolean(route.kind);
 }
 
+/** Collections the server sorts as a whole (`sort=`): a kind's artifacts / analysis rows, the timeline. */
+function hasServerSort(route: Pick<Route, "collection" | "kind">): boolean {
+  return hasKindSort(route) || route.collection === "timeline";
+}
+
 // --- column header filters (`cf=`) ----------------------------------------------
 //
 // Grammar (plan analysis-workbench-p1 §4, 구현 메모):
@@ -373,7 +378,7 @@ export function parseHash(hash: string): Route {
     ) {
       route.category = safeDecode(value);
     } else if (key === "path" && value) route.path = safeDecode(value);
-    else if (key === "sort" && value && hasKindSort(route)) {
+    else if (key === "sort" && value && hasServerSort(route)) {
       const sort = parseSortParam(safeDecode(value));
       if (sort) route.sort = sort;
     } else if (key === "id" && value && route.collection === "analysis") {

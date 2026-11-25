@@ -130,13 +130,16 @@ async function jsonPaged(
   extra = "",
   /** The server filtered the rows (folder, flags, row conditions): `matched` is the total, like a category page. */
   serverFiltered = false,
+  /** Server sort of the whole (filtered) collection (timeline `sort=timestamp`). */
+  sort?: ServerSort,
 ): Promise<RawPage> {
   const started = now();
   const filter = `${scope ? `&scope=${enc(scope)}` : ""}${category ? `&category=${enc(category)}` : ""}${extra}`;
   // Files / timeline pages: the lean list view (no report-grade page blocks the grid never reads).
   const view = endpoint === "files" || endpoint === "timeline" ? "&view=list" : "";
+  const sortQuery = sort ? `&sort=${enc(sort.key)}&order=${sort.order}` : "";
   const payload = await api<Record<string, unknown>>(
-    `/api/runs/${enc(runId)}/${endpoint}?offset=${offset}&limit=${limit}${filter}${view}`,
+    `/api/runs/${enc(runId)}/${endpoint}?offset=${offset}&limit=${limit}${filter}${sortQuery}${view}`,
     { signal },
   );
   // `scope=inventory` pages may name their list `inventory` or keep `candidates`.
@@ -156,6 +159,7 @@ async function jsonPaged(
     backend: "file",
     elapsedMs: Math.round(now() - started),
     ...(Object.keys(meta).length ? { meta } : {}),
+    ...(sort ? { sort: sortStateOf(payload as ArtifactKindPage, sort) } : {}),
   };
   const pagination =
     payload.pagination && typeof payload.pagination === "object" && !Array.isArray(payload.pagination)
@@ -352,6 +356,7 @@ export const fetchTimelinePage = (
   limit: number,
   signal?: AbortSignal,
   conditions?: Record<string, string | string[]>,
+  sort?: ServerSort,
 ) =>
   jsonPaged(
     runId,
@@ -364,6 +369,7 @@ export const fetchTimelinePage = (
     undefined,
     flagQueryString({ conditions }),
     Object.keys(conditions ?? {}).length > 0,
+    sort,
   );
 export const fetchIndicatorsPage = (runId: string, offset: number, limit: number, signal?: AbortSignal) =>
   jsonPaged(runId, "indicators", "indicators", offset, limit, signal);

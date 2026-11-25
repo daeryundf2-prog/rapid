@@ -293,7 +293,9 @@ export function DataGrid(props: DataGridProps = {}) {
   // Artifacts (and analysis job rows) are sorted by the server (whole kind / whole job), never
   // client-side over the loaded pages.
   const isAnalysis = ref.id === "analysis";
-  const serverSorted = ref.id === "artifacts" || isAnalysis;
+  // The timeline sorts its whole (filtered) event list on the server too (`sort=timestamp`).
+  const isTimeline = ref.id === "timeline";
+  const serverSorted = ref.id === "artifacts" || isAnalysis || isTimeline;
   /** The kind whose columns / sort / promoted fields apply; for analysis only once a job is selected. */
   const artifactKind =
     ref.id === "artifacts" ? ref.kind : isAnalysis && ref.analysisId ? ref.kind : undefined;
@@ -718,7 +720,7 @@ export function DataGrid(props: DataGridProps = {}) {
   // Server-sorted deep link: the locator is the JSONL record_index, not the display position;
   // ask the server where that record sits in the sorted order (`locate=` → `sort.position`).
   const sortReady = cq.sortState?.status === "ready";
-  const serverPath = serverSorted ? serverPathFilter(q) : undefined;
+  const serverPath = serverSorted && !isTimeline ? serverPathFilter(q) : undefined;
   const locateTarget =
     routeSort && artifactKind && route.rowRef?.collection === ref.id && route.rowRef.kind === rowKindOfGrid
       ? indexFromRef(route.rowRef)
@@ -1090,7 +1092,7 @@ export function DataGrid(props: DataGridProps = {}) {
   };
   const sortReason = (spec: ColumnSpec): string | null => {
     if (!serverSorted) return null;
-    if (!artifactKind) return isAnalysis ? SORT_ANALYSIS_REASON : SORT_KIND_REASON;
+    if (!artifactKind && !isTimeline) return isAnalysis ? SORT_ANALYSIS_REASON : SORT_KIND_REASON;
     return spec.sortKey ? null : (spec.unsortableReason ?? SORT_COLUMN_REASON);
   };
   const cycleSort = (spec: ColumnSpec) => {
