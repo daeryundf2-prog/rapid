@@ -511,6 +511,59 @@ Units are in 512-byte sectors
             _walk_ntfs_dir(root, Path(tmp_dir), stats, limit=10, on_progress=lambda s: seen.append((s["files"], s["bytes"])))
         self.assertEqual(seen, [(1, 4), (2, 6)])
 
+    def test_priority_pass_recovers_hives_and_logs_before_the_cap_is_spent_on_program_files(self) -> None:
+        from rapidtriage.core.e01_native import _recover_priority_paths, _walk_ntfs_dir
+
+        segments = iter(range(100, 1000))
+
+        class Node:
+            def __init__(self, data: bytes | None = None, children: dict | None = None) -> None:
+                self.segment, self._data, self._children = next(segments), data, children
+
+            def is_dir(self) -> bool:
+                return self._children is not None
+
+            def is_file(self) -> bool:
+                return self._children is None
+
+            def size(self) -> int:
+                return len(self._data or b"")
+
+            def open(self) -> io.BytesIO:
+                return io.BytesIO(self._data or b"")
+
+            def listdir(self, ignore_dos: bool = False) -> list[str]:
+                return list(self._children or {})
+
+            def get(self, name: str) -> Node:
+                return (self._children or {})[name]
+
+        # Directory order puts Program Files and Users before Windows, as on a real volume.
+        root = Node(children={
+            "Program Files": Node(children={f"app{i}.dll": Node(b"x") for i in range(5)}),
+            "Users": Node(children={"alice": Node(children={"NTUSER.DAT": Node(b"regf")})}),
+            "Windows": Node(children={"System32": Node(children={
+                "config": Node(children={"SYSTEM": Node(b"regf"), "SOFTWARE": Node(b"regf")}),
+                "winevt": Node(children={"Logs": Node(children={"Security.evtx": Node(b"ElfFile")})}),
+            })}),
+        })
+        stats = {"files": 0, "bytes": 0, "errors": 0, "depth_skips": 0, "truncated": 0, "alias_skips": 0}
+        done: set[int] = set()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            out = Path(tmp_dir)
+            _recover_priority_paths(root, out, stats, limit=6, done=done)
+            _walk_ntfs_dir(root, out, stats, limit=6, done=done)
+            recovered = sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file())
+        for path in (
+            "Windows/System32/config/SYSTEM",
+            "Windows/System32/config/SOFTWARE",
+            "Windows/System32/winevt/Logs/Security.evtx",
+            "Users/alice/NTUSER.DAT",
+        ):
+            self.assertIn(path, recovered)
+        self.assertEqual(stats["files"], 6)  # 4 priority files + 2 of the 5 Program Files DLLs, none twice
+        self.assertEqual(stats["truncated"], 3)
+
     def test_deleted_sweep_has_its_own_budget_after_the_allocated_walk_hit_the_cap(self) -> None:
         from rapidtriage.core import e01_native
 

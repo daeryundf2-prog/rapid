@@ -528,6 +528,7 @@ def _walk_ntfs_dir(
     depth: int = 0,
     limit: int | None = None,
     on_progress: ExtractProgress | None = None,
+    done: set[int] | None = None,
 ) -> None:
     if depth > 64:
         stats["depth_skips"] += 1
@@ -564,17 +565,97 @@ def _walk_ntfs_dir(
         target = out_dir / _safe_component(name)
         try:
             if rec.is_dir():
-                _walk_ntfs_dir(rec, target, stats, depth + 1, limit, on_progress)
+                _walk_ntfs_dir(rec, target, stats, depth + 1, limit, on_progress, done)
             elif rec.is_file():
+                if done is not None and segment is not None and segment in done:
+                    continue  # already recovered by the priority pass
                 if stats["files"] >= limit:
                     stats["truncated"] += 1
                     continue
                 _dump_ntfs_record(rec, target, stats)
+                if done is not None and segment is not None:
+                    done.add(segment)
                 if on_progress is not None:
                     on_progress(stats)
         except Exception:
             stats["errors"] += 1
             continue
+
+
+# Forensic sources recovered before the full tree walk, so the file cap is never spent on
+# Program Files / ProgramData first: the walk follows directory order, and on a full Windows
+# volume the cap ran out in Users\ before Windows\ (no hives, event logs or Prefetch at all).
+# "*" expands to every child directory (one per user profile).
+PRIORITY_RECOVERY_PATHS: tuple[str, ...] = (
+    "Windows/System32/config",
+    "Windows/System32/winevt/Logs",
+    "Windows/Prefetch",
+    "Windows/appcompat/Programs",
+    "Windows/System32/sru",
+    "Windows/System32/Tasks",
+    "Windows/inf/setupapi.dev.log",
+    "Users/*/NTUSER.DAT",
+    "Users/*/NTUSER.DAT.LOG1",
+    "Users/*/NTUSER.DAT.LOG2",
+    "Users/*/AppData/Local/Microsoft/Windows/UsrClass.dat",
+    "Users/*/AppData/Roaming/Microsoft/Windows/Recent",
+    "Users/*/AppData/Roaming/Microsoft/Windows/PowerShell/PSReadLine",
+    "$Recycle.Bin",
+)
+
+
+def _priority_targets(root: Any, pattern: str) -> list[tuple[str, Any]]:
+    """(relative path, record) pairs for one PRIORITY_RECOVERY_PATHS entry; missing parts yield none."""
+    found: list[tuple[str, Any]] = [("", root)]
+    for part in pattern.split("/"):
+        nxt: list[tuple[str, Any]] = []
+        for rel, node in found:
+            try:
+                names = [n for n in node.listdir(ignore_dos=True) if n not in (".", "..")] if part == "*" else [part]
+            except Exception:
+                continue
+            for name in names:
+                try:
+                    child = node.get(name)
+                except Exception:
+                    continue
+                if child is None or (part == "*" and not child.is_dir()):
+                    continue
+                nxt.append((f"{rel}/{name}" if rel else name, child))
+        found = nxt
+    return found
+
+
+def _recover_priority_paths(
+    root: Any,
+    extract_dir: Path,
+    stats: dict[str, int],
+    *,
+    limit: int,
+    done: set[int],
+    on_progress: ExtractProgress | None = None,
+) -> None:
+    """Recover PRIORITY_RECOVERY_PATHS first, at the same relative paths the full walk uses."""
+    for pattern in PRIORITY_RECOVERY_PATHS:
+        for rel, rec in _priority_targets(root, pattern):
+            target = extract_dir.joinpath(*(_safe_component(part) for part in rel.split("/")))
+            try:
+                if rec.is_dir():
+                    _walk_ntfs_dir(rec, target, stats, limit=limit, on_progress=on_progress, done=done)
+                elif rec.is_file():
+                    segment = getattr(rec, "segment", None)
+                    if segment is not None and segment in done:
+                        continue
+                    if stats["files"] >= limit:
+                        stats["truncated"] += 1
+                        continue
+                    _dump_ntfs_record(rec, target, stats)
+                    if segment is not None:
+                        done.add(segment)
+                    if on_progress is not None:
+                        on_progress(stats)
+            except Exception:
+                stats["errors"] += 1
 
 
 def _mft_record_count(fs: Any) -> int:
@@ -701,7 +782,9 @@ def extract_e01_native(
             "file_limit": native_extract_file_limit(),
         }
         root = fs.mft.get(5)
-        _walk_ntfs_dir(root, extract_dir, stats, limit=stats["file_limit"], on_progress=on_progress)
+        done: set[int] = set()
+        _recover_priority_paths(root, extract_dir, stats, limit=stats["file_limit"], done=done, on_progress=on_progress)
+        _walk_ntfs_dir(root, extract_dir, stats, limit=stats["file_limit"], on_progress=on_progress, done=done)
         if include_deleted:
             _sweep_deleted_mft_records(fs, extract_dir, stats, limit=stats["file_limit"], on_progress=on_progress)
         system_artifacts: dict[str, str] = {}
