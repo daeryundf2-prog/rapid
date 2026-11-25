@@ -187,6 +187,11 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
         F("key_last_written_at", "last-written"),
     ),
     "windows-mounted-device": (F("key_last_written_at", "last-written"),),
+    # SetupAPI section start is local wall-clock text without a UTC offset: it keeps the raw
+    # value with zone undetermined (local-unknown), never a guessed KST/UTC offset.
+    "usb-setupapi-device-install-candidate": (
+        F("install_entries[].section_start", "install-section-start", timezone="local-unknown"),
+    ),
     "windows-service-config": (F("key_last_written_at", "last-written"),),
     # R3 O1 registry depth. NetworkList dates are SYSTEMTIME in local wall-clock time; key-level
     # LastWrite times (MRU lists, FeatureUsage, PCA Store, KnownDLLs) are one event per key.
@@ -1850,6 +1855,26 @@ def build_artifact_summary(artifact_type: str, artifact_path: str, context: Mapp
             field_label("cmd", context.get("command_line") or context.get("script_block_text")),
         ]
         return f"{label}: {' '.join(bit for bit in bits if bit)}".strip()
+    if artifact_type == "recycle-bin-entry":
+        name = Path(artifact_path).name or artifact_path
+        original = str(context.get("original_path") or "")
+        payload = str(context.get("paired_payload_path") or "")
+        if context.get("recycle_body_status") == "missing":
+            body = "대응 본문 없음($R 없음, 내용 복원 불가)"
+        elif context.get("recycle_body_status") == "present":
+            body = f"대응 $R 본문 있음: {Path(payload).name or payload}"
+        else:
+            body = ""
+        bits = [name, original, f"— {body}" if body else ""]
+        return f"Artifact event: {artifact_type} {' '.join(bit for bit in bits if bit)}"
+    if artifact_type == "usb-setupapi-device-install-candidate":
+        bits = [
+            "SetupAPI device install section start:",
+            str(context.get("device_id") or Path(artifact_path).name),
+            f"— 원문 현지 시각 {context.get('section_start')}" if context.get("section_start") else "",
+            "(시간대 미확정: UTC 오프셋 없음)",
+        ]
+        return " ".join(bit for bit in bits if bit)
     if "ai_service" in context:
         bits = [
             str(context.get("ai_service") or "AI service"),
@@ -1958,12 +1983,34 @@ def build_timeline_report(payload: Mapping[str, object]) -> str:
         "",
     ]
     unmapped = summary.get("unmapped_artifact_type_counts")
-    if isinstance(unmapped, Mapping) and unmapped:
+    unmapped = unmapped if isinstance(unmapped, Mapping) else {}
+    excluded_types = summary.get("excluded_artifact_type_counts")
+    excluded_types = excluded_types if isinstance(excluded_types, Mapping) else {}
+    event_rows = [event for event in events if isinstance(event, Mapping)] if isinstance(events, list) else []
+    insert_at = lines.index("## Inputs") - 1
+    lines[insert_at:insert_at] = [
+        f"- 타임라인 미반영 아티팩트 행: 매핑 없음 {sum(int(value or 0) for value in unmapped.values())}건"
+        f" (시각 필드는 있으나 이벤트 규칙 없음), 설계상 제외 {sum(int(value or 0) for value in excluded_types.values())}건"
+        " (요약·재기록 행 등). 유형별 내역은 아래에 있습니다.",
+        f"- 시간대 미확정 이벤트: {sum(1 for event in event_rows if event.get('timezone') in LOCAL_TIMEZONE_LABELS)}건"
+        " (오프셋 없는 현지 벽시계 시각을 원문 그대로 저장, KST/UTC 오프셋을 붙이지 않음)",
+    ]
+    insert_at = lines.index("## Inputs")
+    lines[insert_at:insert_at] = [*activity_count_lines(event_rows), ""]
+    if unmapped:
         insert_at = lines.index("## Inputs")
         lines[insert_at:insert_at] = [
             "### 타임라인 매핑이 없는 아티팩트 유형 (시각 필드 있음, 이벤트 미생성)",
             "",
             *[f"- `{name}`: {count}" for name, count in sorted(unmapped.items())],
+            "",
+        ]
+    if excluded_types:
+        insert_at = lines.index("## Inputs")
+        lines[insert_at:insert_at] = [
+            "### 타임라인에서 설계상 제외한 아티팩트 유형",
+            "",
+            *[f"- `{name}`: {count}" for name, count in sorted(excluded_types.items())],
             "",
         ]
 
@@ -2008,6 +2055,44 @@ def build_timeline_report(payload: Mapping[str, object]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def activity_count_lines(events: Sequence[Mapping[str, object]]) -> list[str]:
+    """Lawyer-facing activity counts that must not be misread: active logons apart from
+    recovered (slack/inactive) logon candidates, Recycle Bin entries with/without a body."""
+    active: Counter[str] = Counter()
+    recovered: Counter[str] = Counter()
+    recycle: Counter[str] = Counter()
+    for event in events:
+        details = event.get("details") if isinstance(event.get("details"), Mapping) else {}
+        event_type = str(event.get("event_type") or "")
+        if event_type == "eventlog-logon-success":
+            active[str(details.get("logon_type") or "?")] += 1
+        elif event_type == "eventlog-recovery-candidate" and details.get("event_category") == "logon-success":
+            recovered[str(details.get("logon_type") or "?")] += 1
+        elif details.get("artifact_type") == "recycle-bin-entry":
+            recycle[str(details.get("recycle_body_status") or "unknown")] += 1
+
+    def by_type(counter: Counter[str]) -> str:
+        ordered = sorted(counter.items(), key=lambda item: (not item[0].isdigit(), int(item[0]) if item[0].isdigit() else 0, item[0]))
+        return ", ".join(f"유형 {name}: {count}건" for name, count in ordered) or "없음"
+
+    lines = ["## 활동 집계 / Activity counts", ""]
+    if active or recovered:
+        lines.append(
+            f"- 로그온 성공(4624): 활성 {sum(active.values())}건 ({by_type(active)})"
+            f" / 복원 후보 {sum(recovered.values())}건 ({by_type(recovered)})"
+            " — 복원 후보(슬랙·비활성 레코드)는 활성 로그온 합계에 넣지 않습니다."
+        )
+    if recycle:
+        lines.append(
+            f"- 휴지통($I) 항목: {sum(recycle.values())}건 — 대응 $R 본문 있음 {recycle['present']}건,"
+            f" 대응 본문 없음 {recycle['missing']}건"
+            + (f", 확인 불가 {recycle['unknown']}건" if recycle["unknown"] else "")
+        )
+    if len(lines) == 2:
+        lines.append("- 해당 없음")
+    return lines
+
+
 def _valid_range_max_text(summary: Mapping[str, object]) -> str:
     valid = summary.get("valid_range") if isinstance(summary.get("valid_range"), Mapping) else {}
     basis = str(valid.get("max_basis") or "now + 1 day")
@@ -2039,7 +2124,12 @@ def timeline_report_caveat(event: Mapping[str, object]) -> str:
         return ""
     bits: list[str] = []
     if event.get("timezone") and event.get("timezone") != "UTC":
-        bits.append(f"timezone={event.get('timezone')}")
+        timezone_label = str(event.get("timezone"))
+        bits.append(
+            f"timezone={timezone_label} (시간대 미확정: 오프셋 없는 현지 시각 원문)"
+            if timezone_label in LOCAL_TIMEZONE_LABELS
+            else f"timezone={timezone_label}"
+        )
     if details.get("validation_required") is True:
         bits.append("validation required")
     reportability = details.get("reportability")

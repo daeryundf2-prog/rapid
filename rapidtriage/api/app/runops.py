@@ -20,6 +20,7 @@ from ...core.case import (
     build_empty_case_payload,
     load_case_payload,
 )
+from ...core.case_db.run_locator import canonical_run_case
 from ...core.case_report import (
     build_case_report_markdown,
     case_report_export_paths,
@@ -32,6 +33,7 @@ from ...core.jobs import (
     run_output_dir,
 )
 from ...core.large_case_controls import build_source_search_full_cursor_contract
+from ...core.review_submission import review_mark_bookmarks, with_review_marks
 from ...core.source_paths import (
     candidate_source_paths,
     source_path_resolution_diagnostics,
@@ -43,7 +45,11 @@ from ...core.source_reader import (
 from ...core.source_reader import (
     build_archived_source_preview as build_archived_source_read_preview,
 )
-from ...core.submission import build_submission_manifest, compute_hashes
+from ...core.submission import (
+    build_submission_manifest,
+    compute_hashes,
+    missing_submission_message,
+)
 from .constants import (
     DEFAULT_INTERNAL_VALIDATION_PACKAGE,
     DOCUMENT_PREVIEW_MAX_BYTES,
@@ -608,21 +614,40 @@ def load_case_payload_or_empty(case_path: Path) -> dict[str, object]:
         raise HTTPException(status_code=409, detail=str(exc))
 
 
+def load_run_review_payload(store: RunJobStore, run_id: str) -> dict[str, object]:
+    """The run's review decisions as one case payload: the case-JSON bookmarks
+    plus every active review mark of the run's canonical case DB (the V2
+    review board) — the payload every submission output reads, so the review
+    counts, the manifest, the report and the bundle name the same items."""
+    job = get_job(store, run_id)
+    if job.summary is None:
+        raise HTTPException(status_code=409, detail=run_not_finished_message(job))
+    case_payload = load_case_payload_or_empty(default_case_path(store, run_id))
+    database, case_id = canonical_run_case(job.summary, run_id)
+    outputs = job.summary.get("outputs")
+    marks = review_mark_bookmarks(
+        database,
+        case_id,
+        outputs if isinstance(outputs, Mapping) else {},
+        output_dir=run_output_dir(job.summary),
+    )
+    return with_review_marks(case_payload, marks) if marks else case_payload
+
+
 def build_run_submission_manifest(
     store: RunJobStore,
     run_id: str,
     *,
     include_all: bool,
     max_items: int,
+    case_payload: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     job = get_job(store, run_id)
     if job.summary is None:
         raise HTTPException(status_code=409, detail=run_not_finished_message(job))
-    case_path = default_case_path(store, run_id)
-    case_payload = load_case_payload_or_empty(case_path)
     try:
         return build_submission_manifest(
-            case_payload,
+            case_payload if case_payload is not None else load_run_review_payload(store, run_id),
             allowed_roots=allowed_source_roots(job.summary),
             include_all=include_all,
             max_items=max_items,
@@ -636,16 +661,21 @@ def build_run_case_report(
     run_id: str,
     request: CaseReportCreateRequest,
 ) -> str:
+    """Case report markdown of the run's review payload.
+
+    Refuses (409, Korean list of the items and reasons) while any report
+    candidate cannot be carried: a report never leaves a marked item out."""
     job = get_job(store, run_id)
     if job.summary is None:
         raise HTTPException(status_code=409, detail=run_not_finished_message(job))
     case_path = default_case_path(store, run_id)
-    case_payload = load_case_payload_or_empty(case_path)
+    case_payload = load_run_review_payload(store, run_id)
     manifest = build_run_submission_manifest(
         store,
         run_id,
         include_all=request.include_all,
         max_items=request.max_items,
+        case_payload=case_payload,
     )
     manifest_path = default_submission_manifest_path(store, run_id)
     write_json_file(manifest_path, manifest)
@@ -656,6 +686,9 @@ def build_run_case_report(
         include_all=request.include_all,
         max_items=request.max_items,
     )
+    missing = missing_submission_message(manifest)
+    if missing:
+        raise HTTPException(status_code=409, detail=missing)
     # 접수 dashboard case notes fill an empty 분석자 / 범위 (explicit request fields win).
     metadata = apply_case_notes_to_report_metadata(dict(model_to_dict(request)), case_path.parent)
     return build_case_report_markdown(
@@ -875,6 +908,15 @@ def build_commercial_readiness_api_payload(
     }
 
 
+def run_review_input_files(store: RunJobStore, run_id: str) -> list[tuple[str, Path]]:
+    """The review stores a submission reads: the case JSON and the run's case DB."""
+    job = get_job(store, run_id)
+    inputs = [("case-json", default_case_path(store, run_id))]
+    if job.summary is not None:
+        inputs.append(("case-db", canonical_run_case(job.summary, run_id)[0]))
+    return inputs
+
+
 def write_submission_audit(
     store: RunJobStore,
     run_id: str,
@@ -883,12 +925,11 @@ def write_submission_audit(
     include_all: bool,
     max_items: int,
 ) -> None:
-    case_path = default_case_path(store, run_id)
     write_audit_record(
         audit_path_for(manifest_path),
         command="submission-manifest",
         options={"include_all": include_all, "max_items": max_items},
-        input_files=[("case-json", case_path)],
+        input_files=run_review_input_files(store, run_id),
         output_files=[("submission-manifest", manifest_path)],
     )
 
@@ -914,14 +955,13 @@ def write_case_report_audit(
     report_path: Path,
     request: CaseReportCreateRequest,
 ) -> None:
-    case_path = default_case_path(store, run_id)
     manifest_path = default_submission_manifest_path(store, run_id)
     exports = case_report_export_paths(report_path)
     write_audit_record(
         audit_path_for(report_path),
         command="case-report",
         options=model_to_dict(request),
-        input_files=[("case-json", case_path), ("submission-manifest", manifest_path)],
+        input_files=[*run_review_input_files(store, run_id), ("submission-manifest", manifest_path)],
         output_files=[
             ("case-report", exports["md"]),
             ("case-report-html", exports["html"]),

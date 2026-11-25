@@ -24,6 +24,7 @@ from .helpers import (
     resolve_allowed_source_file,
     run_not_finished_message,
 )
+from .query_filters import strict_query_filters
 from .runops import (
     attach_search_result_source_actions,
     build_archived_source_search,
@@ -150,7 +151,8 @@ def build_search_router(
         return payload
 
 
-    @router.get("/api/runs/{run_id}/search")
+    # An undeclared query parameter is a Korean 422 (D26 #5: a dropped condition must not look applied).
+    @router.get("/api/runs/{run_id}/search", dependencies=[Depends(strict_query_filters)])
     def search_run(
         run_id: str,
         keyword: list[str] = Query(..., min_length=1),

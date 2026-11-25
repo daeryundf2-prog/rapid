@@ -452,6 +452,8 @@ def run_triage_mode(
     skip_tasks: Sequence[str] = (),
     actor: str = "cli",
     control_since: str | None = None,
+    source_image: Mapping[str, object] | None = None,
+    replay_of: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Run every triage stage for ``root`` into ``output_dir``.
 
@@ -472,6 +474,11 @@ def run_triage_mode(
     control requests in the output directory belong to this run: requests
     written at or after it are applied even when they were written before
     the run process started watching (default: when this call started).
+
+    ``source_image`` (``{path, sha256, size}``) names the evidence image a
+    selected folder was extracted from; ``replay_of`` the audit a
+    ``--replay-audit`` run reproduces. Both go into the run audit, so a
+    colleague's replay links back to the original image and run.
     """
     control_since = control_since or utc_now()
     normalized_mode = mode.lower()
@@ -609,6 +616,8 @@ def run_triage_mode(
                 skip_groups=plan["options"]["skip_groups"],
                 skip_tasks=plan["options"]["skip_tasks"],
                 e01_partition_start_sector=e01_partition_start_sector,
+                source_image=source_image,
+                replay_of=replay_of,
             )
         finally:
             unregister_tool_output_dir(own_inner_dir)
@@ -718,6 +727,8 @@ def _run_triage_stages(
     skip_groups: Sequence[str] = (),
     skip_tasks: Sequence[str] = (),
     e01_partition_start_sector: int | None = None,
+    source_image: Mapping[str, object] | None = None,
+    replay_of: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Run every stage after the input root is prepared (see run_triage_mode)."""
 
@@ -1708,6 +1719,8 @@ def _run_triage_stages(
             "plan_control": plan_control_requests(final_plan),
             "plan_outcome": (final_plan or {}).get("outcome"),
             "image_source": str(image_result.source_path) if image_result else None,
+            "source_image": dict(source_image) if source_image else None,
+            "replay_of": dict(replay_of) if replay_of else None,
             "image_extracted_root": str(image_result.extract_dir) if image_result else None,
             "image_extraction_command": str(image_result.to_dict().get("command")) if image_result else None,
             "tool_build": run_tool_build_identity(),

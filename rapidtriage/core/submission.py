@@ -35,6 +35,13 @@ def build_submission_manifest(
             skipped.append(build_skip(bookmark, reason="max-items"))
             continue
 
+        reference = bookmark.get("reference")
+        case_db = reference.get("case_db") if isinstance(reference, Mapping) else None
+        if isinstance(case_db, Mapping) and case_db.get("unresolved_reason"):
+            # A case-DB review mark whose output row cannot be cited (core/review_submission.py).
+            skipped.append(build_skip(bookmark, reason=str(case_db["unresolved_reason"])))
+            continue
+
         snapshot = bookmark.get("snapshot")
         snapshot_payload = snapshot if isinstance(snapshot, Mapping) else {}
         raw_path = snapshot_payload.get("path")
@@ -50,7 +57,6 @@ def build_submission_manifest(
             skipped.append(build_skip(bookmark, path=source_path, reason="missing-or-not-file"))
             continue
 
-        reference = bookmark.get("reference")
         reference_payload = dict(reference) if isinstance(reference, Mapping) else {}
         withheld = verify_reference_row(reference_payload, source_cache)
         if withheld:
@@ -67,6 +73,7 @@ def build_submission_manifest(
                 "note": str(bookmark.get("note") or ""),
                 "review": review_payload,
                 "reference": reference_payload,
+                "snapshot": dict(snapshot_payload),
                 "evidence": {
                     "path": str(source_path),
                     "name": source_path.name,
@@ -103,8 +110,12 @@ def build_submission_manifest(
         },
         "summary": {
             "case_bookmark_count": len(rows),
+            # Bookmarks marked for the report (every bookmark with include_all);
+            # a missing one is in ``skipped`` and stops the report and bundle.
+            "report_candidate_count": len(items) + len(skipped),
             "hashed_item_count": len(items),
             "skipped_count": len(skipped),
+            "missing_count": len(skipped),
             "total_size": sum(int(item["evidence"]["size"]) for item in items),
         },
         "items": items,
@@ -171,13 +182,18 @@ def load_reference_document(raw_file: str, cache: dict[str, object]) -> Mapping[
 
 def matching_row_pointers(payload: Mapping[str, object], *, command: str, pointer: str, expected: str) -> list[str]:
     """Every pointer of the same shape (collection index, same nested path)
-    whose row hashes to ``expected``."""
+    whose row hashes to ``expected``. The collection is the pointer's own:
+    the source's primary rows or one of its extra row arrays
+    (``case.CASE_SOURCE_EXTRA_ROWS``: files inventory, the docs listing, IOC
+    scanner hits)."""
     from . import case as case_rows
 
-    collection_name = case_rows.CASE_SOURCE_ROWS.get(command)
+    primary = case_rows.CASE_SOURCE_ROWS.get(command)
+    allowed = (primary, *case_rows.CASE_SOURCE_EXTRA_ROWS.get(command, ())) if primary else ()
     parts = pointer.split("/")
-    if collection_name is None or len(parts) < 3 or parts[1] != collection_name:
+    if len(parts) < 3 or parts[1] not in allowed:
         return []
+    collection_name = parts[1]
     nested = "/".join(parts[3:])
     if command == "artifacts" and payload.get("records_path"):
         rows: Sequence[object] | Iterator[dict[str, object]] = iter_payload_records(payload)
@@ -216,9 +232,44 @@ def build_skip(bookmark: Mapping[str, object], *, reason: str, path: Path | None
     return {
         "bookmark_id": str(bookmark.get("bookmark_id") or ""),
         "summary": str(bookmark.get("summary") or ""),
+        "note": str(bookmark.get("note") or ""),
         "path": raw_path,
         "reason": reason,
     }
+
+
+SKIP_REASON_LABELS = {
+    "max-items": "최대 항목 수 초과",
+    "no-source-path": "원본 파일 경로가 없음",
+    "outside-allowed-roots": "허용된 증거 루트 밖",
+    "missing-or-not-file": "원본이 파일이 아니거나 없음",
+    "review-mark-row-not-found": "검토 표시의 행을 이 런 산출물에서 찾을 수 없음",
+    "review-mark-not-citable": "분석 결과 행은 제출 항목으로 인용할 수 없음",
+    "review-mark-source-unreadable": "검토 표시가 가리키는 산출물을 읽을 수 없음",
+}
+
+
+def missing_submission_message(manifest: Mapping[str, object]) -> str | None:
+    """Korean refusal naming every report candidate the manifest could not carry, or ``None``."""
+    skipped = [item for item in manifest.get("skipped") or [] if isinstance(item, Mapping)]
+    if not skipped:
+        return None
+    summary = manifest.get("summary") if isinstance(manifest.get("summary"), Mapping) else {}
+    total = int(summary.get("report_candidate_count") or len(skipped))
+    lines = [
+        f"보고서 포함으로 지정된 {total}건 중 {len(skipped)}건을 제출물에 넣을 수 없어 생성하지 않았습니다. "
+        "아래 항목을 고치거나 보고서 포함을 해제한 뒤 다시 생성하세요."
+    ]
+    for item in skipped:
+        reason = str(item.get("reason") or "")
+        line = f"- {item.get('bookmark_id') or ''} {item.get('summary') or ''}"
+        if item.get("note"):
+            line += f" (메모: {item.get('note')})"
+        line += f": {SKIP_REASON_LABELS.get(reason, reason)}"
+        if item.get("path"):
+            line += f" — {item.get('path')}"
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def is_relative_to(path: Path, root: Path) -> bool:

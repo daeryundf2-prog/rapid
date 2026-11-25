@@ -48,6 +48,7 @@ from .schema import (
 )
 
 __all__ = [
+    "CASE_SEARCH_HIT_TYPE_LABELS",
     "artifact_fts_has_rows",
     "attach_review_marks",
     "build_case_search_execution_plan",
@@ -56,6 +57,7 @@ __all__ = [
     "build_source_reference",
     "case_document_extraction_errors",
     "case_search_cursor_scope",
+    "case_search_hit_type",
     "case_search_priority_sort_key",
     "case_search_reportability_decision",
     "case_search_scan_candidate_limit",
@@ -359,6 +361,40 @@ def enrich_case_search_matches(matches: list[dict[str, object]], keywords: list[
     for match in enriched:
         match.pop("_result_order", None)
     return enriched
+
+
+# What one case-search hit is (D26 #5): one EventLog record can match as its raw
+# event row, the detection made from it, the parser summary and the timeline
+# event, so "4 hits" is not "4 records". Matching is unchanged; ``hit_type``
+# only names the row kind of each hit.
+CASE_SEARCH_HIT_TYPE_LABELS = {
+    "document": "문서 본문",
+    "file": "파일 메타데이터",
+    "artifact-record": "아티팩트 행",
+    "detection": "탐지 규칙 결과",
+    "summary": "파서 요약 행",
+    "indicator": "지표 후보",
+    "timeline-event": "타임라인 이벤트",
+}
+
+
+def case_search_hit_type(match: Mapping[str, object]) -> str:
+    """``hit_type`` of a case-search match: its source table and, for artifact rows, the row kind."""
+    source = str(match.get("source") or "")
+    if source == "documents":
+        return "document"
+    if source == "files":
+        return "file"
+    if source == "timeline":
+        return "timeline-event"
+    if source == "indicators":
+        return "indicator"
+    kind = str(match.get("kind") or "")
+    if kind.endswith("-detection"):
+        return "detection"
+    if kind.endswith("-summary"):
+        return "summary"
+    return "artifact-record"
 
 
 def case_search_priority_sort_key(match: Mapping[str, object]) -> tuple[int, int]:

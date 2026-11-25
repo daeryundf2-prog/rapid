@@ -20,6 +20,8 @@ __all__ = [
     "build_key_hit_rows",
     "build_markdown_report",
     "build_plan_section",
+    "document_index_counts",
+    "format_status_counts",
 ]
 
 
@@ -50,20 +52,54 @@ def build_markdown_report(
 _DOC_MATCH_LINE_RE = re.compile(r"^- Document matches: (\d+)$", re.MULTILINE)
 
 
+def document_index_counts(documents: Mapping[str, object]) -> dict[str, object]:
+    """Indexed / not-indexed document counts of ``disclosures.documents`` (D26 #6).
+
+    ``indexed_count``: candidates whose text was extracted and indexed; ``not_indexed_count``:
+    the rest, with ``not_indexed_status_counts`` (``binary-rejected``, ``encrypted``, ...) as the
+    reasons. A summary without the per-status split falls back to the non-``ok`` statuses.
+    """
+    candidate_count = int(documents.get("candidate_count") or 0)
+    status_counts = documents.get("text_status_counts") if isinstance(documents.get("text_status_counts"), Mapping) else {}
+    indexed = documents.get("indexed_with_text_count")
+    indexed_count = int(indexed) if isinstance(indexed, int) else int(status_counts.get("ok") or 0)
+    reasons = documents.get("not_indexed_status_counts")
+    if not isinstance(reasons, Mapping):
+        reasons = {status: count for status, count in status_counts.items() if status != "ok"}
+    return {
+        "candidate_count": candidate_count,
+        "indexed_count": indexed_count,
+        "not_indexed_count": max(0, candidate_count - indexed_count),
+        "not_indexed_status_counts": {str(status): int(count) for status, count in sorted(reasons.items()) if count},
+        "match_count": int(documents.get("match_count") or 0),
+    }
+
+
+def format_status_counts(counts: Mapping[str, object]) -> str:
+    """``binary-rejected 2, encrypted 1`` (empty string without counts)."""
+    return ", ".join(f"{status} {count}" for status, count in counts.items())
+
+
 def apply_report_disclosures(markdown: str, summary_payload: Mapping[str, object]) -> str:
     """Insert the parser-quality disclosure section and demote "Document matches".
 
-    The keyword-hit count is not a headline: the overview shows document
-    candidates and how many had text, with matches as a detail.
+    The keyword-hit count is not a headline: the overview shows the scanned
+    files, the document candidates, how many were indexed with text and why
+    the others were not, with matches as a detail.
     """
     disclosures = summary_payload.get("disclosures") if isinstance(summary_payload.get("disclosures"), Mapping) else {}
     documents = disclosures.get("documents") if isinstance(disclosures.get("documents"), Mapping) else {}
+    run_summary = summary_payload.get("summary") if isinstance(summary_payload.get("summary"), Mapping) else {}
 
     def doc_line(match: re.Match[str]) -> str:
+        counts = document_index_counts(documents) if documents else None
+        reasons = format_status_counts(counts["not_indexed_status_counts"]) if counts else ""
+        scanned = f"- 스캔 파일: {run_summary['scanned_file_count']}\n" if "scanned_file_count" in run_summary else ""
         return (
-            f"- 문서 후보: {documents.get('candidate_count', '?')}"
-            f" (텍스트 추출 {documents.get('indexed_with_text_count', '?')}, 암호화 {documents.get('encrypted_count', '?')},"
-            f" 키워드 일치 {match.group(1)})"
+            f"{scanned}- 문서 후보: {documents.get('candidate_count', '?')}"
+            f" (텍스트 색인 {counts['indexed_count'] if counts else '?'},"
+            f" 미색인 {counts['not_indexed_count'] if counts else '?'}{f' [{reasons}]' if reasons else ''},"
+            f" 암호화 {documents.get('encrypted_count', '?')}, 키워드 일치 {match.group(1)})"
         )
 
     markdown = _DOC_MATCH_LINE_RE.sub(doc_line, markdown, count=1)
@@ -170,6 +206,16 @@ def build_disclosure_section(disclosures: Mapping[str, object]) -> str:
         lines.append(
             f"- 타임라인 제외: 범위 밖 시각 {excluded.get('out_of_range', 0)}건, 중복 {excluded.get('duplicates', 0)}건,"
             f" 사본 시각만 있는 파일 {excluded.get('copy_time_candidates', 0)}건"
+        )
+        unmapped = excluded.get("unmapped_artifact_type_counts") if isinstance(excluded.get("unmapped_artifact_type_counts"), Mapping) else {}
+        dropped = excluded.get("excluded_artifact_type_counts") if isinstance(excluded.get("excluded_artifact_type_counts"), Mapping) else {}
+
+        def by_type(counts: Mapping[str, object]) -> str:
+            total = sum(int(value or 0) for value in counts.values())
+            return f"{total}건" + (f" ({', '.join(f'{name} {count}' for name, count in sorted(counts.items()))})" if counts else "")
+
+        lines.append(
+            f"- 타임라인 미반영 아티팩트 행: 매핑 없음 {by_type(unmapped)}, 설계상 제외 {by_type(dropped)}"
         )
     indicators = disclosures.get("indicators") if isinstance(disclosures.get("indicators"), Mapping) else {}
     if indicators:

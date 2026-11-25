@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from ...core.carving import SIGNATURE_KINDS
@@ -33,6 +33,7 @@ from .artifact_sort import (
 )
 from .jsonl_records import iter_artifact_records, iter_record_range
 from .pagination import paginate_artifact_output
+from .query_filters import strict_query_filters
 from .triage_flags import (
     flag_rows_source,
     flags_join,
@@ -270,6 +271,7 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
         signature_kind: list[str] = Query(default=[]),
         recovery_method: list[str] = Query(default=[]),
         in_use: str | None = Query(default=None),
+        applied_filters: dict[str, list[str]] = Depends(strict_query_filters),
     ) -> dict[str, object]:
         """Result rows paged like an artifacts kind page; every row has ``record_index``.
 
@@ -296,6 +298,9 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
         ``unsupported`` with ``RUNNING_SORT_REASON`` (no index is built). Every
         reader (pages, ``path_contains``, the sort index) stops at the flushed
         ``row_count``: lines a running analysis is still writing are never served.
+
+        An undeclared query parameter is a Korean 422 listing the supported
+        ones (never ignored); the response echoes ``applied_filters``.
         """
         scope = run_scope(store, run_id, require_ready=False)
         state = analysis_payload(scope.output_dir, analysis_id)
@@ -412,6 +417,7 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
             "record_count": page.get("record_count"),
             "matched": page.get("matched"),
             "pagination": {key: pagination[key] for key in PAGINATION_KEYS if key in pagination},
+            "applied_filters": applied_filters,
         }
         if sort_key or flag_sort:
             response["sort"] = page.get("sort")

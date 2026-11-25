@@ -9,7 +9,7 @@ import type { RunCreateBody, RunJob } from "./runs";
 const enc = encodeURIComponent;
 const caseUrl = (caseId: string) => `/api/cases/${enc(caseId)}`;
 
-export type EvidenceType = "e01" | "folder" | "export" | "mobile";
+export type EvidenceType = "e01" | "raw" | "folder" | "export" | "mobile";
 
 export interface CaseRunBrief {
   run_id: string;

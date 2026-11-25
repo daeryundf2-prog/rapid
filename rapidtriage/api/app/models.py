@@ -255,12 +255,17 @@ class CasePatchRequest(BaseModel):
     actor: str = Field("", max_length=200)
 
 
+#: Evidence kinds of case intake (core/case_db/intake.EVIDENCE_TYPES); ``raw`` = the raw-image adapter's
+#: ``detected_format`` (.dd/.raw/.img/.001…), so a path the support check accepts registers as it is.
+EvidenceSourceType = Literal["e01", "raw", "folder", "export", "mobile"]
+
+
 class CaseEvidenceCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     evidence_number: str = Field(..., min_length=1, max_length=50)
     display_name: str = Field("", max_length=200)
-    source_type: Literal["e01", "folder", "export", "mobile"]
+    source_type: EvidenceSourceType
     path: str = Field(..., min_length=1, max_length=4096)
     verify_hash: bool = False
     expected_hash: str = Field("", max_length=128)
@@ -271,7 +276,7 @@ class CaseEvidenceCheckRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     path: str = Field(..., min_length=1, max_length=4096)
-    source_type: Literal["e01", "folder", "export", "mobile"] | None = None
+    source_type: EvidenceSourceType | None = None
 
 
 class CaseRunCreateRequest(RunCreateRequest):

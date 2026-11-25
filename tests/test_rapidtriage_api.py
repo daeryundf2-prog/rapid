@@ -4299,7 +4299,7 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(client.get("/api/runs/missing/review-counts").status_code, 404)
 
     def test_review_batch_resolves_run_locators_and_review_map_round_trips(self) -> None:
-        from rapidtriage.api.app.run_review import RunLocatorIndex
+        from rapidtriage.core.case_db.run_locator import RunLocatorIndex
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"

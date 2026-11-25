@@ -19,6 +19,7 @@ export const TIMESTAMP_KIND_LABELS: Readonly<Record<string, string>> = {
   visited: "방문",
   visit: "방문",
   installed: "설치",
+  "install-section-start": "설치 섹션 시작(현지 시각, 시간대 미확정)",
   registered: "등록",
   "first-connected": "최초 연결",
   "last-connected": "마지막 연결",

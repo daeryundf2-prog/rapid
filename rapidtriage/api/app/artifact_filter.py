@@ -60,8 +60,18 @@ def as_channel_filter(channels: ChannelFilter | Collection[str] | None) -> Chann
 # Exact record-field filters of ``GET /artifacts`` (r2 console fix M2): query
 # parameter -> the record field it matches (``details.<field>``, else the row's
 # top-level field). ``browser=ie-edge-legacy`` pages the WebCacheV01 rows,
-# ``service=teams`` one desktop messenger app.
-RECORD_FIELD_FILTERS: tuple[str, ...] = ("browser", "service")
+# ``service=teams`` one desktop messenger app; the event-log record fields
+# (D26 #5) page e.g. ``event_id=1102`` or ``evtx_record_state=slack-recovered``.
+RECORD_FIELD_FILTERS: tuple[str, ...] = (
+    "browser",
+    "service",
+    "event_id",
+    "record_id",
+    "evtx_record_state",
+    "logon_type",
+    "provider_name",
+    "user_name",
+)
 FIELD_FILTER_MAX_VALUES = 32
 FIELD_FILTER_MAX_LENGTH = 200
 FieldFilters = Mapping[str, frozenset[str]]

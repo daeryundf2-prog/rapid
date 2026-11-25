@@ -93,7 +93,8 @@ def planned_out_timeline_payload(input_root: InputRoot, *, status: str, reason: 
             artifacts_inputs=[base / "artifacts.json"],
             input_payloads=inputs,
         )
-        payload["inputs"] = []
+        # The usual inputs shape, listing no input file (the temp inputs are gone).
+        payload["inputs"] = {"files": [], "docs": [], "artifacts": []}
     payload["root"] = str(input_root.root_path)
     return _mark(payload, status, reason)
 

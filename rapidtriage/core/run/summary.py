@@ -304,6 +304,22 @@ def detect_missing_tools() -> dict[str, dict[str, object]]:
     }
 
 
+def not_indexed_document_status_counts(docs_payload: Mapping[str, object]) -> dict[str, int] | None:
+    """``text_status`` counts of the document candidates whose text was not indexed (no text extracted).
+
+    ``ok`` with empty text counts as ``no-text``. ``None`` when the payload has no candidate list.
+    """
+    candidates = docs_payload.get("candidates")
+    if not isinstance(candidates, list):
+        return None
+    counts: Counter[str] = Counter()
+    for item in candidates:
+        if isinstance(item, Mapping) and not int(item.get("text_length") or 0):
+            status = str(item.get("text_status") or "unknown")
+            counts["no-text" if status == "ok" else status] += 1
+    return dict(sorted(counts.items()))
+
+
 def build_run_disclosures(
     *,
     files_payload: Mapping[str, object],
@@ -353,6 +369,9 @@ def build_run_disclosures(
             "out_of_range": timeline_summary.get("out_of_range_excluded_count", 0),
             "duplicates": timeline_summary.get("duplicate_events_removed", 0),
             "copy_time_candidates": timeline_summary.get("acquisition_copy_time_candidates_not_emitted", 0),
+            # Artifact rows with evidence times that produced no timeline event, by type.
+            "unmapped_artifact_type_counts": dict(timeline_summary.get("unmapped_artifact_type_counts") or {}),
+            "excluded_artifact_type_counts": dict(timeline_summary.get("excluded_artifact_type_counts") or {}),
         },
         "documents": {
             "candidate_count": docs_summary.get("candidate_count", 0),
@@ -361,6 +380,8 @@ def build_run_disclosures(
             "encrypted_count": docs_summary.get("encrypted_count"),
             "zero_text_count": docs_summary.get("zero_text_count"),
             "text_status_counts": docs_summary.get("text_status_counts", {}),
+            # Why the documents without text were not indexed, by text_status (D26 #6).
+            "not_indexed_status_counts": not_indexed_document_status_counts(docs_payload),
             # Text-extraction byte caps (core/docs.py build_docs_size_cap_disclosure).
             "size_caps": dict(docs_summary["size_caps"]) if isinstance(docs_summary.get("size_caps"), Mapping) else None,
         },

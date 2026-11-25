@@ -123,8 +123,9 @@ INTAKE_UNIQUE_INDEXES = (
 )
 INTAKE_TRIGGERS = ("case_note_history_no_update", "case_note_history_no_delete")
 
-#: Evidence kinds the intake wizard offers (AXIOM: image / folder / export / mobile).
-EVIDENCE_TYPES = ("e01", "folder", "export", "mobile")
+#: Evidence kinds the intake wizard offers (AXIOM: image / folder / export / mobile); ``raw`` is a
+#: raw/split disk image (the raw-image adapter's ``detected_format``).
+EVIDENCE_TYPES = ("e01", "raw", "folder", "export", "mobile")
 
 HASH_STATUS_LABELS = {
     "not-requested": "해시 검증 안 함",

@@ -2342,7 +2342,9 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(summary["recovery_candidate_event_count"], 1)
             self.assertIn({"value": "execution", "count": 1}, summary["event_family_counts"])
             self.assertIn({"value": "powershell -enc", "count": 2}, summary["risk_term_counts"])
-            self.assertIn({"value": "RT-EVTX-PS-ENCODED", "count": 2}, summary["detection_rule_counts"])
+            # Detections count live records only (D26); the outside-chunk 4104's detection is listed apart.
+            self.assertIn({"value": "RT-EVTX-PS-ENCODED", "count": 1}, summary["detection_rule_counts"])
+            self.assertIn({"value": "RT-EVTX-PS-ENCODED", "count": 1}, summary["recovery_candidate_detection_rule_counts"])
             self.assertIn({"value": "trailing-size-valid", "count": 1}, summary["native_integrity_counts"])
             self.assertIn({"value": "first-record", "count": 1}, summary["native_sequence_counts"])
             self.assertIn({"value": "record-string", "count": 1}, summary["native_channel_hint_counts"])

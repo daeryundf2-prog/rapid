@@ -31,6 +31,7 @@ from .case_workspace import (
     evidence_slug,
     expected_hash_algorithm,
     infer_source_type,
+    raw_split_part_count,
     run_brief,
     run_readiness,
     same_path,
@@ -221,6 +222,11 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
                 status_code=422,
                 detail="E01은 컨테이너 바이트만 해시하므로 획득(매체) 해시와 비교할 수 없습니다. 기대 해시 없이 계산만 하세요",
             )
+        if request.expected_hash.strip() and request.source_type == "raw" and raw_split_part_count(path) > 1:
+            raise HTTPException(
+                status_code=422,
+                detail="분할 RAW 이미지는 선택한 조각 파일의 바이트만 해시하므로 전체 매체 해시와 비교할 수 없습니다. 기대 해시 없이 계산만 하세요",
+            )
         if request.expected_hash.strip() and not request.verify_hash:
             raise HTTPException(status_code=422, detail="기대 해시는 해시 검증을 켠 경우에만 지정할 수 있습니다")
         hashable = path.is_file()
@@ -282,7 +288,11 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
 
     @router.post("/api/cases/evidence-check")
     def check_evidence(request: CaseEvidenceCheckRequest) -> dict[str, Any]:
-        """Pre-check one evidence path before anything is saved: path policy, kind, runnable."""
+        """Pre-check one evidence path before anything is saved: path policy, kind, runnable.
+
+        ``source_type`` = the registration kind for the path (``raw`` for a raw-image adapter path),
+        so the kind the check reports is one ``POST /api/cases/{id}/evidence`` accepts.
+        """
         try:
             lexical = checked_local_path(request.path, label="증거", confine_to_analysis_roots=True)
             path = Path(lexical)
@@ -295,7 +305,7 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
                     "runnable": False, "run_blocked_reason": ""}
         runnable, reason = run_readiness(path)
         return {"command": "case.evidence.check", "path": lexical, "ok": True, "problem": "",
-                "runnable": runnable, "run_blocked_reason": reason}
+                "source_type": infer_source_type(path), "runnable": runnable, "run_blocked_reason": reason}
 
     @router.get("/api/cases/{case_id}/evidence")
     def list_evidence(case_id: str) -> dict[str, Any]:

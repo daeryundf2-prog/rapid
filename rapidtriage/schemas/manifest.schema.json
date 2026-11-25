@@ -7,6 +7,14 @@
     "generated_at": { "type": "string", "format": "date-time" },
     "root": { "type": "string" },
     "platform": { "type": "string" },
+    "inputs_partial": {
+      "const": true,
+      "description": "Assembled after a skipped, cancelled or failed provider task; never reused by --resume"
+    },
+    "partial_kinds": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
     "keywords": {
       "type": "array",
       "items": { "type": "string" }
@@ -23,6 +31,10 @@
           "target_platform": { "type": "string" },
           "supported": { "type": "boolean" },
           "collection_status": { "type": "string" },
+          "plan_status": {
+            "enum": ["skipped", "cancelled"],
+            "description": "Run plan: this provider task did not run (core/docs.py planned-out provider row)"
+          },
           "parser_errors": {
             "type": "array",
             "items": { "type": "object", "additionalProperties": true }

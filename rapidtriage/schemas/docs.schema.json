@@ -12,6 +12,13 @@
     "results"
   ],
   "properties": {
+    "plan_status": {
+      "enum": ["skipped", "cancelled"],
+      "description": "Run plan: the docs task did not run; the payload is the zero-row shape (core/run/planned_out.py)"
+    },
+    "plan_reason": {
+      "type": "string"
+    },
     "command": {
       "const": "docs"
     },
@@ -34,6 +41,12 @@
         "supported_extensions"
       ],
       "properties": {
+        "plan_status": {
+          "enum": ["skipped", "cancelled"]
+        },
+        "plan_reason": {
+          "type": "string"
+        },
         "candidate_count": {
           "type": "integer"
         },

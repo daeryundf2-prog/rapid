@@ -7,7 +7,7 @@
   ``all=1`` pages ``candidates`` with an optional ``matched`` filter;
   ``matched=0`` without ``all=1`` is a 400; every view reports
   ``candidate_count``/``matched_count``.
-* ``run_review.canonical_run_case`` finds a case DB persisted under the
+* ``run_locator.canonical_run_case`` finds a case DB persisted under the
   older ``run-run-<slug>`` id.
 * ``/files?scope=inventory`` (parser-quality r2) pages the files output's
   ``inventory`` (every non-candidate scanned file, incl. ``other``) with the
@@ -51,8 +51,8 @@ try:
     from rapidtriage.api.app import create_app, files_ntfs
     from rapidtriage.api.app.artifact_filter import filter_files_by_category
     from rapidtriage.api.app.pagination import docs_page
-    from rapidtriage.api.app.run_review import RunLocatorIndex, canonical_run_case
     from rapidtriage.api.app.tree import build_artifact_domain_groups
+    from rapidtriage.core.case_db.run_locator import RunLocatorIndex, canonical_run_case
 
     HAS_FASTAPI = True
 except ModuleNotFoundError:  # pragma: no cover - optional dependency

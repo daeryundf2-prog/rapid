@@ -742,6 +742,9 @@ def collect_recycle_bin_artifacts(root: Path) -> Iterable[ArtifactRecord]:
                     "metadata_status": metadata_status,
                     "metadata_issue": parsed["metadata_issue"],
                     "paired_payload_path": str(paired_payload.resolve()) if paired_payload else "",
+                    # Body present (matching $R) or missing: $I alone proves the move to the
+                    # Recycle Bin, never that the content is still recoverable.
+                    "recycle_body_status": "present" if paired_payload is not None else "missing",
                     "paired_payload_kind": payload_kind,
                     "paired_payload_hashes": file_hashes(paired_payload) if payload_kind == "file" else {},
                     **(

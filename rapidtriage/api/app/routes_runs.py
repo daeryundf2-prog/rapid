@@ -12,13 +12,14 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import (
     FileResponse,
     PlainTextResponse,
 )
 
 from ...core.artifact_profiles import payload_record_count
+from ...core.case_db.search import case_search_hit_type
 from ...core.columnar_store import query_columnar_artifact_records
 from ...core.eventlog_channels import ChannelFilter
 from ...core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, run_extract
@@ -92,6 +93,7 @@ from .pagination import (
     paginate_payload,
     with_record_index,
 )
+from .query_filters import strict_query_filters, with_applied_filters
 from .row_conditions import (
     MATCH_CACHE,
     RowConditions,
@@ -264,13 +266,27 @@ def _run_output_dir_or_none(summary: Mapping[str, object] | None) -> Path | None
 
 
 def _attach_artifact_flags(response: dict[str, object], join: FlagsJoin) -> None:
-    """``flags`` on every row of every kind page and the response's ``flags_join``."""
+    """``flags`` and ``hit_type`` on every row of every kind page, and the response's ``flags_join``.
+
+    ``hit_type`` (D26 #5) names what the row is: a parsed record
+    (``artifact-record``), a ``detection`` made from records, or a parser
+    ``summary`` -- one EventLog record is not three hits."""
     pages = response.get("artifacts")
     if isinstance(pages, dict):
         for kind_name, page in pages.items():
             if isinstance(page, dict) and isinstance(page.get("artifacts"), list):
                 page["artifacts"] = join.attach(page["artifacts"], str(kind_name))
+                for row in page["artifacts"]:
+                    if isinstance(row, dict):
+                        row["hit_type"] = case_search_hit_type({"source": "artifacts", "kind": row.get("artifact_type")})
     response["flags_join"] = dict(join.info)
+
+
+# Event-log record fields: they select event records. A detection made from a
+# record carries the same fields but is a derived row; it is listed only when
+# its artifact_type (``eventlog-detection``) is asked for (D26 #5).
+EVENT_RECORD_FIELDS = frozenset({"event_id", "record_id", "evtx_record_state", "logon_type", "provider_name", "user_name"})
+EVENT_RECORD_TYPES = frozenset({"eventlog-event"})
 
 
 def run_request_from_body(request: RunCreateRequest, *, root: str | None = None, output_dir: str | None = None) -> RunRequest:
@@ -531,6 +547,7 @@ def build_runs_router(
         partial: str | None = Query(default=None),
         content: list[str] = Query(default=[]),
         geo: str | None = Query(default=None),
+        applied_filters: dict[str, list[str]] = Depends(strict_query_filters),
     ) -> dict[str, object]:
         """Paged timeline events.
 
@@ -542,6 +559,9 @@ def build_runs_router(
         ``record_count`` and ``pagination.conditions``. A bad value is a Korean 422; so is ``geo``
         (events carry no coordinates). The matching positions are cached per (timeline revision,
         conditions) so later pages do not rescan the events (``row_conditions.MATCH_CACHE``).
+
+        An undeclared query parameter is a Korean 422 listing the supported ones (never
+        ignored); every page echoes the filters it applied as ``applied_filters``.
         """
         reject_geo(geo)
         conditions = row_conditions_or_422(
@@ -556,7 +576,9 @@ def build_runs_router(
         )
         payload = get_named_output(store, run_id, "timeline")
         if conditions is None:
-            return paginate_payload(payload, "events", offset=offset, limit=limit, cursor=cursor)
+            return with_applied_filters(
+                paginate_payload(payload, "events", offset=offset, limit=limit, cursor=cursor), applied_filters
+            )
         if limit <= 0:
             raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
         events = payload.get("events") if isinstance(payload.get("events"), list) else []
@@ -574,7 +596,7 @@ def build_runs_router(
         page["record_count"] = len(events)
         page["matched"] = pagination["matched"]
         page["pagination"] = pagination
-        return page
+        return with_applied_filters(page, applied_filters)
 
 
     @router.get("/api/runs/{run_id}/timeline-histogram")
@@ -589,9 +611,13 @@ def build_runs_router(
         offset: int = Query(0, ge=0),
         limit: int = Query(0, ge=0, le=1000),
         cursor: str | None = Query(default=None),
+        applied_filters: dict[str, list[str]] = Depends(strict_query_filters),
     ) -> dict[str, object]:
+        """Paged indicators; no row filters (an undeclared query parameter is a Korean 422)."""
         payload = get_named_output(store, run_id, "indicators")
-        return paginate_payload(payload, "indicators", offset=offset, limit=limit, cursor=cursor)
+        return with_applied_filters(
+            paginate_payload(payload, "indicators", offset=offset, limit=limit, cursor=cursor), applied_filters
+        )
 
 
     @router.get("/api/runs/{run_id}/indicators/ti-enrichment")
@@ -630,6 +656,12 @@ def build_runs_router(
         flag_grade: str | None = Query(default=None),
         browser: list[str] = Query(default=[]),
         service: list[str] = Query(default=[]),
+        event_id: list[str] = Query(default=[]),
+        record_id: list[str] = Query(default=[]),
+        evtx_record_state: list[str] = Query(default=[]),
+        logon_type: list[str] = Query(default=[]),
+        provider_name: list[str] = Query(default=[]),
+        user_name: list[str] = Query(default=[]),
         channel: list[str] = Query(default=[]),
         channel_group: list[str] = Query(default=[]),
         time_from: str | None = Query(default=None, alias="from"),
@@ -641,6 +673,7 @@ def build_runs_router(
         partial: str | None = Query(default=None),
         content: list[str] = Query(default=[]),
         geo: str | None = Query(default=None),
+        applied_filters: dict[str, list[str]] = Depends(strict_query_filters),
     ) -> dict[str, object]:
         """Page per-kind artifact rows; every row carries its JSONL ``record_index``.
 
@@ -664,7 +697,20 @@ def build_runs_router(
         other filter like ``artifact_type`` (``limit > 0``; an empty, over-long
         or control-character value is a 422 with a Korean message); the
         pagination reports ``fields``. ``/tree`` gives the matching counts
-        (``field_type_counts``).
+        (``field_type_counts``). The event-log record fields ``event_id``,
+        ``record_id``, ``evtx_record_state`` (``live`` / ``slack-recovered``…),
+        ``logon_type``, ``provider_name`` and ``user_name`` filter the same way
+        (exact ``details.<field>``; rows without the field never match:
+        ``kind=eventlog&event_id=1102`` keeps the 1102 event records only:
+        without an ``artifact_type`` these fields imply
+        ``artifact_type=eventlog-event`` (echoed in ``applied_filters``); the
+        detections made from them are listed with
+        ``artifact_type=eventlog-detection``). Every row carries ``hit_type``.
+
+        A query parameter this route does not declare is a Korean 422 listing
+        the supported ones (D26 #5: never ignored as if the rows were
+        filtered); every response echoes the filters it applied as
+        ``applied_filters`` (``{name: [values]}``, paging/sort parameters left out).
 
         ``channel`` (repeatable; plan r3-os-depth §3.2 O2) keeps only rows whose
         ``details.channel`` equals one of the values exactly (event-log
@@ -743,9 +789,23 @@ def build_runs_router(
             raise HTTPException(status_code=422, detail=str(exc))
         needle = path_contains.strip() if path_contains and path_contains.strip() else None
         try:
-            fields = parse_field_filters({"browser": browser, "service": service})
+            fields = parse_field_filters(
+                {
+                    "browser": browser,
+                    "service": service,
+                    "event_id": event_id,
+                    "record_id": record_id,
+                    "evtx_record_state": evtx_record_state,
+                    "logon_type": logon_type,
+                    "provider_name": provider_name,
+                    "user_name": user_name,
+                }
+            )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
+        if wanted_types is None and fields and EVENT_RECORD_FIELDS & set(fields):
+            wanted_types = EVENT_RECORD_TYPES
+            applied_filters = {**applied_filters, "artifact_type": sorted(EVENT_RECORD_TYPES)}
         conditions = row_conditions_or_422(
             time_from=time_from,
             time_to=time_to,
@@ -798,6 +858,7 @@ def build_runs_router(
             _attach_artifact_flags(response, join)
             if live is not None:
                 response["live"] = live
+            response["applied_filters"] = applied_filters
             return response
         artifacts = {}
         kind_payloads: dict[str, dict[str, object]] = {}
@@ -919,7 +980,7 @@ def build_runs_router(
         for kind_name, page in artifacts.items():
             if isinstance(page, dict) and kind_name in kind_payloads:
                 annotate_page_counts(page, kind_payloads[kind_name], filtered=filtered_pages)
-        response: dict[str, object] = {"artifacts": artifacts}
+        response: dict[str, object] = {"artifacts": artifacts, "applied_filters": applied_filters}
         _attach_artifact_flags(response, join)
         if live is not None:
             response["live"] = live
@@ -1067,6 +1128,7 @@ def build_runs_router(
         artifact_family: str | None = Query(default=None),
         artifact_type: str | None = Query(default=None),
         keyword: str | None = Query(default=None),
+        applied_filters: dict[str, list[str]] = Depends(strict_query_filters),
     ) -> dict[str, object]:
         """Query the opt-in columnar sidecar Parquet with bounded pagination.
 
@@ -1075,6 +1137,7 @@ def build_runs_router(
         produced (no ``--columnar-store``) the endpoint 404s on the missing
         output; when duckdb is not installed it returns 200 with
         ``status=skipped`` so callers fall back to the JSONL/JSON outputs.
+        An undeclared query parameter is a Korean 422; ``applied_filters`` echoes the filters.
         """
         job = get_job(store, run_id)
         if job.summary is None:
@@ -1091,13 +1154,16 @@ def build_runs_router(
                     ),
                 ) from exc
             raise
-        return query_columnar_artifact_records(
-            parquet_path=path,
-            offset=offset,
-            limit=limit,
-            artifact_family=artifact_family,
-            artifact_type=artifact_type,
-            keyword=keyword,
+        return with_applied_filters(
+            query_columnar_artifact_records(
+                parquet_path=path,
+                offset=offset,
+                limit=limit,
+                artifact_family=artifact_family,
+                artifact_type=artifact_type,
+                keyword=keyword,
+            ),
+            applied_filters,
         )
 
 
@@ -1152,6 +1218,7 @@ def build_runs_router(
         partial: str | None = Query(default=None),
         content: list[str] = Query(default=[]),
         geo: str | None = Query(default=None),
+        applied_filters: dict[str, list[str]] = Depends(strict_query_filters),
     ) -> dict[str, object]:
         """Paged file rows joined with the newest ``ntfs-meta`` analysis.
 
@@ -1208,6 +1275,9 @@ def build_runs_router(
         Every row carries ``record_index``: its position in that list of the
         files output (locator ``/candidates/<n>`` or ``/inventory/<n>``),
         filtered or not.
+
+        An undeclared query parameter is a Korean 422 listing the supported
+        ones; every page echoes the filters it applied as ``applied_filters``.
         """
         payload = get_named_output(store, run_id, "files")
         collection = scope
@@ -1303,6 +1373,7 @@ def build_runs_router(
         if isinstance(joined.get(collection), list):
             joined[collection] = join.attach(joined[collection], f"files:{collection}")
         joined["flags_join"] = dict(join.info)
+        joined["applied_filters"] = applied_filters
         return joined
 
 
@@ -1314,6 +1385,7 @@ def build_runs_router(
         cursor: str | None = Query(default=None),
         all_candidates: bool = Query(default=False, alias="all"),
         matched: bool | None = Query(default=None),
+        applied_filters: dict[str, list[str]] = Depends(strict_query_filters),
     ) -> dict[str, object]:
         """Paged document listing.
 
@@ -1324,13 +1396,15 @@ def build_runs_router(
         ``matched=0``/``matched=1`` filter those candidates. ``matched=0``
         without ``all=1`` is a 400. Every page reports ``candidate_count``
         (all candidates) and ``matched_count`` (keyword hits). ``limit=0``
-        returns the whole payload.
+        returns the whole payload. An undeclared query parameter is a Korean
+        422 listing the supported ones; ``applied_filters`` echoes the filters.
         """
         if matched is False and not all_candidates:
             raise HTTPException(status_code=400, detail=DOCS_MATCHED_REQUIRES_ALL)
         payload = get_named_output(store, run_id, "docs")
-        return docs_page(
-            payload, all_candidates=all_candidates, matched=matched, offset=offset, limit=limit, cursor=cursor
+        return with_applied_filters(
+            docs_page(payload, all_candidates=all_candidates, matched=matched, offset=offset, limit=limit, cursor=cursor),
+            applied_filters,
         )
 
 

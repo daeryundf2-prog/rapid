@@ -304,7 +304,7 @@ QUERY_LIMITER = QueryLimiter()
 
 
 def run_case(job: RunJob, run_id: str) -> tuple[Path, str]:
-    from .run_review import canonical_run_case
+    from ...core.case_db.run_locator import canonical_run_case
 
     assert job.summary is not None
     return canonical_run_case(job.summary, run_id)
