@@ -472,17 +472,19 @@ def build_parser() -> argparse.ArgumentParser:
         "kakaotalk-collect-macos",
         help="Authorized live collection of a consenting macOS KakaoTalk process memory (core + manifest)",
         description=(
-            "Collect the running KakaoTalk process memory of a logged-in, consenting macOS "
-            "user on site. Runs preflight checks (admin/sudo, SIP, Developer Mode, lldb, "
-            "hardened-runtime limits) and uses lldb 'process save-core'. macOS enforces all "
-            "access control; refusals are reported, never bypassed."
+            "Report the macOS collection posture (admin/sudo, SIP, Developer Mode, lldb, "
+            "hardened-runtime limits) and, only with --attach-live-process, collect the running "
+            "KakaoTalk process memory of a logged-in, consenting user on site with lldb "
+            "'process save-core'. Attaching stops and alters the live process; the attach "
+            "window is recorded. macOS enforces all access control; refusals are reported, "
+            "never bypassed."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent(
             """\
             Examples:
-              rapidtriage kakaotalk-collect-macos --output-root ./cases --preflight-only
-              sudo rapidtriage kakaotalk-collect-macos --output-root ./cases \\
+              rapidtriage kakaotalk-collect-macos --output-root ./cases --operator "Investigator Name"
+              sudo rapidtriage kakaotalk-collect-macos --output-root ./cases --attach-live-process \\
                   --operator "Investigator Name" --consent-statement "Holder consented on 2026-11-25"
             """
         ),
@@ -492,9 +494,9 @@ def build_parser() -> argparse.ArgumentParser:
     kakao_macos_collect.add_argument("--consent-statement", default="", help="Recorded statement of the account holder's on-site consent")
     kakao_macos_collect.add_argument("--authority-reference", default="", help="Optional legal authority reference (warrant, case number, authorization ID)")
     kakao_macos_collect.add_argument("--lldb-bin", default="lldb", help="lldb binary used for process save-core")
-    kakao_macos_collect.add_argument("--save-core-style", default="modified-memory", help="lldb save-core style (modified-memory, full, stack)")
+    kakao_macos_collect.add_argument("--save-core-style", default="modified-memory", choices=("modified-memory", "full", "stack"), help="lldb save-core style")
     kakao_macos_collect.add_argument("--timeout-seconds", type=float, default=600.0, help="Timeout per lldb save-core invocation")
-    kakao_macos_collect.add_argument("--preflight-only", action="store_true", help="Run and report preflight checks only; never attempt a dump")
+    kakao_macos_collect.add_argument("--attach-live-process", action="store_true", help="Opt in to attaching lldb to the running KakaoTalk process and saving a core; this alters live memory state. Without it only the preflight posture is recorded")
     kakao_macos_collect.add_argument("--json", action="store_true", help="Print JSON payload to stdout")
 
     cloud_collect = sub.add_parser(
