@@ -22,7 +22,43 @@ from ..core.kakaotalk import (
         run_kakaotalk_userdir_bruteforce,
         run_kakaotalk_windows_collect,
 )
+from ..core.kakaotalk_v2_pagecrypto import run_kakaotalk_v2_page_decrypt
 from .helpers import write_kakaotalk_message_residue_csv
+
+
+def handle_kakaotalk_v2_page_decrypt(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
+        root = Path(args.root).expanduser().resolve()
+        output = Path(args.output).expanduser().resolve()
+        export_dir = Path(args.export_dir).expanduser().resolve() if args.export_dir else None
+        try:
+            payload = run_kakaotalk_v2_page_decrypt(root, output=output, export_dir=export_dir)
+        except KakaoTalkDecryptError as exc:
+            parser.error(str(exc))
+        write_audit_record(
+            audit_path_for(output),
+            command="kakaotalk-v2-page-decrypt",
+            options={
+                "output": str(output),
+                "export_dir": str(export_dir) if export_dir else None,
+                "raw_keys_redacted": True,
+            },
+            output_files=[("kakaotalk-v2-page-decrypt-json", output)]
+            + ([("kakaotalk-v2-plaintext-export-dir", export_dir)] if export_dir else []),
+            notes=[
+                "Original EDB files are read only; plaintext is rebuilt in memory and in temporary files.",
+                "A database counts as decrypted only after sqlite3 opens it and count(*) runs on sqlite_master and chatLogs.",
+            ],
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            print(
+                f"KakaoTalk v2 page decrypt: {summary['decrypted_count']} decrypted, "
+                f"{summary['rejected_by_sqlite_gate_count']} rejected by SQLite gate, "
+                f"chatLogs rows: {summary['chatlogs_row_count']}"
+            )
+        return 0
 
 
 def handle_kakaotalk_decrypt(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
@@ -550,6 +586,7 @@ HANDLERS = {
     "kakaotalk-collect-macos": handle_kakaotalk_collect_macos,
     "kakaotalk-memory-carve": handle_kakaotalk_memory_carve,
     "kakaotalk-sqlcipher-probe": handle_kakaotalk_sqlcipher_probe,
+    "kakaotalk-v2-page-decrypt": handle_kakaotalk_v2_page_decrypt,
     "kakaotalk-key-store-inspect": handle_kakaotalk_key_store_inspect,
     "kakaotalk-userdir-bruteforce": handle_kakaotalk_userdir_bruteforce,
 }
