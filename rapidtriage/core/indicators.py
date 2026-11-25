@@ -12,9 +12,9 @@ from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .artifact_profiles import iter_payload_records
+from .artifact_profiles import iter_payload_records, resolve_records_path
 from .forensic_accuracy import build_accuracy_gate
-from .indicator_kernel import IndicatorBatch, Span
+from .indicator_kernel import FieldPolicy, IndicatorBatch, Span
 from .json_stream import LazyArray, LazyObject, Scalar, open_json
 from .rules import RuleSet
 
@@ -132,7 +132,13 @@ PROVENANCE_LEAF_KEYS: frozenset[str] = frozenset(
         "generated_at",
     }
 )
-PROVENANCE_LEAF_RE = re.compile(r"(_sha256|_sha1|_md5|_hash|_hashes|_fingerprint|_digest|_row_hash|_id_hash)$")
+PROVENANCE_LEAF_SUFFIXES: tuple[str, ...] = (
+    "_sha256", "_sha1", "_md5", "_hash", "_hashes", "_fingerprint", "_digest", "_row_hash", "_id_hash",
+)
+PROVENANCE_LEAF_RE = re.compile(f"({'|'.join(map(re.escape, PROVENANCE_LEAF_SUFFIXES))})$")
+# ``source_hashes*`` (incl. ``source_hashes_by_file``) are hashes the tool
+# computed over evidence files, keyed by host path.
+PROVENANCE_SUBTREE_PREFIX = "source_hash"
 # Leaf keys whose values are hashes recorded *inside* the evidence (Amcache
 # SHA-1, Sysmon Hashes=, file-id). Hash tokens elsewhere count only when the
 # whole value is the hash ("standalone").
@@ -179,9 +185,11 @@ INDICATOR_SCANNED_OUTPUTS = ("docs", "files")
 
 
 def is_provenance_subtree(key: str) -> bool:
-    # ``source_hashes*`` (incl. ``source_hashes_by_file``) are hashes the tool
-    # computed over evidence files, keyed by host path.
-    return key in PROVENANCE_SUBTREE_KEYS or key.endswith(PROVENANCE_SUBTREE_SUFFIXES) or key.startswith("source_hash")
+    return (
+        key in PROVENANCE_SUBTREE_KEYS
+        or key.endswith(PROVENANCE_SUBTREE_SUFFIXES)
+        or key.startswith(PROVENANCE_SUBTREE_PREFIX)
+    )
 
 
 def is_provenance_leaf(key: str) -> bool:
@@ -677,20 +685,43 @@ def collect_indicators_from_artifact_records(
             rejections=rejections,
             batch=batch,
         )
-    for index, row in enumerate(iter_payload_records(payload, payload_path=payload_path, expand=False)):
+
+    def scan_row(index: int, row: Mapping[str, object], row_batch: IndicatorBatch | None) -> int:
         if str(row.get("artifact_type") or "") in INDICATOR_EXCLUDED_ARTIFACT_TYPES:
-            continue
+            return 0
         row_pointer = f"/artifacts/{index}"
         nested_hits.extend(iter_ioc_hit_contexts(row, pointer=row_pointer, include_root=False))
+        scalars = 0
         for pointer, value, context in iter_scalar_contexts(row, row_pointer):
+            scalars += 1
             collect_indicators_from_text(
                 value,
                 accumulator,
                 source={**source, "pointer": pointer, **context},
                 max_sources_per_indicator=max_sources_per_indicator,
                 rejections=rejections,
-                batch=batch,
+                batch=row_batch,
             )
+        return scalars
+
+    def apply_hit(text: str, pointer: str, context: dict[str, str], spans: list[Span] | None) -> None:
+        collect_indicators_from_text(
+            text,
+            accumulator,
+            source={**source, "pointer": pointer, **context},
+            max_sources_per_indicator=max_sources_per_indicator,
+            rejections=rejections,
+            spans=spans,
+        )
+
+    records_path = resolve_records_path(payload, payload_path) if batch is not None else None
+    if batch is not None and records_path is not None and records_path.is_file():
+        # Rows the worker returns are scanned here with Python, unbatched,
+        # so they stay in file order between natively matched rows.
+        batch.scan_jsonl(records_path, NATIVE_FIELD_POLICY, apply_hit, lambda index, row: scan_row(index, row, None))
+    else:
+        for index, row in enumerate(iter_payload_records(payload, payload_path=payload_path, expand=False)):
+            scan_row(index, row, batch)
     hit_contexts = nested_hits or list(iter_ioc_hit_contexts(head, pointer="", include_root=True))
     for pointer, hit, context in hit_contexts:
         add_ioc_scanner_hit_from_dict(
@@ -733,13 +764,30 @@ def iter_scalar_contexts(value: object, pointer: str = "") -> Iterable[tuple[str
             yield from iter_scalar_contexts(item, f"{pointer}/{index}")
 
 
+CONTEXT_KEYS: tuple[str, ...] = ("path", "source_path", "artifact_type", "kind", "event_type", "source", "parser")
+
+
 def context_from_mapping(value: Mapping[str, object]) -> dict[str, str]:
     context: dict[str, str] = {}
-    for key in ("path", "source_path", "artifact_type", "kind", "event_type", "source", "parser"):
+    for key in CONTEXT_KEYS:
         item = value.get(key)
         if item not in (None, ""):
             context[key] = str(item)
     return context
+
+
+# The traversal policy above, as applied by the opt-in JSONL worker.
+NATIVE_FIELD_POLICY = FieldPolicy(
+    max_scalar=MAX_SCALAR_LENGTH,
+    excluded_types=INDICATOR_EXCLUDED_ARTIFACT_TYPES,
+    subtree_keys=PROVENANCE_SUBTREE_KEYS,
+    subtree_suffixes=PROVENANCE_SUBTREE_SUFFIXES,
+    subtree_prefixes=(PROVENANCE_SUBTREE_PREFIX,),
+    leaf_keys=PROVENANCE_LEAF_KEYS,
+    evidence_hash_keys=EVIDENCE_HASH_KEYS,
+    leaf_suffixes=PROVENANCE_LEAF_SUFFIXES,
+    context_keys=CONTEXT_KEYS,
+)
 
 
 def escape_pointer(value: str) -> str:

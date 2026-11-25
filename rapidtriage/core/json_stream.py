@@ -24,6 +24,7 @@ member at near I/O speed.
 
 from __future__ import annotations
 
+import io
 import json
 import re
 from collections.abc import Iterator
@@ -38,7 +39,9 @@ __all__ = [
     "Scalar",
     "iter_array_items",
     "iter_jsonl_items",
+    "iter_jsonl_lines",
     "open_json",
+    "parse_jsonl_line",
     "read_member",
 ]
 
@@ -393,17 +396,33 @@ def iter_jsonl_items(
         return
     yielded = 0
     index = 0
-    with open(Path(path), "r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            if not line.strip():
-                continue
-            index += 1
-            if index <= offset:
-                continue
-            try:
-                yield json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise JsonStreamError(f"invalid JSON on line {line_number} of {path}: {exc}") from exc
-            yielded += 1
-            if limit is not None and yielded >= limit:
-                return
+    for line_number, line in iter_jsonl_lines(path):
+        if not line.strip():
+            continue
+        index += 1
+        if index <= offset:
+            continue
+        yield parse_jsonl_line(line, line_number, path)
+        yielded += 1
+        if limit is not None and yielded >= limit:
+            return
+
+
+def iter_jsonl_lines(path: Path, *, start: int = 0, first_line_number: int = 1) -> Iterator[tuple[int, str]]:
+    """Yield numbered lines of a UTF-8 text file in universal-newline mode.
+
+    ``start`` is a byte offset on a line boundary, so a reader can resume
+    after the lines another reader has already consumed.
+    """
+    with open(Path(path), "rb") as raw:
+        raw.seek(start)
+        with io.TextIOWrapper(raw, encoding="utf-8") as handle:
+            yield from enumerate(handle, start=first_line_number)
+
+
+def parse_jsonl_line(line: str, line_number: int, path: Path) -> Any:
+    """Decode one JSON Lines record; a malformed line names its line number."""
+    try:
+        return json.loads(line)
+    except json.JSONDecodeError as exc:
+        raise JsonStreamError(f"invalid JSON on line {line_number} of {path}: {exc}") from exc
