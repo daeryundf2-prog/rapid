@@ -15,9 +15,11 @@ from rapidtriage.core.kakaotalk_algorithms import (
     V2_PAGE_PAYLOAD_SIZE,
     V2_PAGE_SIZE,
     KakaoTalkAlgorithmError,
+    decrypt_postpatch_v2_file,
     decrypt_postpatch_v2_pages,
     find_postpatch_v2_bound_ikm_by_salt_locality,
     validate_decrypted_sqlite_bytes,
+    validate_decrypted_sqlite_file,
 )
 from tests.kakaotalk_v2_pagecrypto_fixtures import (
     build_reserved_sqlite,
@@ -121,11 +123,17 @@ class KakaoTalkV2PageCryptoTests(unittest.TestCase):
         self.assertEqual(validate_decrypted_sqlite_bytes(b"")["error"], "sqlite-header-mismatch")
         self.assertFalse(validate_decrypted_sqlite_bytes(b"SQLite format 3\x00")["accepted"])
         wrapped = wrap_dek(BOUND_IKM, DEK)
-        self.assertIsNone(
-            find_postpatch_v2_bound_ikm_by_salt_locality(
-                APP_SALT + BOUND_IKM, appstate_salt=APP_SALT, info=CHAT_INFO, wrapped_dek=wrapped
-            )
+        miss = find_postpatch_v2_bound_ikm_by_salt_locality(
+            APP_SALT + BOUND_IKM, appstate_salt=APP_SALT, info=CHAT_INFO, wrapped_dek=wrapped
         )
+        self.assertFalse(miss["confirmed"])
+        self.assertIsNone(miss["bound_ikm"])
+        self.assertEqual(miss["salt_hits_tested"], 1)
+        capped = find_postpatch_v2_bound_ikm_by_salt_locality(
+            locality_dump(), appstate_salt=APP_SALT, info=CHAT_INFO, wrapped_dek=wrapped, max_hits=1
+        )
+        self.assertFalse(capped["confirmed"])
+        self.assertTrue(capped["salt_hits_truncated"])
         with self.assertRaises(KakaoTalkAlgorithmError):
             find_postpatch_v2_bound_ikm_by_salt_locality(
                 locality_dump(), appstate_salt=APP_SALT[:16], info=CHAT_INFO, wrapped_dek=wrapped
@@ -138,8 +146,7 @@ class KakaoTalkV2PageCryptoTests(unittest.TestCase):
             dump, appstate_salt=APP_SALT, info=CHAT_INFO, wrapped_dek=wrap_dek(BOUND_IKM, DEK)
         )
 
-        self.assertIsNotNone(hit)
-        assert hit is not None
+        self.assertTrue(hit["confirmed"])
         self.assertEqual(hit["bound_ikm"], BOUND_IKM)
         self.assertEqual(hit["salt_hits_tested"], 2)
         self.assertEqual(hit["bound_ikm_offset"], dump.rindex(APP_SALT) - 0x20)
@@ -190,6 +197,47 @@ class KakaoTalkV2PageCryptoTests(unittest.TestCase):
             self.assertEqual(len(candidates), 1)
             self.assertEqual(candidates[0]["key_confirmation_method"], "hmac-unwrap-chain")
             self.assertEqual(candidates[0]["key_hex"], DEK.hex())
+            self.assertIn("no salt-0x20 candidate", candidates[0]["key_confirmation_fallback_reason"])
+
+    def test_file_decrypt_streams_the_same_image_as_the_bytes_path(self) -> None:
+        encrypted = encrypt_v2_pages(build_reserved_sqlite(MESSAGES), dek=DEK)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            source = Path(tmp_dir) / "chatLogs_42.edb"
+            source.write_bytes(encrypted)
+            target = Path(tmp_dir) / "plain.sqlite"
+            result = decrypt_postpatch_v2_file(source, target, dek=DEK)
+            plain = target.read_bytes()
+            gate = validate_decrypted_sqlite_file(target)
+            source.write_bytes(encrypted + b"\x00" * 100)
+            with self.assertRaises(KakaoTalkAlgorithmError):
+                decrypt_postpatch_v2_file(source, target, dek=DEK)
+
+        self.assertEqual(plain, decrypt_postpatch_v2_pages(encrypted, dek=DEK))
+        self.assertEqual(result["page_count"], len(encrypted) // V2_PAGE_SIZE)
+        self.assertEqual(result["plaintext_sha256"], hashlib.sha256(plain).hexdigest())
+        self.assertTrue(gate["accepted"])
+
+    def test_cli_records_fallback_attempts_and_decrypts_each_database_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case"
+            write_case(root, page_key=DEK, dump=locality_dump())
+            user = root / "KakaoTalk" / "users" / ("d" * 40)
+            backup = root / "backup"
+            backup.mkdir()
+            (backup / "appstate.dat").write_bytes((user / "appstate.dat").read_bytes())
+            output = Path(tmp_dir) / "v2.json"
+
+            self.assertEqual(main(["kakaotalk-v2-page-decrypt", str(root), "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertEqual(len(payload["derived_keys"]), 2)
+        self.assertEqual(len(payload["databases"]), 1)
+        self.assertEqual(payload["summary"]["decrypted_count"], 1)
+        attempts = payload["key_confirmation_attempts"]
+        self.assertEqual(len(attempts), 2)
+        self.assertTrue(all(item["key_confirmation_method"] == "salt-locality-0x20" for item in attempts))
+        self.assertEqual(attempts[0]["salt_locality"]["sources_scanned"], 1)
+        self.assertNotIn(BOUND_IKM.hex(), json.dumps(payload))
 
     def test_cli_exports_only_gate_accepted_databases(self) -> None:
         for page_key, expected_status in ((DEK, "decrypted"), (WRONG_DEK, "rejected-by-sqlite-gate")):
