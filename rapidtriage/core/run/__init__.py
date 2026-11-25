@@ -1040,6 +1040,9 @@ def _run_triage_stages(
     docs_text_spool_path = output_dir / DOCS_TEXT_SPOOL_NAME
     docs_text_spool_path.unlink(missing_ok=True)
 
+    def report_docs(documents: int, message: str) -> None:
+        progress.task_progress("docs", rows=documents, message=message)
+
     def produce_docs_payload() -> dict[str, object]:
         if not case_db:
             return run_docs_search(
@@ -1049,6 +1052,7 @@ def _run_triage_stages(
                 rule_set=rule_set,
                 index_output=docs_index_path,
                 manifest=manifest_payload,
+                on_progress=report_docs,
             )
         with DocumentTextSpool(docs_text_spool_path) as spool:
             return run_docs_search(
@@ -1059,6 +1063,7 @@ def _run_triage_stages(
                 index_output=docs_index_path,
                 manifest=manifest_payload,
                 text_sink=spool.write,
+                on_progress=report_docs,
             )
 
     docs_planned = stage_planned_out("docs")
@@ -1377,6 +1382,7 @@ def _run_triage_stages(
             root=str(input_root.root_path),
             source={"type": input_root.kind, "analysis_root": str(input_root.root_path)},
             docs_text_spool=docs_text_spool_path,
+            on_progress=lambda rows, message: progress.task_progress("persist", rows=rows, message=message),
         )
     else:
         docs_text_spool_path.unlink(missing_ok=True)
@@ -2387,6 +2393,7 @@ def tracked_artifact_collection(
         collector_options=collector_options,
         check_cancel=progress.cancel_checker(kind),
         on_rows=progress.rows_reporter(kind),
+        on_message=progress.message_reporter(kind),
     )
 
 
@@ -2425,6 +2432,7 @@ def timed_artifact_collection(
     collector_options: Mapping[str, object] | None = None,
     check_cancel: Callable[[], bool] | None = None,
     on_rows: Callable[[int], None] | None = None,
+    on_message: Callable[[str], None] | None = None,
 ) -> tuple[dict[str, object], str, str, int]:
     start = time.perf_counter()
     started_at = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -2439,6 +2447,7 @@ def timed_artifact_collection(
         use_cache=False,
         check_cancel=check_cancel,
         on_rows=on_rows,
+        on_message=on_message,
     )
     completed_at = dt.datetime.now(dt.timezone.utc).isoformat()
     duration_ms = max(0, int((time.perf_counter() - start) * 1000))

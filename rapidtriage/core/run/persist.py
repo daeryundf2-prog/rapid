@@ -15,7 +15,7 @@ import gc
 import json
 import re
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 
 from ..case_db import CaseDatabase
@@ -25,6 +25,26 @@ DOCS_TEXT_SPOOL_NAME = "rapidtriage-docs-text.tmp.jsonl"
 SEARCH_BACKEND_FTS = "fts"
 SEARCH_BACKEND_SCAN = "scan"
 _SQLITE_SIDECAR_SUFFIXES = ("", "-wal", "-shm", "-journal")
+# Import phases of ``CaseDatabase.import_run_output`` as shown on the persist task.
+IMPORT_PHASE_LABELS = {
+    "files": "파일 목록",
+    "docs": "문서 본문",
+    "artifacts": "아티팩트",
+    "indicators": "지표",
+    "timeline": "타임라인 이벤트",
+}
+
+
+def case_db_import_reporter(on_progress: Callable[[int, str], None]) -> Callable[[str, int], None]:
+    """``(phase, rows)`` import callbacks -> ``(rows imported so far in all phases, Korean message)``."""
+    done: dict[str, int] = {}
+
+    def report(phase: str, rows: int) -> None:
+        done[phase] = rows
+        label = IMPORT_PHASE_LABELS.get(phase, phase)
+        on_progress(sum(done.values()), f"케이스 DB 적재 중 · {label} {rows:,}건")
+
+    return report
 
 
 class DocumentTextSpool:
@@ -101,8 +121,11 @@ def build_run_case_db(
     root: str,
     source: Mapping[str, object] | None = None,
     docs_text_spool: Path | None = None,
+    on_progress: Callable[[int, str], None] | None = None,
 ) -> dict[str, object]:
     """(Re)build ``<output_dir>/rapidtriage-case.db`` from the run outputs.
+
+    ``on_progress(rows, message)`` follows the import (rows across all tables).
 
     Returns a persist record: ``status`` (``completed``/``failed``), timing,
     row counts and, on failure, the error text. Never raises for import
@@ -142,6 +165,7 @@ def build_run_case_db(
             case_name=f"RapidTriage run {output_dir.name}",
             document_texts=document_texts,
             hash_files=False,
+            on_progress=case_db_import_reporter(on_progress) if on_progress is not None else None,
         )
     except Exception as exc:  # persist failure must not fail the run
         try:

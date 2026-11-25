@@ -119,6 +119,8 @@ class RunProgress:
         self.control_watcher: object | None = None
         # Cooperative cancel state, set from control requests.
         self._cancel_events: set[str] = set()
+        # Tasks whose message is a live phase message (task_progress): dropped when the task ends.
+        self._live_message_tasks: set[str] = set()
         self.cancel_all_requested = threading.Event()
         self.finish_requested = threading.Event()
         self._payload: dict[str, object] = {
@@ -312,13 +314,29 @@ class RunProgress:
     def rows_reporter(self, task_id: str) -> Callable[[int], None]:
         return lambda rows: self.task_rows(task_id, rows)
 
+    def message_reporter(self, task_id: str) -> Callable[[str], None]:
+        """Phase messages of a running task (e.g. a provider's long file scan that yields no rows)."""
+        return lambda message: self.task_progress(task_id, message=message)
+
     def task_rows(self, task_id: str, rows: int) -> None:
         """Rows written so far by a running task (file write throttled to once a second)."""
+        self.task_progress(task_id, rows=rows)
+
+    def task_progress(self, task_id: str, *, rows: int | None = None, message: str | None = None) -> None:
+        """Live ``rows_so_far`` and/or ``message`` of a running task.
+
+        The file write is throttled to once a second (the 15-second heartbeat
+        writes whatever was set last), so long loops may call this freely.
+        """
         with self._lock:
             task = find_task(self._plan, task_id) if self._plan is not None else None
             if task is None:
                 return
-            task["rows_so_far"] = int(rows)
+            if rows is not None:
+                task["rows_so_far"] = int(rows)
+            if message is not None and task.get("status") == "running" and task_id not in self._cancel_events:
+                task["message"] = message
+                self._live_message_tasks.add(task_id)
             now = time.monotonic()
             if now - self._last_rows_write < ROWS_WRITE_INTERVAL_SECONDS:
                 return
@@ -654,6 +672,9 @@ class RunProgress:
             task["message"] = message
         elif task.get("message") == CANCEL_REQUESTED_MESSAGE and status == "completed":
             task["message"] = "취소 요청 시점에 실행 중이어서 단계 끝까지 마침"
+        elif task_id in self._live_message_tasks and task.get("message") != CANCEL_REQUESTED_MESSAGE:
+            task["message"] = ""  # "... 중" phase text must not outlive the task
+        self._live_message_tasks.discard(task_id)
         if reason is not None:
             task["reason"] = reason
         if parser_error_count:

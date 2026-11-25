@@ -42,6 +42,7 @@ from .files import file_time_origin_for_input_kind, is_tool_output_dir
 from .input_root import InputRoot, resolve_input_root
 from .json_safe import json_default
 from .models import DocumentCandidate, DocumentMatch
+from .provider_progress import PROVIDER_SCAN_REPORT_EVERY
 from .rules import RuleSet, annotate_docs_payload
 from .safe_xml import safe_xml_fromstring
 from .textnorm import locate_normalized, normalize_nfc, normalize_search_text
@@ -135,13 +136,23 @@ class ManifestProgress(Protocol):
     def provider_finished(self, kind: str, *, status: str, artifact_count: int, **extra: object) -> None: ...
 
 
-def scan_document_candidates(root: InputRoot | Path, limit: int = 0) -> list[DocumentCandidate]:
+DocsProgress = Callable[[int, str], None]
+"""``(documents extracted so far, Korean phase message)`` of a docs search (run progress)."""
+
+
+def scan_document_candidates(
+    root: InputRoot | Path, limit: int = 0, *, on_progress: DocsProgress | None = None
+) -> list[DocumentCandidate]:
     input_root = resolve_input_root(root)
     origin = file_time_origin_for_input_kind(input_root.kind)
     candidates: list[DocumentCandidate] = []
+    seen = 0
     for dirpath, dirnames, files in os.walk(input_root.root_path):
         dirnames[:] = [name for name in dirnames if not is_tool_output_dir(Path(dirpath) / name)]
         for name in files:
+            seen += 1
+            if on_progress is not None and seen % PROVIDER_SCAN_REPORT_EVERY == 0:
+                on_progress(0, f"문서 후보 찾는 중 · 파일 {seen:,}개 확인 · 후보 {len(candidates):,}개")
             path = Path(dirpath) / name
             suffix = path.suffix.lower()
             if suffix not in SUPPORTED_DOC_EXTS:
@@ -248,6 +259,7 @@ def build_manifest(
     task_status = getattr(progress, "task_status", None)
     cancel_checker = getattr(progress, "cancel_checker", None)
     rows_reporter = getattr(progress, "rows_reporter", None)
+    message_reporter = getattr(progress, "message_reporter", None)
 
     def collect_summary_row(provider: object, progress_key: str) -> dict[str, object]:
         from .artifacts import run_artifact_collection
@@ -263,6 +275,7 @@ def build_manifest(
             use_cache=False,
             check_cancel=cancel_checker(progress_key) if callable(cancel_checker) else None,
             on_rows=rows_reporter(progress_key) if callable(rows_reporter) else None,
+            on_message=message_reporter(progress_key) if callable(message_reporter) else None,
         )
         write_result(payload, output_path)
         row = manifest_summary_row(provider, payload, output_path=output_path)
@@ -420,22 +433,27 @@ def run_docs_search(
     index_output: Path | None = None,
     manifest: Mapping[str, object] | None = None,
     text_sink: Callable[[str, str, str], None] | None = None,
+    on_progress: DocsProgress | None = None,
 ) -> dict[str, object]:
     """Search documents under ``root``; ``manifest`` reuses an already-built
     provider manifest (run pipeline) instead of collecting providers again.
 
     ``text_sink(path, text, extraction_error)`` receives every candidate's
     extracted text in candidate order (the run pipeline spools it for the
-    persist step's case DB so documents are not extracted twice)."""
+    persist step's case DB so documents are not extracted twice).
+    ``on_progress(documents_done, message)`` reports the candidate walk, the
+    text extraction and the index build (minutes each on a full volume)."""
     input_root = resolve_input_root(root, kind=input_kind)
     normalized = [normalize_search_text(item) for item in keywords]
-    candidates = scan_document_candidates(input_root, limit=limit)
+    candidates = scan_document_candidates(input_root, limit=limit, on_progress=on_progress)
     matches: list[DocumentMatch] = []
     text_by_path: dict[str, str] = {}
     extraction_errors: list[dict[str, object]] = []
     status_counts: Counter[str] = Counter()
     method_counts: Counter[str] = Counter()
-    for candidate in candidates:
+    for done, candidate in enumerate(candidates):
+        if on_progress is not None:
+            on_progress(done, f"문서 텍스트 추출 중 · {done:,}/{len(candidates):,}개")
         extraction_error = ""
         try:
             result = extract_document_text(Path(candidate.path), candidate.kind)
@@ -515,6 +533,8 @@ def run_docs_search(
     if rule_set is not None:
         annotate_docs_payload(payload, rule_set, text_by_path=text_by_path)
     if index_output is not None:
+        if on_progress is not None:
+            on_progress(len(candidates), f"문서 검색 색인 만드는 중 · 문서 {len(candidates):,}개")
         index_payload = build_docs_index(input_root, candidates, text_by_path)
         # Machine-read inverted index: written compact (C JSON encoder);
         # the indented writer took minutes on large cases.
