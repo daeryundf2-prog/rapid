@@ -295,10 +295,8 @@ fn hex_upper(data: &[u8]) -> String {
 
 /// Python `bytes.decode("utf-16le", errors="replace")` (even-length input).
 fn utf16_lossy(data: &[u8]) -> String {
-    if data
-        .chunks_exact(2)
-        .all(|pair| pair[1] == 0 && pair[0] < 0x80)
-    {
+    let (pairs, _) = data.as_chunks::<2>();
+    if pairs.iter().all(|pair| pair[1] == 0 && pair[0] < 0x80) {
         return data
             .iter()
             .step_by(2)
@@ -306,9 +304,7 @@ fn utf16_lossy(data: &[u8]) -> String {
             .collect();
     }
     let mut out = String::with_capacity(data.len() / 2 * 3);
-    let units = data
-        .chunks_exact(2)
-        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]));
+    let units = pairs.iter().map(|pair| u16::from_le_bytes(*pair));
     for item in char::decode_utf16(units) {
         out.push(item.unwrap_or(char::REPLACEMENT_CHARACTER));
     }
