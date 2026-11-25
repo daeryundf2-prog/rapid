@@ -149,8 +149,11 @@ describe("loading state while a server filter scans (16)", () => {
     );
     expect(screen.getByTestId("grid-footer-total").textContent).toBe("총 세는 중…");
     expect(screen.getByTestId("grid-footer-loading").textContent).toContain("불러오는 중");
+    // Once the load is no longer instant: what is loading and for how long, over the skeleton.
+    expect((await screen.findByTestId("grid-wait")).querySelector(".wait-panel-elapsed")).toBeTruthy();
     release();
     await waitFor(() => expect(screen.queryByTestId("grid-loading")).toBeNull());
+    expect(screen.queryByTestId("grid-wait")).toBeNull();
     expect(screen.getByTestId("grid-footer-total").textContent).toBe("총 3건");
   });
 });

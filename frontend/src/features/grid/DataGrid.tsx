@@ -27,6 +27,7 @@ import { ApiError, downloadFile } from "../../api/client";
 import { DOCS_MATCHED } from "../../api/collections";
 import type { RunExtractResult } from "../../api/extract";
 import { getRunTree } from "../../api/runs";
+import { WaitPanel } from "../../components/WaitPanel";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
 import type { CommandContext } from "../../contracts/command";
 import { Icon } from "../../icons";
@@ -1571,6 +1572,14 @@ export function DataGrid(props: DataGridProps = {}) {
             </div>
           ) : null}
         </div>
+        {/* First page: what is loading and for how long, over the skeleton rows. */}
+        {displayCount === 0 && cq.isLoading && runId ? (
+          <WaitPanel
+            className="floating grid-wait"
+            label={serverFiltering ? "조건에 맞는 행 찾는 중…" : `${def.label} 목록 불러오는 중…`}
+            testId="grid-wait"
+          />
+        ) : null}
         {/* The batch bar floats over the bottom of the grid: selecting never moves the rows. */}
         <BatchBar
           selectedCount={batch.count}

@@ -469,3 +469,21 @@ describe("hidden-family count is final (review #7)", () => {
     expect(screen.getByTestId("tree-empty-toggle").textContent).toBe(first);
   });
 });
+
+describe("tree wait panel", () => {
+  it("says the tree is loading for as long as /tree has not answered", async () => {
+    const { fetchMock } = mockFetch(routes());
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).split("?")[0]?.endsWith("/tree")) await gate;
+      return fetchMock(input, init);
+    });
+    renderWithQuery(<EvidenceTree runId="r1" />);
+    expect((await screen.findByTestId("tree-wait")).querySelector(".wait-panel-elapsed")).toBeTruthy();
+    release();
+    await waitFor(() => expect(screen.queryByTestId("tree-wait")).toBeNull());
+  });
+});

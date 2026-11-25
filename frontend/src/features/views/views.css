@@ -179,27 +179,11 @@
   color: var(--text-muted);
 }
 
-.view-spinner {
-  display: inline-block;
-  width: 20px;
-  height: 20px;
-  margin-bottom: var(--space-2);
-  border: 2px solid var(--line-subtle);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: view-spin 0.8s linear infinite;
-}
-
-@keyframes view-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .view-spinner {
-    animation: none;
-  }
+/* Loading card: the wait panel (controls.css) centred in the card. */
+.view-state.wait-panel {
+  flex-wrap: wrap;
+  justify-content: center;
+  margin: var(--space-6) auto;
 }
 
 /* Thumbnails (X16) ------------------------------------------------------ */

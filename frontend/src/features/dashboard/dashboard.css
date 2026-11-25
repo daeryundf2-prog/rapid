@@ -1,10 +1,18 @@
 /* 접수 dashboard (S7, plan §9 X1/X9/X10/X18). Tokens only; status colours from S10 with fallbacks. */
 
 .dash {
+  position: relative;
   container: dash / inline-size;
   height: 100%;
   overflow: auto;
   padding: var(--space-3) var(--space-4) var(--space-5);
+}
+
+/* Opening a case: the wait pill (components/WaitPanel) floats over the card shells. */
+.dash-wait {
+  top: var(--space-3);
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 .dash-head {
@@ -157,14 +165,6 @@
   flex-direction: column;
   gap: var(--space-3);
   padding: var(--space-2) 0;
-}
-
-.dash-loading {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin: 0;
-  color: var(--text-muted);
 }
 
 .dash-spin {
