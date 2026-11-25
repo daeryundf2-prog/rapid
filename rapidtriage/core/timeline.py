@@ -645,11 +645,11 @@ def run_timeline(
             builder.extend(extract_artifact_events(payload, Path(f"generated:artifacts:{kind}"), stats=stats))
 
     events = builder.events()
+    del builder  # Release the deduplication index before the sort allocates its keys.
     events.sort(key=event_sort_key)
     event_type_counts = Counter(str(event["event_type"]) for event in events)
     source_counts = Counter(str(event["source"]) for event in events)
     kind_counts = Counter(str(event.get("timestamp_kind") or "") for event in events)
-    timestamps = [str(event["timestamp"]) for event in events]
 
     payload = {
         "command": "timeline",
@@ -666,8 +666,8 @@ def run_timeline(
             "source_counts": dict(source_counts),
             "event_type_counts": dict(event_type_counts),
             "timestamp_kind_counts": dict(kind_counts),
-            "earliest_event_at": timestamps[0] if timestamps else None,
-            "latest_event_at": timestamps[-1] if timestamps else None,
+            "earliest_event_at": str(events[0]["timestamp"]) if events else None,
+            "latest_event_at": str(events[-1]["timestamp"]) if events else None,
             "timezone": build_timezone_disclosure(stats.evidence_timezone),
             "file_time_origin": file_time_origin or "unknown",
             "time_policy": {
@@ -962,6 +962,9 @@ def normalize_event_time(
             if len(stats.out_of_range_samples) < 20:
                 stats.out_of_range_samples.append({"event_type": event_type, "field": field_path, "value": str(value)})
             return None
+    # UTC text already carries the original fraction, including its seventh digit.
+    if not local and text and _is_utc_iso_text(text) and not source_timezone:
+        return (text.replace("Z", "+00:00") if text.endswith("Z") else text), tz_label, source_timezone
     # Sub-microsecond digits (100 ns ticks) that ``isoformat`` would drop are converted in ticks.
     ticks = event_timestamp_utc_ticks(text)[0] if text else None
     exact = None
@@ -971,8 +974,6 @@ def normalize_event_time(
         exact = filetime_to_iso_7(ticks)
     if local:
         return (exact[:-1] if exact else parsed.replace(tzinfo=None).isoformat()), tz_label, source_timezone
-    if text and _is_utc_iso_text(text) and not source_timezone:
-        return (text.replace("Z", "+00:00") if text.endswith("Z") else text), tz_label, source_timezone
     return (f"{exact[:-1]}+00:00" if exact else parsed.isoformat()), tz_label, source_timezone
 
 
@@ -1569,6 +1570,12 @@ def _resolve_field(
     field: TimelineField,
 ) -> Iterable[tuple[object, Mapping[str, object] | None, str, str]]:
     """Yield ``(value, list element or None, element identity, label)`` for a field path."""
+    if "." not in field.path and not field.path.endswith(("[]", "[*]")):
+        value = precise_time_value(details, field.path, details.get(field.path))
+        if value not in (None, "", 0):
+            yield value, None, "", field.label
+        return
+
     parts = field.path.split(".")
 
     def walk(node: object, index: int, element: Mapping[str, object] | None, identity: str) -> Iterable[tuple]:
@@ -2024,12 +2031,13 @@ def write_timeline_result(payload: Mapping[str, object], output: Path) -> None:
     head = {key: value for key, value in payload.items() if key != "events"}
     events = payload.get("events") if isinstance(payload.get("events"), list) else []
     head_text = json.dumps(head, ensure_ascii=False, indent=2, default=str)
+    encode_event = json.JSONEncoder(ensure_ascii=False, separators=(",", ":"), default=str).encode
     with output.open("w", encoding="utf-8", newline="\n", buffering=4 * 1024 * 1024) as handle:
         handle.write(head_text[:-1].rstrip())
         handle.write(',\n  "events": [')
         for index, event in enumerate(events):
             handle.write("\n    " if index == 0 else ",\n    ")
-            handle.write(json.dumps(event, ensure_ascii=False, separators=(",", ":"), default=str))
+            handle.write(encode_event(event))
         handle.write("\n  ]\n}\n" if events else "]\n}\n")
 
 

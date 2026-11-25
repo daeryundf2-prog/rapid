@@ -27,6 +27,7 @@ import json
 import queue
 import sqlite3
 import threading
+import unicodedata
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 
@@ -121,6 +122,7 @@ def _prepared_artifacts(
     file_id_for: Callable[[str], int | None],
 ) -> Iterator[tuple[object, ...]]:
     """Per-row values of the run's artifact outputs, in import order."""
+    encode = json.JSONEncoder(ensure_ascii=False, sort_keys=True, default=str).encode
     for output_name, raw_path in sorted(outputs.items()):
         name = str(output_name)
         if not name.startswith("artifacts_"):
@@ -140,7 +142,7 @@ def _prepared_artifacts(
             stored = dict(varying_row)
             locator = {"output_name": name, "row_index": row_index}
             stored[ARTIFACT_DATA_LOCATOR_KEY] = locator
-            data_json = json.dumps(stored, ensure_ascii=False, sort_keys=True, default=str)
+            data_json = encode(stored)
             stub, blob, codec = encode_artifact_data(data_json, locator=locator)
             yield (
                 name,
@@ -294,8 +296,8 @@ def bulk_import_run_events(
                 None,
             )
         )
-        fts_values = {"event_type": event_type, "target": event_path, "description": summary, "source": source}
-        if not all(value.isascii() for value in fts_values.values()):
+        if not all(unicodedata.is_normalized("NFC", value) for value in (event_type, event_path, summary, source)):
+            fts_values = {"event_type": event_type, "target": event_path, "description": summary, "source": source}
             nfc_fixups.append((row_id, fts_values))
         count += 1
         if len(batch) >= batch_rows:
