@@ -18,7 +18,7 @@ Amcache/UserAssist/BAM/ShimCache, SAM accounts, media-player MRUs and the regist
 | Environment | `RAPIDTRIAGE_REGISTRY_ENGINE=rust` (or `python`, the default) |
 | CLI | `rapidtriage --registry-engine rust <command> ...` (sets the variable for the process and its children) |
 
-Build and stage the extension once per checkout (it lands in the gitignored `rapidtriage/native/`):
+Build and stage the extension once per checkout (it lands in the gitignored native folder under the `rapidtriage` package):
 
 ```sh
 python scripts/build-native-accel.py --crate rapid-registry
