@@ -1207,7 +1207,13 @@ def run_kakaotalk_sqlcipher_probe(
         residue_sources=residue_sources,
     )
     key_candidates.extend(residue_keys)
-    residue_digests = {str(candidate.get("candidate_sha256") or "") for candidate in residue_keys}
+    residue_digests = {
+        str(candidate.get("candidate_sha256") or ""): (
+            str(candidate.get("evidence_class") or RESIDUE_EVIDENCE_CLASS),
+            str(candidate.get("confidence") or RESIDUE_CONFIDENCE),
+        )
+        for candidate in residue_keys
+    }
     edb_databases = find_kakaotalk_edb_databases(root)
     payload: dict[str, object] = {
         "command": "kakaotalk-sqlcipher-probe",
@@ -1603,7 +1609,10 @@ def run_kakaotalk_key_store_inspect(
         "residue_memory": {
             "sources": residue_sources,
             "not_applied": ["runtime-key-store-nodes", "postpatch-ikm", "postpatch-v2-dek-derivation"],
-            "not_applied_reason": "hiberfil/pagefile pages carry no process virtual address map",
+            "not_applied_reason": (
+                "segmented sources (hiberfil/pagefile/swapfile pages, process dumps over the in-memory cap) "
+                "carry no process virtual address map"
+            ),
         },
         "errors": errors,
         "validation": {
@@ -2739,11 +2748,13 @@ def collect_kakaotalk_residue_probe_material(
     return keys, messages, [status.to_dict() for status in statuses]
 
 
-def tag_residue_key_matches(matches: Sequence[dict[str, object]], residue_digests: set[str]) -> None:
+def tag_residue_key_matches(
+    matches: Sequence[dict[str, object]], residue_digests: Mapping[str, tuple[str, str]]
+) -> None:
     for match in matches:
-        if str(match.get("key_candidate_sha256") or "") in residue_digests:
-            match["evidence_class"] = RESIDUE_EVIDENCE_CLASS
-            match["confidence"] = RESIDUE_CONFIDENCE
+        evidence = residue_digests.get(str(match.get("key_candidate_sha256") or ""))
+        if evidence is not None:
+            match["evidence_class"], match["confidence"] = evidence
 
 
 def inspect_kakaotalk_key_store_residue_hits(

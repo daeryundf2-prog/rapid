@@ -4,8 +4,9 @@ import struct
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from rapidtriage.artifacts import clear_collect_cache
+from rapidtriage.artifacts import clear_collect_cache, kakaotalk_memory
 from rapidtriage.artifacts.kakaotalk_memory import KakaoTalkMemoryProvider
 from rapidtriage.cli import build_parser
 from tests.test_kakaotalk_residue_memory import synthetic_hiberfil
@@ -126,6 +127,60 @@ class KakaoTalkMemoryDiscoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             (Path(tmp_dir) / "notes.txt").write_text("no memory here", encoding="utf-8")
             self.assertEqual(list(KakaoTalkMemoryProvider().collect(Path(tmp_dir))), [])
+
+    def test_dump_over_in_memory_cap_is_segmented_and_never_read_whole(self) -> None:
+        whole_reads: list[str] = []
+        real_read_bytes = Path.read_bytes
+
+        def tracking_read_bytes(path: Path) -> bytes:
+            whole_reads.append(path.name)
+            return real_read_bytes(path)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "kakao-case" / "evidence"
+            build_evidence_tree(root)
+            with (
+                mock.patch.object(kakaotalk_memory, "MAX_IN_MEMORY_DUMP_BYTES", 64 * 1024),
+                mock.patch.object(Path, "read_bytes", tracking_read_bytes),
+            ):
+                records = [record.to_dict() for record in KakaoTalkMemoryProvider().collect(root)]
+
+        self.assertNotIn("memo.bin", whole_reads)
+        self.assertNotIn("crash.dmp", whole_reads)
+        memo = next(
+            row["details"]
+            for row in records
+            if row["artifact_type"] == "kakaotalk-memory-dump" and row["path"].endswith("memo.bin")
+        )
+        self.assertEqual(memo["analysis_mode"], "segmented")
+        self.assertIn("postpatch-ikm", memo["not_applied"])
+        self.assertEqual(memo["analysis_counts"]["chat_message_residues"], 1)
+        message = next(
+            row["details"]
+            for row in records
+            if row["artifact_type"] == "kakaotalk-memory-message-residue"
+            and row["details"]["message"] == "dump message"
+        )
+        self.assertEqual(message["source_kind"], "process-dump")
+        self.assertEqual(message["evidence_class"], "process-memory")
+        self.assertEqual(message["confidence"], "needs-validation")
+
+    def test_confirmed_dumps_over_the_analysis_limit_are_reported_not_dropped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "kakao-case" / "evidence"
+            build_evidence_tree(root)
+            with mock.patch.object(kakaotalk_memory, "MAX_ANALYSED_DUMPS", 1):
+                records = [record.to_dict() for record in KakaoTalkMemoryProvider().collect(root)]
+
+        analysed = [row for row in records if row["artifact_type"] == "kakaotalk-memory-dump"]
+        limited = [
+            row
+            for row in records
+            if row["artifact_type"] == "kakaotalk-memory-dump-skipped"
+            and row["details"]["skip_reason"] == "analysis-limit"
+        ]
+        self.assertEqual([Path(row["path"]).name for row in analysed], ["crash.dmp"])
+        self.assertEqual([Path(row["path"]).name for row in limited], ["memo.bin"])
 
 
 class KakaoTalkMemoryRunTests(unittest.TestCase):
