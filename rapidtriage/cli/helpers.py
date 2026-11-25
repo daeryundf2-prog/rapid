@@ -99,6 +99,16 @@ def add_eventlog_output_arguments(command: argparse.ArgumentParser) -> None:
         default=None,
         help="Per-event output shape: triage (default compact projection) or full (every per-event validation/report block)",
     )
+    command.add_argument(
+        "--eventlog-evtx-engine",
+        choices=("python", "rust"),
+        default=None,
+        help=(
+            "EVTX BinXML decoder: python (default) or rust (rapidcore_native, same rows; "
+            "falls back to python with a notice on the eventlog-file row when the module is not built). "
+            "Unset: RAPIDTRIAGE_EVTX_ENGINE"
+        ),
+    )
 
 
 def eventlog_collector_options(args: argparse.Namespace) -> dict[str, object]:
@@ -109,6 +119,9 @@ def eventlog_collector_options(args: argparse.Namespace) -> dict[str, object]:
     record_detail = getattr(args, "eventlog_record_detail", None)
     if record_detail:
         options["record_detail"] = str(record_detail)
+    evtx_engine = getattr(args, "eventlog_evtx_engine", None)
+    if evtx_engine:
+        options["evtx_engine"] = str(evtx_engine)
     return options
 
 

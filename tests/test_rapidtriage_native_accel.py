@@ -43,6 +43,27 @@ def _write_sample_evtx(path: Path) -> None:
     path.write_bytes(bytes(blob))
 
 
+def _write_two_live_records_evtx(path: Path) -> None:
+    """Chunk laid out per the EVTX chunk header spec (libyal libevtx,
+    "Windows XML Event Log (EVTX) format", section "Chunk header"):
+    offset 40 header size (128), 44 last event record offset,
+    48 free space offset, 52 event records CRC32. Two live records, then a
+    slack record past the free-space offset."""
+    blob = bytearray(FILE_HEADER + CHUNK)
+    blob[0:8] = native_accel.EVTX_FILE_SIGNATURE
+    struct.pack_into("<Q", blob, 24, 3)
+    chunk = FILE_HEADER
+    blob[chunk : chunk + 8] = native_accel.EVTX_CHUNK_SIGNATURE
+    struct.pack_into("<QQQQ", blob, chunk + 8, 1, 2, 1, 2)
+    struct.pack_into("<III", blob, chunk + 40, 128, 576, 640)
+    for relative, record_id in ((512, 1), (576, 2), (1024, 9)):
+        rec = chunk + relative
+        blob[rec : rec + 4] = native_accel.EVTX_RECORD_MAGIC
+        struct.pack_into("<IQQ", blob, rec + 4, 64, record_id, 0xDEAD0000 + record_id)
+        struct.pack_into("<I", blob, rec + 60, 64)
+    path.write_bytes(bytes(blob))
+
+
 class NativeAccelTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -126,6 +147,18 @@ class NativeAccelTests(unittest.TestCase):
         info = native_accel.engine_info()
         self.assertIn(info["engine"], ("pyo3-rapidcore", "rapid-worker-subprocess", "python-fallback"))
         self.assertIsInstance(info["available"], bool)
+
+    def test_last_live_record_of_chunk_is_allocated(self) -> None:
+        path = Path(self._tmp.name) / "two-live.evtx"
+        _write_two_live_records_evtx(path)
+        scans = [native_accel._scan_evtx_python(path, 1024)]
+        if native_accel._EXTENSION is not None:
+            scans.append(native_accel.scan_evtx(path))
+        for result in scans:
+            chunk = result["chunks"][0]
+            self.assertEqual((chunk["last_record_offset"], chunk["free_space_offset"]), (576, 640))
+            statuses = [(record["record_id"], record["allocation_status"]) for record in result["records"]]
+            self.assertEqual(statuses, [(1, "allocated"), (2, "allocated"), (9, "slack")])
 
 
 if __name__ == "__main__":

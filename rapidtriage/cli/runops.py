@@ -207,6 +207,7 @@ def apply_replay_audit(args: argparse.Namespace, parser: argparse.ArgumentParser
     eventlog_options = (options.get("collector_options") or {}).get("eventlog") or {}
     args.eventlog_structure_rows = bool(eventlog_options.get("structure_rows"))
     args.eventlog_record_detail = eventlog_options.get("record_detail")
+    args.eventlog_evtx_engine = eventlog_options.get("evtx_engine")
     if options.get("known_good_hash_feeds") and not options.get("known_good_hash_feed_files"):
         parser.error("--replay-audit: 감사 기록에 알려진 정상 해시 목록의 판본(SHA-256)이 없어 같은 목록을 특정할 수 없습니다.")
     archive_dir = audit_path.parent / KNOWN_GOOD_FEED_ARCHIVE_DIR_NAME
@@ -417,7 +418,9 @@ def handle_artifacts(args: argparse.Namespace, parser: argparse.ArgumentParser, 
             collector_options["message_catalog_path"] = Path(args.eventlog_message_catalog).expanduser().resolve()
         eventlog_options = eventlog_collector_options(args)
         if eventlog_options and args.kind != "eventlog":
-            parser.error("--eventlog-structure-rows/--eventlog-record-detail can only be used with --kind eventlog")
+            parser.error(
+                "--eventlog-structure-rows/--eventlog-record-detail/--eventlog-evtx-engine can only be used with --kind eventlog"
+            )
         collector_options.update(eventlog_options)
         if args.kind == "mobile-export":
             # R6 S2: adb backup inner databases are copied next to --output (never the evidence tree).
