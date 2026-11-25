@@ -53,3 +53,12 @@
   one still goes through the Python `redact_recovery_passwords`, so the output
   is identical (`tests/test_evtx_engine_rows_diff.py`). About 10× faster per
   full-detail row: 580–670 µs down to 50–65 µs.
+- With the Rust EVTX engine selected, the eventlog stage folds and strips
+  per-type/per-file constant blocks (`artifact_type_profiles`) in Rust
+  (`rapidcore_native.profile_observe_details`, `profile_common`,
+  `profile_strip_level`), and readers of that eventlog output expand rows with
+  `profile_merge`. Equality stays type-strict (`True` ≠ `1` ≠ `1.0`, `-0.0` ≠
+  `0.0`), key order and object identity are kept, and anything other than plain
+  JSON values goes to the Python code, so profiles and JSONL bytes are identical
+  (`tests/test_evtx_engine_rows_diff.py`). On 50,000 events, compaction CPU
+  went from 6.4 s to 1.6 s.

@@ -6,6 +6,8 @@ pub mod evtx;
 pub mod evtx_binxml;
 #[cfg(feature = "python")]
 pub mod py;
+#[cfg(feature = "python")]
+mod py_rows;
 
 pub const ARTIFACT_SCHEMA_VERSION: &str = "ArtifactRecordV1";
 

@@ -379,6 +379,18 @@ def _shallow_row(item: object) -> object:
     return item.to_dict() if hasattr(item, "to_dict") else item
 
 
+def _native_row_kernels(collector: object, collector_kind: str) -> object:
+    """``rapidcore_native`` for an eventlog collection on the Rust EVTX engine, else ``None``.
+
+    Its row kernels give the same profiles and rows as the Python code.
+    """
+    if collector_kind != EVENTLOG_KIND:
+        return None
+    from ..artifacts.windows.evtx_engine import native_row_kernels
+
+    return native_row_kernels(getattr(collector, "evtx_engine", None))
+
+
 def _dump_row(row: object) -> str:
     return json.dumps(row, ensure_ascii=False, separators=(",", ":"), default=json_default)
 
@@ -430,7 +442,8 @@ def stream_artifact_collection(
     records_path.parent.mkdir(parents=True, exist_ok=True)
     raw_path = records_path.with_name(records_path.name + ".raw.tmp")
     final_tmp = records_path.with_name(records_path.name + ".tmp")
-    builder = StreamingProfileBuilder()
+    native = _native_row_kernels(collector, collector_kind)
+    builder = StreamingProfileBuilder(native=native)
     annotator = StreamingArtifactAnnotator(rule_set) if rule_set is not None else None
     type_counts: Counter[str] = Counter()
     skip_reasons: Counter[str] = Counter()
@@ -531,7 +544,7 @@ def stream_artifact_collection(
         type_counts = Counter()
         skip_reasons = Counter()
         channels = ChannelCounter() if collector_kind == EVENTLOG_KIND else None
-        builder = StreamingProfileBuilder()
+        builder = StreamingProfileBuilder(native=native)
         annotator = StreamingArtifactAnnotator(rule_set) if rule_set is not None else None
         raw_path.write_text("", encoding="utf-8")
     except BaseException:

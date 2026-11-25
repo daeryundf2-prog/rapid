@@ -287,5 +287,6 @@ fn rapidcore_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(evtx_decoder_version, module)?)?;
     module.add_function(wrap_pyfunction!(redact_recovery_passwords_in, module)?)?;
     module.add_class::<EvtxChunkDecoder>()?;
+    crate::py_rows::register(module)?;
     Ok(())
 }

@@ -18,6 +18,7 @@ from ..artifact_profiles import (
     PROFILE_REF_KEY,
     PROFILES_PAYLOAD_KEY,
     expand_profile,
+    payload_row_kernels,
     resolve_records_path,
 )
 
@@ -44,6 +45,7 @@ def iter_artifact_rows(payload: Mapping[str, object], payload_path: Path | None)
     """``(record_index, expanded row)`` of a per-kind artifacts payload (JSONL stream or inline)."""
     profiles = payload.get(PROFILES_PAYLOAD_KEY)
     profiles = profiles if isinstance(profiles, Mapping) else None
+    native = payload_row_kernels(payload) if profiles else None
     records_path = (
         resolve_records_path(payload, payload_path) if payload.get("records_path") or payload.get("records_file") else None
     )
@@ -56,5 +58,5 @@ def iter_artifact_rows(payload: Mapping[str, object], payload_path: Path | None)
         if not isinstance(row, dict):
             continue
         if profiles and row.get(PROFILE_REF_KEY):
-            row = expand_profile(row, profiles, copy_templates=False)
+            row = expand_profile(row, profiles, copy_templates=False, native=native)
         yield index, row

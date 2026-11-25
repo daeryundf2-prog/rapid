@@ -290,7 +290,7 @@ class EngineSelectionTests(unittest.TestCase):
         stale = types.SimpleNamespace(
             EvtxChunkDecoder=object,
             evtx_decoder_version=lambda: "evtx-chunk-binxml-decoder-v1",
-            redact_recovery_passwords_in=None,
+            **dict.fromkeys(evtx_engine.NATIVE_ENGINE_FUNCTIONS),
         )
         with unittest.mock.patch("rapidtriage.core.native_accel.extension", return_value=stale):
             selection = evtx_engine.resolve_evtx_engine("rust")
