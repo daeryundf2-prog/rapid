@@ -2,6 +2,7 @@
 
 | Area | Status | Notes |
 | --- | --- | --- |
+| AI coding agents and MCP | Synthetic fixture coverage | Claude Code, Codex CLI, Gemini CLI, Cursor and VS Code-family global and workspace storage and chat session files, and MCP server settings. [Fields, paths and limits](ai-agent-artifacts.md) |
 | File metadata | Implemented | Names, paths, extensions, sizes, modified time, categories. |
 | KAPE-style collect planning/export | Implemented baseline | `collect-plan` profiles preview present/missing Windows/macOS collection targets before heavy scanning or copying. `collect-export` can build a bounded source-relative export package with SHA256 copy logs. |
 | Document text | Implemented | Text/log/config/data, EML/MBOX email, bounded Outlook MSG/PST/OST strings, PDF, Office OpenXML, and OpenDocument where dependencies support extraction. OOXML/ODF files now also emit `document-metadata-risk` rows with author/timestamp candidates, `metadata_profile`, `macro_profile`, and external relationship candidates so macro/template-link leakage pivots are visible in GUI/search; legacy OLE and macro behavior remain validation-gated. Sticky Notes `plum.sqlite` now emits live note rows with `sticky_note_schema_profile` and `sticky_note_review_profile`, plus bounded `sticky-note-recovery-candidate` string fragments that are not present in live note rows; recovered fragments remain validation-gated until deleted-row fixtures/trusted diffs exist. |

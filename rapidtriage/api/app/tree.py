@@ -19,6 +19,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from ...core.ai_agent_kinds import AI_AGENT_LABELS
 from ...core.artifact_domains import (
     ARTIFACT_DOMAIN_TABLE,
     DOMAIN_LABELS,
@@ -107,6 +108,7 @@ KIND_LABELS: dict[str, str] = {
     "recent-files": "최근 파일·LNK",
     "windows-remote-access": "원격 접속",
     "browser": "브라우저",
+    **AI_AGENT_LABELS,
     "p2p": "P2P·토렌트",
     "email": "이메일",
     "kakaotalk-windows": "카카오톡 (Windows)",

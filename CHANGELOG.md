@@ -114,3 +114,9 @@
   bounded text) go to the Python function
   (`tests/test_evtx_engine_rows_diff.py`). About 2× faster per row (18–23 µs
   down to 9–10 µs).
+- Five evidence collectors for AI coding agents: `claude-code`, `codex-cli`,
+  `gemini-cli`, `editor-chat` (Cursor and VS Code-family chat storage) and
+  `agent-mcp` (MCP server configuration). Dated messages, tool calls and tool
+  results appear in the timeline. Secrets are redacted before output, SQLite
+  is read from a verified private snapshot, and rows without a recorded
+  version carry `version-unknown`. See `docs/ai-agent-artifacts.md`.

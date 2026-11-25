@@ -10,8 +10,13 @@ import {
   kindsForCategory,
 } from "./categories";
 
-/** `artifact_collectors()` keys in rapidtriage/core/artifacts (25 kinds + R5 L1 email-clients, media-player, windows-phone-link). */
+/** `artifact_collectors()` keys in rapidtriage/core/artifacts (25 kinds + R5 L1 email-clients, media-player, windows-phone-link + AI coding agents). */
 const ENGINE_KINDS = [
+  "agent-mcp",
+  "claude-code",
+  "codex-cli",
+  "editor-chat",
+  "gemini-cli",
   "android-apk",
   "browser",
   "cloud-export",

@@ -134,6 +134,41 @@
       "artifacts": []
     },
     {
+      "name": "claude-code",
+      "description": "Claude Code 사용 기록",
+      "target_platform": "any",
+      "supported": true,
+      "artifacts": []
+    },
+    {
+      "name": "codex-cli",
+      "description": "Codex CLI 사용 기록",
+      "target_platform": "any",
+      "supported": true,
+      "artifacts": []
+    },
+    {
+      "name": "gemini-cli",
+      "description": "Gemini CLI 사용 기록",
+      "target_platform": "any",
+      "supported": true,
+      "artifacts": []
+    },
+    {
+      "name": "editor-chat",
+      "description": "Cursor·VS Code 대화 기록",
+      "target_platform": "any",
+      "supported": true,
+      "artifacts": []
+    },
+    {
+      "name": "agent-mcp",
+      "description": "코딩 에이전트 MCP 서버 설정",
+      "target_platform": "any",
+      "supported": true,
+      "artifacts": []
+    },
+    {
       "name": "kakaotalk-macos-database-inventory",
       "description": "macOS KakaoTalk container and database inventory with SQLite openability checks",
       "target_platform": "macos",

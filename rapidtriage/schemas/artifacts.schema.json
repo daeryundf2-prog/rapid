@@ -259,6 +259,31 @@
             "type": "boolean",
             "description": "true when artifact_type_profiles[profile_ref].contexts[path] holds this row's per-source-file constants"
           }
+        },
+        "if": {
+          "properties": {
+            "provider": {
+              "enum": [
+                "claude-code",
+                "codex-cli",
+                "gemini-cli",
+                "editor-chat",
+                "agent-mcp"
+              ]
+            }
+          },
+          "not": {
+            "required": [
+              "profile_ref"
+            ]
+          }
+        },
+        "then": {
+          "properties": {
+            "details": {
+              "$ref": "#/$defs/agentDetails"
+            }
+          }
         }
       }
     },
@@ -471,6 +496,118 @@
       "description": "Run stage reuse binding a --resume run must match: evidence identity digest, input fingerprint, stage options digest",
       "additionalProperties": {
         "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "agentDetails": {
+      "description": "Expanded AI coding-agent details. Streamed rows may hoist shared fields into profiles.",
+      "type": "object",
+      "required": [
+        "source_path",
+        "agent",
+        "role",
+        "text",
+        "model",
+        "session_id",
+        "cwd",
+        "tool_name",
+        "command_line",
+        "schema_version",
+        "file_paths",
+        "flags",
+        "timestamp_raw",
+        "timestamp_utc"
+      ],
+      "properties": {
+        "source_path": {
+          "type": "string"
+        },
+        "agent": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        },
+        "command_line": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "file_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "timestamp_raw": {
+          "type": [
+            "string",
+            "number",
+            "null"
+          ]
+        },
+        "timestamp_utc": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "source_line": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "message_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "content_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tool_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_table": {
+          "type": "string"
+        },
+        "source_rowid": {
+          "type": "integer"
+        },
+        "env_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     }
   }

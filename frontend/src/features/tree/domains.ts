@@ -730,6 +730,11 @@ export const DOMAINS: readonly DomainDef[] = [
           "shell-shortcut-invalid-content": "비정상 바탕화면·시작 메뉴 바로가기",
         },
       },
+      { id: "exec-claude-code", label: "Claude Code 사용 기록", target: a("claude-code") },
+      { id: "exec-codex-cli", label: "Codex CLI 사용 기록", target: a("codex-cli") },
+      { id: "exec-gemini-cli", label: "Gemini CLI 사용 기록", target: a("gemini-cli") },
+      { id: "exec-editor-chat", label: "Cursor·VS Code 대화 기록", target: a("editor-chat") },
+      { id: "exec-agent-mcp", label: "코딩 에이전트 MCP 서버 설정", target: a("agent-mcp") },
       { id: "exec-search-index", label: "Windows 검색 색인", target: a("windows-search-index") },
       {
         id: "exec-powershell",

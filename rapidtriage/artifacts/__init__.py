@@ -8,6 +8,8 @@ import warnings
 from collections.abc import Mapping
 from pathlib import Path
 
+from ..core.ai_agent_kinds import AI_AGENT_LABELS
+from .ai_agents import AiAgentProvider
 from .android import AndroidApkProvider
 from .cloud import CloudExportProvider
 from .cloud_sync import CloudSyncClientsProvider
@@ -116,6 +118,7 @@ def _builtin_providers() -> list[object]:
         SyntheticMediaProvider(),
         MobileExportProvider(),
         P2PArtifactsProvider(),
+        *(AiAgentProvider(kind) for kind in AI_AGENT_LABELS),
         KakaoTalkMacOsProvider(),
         KakaoTalkWindowsProvider(),
         KakaoTalkMemoryProvider(),

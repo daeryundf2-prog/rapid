@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..ai_agent_kinds import AI_AGENT_LABELS
 from .constants import (
     CROSS_PLATFORM_SYSTEM_ARTIFACT_KINDS,
     GENERAL_FORENSIC_ARTIFACT_KINDS,
@@ -110,6 +111,7 @@ RUN_PROFILES: dict[str, RunProfile] = {
         file_scan_path_contains=("recycle",),
         preferred_locations=("$recycle.bin", "recycle", "trash", "deleted"),
         artifacts_kinds=(
+            *AI_AGENT_LABELS,
             "recent-files",
             "email",
             "cloud-export",

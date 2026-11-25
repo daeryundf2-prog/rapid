@@ -6,6 +6,8 @@ search index build (``core.search_index``) and the CLI need not import the API.
 
 from __future__ import annotations
 
+from .ai_agent_kinds import AI_AGENT_LABELS
+
 # Evidence-tree domains, aligned with frontend/src/features/tree/domains.ts
 # (one table): (domain id, Korean label, artifact kind, artifact types).
 # ``None`` types = the kind's default domain; a row with types routes those
@@ -39,6 +41,7 @@ ARTIFACT_DOMAIN_TABLE: tuple[tuple[str, str, tuple[str, ...] | None], ...] = (
     ("execution", "windows-execution", None),
     ("execution", "windows-search-index", None),
     ("execution", "recent-files", None),
+    *(("execution", kind, None) for kind in AI_AGENT_LABELS),
     ("filesystem", "windows-filesystem", None),
     ("registry", "windows-registry", None),
     ("registry", "windows-shellbags", None),
