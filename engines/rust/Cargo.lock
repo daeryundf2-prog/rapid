@@ -154,6 +154,13 @@ name = "rapid-indicators"
 version = "0.1.0"
 
 [[package]]
+name = "rapid-ntfs"
+version = "0.1.0"
+dependencies = [
+ "pyo3",
+]
+
+[[package]]
 name = "rapid-worker"
 version = "0.1.0"
 dependencies = [

@@ -1271,9 +1271,9 @@ def parse_mft_file(
     """
     from ...artifacts.windows.filesystem import (
         mft_preferred_file_name_entry,
-        parse_mft_record_headers,
         resolve_mft_bounded_path,
     )
+    from ...core.ntfs_native import parse_mft_record_headers
 
     staging = ctx.directory / "mft-records.staging.jsonl"
     record_count = 0
@@ -1421,10 +1421,8 @@ def parse_mft_file(
 
 
 def parse_usn_file(ctx: AnalysisContext, journal_path: Path, nodes: _NodeView) -> dict[str, object]:
-    from ...artifacts.windows.filesystem import (
-        parse_usn_record_scan,
-        resolve_mft_bounded_path,
-    )
+    from ...artifacts.windows.filesystem import resolve_mft_bounded_path
+    from ...core.ntfs_native import parse_usn_record_scan
 
     size = journal_path.stat().st_size
     parent_paths: dict[int, str] = {}
