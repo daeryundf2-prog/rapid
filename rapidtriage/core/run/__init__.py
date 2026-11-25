@@ -2468,6 +2468,9 @@ def image_extract_reporter(progress: RunProgress, *, interval: float = 1.0) -> C
             message += f" · 삭제 파일 {deleted:,}개"
         if skipped:
             message += f" · 상한 초과 {skipped:,}개 건너뜀"
+        no_space = int(stats.get("disk_space_skips") or 0)
+        if no_space:
+            message += f" · 디스크 여유 공간 부족으로 {no_space:,}개 중단"
         progress.task_set_message("image-extract", message)
 
     return report

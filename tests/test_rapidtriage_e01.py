@@ -556,7 +556,7 @@ Units are in 512-byte sectors
         done: set[int] = set()
         with tempfile.TemporaryDirectory() as tmp_dir:
             out = Path(tmp_dir)
-            _recover_priority_paths(root, out, stats, limit=6, done=done)
+            _recover_priority_paths(root, out, stats, done=done)
             _walk_ntfs_dir(root, out, stats, limit=6, done=done)
             recovered = sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file())
         for path in (
@@ -568,6 +568,18 @@ Units are in 512-byte sectors
             self.assertIn(path, recovered)
         self.assertEqual(stats["files"], 6)  # 4 priority files + 2 of the 5 Program Files DLLs, none twice
         self.assertEqual(stats["truncated"], 3)
+
+        # A cap below the priority set (env override) still recovers every forensic source.
+        stats = {"files": 0, "bytes": 0, "errors": 0, "depth_skips": 0, "truncated": 0, "alias_skips": 0}
+        done = set()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            out = Path(tmp_dir)
+            _recover_priority_paths(root, out, stats, done=done)
+            _walk_ntfs_dir(root, out, stats, limit=2, done=done)
+            recovered = sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file())
+        self.assertEqual(len(recovered), 4)
+        self.assertNotIn("Program Files/app0.dll", recovered)
+        self.assertEqual(stats["truncated"], 5)
 
     def test_deleted_sweep_has_its_own_budget_after_the_allocated_walk_hit_the_cap(self) -> None:
         from rapidtriage.core import e01_native
@@ -949,6 +961,84 @@ Units are in 512-byte sectors
         for bogus in ("not-a-number", "0", "-5"):
             with patch.dict(os.environ, {e01_native.NATIVE_MAX_EXTRACT_FILES_ENV: bogus}):
                 self.assertEqual(e01_native.native_extract_file_limit(), e01_native.MAX_NATIVE_EXTRACT_FILES)
+
+    def test_default_file_cap_is_sized_from_the_mft_so_a_full_volume_is_covered(self) -> None:
+        from rapidtriage.core import e01_native
+
+        env = os.environ.copy()
+        env.pop(e01_native.NATIVE_MAX_EXTRACT_FILES_ENV, None)
+        with patch.dict(os.environ, env, clear=True):
+            # A full Windows volume has far more records than the old fixed 200k cap.
+            self.assertEqual(e01_native.native_extract_file_limit(1_200_000), 1_200_000)
+            self.assertEqual(e01_native.native_extract_file_limit(5_000), e01_native.MAX_NATIVE_EXTRACT_FILES)
+            self.assertEqual(
+                e01_native.native_extract_file_limit(10**9), e01_native.NATIVE_EXTRACT_FILES_CEILING
+            )
+            self.assertIsNone(e01_native.native_extract_file_limit_override())
+        with patch.dict(os.environ, {e01_native.NATIVE_MAX_EXTRACT_FILES_ENV: "50000"}):
+            self.assertEqual(e01_native.native_extract_file_limit(1_200_000), 50_000)  # explicit cap wins
+
+    def test_space_guard_stops_writing_at_the_free_space_reserve(self) -> None:
+        from rapidtriage.core import e01_native
+
+        free = {"bytes": 1_000}
+        usage = lambda _path: type("Usage", (), {"free": free["bytes"]})()
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.object(e01_native.shutil, "disk_usage", usage):
+            guard = e01_native.ExtractSpaceGuard(Path(tmp_dir), reserve=600)
+            self.assertTrue(guard.allows(300))  # 1,000 - 300 leaves 700
+            free["bytes"] = 700  # what the drive really has after that write
+            self.assertFalse(guard.allows(300))  # 700 - 300 would leave 400 < 600
+            self.assertTrue(guard.tripped)
+            free["bytes"] = 10_000
+            self.assertFalse(guard.allows(1))  # stays stopped: no flapping near the reserve
+
+            class Rec:
+                def size(self) -> int:
+                    return 5
+
+                def open(self) -> io.BytesIO:
+                    return io.BytesIO(b"12345")
+
+            stats = {"files": 0, "bytes": 0, "errors": 0, "disk_space_skips": 0}
+            target = Path(tmp_dir) / "x.bin"
+            e01_native._dump_ntfs_record(Rec(), target, stats, guard)
+        self.assertEqual(stats, {"files": 0, "bytes": 0, "errors": 0, "disk_space_skips": 1})
+        self.assertFalse(target.exists())
+
+    def test_deleted_record_skipped_for_disk_space_is_not_counted_as_recovered(self) -> None:
+        from rapidtriage.core import e01_native
+
+        class Header:
+            Flags = 0
+
+        class DeletedRecord:
+            header = Header()
+            filename = "gone.docx"
+
+            def is_file(self) -> bool:
+                return True
+
+            def size(self) -> int:
+                return 3
+
+            def open(self) -> io.BytesIO:
+                return io.BytesIO(b"doc")
+
+        class Fs:
+            class mft:
+                @staticmethod
+                def get(index: int) -> DeletedRecord:
+                    return DeletedRecord()
+
+        class FullDisk:
+            def allows(self, size: int) -> bool:
+                return False
+
+        stats = {"files": 0, "bytes": 0, "errors": 0, "truncated": 0, "deleted_files": 0,
+                 "deleted_read_errors": 0, "disk_space_skips": 0}
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.object(e01_native, "_mft_record_count", return_value=2):
+            e01_native._sweep_deleted_mft_records(Fs(), Path(tmp_dir), stats, limit=10, guard=FullDisk())
+        self.assertEqual((stats["deleted_files"], stats["deleted_read_errors"], stats["disk_space_skips"]), (0, 0, 2))
 
     def _fake_ntfs_fixtures(self):
         class _FakeFile:

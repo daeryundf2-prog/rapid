@@ -2137,7 +2137,10 @@ def _extract_e01_native_fallback(
 ) -> E01ExtractionResult:
     """Recover files with pyewf + dissect.ntfs (in-process, no external tools)."""
     from .e01_native import (
+        MAX_NATIVE_EXTRACT_FILES,
+        NATIVE_EXTRACT_FILES_CEILING,
         NATIVE_MAX_EXTRACT_FILES_ENV,
+        NATIVE_MIN_FREE_GB_ENV,
         NATIVE_MOUNT_STRATEGY,
         extract_e01_native,
     )
@@ -2283,14 +2286,31 @@ def _extract_e01_native_fallback(
         "encrypted volumes are not expanded.",
     ]
     if stats.get("truncated"):
-        # The active cap (RAPIDTRIAGE_NATIVE_MAX_EXTRACT_FILES may override the default), applied
-        # separately to the allocated tree and to the deleted-record sweep.
+        # The active cap, applied separately to the allocated tree and to the deleted-record
+        # sweep: RAPIDTRIAGE_NATIVE_MAX_EXTRACT_FILES when set, else sized from the $MFT.
         file_limit = int(stats.get("file_limit") or 0)
+        if stats.get("file_limit_from_env"):
+            origin = f"set by {NATIVE_MAX_EXTRACT_FILES_ENV}"
+            remedy = f"raise or unset {NATIVE_MAX_EXTRACT_FILES_ENV}"
+        else:
+            origin = (
+                f"default, sized from {int(stats.get('mft_record_count') or 0):,} $MFT records "
+                f"(floor {MAX_NATIVE_EXTRACT_FILES:,}, ceiling {NATIVE_EXTRACT_FILES_CEILING:,})"
+            )
+            remedy = f"set {NATIVE_MAX_EXTRACT_FILES_ENV} above the cap"
         warnings.append(
-            f"Native extraction hit the {file_limit:,}-file safety cap "
-            f"({stats.get('truncated'):,} further entries skipped; the cap applies to allocated "
-            "files and to deleted records separately). Re-run with a narrower partition "
-            f"selection or raise {NATIVE_MAX_EXTRACT_FILES_ENV} if complete coverage is required."
+            f"Native extraction hit the {file_limit:,}-file safety cap ({origin}; "
+            f"{stats.get('truncated'):,} further entries skipped; the cap applies to allocated "
+            "files and to deleted records separately; Windows forensic sources (hives, event "
+            "logs, Prefetch, ...) are recovered first and never capped). Re-run with a narrower "
+            f"partition selection or {remedy} if complete coverage is required."
+        )
+    if stats.get("disk_space_skips"):
+        min_free_gib = int(stats.get("min_free_bytes") or 0) / (1 << 30)
+        warnings.append(
+            f"Native extraction stopped writing when the output drive reached its {min_free_gib:.0f} GB "
+            f"free-space reserve ({stats.get('disk_space_skips'):,} entries not recovered). Free space "
+            f"or choose another output drive, or lower {NATIVE_MIN_FREE_GB_ENV}, and re-run."
         )
     return E01ExtractionResult(
         source_path=source_path,
