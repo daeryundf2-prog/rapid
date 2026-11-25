@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 import struct
 import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest import mock
 
 from rapidtriage.artifacts.windows.prefetch import WindowsPrefetchProvider
 from rapidtriage.artifacts.windows.recent_files import (
@@ -145,6 +147,32 @@ class TruncatedPrefetchTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["parser_error_count"], 1)
         self.assertEqual(payload["parser_errors"][0]["error_type"], "prefetch-incomplete-input")
         self.assertEqual(Path(payload["parser_errors"][0]["path"]).name, "OTHER.EXE-00000000.pf")
+
+    def test_unreadable_prefetch_folder_is_a_collection_failure_not_an_empty_success(self) -> None:
+        root, _ = self.collect_dir({"SAMPLE.EXE-1A2B3C4D.pf": v23_prefetch()})
+        # Resolved on both sides: a Windows TEMP may be an 8.3 short path (C:\Users\RUNNER~1\...)
+        # while the collector lists the long form.
+        prefetch_dir = (root / "Windows" / "Prefetch").resolve()
+        real_iterdir = Path.iterdir
+
+        def denied(self: Path):
+            if self.resolve() == prefetch_dir:
+                raise PermissionError(13, "Access is denied", str(self))
+            return real_iterdir(self)
+
+        real_scandir = os.scandir
+
+        def denied_scandir(path="."):
+            if Path(path).resolve() == prefetch_dir:
+                raise PermissionError(13, "Access is denied", str(path))
+            return real_scandir(path)
+
+        with mock.patch.object(Path, "iterdir", denied), mock.patch("os.scandir", denied_scandir):
+            payload = run_artifact_collection(root, kind="windows-prefetch", use_cache=False)
+
+        self.assertEqual(payload["summary"]["collection_status"], "failed-isolated")
+        self.assertEqual(payload["summary"]["artifact_count"], 0)
+        self.assertEqual(payload["parser_errors"][0]["error_type"], "PermissionError")
 
     def test_cut_inside_file_information_is_incomplete_for_each_version(self) -> None:
         full = v23_prefetch()

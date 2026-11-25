@@ -20,21 +20,50 @@ function Write-Step {
     Write-Host "==> $Message" -ForegroundColor Cyan
 }
 
+# Python children write UTF-8 and the console decodes it as UTF-8; otherwise Korean
+# paths and messages piped through Out-Host are shown as CP949 mojibake.
+$env:PYTHONIOENCODING = "utf-8"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+# The python.org per-user installer leaves py.exe/python.exe off PATH unless the
+# PATH box is ticked, and %LOCALAPPDATA%\Microsoft\WindowsApps\python.exe is the
+# Microsoft Store alias that only prints "Python was not found" (exit 9009).
+function Find-SystemPython {
+    $py = Get-Command py -ErrorAction SilentlyContinue
+    if (-not $py) {
+        $py = Get-Item (Join-Path $env:LOCALAPPDATA "Programs\Python\Launcher\py.exe") -ErrorAction SilentlyContinue
+    }
+    if ($py) {
+        return @{ Exe = $(if ($py -is [System.IO.FileInfo]) { $py.FullName } else { $py.Source }); Args = @("-3") }
+    }
+    $python = Get-Command python -All -ErrorAction SilentlyContinue |
+        Where-Object { $_.Source -notlike "*\WindowsApps\*" } |
+        Select-Object -First 1
+    if ($python) {
+        return @{ Exe = $python.Source; Args = @() }
+    }
+    # Python312, Python312-32, Python313-arm64: order by the minor version, not every digit
+    # in the folder name, and skip interpreters older than the 3.10 floor.
+    $installed = Get-ChildItem (Join-Path $env:LOCALAPPDATA "Programs\Python\Python3*\python.exe") -ErrorAction SilentlyContinue |
+        Where-Object { $_.Directory.Name -match "^Python3(\d+)" -and [int]$Matches[1] -ge 10 } |
+        Sort-Object { [int]($_.Directory.Name -replace "^Python3(\d+).*$", '$1') } -Descending |
+        Select-Object -First 1
+    if ($installed) {
+        return @{ Exe = $installed.FullName; Args = @() }
+    }
+    throw "Python was not found. Install Python 3.10+ from https://www.python.org/downloads/windows/ and enable 'Add python.exe to PATH'."
+}
+
 # Native command output is sent to the host (Out-Host), never to the
 # function's output stream: a PowerShell function returns everything its
 # body writes, so a child that prints a line would otherwise turn the
 # returned exit code into an array and every caller check into a failure.
 function Invoke-SystemPython {
     param([string[]]$PythonArgs)
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        & py -3 @PythonArgs | Out-Host
-        return [int]$LASTEXITCODE
-    }
-    if (Get-Command python -ErrorAction SilentlyContinue) {
-        & python @PythonArgs | Out-Host
-        return [int]$LASTEXITCODE
-    }
-    throw "Python was not found. Install Python 3.10+ from https://www.python.org/downloads/windows/ and enable 'Add python.exe to PATH'."
+    $python = Find-SystemPython
+    $allArgs = @($python.Args) + $PythonArgs
+    & $python.Exe @allArgs | Out-Host
+    return [int]$LASTEXITCODE
 }
 
 function Invoke-VenvPython {

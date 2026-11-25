@@ -101,7 +101,7 @@ python -m pip install -e ".[web,test,kakaotalk,columnar]"
 rapidtriage doctor
 ```
 
-`py -3.12`가 없다면 Python 3.12를 설치하거나 `py -3.11`을 사용하세요.
+`py -3.12`가 없다면 Python 3.12를 설치하거나 `py -3.11`을 사용하세요. python.org 사용자 설치에서 "Add python.exe to PATH"를 켜지 않아 `py`가 인식되지 않으면 첫 줄을 `& "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe" -m venv .venv`로 바꾸거나, 이 경우를 스스로 찾는 `scripts\windows\start-rapidtriage.ps1` 런처를 쓰세요.
 
 ### 웹 UI 실행
 
