@@ -64,6 +64,50 @@ sh scripts/start-rapidtriage.sh --no-browser
 5. Use `Check evidence support` on real evidence before running it.
 6. Use `Fast first pass` for large cases before any deep extraction.
 
+## KnowledgeC and journald
+
+Point either collector at the root of a mounted evidence volume or a directory
+export that preserves its paths. Write the results outside the evidence root.
+
+```bash
+python -m rapidtriage artifacts ./mac-export --kind macos-knowledgec --output ./knowledgec.json
+python -m rapidtriage artifacts ./linux-export --kind linux-journald --output ./journald.json
+```
+
+**macOS activity.** The collector looks for
+`private/var/db/CoreDuet/Knowledge/knowledgeC.db` and
+`Users/<user>/Library/Application Support/Knowledge/knowledgeC.db`.
+Keep the database and its acquired SQLite sidecars together. A committed
+activity may exist only in the WAL. The collector uses a private read-only
+snapshot and cites the source table and row. [SQLite WAL format](https://www.sqlite.org/wal.html)
+
+App focus and usage, lock and backlight state, Safari history, web usage,
+notifications, intents and battery percentage retain their stream names.
+Unknown streams carry a flag and their stored values. Read the stream and
+source device together when interpreting synced activity. Raw start and end
+values are seconds from 2001-01-01 00:00:00 UTC. [Core Foundation absolute time](https://developer.apple.com/documentation/corefoundation/cfabsolutetime)
+
+**Linux system journal.** The collector follows the global entry-array chain
+in `var/log/journal/` files ending in `.journal` or `.journal~`. It reads
+regular and compact layouts through object offsets in both hash modes.
+Real time is UTC microseconds since the Unix epoch. Monotonic time is
+meaningful with its boot ID. The entry and its field objects have separate
+offsets, so a damaged or compressed field can be located even if its value
+is unavailable. Online state is recorded. XZ uses the standard library.
+LZ4 and ZSTD fields carry a `compressed-unsupported` limitation.
+[Journal File Format](https://systemd.io/JOURNAL_FILE_FORMAT/)
+
+| Collector | Limits and diagnostics |
+| --- | --- |
+| KnowledgeC | Per database, up to 256 MiB across the database and sidecars, 5,000 events, 16 MiB of serialized event details, 32 value columns and 256 metadata columns. Each value retains up to 4,096 bytes. Clipped values name the affected column. |
+| journald | Per collection, up to 64 files, 5,000 indexed entry slots, 65,536 field references and 64 MiB of reads plus inflated data. Each file may use up to 4,096 entry arrays. Each entry may reference up to 256 fields, each limited to 1 MiB stored or decoded. The XZ decoder has a 64 MiB memory limit. |
+
+KnowledgeC binary values are hex-encoded. Journal fields retain their stored
+names, repeated fields become lists, and non-UTF-8 values use tagged base64.
+Journal coverage follows the global index. Unlinked records, volatile journals
+under `run/log/journal`, and cryptographic seal verification are outside its
+scope. Fixture validation uses generated inputs for both formats.
+
 ## Release Smoke Test
 
 Before handing a macOS/Linux build to another analyst, run the automated smoke test:

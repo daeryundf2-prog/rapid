@@ -32,6 +32,14 @@
 
 ### Added
 
+- The `macos-knowledgec` collector reads system and per-user KnowledgeC
+  activity streams, including committed WAL rows. It retains raw time values
+  alongside UTC timestamps and flags unknown streams.
+- The `linux-journald` collector reads persistent systemd journals in regular
+  and compact layouts. Entries carry source offsets. Undecodable fields
+  and damaged structures carry diagnostics. Both collectors are selectable
+  in run plans and contribute events to the timeline.
+
 - Opt-in Rust EVTX chunk decoder (`rapidcore_native.EvtxChunkDecoder`),
   selected with `RAPIDTRIAGE_EVTX_ENGINE=rust` or
   `--eventlog-evtx-engine rust`. The default stays Python. Rows are identical to

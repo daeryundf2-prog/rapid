@@ -14,9 +14,11 @@ from .cloud_sync import CloudSyncClientsProvider
 from .email import EmailArtifactsProvider
 from .email_clients import EmailClientsProvider
 from .generic import GenericDocumentArtifactProvider
+from .journald import JournaldProvider
 from .kakaotalk_macos import KakaoTalkMacOsProvider
 from .kakaotalk_memory import KakaoTalkMemoryProvider
 from .kakaotalk_windows import KakaoTalkWindowsProvider
+from .knowledgec import KnowledgeCProvider
 from .linux import LinuxSystemArtifactsProvider
 from .macos import MacOsSystemArtifactsProvider
 from .media import MediaImageProvider
@@ -106,7 +108,9 @@ def _builtin_providers() -> list[object]:
         # R5 L1 (communication and media apps)
         EmailClientsProvider(),
         LinuxSystemArtifactsProvider(),
+        JournaldProvider(),
         MacOsSystemArtifactsProvider(),
+        KnowledgeCProvider(),
         MediaImageProvider(),
         MemoryVolatilityProvider(),
         SyntheticMediaProvider(),

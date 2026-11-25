@@ -129,6 +129,67 @@
           "supported",
           "details"
         ],
+        "allOf": [
+          {
+            "if": {
+              "properties": { "artifact_type": { "const": "macos-knowledgec-event" } },
+              "not": { "required": ["profile_ref"] }
+            },
+            "then": {
+              "properties": {
+                "details": {
+                  "required": ["source_row_id", "stream", "unknown_stream", "start_raw", "end_raw", "start_at", "end_at", "structured_metadata"],
+                  "properties": {
+                    "stream": { "type": "string" },
+                    "unknown_stream": { "type": "boolean" },
+                    "start_at": { "type": ["string", "null"] },
+                    "end_at": { "type": ["string", "null"] },
+                    "structured_metadata": { "type": "object" }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": { "artifact_type": { "const": "linux-journald-entry" } },
+              "not": { "required": ["profile_ref"] }
+            },
+            "then": {
+              "properties": {
+                "details": {
+                  "required": ["source_offset", "length", "entry_array_offset", "data_offsets", "timestamp", "fields", "journal_state", "compact", "keyed_hash", "limitations"],
+                  "properties": {
+                    "source_offset": { "type": "integer", "minimum": 0 },
+                    "length": { "type": "integer", "minimum": 0 },
+                    "entry_array_offset": { "type": "integer", "minimum": 0 },
+                    "data_offsets": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+                    "timestamp": { "type": ["string", "null"] },
+                    "fields": { "type": "object" },
+                    "journal_state": { "enum": ["offline", "online", "archived"] },
+                    "compact": { "type": "boolean" },
+                    "keyed_hash": { "type": "boolean" },
+                    "limitations": { "type": "array" }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": { "artifact_type": { "enum": ["macos-knowledgec-diagnostic", "linux-journald-diagnostic"] } },
+              "not": { "required": ["profile_ref"] }
+            },
+            "then": {
+              "properties": {
+                "details": {
+                  "required": ["source_path", "reason"],
+                  "properties": { "source_path": { "type": "string" }, "reason": { "type": "string" } }
+                }
+              }
+            }
+          }
+        ],
         "properties": {
           "provider": {
             "type": "string"

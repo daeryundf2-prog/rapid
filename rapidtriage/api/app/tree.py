@@ -129,6 +129,8 @@ KIND_LABELS: dict[str, str] = {
     "windows-system": "Windows 시스템",
     "linux-system": "Linux 시스템",
     "macos-system": "macOS 시스템",
+    "macos-knowledgec": "macOS 활동 기록(KnowledgeC)",
+    "linux-journald": "Linux 시스템 저널",
 }
 
 
