@@ -511,6 +511,41 @@ Units are in 512-byte sectors
             _walk_ntfs_dir(root, Path(tmp_dir), stats, limit=10, on_progress=lambda s: seen.append((s["files"], s["bytes"])))
         self.assertEqual(seen, [(1, 4), (2, 6)])
 
+    def test_deleted_sweep_has_its_own_budget_after_the_allocated_walk_hit_the_cap(self) -> None:
+        from rapidtriage.core import e01_native
+
+        class Header:
+            Flags = 0  # in-use bit cleared: a deleted record
+
+        class DeletedRecord:
+            header = Header()
+            filename = "gone.docx"
+
+            def is_file(self) -> bool:
+                return True
+
+            def size(self) -> int:
+                return 3
+
+            def open(self) -> io.BytesIO:
+                return io.BytesIO(b"doc")
+
+        class Mft:
+            def get(self, index: int) -> DeletedRecord:
+                return DeletedRecord()
+
+        class Fs:
+            mft = Mft()
+
+        # The allocated walk already used the whole cap (files == limit).
+        stats = {"files": 2, "bytes": 0, "errors": 0, "truncated": 5, "deleted_files": 0, "deleted_read_errors": 0}
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.object(e01_native, "_mft_record_count", return_value=3):
+            e01_native._sweep_deleted_mft_records(Fs(), Path(tmp_dir), stats, limit=2)
+            recovered = sorted(p.name for p in (Path(tmp_dir) / "_deleted_mft").iterdir())
+        self.assertEqual(stats["deleted_files"], 2)
+        self.assertEqual(recovered, ["0-gone.docx", "1-gone.docx"])
+        self.assertEqual(stats["truncated"], 6)  # the third deleted record is over its own budget
+
     def test_image_extract_reporter_writes_files_and_size_to_the_running_plan_task(self) -> None:
         from rapidtriage.core.run import RunProgress, image_extract_reporter
         from rapidtriage.core.run.plan import build_run_plan
@@ -811,11 +846,12 @@ Units are in 512-byte sectors
                 "selected_partition": partition_row,
                 "selected_start_sector": 2048,
                 "stats": {
-                    "files": 200_000,
+                    "files": 50_000,
                     "bytes": 0,
                     "errors": 0,
                     "truncated": 42,
                     "deleted_files": 0,
+                    "file_limit": 50_000,
                 },
             }
             with patch(
@@ -827,7 +863,10 @@ Units are in 512-byte sectors
                     root / "stage",
                     tool_resolver=lambda _: None,
                 )
-            self.assertTrue(any("safety cap" in warning for warning in result.warnings))
+            cap_warning = next(warning for warning in result.warnings if "safety cap" in warning)
+            # The active (env-overridable) cap and the variable that raises it, not a fixed 200,000.
+            self.assertIn("50,000-file safety cap", cap_warning)
+            self.assertIn("RAPIDTRIAGE_NATIVE_MAX_EXTRACT_FILES", cap_warning)
             checkpoint = json.loads(
                 (root / "stage" / "rapidtriage-e01-stage-status.json").read_text(encoding="utf-8")
             )

@@ -622,7 +622,9 @@ def _sweep_deleted_mft_records(
             filename = rec.filename or f"record-{index}"
         except Exception:
             continue
-        if stats["files"] >= limit:
+        # Deleted records get their own budget: the sweep runs after the allocated walk, so a
+        # shared cap (reached by the live tree on any full Windows volume) recovered none of them.
+        if stats["deleted_files"] + stats["deleted_read_errors"] >= limit:
             stats["truncated"] += 1
             continue
         target = deleted_dir / f"{index}-{_safe_component(filename)}"

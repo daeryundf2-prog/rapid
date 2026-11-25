@@ -2136,7 +2136,11 @@ def _extract_e01_native_fallback(
     on_progress: ExtractProgress | None = None,
 ) -> E01ExtractionResult:
     """Recover files with pyewf + dissect.ntfs (in-process, no external tools)."""
-    from .e01_native import NATIVE_MOUNT_STRATEGY, extract_e01_native
+    from .e01_native import (
+        NATIVE_MAX_EXTRACT_FILES_ENV,
+        NATIVE_MOUNT_STRATEGY,
+        extract_e01_native,
+    )
 
     recovery_scope = build_tsk_recover_recovery_scope()
     recovery_scope = {
@@ -2279,11 +2283,14 @@ def _extract_e01_native_fallback(
         "encrypted volumes are not expanded.",
     ]
     if stats.get("truncated"):
+        # The active cap (RAPIDTRIAGE_NATIVE_MAX_EXTRACT_FILES may override the default), applied
+        # separately to the allocated tree and to the deleted-record sweep.
+        file_limit = int(stats.get("file_limit") or 0)
         warnings.append(
-            f"Native extraction hit the {200_000:,}-file safety cap "
-            f"({stats.get('truncated'):,} further entries skipped). Re-run "
-            "with a narrower partition selection or raise the limit if "
-            "complete coverage is required."
+            f"Native extraction hit the {file_limit:,}-file safety cap "
+            f"({stats.get('truncated'):,} further entries skipped; the cap applies to allocated "
+            "files and to deleted records separately). Re-run with a narrower partition "
+            f"selection or raise {NATIVE_MAX_EXTRACT_FILES_ENV} if complete coverage is required."
         )
     return E01ExtractionResult(
         source_path=source_path,
