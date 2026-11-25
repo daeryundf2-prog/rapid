@@ -134,6 +134,13 @@
       "artifacts": []
     },
     {
+      "name": "kakaotalk-memory-analysis",
+      "description": "KakaoTalk process dumps anywhere in the evidence tree plus hiberfil/pagefile residue",
+      "target_platform": "windows",
+      "supported": true,
+      "artifacts": []
+    },
+    {
       "name": "windows-browser-artifacts",
       "description": "Windows browser history/download collectors backed by real profile files",
       "target_platform": "windows",
