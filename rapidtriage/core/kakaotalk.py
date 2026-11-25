@@ -84,7 +84,7 @@ STORED_PRAGMA_FIELD_NAMES = ("dev_id",)
 KAKAOTALK_USERDIR_KEY_SEED = "KAKAOTALK_PC_FOREVER"
 USERDIR_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
 MEMORY_DUMP_SUFFIXES = (".dmp", ".dump", ".raw", ".mem", ".core")
-MEMORY_DUMP_NAME_HINTS = ("kakaotalk", "kakaotalkmac", "memory", "process", "core")
+MEMORY_DUMP_NAME_HINTS = ("kakaotalk", "memory", "process")
 KAKAOTALK_MACOS_COLLECT_VERSION = "kakaotalk-macos-collect-v1"
 MACHO_MAGIC_64_LE = b"\xcf\xfa\xed\xfe"
 MACHO_MAGIC_64_BE = b"\xfe\xed\xfa\xcf"
@@ -92,6 +92,14 @@ MACHO_FILETYPE_CORE = 4
 MACHO_LC_SEGMENT_64 = 0x19
 MACHO_LOAD_COMMAND_READ_CAP = 64 * 1024 * 1024
 KAKAOTALK_MACOS_PROCESS_NAMES = ("KakaoTalk", "KakaoTalkMac")
+MACOS_SAVE_CORE_STYLES = ("modified-memory", "full", "stack")
+MACOS_LIVE_STATE_NOTICE = (
+    "Attaching a debugger alters the live system: lldb stops every thread of the target "
+    "while the core is written, starts debugserver, pages memory in, and changes the "
+    "process's timing, thread states and kernel accounting. The core is a snapshot of an "
+    "altered state and cannot be reproduced; if lldb times out or fails mid-attach the "
+    "process may be left stopped or terminated. Record the attach window with the evidence."
+)
 DEFAULT_MEMORY_REVERSE_INDICATOR_LIMIT = 300
 DEFAULT_MEMORY_SQLCIPHER_KEY_RESIDUE_LIMIT = 300
 SQLCIPHER_KEY_LITERAL_PATTERN = re.compile(rb"x'([0-9a-fA-F]{64}|[0-9a-fA-F]{96})'")
@@ -980,6 +988,22 @@ def find_running_kakaotalk_macos_pids() -> list[int]:
     return sorted(set(pids))
 
 
+def macos_process_executable_name(pid: int) -> str:
+    """Executable base name of ``pid`` from the process table (``ps -o comm=``), or ''."""
+
+    try:
+        result = _run_macos_command(["ps", "-p", str(pid), "-o", "comm="], timeout=10.0)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return (result.stdout or "").strip().rsplit("/", 1)[-1]
+
+
+def lldb_quote(value: str) -> str:
+    """Quote one lldb command argument (double quotes; backslash escapes ``\\`` and ``"``)."""
+
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def run_lldb_process_save_core(
     pid: int,
     output_core: Path,
@@ -994,29 +1018,42 @@ def run_lldb_process_save_core(
     target task port, which requires root or the debugging entitlement and is
     refused for a hardened-runtime app that lacks ``get-task-allow``. This never
     bypasses that; it reports whatever the system returns. Callers run it only on
-    a consenting, authorized live session.
+    a consenting, authorized live session after the operator opted in to attaching.
+    The attach alters the live process (``MACOS_LIVE_STATE_NOTICE``); its window is
+    recorded as ``attach_started_at``/``attach_finished_at``.
     """
 
+    if style not in MACOS_SAVE_CORE_STYLES:
+        raise KakaoTalkDecryptError(f"--save-core-style must be one of {', '.join(MACOS_SAVE_CORE_STYLES)}")
     command = [
         lldb_bin,
         "-b",
         "-o",
         f"process attach --pid {pid}",
         "-o",
-        f"process save-core --style={style} {output_core}",
+        f"process save-core --style={style} {lldb_quote(str(output_core))}",
         "-o",
         "detach",
         "-o",
         "quit",
     ]
+    started_at = dt.datetime.now(dt.timezone.utc).isoformat()
     try:
         result = _run_macos_command(command, timeout=timeout)
     except (OSError, subprocess.SubprocessError) as exc:
+        timed_out = isinstance(exc, subprocess.TimeoutExpired)
         return {
             "pid": pid,
             "status": "tool-error",
             "core_path": "",
-            "detail": f"lldb could not be launched: {exc}",
+            "detail": (
+                f"lldb timed out after {timeout} s and was killed; the target may be left stopped or terminated"
+                if timed_out
+                else f"lldb could not be launched: {exc}"
+            ),
+            "process_state_unknown": timed_out,
+            "attach_started_at": started_at,
+            "attach_finished_at": dt.datetime.now(dt.timezone.utc).isoformat(),
             "lldb_command": command,
         }
     produced = output_core.exists() and output_core.stat().st_size > 0
@@ -1026,6 +1063,8 @@ def run_lldb_process_save_core(
         "core_path": str(output_core) if produced else "",
         "returncode": result.returncode,
         "detail": ((result.stdout or "") + (result.stderr or "")).strip()[:4000],
+        "attach_started_at": started_at,
+        "attach_finished_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "lldb_command": command,
     }
 
@@ -1084,8 +1123,9 @@ def write_macos_collection_manifest(
     consent: Mapping[str, object],
     preflight: Mapping[str, object],
     core_dumps: Sequence[Mapping[str, object]],
+    forensic_soundness: Mapping[str, object],
 ) -> dict[str, object]:
-    """Write a hashed manifest of collected cores with consent and tool metadata."""
+    """Write a hashed manifest of collected cores with consent, tool and live-state metadata."""
 
     files: list[dict[str, object]] = []
     for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
@@ -1117,6 +1157,7 @@ def write_macos_collection_manifest(
             "Collect only a live session you are authorized to examine, with the "
             "account holder present and consenting."
         ),
+        "forensic_soundness": dict(forensic_soundness),
     }
     write_result(manifest, output)
     return manifest
@@ -1131,25 +1172,29 @@ def run_kakaotalk_macos_collect(
     lldb_bin: str = "lldb",
     save_core_style: str = "modified-memory",
     timeout_seconds: float = 600.0,
-    preflight_only: bool = False,
+    attach: bool = False,
 ) -> dict[str, object]:
-    """Collect authorized live macOS KakaoTalk process memory into cores + manifest.
+    """Report macOS collection posture and, only when ``attach`` is set, collect KakaoTalk cores.
 
-    The collection targets the running KakaoTalk process of a logged-in, consenting
-    user on site. It runs preflight checks first and never bypasses macOS security:
-    if the system refuses the task port, the refusal is recorded. ``preflight_only``
-    stops after the posture report without attempting any dump.
+    Without ``attach`` nothing is attached: the preflight posture is recorded and the
+    process table is not even queried. With ``attach`` (the operator's explicit opt-in,
+    plus a recorded consent statement) each running process named KakaoTalk or
+    KakaoTalkMac is re-checked by name right before lldb attaches, so a recycled PID
+    is never attached. macOS security is never bypassed: a refused task port is
+    recorded. Attaching alters the live process; see ``MACOS_LIVE_STATE_NOTICE``.
     """
 
     output_root = output_root.expanduser().resolve()
     if not operator.strip():
         raise KakaoTalkDecryptError("--operator is required to record who performed the collection")
-    if not consent_statement.strip() and not preflight_only:
+    if attach and not consent_statement.strip():
         raise KakaoTalkDecryptError("--consent-statement is required to record the account holder's consent")
     if timeout_seconds <= 0:
         raise KakaoTalkDecryptError("--timeout-seconds must be > 0")
+    if save_core_style not in MACOS_SAVE_CORE_STYLES:
+        raise KakaoTalkDecryptError(f"--save-core-style must be one of {', '.join(MACOS_SAVE_CORE_STYLES)}")
 
-    timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     case_dir = output_root / f"kakaotalk_macos_collection_{timestamp}"
     collection_dir = case_dir / "collection"
     collection_dir.mkdir(parents=True, exist_ok=True)
@@ -1162,10 +1207,16 @@ def run_kakaotalk_macos_collect(
         "recorded_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "consent_obtained": bool(consent_statement.strip()),
     }
+    forensic_soundness = {
+        "attach_opt_in": attach,
+        "live_state_altered": False,
+        "live_state_notice": MACOS_LIVE_STATE_NOTICE,
+        "target_process_names": list(KAKAOTALK_MACOS_PROCESS_NAMES),
+    }
 
     core_dumps: list[dict[str, object]] = []
     status = "preflight-only"
-    if not preflight_only:
+    if attach:
         if not preflight["can_attempt"]:
             status = "blocked-by-preflight"
         else:
@@ -1174,18 +1225,37 @@ def run_kakaotalk_macos_collect(
                 status = "no-running-process"
             else:
                 for pid in pids:
-                    core_path = collection_dir / f"KakaoTalkMac_{pid}.core"
-                    core_dumps.append(
-                        run_lldb_process_save_core(
-                            pid,
-                            core_path,
-                            lldb_bin=lldb_bin,
-                            style=save_core_style,
-                            timeout=timeout_seconds,
+                    executable = macos_process_executable_name(pid)
+                    if executable not in KAKAOTALK_MACOS_PROCESS_NAMES:
+                        core_dumps.append(
+                            {
+                                "pid": pid,
+                                "status": "skipped-not-target",
+                                "core_path": "",
+                                "detail": f"process name {executable!r} is not a KakaoTalk process; not attached",
+                            }
                         )
+                        continue
+                    core_path = collection_dir / f"KakaoTalkMac_{pid}.core"
+                    result = run_lldb_process_save_core(
+                        pid,
+                        core_path,
+                        lldb_bin=lldb_bin,
+                        style=save_core_style,
+                        timeout=timeout_seconds,
                     )
+                    result["process_name"] = executable
+                    core_dumps.append(result)
+                    # A launch failure never reached the target; anything else may have attached.
+                    if result.get("status") != "tool-error" or result.get("process_state_unknown"):
+                        forensic_soundness["live_state_altered"] = True
                 saved = [item for item in core_dumps if item.get("status") == "saved"]
-                status = "collected" if saved else "refused-by-system"
+                if saved:
+                    status = "collected"
+                elif any(item.get("status") != "skipped-not-target" for item in core_dumps):
+                    status = "refused-by-system"
+                else:
+                    status = "no-running-process"
 
     manifest_path = collection_dir / "collection_manifest.json"
     manifest = write_macos_collection_manifest(
@@ -1194,13 +1264,14 @@ def run_kakaotalk_macos_collect(
         consent=consent,
         preflight=preflight,
         core_dumps=core_dumps,
+        forensic_soundness=forensic_soundness,
     )
 
     saved_count = sum(1 for item in core_dumps if item.get("status") == "saved")
     return {
         "command": "kakaotalk-collect-macos",
         "parser": KAKAOTALK_MACOS_COLLECT_VERSION,
-        "generated_at": dt.datetime.now().isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "summary": {
             "case_dir": str(case_dir),
             "collection_dir": str(collection_dir),
@@ -1211,9 +1282,12 @@ def run_kakaotalk_macos_collect(
             "core_dump_saved_count": saved_count,
             "consent_obtained": consent["consent_obtained"],
             "status": status,
+            "attach_opt_in": attach,
+            "live_state_altered": forensic_soundness["live_state_altered"],
         },
         "preflight": preflight,
         "user_consent": consent,
+        "forensic_soundness": forensic_soundness,
         "core_dumps": core_dumps,
         "manifest": manifest,
     }

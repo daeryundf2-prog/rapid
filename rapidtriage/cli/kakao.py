@@ -257,7 +257,7 @@ def handle_kakaotalk_collect_macos(args: argparse.Namespace, parser: argparse.Ar
                 lldb_bin=args.lldb_bin,
                 save_core_style=args.save_core_style,
                 timeout_seconds=args.timeout_seconds,
-                preflight_only=args.preflight_only,
+                attach=args.attach_live_process,
             )
         except KakaoTalkDecryptError as exc:
             parser.error(str(exc))
@@ -272,7 +272,8 @@ def handle_kakaotalk_collect_macos(args: argparse.Namespace, parser: argparse.Ar
                 "authority_reference": args.authority_reference,
                 "lldb_bin": args.lldb_bin,
                 "save_core_style": args.save_core_style,
-                "preflight_only": args.preflight_only,
+                "attach_live_process": args.attach_live_process,
+                "live_state_altered": payload["summary"]["live_state_altered"],
                 "consent_obtained": payload["summary"]["consent_obtained"],
                 "status": payload["summary"]["status"],
                 "secrets_redacted": True,
@@ -281,6 +282,7 @@ def handle_kakaotalk_collect_macos(args: argparse.Namespace, parser: argparse.Ar
             notes=[
                 "Collect only a live session within authorized legal scope, with the account holder present and consenting.",
                 "macOS enforces task-port access control; refusals are reported, never bypassed.",
+                "lldb attaches only with --attach-live-process; attaching stops and alters the live process, and the attach window is recorded per core.",
                 "The consent statement and operator are recorded in the manifest.",
             ],
         )

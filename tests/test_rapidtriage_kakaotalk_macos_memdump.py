@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import struct
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,6 +18,7 @@ from unittest.mock import patch
 from rapidtriage.cli import main
 from rapidtriage.core.kakaotalk import (
     KAKAOTALK_MACOS_COLLECT_VERSION,
+    KakaoTalkDecryptError,
     build_memory_address_ranges,
     describe_memory_region_for_offset,
     detect_memory_dump_format,
@@ -25,6 +27,7 @@ from rapidtriage.core.kakaotalk import (
     parse_macho_core_segments,
     run_kakaotalk_macos_collect,
     run_kakaotalk_memory_carve,
+    run_lldb_process_save_core,
 )
 
 MACHO_MAGIC_64_LE = 0xFEEDFACF
@@ -162,6 +165,8 @@ class MacosCollectorTests(unittest.TestCase):
         ), patch(
             "rapidtriage.core.kakaotalk.find_running_kakaotalk_macos_pids", return_value=[4242]
         ), patch(
+            "rapidtriage.core.kakaotalk.macos_process_executable_name", return_value="KakaoTalk"
+        ), patch(
             "rapidtriage.core.kakaotalk.run_lldb_process_save_core", side_effect=fake_save_core
         ):
             payload = run_kakaotalk_macos_collect(
@@ -169,6 +174,7 @@ class MacosCollectorTests(unittest.TestCase):
                 operator="Investigator A",
                 consent_statement="Holder consented on site",
                 authority_reference="Case 42",
+                attach=True,
             )
             manifest_path = Path(str(payload["summary"]["manifest_path"]))
             manifest = json.loads(manifest_path.read_text())
@@ -184,6 +190,74 @@ class MacosCollectorTests(unittest.TestCase):
         self.assertTrue(manifest["files"])
         self.assertEqual(manifest["core_dumps"][0]["status"], "saved")
         self.assertTrue(all(len(item["sha256"]) == 64 for item in manifest["files"]))
+        self.assertTrue(manifest["forensic_soundness"]["attach_opt_in"])
+        self.assertTrue(manifest["forensic_soundness"]["live_state_altered"])
+        self.assertIn("alters the live system", manifest["forensic_soundness"]["live_state_notice"])
+
+    def test_without_attach_opt_in_nothing_is_attached_even_with_consent(self) -> None:
+        preflight = {"checks": {}, "tool_versions": {}, "blockers": [], "advisories": [], "can_attempt": True}
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "rapidtriage.core.kakaotalk.macos_collect_preflight", return_value=preflight
+        ), patch(
+            "rapidtriage.core.kakaotalk.find_running_kakaotalk_macos_pids", return_value=[4242]
+        ) as find_pids, patch("rapidtriage.core.kakaotalk.run_lldb_process_save_core") as save_core:
+            payload = run_kakaotalk_macos_collect(
+                output_root=Path(tmp),
+                operator="Investigator A",
+                consent_statement="Holder consented on site",
+            )
+
+        self.assertEqual(payload["summary"]["status"], "preflight-only")
+        self.assertFalse(payload["summary"]["live_state_altered"])
+        find_pids.assert_not_called()
+        save_core.assert_not_called()
+
+    def test_attach_requires_consent_statement(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaises(KakaoTalkDecryptError):
+            run_kakaotalk_macos_collect(
+                output_root=Path(tmp), operator="Investigator A", consent_statement="", attach=True
+            )
+
+    def test_recycled_pid_with_another_name_is_never_attached(self) -> None:
+        preflight = {"checks": {}, "tool_versions": {}, "blockers": [], "advisories": [], "can_attempt": True}
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "rapidtriage.core.kakaotalk.macos_collect_preflight", return_value=preflight
+        ), patch(
+            "rapidtriage.core.kakaotalk.find_running_kakaotalk_macos_pids", return_value=[4242]
+        ), patch(
+            "rapidtriage.core.kakaotalk.macos_process_executable_name", return_value="Terminal"
+        ), patch("rapidtriage.core.kakaotalk.run_lldb_process_save_core") as save_core:
+            payload = run_kakaotalk_macos_collect(
+                output_root=Path(tmp),
+                operator="Investigator A",
+                consent_statement="Holder consented on site",
+                attach=True,
+            )
+
+        save_core.assert_not_called()
+        self.assertEqual(payload["core_dumps"][0]["status"], "skipped-not-target")
+        self.assertEqual(payload["summary"]["status"], "no-running-process")
+        self.assertFalse(payload["summary"]["live_state_altered"])
+
+    def test_lldb_command_quotes_core_path_and_records_timeout(self) -> None:
+        calls: list[list[str]] = []
+
+        def timing_out(args, *, timeout):
+            calls.append(list(args))
+            raise subprocess.TimeoutExpired(args, timeout)
+
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "rapidtriage.core.kakaotalk._run_macos_command", side_effect=timing_out
+        ):
+            core = Path(tmp) / "Evidence Drive" / 'case "1"' / "KakaoTalkMac_4242.core"
+            result = run_lldb_process_save_core(4242, core, timeout=5.0)
+
+        save_core_command = calls[0][calls[0].index("-o", 3) + 1]
+        quoted = str(core).replace("\\", "\\\\").replace('"', '\\"')
+        self.assertEqual(save_core_command, f'process save-core --style=modified-memory "{quoted}"')
+        self.assertEqual(result["status"], "tool-error")
+        self.assertTrue(result["process_state_unknown"])
+        self.assertTrue(result["attach_started_at"])
 
     def test_preflight_blocker_skips_any_dump_attempt(self) -> None:
         blocked = {
@@ -204,6 +278,7 @@ class MacosCollectorTests(unittest.TestCase):
                 output_root=Path(tmp),
                 operator="Investigator A",
                 consent_statement="Holder consented on site",
+                attach=True,
             )
 
         self.assertEqual(payload["summary"]["status"], "blocked-by-preflight")
@@ -222,7 +297,6 @@ class MacosCollectorTests(unittest.TestCase):
                 output_root=Path(tmp),
                 operator="Investigator A",
                 consent_statement="",
-                preflight_only=True,
             )
 
         self.assertEqual(payload["summary"]["status"], "preflight-only")
@@ -242,7 +316,6 @@ class MacosCollectorTests(unittest.TestCase):
                     tmp,
                     "--operator",
                     "Investigator A",
-                    "--preflight-only",
                     "--json",
                 ]
             )

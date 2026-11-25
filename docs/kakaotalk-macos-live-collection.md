@@ -28,7 +28,7 @@ The collector uses the debugger's documented core-dump facility:
 
 ```
 lldb -b -o "process attach --pid <pid>" \
-        -o "process save-core --style=modified-memory <out>.core" \
+        -o 'process save-core --style=modified-memory "<out>.core"' \
         -o "detach" -o "quit"
 ```
 
@@ -36,6 +36,35 @@ lldb -b -o "process attach --pid <pid>" \
 `LC_SEGMENT_64` load commands describe each mapped region. Under the hood this
 relies on the kernel granting the target task port (`task_for_pid` /
 `mach_vm_read` of readable regions); lldb is simply the supported front end.
+
+### Forensic soundness: attaching alters live memory state
+
+This is not a passive read. Attaching a debugger changes the system under
+examination:
+
+- lldb stops every thread of KakaoTalk for the whole time the core is written,
+  then resumes it on `detach`. Timers, network sessions and in-flight work see a
+  pause; KakaoTalk itself may react to it.
+- lldb starts `debugserver`, which takes the task port and allocates memory and
+  ports in the kernel; reading every region pages memory in and changes the
+  target's and the system's memory accounting.
+- The core is a snapshot of that altered state. It cannot be reproduced: a second
+  collection captures a different process.
+- If lldb times out it is killed; the target may then be left stopped or
+  terminated. The core entry records `process_state_unknown: true`.
+
+So the collector never attaches by default. Attaching needs the explicit
+`--attach-live-process` flag and a recorded consent statement. Each core entry
+records `attach_started_at` and `attach_finished_at` (UTC), and the manifest's
+`forensic_soundness` block records the opt-in, whether live state was altered,
+and this notice. Note the attach window in the field record.
+
+### Target selection
+
+Only processes named exactly `KakaoTalk` or `KakaoTalkMac` are considered
+(`pgrep -x`). Right before attaching, each PID's executable name is read again
+from the process table (`ps -o comm=`), so a PID that was recycled to another
+program in the meantime is skipped (`skipped-not-target`) and never attached.
 
 ### Requirements and limits
 
@@ -67,25 +96,29 @@ effective UID is not 0.
 
 ## Running the collector
 
-Document posture first, without attempting any dump:
+Document posture first, without attempting any dump. This is the default: without
+`--attach-live-process` nothing is attached and the process table is not queried:
 
 ```
-rapidtriage kakaotalk-collect-macos --output-root ./cases --preflight-only
+rapidtriage kakaotalk-collect-macos --output-root ./cases --operator "Investigator Name"
 ```
 
-Perform an authorized, consenting collection:
+Perform an authorized, consenting collection (this attaches and alters the live
+process, see above):
 
 ```
 sudo rapidtriage kakaotalk-collect-macos --output-root ./cases \
+        --attach-live-process \
         --operator "Investigator Name" \
         --consent-statement "Account holder consented on site on 2026-11-25" \
         --authority-reference "Case 2026-1234"
 ```
 
-Key options: `--operator` (recorded), `--consent-statement` (recorded; required
-unless `--preflight-only`), `--authority-reference`, `--lldb-bin`,
+Key options: `--operator` (recorded, always required), `--attach-live-process`
+(the opt-in to attach), `--consent-statement` (recorded; required with
+`--attach-live-process`), `--authority-reference`, `--lldb-bin`,
 `--save-core-style` (`modified-memory`, `full`, `stack`), `--timeout-seconds`,
-`--preflight-only`, and `--json`.
+and `--json`.
 
 ### Manifest and provenance
 
@@ -97,7 +130,10 @@ Each case directory holds a `collection_manifest.json` with:
   the consent-recorded timestamp.
 - The full `preflight` result (checks, blockers, advisories).
 - Per-process `core_dumps` entries with status (`saved`, `refused`,
-  `tool-error`) and the exact lldb command used.
+  `tool-error`, `skipped-not-target`), the attach window, and the exact lldb
+  command used.
+- The `forensic_soundness` block: `attach_opt_in`, `live_state_altered`, the
+  target process names and the live-state notice.
 
 An audit record is written alongside the manifest, with sensitive material
 redacted.
