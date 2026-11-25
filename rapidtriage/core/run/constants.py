@@ -67,6 +67,7 @@ GENERAL_FORENSIC_ARTIFACT_KINDS = (
     "media-image",
     "generic-documents",
     "memory-volatility",
+    "kakaotalk-memory",
     "synthetic-media",
 )
 WINDOWS_FORENSIC_ARTIFACT_KINDS = (

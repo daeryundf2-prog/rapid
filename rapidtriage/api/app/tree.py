@@ -124,6 +124,7 @@ KIND_LABELS: dict[str, str] = {
     "synthetic-media": "합성 미디어",
     "generic-documents": "문서",
     "memory-volatility": "메모리 (Volatility)",
+    "kakaotalk-memory": "카카오톡 메모리 분석",
     "windows-filesystem": "파일시스템 기록",
     "windows-system": "Windows 시스템",
     "linux-system": "Linux 시스템",

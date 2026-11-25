@@ -15,6 +15,7 @@ from .email import EmailArtifactsProvider
 from .email_clients import EmailClientsProvider
 from .generic import GenericDocumentArtifactProvider
 from .kakaotalk_macos import KakaoTalkMacOsProvider
+from .kakaotalk_memory import KakaoTalkMemoryProvider
 from .kakaotalk_windows import KakaoTalkWindowsProvider
 from .linux import LinuxSystemArtifactsProvider
 from .macos import MacOsSystemArtifactsProvider
@@ -113,6 +114,7 @@ def _builtin_providers() -> list[object]:
         P2PArtifactsProvider(),
         KakaoTalkMacOsProvider(),
         KakaoTalkWindowsProvider(),
+        KakaoTalkMemoryProvider(),
         WindowsBrowserArtifactsProvider(),
         WindowsRecentFilesProvider(),
         WindowsOsAccountProvider(),
