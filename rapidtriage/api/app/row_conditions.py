@@ -799,6 +799,31 @@ def output_stamp(*paths: object) -> tuple[object, ...]:
     return tuple(stamp)
 
 
+def _sort_moment(row: Mapping[str, object], collection: str) -> dt.datetime | None:
+    moment = row_time(row, collection)
+    if moment is None and _scalar(row.get("timestamp")):
+        moment = parse_moment(row.get("timestamp"))  # a wall clock of unknown zone still orders
+    if moment is not None and moment.tzinfo is None:
+        moment = moment.replace(tzinfo=dt.timezone.utc)
+    return moment
+
+
+def time_order(rows: Iterable[object], collection: str, order: str) -> array:
+    """Positions of ``rows`` ordered by the row time (``asc`` | ``desc``); ties keep record order and
+    rows without a time come last in both orders."""
+    timed: list[tuple[float, int]] = []
+    untimed: list[int] = []
+    for index, row in enumerate(rows):
+        moment = _sort_moment(row, collection) if isinstance(row, Mapping) else None
+        if moment is None:
+            untimed.append(index)
+        else:
+            seconds = moment.timestamp()
+            timed.append((seconds if order == "asc" else -seconds, index))
+    timed.sort()
+    return array("L", [index for _key, index in timed] + untimed)
+
+
 def matched_indices(
     rows: Sequence[object], predicate: Callable[[Mapping[str, object]], bool], cache_key: tuple[object, ...] | None = None
 ) -> array:
@@ -822,7 +847,19 @@ def filter_rows_page(
 
     ``record_index`` is the row's position in ``rows``; ``matched`` is exact (the list is scanned
     to the end once per ``cache_key``: later pages reuse the matched positions, :data:`MATCH_CACHE`)."""
-    indices = matched_indices(rows, predicate, cache_key)
+    return rows_page(rows, matched_indices(rows, predicate, cache_key), collection=collection, offset=offset, limit=limit)
+
+
+def rows_page(
+    rows: Sequence[object],
+    indices: Sequence[int],
+    *,
+    collection: str,
+    offset: int,
+    limit: int,
+    filtered: bool = True,
+) -> tuple[list[object], dict[str, object]]:
+    """Page of the ``rows`` at ``indices`` (matched / sorted positions) -> ``(rows with record_index, pagination)``."""
     matched = len(indices)
     window = indices[offset : offset + limit] if limit > 0 else indices[offset:]
     page: list[object] = [{**rows[index], "record_index": index} for index in window]  # type: ignore[dict-item]
@@ -837,7 +874,7 @@ def filter_rows_page(
         "next_offset": offset + len(page) if has_more else None,
         "previous_offset": max(0, offset - limit) if offset > 0 and limit > 0 else None,
         "has_more": has_more,
-        "filtered": True,
+        "filtered": filtered,
         "scanned": len(rows),
         "truncated": False,
     }

@@ -215,7 +215,8 @@ def build_fs_index(key: tuple[object, ...], payload: Mapping[str, object]) -> Fs
     folder_rows: dict[str, list[tuple[int, int]]] = {}
     for scope in SCOPES:
         rows = payload.get(scope)
-        rows = rows if isinstance(rows, list) else []
+        # A list, or the lazily parsed rows of a large output (``json_rows.LazyRows``).
+        rows = rows if isinstance(rows, Sequence) and not isinstance(rows, (str, bytes)) else []
         dirs = array("i", [-1]) * len(rows)
         placed: list[tuple[int, int]] = []
         outside = 0

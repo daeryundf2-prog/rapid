@@ -21,7 +21,7 @@ import re
 import threading
 from array import array
 from collections import OrderedDict
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import Any, overload
 
@@ -30,6 +30,8 @@ from ...core.jobs import OUTPUT_JSON_CACHE_MAX_BYTES
 # A line break followed by exactly two or four spaces and the line's first character.
 _MEMBER_OR_ELEMENT_LINE = re.compile(rb"\n( {2}| {4})(?=[^ \r\n])")
 INDEX_CACHE_SIZE = 4
+# Rows of a folder / special node read up front (a larger restriction parses the whole output).
+PREFETCH_ROWS_MAX = 20_000
 
 
 class JsonLayoutError(ValueError):
@@ -165,7 +167,14 @@ class JsonRowIndex:
 
 
 class LazyRows(Sequence[object]):
-    """Read-only sequence view of one indexed top-level array (elements parsed on access)."""
+    """Read-only sequence view of one indexed top-level array (elements parsed on access;
+    iteration reads the array in chunks)."""
+
+    CHUNK = 4096
+
+    def __iter__(self) -> Iterator[object]:
+        for start in range(0, self._length, self.CHUNK):
+            yield from self._index.rows(self._key, start, start + self.CHUNK)
 
     def __init__(self, index: JsonRowIndex, key: str) -> None:
         self._index = index
@@ -190,6 +199,32 @@ class LazyRows(Sequence[object]):
         if not 0 <= position < self._length:
             raise IndexError(item)
         return self._index.rows(self._key, position, position + 1)[0]
+
+
+class PrefetchedRows(LazyRows):
+    """An indexed array whose rows at ``positions`` (ascending) are read up front, in contiguous
+    runs; other positions are parsed on access."""
+
+    MAX_GAP = 64
+
+    def __init__(self, index: JsonRowIndex, key: str, positions: Sequence[int]) -> None:
+        super().__init__(index, key)
+        self._rows: dict[int, object] = {}
+        run_start: int | None = None
+        previous = -1
+        for position in [*positions, -1]:
+            if run_start is not None and (position < 0 or position - previous > self.MAX_GAP or position - run_start >= self.CHUNK):
+                for offset, row in enumerate(index.rows(key, run_start, previous + 1)):
+                    self._rows[run_start + offset] = row
+                run_start = None
+            if position >= 0:
+                run_start = position if run_start is None else run_start
+                previous = position
+
+    def __getitem__(self, item):  # type: ignore[override]
+        if isinstance(item, int) and item in self._rows:
+            return self._rows[item]
+        return super().__getitem__(item)
 
 
 _INDEX_CACHE: OrderedDict[tuple[str, int, int], JsonRowIndex | None] = OrderedDict()

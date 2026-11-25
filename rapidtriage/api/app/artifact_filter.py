@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
+import threading
 import unicodedata
+from array import array
+from collections import OrderedDict
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from ...core.artifact_profiles import payload_record_count
 from ...core.eventlog_channels import GROUP_LABELS, ChannelFilter
-from .jsonl_records import iter_artifact_records
+from .jsonl_records import (
+    expand_row,
+    iter_artifact_records,
+    iter_jsonl_records,
+    jsonl_records_path,
+    parse_record_line,
+    payload_profiles,
+)
 
 ARTIFACT_PATH_FILTER_SCAN_CAP = 2_000_000
 # Rows scanned per request by the all-kinds ``artifact_type=`` pager.
@@ -150,6 +161,7 @@ def filter_artifact_page(
     channels: ChannelFilter | Collection[str] | None = None,
     fields: FieldFilters | None = None,
     row_filter: Callable[[Mapping[str, object]], bool] | None = None,
+    match_cache_key: tuple[object, ...] | None = None,
 ) -> dict[str, object]:
     """Page only rows whose ``path`` contains ``path_contains`` (NFC, case-insensitive),
     when ``artifact_types`` is given, whose ``artifact_type`` is one of them,
@@ -166,11 +178,35 @@ def filter_artifact_page(
     sort); by default rows stream in JSONL order, records ``0..record_limit-1``
     only when ``record_limit`` is given. Every returned row carries its
     original ``record_index``.
+
+    ``match_cache_key`` (a JSONL-backed kind in record order; it must name the kind file's
+    revision and every filter): the first request scans the whole kind once and keeps the
+    matching records' byte offsets (:func:`kind_matches`); later pages read only their own rows.
+    The page is the one the streaming scan returns (same ``scanned`` / ``truncated``).
     """
     needle = nfc_fold(path_contains) if path_contains else ""
     wanted_types = frozenset(artifact_types) if artifact_types else None
     wanted_channels = as_channel_filter(channels)
     matches = row_matcher(needle, wanted_types, wanted_channels, fields, row_filter)
+    describe = {"path_contains": path_contains, "wanted_types": wanted_types, "wanted_channels": wanted_channels, "fields": fields}
+    records_path = jsonl_records_path(payload, payload_path)
+    if match_cache_key is not None and rows_source is None and record_limit is None and records_path is not None:
+        found = kind_matches(match_cache_key, records_path, payload_profiles(payload), matches, scan_cap)
+        if found is not None:
+            stop = offset + limit
+            has_more = len(found.records) > stop
+            window = range(offset, min(stop, len(found.records)))
+            return _filter_page(
+                payload,
+                [{**row, "record_index": found.records[i]} for i, row in zip(window, found.read(records_path, window))],
+                offset=offset,
+                limit=limit,
+                matched=len(found.records),
+                has_more=has_more,
+                exhausted=not has_more,
+                scanned=found.ordinals[stop] if has_more else found.scanned,
+                **describe,
+            )
     rows: list[object] = []
     matched = 0
     scanned = 0
@@ -193,6 +229,94 @@ def filter_artifact_page(
             if matched >= offset:
                 rows.append({**row, "record_index": record_index})
             matched += 1
+    return _filter_page(
+        payload,
+        rows,
+        offset=offset,
+        limit=limit,
+        matched=matched,
+        has_more=has_more,
+        exhausted=exhausted,
+        scanned=scanned,
+        **describe,
+    )
+
+
+@dataclass(frozen=True)
+class KindMatches:
+    """Matching records of one filtered kind, in record order."""
+
+    records: array  # record_index of each match
+    offsets: array  # byte offset of its JSONL line
+    ordinals: array  # rows scanned up to and including it (the streaming scan's ``scanned``)
+    scanned: int  # rows of the whole kind
+
+    def read(self, records_path: Path, window: range) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
+        with open(records_path, "rb") as handle:
+            for position in window:
+                handle.seek(self.offsets[position])
+                row = parse_record_line(handle.readline().strip(), path=records_path, line_number=0)
+                rows.append(expand_row(row, self.profiles) if row is not None else {})
+        return rows
+
+    profiles: Mapping[str, Mapping[str, object]] | None = None
+
+
+KIND_MATCH_CACHE_SIZE = 32
+_KIND_MATCHES: OrderedDict[tuple[object, ...], KindMatches | None] = OrderedDict()
+_KIND_MATCH_LOCK = threading.Lock()
+
+
+def kind_matches(
+    key: tuple[object, ...],
+    records_path: Path,
+    profiles: Mapping[str, Mapping[str, object]] | None,
+    matches: Callable[[Mapping[str, object]], bool],
+    scan_cap: int,
+) -> KindMatches | None:
+    """Cached matches of one kind under ``key`` (``None``: the kind has more than ``scan_cap`` rows)."""
+    with _KIND_MATCH_LOCK:
+        if key in _KIND_MATCHES:
+            _KIND_MATCHES.move_to_end(key)
+            return _KIND_MATCHES[key]
+    records, offsets, ordinals = array("q"), array("q"), array("q")
+    scanned = 0
+    found: KindMatches | None = None
+    for index, offset, row, _line in iter_jsonl_records(records_path):
+        if row is None:
+            continue
+        if scanned >= scan_cap:
+            break  # the streaming scan would stop here (truncated): not cacheable
+        scanned += 1
+        if matches(expand_row(row, profiles)):
+            records.append(index)
+            offsets.append(offset)
+            ordinals.append(scanned)
+    else:
+        found = KindMatches(records, offsets, ordinals, scanned, profiles)
+    with _KIND_MATCH_LOCK:
+        _KIND_MATCHES[key] = found
+        while len(_KIND_MATCHES) > KIND_MATCH_CACHE_SIZE:
+            _KIND_MATCHES.popitem(last=False)
+    return found
+
+
+def _filter_page(
+    payload: Mapping[str, object],
+    rows: list[object],
+    *,
+    offset: int,
+    limit: int,
+    matched: int,
+    has_more: bool,
+    exhausted: bool,
+    scanned: int,
+    path_contains: str | None,
+    wanted_types: frozenset[str] | None,
+    wanted_channels: ChannelFilter | None,
+    fields: FieldFilters | None,
+) -> dict[str, object]:
     end = offset + len(rows)
     page = dict(payload)
     page["artifacts"] = rows

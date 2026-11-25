@@ -12,7 +12,7 @@ from unittest import mock
 try:
     from fastapi.testclient import TestClient
 
-    from rapidtriage.api.app import create_app, json_rows, tree
+    from rapidtriage.api.app import artifact_filter, create_app, fs_tree, json_rows, tree
     from rapidtriage.api.app.json_rows import JsonLayoutError, JsonRowIndex, LazyRows, large_output_index
     from rapidtriage.api.app.list_view import project_details
 
@@ -47,6 +47,7 @@ def artifact(index: int) -> dict[str, object]:
 ARTIFACTS = [artifact(i) for i in range(3)]
 FILES = {
     "command": "files",
+    "root": "C:\\Users",
     "summary": {"category_counts": {"documents": 3}},
     "candidates": [{"path": rf"C:\Users\a\doc{i}.docx", "name": f"doc{i}.docx", "categories": ["documents"]} for i in range(3)],
     "duplicate_content_groups": [{"sha256": "ab", "paths": ["a", "b"], "file_count": 2}],
@@ -55,7 +56,12 @@ FILES = {
 }
 TIMELINE = {
     "command": "timeline",
-    "events": [{"timestamp": f"2025-05-2{i}T01:00:00Z", "event_type": f"e{i}", "details": {"n": i}} for i in range(5)],
+    # Record order is not time order; e5 has no time.
+    "events": [
+        {"timestamp": f"2025-05-2{day}T01:00:00Z", "event_type": f"e{i}", "details": {"n": i}}
+        for i, day in enumerate((2, 0, 4, 1, 3))
+    ]
+    + [{"timestamp": None, "event_type": "e5", "details": {}}],
     "summary": {"event_count": 5},
 }
 
@@ -99,7 +105,7 @@ class ConsoleApiScaleTests(unittest.TestCase):
                     "output_dir": str(run_dir),
                     "source": {"type": "directory", "analysis_root": str(base / "evidence")},
                     "outputs": summary_outputs,
-                    "summary": {"counts": {"artifacts": len(ARTIFACTS), "files": 3, "timeline_events": 5}},
+                    "summary": {"counts": {"artifacts": len(ARTIFACTS), "files": 3, "timeline_events": 6}},
                 }
             ),
             encoding="utf-8",
@@ -212,6 +218,73 @@ class ConsoleApiScaleTests(unittest.TestCase):
             self.assertIsNone(large_output_index(compact))
             self.assertIsNotNone(large_output_index(self.paths["files"]))
         self.assertIsNone(large_output_index(self.paths["files"]))  # small: the parsed-output cache serves it
+
+    # --- whole-list timeline sort ---------------------------------------------------------
+
+    def timeline_types(self, query: str) -> list[str]:
+        return [event["event_type"] for event in self.call("timeline", query)["events"]]
+
+    def test_timeline_sort_orders_the_whole_list_on_the_server(self) -> None:
+        page = self.call("timeline", "sort=timestamp&order=desc&limit=3&view=list")
+        self.assertEqual([event["record_index"] for event in page["events"]], [2, 4, 0])
+        self.assertEqual((page["pagination"]["total"], page["pagination"]["has_more"]), (6, True))
+        self.assertEqual(page["sort"], {"key": "timestamp", "order": "desc", "status": "ready", "progress": 1})
+        self.assertEqual(self.timeline_types("sort=timestamp:desc&offset=3&limit=10"), ["e3", "e1", "e5"])
+        ascending = self.call("timeline", "sort=timestamp&limit=10&locate=0")
+        self.assertEqual([event["event_type"] for event in ascending["events"]], ["e1", "e3", "e0", "e4", "e2", "e5"])
+        self.assertEqual(ascending["sort"]["position"], 2)
+        window = "from=2025-05-21T00:00:00Z&to=2025-05-23T23:59:59Z"
+        filtered = self.call("timeline", f"sort=timestamp&order=desc&limit=10&{window}")
+        self.assertEqual([event["event_type"] for event in filtered["events"]], ["e4", "e0", "e3"])
+        self.assertEqual(filtered["matched"], 3)
+        self.assertIn("conditions", filtered["pagination"])
+        queries = ["sort=timestamp&order=desc&limit=3", "sort=timestamp&limit=10&locate=0", f"sort=timestamp&order=desc&limit=10&{window}", f"limit=2&{window}"]
+        expected = {query: self.call("timeline", query) for query in queries}
+        with mock.patch.object(json_rows, "OUTPUT_JSON_CACHE_MAX_BYTES", 0):
+            for query, page in expected.items():
+                self.assertEqual(self.call("timeline", query), page, query)
+
+    def test_timeline_sort_rejects_other_keys(self) -> None:
+        self.call("timeline", "sort=event_type&limit=5", expect=422)
+        self.call("timeline", "sort=timestamp&order=up&limit=5", expect=422)
+        self.call("timeline", "sort=timestamp", expect=400)
+
+    # --- filtered kind pages -------------------------------------------------------------
+
+    def test_filtered_kind_pages_reuse_one_match_scan(self) -> None:
+        queries = [
+            "artifact_type=mft-entry&limit=2",
+            "artifact_type=mft-entry&offset=1&limit=1",
+            "artifact_type=mft-entry&offset=2&limit=5",
+            "path_contains=MFT&limit=1&view=list",
+        ]
+
+        def pages() -> list[dict[str, object]]:
+            return [self.call("artifacts", f"kind=windows-filesystem&{query}") for query in queries]
+
+        with mock.patch.object(artifact_filter, "kind_matches", return_value=None):
+            streamed = pages()  # the streaming scan, as before the cache
+        artifact_filter._KIND_MATCHES.clear()
+        self.assertEqual(pages(), streamed)
+        with mock.patch.object(artifact_filter, "iter_jsonl_records", side_effect=AssertionError("rescanned")):
+            self.assertEqual(pages(), streamed)
+
+    def test_large_files_folder_pages_come_from_the_row_index(self) -> None:
+        queries = ["path_prefix=a&limit=2", "path_prefix=a&offset=1&limit=5&view=list", "path_prefix=a&limit=5&category=documents"]
+        expected = {query: self.call("files", query) for query in queries}
+        self.assertEqual(len(expected["path_prefix=a&limit=2"]["candidates"]), 2)
+        fs_tree.clear_fs_index_cache()
+        reads: list[str] = []
+        original = self.store.read_output
+
+        def tracked(run_id: str, name: str) -> dict[str, object]:
+            reads.append(name)
+            return original(run_id, name)
+
+        with mock.patch.object(json_rows, "OUTPUT_JSON_CACHE_MAX_BYTES", 0), mock.patch.object(self.store, "read_output", tracked):
+            for query, page in expected.items():
+                self.assertEqual(self.call("files", query), page, query)
+        self.assertEqual(reads, [])  # the folder index too is built from the row index
 
     # --- /tree summary head scan ---------------------------------------------------------
 
