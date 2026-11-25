@@ -83,8 +83,15 @@ USER_ID_FIELD_NAMES = (
 STORED_PRAGMA_FIELD_NAMES = ("dev_id",)
 KAKAOTALK_USERDIR_KEY_SEED = "KAKAOTALK_PC_FOREVER"
 USERDIR_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
-MEMORY_DUMP_SUFFIXES = (".dmp", ".dump", ".raw", ".mem")
-MEMORY_DUMP_NAME_HINTS = ("kakaotalk", "memory", "process")
+MEMORY_DUMP_SUFFIXES = (".dmp", ".dump", ".raw", ".mem", ".core")
+MEMORY_DUMP_NAME_HINTS = ("kakaotalk", "kakaotalkmac", "memory", "process", "core")
+KAKAOTALK_MACOS_COLLECT_VERSION = "kakaotalk-macos-collect-v1"
+MACHO_MAGIC_64_LE = b"\xcf\xfa\xed\xfe"
+MACHO_MAGIC_64_BE = b"\xfe\xed\xfa\xcf"
+MACHO_FILETYPE_CORE = 4
+MACHO_LC_SEGMENT_64 = 0x19
+MACHO_LOAD_COMMAND_READ_CAP = 64 * 1024 * 1024
+KAKAOTALK_MACOS_PROCESS_NAMES = ("KakaoTalk", "KakaoTalkMac")
 DEFAULT_MEMORY_REVERSE_INDICATOR_LIMIT = 300
 DEFAULT_MEMORY_SQLCIPHER_KEY_RESIDUE_LIMIT = 300
 SQLCIPHER_KEY_LITERAL_PATTERN = re.compile(rb"x'([0-9a-fA-F]{64}|[0-9a-fA-F]{96})'")
@@ -869,6 +876,347 @@ int main(int argc, char **argv) {
     return 1;
 }
 """
+
+
+def _run_macos_command(args: Sequence[str], *, timeout: float = 15.0) -> subprocess.CompletedProcess[str]:
+    """Run a read-only macOS helper command, capturing text output.
+
+    This is a thin wrapper so the live-collection preflight and save-core calls
+    have a single, test-mockable seam. It never runs a target process; it only
+    queries tool versions and system posture.
+    """
+
+    return subprocess.run(
+        list(args),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+
+
+def macos_current_euid() -> int:
+    getter = getattr(os, "geteuid", None)
+    return int(getter()) if getter is not None else -1
+
+
+def detect_macos_sip_status() -> dict[str, object]:
+    """Report System Integrity Protection posture via ``csrutil status``."""
+
+    try:
+        result = _run_macos_command(["csrutil", "status"], timeout=10.0)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"available": False, "detail": f"csrutil unavailable: {exc}", "enabled": None}
+    text = (result.stdout or "").strip()
+    lowered = text.lower()
+    enabled: bool | None
+    if "enabled" in lowered:
+        enabled = True
+    elif "disabled" in lowered:
+        enabled = False
+    else:
+        enabled = None
+    return {"available": result.returncode == 0, "detail": text, "enabled": enabled}
+
+
+def detect_macos_developer_mode() -> dict[str, object]:
+    """Report whether developer-mode debugging is authorized (``DevToolsSecurity``)."""
+
+    try:
+        result = _run_macos_command(["DevToolsSecurity", "-status"], timeout=10.0)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"available": False, "detail": f"DevToolsSecurity unavailable: {exc}", "enabled": None}
+    text = (result.stdout or "").strip()
+    enabled = "enabled" in text.lower()
+    return {"available": result.returncode == 0, "detail": text, "enabled": enabled}
+
+
+def macos_tool_versions(*, lldb_bin: str = "lldb") -> dict[str, str]:
+    """Capture the macOS and lldb versions recorded in the collection manifest."""
+
+    versions: dict[str, str] = {}
+    try:
+        sw = _run_macos_command(["sw_vers", "-productVersion"], timeout=10.0)
+        versions["macos_product_version"] = (sw.stdout or "").strip()
+    except (OSError, subprocess.SubprocessError) as exc:
+        versions["macos_product_version"] = f"unavailable: {exc}"
+    try:
+        build = _run_macos_command(["uname", "-m"], timeout=10.0)
+        versions["machine_arch"] = (build.stdout or "").strip()
+    except (OSError, subprocess.SubprocessError) as exc:
+        versions["machine_arch"] = f"unavailable: {exc}"
+    try:
+        lldb = _run_macos_command([lldb_bin, "--version"], timeout=10.0)
+        versions["lldb_version"] = (lldb.stdout or lldb.stderr or "").strip().splitlines()[0] if (lldb.stdout or lldb.stderr) else ""
+        versions["lldb_available"] = "true" if lldb.returncode == 0 else "false"
+    except (OSError, subprocess.SubprocessError) as exc:
+        versions["lldb_version"] = f"unavailable: {exc}"
+        versions["lldb_available"] = "false"
+    return versions
+
+
+def find_running_kakaotalk_macos_pids() -> list[int]:
+    """List PIDs of a running KakaoTalk macOS app via ``pgrep`` (process list only).
+
+    This reads the process table; it never attaches to or reads a process. It is a
+    mockable seam so the live-collection workflow can be tested without a target.
+    """
+
+    pids: list[int] = []
+    for name in KAKAOTALK_MACOS_PROCESS_NAMES:
+        try:
+            result = _run_macos_command(["pgrep", "-x", name], timeout=10.0)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        for line in (result.stdout or "").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                pids.append(int(line))
+            except ValueError:
+                continue
+    return sorted(set(pids))
+
+
+def run_lldb_process_save_core(
+    pid: int,
+    output_core: Path,
+    *,
+    lldb_bin: str = "lldb",
+    style: str = "modified-memory",
+    timeout: float = 600.0,
+) -> dict[str, object]:
+    """Capture an authorized live process core with ``lldb process save-core``.
+
+    The macOS kernel enforces every access control here: lldb must obtain the
+    target task port, which requires root or the debugging entitlement and is
+    refused for a hardened-runtime app that lacks ``get-task-allow``. This never
+    bypasses that; it reports whatever the system returns. Callers run it only on
+    a consenting, authorized live session.
+    """
+
+    command = [
+        lldb_bin,
+        "-b",
+        "-o",
+        f"process attach --pid {pid}",
+        "-o",
+        f"process save-core --style={style} {output_core}",
+        "-o",
+        "detach",
+        "-o",
+        "quit",
+    ]
+    try:
+        result = _run_macos_command(command, timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {
+            "pid": pid,
+            "status": "tool-error",
+            "core_path": "",
+            "detail": f"lldb could not be launched: {exc}",
+            "lldb_command": command,
+        }
+    produced = output_core.exists() and output_core.stat().st_size > 0
+    return {
+        "pid": pid,
+        "status": "saved" if (result.returncode == 0 and produced) else "refused",
+        "core_path": str(output_core) if produced else "",
+        "returncode": result.returncode,
+        "detail": ((result.stdout or "") + (result.stderr or "")).strip()[:4000],
+        "lldb_command": command,
+    }
+
+
+def macos_collect_preflight(*, lldb_bin: str = "lldb") -> dict[str, object]:
+    """Evaluate whether an authorized macOS live memory collection can proceed.
+
+    Each check is advisory and reported verbatim; nothing is bypassed. The caller
+    and the field operator decide whether the posture permits collection.
+    """
+
+    euid = macos_current_euid()
+    sip = detect_macos_sip_status()
+    developer_mode = detect_macos_developer_mode()
+    versions = macos_tool_versions(lldb_bin=lldb_bin)
+    is_macos = os.uname().sysname == "Darwin" if hasattr(os, "uname") else os.name == "posix"
+    checks = {
+        "platform_is_macos": is_macos,
+        "running_as_root": euid == 0,
+        "effective_uid": euid,
+        "lldb_available": versions.get("lldb_available") == "true",
+        "sip": sip,
+        "developer_mode": developer_mode,
+    }
+    blockers: list[str] = []
+    if not is_macos:
+        blockers.append("This command runs only on macOS (Darwin).")
+    if versions.get("lldb_available") != "true":
+        blockers.append("lldb was not found; install the Xcode command line tools.")
+    if euid != 0:
+        blockers.append(
+            "Not running as root: macOS denies the target task port for another user's "
+            "process. Re-run under sudo with on-site consent."
+        )
+    advisories = [
+        "KakaoTalk ships with the hardened runtime and no get-task-allow entitlement, "
+        "so macOS may refuse task_for_pid even for root; if the system refuses, this is "
+        "reported, never bypassed.",
+        "System Integrity Protection and Developer Mode govern whether debugging a "
+        "third-party app is permitted; lowering them is a deliberate operator decision "
+        "outside this tool.",
+    ]
+    return {
+        "checks": checks,
+        "tool_versions": versions,
+        "blockers": blockers,
+        "advisories": advisories,
+        "can_attempt": not blockers,
+    }
+
+
+def write_macos_collection_manifest(
+    root: Path,
+    output: Path,
+    *,
+    consent: Mapping[str, object],
+    preflight: Mapping[str, object],
+    core_dumps: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    """Write a hashed manifest of collected cores with consent and tool metadata."""
+
+    files: list[dict[str, object]] = []
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if not path.is_file() or path == output:
+            continue
+        try:
+            stat = path.stat()
+            hashes = compute_hashes(path)
+        except OSError:
+            continue
+        files.append(
+            {
+                "relative_path": safe_relative_path(root, path),
+                "size": stat.st_size,
+                "mtime_utc": dt.datetime.fromtimestamp(stat.st_mtime, tz=dt.timezone.utc).isoformat(),
+                "sha256": hashes.get("sha256", ""),
+            }
+        )
+    manifest = {
+        "parser": KAKAOTALK_MACOS_COLLECT_VERSION,
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "collection_root": str(root),
+        "user_consent": dict(consent),
+        "preflight": dict(preflight),
+        "tool_versions": dict(preflight.get("tool_versions") or {}),
+        "core_dumps": [dict(item) for item in core_dumps],
+        "files": files,
+        "authorization_notice": (
+            "Collect only a live session you are authorized to examine, with the "
+            "account holder present and consenting."
+        ),
+    }
+    write_result(manifest, output)
+    return manifest
+
+
+def run_kakaotalk_macos_collect(
+    *,
+    output_root: Path,
+    operator: str,
+    consent_statement: str,
+    authority_reference: str = "",
+    lldb_bin: str = "lldb",
+    save_core_style: str = "modified-memory",
+    timeout_seconds: float = 600.0,
+    preflight_only: bool = False,
+) -> dict[str, object]:
+    """Collect authorized live macOS KakaoTalk process memory into cores + manifest.
+
+    The collection targets the running KakaoTalk process of a logged-in, consenting
+    user on site. It runs preflight checks first and never bypasses macOS security:
+    if the system refuses the task port, the refusal is recorded. ``preflight_only``
+    stops after the posture report without attempting any dump.
+    """
+
+    output_root = output_root.expanduser().resolve()
+    if not operator.strip():
+        raise KakaoTalkDecryptError("--operator is required to record who performed the collection")
+    if not consent_statement.strip() and not preflight_only:
+        raise KakaoTalkDecryptError("--consent-statement is required to record the account holder's consent")
+    if timeout_seconds <= 0:
+        raise KakaoTalkDecryptError("--timeout-seconds must be > 0")
+
+    timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    case_dir = output_root / f"kakaotalk_macos_collection_{timestamp}"
+    collection_dir = case_dir / "collection"
+    collection_dir.mkdir(parents=True, exist_ok=True)
+
+    preflight = macos_collect_preflight(lldb_bin=lldb_bin)
+    consent = {
+        "operator": operator,
+        "consent_statement": consent_statement,
+        "authority_reference": authority_reference,
+        "recorded_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "consent_obtained": bool(consent_statement.strip()),
+    }
+
+    core_dumps: list[dict[str, object]] = []
+    status = "preflight-only"
+    if not preflight_only:
+        if not preflight["can_attempt"]:
+            status = "blocked-by-preflight"
+        else:
+            pids = find_running_kakaotalk_macos_pids()
+            if not pids:
+                status = "no-running-process"
+            else:
+                for pid in pids:
+                    core_path = collection_dir / f"KakaoTalkMac_{pid}.core"
+                    core_dumps.append(
+                        run_lldb_process_save_core(
+                            pid,
+                            core_path,
+                            lldb_bin=lldb_bin,
+                            style=save_core_style,
+                            timeout=timeout_seconds,
+                        )
+                    )
+                saved = [item for item in core_dumps if item.get("status") == "saved"]
+                status = "collected" if saved else "refused-by-system"
+
+    manifest_path = collection_dir / "collection_manifest.json"
+    manifest = write_macos_collection_manifest(
+        collection_dir,
+        manifest_path,
+        consent=consent,
+        preflight=preflight,
+        core_dumps=core_dumps,
+    )
+
+    saved_count = sum(1 for item in core_dumps if item.get("status") == "saved")
+    return {
+        "command": "kakaotalk-collect-macos",
+        "parser": KAKAOTALK_MACOS_COLLECT_VERSION,
+        "generated_at": dt.datetime.now().isoformat(),
+        "summary": {
+            "case_dir": str(case_dir),
+            "collection_dir": str(collection_dir),
+            "manifest_path": str(manifest_path),
+            "preflight_can_attempt": bool(preflight["can_attempt"]),
+            "preflight_blockers": list(preflight["blockers"]),  # type: ignore[arg-type]
+            "core_dump_count": len(core_dumps),
+            "core_dump_saved_count": saved_count,
+            "consent_obtained": consent["consent_obtained"],
+            "status": status,
+        },
+        "preflight": preflight,
+        "user_consent": consent,
+        "core_dumps": core_dumps,
+        "manifest": manifest,
+    }
 
 
 def run_kakaotalk_decrypt(
@@ -2039,7 +2387,141 @@ def build_memory_address_ranges(data: bytes) -> list[tuple[int, int, int]]:
                 file_offset += size
             if ranges:
                 return sorted(ranges)
+    macho_ranges = parse_macho_core_ranges(data)
+    if macho_ranges:
+        return macho_ranges
     return [(0, len(data), 0)]
+
+
+def detect_memory_dump_format(data: bytes) -> str:
+    """Classify a memory dump blob as a Windows minidump, a macOS Mach-O core, or raw."""
+
+    if len(data) >= 4 and data[:4] == b"MDMP":
+        return "minidump"
+    if _is_macho_core(data):
+        return "macho-core"
+    return "raw"
+
+
+def _is_macho_core(data: bytes) -> bool:
+    if len(data) < 32:
+        return False
+    if data[:4] not in (MACHO_MAGIC_64_LE, MACHO_MAGIC_64_BE):
+        return False
+    endian = "<" if data[:4] == MACHO_MAGIC_64_LE else ">"
+    try:
+        filetype = struct.unpack_from(endian + "I", data, 12)[0]
+    except struct.error:
+        return False
+    return filetype == MACHO_FILETYPE_CORE
+
+
+def parse_macho_core_segments(data: bytes) -> list[dict[str, object]]:
+    """Return LC_SEGMENT_64 descriptors from a 64-bit Mach-O core file.
+
+    Each descriptor carries the segment name, virtual address, virtual size, the
+    bytes actually present in the file (filesize/fileoff), and initial protection
+    flags, providing region provenance for carved artifacts.
+    """
+
+    if not _is_macho_core(data):
+        return []
+    endian = "<" if data[:4] == MACHO_MAGIC_64_LE else ">"
+    try:
+        ncmds = struct.unpack_from(endian + "I", data, 16)[0]
+    except struct.error:
+        return []
+    segments: list[dict[str, object]] = []
+    cursor = 32
+    for index in range(ncmds):
+        if cursor + 8 > len(data):
+            break
+        try:
+            cmd, cmdsize = struct.unpack_from(endian + "II", data, cursor)
+        except struct.error:
+            break
+        if cmdsize < 8 or cursor + cmdsize > len(data):
+            break
+        if cmd == MACHO_LC_SEGMENT_64 and cmdsize >= 72:
+            try:
+                segname_raw = data[cursor + 8 : cursor + 24]
+                vmaddr, vmsize, fileoff, filesize, maxprot, initprot, nsects, flags = struct.unpack_from(
+                    endian + "QQQQiiII", data, cursor + 24
+                )
+            except struct.error:
+                break
+            segname = segname_raw.split(b"\x00", 1)[0].decode("ascii", "replace")
+            segments.append(
+                {
+                    "index": index,
+                    "segname": segname,
+                    "vmaddr": vmaddr,
+                    "vmsize": vmsize,
+                    "fileoff": fileoff,
+                    "filesize": filesize,
+                    "maxprot": maxprot,
+                    "initprot": initprot,
+                    "nsects": nsects,
+                    "flags": flags,
+                }
+            )
+        cursor += cmdsize
+    return segments
+
+
+def parse_macho_core_ranges(data: bytes) -> list[tuple[int, int, int]]:
+    """Return (virtual_address, size, file_offset) ranges for a Mach-O core file."""
+
+    ranges: list[tuple[int, int, int]] = []
+    for segment in parse_macho_core_segments(data):
+        filesize = int(segment["filesize"])  # type: ignore[arg-type]
+        if filesize <= 0:
+            continue
+        ranges.append((int(segment["vmaddr"]), filesize, int(segment["fileoff"])))  # type: ignore[arg-type]
+    return sorted(ranges)
+
+
+def macos_core_segments_from_path(path: Path) -> tuple[str, list[dict[str, object]]]:
+    """Detect the dump format and, for Mach-O cores, read the bounded segment table.
+
+    Only the Mach-O header and its load-command block are read, so large cores do
+    not have to be loaded whole just to recover region provenance.
+    """
+
+    head = read_bytes_at(path, 0, 32)
+    fmt = detect_memory_dump_format(head)
+    if fmt != "macho-core":
+        return fmt, []
+    endian = "<" if head[:4] == MACHO_MAGIC_64_LE else ">"
+    try:
+        sizeofcmds = struct.unpack_from(endian + "I", head, 20)[0]
+    except struct.error:
+        return fmt, []
+    load_command_bytes = 32 + min(sizeofcmds, MACHO_LOAD_COMMAND_READ_CAP)
+    header = read_bytes_at(path, 0, load_command_bytes)
+    return fmt, parse_macho_core_segments(header)
+
+
+def describe_memory_region_for_offset(
+    offset: int, segments: Sequence[Mapping[str, object]]
+) -> dict[str, object] | None:
+    """Map a file offset to its containing Mach-O segment for region provenance."""
+
+    for segment in segments:
+        fileoff = int(segment["fileoff"])  # type: ignore[arg-type]
+        filesize = int(segment["filesize"])  # type: ignore[arg-type]
+        if fileoff <= offset < fileoff + filesize:
+            vmaddr = int(segment["vmaddr"])  # type: ignore[arg-type]
+            return {
+                "segment_index": int(segment["index"]),  # type: ignore[arg-type]
+                "segment_name": str(segment["segname"]),
+                "segment_vmaddr": vmaddr,
+                "segment_fileoff": fileoff,
+                "segment_filesize": filesize,
+                "segment_initprot": int(segment["initprot"]),  # type: ignore[arg-type]
+                "mapped_virtual_address": vmaddr + (offset - fileoff),
+            }
+    return None
 
 
 def mapped_offset_to_va(offset: int, ranges: Sequence[tuple[int, int, int]]) -> int | None:
@@ -2491,8 +2973,11 @@ def build_kakaotalk_memory_carve_payload(
         carve_dir.mkdir(parents=True, exist_ok=True)
     sources = find_memory_dump_candidates(root) if sources is None else list(sources)
     entries: list[dict[str, object]] = []
+    source_formats: dict[str, str] = {}
     header_count = 0
     for source in sources:
+        source_format, source_segments = macos_core_segments_from_path(source)
+        source_formats[str(source.resolve())] = source_format
         for offset in iter_sqlite_header_offsets(source, max_hits=max(0, max_hits - header_count) if max_hits else 0):
             header_count += 1
             entry = analyze_memory_sqlite_carve(
@@ -2504,6 +2989,8 @@ def build_kakaotalk_memory_carve_payload(
                 max_rows_per_table=max_rows_per_table,
                 write_carves=write_carves,
             )
+            entry["memory_dump_format"] = source_format
+            entry["region_provenance"] = describe_memory_region_for_offset(offset, source_segments)
             entries.append(entry)
             if max_hits and header_count >= max_hits:
                 break
