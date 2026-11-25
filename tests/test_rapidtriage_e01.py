@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import subprocess
@@ -474,6 +475,57 @@ Units are in 512-byte sectors
                 (Path(tmp_dir) / "stage" / "rapidtriage-e01-stage-status.json").read_text(encoding="utf-8")
             )
             self.assertEqual(checkpoint["mount_strategy"], "python-native-ewf")
+
+    def test_native_walk_reports_progress_after_each_recovered_file(self) -> None:
+        from rapidtriage.core.e01_native import _walk_ntfs_dir
+
+        class FakeRecord:
+            def __init__(self, segment: int, data: bytes = b"", children: dict | None = None) -> None:
+                self.segment, self._data, self._children = segment, data, children
+
+            def is_dir(self) -> bool:
+                return self._children is not None
+
+            def is_file(self) -> bool:
+                return self._children is None
+
+            def size(self) -> int:
+                return len(self._data)
+
+            def open(self) -> io.BytesIO:
+                return io.BytesIO(self._data)
+
+            def listdir(self, ignore_dos: bool = False) -> list[str]:
+                return list(self._children or {})
+
+            def get(self, name: str) -> FakeRecord:
+                return (self._children or {})[name]
+
+        root = FakeRecord(5, children={
+            "a.txt": FakeRecord(30, b"aaaa"),
+            "Users": FakeRecord(31, children={"b.bin": FakeRecord(32, b"bb")}),
+        })
+        stats = {"files": 0, "bytes": 0, "errors": 0, "depth_skips": 0, "truncated": 0, "alias_skips": 0}
+        seen: list[tuple[int, int]] = []
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            _walk_ntfs_dir(root, Path(tmp_dir), stats, limit=10, on_progress=lambda s: seen.append((s["files"], s["bytes"])))
+        self.assertEqual(seen, [(1, 4), (2, 6)])
+
+    def test_image_extract_reporter_writes_files_and_size_to_the_running_plan_task(self) -> None:
+        from rapidtriage.core.run import RunProgress, image_extract_reporter
+        from rapidtriage.core.run.plan import build_run_plan
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            progress = RunProgress(output_dir)
+            progress.start(stage="prepare")
+            progress.set_plan(build_run_plan(mode="fraud"))
+            report = image_extract_reporter(progress, interval=0.0)
+            report({"files": 1234, "bytes": 3 << 30})
+            task = progress.task_record("image-extract")
+            progress.finish(status="completed")
+        self.assertEqual(task["rows_so_far"], 1234)
+        self.assertEqual(task["message"], "파일 1,234개 · 3.0 GB 추출")
 
     def _fake_native_result(self) -> dict:
         partition_row = {
@@ -2334,6 +2386,7 @@ Units are in 512-byte sectors
                 stage_dir: Path,
                 *,
                 partition_start_sector: int | None = None,
+                on_progress=None,
             ) -> E01ExtractionResult:
                 extract_dir = stage_dir / "filesystem"
                 extract_dir.mkdir(parents=True, exist_ok=True)

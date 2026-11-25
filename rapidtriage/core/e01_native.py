@@ -16,6 +16,7 @@ import io
 import os
 import struct
 import uuid
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -516,12 +517,17 @@ def _dump_ntfs_record(rec: Any, out_path: Path, stats: dict[str, int]) -> None:
     stats["bytes"] += size - max(remaining, 0)
 
 
+ExtractProgress = Callable[[Mapping[str, int]], None]
+"""Called after each recovered file with the running stats (files, bytes, errors, …)."""
+
+
 def _walk_ntfs_dir(
     node: Any,
     out_dir: Path,
     stats: dict[str, int],
     depth: int = 0,
     limit: int | None = None,
+    on_progress: ExtractProgress | None = None,
 ) -> None:
     if depth > 64:
         stats["depth_skips"] += 1
@@ -558,12 +564,14 @@ def _walk_ntfs_dir(
         target = out_dir / _safe_component(name)
         try:
             if rec.is_dir():
-                _walk_ntfs_dir(rec, target, stats, depth + 1, limit)
+                _walk_ntfs_dir(rec, target, stats, depth + 1, limit, on_progress)
             elif rec.is_file():
                 if stats["files"] >= limit:
                     stats["truncated"] += 1
                     continue
                 _dump_ntfs_record(rec, target, stats)
+                if on_progress is not None:
+                    on_progress(stats)
         except Exception:
             stats["errors"] += 1
             continue
@@ -591,6 +599,7 @@ def _sweep_deleted_mft_records(
     extract_dir: Path,
     stats: dict[str, int],
     limit: int | None = None,
+    on_progress: ExtractProgress | None = None,
 ) -> None:
     """Best-effort recovery of MFT records whose in-use flag is cleared."""
     if limit is None:
@@ -623,6 +632,8 @@ def _sweep_deleted_mft_records(
             stats["deleted_read_errors"] += 1
         else:
             stats["deleted_files"] += 1
+        if on_progress is not None:
+            on_progress(stats)
 
 
 def _dump_ntfs_system_record(rec: Any, out_path: Path) -> int:
@@ -649,6 +660,7 @@ def extract_e01_native(
     partition_start_sector: int | None = None,
     include_deleted: bool = True,
     system_dir: Path | None = None,
+    on_progress: ExtractProgress | None = None,
 ) -> dict[str, Any]:
     """Open an EWF segment set, select a partition, and recover files via NTFS.
 
@@ -687,9 +699,9 @@ def extract_e01_native(
             "file_limit": native_extract_file_limit(),
         }
         root = fs.mft.get(5)
-        _walk_ntfs_dir(root, extract_dir, stats, limit=stats["file_limit"])
+        _walk_ntfs_dir(root, extract_dir, stats, limit=stats["file_limit"], on_progress=on_progress)
         if include_deleted:
-            _sweep_deleted_mft_records(fs, extract_dir, stats, limit=stats["file_limit"])
+            _sweep_deleted_mft_records(fs, extract_dir, stats, limit=stats["file_limit"], on_progress=on_progress)
         system_artifacts: dict[str, str] = {}
         if system_dir is not None:
             # Dump $MFT (record 0) outside the recovered tree so reference-diff

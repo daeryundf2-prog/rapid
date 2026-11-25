@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .audit import compute_sha256
-from .e01_native import native_e01_available
+from .e01_native import ExtractProgress, native_e01_available
 from .extraction_failures import (
     E01_EXTRACT_DIR_NAME,
     E01_LEGACY_EXTRACT_DIR_NAMES,
@@ -1647,6 +1647,7 @@ def extract_e01_to_directory(
     runner: CommandRunner = default_runner,
     tool_resolver: ToolResolver = shutil.which,
     stream_runner: StreamRunner | None = None,
+    on_progress: ExtractProgress | None = None,
 ) -> E01ExtractionResult:
     source_path = e01_path.expanduser().resolve()
     if not source_path.is_file():
@@ -1757,6 +1758,7 @@ def extract_e01_to_directory(
             missing_tools=list(missing),
             command_history=command_history,
             engine_note="requested",
+            on_progress=on_progress,
         )
 
     native_failure: E01ExtractionError | None = None
@@ -1775,6 +1777,7 @@ def extract_e01_to_directory(
                 missing_tools=list(missing),
                 command_history=command_history,
                 engine_note="preferred",
+                on_progress=on_progress,
             )
         except E01ExtractionError as exc:
             native_failure = exc
@@ -1807,6 +1810,7 @@ def extract_e01_to_directory(
                 tool_preflight=tool_preflight,
                 missing_tools=missing,
                 command_history=command_history,
+                on_progress=on_progress,
             )
         if blocked:
             blocked_payload: dict[str, object] = {
@@ -2129,6 +2133,7 @@ def _extract_e01_native_fallback(
     missing_tools: list[str],
     command_history: list[dict[str, object]],
     engine_note: str = "fallback",
+    on_progress: ExtractProgress | None = None,
 ) -> E01ExtractionResult:
     """Recover files with pyewf + dissect.ntfs (in-process, no external tools)."""
     from .e01_native import NATIVE_MOUNT_STRATEGY, extract_e01_native
@@ -2185,6 +2190,7 @@ def _extract_e01_native_fallback(
             extract_dir,
             partition_start_sector=partition_start_sector,
             system_dir=stage / "_system",
+            on_progress=on_progress,
         )
     except Exception as exc:
         checkpoint_payload["stages"] = {

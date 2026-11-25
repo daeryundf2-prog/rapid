@@ -566,6 +566,7 @@ def run_triage_mode(
             input_kind=input_kind,
             output_dir=output_dir,
             e01_partition_start_sector=e01_partition_start_sector,
+            on_extract_progress=image_extract_reporter(progress),
         )
         progress.set_run_root(str(input_root.root_path))
         if image_result is None:
@@ -2444,12 +2445,34 @@ def timed_artifact_collection(
     return payload, started_at, completed_at, duration_ms
 
 
+def image_extract_reporter(progress: RunProgress, *, interval: float = 1.0) -> Callable[[Mapping[str, int]], None]:
+    """Native E01 recovery progress -> the plan's image-extract task (files so far + a GB message).
+
+    The prepare stage can run for an hour on a large image; without this the progress file (and the
+    console) showed 0/0 until extraction ended. Throttled to one update per `interval` seconds.
+    """
+    last = [0.0]
+
+    def report(stats: Mapping[str, int]) -> None:
+        now = time.monotonic()
+        if now - last[0] < interval:
+            return
+        last[0] = now
+        files = int(stats.get("files") or 0)
+        gib = int(stats.get("bytes") or 0) / (1 << 30)
+        progress.task_rows("image-extract", files)
+        progress.task_set_message("image-extract", f"파일 {files:,}개 · {gib:.1f} GB 추출")
+
+    return report
+
+
 def prepare_run_input_root(
     root: InputRoot | Path,
     *,
     input_kind: str | None,
     output_dir: Path,
     e01_partition_start_sector: int | None = None,
+    on_extract_progress: Callable[[Mapping[str, int]], None] | None = None,
 ) -> tuple[
     InputRoot,
     E01ExtractionResult | DiskImageExtractionResult | ArchiveImageExtractionResult | VirtualDiskExtractionResult | None,
@@ -2464,6 +2487,7 @@ def prepare_run_input_root(
                 root_path,
                 output_dir / "_e01",
                 partition_start_sector=e01_partition_start_sector,
+                on_progress=on_extract_progress,
             )
         except E01ExtractionError as exc:
             guidance = e01_failure_guidance(str(exc))
