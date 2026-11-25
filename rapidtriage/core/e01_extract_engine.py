@@ -18,10 +18,14 @@ copy/decode threads (default: CPU count, at most 8; ``1`` copies during the walk
 (``tests/test_e01_extract_rust_parity.py``). When ``rust`` is requested but the extension is
 missing, built for another contract, or fails on the image, the Python engine runs instead and
 the fallback is recorded (``extract_engine`` in the result, a Korean notice in the warnings).
+The Rust engine never skips files for the output drive's free-space reserve
+(``RAPIDTRIAGE_NATIVE_MIN_FREE_GB``): when the reserve would be reached it stops, and the Python
+engine, whose ``ExtractSpaceGuard`` decides what is written, redoes the image.
 """
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import logging
 import os
@@ -29,7 +33,7 @@ import shutil
 import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from types import ModuleType
+from types import MappingProxyType, ModuleType
 from typing import Any
 
 E01_EXTRACT_ENGINE_ENV = "RAPIDTRIAGE_E01_EXTRACT_ENGINE"
@@ -38,8 +42,10 @@ E01_EXTRACT_READER_ENV = "RAPIDTRIAGE_E01_EXTRACT_READER"
 E01_EXTRACT_ENGINES = ("python", "rust")
 E01_EXTRACT_NATIVE_MODULE = "rapid_extract_native"
 # Must equal ABI_VERSION in engines/rust/crates/rapid-extract/src/lib.rs.
-E01_EXTRACT_NATIVE_ABI_VERSION = 2
+E01_EXTRACT_NATIVE_ABI_VERSION = 3
 E01_EXTRACT_BUILD_HINT = "python scripts/build-e01-extract-native.py"
+# Error prefix of the extension when the free-space reserve would be reached (extract.rs).
+E01_EXTRACT_SPACE_RESERVE_ERROR = "free-space-reserve"
 NATIVE_DIR = Path(__file__).resolve().parents[1] / "native"
 LOGGER = logging.getLogger(__name__)
 
@@ -104,6 +110,9 @@ def run_rust_extraction(
     include_deleted: bool,
     priority_paths: tuple[str, ...],
     on_progress: Callable[[Mapping[str, int]], None] | None,
+    free_at_start: int = -1,
+    min_free_bytes: int = 0,
+    free_space_probe: Callable[[], int] | None = None,
 ) -> bool:
     """Run the Rust walk into ``stats``; False (``status`` switched to the Python fallback, any
     files it wrote removed, ``stats`` untouched) when the extension fails on this image."""
@@ -112,9 +121,15 @@ def run_rust_extraction(
         return False
     before = set(extract_dir.iterdir()) if extract_dir.is_dir() else None
 
-    def progress(snapshot: Mapping[str, int]) -> None:
+    def notify(view: Mapping[str, int]) -> None:
+        # As ``_notify_progress``: progress is advisory, so an observer that raises must not
+        # abort the run (here: make the Rust engine fail over to Python).
         if on_progress is not None:
-            on_progress({**stats, **snapshot})
+            with contextlib.suppress(Exception):
+                on_progress(MappingProxyType(dict(view)))
+
+    def progress(snapshot: Mapping[str, int]) -> None:
+        notify({**stats, **snapshot})
 
     try:
         result = module.extract_tree(
@@ -130,15 +145,20 @@ def run_rust_extraction(
             media_size=int(handle.get_media_size()),
             threads=e01_extract_threads(),
             reader="python" if (os.environ.get(E01_EXTRACT_READER_ENV) or "").strip().lower() == "python" else "auto",
+            free_at_start=int(free_at_start),
+            min_free_bytes=int(min_free_bytes),
+            free_space=free_space_probe,
         )
     except Exception as exc:  # the Rust engine reports every failure as one exception
         _discard_new_entries(extract_dir, before)
-        status.update(
-            _fallback(
-                "rust",
-                f"Rust E01 추출 엔진이 이 이미지에서 실패해 Python 엔진으로 다시 처리했습니다({exc}).",
+        if str(exc).startswith(E01_EXTRACT_SPACE_RESERVE_ERROR):
+            notice = (
+                "출력 드라이브 여유 공간이 예약치에 가까워 Rust E01 추출 엔진 대신 Python 엔진으로 처리했습니다"
+                f"(여유 공간 보호는 Python 엔진이 맡습니다: {exc})."
             )
-        )
+        else:
+            notice = f"Rust E01 추출 엔진이 이 이미지에서 실패해 Python 엔진으로 다시 처리했습니다({exc})."
+        status.update(_fallback("rust", notice))
         return False
     stats.update({key: int(value) for key, value in dict(result["stats"]).items()})
     status["media_reader"] = str(result["media_reader"])
@@ -146,8 +166,7 @@ def run_rust_extraction(
     status["rerun_reason"] = result["rerun_reason"]
     status["walk_seconds"] = round(float(result["walk_seconds"]), 3)
     status["copy_seconds"] = round(float(result["copy_seconds"]), 3)
-    if on_progress is not None:
-        on_progress(stats)
+    notify(stats)
     return True
 
 

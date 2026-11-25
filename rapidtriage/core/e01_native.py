@@ -955,6 +955,9 @@ def extract_e01_native(
                 include_deleted=include_deleted,
                 priority_paths=PRIORITY_RECOVERY_PATHS,
                 on_progress=on_progress,
+                free_at_start=guard.free_at_start,
+                min_free_bytes=guard.reserve,
+                free_space_probe=guard._probe,
             )
         ):
             root = fs.mft.get(5)

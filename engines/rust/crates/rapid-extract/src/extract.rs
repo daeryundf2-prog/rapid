@@ -6,8 +6,8 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::ntfs::{DirectReader, Media, Ntfs, Record, Stream, VolRead};
@@ -18,6 +18,15 @@ const MAX_CONSECUTIVE_MISSING: u64 = 100_000;
 // `_mft_record_count` asks the boot sector for `clusters_per_file_record`, which dissect's
 // BOOT_SECTOR does not have; the AttributeError leaves its divisor at 1024 on every volume.
 const RECORD_COUNT_DIVISOR: i128 = 1024;
+// `ExtractSpaceGuard`: free space is re-read after this many files or bytes.
+const SPACE_CHECK_EVERY_FILES: u64 = 256;
+const SPACE_CHECK_EVERY_BYTES: i128 = 1 << 30;
+// Headroom over the reserve (Python's estimate may lag the drive by up to one re-read interval),
+// and the allocation unit each file is rounded up to.
+const SPACE_MARGIN: i128 = SPACE_CHECK_EVERY_BYTES;
+const SPACE_BLOCK: i128 = 4096;
+/// Prefix of the error returned when the output drive nears its free-space reserve.
+pub const SPACE_RESERVE_ERROR: &str = "free-space-reserve";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Stats {
@@ -50,6 +59,28 @@ impl Stats {
 
 pub type ProgressFn<'a> = Box<dyn FnMut(&Stats) -> Result<(), String> + 'a>;
 
+/// The output drive's free-space reserve (`ExtractSpaceGuard` of `e01_native.py`). The Rust engine
+/// never skips files for space: when a file would bring the drive within `min_free` (plus
+/// [`SPACE_MARGIN`]), or the drive drops below it while copying, `extract` returns an error starting
+/// with [`SPACE_RESERVE_ERROR`] so the caller reruns the image on the Python engine, whose guard
+/// decides which files are written.
+#[derive(Clone)]
+pub struct SpaceReserve {
+    /// Free bytes when extraction started; negative = unknown (not guarded, as in Python).
+    pub free_at_start: i128,
+    pub min_free: i128,
+    /// Re-reads the drive's free bytes (negative = unreadable).
+    pub probe: Arc<dyn Fn() -> i128 + Send + Sync>,
+}
+
+struct SpaceState {
+    reserve: SpaceReserve,
+    /// Estimated free bytes above `min_free + SPACE_MARGIN`.
+    left: i128,
+    files: u64,
+    bytes: i128,
+}
+
 pub struct Options<'a> {
     pub extract_dir: PathBuf,
     pub limit: i128,
@@ -61,6 +92,7 @@ pub struct Options<'a> {
     pub progress_every: u64,
     /// Worker threads for copying file data; 1 copies inline during the walk (no speculation).
     pub threads: usize,
+    pub space: Option<SpaceReserve>,
 }
 
 /// A deferred `_dump_ntfs_record` side effect of the planning walk, keyed by (target, record).
@@ -126,9 +158,43 @@ pub struct Walker<'a, M: Media> {
     pending: u64,
     plan: Option<Vec<Job>>,
     known: HashMap<JobKey, JobOutcome>,
+    space: Option<SpaceState>,
 }
 
 impl<'a, M: Media> Walker<'a, M> {
+    /// `ExtractSpaceGuard.allows`, except that a file the reserve cannot take aborts the run. A
+    /// planning walk writes nothing, so it only counts down the estimate from the start value.
+    fn reserve_space(&mut self, size: i128) -> Result<(), String> {
+        let planning = self.plan.is_some();
+        let Some(space) = self.space.as_mut() else {
+            return Ok(());
+        };
+        let need = (size.max(0) + SPACE_BLOCK - 1) / SPACE_BLOCK * SPACE_BLOCK;
+        if !planning
+            && (space.files >= SPACE_CHECK_EVERY_FILES
+                || space.bytes >= SPACE_CHECK_EVERY_BYTES
+                || space.left < need)
+        {
+            let free = (space.reserve.probe)();
+            if free >= 0 {
+                space.left = free - space.reserve.min_free - SPACE_MARGIN;
+            }
+            space.files = 0;
+            space.bytes = 0;
+        }
+        if space.left < need {
+            return Err(format!(
+                "{SPACE_RESERVE_ERROR}: writing {size} more bytes would bring the output drive within \
+                 {} bytes (plus a {SPACE_MARGIN}-byte margin) of its free-space reserve",
+                space.reserve.min_free
+            ));
+        }
+        space.files += 1;
+        space.bytes += need;
+        space.left -= need;
+        Ok(())
+    }
+
     fn on_progress(&mut self) -> Result<(), Raised> {
         if self.plan.is_some() {
             return Ok(());
@@ -154,6 +220,7 @@ impl<'a, M: Media> Walker<'a, M> {
                 return Ok(());
             }
         };
+        self.reserve_space(size).map_err(Raised::Fatal)?;
         if let Some(plan) = self.plan.as_mut() {
             let key: JobKey = (out_path.to_path_buf(), record.segment);
             let outcome = self.known.get(&key).copied();
@@ -204,8 +271,16 @@ impl<'a, M: Media> Walker<'a, M> {
         Ok(())
     }
 
-    /// `_walk_ntfs_dir`.
-    fn walk_dir(&mut self, node: &Record, out_dir: &Path, depth: u32) -> Result<(), String> {
+    /// `_walk_ntfs_dir`. `done` holds the segments the priority pass recovered; only that pass
+    /// records into it (`record_done`), so the full walk recovers every path of a hard-linked file.
+    fn walk_dir(
+        &mut self,
+        node: &Record,
+        out_dir: &Path,
+        depth: u32,
+        limit: i128,
+        record_done: bool,
+    ) -> Result<(), String> {
         if depth > MAX_DEPTH {
             self.stats.depth_skips += 1;
             return Ok(());
@@ -247,18 +322,20 @@ impl<'a, M: Media> Walker<'a, M> {
             let target = out_dir.join(safe_component(name));
             let outcome = (|| -> Result<(), Raised> {
                 if record.is_dir() {
-                    self.walk_dir(&record, &target, depth + 1)
+                    self.walk_dir(&record, &target, depth + 1, limit, record_done)
                         .map_err(Raised::Fatal)?;
                 } else {
                     if self.done.contains(&segment) {
                         return Ok(());
                     }
-                    if self.stats.files >= self.stats.file_limit {
+                    if self.stats.files >= limit {
                         self.stats.truncated += 1;
                         return self.on_progress();
                     }
                     self.dump(&record, &target)?;
-                    self.done.insert(segment);
+                    if record_done {
+                        self.done.insert(segment);
+                    }
                     self.on_progress()?;
                 }
                 Ok(())
@@ -309,7 +386,8 @@ impl<'a, M: Media> Walker<'a, M> {
         found
     }
 
-    /// `_recover_priority_paths`.
+    /// `_recover_priority_paths`: exempt from the file cap (the files count toward it, so the tree
+    /// walk gets what is left); only the free-space reserve stops them.
     fn recover_priority(&mut self, extract_dir: &Path, patterns: &[String]) -> Result<(), String> {
         for pattern in patterns {
             let root = match self.ntfs.mft_record(5) {
@@ -322,14 +400,11 @@ impl<'a, M: Media> Walker<'a, M> {
                 });
                 let outcome = (|| -> Result<(), Raised> {
                     if record.is_dir() {
-                        self.walk_dir(&record, &target, 0).map_err(Raised::Fatal)?;
+                        self.walk_dir(&record, &target, 0, i128::MAX, true)
+                            .map_err(Raised::Fatal)?;
                     } else {
                         let segment = record.segment;
                         if self.done.contains(&segment) {
-                            return Ok(());
-                        }
-                        if self.stats.files >= self.stats.file_limit {
-                            self.stats.truncated += 1;
                             return Ok(());
                         }
                         self.dump(&record, &target)?;
@@ -379,7 +454,7 @@ impl<'a, M: Media> Walker<'a, M> {
                 continue;
             }
             let target = deleted_dir.join(format!("{index}-{}", safe_component(&filename)));
-            let before = self.stats.errors;
+            let (before_files, before_errors) = (self.stats.files, self.stats.errors);
             match self.dump(&record, &target) {
                 Ok(()) => {}
                 Err(Raised::Counted) => {
@@ -390,10 +465,10 @@ impl<'a, M: Media> Walker<'a, M> {
                 }
                 Err(Raised::Fatal(message)) => return Err(message),
             }
-            if self.stats.errors != before {
-                self.stats.deleted_read_errors += 1;
-            } else {
+            if self.stats.files != before_files {
                 self.stats.deleted_files += 1;
+            } else if self.stats.errors != before_errors {
+                self.stats.deleted_read_errors += 1;
             }
             self.on_progress().map_err(fatal_message)?;
         }
@@ -438,13 +513,16 @@ fn fold_key(path: &Path) -> String {
 
 /// Run the planned side effects on `threads` workers and return each job's outcome. Jobs whose
 /// targets fold to the same path stay in walk order on one worker (a later failure removes the
-/// file an earlier job wrote, as in Python); units start in image order.
+/// file an earlier job wrote, as in Python); units start in image order. With a `space` reserve
+/// the drive is re-read while copying, and the copies stop with an error once the bytes still to
+/// write no longer fit above the reserve (another writer took the space the plan counted on).
 fn execute<M: Media>(
     ntfs: &Ntfs<M>,
     jobs: &[Job],
     threads: usize,
     stats: &Stats,
     progress: &mut ProgressFn<'_>,
+    space: Option<&SpaceReserve>,
 ) -> Result<Vec<JobOutcome>, String> {
     let mut outcomes: Vec<Option<JobOutcome>> = vec![None; jobs.len()];
     let mut units: Vec<Vec<usize>> = Vec::new();
@@ -476,6 +554,14 @@ fn execute<M: Media>(
     let next = AtomicUsize::new(0);
     let copied_files = AtomicUsize::new(0);
     let bytes = AtomicI64::new(0);
+    let abort = AtomicBool::new(false);
+    let planned_bytes: i128 = jobs
+        .iter()
+        .map(|job| match job {
+            Job::Copy { size, .. } => (*size).max(0),
+            Job::Mkdir { .. } => 0,
+        })
+        .sum();
     let results: Mutex<Vec<(usize, JobOutcome)>> = Mutex::new(Vec::new());
     std::thread::scope(|scope| -> Result<(), String> {
         let workers: Vec<_> = (0..threads.max(1))
@@ -489,10 +575,13 @@ fn execute<M: Media>(
                     let mut local = Vec::new();
                     loop {
                         let unit = next.fetch_add(1, Ordering::Relaxed);
-                        if unit >= units.len() {
+                        if unit >= units.len() || abort.load(Ordering::Relaxed) {
                             break;
                         }
                         for &index in &units[unit] {
+                            if abort.load(Ordering::Relaxed) {
+                                break;
+                            }
                             let Job::Copy { key, stream, size } = &jobs[index] else {
                                 continue;
                             };
@@ -521,11 +610,32 @@ fn execute<M: Media>(
                 })
             })
             .collect();
+        let mut failure: Option<String> = None;
         while workers.iter().any(|w| !w.is_finished()) {
             let mut snapshot = stats.clone();
             snapshot.files = copied_files.load(Ordering::Relaxed) as i128;
             snapshot.bytes = bytes.load(Ordering::Relaxed) as i128;
-            progress(&snapshot)?;
+            let checked = progress(&snapshot).and_then(|()| match space {
+                Some(space) if space.free_at_start >= 0 => {
+                    let free = (space.probe)();
+                    let still_to_write = planned_bytes - snapshot.bytes;
+                    if free >= 0 && free - still_to_write < space.min_free {
+                        Err(format!(
+                            "{SPACE_RESERVE_ERROR}: the output drive has {free} bytes free with \
+                             {still_to_write} still to write, below its {}-byte reserve",
+                            space.min_free
+                        ))
+                    } else {
+                        Ok(())
+                    }
+                }
+                _ => Ok(()),
+            });
+            if let Err(message) = checked {
+                abort.store(true, Ordering::Relaxed);
+                failure = Some(message);
+                break;
+            }
             std::thread::sleep(Duration::from_millis(250));
         }
         for worker in workers {
@@ -533,7 +643,7 @@ fn execute<M: Media>(
                 .join()
                 .map_err(|_| "copy worker panicked".to_string())?;
         }
-        Ok(())
+        failure.map_or(Ok(()), Err)
     })?;
     for (index, outcome) in results
         .into_inner()
@@ -569,6 +679,7 @@ fn new_walker<'a, M: Media>(
     planning: bool,
     limit: i128,
     every: u64,
+    space: Option<&SpaceReserve>,
 ) -> Walker<'a, M> {
     Walker {
         ntfs,
@@ -582,6 +693,14 @@ fn new_walker<'a, M: Media>(
         pending: 0,
         plan: planning.then(Vec::new),
         known: HashMap::new(),
+        space: space
+            .filter(|reserve| reserve.free_at_start >= 0)
+            .map(|reserve| SpaceState {
+                left: reserve.free_at_start - reserve.min_free - SPACE_MARGIN,
+                reserve: reserve.clone(),
+                files: 0,
+                bytes: 0,
+            }),
     }
 }
 
@@ -594,7 +713,8 @@ fn walk_all<M: Media>(
         .mft_record(5)
         .map_err(|m| format!("root record unreadable: {m}"))?;
     walker.recover_priority(&options.extract_dir, &options.priority_paths)?;
-    walker.walk_dir(&root, &options.extract_dir, 0)?;
+    let limit = walker.stats.file_limit;
+    walker.walk_dir(&root, &options.extract_dir, 0, limit, false)?;
     if options.include_deleted {
         walker.sweep_deleted(&options.extract_dir)?;
     }
@@ -624,8 +744,16 @@ pub fn extract<'a, M: Media>(
     mut options: Options<'a>,
 ) -> Result<Outcome, String> {
     let (options_limit, options_every) = (options.limit, options.progress_every);
+    let space = options.space.clone();
     let fresh = |progress: ProgressFn<'a>, planning: bool, known: HashMap<JobKey, JobOutcome>| {
-        let mut walker = new_walker(ntfs, progress, planning, options_limit, options_every);
+        let mut walker = new_walker(
+            ntfs,
+            progress,
+            planning,
+            options_limit,
+            options_every,
+            space.as_ref(),
+        );
         walker.known = known;
         walker
     };
@@ -645,6 +773,7 @@ pub fn extract<'a, M: Media>(
             options.threads,
             &planner.stats,
             &mut planner.progress,
+            space.as_ref(),
         )?;
         if outcomes.iter().all(|o| matches!(o, JobOutcome::Copied(_))) {
             planner.stats.bytes = outcomes

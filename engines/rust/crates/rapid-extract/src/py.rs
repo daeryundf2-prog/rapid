@@ -4,14 +4,14 @@
 use std::fs::File;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
 use crate::ewf::EwfImage;
-use crate::extract::{extract, Options, Outcome, Stats};
+use crate::extract::{extract, Options, Outcome, SpaceReserve, Stats};
 use crate::ntfs::{Media, Ntfs, Res, Volume};
 
 /// A Python object with `seek(offset)` / `read(n)` (a pyewf handle or `RawMediaHandle`). Calls
@@ -155,8 +155,12 @@ fn stats_dict<'py>(py: Python<'py>, stats: &Stats) -> PyResult<Bound<'py, PyDict
 /// from `handle`; any read the Rust reader cannot serve goes to `handle`. Returns
 /// `{"stats": <extract_e01_native stats>, "media_reader": str, "python_reads": int,
 /// "walk_seconds": float, "copy_seconds": float, "sequential_rerun": bool}`.
+/// `free_at_start` / `min_free_bytes` / `free_space` (a callable returning the output drive's free
+/// bytes, negative when unreadable) are `ExtractSpaceGuard`'s start value, reserve and probe; a
+/// negative `free_at_start` or no `free_space` leaves the run unguarded. Raises a `RuntimeError`
+/// starting with `free-space-reserve` when the reserve would be reached.
 #[pyfunction]
-#[pyo3(signature = (handle, base, size, extract_dir, limit, include_deleted, priority_paths, progress=None, progress_every=256, segments=Vec::new(), media_size=0, threads=1, reader="auto"))]
+#[pyo3(signature = (handle, base, size, extract_dir, limit, include_deleted, priority_paths, progress=None, progress_every=256, segments=Vec::new(), media_size=0, threads=1, reader="auto", free_at_start=-1, min_free_bytes=0, free_space=None))]
 #[allow(clippy::too_many_arguments)]
 fn extract_tree(
     py: Python<'_>,
@@ -173,8 +177,23 @@ fn extract_tree(
     media_size: u64,
     threads: usize,
     reader: &str,
+    free_at_start: i64,
+    min_free_bytes: i64,
+    free_space: Option<Py<PyAny>>,
 ) -> PyResult<Py<PyDict>> {
     let reader = reader.to_string();
+    let space = free_space.map(|probe| SpaceReserve {
+        free_at_start: free_at_start.into(),
+        min_free: min_free_bytes.into(),
+        probe: Arc::new(move || {
+            Python::with_gil(|py| {
+                probe
+                    .call0(py)
+                    .and_then(|free| free.extract::<i64>(py))
+                    .map_or(-1, i128::from)
+            })
+        }),
+    });
     let outcome = py.allow_threads(move || {
         let media = AnyMedia {
             source: pick_source(&segments, media_size, &reader, threads),
@@ -207,6 +226,7 @@ fn extract_tree(
                 progress: Box::new(callback),
                 progress_every,
                 threads,
+                space,
             },
         )?;
         let vol = ntfs.vol.borrow();

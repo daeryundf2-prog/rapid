@@ -35,6 +35,11 @@ def _missing() -> str:
     return "" if module is not None else f"rapid_extract_native unavailable: {problem}"
 
 
+def engine_stats(stats: dict[str, int]) -> dict[str, int]:
+    """Stats an engine produces: ``free_bytes_at_start`` is the output drive's state, not engine output."""
+    return {key: value for key, value in stats.items() if key != "free_bytes_at_start"}
+
+
 def tree_manifest(root: Path) -> dict[str, Any]:
     files: dict[str, tuple[int, str]] = {}
     dirs: list[str] = []
@@ -115,7 +120,7 @@ class RustEngineParityTests(EngineParityBase):
         self.assertEqual(sorted(rs_tree["files"]), sorted(py_tree["files"]))
         self.assertEqual(rs_tree["files"], py_tree["files"])
         self.assertEqual(rs_tree["dirs"], py_tree["dirs"])
-        self.assertEqual(rs_result["stats"], py_result["stats"])
+        self.assertEqual(engine_stats(rs_result["stats"]), engine_stats(py_result["stats"]))
         self.assertEqual(rs_progress[-1], rs_result["stats"])
 
     def test_full_extraction_is_identical(self) -> None:
@@ -129,7 +134,8 @@ class RustEngineParityTests(EngineParityBase):
         self.assertEqual(files[docs + "notes.txt"][0], len(b"resident body " * 10))
         self.assertEqual(files[docs + "empty.txt"][0], 0)
         self.assertEqual(files[docs + "truncated.bin"][0], 0)
-        self.assertNotIn("Users/bob/Documents/hardlink-b.txt", files)
+        # Only the priority pass records recovered segments: the walk recovers each hard-link path.
+        self.assertIn("Users/bob/Documents/hardlink-b.txt", files)
         self.assertFalse(any("Zone.Identifier" in rel or ":" in rel for rel in files))
         deleted = [rel for rel in files if rel.startswith("_deleted_mft/")]
         self.assertTrue(any(rel.endswith("-deleted-report.pdf") for rel in deleted))
@@ -207,9 +213,13 @@ class RustEngineParityTests(EngineParityBase):
         self.assertEqual(python[0]["stats"]["errors"], clean[0]["stats"]["errors"] + 1)
 
     def test_failure_that_moves_the_cap_reruns_sequentially(self) -> None:
+        # Priority files are exempt from the cap but count toward it: a cap a few files above them
+        # leaves the tree walk a budget that the failed SYSTEM copy (a priority file) moves.
+        priority_files = self.run_engine("python", limit=1)[0]["stats"]["files"]
+        limit = priority_files + 3
         blocker = ("Windows/System32/config/SYSTEM",)
-        python = self.run_engine("python", limit=40, blockers=blocker)
-        rust = self.run_engine("rust", limit=40, blockers=blocker, extra_env={e01_extract_engine.E01_EXTRACT_THREADS_ENV: "4"})
+        python = self.run_engine("python", limit=limit, blockers=blocker)
+        rust = self.run_engine("rust", limit=limit, blockers=blocker, extra_env={e01_extract_engine.E01_EXTRACT_THREADS_ENV: "4"})
         self.assert_same(python, rust)
         self.assertTrue(rust[0]["extract_engine"]["rerun_reason"])
 
@@ -225,6 +235,36 @@ class RustEngineParityTests(EngineParityBase):
         self.assert_same(python, rust)
         self.assertNotIn("Users/alice/Documents/compressed.log", python[1]["files"])
         self.assertIsNone(rust[0]["extract_engine"]["rerun_reason"])
+
+    def test_free_space_reserve_falls_back_to_python_guard(self) -> None:
+        # A reserve larger than any drive: Python's guard skips every file; Rust must not write
+        # past it, so it hands the image to the Python engine and the fallback is recorded.
+        reserve = {e01_native.NATIVE_MIN_FREE_GB_ENV: str(1 << 30)}
+        python = self.run_engine("python", extra_env=reserve)
+        self.assertGreater(python[0]["stats"]["disk_space_skips"], 0)
+        for threads in ("1", "4"):
+            with self.subTest(threads=threads):
+                result, tree, _ = self.run_engine(
+                    "rust", extra_env={**reserve, e01_extract_engine.E01_EXTRACT_THREADS_ENV: threads}
+                )
+                engine = result["extract_engine"]
+                self.assertEqual((engine["requested"], engine["active"]), ("rust", "python"))
+                self.assertIn(e01_extract_engine.E01_EXTRACT_SPACE_RESERVE_ERROR, engine["notice_ko"])
+                self.assertEqual(tree, python[1])
+                self.assertEqual(engine_stats(result["stats"]), engine_stats(python[0]["stats"]))
+
+    def test_raising_progress_observer_does_not_fail_over(self) -> None:
+        def observer(_stats: Any) -> None:
+            raise RuntimeError("observer bug")
+
+        out = Path(tempfile.mkdtemp(dir=self.temp.name))
+        with (
+            patch.dict(os.environ, {e01_extract_engine.E01_EXTRACT_ENGINE_ENV: "rust"}),
+            patch.object(e01_native, "open_ewf_segments", lambda segs: e01_native.RawMediaHandle(segs[0])),
+        ):
+            result = e01_native.extract_e01_native(self.image, [self.image], out / "tree", on_progress=observer)
+        self.assertEqual(result["extract_engine"]["active"], "rust")
+        self.assertGreater(result["stats"]["files"], 0)
 
 
 class _FailingExtension:
@@ -253,7 +293,7 @@ class EngineFallbackTests(EngineParityBase):
         self.assertEqual((engine["requested"], engine["active"]), ("rust", "python"))
         self.assertIn("synthetic engine failure", engine["notice_ko"])
         self.assertEqual(tree, python[1])
-        self.assertEqual(result["stats"], python[0]["stats"])
+        self.assertEqual(engine_stats(result["stats"]), engine_stats(python[0]["stats"]))
 
     def test_unknown_engine_value_uses_python_with_notice(self) -> None:
         result, tree, _ = self.run_engine("fortran")
