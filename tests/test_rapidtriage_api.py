@@ -3689,6 +3689,52 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(delete_response.status_code, 204)
             self.assertEqual(restored_client.get(f"/api/runs/{run_id}").status_code, 404)
 
+    def test_imported_image_run_is_named_after_the_image(self) -> None:
+        # An image run analyses its extraction (<output>/_e01/fs) and records the image as its source:
+        # the imported request -- the console's case name and the tree label -- must be the image.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            output_dir = tmp_path / "run-out"
+            analysis_root = output_dir / "_e01" / "fs"
+            analysis_root.mkdir(parents=True)
+            image = tmp_path / "evidence" / "PC1(SSD).E01"
+            summary_path = output_dir / "rapidtriage-run-summary.json"
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "mode": "fraud",
+                        "root": str(analysis_root),
+                        "output_dir": str(output_dir),
+                        "outputs": {"summary": str(summary_path)},
+                        "source": {
+                            "type": "e01",
+                            "source_path": str(image),
+                            "analysis_root": str(analysis_root),
+                            "stage_dir": str(output_dir / "_e01"),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state_path = tmp_path / "state" / "runs.json"
+            client = api_test_client(RunJobStore(state_path=state_path))
+
+            imported = client.post("/api/runs/import", json={"output_dir": str(output_dir)})
+
+            self.assertEqual(imported.status_code, 201, imported.text)
+            run_id = imported.json()["run_id"]
+            self.assertEqual(imported.json()["request"]["root"], str(image))
+            listed = client.get("/api/runs").json()["runs"]
+            self.assertEqual([run["request"]["root"] for run in listed], [str(image)])
+            self.assertEqual(client.get(f"/api/runs/{run_id}/tree").json()["root"]["label"], image.name)
+
+            # A catalog saved before this fix holds the extraction folder; it is read back as the image.
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["runs"][0]["request"]["root"] = str(analysis_root)
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+            restored = api_test_client(RunJobStore(state_path=state_path))
+            self.assertEqual(restored.get(f"/api/runs/{run_id}").json()["request"]["root"], str(image))
+
     def test_run_api_passes_file_triage_controls_to_gui_files_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"
