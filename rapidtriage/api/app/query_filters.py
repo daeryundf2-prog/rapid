@@ -12,8 +12,8 @@ from __future__ import annotations
 from fastapi import HTTPException, Request
 from fastapi.dependencies.models import Dependant
 
-#: Paging / ordering parameters: accepted where declared, never echoed as filters.
-PAGING_PARAMETERS = frozenset({"offset", "limit", "cursor", "after", "locate", "sort", "order"})
+#: Paging / ordering / page-shape parameters: accepted where declared, never echoed as filters.
+PAGING_PARAMETERS = frozenset({"offset", "limit", "cursor", "after", "locate", "sort", "order", "view"})
 
 
 def _query_names(dependant: Dependant) -> list[str]:
