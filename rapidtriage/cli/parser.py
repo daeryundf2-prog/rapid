@@ -468,6 +468,35 @@ def build_parser() -> argparse.ArgumentParser:
     kakao_userdir.add_argument("--openssl-bin", default="openssl", help="OpenSSL binary used for DeviceInfo pragma derivation checks")
     kakao_userdir.add_argument("--json", action="store_true", help="Print JSON payload to stdout")
 
+    kakao_macos_collect = sub.add_parser(
+        "kakaotalk-collect-macos",
+        help="Authorized live collection of a consenting macOS KakaoTalk process memory (core + manifest)",
+        description=(
+            "Collect the running KakaoTalk process memory of a logged-in, consenting macOS "
+            "user on site. Runs preflight checks (admin/sudo, SIP, Developer Mode, lldb, "
+            "hardened-runtime limits) and uses lldb 'process save-core'. macOS enforces all "
+            "access control; refusals are reported, never bypassed."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage kakaotalk-collect-macos --output-root ./cases --preflight-only
+              sudo rapidtriage kakaotalk-collect-macos --output-root ./cases \\
+                  --operator "Investigator Name" --consent-statement "Holder consented on 2026-11-25"
+            """
+        ),
+    )
+    kakao_macos_collect.add_argument("--output-root", default="kakaotalk_macos_cases", help="Directory where collection case folders are created")
+    kakao_macos_collect.add_argument("--operator", default="", help="Name/ID of the authorized operator performing the collection (recorded in the manifest)")
+    kakao_macos_collect.add_argument("--consent-statement", default="", help="Recorded statement of the account holder's on-site consent")
+    kakao_macos_collect.add_argument("--authority-reference", default="", help="Optional legal authority reference (warrant, case number, authorization ID)")
+    kakao_macos_collect.add_argument("--lldb-bin", default="lldb", help="lldb binary used for process save-core")
+    kakao_macos_collect.add_argument("--save-core-style", default="modified-memory", help="lldb save-core style (modified-memory, full, stack)")
+    kakao_macos_collect.add_argument("--timeout-seconds", type=float, default=600.0, help="Timeout per lldb save-core invocation")
+    kakao_macos_collect.add_argument("--preflight-only", action="store_true", help="Run and report preflight checks only; never attempt a dump")
+    kakao_macos_collect.add_argument("--json", action="store_true", help="Print JSON payload to stdout")
+
     cloud_collect = sub.add_parser(
         "cloud-collect",
         help="Collect authorized cloud API JSON responses from a request manifest",
