@@ -2136,6 +2136,7 @@ def _extract_e01_native_fallback(
     on_progress: ExtractProgress | None = None,
 ) -> E01ExtractionResult:
     """Recover files with pyewf + dissect.ntfs (in-process, no external tools)."""
+    from .e01_extract_engine import extract_engine_metadata
     from .e01_native import (
         MAX_NATIVE_EXTRACT_FILES,
         NATIVE_EXTRACT_FILES_CEILING,
@@ -2231,6 +2232,8 @@ def _extract_e01_native_fallback(
         "native_extraction_stats": stats,
         "engine": engine_label,
         **({"extract_engine": extract_engine} if extract_engine else {}),
+        # native_e01_extract_engine* (engine used, requested, version, fallback reason, notice).
+        **extract_engine_metadata(extract_engine),
         "system_artifacts": dict(result.get("system_artifacts") or {}),
     }
     command_history.append(

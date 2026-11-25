@@ -938,6 +938,37 @@ Units are in 512-byte sectors
             manifest = result.recovered_root_manifest
             self.assertEqual(manifest["system_artifacts"]["mft"], str(mft_path))
 
+    def test_extract_e01_native_records_extract_engine_fallback_in_run_metadata(self) -> None:
+        from rapidtriage.core.e01_native import native_e01_available
+
+        if not native_e01_available():
+            self.skipTest("pyewf/dissect.ntfs not importable in this environment")
+        fallback = {
+            "requested": "rust",
+            "active": "python",
+            "notice_ko": "Rust E01 추출 엔진이 이 이미지에서 실패해 Python 엔진으로 다시 처리했습니다(rapid-extract panicked: x).",
+            "fallback_reason": "panic: RuntimeError: rapid-extract panicked: x",
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            e01_path = Path(tmp_dir) / "case.E01"
+            e01_path.write_bytes(b"EVF")
+            for name, extract_engine in (("fallback", fallback), ("default", None)):
+                fake = self._fake_native_result()
+                if extract_engine is not None:
+                    fake["extract_engine"] = extract_engine
+                with self.subTest(name), patch("rapidtriage.core.e01_native.extract_e01_native", return_value=fake):
+                    result = extract_e01_to_directory(e01_path, Path(tmp_dir) / name, engine="native")
+                    manifest = result.recovered_root_manifest
+                    recorded = {key: value for key, value in manifest.items() if key.startswith("native_e01_extract_engine")}
+                    if extract_engine is None:
+                        self.assertEqual(recorded, {})  # default Python output unchanged
+                        self.assertEqual(manifest["engine"], "pyewf+dissect.ntfs")
+                        continue
+                    self.assertEqual(recorded["native_e01_extract_engine"], "python")
+                    self.assertEqual(recorded["native_e01_extract_engine_requested"], "rust")
+                    self.assertEqual(recorded["native_e01_extract_engine_fallback_reason"], fallback["fallback_reason"])
+                    self.assertIn(fallback["notice_ko"], result.warnings)
+
     def test_dump_ntfs_system_record_streams_bounded_chunks(self) -> None:
         from rapidtriage.core.e01_native import _dump_ntfs_system_record
 

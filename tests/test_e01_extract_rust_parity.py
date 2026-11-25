@@ -18,7 +18,9 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -35,9 +37,10 @@ def _missing() -> str:
     return "" if module is not None else f"rapid_extract_native unavailable: {problem}"
 
 
-def engine_stats(stats: dict[str, int]) -> dict[str, int]:
-    """Stats an engine produces: ``free_bytes_at_start`` is the output drive's state, not engine output."""
-    return {key: value for key, value in stats.items() if key != "free_bytes_at_start"}
+def engine_stats(stats: Mapping[str, int]) -> list[tuple[str, int]]:
+    """Stats an engine produces, in order (the comparison includes key order):
+    ``free_bytes_at_start`` is the output drive's state, not engine output."""
+    return [(key, value) for key, value in stats.items() if key != "free_bytes_at_start"]
 
 
 def tree_manifest(root: Path) -> dict[str, Any]:
@@ -118,10 +121,24 @@ class RustEngineParityTests(EngineParityBase):
             self.assertEqual(engine["python_reads"], 0)
         self.assertNotIn("extract_engine", py_result)
         self.assertEqual(sorted(rs_tree["files"]), sorted(py_tree["files"]))
-        self.assertEqual(rs_tree["files"], py_tree["files"])
+        self.assertEqual(list(rs_tree["files"].items()), list(py_tree["files"].items()))
         self.assertEqual(rs_tree["dirs"], py_tree["dirs"])
         self.assertEqual(engine_stats(rs_result["stats"]), engine_stats(py_result["stats"]))
-        self.assertEqual(rs_progress[-1], rs_result["stats"])
+        self.assertEqual(list(rs_progress[-1].items()), list(rs_result["stats"].items()))
+
+    def test_extension_version_matches_the_package(self) -> None:
+        module, _ = e01_extract_engine.load_extract_extension()
+        self.assertEqual(module.engine_version(), e01_extract_engine.E01_EXTRACT_NATIVE_VERSION)
+        cargo = (Path(__file__).resolve().parents[1] / "engines/rust/crates/rapid-extract/Cargo.toml").read_text()
+        self.assertIn(f'\nversion = "{e01_extract_engine.E01_EXTRACT_NATIVE_VERSION}"\n', cargo)
+
+    def test_rust_run_records_engine_metadata(self) -> None:
+        result = self.run_engine("rust")[0]
+        metadata = e01_extract_engine.extract_engine_metadata(result["extract_engine"])
+        self.assertEqual(metadata["native_e01_extract_engine"], "rust")
+        self.assertEqual(metadata["native_e01_extract_engine_version"], e01_extract_engine.E01_EXTRACT_NATIVE_VERSION)
+        self.assertEqual(metadata["native_e01_extract_engine_fallback_reason"], "")
+        self.assertEqual(e01_extract_engine.extract_engine_metadata({}), {})
 
     def test_full_extraction_is_identical(self) -> None:
         python = self.run_engine("python")
@@ -267,6 +284,21 @@ class RustEngineParityTests(EngineParityBase):
         self.assertGreater(result["stats"]["files"], 0)
 
 
+class PanicException(BaseException):
+    """Stands in for ``pyo3_runtime.PanicException``: a ``BaseException``, not an ``Exception``."""
+
+
+class _PanickingExtension:
+    ABI_VERSION = e01_extract_engine.E01_EXTRACT_NATIVE_ABI_VERSION
+
+    @staticmethod
+    def extract_tree(handle, base, size, extract_dir, *args, **kwargs):
+        partial = Path(extract_dir) / "Windows" / "partial.bin"
+        partial.parent.mkdir(parents=True, exist_ok=True)
+        partial.write_bytes(b"written before the panic")
+        raise PanicException("index out of bounds: the len is 3 but the index is 7")
+
+
 class _FailingExtension:
     ABI_VERSION = e01_extract_engine.E01_EXTRACT_NATIVE_ABI_VERSION
 
@@ -294,6 +326,63 @@ class EngineFallbackTests(EngineParityBase):
         self.assertIn("synthetic engine failure", engine["notice_ko"])
         self.assertEqual(tree, python[1])
         self.assertEqual(engine_stats(result["stats"]), engine_stats(python[0]["stats"]))
+
+    def test_rust_panic_falls_back_to_python_and_is_recorded_in_run_metadata(self) -> None:
+        python = self.run_engine("python")
+        with patch.object(e01_extract_engine, "load_extract_extension", return_value=(_PanickingExtension, "")):
+            result, tree, _ = self.run_engine("rust")
+        engine = result["extract_engine"]
+        self.assertEqual((engine["requested"], engine["active"]), ("rust", "python"))
+        self.assertTrue(engine["fallback_reason"].startswith("panic: PanicException: index out of bounds"))
+        self.assertEqual(tree, python[1])  # the partial Rust output was discarded
+        self.assertEqual(engine_stats(result["stats"]), engine_stats(python[0]["stats"]))
+        metadata = e01_extract_engine.extract_engine_metadata(engine)
+        self.assertEqual(
+            list(metadata),
+            [
+                "native_e01_extract_engine",
+                "native_e01_extract_engine_requested",
+                "native_e01_extract_engine_version",
+                "native_e01_extract_engine_fallback_reason",
+                "native_e01_extract_engine_notice_ko",
+            ],
+        )
+        self.assertEqual(metadata["native_e01_extract_engine"], "python")
+        self.assertEqual(metadata["native_e01_extract_engine_requested"], "rust")
+        self.assertIsNone(metadata["native_e01_extract_engine_version"])
+        self.assertEqual(metadata["native_e01_extract_engine_fallback_reason"], engine["fallback_reason"])
+
+    def test_keyboard_interrupt_is_not_an_engine_failure(self) -> None:
+        class _Interrupted(_PanickingExtension):
+            @staticmethod
+            def extract_tree(*args, **kwargs):
+                raise KeyboardInterrupt
+
+        with (
+            patch.object(e01_extract_engine, "load_extract_extension", return_value=(_Interrupted, "")),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            self.run_engine("rust")
+
+    def test_stale_extension_build_is_refused(self) -> None:
+        stale = SimpleNamespace(
+            ABI_VERSION=e01_extract_engine.E01_EXTRACT_NATIVE_ABI_VERSION, engine_version=lambda: "0.0.0"
+        )
+        unversioned = SimpleNamespace(ABI_VERSION=e01_extract_engine.E01_EXTRACT_NATIVE_ABI_VERSION)
+        for module, built in ((stale, "0.0.0"), (unversioned, "None")):
+            with (
+                self.subTest(built=built),
+                patch.object(e01_extract_engine, "_extension", None),
+                patch.object(e01_extract_engine.importlib, "import_module", return_value=module),
+                patch.dict(os.environ, {e01_extract_engine.E01_EXTRACT_ENGINE_ENV: "rust"}),
+            ):
+                status = e01_extract_engine.e01_extract_engine_status()
+                self.assertEqual(status["active"], "python")
+                self.assertEqual(
+                    status["fallback_reason"],
+                    f"extension-unavailable: stale-build: built {built}, "
+                    f"expected {e01_extract_engine.E01_EXTRACT_NATIVE_VERSION}",
+                )
 
     def test_unknown_engine_value_uses_python_with_notice(self) -> None:
         result, tree, _ = self.run_engine("fortran")

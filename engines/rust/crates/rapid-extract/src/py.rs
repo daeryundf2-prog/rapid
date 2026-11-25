@@ -11,7 +11,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
 use crate::ewf::EwfImage;
-use crate::extract::{extract, Options, Outcome, SpaceReserve, Stats};
+use crate::extract::{catch_panic, extract, Options, Outcome, SpaceReserve, Stats};
 use crate::ntfs::{Media, Ntfs, Res, Volume};
 
 /// A Python object with `seek(offset)` / `read(n)` (a pyewf handle or `RawMediaHandle`). Calls
@@ -195,47 +195,49 @@ fn extract_tree(
         }),
     });
     let outcome = py.allow_threads(move || {
-        let media = AnyMedia {
-            source: pick_source(&segments, media_size, &reader, threads),
-            python: PyMedia {
-                handle,
-                lock: Mutex::new(()),
-            },
-            python_reads: AtomicU64::new(0),
-        };
-        let ntfs = Ntfs::open(Volume::new(media, base, size))?;
-        let callback = move |stats: &Stats| -> Result<(), String> {
-            let Some(progress) = progress.as_ref() else {
-                return Ok(());
+        catch_panic(move || {
+            let media = AnyMedia {
+                source: pick_source(&segments, media_size, &reader, threads),
+                python: PyMedia {
+                    handle,
+                    lock: Mutex::new(()),
+                },
+                python_reads: AtomicU64::new(0),
             };
-            Python::with_gil(|py| {
-                let dict = stats_dict(py, stats).map_err(|e| e.to_string())?;
-                progress
-                    .call1(py, (dict,))
-                    .map(|_| ())
-                    .map_err(|e| e.to_string())
-            })
-        };
-        let outcome = extract(
-            &ntfs,
-            Options {
-                extract_dir,
-                limit: limit as i128,
-                include_deleted,
-                priority_paths,
-                progress: Box::new(callback),
-                progress_every,
-                threads,
-                space,
-            },
-        )?;
-        let vol = ntfs.vol.borrow();
-        let media = vol.media();
-        Ok::<_, String>((
-            outcome,
-            media.label(),
-            media.python_reads.load(Ordering::Relaxed),
-        ))
+            let ntfs = Ntfs::open(Volume::new(media, base, size))?;
+            let callback = move |stats: &Stats| -> Result<(), String> {
+                let Some(progress) = progress.as_ref() else {
+                    return Ok(());
+                };
+                Python::with_gil(|py| {
+                    let dict = stats_dict(py, stats).map_err(|e| e.to_string())?;
+                    progress
+                        .call1(py, (dict,))
+                        .map(|_| ())
+                        .map_err(|e| e.to_string())
+                })
+            };
+            let outcome = extract(
+                &ntfs,
+                Options {
+                    extract_dir,
+                    limit: limit as i128,
+                    include_deleted,
+                    priority_paths,
+                    progress: Box::new(callback),
+                    progress_every,
+                    threads,
+                    space,
+                },
+            )?;
+            let vol = ntfs.vol.borrow();
+            let media = vol.media();
+            Ok::<_, String>((
+                outcome,
+                media.label(),
+                media.python_reads.load(Ordering::Relaxed),
+            ))
+        })
     });
     match outcome {
         Ok((
@@ -274,15 +276,25 @@ fn ewf_read(
 ) -> PyResult<Py<PyBytes>> {
     let data = py
         .allow_threads(|| {
-            EwfImage::open(&segments, threads).and_then(|image| image.read_at(offset, length))
+            catch_panic(|| {
+                EwfImage::open(&segments, threads).and_then(|image| image.read_at(offset, length))
+            })
         })
         .map_err(PyRuntimeError::new_err)?;
     Ok(PyBytes::new_bound(py, &data).unbind())
 }
 
+/// Crate version; rapidtriage.core.e01_extract_engine refuses a build whose version differs from
+/// E01_EXTRACT_NATIVE_VERSION (a stale extension left in rapidtriage/native).
+#[pyfunction]
+fn engine_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
 #[pymodule]
 fn rapid_extract_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ABI_VERSION", crate::ABI_VERSION)?;
+    m.add_function(wrap_pyfunction!(engine_version, m)?)?;
     m.add_function(wrap_pyfunction!(extract_tree, m)?)?;
     m.add_function(wrap_pyfunction!(ewf_read, m)?)?;
     Ok(())

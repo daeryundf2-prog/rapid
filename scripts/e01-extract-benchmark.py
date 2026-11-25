@@ -134,7 +134,8 @@ def main() -> int:
             runs = [run_once(config, source, segments, raw, work) for _ in range(max(1, args.repeat))]
             times = [elapsed for elapsed, _result, _digest in runs]
             _elapsed, result, digests[config] = runs[-1]
-            stats[config] = result["stats"]
+            # free_bytes_at_start is the output drive's state, not engine output.
+            stats[config] = {k: v for k, v in result["stats"].items() if k != "free_bytes_at_start"}
             files = int(result["stats"]["files"])
             best = best_seconds[config] = min(times)
             report[config] = {

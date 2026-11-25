@@ -60,7 +60,11 @@ def main() -> int:
 
     NATIVE_DIR.mkdir(parents=True, exist_ok=True)
     target = NATIVE_DIR / dst_name
-    shutil.copy2(produced, target)
+    # Stage through a new file and an atomic rename: overwriting a loaded, signed Mach-O in place
+    # makes macOS kill every process that maps it afterwards (CODESIGNING "Invalid Page").
+    staging = target.with_name(f".{target.name}.staging")
+    shutil.copy2(produced, staging)
+    os.replace(staging, target)
     result = {"ok": True, "staged": str(target), "bytes": target.stat().st_size}
     print(json.dumps(result) if args.json else f"staged {target} ({target.stat().st_size} bytes)")
     return 0

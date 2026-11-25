@@ -476,6 +476,20 @@ impl<'a, M: Media> Walker<'a, M> {
     }
 }
 
+/// Runs `body`, turning a panic into `Err("rapid-extract panicked: ...")`. pyo3 would raise a panic
+/// as `pyo3_runtime.PanicException`, a `BaseException` an `except Exception` fallback lets
+/// through; as an error the image is redone on the Python engine and the reason recorded.
+pub fn catch_panic<T>(body: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)).unwrap_or_else(|payload| {
+        let text = payload
+            .downcast_ref::<&str>()
+            .map(|text| (*text).to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_default();
+        Err(format!("rapid-extract panicked: {text}"))
+    })
+}
+
 fn fatal_message(raised: Raised) -> String {
     match raised {
         Raised::Fatal(message) => message,
@@ -838,7 +852,17 @@ pub fn extract<'a, M: Media>(
 
 #[cfg(test)]
 mod tests {
-    use super::safe_component;
+    use super::{catch_panic, safe_component};
+
+    #[test]
+    fn panics_become_errors() {
+        let caught = catch_panic::<()>(|| panic!("index {} out of range", 7));
+        assert_eq!(
+            caught,
+            Err("rapid-extract panicked: index 7 out of range".into())
+        );
+        assert_eq!(catch_panic(|| Ok::<_, String>(3)), Ok(3));
+    }
 
     #[test]
     fn safe_component_matches_python() {
