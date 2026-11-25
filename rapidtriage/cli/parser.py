@@ -2086,6 +2086,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Leave one run-plan task (provider kind or stage) out before the run starts (repeatable)",
     )
     run.add_argument(
+        "--no-kakaotalk-memory",
+        dest="kakaotalk_memory",
+        action="store_false",
+        help="Do not run the automatic KakaoTalk memory analyses (dumps found anywhere, hiberfil/pagefile residue); same as --skip-task kakaotalk-memory",
+    )
+    run.add_argument(
         "--print-plan",
         nargs="?",
         const="table",

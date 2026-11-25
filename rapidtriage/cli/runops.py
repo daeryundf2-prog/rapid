@@ -262,6 +262,8 @@ def handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_s
         )
         skip_groups = list(getattr(args, "skip_group", None) or [])
         skip_tasks = list(getattr(args, "skip_task", None) or [])
+        if not getattr(args, "kakaotalk_memory", True) and "kakaotalk-memory" not in skip_tasks:
+            skip_tasks.append("kakaotalk-memory")
         if getattr(args, "print_plan", None):
             try:
                 plan = build_run_plan(

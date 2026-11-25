@@ -56,6 +56,7 @@ ARTIFACT_DOMAIN_TABLE: tuple[tuple[str, str, tuple[str, ...] | None], ...] = (
     ("mobile", "android-apk", None),
     ("devices", "windows-remote-access", None),
     ("memory", "memory-volatility", None),
+    ("memory", "kakaotalk-memory", None),
     # --- type routing -----------------------------------------------------
     ("devices", "windows-os-account", ("windows-mounted-device", "windows-usb-device")),
     ("devices", "windows-registry", ("windows-mounted-device", "windows-usb-device")),

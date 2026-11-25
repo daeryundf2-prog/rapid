@@ -1171,6 +1171,8 @@ def run_kakaotalk_sqlcipher_probe(
     include_message_preview: bool = False,
     timeout_seconds: float = 2.0,
     export_opened_dir: Path | None = None,
+    memory_sources: Sequence[Path] | None = None,
+    residue_sources: Sequence[Path] | None = None,
 ) -> dict[str, object]:
     root = root.expanduser().resolve()
     output = output.expanduser().resolve()
@@ -1189,7 +1191,7 @@ def run_kakaotalk_sqlcipher_probe(
         resolved_export_dir.mkdir(parents=True, exist_ok=True)
 
     sqlcipher_path = shutil.which(sqlcipher_bin)
-    sources = find_memory_dump_candidates(root)
+    sources = find_memory_dump_candidates(root) if memory_sources is None else list(memory_sources)
     chat_databases = find_chatlog_databases(root)
     if max_databases:
         chat_databases = chat_databases[:max_databases]
@@ -1202,6 +1204,7 @@ def run_kakaotalk_sqlcipher_probe(
         known_digests={str(candidate.get("candidate_sha256") or "") for candidate in key_candidates},
         max_messages=max_message_residues,
         include_message_preview=include_message_preview,
+        residue_sources=residue_sources,
     )
     key_candidates.extend(residue_keys)
     residue_digests = {str(candidate.get("candidate_sha256") or "") for candidate in residue_keys}
@@ -1476,6 +1479,8 @@ def run_kakaotalk_key_store_inspect(
     *,
     output: Path,
     max_memory_sources: int = 2,
+    memory_sources: Sequence[Path] | None = None,
+    residue_sources: Sequence[Path] | None = None,
 ) -> dict[str, object]:
     root = root.expanduser().resolve()
     output = output.expanduser().resolve()
@@ -1486,7 +1491,7 @@ def run_kakaotalk_key_store_inspect(
 
     key_store_files = find_kakaotalk_key_store_files(root)
     chat_databases = find_chatlog_databases(root)
-    memory_sources = find_memory_dump_candidates(root)
+    memory_sources = find_memory_dump_candidates(root) if memory_sources is None else list(memory_sources)
     inspected_memory_sources = memory_sources[:max_memory_sources] if max_memory_sources else []
     sqlcipher_key_candidates = (
         collect_sqlcipher_key_literals_from_memory(inspected_memory_sources, max_keys=0)
@@ -1527,7 +1532,7 @@ def run_kakaotalk_key_store_inspect(
             )
 
     residue_hits_by_key_store, residue_sources = (
-        inspect_kakaotalk_key_store_residue_hits(root, key_store_files) if max_memory_sources else ({}, [])
+        inspect_kakaotalk_key_store_residue_hits(root, key_store_files, residue_sources) if max_memory_sources else ({}, [])
     )
     for entry in entries:
         entry["residue_memory_hits"] = residue_hits_by_key_store.get(str(entry.get("path") or ""), [])
@@ -2470,10 +2475,12 @@ def build_kakaotalk_memory_carve_payload(
     include_message_preview: bool,
     write_carves: bool,
     command: str,
+    sources: Sequence[Path] | None = None,
+    residue_sources: Sequence[Path] | None = None,
 ) -> dict[str, object]:
     if write_carves and carve_dir is not None:
         carve_dir.mkdir(parents=True, exist_ok=True)
-    sources = find_memory_dump_candidates(root)
+    sources = find_memory_dump_candidates(root) if sources is None else list(sources)
     entries: list[dict[str, object]] = []
     header_count = 0
     for source in sources:
@@ -2528,6 +2535,7 @@ def build_kakaotalk_memory_carve_payload(
 
     residue_memory = build_kakaotalk_residue_memory_carve(
         root=root,
+        residue_sources=residue_sources,
         carve_dir=carve_dir,
         max_hits=max_hits,
         max_carve_bytes=max_carve_bytes,
@@ -2648,13 +2656,15 @@ def build_kakaotalk_residue_memory_carve(
     max_message_residues: int,
     include_message_preview: bool,
     write_carves: bool,
+    residue_sources: Sequence[Path] | None = None,
 ) -> dict[str, object]:
     statuses: list[ResidueSourceStatus] = []
     entries: list[dict[str, object]] = []
     messages: list[dict[str, object]] = []
     indicators: list[dict[str, object]] = []
     key_residues: list[dict[str, object]] = []
-    for segment in iter_residue_segments(find_residue_memory_sources(root), statuses=statuses):
+    sources = find_residue_memory_sources(root) if residue_sources is None else list(residue_sources)
+    for segment in iter_residue_segments(sources, statuses=statuses):
         for offset in iter_sqlite_header_offsets(segment.path):
             if max_hits and len(entries) >= max_hits:
                 break
@@ -2702,11 +2712,13 @@ def collect_kakaotalk_residue_probe_material(
     known_digests: set[str],
     max_messages: int,
     include_message_preview: bool,
+    residue_sources: Sequence[Path] | None = None,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
     statuses: list[ResidueSourceStatus] = []
     keys: list[dict[str, object]] = []
     messages: list[dict[str, object]] = []
-    for segment in iter_residue_segments(find_residue_memory_sources(root), statuses=statuses):
+    sources = find_residue_memory_sources(root) if residue_sources is None else list(residue_sources)
+    for segment in iter_residue_segments(sources, statuses=statuses):
         if collect_keys and (not max_keys or len(keys) < max_keys):
             for candidate in remap_residue_hits(segment, collect_sqlcipher_key_literals_from_memory([segment.path], max_keys=0)):
                 digest = str(candidate.get("candidate_sha256") or "")
@@ -2735,7 +2747,7 @@ def tag_residue_key_matches(matches: Sequence[dict[str, object]], residue_digest
 
 
 def inspect_kakaotalk_key_store_residue_hits(
-    root: Path, key_store_files: Sequence[Path]
+    root: Path, key_store_files: Sequence[Path], residue_sources: Sequence[Path] | None = None
 ) -> tuple[dict[str, list[dict[str, object]]], list[dict[str, object]]]:
     """Key-store residency (appstate blob, salt, wrapped DEKs, path strings) in hiberfil/pagefile pages.
 
@@ -2769,7 +2781,8 @@ def inspect_kakaotalk_key_store_residue_hits(
     statuses: list[ResidueSourceStatus] = []
     if not needles:
         return hits_by_key_store, []
-    for segment in iter_residue_segments(find_residue_memory_sources(root), statuses=statuses):
+    sources = find_residue_memory_sources(root) if residue_sources is None else list(residue_sources)
+    for segment in iter_residue_segments(sources, statuses=statuses):
         for key_store_path, data, salt, entries, raw_values in needles:
             for hit in inspect_key_store_memory_hits(
                 data=data, salt=salt, wrapped_entries=entries, wrapped_raw_values=raw_values, sources=[segment.path]
