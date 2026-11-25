@@ -38,6 +38,7 @@ NATIVE_ENGINE_FUNCTIONS = (
     "profile_common",
     "profile_strip_level",
     "profile_merge",
+    "dump_json_row",
 )
 
 

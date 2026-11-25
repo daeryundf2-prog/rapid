@@ -395,6 +395,23 @@ def _dump_row(row: object) -> str:
     return json.dumps(row, ensure_ascii=False, separators=(",", ":"), default=json_default)
 
 
+def _row_dumper(native: object) -> Callable[[object], str]:
+    """``_dump_row``; with ``native`` (Rust EVTX engine) encoded in Rust, same text.
+
+    ``dump_json_row`` returns ``None`` for anything it cannot encode exactly
+    (subclasses, non-str keys, lone surrogates, errors); Python encodes those.
+    """
+    if native is None:
+        return _dump_row
+    dump_json_row = native.dump_json_row  # type: ignore[attr-defined]
+
+    def dump(row: object) -> str:
+        text = dump_json_row(row, json_default)
+        return _dump_row(row) if text is None else text
+
+    return dump
+
+
 def stream_artifact_collection(
     collector: object,
     input_root: InputRoot,
@@ -444,6 +461,7 @@ def stream_artifact_collection(
     final_tmp = records_path.with_name(records_path.name + ".tmp")
     native = _native_row_kernels(collector, collector_kind)
     builder = StreamingProfileBuilder(native=native)
+    dump_row = _row_dumper(native)
     annotator = StreamingArtifactAnnotator(rule_set) if rule_set is not None else None
     type_counts: Counter[str] = Counter()
     skip_reasons: Counter[str] = Counter()
@@ -506,7 +524,7 @@ def stream_artifact_collection(
                     builder.observe(adapted)
                 if channels is not None:
                     channels.observe(adapted if isinstance(adapted, dict) else {})
-                raw.write(_dump_row(adapted) + "\n")
+                raw.write(dump_row(adapted) + "\n")
                 record_count += 1
                 if (check_cancel is not None or on_rows is not None) and (
                     record_count % CANCEL_CHECK_ROWS == 0 or time.monotonic() >= next_check
@@ -576,7 +594,7 @@ def stream_artifact_collection(
                     row = builder.strip_context(row)
                 if len(preview) < max(0, preview_limit):
                     preview.append(row)
-                final.write(_dump_row(row) + "\n")
+                final.write(dump_row(row) + "\n")
         raw_path.unlink()
         final_tmp.replace(records_path)
     except BaseException:

@@ -62,3 +62,10 @@
   JSON values goes to the Python code, so profiles and JSONL bytes are identical
   (`tests/test_evtx_engine_rows_diff.py`). On 50,000 events, compaction CPU
   went from 6.4 s to 1.6 s.
+- With the Rust EVTX engine selected, the eventlog stage writes its JSONL rows
+  with `rapidcore_native.dump_json_row`: the text of
+  `json.dumps(ensure_ascii=False, separators=(",", ":"), default=json_default)`,
+  including Python float `repr`, `NaN`/`Infinity`, big ints and `default=`
+  conversions. Subclasses of str/int/float/list/tuple/dict, non-str keys, lone
+  surrogates, deep nesting and errors go to `json.dumps`
+  (`tests/test_evtx_engine_rows_diff.py`). About 2.8× faster per row.

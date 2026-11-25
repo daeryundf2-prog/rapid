@@ -12,7 +12,7 @@ use pyo3::types::{PyBool, PyDict, PyFloat, PyList, PyLong, PyString, PyTuple};
 
 /// Nesting below this goes to the Python implementation (which also owns
 /// `RecursionError` and circular-reference behaviour).
-const MAX_DEPTH: u32 = 200;
+pub(crate) const MAX_DEPTH: u32 = 200;
 
 /// The value left the plain shape (or a Python call failed): run the Python
 /// implementation, which reproduces the result or the exception.
@@ -77,7 +77,7 @@ pub(crate) fn rich_eq(left: &Bound<'_, PyAny>, right: &Bound<'_, PyAny>) -> Kern
     }
 }
 
-fn float_value(value: &Bound<'_, PyAny>) -> f64 {
+pub(crate) fn float_value(value: &Bound<'_, PyAny>) -> f64 {
     // SAFETY: called only for exact `float` objects.
     unsafe { ffi::PyFloat_AS_DOUBLE(value.as_ptr()) }
 }

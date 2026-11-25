@@ -11,6 +11,9 @@ must give the templates, residues and rows of ``artifact_profiles`` with the
 same types (``True`` != ``1`` != ``1.0``), key order and object identity, and
 decline (Python runs) whatever they cannot reproduce.
 
+JSON rows: ``dump_json_row`` must write the text ``artifacts._dump_row`` writes
+(or decline, and Python then writes it or raises the same exception).
+
 Without the native module these tests skip unless
 ``RAPIDTRIAGE_REQUIRE_NATIVE_EVTX=1``.
 """
@@ -18,14 +21,19 @@ Without the native module these tests skip unless
 from __future__ import annotations
 
 import copy
+import datetime as dt
+import enum
 import json
 import os
 import random
 import string
+import struct
 import tempfile
 import unittest
 import unittest.mock
-from pathlib import Path
+from collections import OrderedDict
+from decimal import Decimal
+from pathlib import Path, PurePosixPath
 
 from evtx_engine_corpus import build_edge_corpus
 
@@ -34,8 +42,10 @@ from rapidtriage.artifacts.windows.antiforensics import (
     redact_recovery_passwords,
     redact_recovery_passwords_in,
 )
+from rapidtriage.artifacts.windows.eventlog import WindowsEventLogProvider
 from rapidtriage.core import artifact_profiles as profiles
 from rapidtriage.core import artifacts
+from rapidtriage.core.json_safe import json_default
 
 NATIVE, NATIVE_REASON = evtx_engine.load_native_evtx_decoder()
 REQUIRE_NATIVE = os.environ.get("RAPIDTRIAGE_REQUIRE_NATIVE_EVTX") == "1"
@@ -461,6 +471,172 @@ class CompactionKernelTests(unittest.TestCase):
         self.assertIsNone(profiles.payload_row_kernels({**payload, "kind": "registry"}))
         with unittest.mock.patch.dict(os.environ, {evtx_engine.EVTX_ENGINE_ENV: "rust"}):
             self.assertIs(profiles.payload_row_kernels({"kind": "eventlog"}), NATIVE)
+
+
+class _Int(enum.IntEnum):
+    ONE = 1
+
+
+class _Float(float):
+    pass
+
+
+class _Unknown:
+    pass
+
+
+def json_edge_values() -> list[object]:
+    circular: list[object] = []
+    circular.append(circular)
+    return [
+        0.0,
+        -0.0,
+        1e16,
+        1e15,
+        123456789012345678.0,
+        1e-4,
+        1e-5,
+        1e22,
+        1.5e300,
+        5e-324,
+        0.1 + 0.2,
+        1 / 3,
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+        0,
+        -1,
+        2**63 - 1,
+        2**63,
+        -(2**63),
+        -(2**63) - 1,
+        10**100,
+        10**5000,
+        True,
+        False,
+        None,
+        "",
+        '"\\\n\r\t\b\f\x00\x1f\x7f',
+        "é한글😀\u2028\u2029",
+        "\ud800 lone",
+        _Str("subclass"),
+        _Int.ONE,
+        _Float(1.5),
+        [],
+        {},
+        (),
+        ("t", 1, [2.5]),
+        _List([1]),
+        _Dict(a=1),
+        OrderedDict(a=1),
+        {1: "int key"},
+        {None: "none key"},
+        {1.5: "float key"},
+        {True: "bool key"},
+        {_Str("k"): "str subclass key"},
+        {"b": 1, "a": [{"c": None}]},
+        nested_dicts(250, "deep"),
+        circular,
+        b"\x00bytes",
+        bytearray(b"ba"),
+        memoryview(b"mv"),
+        dt.datetime(2025, 5, 27, 1, 51, 29, 123456, tzinfo=dt.timezone.utc),
+        dt.date(2025, 5, 27),
+        PurePosixPath("/var/log/x"),
+        {"b", "a", 3},
+        frozenset({"z"}),
+        Decimal("1.10"),
+        _Unknown(),
+        {"nested": [b"x", {"when": dt.date(2020, 1, 1)}, {_Unknown()}]},
+    ]
+
+
+def random_float(rng: random.Random) -> float:
+    roll = rng.random()
+    if roll < 0.4:
+        return struct.unpack("<d", rng.getrandbits(64).to_bytes(8, "little"))[0]
+    if roll < 0.7:
+        return rng.uniform(-1e6, 1e6)
+    return round(rng.uniform(-100, 100), rng.randint(0, 6))
+
+
+def random_text(rng: random.Random) -> str:
+    pool = string.printable + "\x00\x01\x1b\x7f\x85é한글\u2028😀\"\\"
+    return "".join(rng.choice(pool) for _ in range(rng.randint(0, 24)))
+
+
+def json_tree(rng: random.Random, depth: int = 0) -> object:
+    roll = rng.random()
+    if depth > 4 or roll < 0.5:
+        return rng.choice(
+            (
+                None,
+                True,
+                False,
+                rng.randint(-(2**70), 2**70),
+                rng.randint(-1000, 1000),
+                random_float(rng),
+                random_text(rng),
+                random_text(rng),
+                b"\x01",
+                dt.date(2024, 2, 29),
+            )
+        )
+    if roll < 0.75:
+        return {random_text(rng): json_tree(rng, depth + 1) for _ in range(rng.randint(0, 5))}
+    items = [json_tree(rng, depth + 1) for _ in range(rng.randint(0, 5))]
+    return tuple(items) if rng.random() < 0.2 else items
+
+
+class JsonRowKernelTests(unittest.TestCase):
+    def setUp(self) -> None:
+        if NATIVE is None:
+            if REQUIRE_NATIVE:
+                self.fail(f"rapidcore_native EVTX engine required: {NATIVE_REASON}")
+            self.skipTest(f"rapidcore_native EVTX engine not built: {NATIVE_REASON}")
+        self.dump = artifacts._row_dumper(NATIVE)
+
+    def assert_same_text(self, value: object) -> None:
+        try:
+            expected: object = artifacts._dump_row(value)
+        except (TypeError, ValueError, RecursionError) as exc:
+            expected = (type(exc), str(exc))
+        try:
+            actual: object = self.dump(value)
+        except (TypeError, ValueError, RecursionError) as exc:
+            actual = (type(exc), str(exc))
+        self.assertEqual(actual, expected)
+
+    def test_edge_cases(self) -> None:
+        for index, value in enumerate(json_edge_values()):
+            with self.subTest(index=index, type=type(value).__name__):
+                self.assert_same_text(value)
+                self.assert_same_text({"details": {"value": value}, "list": [value, value]})
+
+    def test_plain_rows_are_encoded_in_rust(self) -> None:
+        for value in (1.5, -0.0, float("nan"), 2**80, "é\x01", ("t",), b"x", dt.date(2020, 1, 1), {"a": [None]}):
+            self.assertIsNotNone(NATIVE.dump_json_row({"v": value}, json_default), repr(value))
+        for value in ("\ud800", _Str("s"), _Dict(), {1: 2}, _Unknown()):
+            self.assertIsNone(NATIVE.dump_json_row({"v": value}, json_default), repr(value))
+
+    def test_random_trees(self) -> None:
+        rng = random.Random(3110)
+        for _ in range(5000):
+            self.assert_same_text(json_tree(rng))
+
+    def test_corpus_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            logs = Path(tmp) / "Windows" / "System32" / "winevt" / "Logs"
+            logs.mkdir(parents=True)
+            for name, blob in build_edge_corpus().items():
+                (logs / name).write_bytes(blob)
+            compared = 0
+            for detail in ("full", "triage"):
+                provider = WindowsEventLogProvider().with_options(record_detail=detail, evtx_engine="python")
+                for item in provider.collect(Path(tmp)):
+                    self.assert_same_text(artifacts._shallow_row(item))
+                    compared += 1
+            self.assertGreater(compared, 4000)
 
 
 if __name__ == "__main__":

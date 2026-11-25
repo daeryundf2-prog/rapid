@@ -78,10 +78,11 @@ The EVTX chunk BinXML decoder has a Rust port in `engines/rust/crates/rapidcore/
 
 Records the port cannot reproduce byte-for-byte (non-ASCII ANSI strings that Python decodes as cp949, lone-surrogate character references, element trees deeper than 200 levels) are reported as unsupported; the bridge (`rapidtriage/artifacts/windows/evtx_engine.py`) then replays the chunk with the Python decoder, so caches and counts still match. The count of such chunks is on the eventlog-file row.
 
-The same engine switch also moves per-row Python work to Rust (`src/py.rs`, `src/py_rows.rs`). Each kernel returns exactly what its Python counterpart returns on plain JSON values (exact `dict`/`list`/`str`/`int`/`float`/`bool`/`None`) and declines anything else, which then runs in Python:
+The same engine switch also moves per-row Python work to Rust (`src/py.rs`, `src/py_rows.rs`, `src/py_json.rs`). Each kernel returns exactly what its Python counterpart returns on plain JSON values (exact `dict`/`list`/`str`/`int`/`float`/`bool`/`None`) and declines anything else, which then runs in Python:
 
 - recovery-password redaction walk (`redact_recovery_passwords_in`);
-- compaction of the eventlog stage output (`profile_observe_details`, `profile_common`, `profile_strip_level`) and profile expansion by readers of that output (`profile_merge`, chosen by `artifact_profiles.payload_row_kernels`).
+- compaction of the eventlog stage output (`profile_observe_details`, `profile_common`, `profile_strip_level`) and profile expansion by readers of that output (`profile_merge`, chosen by `artifact_profiles.payload_row_kernels`);
+- JSONL row text of the eventlog stage (`dump_json_row`, `artifacts._dump_row`).
 
 Build and select it:
 
