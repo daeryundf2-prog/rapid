@@ -246,10 +246,26 @@ def check_tesseract(tool_resolver: ToolResolver) -> DoctorCheck:
 
 
 def check_e01_tools(tool_resolver: ToolResolver) -> DoctorCheck:
+    from . import e01_native
+
     tools = ("ewfmount", "mmls", "tsk_recover")
     resolved = {tool: tool_resolver(tool) for tool in tools}
     missing = [tool for tool, path in resolved.items() if path is None]
-    details = {"tools": resolved, "missing": missing}
+    # `run IMAGE.E01` falls back to the in-process pyewf + dissect.ntfs decoder (native-e01 extra)
+    # when the external tools are absent; the check must say so instead of "incomplete".
+    native = e01_native.native_e01_available()
+    details = {"tools": resolved, "missing": missing, "native_decoder": native}
+    if missing and native:
+        return DoctorCheck(
+            name="tools:e01",
+            category="evidence-image",
+            status=OK,
+            summary=(
+                "E01/Ex01 is decoded in-process (pyewf + dissect.ntfs); external ewfmount/Sleuth Kit "
+                "tools are absent. Engineering-grade path: validate recovered content before report use."
+            ),
+            details=details,
+        )
     if missing:
         return DoctorCheck(
             name="tools:e01",
@@ -257,7 +273,7 @@ def check_e01_tools(tool_resolver: ToolResolver) -> DoctorCheck:
             status=WARN,
             summary="E01 direct extraction tools are incomplete.",
             details=details,
-            remediation="Install a Sleuth Kit build with EWF support (native Windows builds can read E01 directly) or libewf for ewfmount; alternatively use WSL2 or scan a mounted/extracted folder.",
+            remediation="Install the native-e01 extra (pip install -e .[native-e01]), a Sleuth Kit build with EWF support (native Windows builds can read E01 directly) or libewf for ewfmount; alternatively use WSL2 or scan a mounted/extracted folder.",
         )
     return DoctorCheck(
         name="tools:e01",

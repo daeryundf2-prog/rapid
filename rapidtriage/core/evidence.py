@@ -605,8 +605,9 @@ class EwfAdapter:
                 {
                     "source_path": str(source),
                     "detected_format": "e01" if source.suffix.lower() == ".e01" else "ex01",
-                    "support_level": "direct-extract" if supported and not missing else "tooling-required",
-                    "scan_strategy": "auto-extract-then-scan" if supported and not missing else "mount-or-export-first",
+                    # Same readiness as the adapter result (direct TSK read or the native decoder count).
+                    "support_level": "direct-extract" if supported and ready else "tooling-required",
+                    "scan_strategy": "auto-extract-then-scan" if supported and ready else "mount-or-export-first",
                     "source_integrity": source_integrity,
                     "tool_preflight": tool_preflight or [],
                     "missing_tools": missing,
@@ -615,6 +616,7 @@ class EwfAdapter:
                         "ewf_libewf_mount_orchestration": True,
                         "auto_extract_then_scan": ready,
                         "native_e01_ex01_parser": False,
+                        "python_native_ewf_extraction": bool(native_decode),
                         "encrypted_volume_unlock_workflow": False,
                     },
                     "limitations": E01_REPORT_GRADE_BLOCKERS,

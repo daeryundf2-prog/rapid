@@ -46,6 +46,9 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(result["supported"], result["missing_tools"] == [] or native_decode)
             self.assertEqual(result["can_extract"], result["missing_tools"] == [] or native_decode)
             self.assertIn(result["support_level"], {"direct-extract", "tooling-required"})
+            # The analyst review profile reads the same readiness as the adapter (native decoder included).
+            review_fields = result["image_analyst_review_profile"]["source_field_values"]
+            self.assertEqual(review_fields["support_level"], result["support_level"])
             self.assertTrue(result["next_actions"])
             self.assertFalse(result["commercial_grade_ready"])
             self.assertEqual(result["source_integrity"]["hash_status"], "computed")

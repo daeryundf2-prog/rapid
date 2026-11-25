@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 HAS_FASTAPI = True
 try:
@@ -49,12 +50,13 @@ class RapidTriageDoctorTests(unittest.TestCase):
             app_data_dir = Path(tmp_dir) / "app-data"
             make_static_assets(static_dir)
 
-            payload = run_doctor(
-                static_dir=static_dir,
-                app_data_dir=app_data_dir,
-                tool_resolver=lambda _name: None,
-                include_port_check=False,
-            )
+            with patch("rapidtriage.core.e01_native.native_e01_available", return_value=False):
+                payload = run_doctor(
+                    static_dir=static_dir,
+                    app_data_dir=app_data_dir,
+                    tool_resolver=lambda _name: None,
+                    include_port_check=False,
+                )
 
         checks = {check["name"]: check for check in payload["checks"]}
         self.assertEqual(payload["status"], WARN)
@@ -67,6 +69,22 @@ class RapidTriageDoctorTests(unittest.TestCase):
         # r2 M2: PST/OST normalisation needs pffexport or readpst.
         self.assertEqual(checks["tools:email-pst"]["status"], WARN)
         self.assertIn("pffexport", checks["tools:email-pst"]["summary"])
+
+    def test_doctor_reports_native_e01_decoder_when_external_tools_are_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            static_dir = Path(tmp_dir) / "static"
+            make_static_assets(static_dir)
+            with patch("rapidtriage.core.e01_native.native_e01_available", return_value=True):
+                payload = run_doctor(
+                    static_dir=static_dir,
+                    app_data_dir=Path(tmp_dir) / "app-data",
+                    tool_resolver=lambda _name: None,
+                    include_port_check=False,
+                )
+        e01 = {check["name"]: check for check in payload["checks"]}["tools:e01"]
+        self.assertEqual(e01["status"], OK)
+        self.assertTrue(e01["details"]["native_decoder"])
+        self.assertEqual(e01["details"]["missing"], ["ewfmount", "mmls", "tsk_recover"])
 
     def test_doctor_reports_email_pst_tool_when_present(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
