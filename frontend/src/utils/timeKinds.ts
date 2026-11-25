@@ -86,6 +86,8 @@ export const TIMESTAMP_KIND_LABELS: Readonly<Record<string, string>> = {
   disabled: "사용 안 함 설정",
   crash: "크래시",
   "process-created": "프로세스 생성",
+  "memory-dump-written": "메모리 덤프 작성",
+  "message-residue": "메모리 메시지 잔존",
   notification: "알림",
   "note-created": "메모 생성",
   "note-updated": "메모 수정",
