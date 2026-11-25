@@ -63,6 +63,8 @@ export const KEY_MAP = {
   stageExplore: "Alt+3",
   stageReview: "Alt+4",
   stageReport: "Alt+5",
+  /** Narrow window (< 900 px): the stage's left panel (탐색 트리) as a drawer. */
+  treePanel: "Alt+0",
   /** 조건 패널 (viewer-families U-F1): search conditions, 특이사항, 열 구성, 밀도. */
   conditions: "F",
   /** 탐색 트리: 결과 없는 계열 표시/숨김 (viewer-families U-F7). */

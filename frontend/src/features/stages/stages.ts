@@ -5,7 +5,7 @@
  */
 
 import { announce } from "../../a11y";
-import { NO_RUN_REASON } from "../../commands/builtin";
+import { focusMain, NO_RUN_REASON } from "../../commands/builtin";
 import { registerCommands } from "../../commands/registry";
 import type { CollectionId } from "../../contracts/collection";
 import type { Command } from "../../contracts/command";
@@ -103,6 +103,11 @@ export function openStage(stage: Stage): void {
   store.navigate(next);
   // Focus the new stage's panel heading (tabindex=-1 h1) and say the stage name once.
   announce(`단계: ${STAGE_DEFS[stage].label}`, { hold: true });
+  // Narrow layout with the panel drawer closed: the heading is hidden, so the page takes focus.
+  if (store.treeIsDrawer && !store.treeDrawerOpen) {
+    focusMain();
+    return;
+  }
   const focusHeading = () => document.getElementById(STAGE_HEADING_ID)?.focus();
   if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(focusHeading);
   else focusHeading();

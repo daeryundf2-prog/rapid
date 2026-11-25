@@ -57,6 +57,17 @@
   cursor: not-allowed;
 }
 
+/* Narrow layout (< 900px): the panel (tree) drawer toggle sits above the stages, split off by a rule. */
+.stage-rail-panel {
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.stage-rail-panel .stage-rail-item[aria-expanded="true"] {
+  color: var(--text);
+  background: var(--bg-raised);
+}
+
 /* Landing (no case): the whole rail recedes until a case is open (review #14). */
 .stage-rail[data-disabled] .stage-rail-item {
   opacity: 0.4;

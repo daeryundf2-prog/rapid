@@ -12,13 +12,13 @@ import { controlRunPlan, runPlanQueryKey } from "../api/runPlan";
 import { normalizeRunStatus, RETRYABLE_RUN_STATUSES } from "../api/runs";
 import { RUNS_QUERY_KEY, type RunPlanCountsCompact, type RunWithProgress } from "../api/runsProgress";
 import { COLLECTION_NODES, runDisplayName } from "../app/collections";
-import type { Command, CommandContext } from "../contracts/command";
+import { type Command, type CommandContext, KEY_MAP } from "../contracts/command";
 import { conditionsCommand } from "../features/filters/conditionPanel";
 import { useViewPrefs } from "../features/review/viewPrefs";
 import { treeEmptyCommand } from "../features/tree/treePrefs";
 import { focusPopout } from "../features/viewer/popout/host";
 import { NO_VIEWER_REASON, stageHasViewer, stageOf } from "../router";
-import { viewerPaneCollapsed } from "../state/slices/overlays";
+import { topOverlay, viewerPaneCollapsed } from "../state/slices/overlays";
 import { DENSITIES, DENSITY_LABEL } from "../state/slices/prefs";
 import { anyRunActive, currentRun } from "../state/slices/runs";
 import { useAppStore } from "../state/store";
@@ -36,6 +36,9 @@ export const VIEWER_ID = "viewer";
 export const GLOBAL_SEARCH_ID = "global-search";
 /** The collapsed viewer rail's expand button (뷰어 접기 lands focus here). */
 export const VIEWER_EXPAND_ID = "viewer-expand";
+/** Narrow layout: the stage panel (tree) drawer and the stage rail button that toggles it. */
+export const TREE_DRAWER_ID = "tree-drawer";
+export const TREE_TOGGLE_ID = "tree-drawer-toggle";
 
 function focusById(id: string, preferSelector?: string): void {
   const run = () => {
@@ -96,6 +99,24 @@ export function collapseViewerPane(): void {
   }
   s.setViewerPane("collapsed");
   focusById(VIEWER_EXPAND_ID);
+}
+
+export const TREE_INLINE_REASON = "창이 넓을 때는 패널이 항상 표시됩니다";
+
+/** Narrow layout: show the stage panel (tree) drawer; focus lands on its heading, like a stage switch. */
+export function openTreeDrawer(): void {
+  const s = useAppStore.getState();
+  if (!s.treeIsDrawer) return;
+  s.setOverlay("treeDrawer", true);
+  focusById(TREE_DRAWER_ID, "h1");
+}
+
+/** Close the stage panel (tree) drawer; focus returns to the stage rail's toggle. */
+export function closeTreeDrawer(): void {
+  const s = useAppStore.getState();
+  if (!s.treeDrawerOpen) return;
+  s.setOverlay("treeDrawer", false);
+  document.getElementById(TREE_TOGGLE_ID)?.focus();
 }
 
 const GRID_ROW_SELECTOR = '[data-grid-focus], [role="row"][tabindex="0"]';
@@ -283,17 +304,13 @@ export function appCommands(): Command[] {
       group: "app",
       shortcut: "Escape",
       icon: "close",
-      disabledReason: () => {
-        const s = store();
-        return s.paletteOpen || s.helpOpen || s.runDialogOpen || s.viewerDrawerOpen
-          ? undefined
-          : "닫을 창이 없습니다";
-      },
+      disabledReason: () => (topOverlay(store()) ? undefined : "닫을 창이 없습니다"),
       run: () => {
-        const wasDrawer =
-          store().viewerDrawerOpen && !store().paletteOpen && !store().helpOpen && !store().runDialogOpen;
-        store().closeTopOverlay();
-        if (wasDrawer) focusMain();
+        const top = topOverlay(store());
+        // The tree drawer hands focus back to its toggle, the viewer drawer to the page.
+        if (top === "treeDrawer") closeTreeDrawer();
+        else store().closeTopOverlay();
+        if (top === "viewerDrawer") focusMain();
       },
     },
     {
@@ -520,6 +537,19 @@ export function caseCommands(queryClient: QueryClient): Command[] {
         if (store().viewerIsDrawer) store().setOverlay("viewerDrawer", true);
         else expandViewerPane();
         focusViewer();
+      },
+    },
+    {
+      // Narrow layout (< 900 px): the stage's left panel is a drawer; the stage rail shows the button.
+      id: "tree.panel",
+      label: "단계 패널(탐색 트리) 열기/닫기",
+      group: "navigate",
+      shortcut: KEY_MAP.treePanel,
+      icon: "sidebar",
+      disabledReason: (ctx) => needsRun(ctx) ?? (store().treeIsDrawer ? undefined : TREE_INLINE_REASON),
+      run: () => {
+        if (store().treeDrawerOpen) closeTreeDrawer();
+        else openTreeDrawer();
       },
     },
     {

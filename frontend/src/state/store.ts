@@ -5,7 +5,7 @@
  *   selection  — focusedRowKey, selectedRowKeys (grid)
  *   viewer     — ViewerTarget (contracts/viewer.ts) mirrored into `row=`/`mode=`
  *   prefs      — theme, density, panel layout (persisted)
- *   overlays   — palette / help / run dialog / viewer drawer
+ *   overlays   — palette / help / run dialog / viewer drawer / tree drawer
  *   runs       — GET /api/runs with progress (status bar, command context)
  *
  * Other streams should use the hooks in ./hooks.ts rather than the raw store.

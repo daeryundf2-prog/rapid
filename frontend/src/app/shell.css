@@ -506,6 +506,26 @@ kbd {
   .global-search {
     min-width: 96px;
   }
+
+  /* A long case name (an image file name) gives way to the search: the trigger ellipsizes
+     instead of pushing the search field over 실행 and the theme button. */
+  .topbar-search {
+    min-width: 96px;
+  }
+
+  .topbar-case {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .topbar-case > .case-picker,
+  .case-picker-trigger {
+    min-width: 0;
+  }
+
+  .topbar-case > :not(.case-picker) {
+    flex: none;
+  }
 }
 
 /* --- buttons: controls.css (.button .primary/.secondary/.ghost/.danger, .icon-btn) --- */
@@ -823,6 +843,39 @@ kbd {
 
 .viewer-drawer[hidden] {
   display: none;
+}
+
+/* Narrow layout (< 900px): the stage's left panel over the page, beside the stage rail. It
+   mirrors the viewer drawer and is as wide as the docked tree can be dragged (320px). */
+.tree-drawer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 700;
+  width: min(320px, 92%);
+  background: var(--bg-panel);
+  border-right: 1px solid var(--line);
+  box-shadow: 8px 0 24px color-mix(in srgb, var(--scrim) 35%, transparent);
+  animation: tree-drawer-in var(--motion) var(--ease);
+}
+
+.tree-drawer[hidden] {
+  display: none;
+}
+
+/* Rows fit the drawer: left to its content the tree's grid grows to its longest row and the
+   counts fall off the right edge. */
+.tree-drawer .case-tree,
+.tree-drawer .case-tree ul {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@keyframes tree-drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(calc(-1 * var(--space-3)));
+  }
 }
 
 .drawer-head {
