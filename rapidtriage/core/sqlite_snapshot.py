@@ -10,6 +10,8 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
+from .audit import compute_sha256
+
 
 class SqliteSnapshotError(sqlite3.OperationalError):
     pass
@@ -72,11 +74,6 @@ def classify_rollback_journal(path: Path) -> dict[str, object]:
         }
 
 
-def _sha256(path: Path) -> str:
-    with path.open("rb") as handle:
-        return hashlib.file_digest(handle, "sha256").hexdigest()
-
-
 def _fingerprint(path: Path) -> dict[str, object]:
     try:
         before = path.lstat()
@@ -84,7 +81,7 @@ def _fingerprint(path: Path) -> dict[str, object]:
         return {"path": str(path), "exists": False}
     if not stat.S_ISREG(before.st_mode):
         raise SqliteSnapshotError(f"SQLite source is not a regular file: {path}")
-    digest = _sha256(path)
+    digest = compute_sha256(path)
     after = path.lstat()
     keys = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns", "st_mode")
     if any(getattr(before, key) != getattr(after, key) for key in keys):
@@ -118,7 +115,7 @@ def open_sqlite_snapshot(
             for kind, destination in (("database", working), ("wal", working.with_name(working.name + "-wal"))):
                 if before[kind]["exists"]:
                     shutil.copyfile(paths[kind], destination)
-                    if _sha256(destination) != before[kind]["sha256"]:
+                    if compute_sha256(destination) != before[kind]["sha256"]:
                         raise SqliteSnapshotError(f"SQLite working copy hash mismatch: {paths[kind]}")
             after = {kind: _fingerprint(source) for kind, source in paths.items()}
             if before != after:
