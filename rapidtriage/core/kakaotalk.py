@@ -23,6 +23,15 @@ from ..artifacts.windows.registry import (
     registry_value_data_preview,
 )
 from .docs import write_result
+from .kakaotalk_residue_memory import (
+    RESIDUE_CONFIDENCE,
+    RESIDUE_EVIDENCE_CLASS,
+    RESIDUE_PROVENANCE_KEYS,
+    ResidueSegment,
+    ResidueSourceStatus,
+    find_residue_memory_sources,
+    iter_residue_segments,
+)
 from .submission import compute_hashes
 
 KAKAOTALK_DECRYPT_VERSION = "kakaotalk-windows-decrypt-v1"
@@ -1185,6 +1194,17 @@ def run_kakaotalk_sqlcipher_probe(
     if max_databases:
         chat_databases = chat_databases[:max_databases]
     key_candidates = collect_sqlcipher_key_literals_from_memory(sources, max_keys=max_keys)
+    key_room = max_keys - len(key_candidates) if max_keys else 0
+    residue_keys, residue_messages, residue_sources = collect_kakaotalk_residue_probe_material(
+        root,
+        collect_keys=not max_keys or key_room > 0,
+        max_keys=key_room,
+        known_digests={str(candidate.get("candidate_sha256") or "") for candidate in key_candidates},
+        max_messages=max_message_residues,
+        include_message_preview=include_message_preview,
+    )
+    key_candidates.extend(residue_keys)
+    residue_digests = {str(candidate.get("candidate_sha256") or "") for candidate in residue_keys}
     edb_databases = find_kakaotalk_edb_databases(root)
     payload: dict[str, object] = {
         "command": "kakaotalk-sqlcipher-probe",
@@ -1212,6 +1232,9 @@ def run_kakaotalk_sqlcipher_probe(
             "chat_database_count": len(chat_databases),
             "edb_database_count": len(edb_databases),
             "key_candidate_count": len(key_candidates),
+            "residue_memory_source_count": len(residue_sources),
+            "residue_key_candidate_count": len(residue_keys),
+            "residue_message_residue_count": 0,
             "variant_count": 0,
             "probe_attempt_count": 0,
             "opened_database_count": 0,
@@ -1228,6 +1251,7 @@ def run_kakaotalk_sqlcipher_probe(
             "status": "sqlcipher-not-found" if sqlcipher_path is None else "not-run",
         },
         "key_candidates": [redact_sqlcipher_key_candidate(candidate) for candidate in key_candidates],
+        "residue_memory_sources": residue_sources,
         "matches": [],
         "openable_edbs": [],
         "errors": [],
@@ -1273,6 +1297,10 @@ def run_kakaotalk_sqlcipher_probe(
         max_messages=max_message_residues,
         include_message_preview=include_message_preview,
     )
+    message_room = max_message_residues - len(postpatch_message_residues) if max_message_residues else len(residue_messages)
+    residue_messages = residue_messages[: max(0, message_room)]
+    postpatch_message_residues.extend(residue_messages)
+    payload["summary"]["residue_message_residue_count"] = len(residue_messages)
     payload["postpatch_message_residues"] = postpatch_message_residues
     payload["postpatch_room_evidence"] = build_kakaotalk_postpatch_room_evidence(
         room_previews=postpatch_chat_rooms,
@@ -1282,7 +1310,9 @@ def run_kakaotalk_sqlcipher_probe(
     payload["summary"]["postpatch_room_evidence_count"] = len(payload["postpatch_room_evidence"])
     payload["summary"]["openable_edb_count"] = len(openable_edbs)
     payload["summary"]["exported_edb_count"] = exported_count
-    payload["openable_edbs"] = [redact_openable_edb_match(match) for match in openable_edbs]
+    redacted_openable_edbs = [redact_openable_edb_match(match) for match in openable_edbs]
+    tag_residue_key_matches(redacted_openable_edbs, residue_digests)
+    payload["openable_edbs"] = redacted_openable_edbs
     postpatch_v2_derived_keys = derive_kakaotalk_postpatch_v2_dek_candidates(
         root=root,
         memory_sources=sources,
@@ -1430,6 +1460,7 @@ def run_kakaotalk_sqlcipher_probe(
     payload["summary"]["postpatch_media_local_file_count"] = media_inventory["summary"]["local_media_file_count"]
     payload["summary"]["postpatch_media_local_match_count"] = media_inventory["summary"]["local_match_count"]
     payload["postpatch_media_inventory"] = media_inventory
+    tag_residue_key_matches(matches, residue_digests)
     payload["summary"]["status"] = "matched" if matches else "no-chatlog-match"
     payload["matches"] = matches
     payload["functional_priority_profile"] = kakaotalk_windows_split_functional_profile(
@@ -1495,6 +1526,11 @@ def run_kakaotalk_key_store_inspect(
                 }
             )
 
+    residue_hits_by_key_store, residue_sources = (
+        inspect_kakaotalk_key_store_residue_hits(root, key_store_files) if max_memory_sources else ({}, [])
+    )
+    for entry in entries:
+        entry["residue_memory_hits"] = residue_hits_by_key_store.get(str(entry.get("path") or ""), [])
     wrapped_entries = [
         wrapped
         for entry in entries
@@ -1542,6 +1578,8 @@ def run_kakaotalk_key_store_inspect(
             "chat_database_key_store_match_count": len(matched_chatlogs),
             "memory_source_count": len(memory_sources),
             "inspected_memory_source_count": len(inspected_memory_sources),
+            "residue_memory_source_count": len(residue_sources),
+            "residue_key_store_hit_count": sum(len(hits) for hits in residue_hits_by_key_store.values()),
             "postpatch_sqlcipher_literal_key_count": len(sqlcipher_key_candidates),
             "postpatch_openable_non_chat_edb_count": len(openable_edbs),
             "postpatch_known_answer_pair_count": len(known_answer_pairs),
@@ -1557,6 +1595,11 @@ def run_kakaotalk_key_store_inspect(
         "postpatch_known_answer_pairs": known_answer_pairs,
         "postpatch_openable_edbs": [redact_openable_edb_match(match) for match in openable_edbs],
         "postpatch_ikm_candidates": postpatch_ikm_candidates,
+        "residue_memory": {
+            "sources": residue_sources,
+            "not_applied": ["runtime-key-store-nodes", "postpatch-ikm", "postpatch-v2-dek-derivation"],
+            "not_applied_reason": "hiberfil/pagefile pages carry no process virtual address map",
+        },
         "errors": errors,
         "validation": {
             "finding": "Post-BigBang PC KakaoTalk appstate.dat uses a CBOR key store with per-EDB wrapped DEKs.",
@@ -2483,6 +2526,17 @@ def build_kakaotalk_memory_carve_payload(
         remaining_reverse_indicators -= len(source_indicators)
         remaining_key_residues -= len(source_key_residues)
 
+    residue_memory = build_kakaotalk_residue_memory_carve(
+        root=root,
+        carve_dir=carve_dir,
+        max_hits=max_hits,
+        max_carve_bytes=max_carve_bytes,
+        include_row_preview=include_row_preview,
+        max_rows_per_table=max_rows_per_table,
+        max_message_residues=max_message_residues,
+        include_message_preview=include_message_preview,
+        write_carves=write_carves,
+    )
     table_total = sum(len(entry.get("tables") or []) for entry in entries)
     chat_relevant_total = sum(
         1
@@ -2533,11 +2587,17 @@ def build_kakaotalk_memory_carve_payload(
                 sqlcipher_key_residues=sqlcipher_key_residues,
             ),
             "message_content_reportable": include_message_preview and bool(message_residues),
+            "residue_memory_source_count": len(residue_memory["sources"]),
+            "residue_carved_database_count": len(residue_memory["entries"]),
+            "residue_chat_message_residue_count": len(residue_memory["chat_message_residues"]),
+            "residue_reverse_indicator_count": len(residue_memory["reverse_indicators"]),
+            "residue_sqlcipher_key_residue_count": len(residue_memory["sqlcipher_key_residues"]),
         },
         "entries": entries,
         "chat_message_residues": message_residues,
         "reverse_indicators": reverse_indicators,
         "sqlcipher_key_residues": sqlcipher_key_residues,
+        "residue_memory": residue_memory,
     }
 
 
@@ -2571,6 +2631,172 @@ def find_memory_dump_candidates(root: Path) -> list[Path]:
         if suffix_match and hinted:
             candidates.append(path)
     return candidates
+
+
+def remap_residue_hits(segment: ResidueSegment, hits: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    return [remapped for hit in hits if (remapped := segment.remap(hit)) is not None]
+
+
+def build_kakaotalk_residue_memory_carve(
+    *,
+    root: Path,
+    carve_dir: Path | None,
+    max_hits: int,
+    max_carve_bytes: int,
+    include_row_preview: bool,
+    max_rows_per_table: int,
+    max_message_residues: int,
+    include_message_preview: bool,
+    write_carves: bool,
+) -> dict[str, object]:
+    statuses: list[ResidueSourceStatus] = []
+    entries: list[dict[str, object]] = []
+    messages: list[dict[str, object]] = []
+    indicators: list[dict[str, object]] = []
+    key_residues: list[dict[str, object]] = []
+    for segment in iter_residue_segments(find_residue_memory_sources(root), statuses=statuses):
+        for offset in iter_sqlite_header_offsets(segment.path):
+            if max_hits and len(entries) >= max_hits:
+                break
+            if segment.locate(offset) is None:
+                continue
+            entry = analyze_memory_sqlite_carve(
+                segment.path,
+                offset=offset,
+                carve_dir=carve_dir,
+                max_carve_bytes=max_carve_bytes,
+                include_row_preview=include_row_preview,
+                max_rows_per_table=max_rows_per_table,
+                write_carves=write_carves,
+            )
+            entries.extend(remap_residue_hits(segment, [entry]))
+        message_limit = max_message_residues - len(messages) if max_message_residues else 0
+        if not max_message_residues or message_limit > 0:
+            segment_messages = extract_memory_chat_message_residues(
+                segment.path,
+                max_messages=message_limit,
+                include_message_preview=include_message_preview,
+            )
+            messages.extend(remap_residue_hits(segment, segment_messages))
+        reverse_evidence = extract_memory_reverse_evidence(
+            segment.path,
+            max_indicators=DEFAULT_MEMORY_REVERSE_INDICATOR_LIMIT - len(indicators),
+            max_key_residues=DEFAULT_MEMORY_SQLCIPHER_KEY_RESIDUE_LIMIT - len(key_residues),
+        )
+        indicators.extend(remap_residue_hits(segment, reverse_evidence["reverse_indicators"]))
+        key_residues.extend(remap_residue_hits(segment, reverse_evidence["sqlcipher_key_residues"]))
+    return {
+        "sources": [status.to_dict() for status in statuses],
+        "entries": entries,
+        "chat_message_residues": messages,
+        "reverse_indicators": indicators,
+        "sqlcipher_key_residues": key_residues,
+    }
+
+
+def collect_kakaotalk_residue_probe_material(
+    root: Path,
+    *,
+    collect_keys: bool,
+    max_keys: int,
+    known_digests: set[str],
+    max_messages: int,
+    include_message_preview: bool,
+) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
+    statuses: list[ResidueSourceStatus] = []
+    keys: list[dict[str, object]] = []
+    messages: list[dict[str, object]] = []
+    for segment in iter_residue_segments(find_residue_memory_sources(root), statuses=statuses):
+        if collect_keys and (not max_keys or len(keys) < max_keys):
+            for candidate in remap_residue_hits(segment, collect_sqlcipher_key_literals_from_memory([segment.path], max_keys=0)):
+                digest = str(candidate.get("candidate_sha256") or "")
+                if digest in known_digests:
+                    continue
+                known_digests.add(digest)
+                keys.append(candidate)
+                if max_keys and len(keys) >= max_keys:
+                    break
+        message_limit = max_messages - len(messages) if max_messages else 0
+        if not max_messages or message_limit > 0:
+            segment_messages = extract_memory_chat_message_residues(
+                segment.path,
+                max_messages=message_limit,
+                include_message_preview=include_message_preview,
+            )
+            messages.extend(remap_residue_hits(segment, segment_messages))
+    return keys, messages, [status.to_dict() for status in statuses]
+
+
+def tag_residue_key_matches(matches: Sequence[dict[str, object]], residue_digests: set[str]) -> None:
+    for match in matches:
+        if str(match.get("key_candidate_sha256") or "") in residue_digests:
+            match["evidence_class"] = RESIDUE_EVIDENCE_CLASS
+            match["confidence"] = RESIDUE_CONFIDENCE
+
+
+def inspect_kakaotalk_key_store_residue_hits(
+    root: Path, key_store_files: Sequence[Path]
+) -> tuple[dict[str, list[dict[str, object]]], list[dict[str, object]]]:
+    """Key-store residency (appstate blob, salt, wrapped DEKs, path strings) in hiberfil/pagefile pages.
+
+    Runtime map nodes and the post-patch IKM need process virtual addresses, which
+    residue pages do not carry, so only byte residency is checked here.
+    """
+    needles: list[tuple[str, bytes, bytes, list[dict[str, object]], list[tuple[str, bytes]]]] = []
+    for path in key_store_files:
+        try:
+            data = path.read_bytes()
+            decoded = MiniCborDecoder(data).decode()
+        except (OSError, KakaoTalkKeyStoreParseError, ValueError):
+            continue
+        if not isinstance(decoded, dict) or not isinstance(decoded.get("wrapped_dek_map"), list):
+            continue
+        pairs = [
+            (cbor_byte_array_to_text(pair[0]), cbor_byte_array_to_bytes(pair[1]))
+            for pair in decoded["wrapped_dek_map"]
+            if isinstance(pair, list) and len(pair) == 2
+        ]
+        needles.append(
+            (
+                str(path.resolve()),
+                data,
+                cbor_byte_array_to_bytes(decoded.get("salt")),
+                [{"relative_path": relative_path} for relative_path, _ in pairs],
+                [(normalize_kakaotalk_relative_path(relative_path), wrapped) for relative_path, wrapped in pairs],
+            )
+        )
+    hits_by_key_store: dict[str, list[dict[str, object]]] = {needle[0]: [] for needle in needles}
+    statuses: list[ResidueSourceStatus] = []
+    if not needles:
+        return hits_by_key_store, []
+    for segment in iter_residue_segments(find_residue_memory_sources(root), statuses=statuses):
+        for key_store_path, data, salt, entries, raw_values in needles:
+            for hit in inspect_key_store_memory_hits(
+                data=data, salt=salt, wrapped_entries=entries, wrapped_raw_values=raw_values, sources=[segment.path]
+            ):
+                appstate_offset = hit.get("appstate_blob_offset")
+                found = hit.get("appstate_blob_present") or any(
+                    hit.get(name)
+                    for name in ("salt_occurrence_count", "wrapped_dek_exact_hit_count", "key_store_path_string_hit_count")
+                )
+                if not found:
+                    continue
+                provenance = (
+                    segment.locate(appstate_offset) if isinstance(appstate_offset, int) and appstate_offset >= 0 else None
+                ) or segment.locate(segment.owned_start)
+                if provenance is None:
+                    continue
+                residue_hit = dict(hit)
+                residue_hit["segment_size"] = residue_hit.pop("source_size", 0)
+                residue_hit.update(provenance)
+                residue_hit["validation"] = {
+                    "source": "memory-residue-key-store-residency",
+                    "raw_memory_redacted": True,
+                    "requires_manual_validation": True,
+                    "counts_scope": "per-segment",
+                }
+                hits_by_key_store[key_store_path].append(residue_hit)
+    return hits_by_key_store, [status.to_dict() for status in statuses]
 
 
 def iter_sqlite_header_offsets(path: Path, *, max_hits: int = 0) -> list[int]:
@@ -3135,6 +3361,7 @@ def redact_sqlcipher_key_candidate(candidate: Mapping[str, object]) -> dict[str,
             "raw_key_redacted": True,
             "requires_manual_validation": True,
         },
+        **{key: candidate[key] for key in RESIDUE_PROVENANCE_KEYS if key in candidate},
     }
 
 
