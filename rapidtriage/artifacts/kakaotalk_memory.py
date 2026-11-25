@@ -12,6 +12,11 @@ its module list (process image ``KakaoTalk.exe``) and stream directory
 without reading memory ranges, and a header-less raw dump is accepted only
 next to KakaoTalk evidence or when a bounded sample holds KakaoTalk
 markers. Nothing is read in full before a dump is confirmed.
+
+The analyses hold a whole dump in memory, so a confirmed dump larger than
+``MAX_IN_MEMORY_DUMP_BYTES`` is scanned like hiberfil/pagefile residue, as
+bounded overlapping segments; the analyses that need the dump's virtual
+address map are not applied to it, and its record says so.
 """
 
 from __future__ import annotations
@@ -32,6 +37,8 @@ COLLECTOR_KIND = "kakaotalk-memory"
 DISCOVERY_MIN_BYTES = 64 * 1024
 RAW_SAMPLE_BYTES = 1024 * 1024
 MAX_ANALYSED_DUMPS = 64
+MAX_IN_MEMORY_DUMP_BYTES = 1024 * 1024 * 1024
+SEGMENTED_NOT_APPLIED = ("runtime-key-store-nodes", "postpatch-ikm", "postpatch-v2-dek-derivation")
 MAX_MESSAGE_ROWS = 1000
 KAKAO_PROCESS_IMAGE = "kakaotalk.exe"
 KAKAO_COLLECT_NAME = re.compile(r"^kakaotalk_\d+\.dmp$", re.IGNORECASE)
@@ -58,21 +65,28 @@ class KakaoTalkMemoryProvider:
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
         dumps, residue_sources = discover_kakaotalk_memory_sources(root)
-        confirmed = [dump for dump in dumps if dump["confirmed"]][:MAX_ANALYSED_DUMPS]
+        confirmed = [dump for dump in dumps if dump["confirmed"]]
+        analysed = confirmed[:MAX_ANALYSED_DUMPS]
         for dump in dumps:
             if not dump["confirmed"]:
                 yield build_dump_record(dump, analysis_counts={})
-        if not confirmed and not residue_sources:
+        for dump in confirmed[MAX_ANALYSED_DUMPS:]:
+            yield build_dump_record(dump, analysis_counts={}, skip_reason="analysis-limit")
+        if not analysed and not residue_sources:
             return
-        analyses = run_kakaotalk_memory_analyses(
-            root, [Path(str(dump["path"])) for dump in confirmed], residue_sources
-        )
+        whole = [Path(str(dump["path"])) for dump in analysed if not is_segmented(dump)]
+        segmented = [Path(str(dump["path"])) for dump in analysed if is_segmented(dump)]
+        analyses = run_kakaotalk_memory_analyses(root, whole, [*residue_sources, *segmented])
         carve = analyses["carve"]
-        for dump in confirmed:
+        for dump in analysed:
             yield build_dump_record(
                 dump, analysis_counts=count_hits_for_source(carve, str(dump["path"]))
             )
         yield from build_analysis_rows(analyses)
+
+
+def is_segmented(dump: Mapping[str, object]) -> bool:
+    return int(dump.get("size") or 0) > MAX_IN_MEMORY_DUMP_BYTES
 
 
 def discover_kakaotalk_memory_sources(
@@ -248,13 +262,21 @@ def count_hits_for_source(
     carve: Mapping[str, object], source_path: str
 ) -> dict[str, int]:
     counts: dict[str, int] = {}
+    residue = (
+        carve.get("residue_memory")
+        if isinstance(carve.get("residue_memory"), Mapping)
+        else {}
+    )
     for key in (
         "entries",
         "chat_message_residues",
         "reverse_indicators",
         "sqlcipher_key_residues",
     ):
-        items = carve.get(key) if isinstance(carve.get(key), list) else []
+        items = [
+            *(carve.get(key) if isinstance(carve.get(key), list) else []),
+            *list_of(residue, key),
+        ]
         counts[key] = sum(
             1
             for item in items
@@ -280,11 +302,14 @@ def file_times(path: Path) -> dict[str, str]:
 
 
 def build_dump_record(
-    dump: Mapping[str, object], *, analysis_counts: Mapping[str, int]
+    dump: Mapping[str, object],
+    *,
+    analysis_counts: Mapping[str, int],
+    skip_reason: str = "",
 ) -> ArtifactRecord:
     path = Path(str(dump["path"]))
     size = int(dump.get("size") or 0)
-    confirmed = bool(dump.get("confirmed"))
+    analysed = bool(dump.get("confirmed")) and not skip_reason
     details: dict[str, object] = {
         "parser": COLLECTOR_KIND,
         "parser_version": PARSER_VERSION,
@@ -301,11 +326,25 @@ def build_dump_record(
         "file_times_source": "extracted-file-stat",
         "reportability": "triage",
     }
-    if confirmed:
+    if analysed:
         details["source_hashes"] = safe_memory_source_hashes(path, file_size=size)
         details["analysis_counts"] = dict(analysis_counts)
         details["display_label"] = "카카오톡 프로세스 메모리 덤프"
         details["timestamp"] = dump.get("dump_time", "")
+        if is_segmented(dump):
+            details["analysis_mode"] = "segmented"
+            details["analysis_mode_reason"] = (
+                f"larger than the {MAX_IN_MEMORY_DUMP_BYTES}-byte in-memory cap: scanned as bounded "
+                "overlapping segments like hiberfil/pagefile residue"
+            )
+            details["not_applied"] = list(SEGMENTED_NOT_APPLIED)
+        else:
+            details["analysis_mode"] = "whole-file"
+    elif skip_reason:
+        details["skip_reason"] = skip_reason
+        details["display_label"] = (
+            f"카카오톡 프로세스 메모리 덤프(분석 한도 {MAX_ANALYSED_DUMPS}개 초과, 미분석)"
+        )
     else:
         details["skip_reason"] = (
             "other-process-dump"
@@ -316,7 +355,7 @@ def build_dump_record(
     return ArtifactRecord(
         provider=KakaoTalkMemoryProvider.name,
         artifact_type="kakaotalk-memory-dump"
-        if confirmed
+        if analysed
         else "kakaotalk-memory-dump-skipped",
         path=str(path),
         supported=True,
