@@ -183,6 +183,44 @@ class ResidueSegmentTests(unittest.TestCase):
         self.assertEqual(sorted(owners), list(range(0, 5 * RESIDUE_PAGE_SIZE, 512)))
         self.assertGreater(statuses[0].segments_scanned, 2)
 
+    def test_hiberfil_segments_overlap_so_boundary_hits_stay_whole(self) -> None:
+        needle = b"STRADDLE"
+        kernel_pages = [
+            (0x400, page_with((RESIDUE_PAGE_SIZE - 4, needle[:4]))),
+            (0x401, page_with((0, needle[4:]))),
+            (0x402, page_with((0, b"third"))),
+            (0x403, page_with((0, b"fourth"))),
+        ]
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            hiberfil = Path(tmp_dir) / "hiberfil.sys"
+            hiberfil.write_bytes(
+                build_hiberfil(
+                    boot=[compression_set([(0x10, page_with((0, b"boot")))], method="raw")],
+                    kernel=[compression_set(kernel_pages, method="raw")],
+                )
+            )
+            statuses: list[ResidueSourceStatus] = []
+            owned_pages: list[int] = []
+            needle_hits: list[dict[str, object]] = []
+            for segment in iter_residue_segments(
+                [hiberfil], statuses=statuses, segment_bytes=2 * RESIDUE_PAGE_SIZE
+            ):
+                data = segment.path.read_bytes()
+                owned_pages.extend(
+                    int(provenance["page_number"])
+                    for offset in range(0, len(data), RESIDUE_PAGE_SIZE)
+                    if (provenance := segment.locate(offset)) is not None
+                )
+                found = data.find(needle)
+                if found >= 0 and (provenance := segment.locate(found)) is not None:
+                    needle_hits.append(provenance)
+
+        self.assertEqual(statuses[0].status, "read")
+        self.assertEqual(owned_pages, [0x10, 0x400, 0x401, 0x402, 0x403])
+        self.assertEqual(len(needle_hits), 1)
+        self.assertEqual(needle_hits[0]["page_number"], 0x400)
+        self.assertEqual(needle_hits[0]["page_offset"], RESIDUE_PAGE_SIZE - 4)
+
     def test_unsupported_and_corrupt_hiberfils_are_reported_not_raised(self) -> None:
         cases = {
             "wiped": b"\0" * (4 * RESIDUE_PAGE_SIZE),

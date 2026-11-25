@@ -173,10 +173,14 @@ def iter_residue_segments(
     with tempfile.TemporaryDirectory(prefix="rapidtriage-kakao-residue-") as temp_dir:
         for index, source in enumerate(sources):
             kind = RESIDUE_SOURCE_KINDS.get(source.name.lower(), "pagefile")
-            status = ResidueSourceStatus(
-                path=source.resolve(), kind=kind, size=source.stat().st_size
-            )
+            status = ResidueSourceStatus(path=source.resolve(), kind=kind, size=0)
             statuses.append(status)
+            try:
+                status.size = source.stat().st_size
+            except OSError as exc:
+                status.errors.append(str(exc))
+                status.status = "error"
+                continue
             reader = (
                 iter_hiberfil_segments if kind == "hiberfil" else iter_raw_page_segments
             )
@@ -303,7 +307,10 @@ def iter_hiberfil_pages(
                 set_header = handle.read(4 + HIBR_MAX_PAGES_PER_SET * descriptor_size)
                 (set_status,) = struct.unpack_from("<I", set_header, 0)
                 descriptor_count = set_status & 0xFF
-                compressed_size = (set_status >> 8) & 0x0FFFFF
+                # Compressed size: bits 8-28 (Volatility hib layer; bit 29 joins it before
+                # Windows 11 24H2 but is not part of it there). A set holds at most 16 pages
+                # (64 KiB), so the masked-off bit is never legitimately set.
+                compressed_size = (set_status >> 8) & 0x1FFFFF
                 huffman = bool(set_status & 0xC0000000)
                 if (
                     not descriptor_count
@@ -372,16 +379,32 @@ def iter_hiberfil_pages(
 def iter_hiberfil_segments(
     source: Path, status: ResidueSourceStatus, segment_bytes: int
 ) -> Iterator[tuple[bytes, list[tuple[int, int, int]], int, int]]:
+    """Decompressed pages in bounded segments, overlapping like the raw page reader.
+
+    A segment is cut once it holds ``segment_bytes`` plus the overlap; its last
+    overlap pages are carried into the next segment, which owns them, so a hit
+    that starts near a boundary is scanned with its following bytes.
+    """
+    overlap = (
+        min(RESIDUE_SEGMENT_OVERLAP_BYTES, segment_bytes // 2)
+        // RESIDUE_PAGE_SIZE
+        * RESIDUE_PAGE_SIZE
+    )
     buffer = bytearray()
     pages: list[tuple[int, int, int]] = []
     try:
         for page_number, set_offset, page in iter_hiberfil_pages(source, status):
             pages.append((len(buffer), set_offset, page_number))
             buffer += page
-            if len(buffer) >= segment_bytes:
-                yield bytes(buffer), pages, 0, len(buffer)
-                buffer = bytearray()
-                pages = []
+            if len(buffer) >= segment_bytes + overlap:
+                owned_end = len(buffer) - overlap
+                yield bytes(buffer), pages, 0, owned_end
+                pages = [
+                    (offset - owned_end, file_offset, number)
+                    for offset, file_offset, number in pages
+                    if offset >= owned_end
+                ]
+                buffer = bytearray(buffer[owned_end:])
     except ResidueFormatError:
         if buffer:
             yield bytes(buffer), pages, 0, len(buffer)
