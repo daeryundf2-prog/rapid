@@ -69,3 +69,10 @@
   conversions. Subclasses of str/int/float/list/tuple/dict, non-str keys, lone
   surrogates, deep nesting and errors go to `json.dumps`
   (`tests/test_evtx_engine_rows_diff.py`). About 2.8× faster per row.
+- With the Rust EVTX engine selected, triage-detail event rows are projected in
+  Rust (`rapidcore_native.EventlogTriageProjector`, the port of
+  `triage_eventlog_details`): same keys, order, values and types; values it
+  cannot reproduce exactly (subclasses, custom objects, lone surrogates in
+  bounded text) go to the Python function
+  (`tests/test_evtx_engine_rows_diff.py`). About 2× faster per row (18–23 µs
+  down to 9–10 µs).

@@ -14,6 +14,9 @@ decline (Python runs) whatever they cannot reproduce.
 JSON rows: ``dump_json_row`` must write the text ``artifacts._dump_row`` writes
 (or decline, and Python then writes it or raises the same exception).
 
+Triage: ``EventlogTriageProjector.project`` must return the dict
+``triage_eventlog_details`` returns (or decline).
+
 Without the native module these tests skip unless
 ``RAPIDTRIAGE_REQUIRE_NATIVE_EVTX=1``.
 """
@@ -42,7 +45,13 @@ from rapidtriage.artifacts.windows.antiforensics import (
     redact_recovery_passwords,
     redact_recovery_passwords_in,
 )
-from rapidtriage.artifacts.windows.eventlog import WindowsEventLogProvider
+from rapidtriage.artifacts.windows.eventlog import (
+    EVENTLOG_TRIAGE_PAYLOAD_MAX_CHARS,
+    EVENTLOG_TRIAGE_TEXT_MAX_CHARS,
+    WindowsEventLogProvider,
+    native_triage_projector,
+    triage_eventlog_details,
+)
 from rapidtriage.core import artifact_profiles as profiles
 from rapidtriage.core import artifacts
 from rapidtriage.core.json_safe import json_default
@@ -637,6 +646,172 @@ class JsonRowKernelTests(unittest.TestCase):
                     self.assert_same_text(artifacts._shallow_row(item))
                     compared += 1
             self.assertGreater(compared, 4000)
+
+
+ENGINE_FIELDS = (
+    "native_evtx_engine",
+    "native_evtx_engine_requested",
+    "native_evtx_engine_python_fallback_chunk_count",
+    "native_evtx_engine_notice_ko",
+)
+
+
+def corpus_tree(tmp: str) -> Path:
+    logs = Path(tmp) / "Windows" / "System32" / "winevt" / "Logs"
+    logs.mkdir(parents=True)
+    for name, blob in build_edge_corpus().items():
+        (logs / name).write_bytes(blob)
+    return Path(tmp)
+
+
+def triage_text(rng: random.Random) -> object:
+    pieces = ("a", "é", "한", "😀", "\x00", "\x01", "\x1f", "\x7f", "\t", "\n", "\r", "e\u0301", "\u2028")
+    size = rng.choice((0, 3, EVENTLOG_TRIAGE_TEXT_MAX_CHARS - 1, EVENTLOG_TRIAGE_TEXT_MAX_CHARS + 2))
+    if rng.random() < 0.05:
+        size = EVENTLOG_TRIAGE_PAYLOAD_MAX_CHARS + 3
+    return "".join(rng.choice(pieces) for _ in range(size))
+
+
+def triage_value(rng: random.Random) -> object:
+    return rng.choice(
+        (
+            None,
+            "",
+            [],
+            {},
+            (),
+            0,
+            False,
+            True,
+            0.0,
+            float("nan"),
+            7,
+            2**70,
+            "x",
+            triage_text(rng),
+            triage_text(rng),
+            ["a", 1],
+            {"k": "v"},
+            b"\x01",
+            _Str("s"),
+            "\ud800",
+        )
+    )
+
+
+def mutate_triage_details(rng: random.Random, details: dict[str, object]) -> dict[str, object]:
+    out = copy.deepcopy(details)
+    keys = list(out) + ["command_line", "raw_preview", "rule", "event_message", "user_name", "logon_id", "script_block_text"]
+    for key in rng.sample(keys, k=min(len(keys), rng.randint(1, 6))):
+        out[key] = triage_value(rng)
+    roll = rng.random()
+    if roll < 0.2:
+        out["event_data_items"] = [
+            rng.choice(({"name": triage_value(rng), "value": triage_value(rng)}, "not-a-mapping", {}))
+            for _ in range(rng.choice((0, 2, 70)))
+        ]
+    elif roll < 0.4:
+        data_key = "binxml_event_data_fields" if out.get("parser") == "windows-eventlog-evtx-native" else "data"
+        out[data_key] = {
+            rng.choice(("CommandLine", "ScriptBlockText", "İmagePath", "\u212aey", "Name", "x" * 3, 5)): rng.choice(
+                (triage_text(rng), {"b": [1, b"x"], "a": None}, ["z", 2.5], 3, None, ("t",))
+            )
+            for _ in range(rng.choice((1, 3, 70)))
+        }
+    elif roll < 0.55:
+        out["binxml_event_data_fields"] = {}
+        out["evtx_binxml"] = {
+            "value_fields": rng.choice(
+                (
+                    [
+                        {"element_path": rng.choice(("Event/System/Provider", "Event/EventData", None)), "text": triage_value(rng)}
+                        for _ in range(rng.choice((0, 3, 70)))
+                    ],
+                    (),
+                    None,
+                    "text",
+                )
+            )
+        }
+        out["extracted_strings"] = rng.choice(([triage_text(rng) for _ in range(20)], [1, "", "x"], (), None, "abc"))
+    elif roll < 0.7:
+        context = dict(out["evtx_chunk_context"]) if isinstance(out.get("evtx_chunk_context"), dict) else {}
+        context["chunk_offset"] = rng.choice((0, 4095, 4096, 4096 + 65536 * 3, "  8192 ", "1_0000", "٤٠٩٦", 5000.0, True, 2**70, -5, None, "x"))
+        context["chunk_boundary_status"] = triage_value(rng)
+        out["evtx_chunk_context"] = context
+        out["evtx_record_integrity"] = rng.choice(({"trailing_size_valid": rng.choice((1, 0, "", "yes"))}, [], None))
+    elif roll < 0.8:
+        out["rule"] = rng.choice(({"title": "", "id": 0}, {"title": "", "id": "R1"}, {"title": "T"}, _Dict(title="T"), []))
+    elif roll < 0.9:
+        out["parser"] = rng.choice(("windows-eventlog-evtx-native", _Str("windows-eventlog-evtx-native"), "other", None))
+    return out
+
+
+class TriageProjectionKernelTests(unittest.TestCase):
+    def setUp(self) -> None:
+        if NATIVE is None:
+            if REQUIRE_NATIVE:
+                self.fail(f"rapidcore_native EVTX engine required: {NATIVE_REASON}")
+            self.skipTest(f"rapidcore_native EVTX engine not built: {NATIVE_REASON}")
+        self.projector = native_triage_projector(NATIVE)
+
+    def full_event_details(self) -> list[dict[str, object]]:
+        with tempfile.TemporaryDirectory() as tmp:
+            provider = WindowsEventLogProvider().with_options(record_detail="full", evtx_engine="python")
+            return [
+                item.details for item in provider.collect(corpus_tree(tmp)) if item.artifact_type == "eventlog-event"
+            ]
+
+    def assert_same_projection(self, details: object) -> bool:
+        try:
+            expected: object = shape(triage_eventlog_details(details))
+        except Exception as exc:  # the native path must raise the same
+            expected = (type(exc), str(exc))
+        projected = self.projector.project(details)
+        try:
+            actual: object = shape(projected if projected is not None else triage_eventlog_details(details))
+        except Exception as exc:
+            actual = (type(exc), str(exc))
+        self.assertEqual(actual, expected)
+        return projected is not None
+
+    def test_corpus_details(self) -> None:
+        rows = self.full_event_details()
+        native = sum(self.assert_same_projection(details) for details in rows)
+        self.assertGreater(len(rows), 1000)
+        # Rows with lone surrogates (python-fallback-chunks.evtx) are the only declines.
+        self.assertGreater(native, len(rows) * 0.8)
+
+    def test_mutated_details(self) -> None:
+        rng = random.Random(8655)
+        rows = self.full_event_details()
+        native = 0
+        for _ in range(4000):
+            native += self.assert_same_projection(mutate_triage_details(rng, rng.choice(rows)))
+        self.assertGreater(native, 1000)
+
+    def test_non_dict_details(self) -> None:
+        for details in ({}, _Dict(parser="x"), {"parser": "windows-eventlog-evtx-native"}):
+            self.assert_same_projection(details)
+
+    def test_provider_triage_rows_identical_across_engines(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = corpus_tree(tmp)
+            rows = {}
+            for engine in ("python", "rust"):
+                provider = WindowsEventLogProvider().with_options(record_detail="triage", evtx_engine=engine)
+                rows[engine] = [artifacts._dump_row(artifacts._shallow_row(item)) for item in provider.collect(root)]
+        python_rows, rust_rows = rows["python"], rows["rust"]
+        self.assertEqual(len(rust_rows), len(python_rows))
+        for index, (left, right) in enumerate(zip(python_rows, rust_rows)):
+            left_row, right_row = json.loads(left), json.loads(right)
+            if right_row["artifact_type"] == "eventlog-file":
+                self.assertEqual(right_row["details"]["native_evtx_engine"], "rust")
+                for key in ENGINE_FIELDS:
+                    right_row["details"].pop(key, None)
+                right = artifacts._dump_row(right_row)
+                left = artifacts._dump_row(left_row)
+            self.assertEqual(right, left, f"row {index}")
 
 
 if __name__ == "__main__":

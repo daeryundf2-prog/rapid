@@ -289,5 +289,6 @@ fn rapidcore_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<EvtxChunkDecoder>()?;
     crate::py_rows::register(module)?;
     crate::py_json::register(module)?;
+    crate::py_triage::register(module)?;
     Ok(())
 }
