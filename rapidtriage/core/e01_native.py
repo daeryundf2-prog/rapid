@@ -571,6 +571,8 @@ def _walk_ntfs_dir(
                     continue  # already recovered by the priority pass
                 if stats["files"] >= limit:
                     stats["truncated"] += 1
+                    if on_progress is not None:
+                        on_progress(stats)  # the walk past the cap still takes minutes on a full volume
                     continue
                 _dump_ntfs_record(rec, target, stats)
                 if done is not None and segment is not None:
@@ -707,6 +709,8 @@ def _sweep_deleted_mft_records(
         # shared cap (reached by the live tree on any full Windows volume) recovered none of them.
         if stats["deleted_files"] + stats["deleted_read_errors"] >= limit:
             stats["truncated"] += 1
+            if on_progress is not None:
+                on_progress(stats)
             continue
         target = deleted_dir / f"{index}-{_safe_component(filename)}"
         before_errors = stats["errors"]

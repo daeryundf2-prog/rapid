@@ -2461,7 +2461,14 @@ def image_extract_reporter(progress: RunProgress, *, interval: float = 1.0) -> C
         files = int(stats.get("files") or 0)
         gib = int(stats.get("bytes") or 0) / (1 << 30)
         progress.task_rows("image-extract", files)
-        progress.task_set_message("image-extract", f"파일 {files:,}개 · {gib:.1f} GB 추출")
+        skipped = int(stats.get("truncated") or 0)
+        deleted = int(stats.get("deleted_files") or 0)
+        message = f"파일 {files:,}개 · {gib:.1f} GB 추출"
+        if deleted:
+            message += f" · 삭제 파일 {deleted:,}개"
+        if skipped:
+            message += f" · 상한 초과 {skipped:,}개 건너뜀"
+        progress.task_set_message("image-extract", message)
 
     return report
 

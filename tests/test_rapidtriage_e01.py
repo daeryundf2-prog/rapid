@@ -510,6 +510,11 @@ Units are in 512-byte sectors
         with tempfile.TemporaryDirectory() as tmp_dir:
             _walk_ntfs_dir(root, Path(tmp_dir), stats, limit=10, on_progress=lambda s: seen.append((s["files"], s["bytes"])))
         self.assertEqual(seen, [(1, 4), (2, 6)])
+        stats.update(files=0, bytes=0)
+        capped: list[int] = []
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            _walk_ntfs_dir(root, Path(tmp_dir), stats, limit=1, on_progress=lambda s: capped.append(s["truncated"]))
+        self.assertEqual(capped, [0, 1])  # the skipped file past the cap is reported too
 
     def test_priority_pass_recovers_hives_and_logs_before_the_cap_is_spent_on_program_files(self) -> None:
         from rapidtriage.core.e01_native import _recover_priority_paths, _walk_ntfs_dir
@@ -610,10 +615,14 @@ Units are in 512-byte sectors
             progress.set_plan(build_run_plan(mode="fraud"))
             report = image_extract_reporter(progress, interval=0.0)
             report({"files": 1234, "bytes": 3 << 30})
-            task = progress.task_record("image-extract")
+            task = dict(progress.task_record("image-extract"))
+            report({"files": 200_000, "bytes": 3 << 30, "deleted_files": 12, "truncated": 5_000})
+            capped = dict(progress.task_record("image-extract"))
             progress.finish(status="completed")
         self.assertEqual(task["rows_so_far"], 1234)
         self.assertEqual(task["message"], "파일 1,234개 · 3.0 GB 추출")
+        # Past the cap the walk keeps going for minutes; the message must keep moving.
+        self.assertEqual(capped["message"], "파일 200,000개 · 3.0 GB 추출 · 삭제 파일 12개 · 상한 초과 5,000개 건너뜀")
 
     def _fake_native_result(self) -> dict:
         partition_row = {
