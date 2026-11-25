@@ -45,6 +45,7 @@ import type { GridRow } from "../../contracts/collection";
 import type { Command, CommandContext } from "../../contracts/command";
 import type { ViewerMode, ViewerTarget } from "../../contracts/viewer";
 import { useAppStore } from "../../state/store";
+import { resetFullRecordCache, useFullRecordRow } from "./fullRecord";
 import { resetViewerSession } from "./session";
 
 // ---------------------------------------------------------------------------
@@ -147,9 +148,14 @@ export function setViewerRouteMode(mode: ViewerMode | undefined): void {
   if (state.routeMode !== mode) setState({ routeMode: mode });
 }
 
-/** Row context for the current target only (a stale row for another target is ignored). */
+/**
+ * Row context for the current target only (a stale row for another target is ignored); an
+ * artifact list row gets its full record (`fullRecord.ts`) once loaded.
+ */
 export function useViewerRowContext(): GridRow | null {
-  return useAdapter((s) => (rowMatches(s.row, s.target) ? s.row : null));
+  const row = useAdapter((s) => (rowMatches(s.row, s.target) ? s.row : null));
+  const runId = useAdapter((s) => s.target?.runId ?? null);
+  return useFullRecordRow(row, runId);
 }
 
 /** Route `q=` keywords (S1 store); falls back to parsing the hash when no case is routed. */
@@ -251,6 +257,7 @@ export async function dispatchCommand(id: string, ctx: CommandContext): Promise<
 /** Test helper: reset the local adapter between tests. */
 export function resetViewerAdapter(): void {
   resetViewerSession();
+  resetFullRecordCache();
   for (const off of shellOffs.values()) off();
   shellOffs.clear();
   commands.clear();

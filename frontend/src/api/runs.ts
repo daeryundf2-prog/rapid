@@ -497,6 +497,11 @@ export interface ArtifactsQuery {
   channel_group?: string[];
   /** Row conditions (r4 §2.3): `from`, `to`, `weekday`, `hours`, `offhours`, `tz`, `partial`, `content`, `geo`. */
   conditions?: Record<string, string | string[]>;
+  /**
+   * `list` = lean grid rows (api/app/list_view.py): `details` without the nested parser
+   * profiles (dropped keys in `details_omitted`); the viewer fetches the full row.
+   */
+  view?: "list";
 }
 
 export function artifactsQueryString(query: ArtifactsQuery): string {
@@ -520,5 +525,6 @@ export function artifactsQueryString(query: ArtifactsQuery): string {
     params.set("order", query.order ?? "asc");
     if (query.locate !== undefined) params.set("locate", String(query.locate));
   }
+  if (query.view) params.set("view", query.view);
   return params.toString();
 }
