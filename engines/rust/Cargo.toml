@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/rapidcore",
+  "crates/rapid-indicators",
   "crates/rapid-worker",
 ]
 resolver = "2"
