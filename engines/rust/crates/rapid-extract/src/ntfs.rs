@@ -860,6 +860,12 @@ impl IndexEntry {
     }
 }
 
+/// One `$I30` entry of a directory: the name it lists and the MFT segment it references.
+pub struct DirEntry {
+    pub name: String,
+    pub segment: u64,
+}
+
 /// `Index(record, "$I30")`.
 pub struct Index {
     root: Stream,
@@ -1361,14 +1367,17 @@ impl<M: Media> Ntfs<M> {
         Ok(out)
     }
 
-    /// `MftRecord.listdir(ignore_dos)` keys, in dict insertion order.
-    pub fn listdir(&self, record: &Record, ignore_dos: bool) -> Res<Vec<String>> {
+    /// `_directory_entries`: the `$I30` entries of `record` as (name, MFT segment), in index order:
+    /// Win32 and POSIX names, then DOS 8.3 names. Callers follow each entry's own MFT reference,
+    /// never a lookup by name: NTFS looks names up case-insensitively, so of two entries whose
+    /// names differ only in case (POSIX namespace, case-sensitive directories), each a record of
+    /// its own, a lookup reaches one.
+    pub fn directory_entries(&self, record: &Record) -> Res<(Vec<DirEntry>, Vec<DirEntry>)> {
         if !record.is_dir() {
             return Err("not a directory".into());
         }
         let index = self.open_index(record)?;
-        let mut names = Vec::new();
-        let mut seen = HashSet::new();
+        let (mut preferred, mut dos) = (Vec::new(), Vec::new());
         for entry in self.index_entries(&index)? {
             if entry.key_length == 0 || index.attribute_type == 0 {
                 return Err("index entry without attribute".into());
@@ -1377,14 +1386,17 @@ impl<M: Media> Ntfs<M> {
                 return Err("index entry attribute is not a FILE_NAME".into());
             }
             let info = parse_file_name(&entry.buf)?;
-            if ignore_dos && info.flags == FILE_NAME_DOS {
-                continue;
-            }
-            if seen.insert(info.name.clone()) {
-                names.push(info.name);
+            let listed = DirEntry {
+                name: info.name,
+                segment: entry.segment(),
+            };
+            if info.flags == FILE_NAME_DOS {
+                dos.push(listed);
+            } else {
+                preferred.push(listed);
             }
         }
-        Ok(names)
+        Ok((preferred, dos))
     }
 
     /// `Index.search(value)` with the `_cmp_filename` collation.

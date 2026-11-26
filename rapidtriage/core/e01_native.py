@@ -868,6 +868,27 @@ def _notify_progress(on_progress: ExtractProgress | None, stats: dict[str, int])
         on_progress(MappingProxyType(stats))
 
 
+# $FILE_NAME namespace of a DOS 8.3 name (dissect.ntfs.c_ntfs.FILE_NAME_DOS).
+_FILE_NAME_DOS = 0x02
+_IndexEntries = list[tuple[str, Any]]
+
+
+def _directory_entries(node: Any) -> tuple[_IndexEntries, _IndexEntries]:
+    """``node``'s $I30 entries as (name, index entry), in index order: Win32 and POSIX names, then
+    DOS 8.3 names.
+
+    Callers follow each entry's own MFT reference (``IndexEntry.dereference``), never a lookup by
+    name: NTFS looks names up case-insensitively, so of two entries whose names differ only in case
+    (POSIX namespace, case-sensitive directories), each a record of its own, a lookup reaches one.
+    """
+    preferred: _IndexEntries = []
+    dos: _IndexEntries = []
+    for entry in node.iterdir():
+        name = entry.attribute
+        (dos if name.flags == _FILE_NAME_DOS else preferred).append((name.file_name, entry))
+    return preferred, dos
+
+
 def _walk_ntfs_dir(
     node: Any,
     out_dir: _OutputEntry,
@@ -889,25 +910,22 @@ def _walk_ntfs_dir(
     if limit is None:
         limit = native_extract_file_limit()
     try:
-        # NTFS indexes carry both the Win32 long name and any DOS 8.3 alias
-        # for the same record. Walk non-DOS names first and dedupe on the
-        # record segment so each file is extracted once under its long name,
-        # while records that only have a DOS name are still recovered.
-        preferred_names = list(node.listdir(ignore_dos=True))
-        dos_only_names = [n for n in node.listdir() if n not in preferred_names]
+        # NTFS indexes carry both the Win32 long name and any DOS 8.3 alias for the same record.
+        # Walk non-DOS entries first and dedupe on the record segment, so each record is
+        # extracted once under its long name (the alias counted in alias_skips), while records
+        # that only have a DOS name are still recovered.
+        preferred, dos = _directory_entries(node)
     except Exception:
         stats["errors"] += 1
         return
     seen_segments: set[int] = set()
-    for name in (*preferred_names, *dos_only_names):
+    for name, entry in (*preferred, *dos):
         if name in (".", ".."):
             continue
         try:
-            rec = node.get(name)
+            rec = entry.dereference()
         except Exception:
             stats["errors"] += 1
-            continue
-        if rec is None:
             continue
         segment = getattr(rec, "segment", None)
         if segment is not None:
@@ -958,19 +976,24 @@ PRIORITY_RECOVERY_PATHS: tuple[str, ...] = (
 
 
 def _priority_targets(root: Any, pattern: str) -> list[tuple[tuple[str, Any], ...]]:
-    """The (name, record) chains below ``root`` for one PRIORITY_RECOVERY_PATHS entry; missing parts yield none."""
+    """The (name, record) chains below ``root`` for one PRIORITY_RECOVERY_PATHS entry; missing
+    parts yield none. A named part is looked up case-insensitively, as Windows resolves it; "*"
+    follows every Win32/POSIX entry by its MFT reference (see ``_directory_entries``)."""
     found: list[tuple[tuple[str, Any], ...]] = [()]
     for part in pattern.split("/"):
         nxt: list[tuple[tuple[str, Any], ...]] = []
         for chain in found:
             node = chain[-1][1] if chain else root
             try:
-                names = [n for n in node.listdir(ignore_dos=True) if n not in (".", "..")] if part == "*" else [part]
+                if part == "*":
+                    children = [(name, entry) for name, entry in _directory_entries(node)[0] if name not in (".", "..")]
+                else:
+                    children = [(part, None)]
             except Exception:
                 continue
-            for name in names:
+            for name, entry in children:
                 try:
-                    child = node.get(name)
+                    child = node.get(name) if entry is None else entry.dereference()
                 except Exception:
                     continue
                 if child is None or (part == "*" and not child.is_dir()):

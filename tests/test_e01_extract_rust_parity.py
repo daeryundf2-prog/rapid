@@ -337,8 +337,7 @@ class RustEngineParityTests(EngineParityBase):
 
 def _folds_normalization(directory: Path) -> bool:
     """Whether the output drive opens one file for the composed and decomposed spelling of a name
-    (APFS, case-sensitive or not; not NTFS or ext4). The fixture's composed/decomposed records
-    are all reached by the walk; its case twins are not (see ``colliding_sources``)."""
+    (APFS, case-sensitive or not; not NTFS or ext4)."""
     probe = directory / "caf\u00e9-probe"
     probe.write_bytes(b"")
     try:
@@ -347,31 +346,34 @@ def _folds_normalization(directory: Path) -> bool:
         probe.unlink()
 
 
-def colliding_sources(builder: ntfs_volume_gen.VolumeBuilder) -> dict[int, tuple[str, bytes, bool]]:
-    """Allocated files below ``Collide/`` and the root file ``_deleted_mft``: record -> (path,
-    body, reached). Not reached: a case twin or a file below one; the walk looks names up
-    case-insensitively (as dissect does) and reaches one record per upper-cased name."""
-    twins: dict[tuple[int, str], int] = {}
-    for number, entry in builder.entries.items():
-        if number != builder.root and not entry.deleted:
-            link = entry.links[0]
-            twins[(link.parent, link.name.upper())] = twins.get((link.parent, link.name.upper()), 0) + 1
+def _folds_case(directory: Path) -> bool:
+    """Whether the output drive opens one file for two names that differ only in case (NTFS,
+    default APFS; not ext4)."""
+    probe = directory / "Case-probe"
+    probe.write_bytes(b"")
+    try:
+        return (directory / "case-probe").exists()
+    finally:
+        probe.unlink()
 
-    def source(record: int) -> tuple[str, bool]:
-        parts, reached = [], True
+
+def colliding_sources(builder: ntfs_volume_gen.VolumeBuilder) -> dict[int, tuple[str, bytes]]:
+    """Allocated files below ``Collide/`` and the root file ``_deleted_mft``: record -> (path, body)."""
+
+    def source(record: int) -> str:
+        parts = []
         while record != builder.root:
             link = builder.entries[record].links[0]
             parts.append(link.name)
-            reached = reached and twins[(link.parent, link.name.upper())] == 1
             record = link.parent
-        return "/".join(reversed(parts)), reached
+        return "/".join(reversed(parts))
 
     sources = {}
     for number, entry in builder.entries.items():
         if not entry.is_dir and not entry.deleted:
-            path, reached = source(number)
+            path = source(number)
             if path.startswith("Collide/") or path == "_deleted_mft":
-                sources[number] = (path, entry.data, reached)
+                sources[number] = (path, entry.data)
     return sources
 
 
@@ -399,7 +401,7 @@ class OutputNameCollisionTests(EngineParityBase):
             self.skipTest("dissect.ntfs is not installed")
 
     def record(self, path: str) -> int:
-        return next(number for number, (source, _, _) in self.sources.items() if source == path)
+        return next(number for number, (source, _) in self.sources.items() if source == path)
 
     def assert_every_record_recovered(self, run: tuple) -> None:
         result, tree, _ = run
@@ -408,15 +410,14 @@ class OutputNameCollisionTests(EngineParityBase):
         self.assertEqual(stats["files"], len(files), listing)
         self.assertEqual(stats["name_collisions_unresolved"], 0)
         self.assertEqual(stats["name_collision_renames"], len(renames))
+        # Every record is reached, case twins (``Foo`` and ``foo``) included, and written once.
         recovered = Counter(digest for rel, (_, digest) in files.items() if rel.startswith(("Collide/", "_deleted_mft~")))
-        reached = Counter(hashlib.sha256(body).hexdigest() for _, body, ok in self.sources.values() if ok)
-        every = {hashlib.sha256(body).hexdigest() for _, body, _ in self.sources.values()}
-        self.assertEqual(reached - recovered, Counter())
-        self.assertLessEqual(set(recovered), every)
+        every = Counter(hashlib.sha256(body).hexdigest() for _, body in self.sources.values())
+        self.assertEqual(recovered, every, listing)
         for entry in renames:
             self.assertEqual(entry["status"], "renamed", entry)
             if entry["kind"] == "file":
-                source, body, _ = self.sources[entry["mft_segment"]]
+                source, body = self.sources[entry["mft_segment"]]
                 self.assertEqual(entry["source_path"], source)
                 self.assertEqual(entry["source_name"], source.rsplit("/", 1)[-1])
                 self.assertEqual(entry["mft_sequence"], self.builder.entries[entry["mft_segment"]].sequence)
@@ -447,7 +448,7 @@ class OutputNameCollisionTests(EngineParityBase):
                 self.fail(missing)
             self.skipTest(missing)
         python = self.run_engine("python")
-        folds = _folds_normalization(Path(self.temp.name))
+        folds = _folds_normalization(Path(self.temp.name)) or _folds_case(Path(self.temp.name))
         for threads in ("1", "4", "8"):
             with self.subTest(threads=threads):
                 rust = self.run_engine("rust", extra_env={e01_extract_engine.E01_EXTRACT_THREADS_ENV: threads})
@@ -455,6 +456,97 @@ class OutputNameCollisionTests(EngineParityBase):
                 self.assert_every_record_recovered(rust)
                 # The plan names every record apart; only a folding drive makes two of them meet,
                 # which sends the copy back to the sequential walk.
+                rerun = rust[0]["extract_engine"]["rerun_reason"]
+                if threads != "1" and folds:
+                    self.assertTrue(rerun.startswith("output path collision"), rerun)
+                else:
+                    self.assertIsNone(rerun)
+
+
+class CaseTwinTests(EngineParityBase):
+    """Entries of one NTFS directory whose names differ only in case (``Foo.txt`` and ``foo.txt``:
+    POSIX namespace, case-sensitive directories) are distinct records. Each is recovered from its
+    own index entry, never looked up by name (a case-insensitive lookup reached one of them and
+    counted the other as an 8.3 alias); where the output drive folds case, the later one gets a
+    tagged name listed in ``output_name_collisions``. Genuine 8.3 aliases are still skipped and
+    counted in ``alias_skips``; a record named in the DOS namespace only is recovered."""
+
+    builder: ntfs_volume_gen.VolumeBuilder
+    sources: dict[int, tuple[str, bytes]]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.temp = tempfile.TemporaryDirectory()
+        cls.image = Path(cls.temp.name) / "case-twins.raw"
+        cls.builder = ntfs_volume_gen.VolumeBuilder(11)
+        build_disk_image(cls.image, bulk_files=0, bulk_dirs=1, seed=11, case_twins=True, builder=cls.builder)
+        entries = cls.builder.entries
+
+        def path(record: int) -> str:
+            parts = []
+            while record != cls.builder.root:
+                link = entries[record].links[0]
+                parts.append(link.name)
+                record = link.parent
+            return "/".join(reversed(parts))
+
+        cls.sources = {
+            number: (path(number), entry.data)
+            for number, entry in entries.items()
+            if not entry.is_dir and not entry.deleted and path(number).startswith("Twins/")
+        }
+
+    def setUp(self) -> None:
+        if e01_native.NTFS is None:
+            if REQUIRE:
+                self.fail("dissect.ntfs is not installed")
+            self.skipTest("dissect.ntfs is not installed")
+
+    def assert_every_twin_recovered(self, run: tuple) -> None:
+        result, tree, _ = run
+        files, renames = tree["files"], result["output_name_collisions"]
+        listing = ascii({"renames": renames, "twins": sorted(rel for rel in files if rel.startswith("Twins/"))})
+        self.assertEqual(len(self.sources), 7)
+        renamed_files = {entry["mft_segment"]: entry for entry in renames if entry["kind"] == "file"}
+        renamed_dirs = {entry["source_path"]: entry["output_path"] for entry in renames if entry["kind"] == "directory"}
+        for record, (source, body) in self.sources.items():
+            entry = renamed_files.get(record)
+            if entry is None:
+                parent, name = source.rsplit("/", 1)
+                output = f"{renamed_dirs.get(parent, parent)}/{name}"
+            else:
+                self.assertEqual((entry["status"], entry["source_path"]), ("renamed", source))
+                output = entry["output_path"]
+            self.assertEqual(files.get(output), (len(body), hashlib.sha256(body).hexdigest()), f"{source} {listing}")
+        self.assertEqual(sum(rel.startswith("Twins/") for rel in files), len(self.sources), listing)
+        # The control: each genuine 8.3 alias (a DOS name next to a long name of the same record
+        # in the same directory) is the only thing alias_skips counts.
+        aliases = sum(
+            link.namespace == ntfs_volume_gen.NS_DOS
+            and any(other.parent == link.parent and other.namespace != ntfs_volume_gen.NS_DOS for other in entry.links)
+            for entry in self.builder.entries.values()
+            if not entry.deleted
+            for link in entry.links
+        )
+        self.assertEqual(aliases, 2)
+        self.assertEqual(result["stats"]["alias_skips"], aliases, listing)
+
+    def test_python_engine_recovers_every_twin(self) -> None:
+        self.assert_every_twin_recovered(self.run_engine("python"))
+
+    def test_rust_engine_matches_python_at_one_and_four_threads(self) -> None:
+        missing = _missing()
+        if missing:
+            if REQUIRE:
+                self.fail(missing)
+            self.skipTest(missing)
+        python = self.run_engine("python")
+        folds = _folds_case(Path(self.temp.name))
+        for threads in ("1", "4"):
+            with self.subTest(threads=threads):
+                rust = self.run_engine("rust", extra_env={e01_extract_engine.E01_EXTRACT_THREADS_ENV: threads})
+                self.assert_same(python, rust)
+                self.assert_every_twin_recovered(rust)
                 rerun = rust[0]["extract_engine"]["rerun_reason"]
                 if threads != "1" and folds:
                     self.assertTrue(rerun.startswith("output path collision"), rerun)
