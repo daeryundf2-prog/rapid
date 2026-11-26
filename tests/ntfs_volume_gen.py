@@ -9,7 +9,8 @@ extraction walk meets on real volumes:
   LZNT1-compressed and ``$ATTRIBUTE_LIST``-split (two ``$DATA`` extents in extension
   records) default streams; empty files; streams whose runs end past the volume;
 - alternate data streams (resident and non-resident), Win32+DOS name pairs, hard links,
-  POSIX-namespace case twins, names ``_safe_component`` rewrites, Korean names;
+  names ``_safe_component`` rewrites, Korean names; on request, colliding output names
+  (``add_name_collisions``) and case twins next to 8.3 aliases (``add_case_twins``);
 - deleted file/directory records (content still on disk), a stale index entry that points
   at a deleted record, a record with a broken fixup, reserved FILE records with no
   attributes, and non-FILE slots in the MFT;
@@ -652,8 +653,6 @@ def populate(
     b.add_file(docs, "weird:name?.txt", b"rewritten by _safe_component", namespace=NS_POSIX)
     b.add_file(docs, "trailing dot. ", b"trailing", namespace=NS_POSIX)
     b.add_file(docs, "x" * 200 + ".txt", b"long name")
-    b.add_file(docs, "readme", b"lower posix twin", namespace=NS_POSIX)
-    b.add_file(docs, "README", b"upper posix twin", namespace=NS_POSIX)
     shared = b.add_file(docs, "hardlink-a.txt", b"hard linked content" * 40)
     b.entries[shared].links.append(Link(b.makedirs("Users", "bob", "Documents"), "hardlink-b.txt"))
     broken = b.add_file(docs, "broken-fixup.bin", rng.randbytes(3000))
@@ -713,8 +712,7 @@ def add_name_collisions(b: VolumeBuilder) -> None:
     for suffix in ("A", "B"):
         b.add_file(root, "p" * 180 + suffix, suffix.encode())
     # Directories a normalization-insensitive drive (APFS) folds into one, each with a same-named
-    # and an own child. (Case twins are not used here: the walk's name lookup, like dissect's, is
-    # case-insensitive, so only one twin is reached.)
+    # and an own child.
     for form in ("NFC", "NFD"):
         name = unicodedata.normalize(form, "r\u00e9sum\u00e9")
         folder = b.add_dir(root, name)
@@ -725,6 +723,22 @@ def add_name_collisions(b: VolumeBuilder) -> None:
     b.add_file(b.root, "_deleted_mft", b"allocated file named _deleted_mft")
 
 
+def add_case_twins(b: VolumeBuilder) -> None:
+    """``Twins/``: entries whose names differ only in case (POSIX namespace, or a case-sensitive
+    directory), each its own record, next to the controls: a genuine 8.3 alias of a Win32 name,
+    which recovery skips, and a record whose only name is a DOS name, which it recovers."""
+    twins = b.makedirs("Twins")
+    b.add_file(twins, "Foo.txt", b"upper-case Foo.txt " * 50, namespace=NS_WIN32_AND_DOS)
+    b.add_file(twins, "foo.txt", b"lower-case foo.txt " * 70, namespace=NS_POSIX)
+    b.add_file(twins, "Quarterly Summary.docx", b"Win32 name with an 8.3 alias " * 40, dos_name="QUARTE~1.DOC")
+    b.add_file(twins, "quarterly summary.docx", b"POSIX twin of a name with an alias " * 30, namespace=NS_POSIX)
+    b.add_file(twins, "ONLYDOS.TXT", b"record named in the DOS namespace only", namespace=NS_DOS)
+    for name, namespace in (("Sub", NS_WIN32), ("SUB", NS_POSIX)):
+        folder = b.add_dir(twins, name)
+        b.entries[folder].links[0] = Link(twins, name, namespace)
+        b.add_file(folder, "inside.txt", f"inside directory {name}".encode())
+
+
 def build_disk_image(
     path: Path,
     *,
@@ -733,6 +747,7 @@ def build_disk_image(
     seed: int = 1,
     payload: str = "random",
     collisions: bool = False,
+    case_twins: bool = False,
     builder: VolumeBuilder | None = None,
 ) -> dict[str, int]:
     """Write an MBR disk (one 0x07 partition at sector 2048) holding the synthetic volume."""
@@ -740,6 +755,8 @@ def build_disk_image(
     info = populate(builder, bulk_files=bulk_files, bulk_dirs=bulk_dirs, seed=seed, payload=payload)
     if collisions:
         add_name_collisions(builder)
+    if case_twins:
+        add_case_twins(builder)
     volume = builder.build_volume()
     sectors = len(volume) // SECTOR
     mbr = bytearray(PARTITION_SECTOR * SECTOR)

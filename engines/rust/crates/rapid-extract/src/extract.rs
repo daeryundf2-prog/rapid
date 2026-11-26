@@ -336,30 +336,24 @@ impl<'a, M: Media> Walker<'a, M> {
             self.stats.depth_skips += 1;
             return Ok(());
         }
-        let listed = self.ntfs.listdir(node, true).and_then(|preferred| {
-            let all = self.ntfs.listdir(node, false)?;
-            Ok((preferred, all))
-        });
-        let (preferred, all) = match listed {
-            Ok(names) => names,
+        // Win32/POSIX entries first, deduplicated on the record segment: each record is extracted
+        // once under its long name (a DOS 8.3 alias counted in alias_skips), and records that
+        // only have a DOS name are still recovered. Each entry is followed by its own reference.
+        let (preferred, dos) = match self.ntfs.directory_entries(node) {
+            Ok(entries) => entries,
             Err(_) => {
                 self.stats.errors += 1;
                 return Ok(());
             }
         };
-        let preferred_set: HashSet<&String> = preferred.iter().collect();
-        let dos_only: Vec<String> = all
-            .iter()
-            .filter(|n| !preferred_set.contains(n))
-            .cloned()
-            .collect();
         let mut seen_segments: HashSet<u64> = HashSet::new();
-        for name in preferred.iter().chain(dos_only.iter()) {
+        for listed in preferred.iter().chain(dos.iter()) {
             self.ntfs.check_refused()?;
+            let name = &listed.name;
             if name == "." || name == ".." {
                 continue;
             }
-            let record = match self.ntfs.get_path(node, name) {
+            let record = match self.ntfs.mft_record(listed.segment) {
                 Ok(record) => record,
                 Err(_) => {
                     self.stats.errors += 1;
@@ -405,25 +399,31 @@ impl<'a, M: Media> Walker<'a, M> {
     }
 
     /// `_priority_targets`: below `root`, for one pattern, each target record with the chain of
-    /// (name, MFT segment, sequence) that leads to it.
+    /// (name, MFT segment, sequence) that leads to it. A named part is looked up case-insensitively,
+    /// as Windows resolves it; `*` follows every Win32/POSIX entry by its MFT reference.
     fn priority_targets(&self, root: Record, pattern: &str) -> Vec<(Vec<Link>, Record)> {
         let mut found: Vec<(Vec<Link>, Record)> = vec![(Vec::new(), root)];
         for part in pattern.split('/') {
             let mut next = Vec::new();
             for (chain, node) in &found {
-                let names = if part == "*" {
-                    match self.ntfs.listdir(node, true) {
-                        Ok(names) => names
+                let children: Vec<(String, Option<u64>)> = if part == "*" {
+                    match self.ntfs.directory_entries(node) {
+                        Ok((preferred, _)) => preferred
                             .into_iter()
-                            .filter(|n| n != "." && n != "..")
+                            .filter(|e| e.name != "." && e.name != "..")
+                            .map(|e| (e.name, Some(e.segment)))
                             .collect(),
                         Err(_) => continue,
                     }
                 } else {
-                    vec![part.to_string()]
+                    vec![(part.to_string(), None)]
                 };
-                for name in names {
-                    let Ok(child) = self.ntfs.get_path(node, &name) else {
+                for (name, segment) in children {
+                    let resolved = match segment {
+                        Some(segment) => self.ntfs.mft_record(segment),
+                        None => self.ntfs.get_path(node, &name),
+                    };
+                    let Ok(child) = resolved else {
                         continue;
                     };
                     if part == "*" && !child.is_dir() {

@@ -61,6 +61,25 @@ from rapidtriage.core.virtual_disk import (
 from tests.test_rapidtriage_run import build_run_fixture
 
 
+class _FakeIndexEntry:
+    """A ``dissect.ntfs`` ``IndexEntry``: its $FILE_NAME key and the record it references."""
+
+    class _FileName:
+        def __init__(self, name: str, dos: bool) -> None:
+            self.file_name, self.flags = name, 2 if dos else 1  # FILE_NAME_DOS / FILE_NAME_NTFS
+
+    def __init__(self, name: str, record: Any, dos: bool = False) -> None:
+        self.attribute, self._record = self._FileName(name, dos), record
+
+    def dereference(self) -> Any:
+        return self._record
+
+
+def _fake_index(children: dict | None, dos_names: set[str] | frozenset[str] = frozenset()) -> list[_FakeIndexEntry]:
+    """A directory's $I30 entries, in ``children`` order; ``dos_names`` are DOS 8.3 entries."""
+    return [_FakeIndexEntry(name, record, name in dos_names) for name, record in (children or {}).items()]
+
+
 class _FakeNtfsRecord:
     def __init__(self, segment: int, data: bytes = b"", children: dict | None = None) -> None:
         self.segment, self._data, self._children = segment, data, children
@@ -77,11 +96,8 @@ class _FakeNtfsRecord:
     def open(self) -> io.BytesIO:
         return io.BytesIO(self._data)
 
-    def listdir(self, ignore_dos: bool = False) -> list[str]:
-        return list(self._children or {})
-
-    def get(self, name: str) -> _FakeNtfsRecord:
-        return (self._children or {})[name]
+    def iterdir(self) -> list[_FakeIndexEntry]:
+        return _fake_index(self._children)
 
 
 def _fake_ntfs_tree() -> _FakeNtfsRecord:
@@ -559,8 +575,8 @@ Units are in 512-byte sectors
             def open(self) -> io.BytesIO:
                 return io.BytesIO(self._data or b"")
 
-            def listdir(self, ignore_dos: bool = False) -> list[str]:
-                return list(self._children or {})
+            def iterdir(self) -> list[_FakeIndexEntry]:
+                return _fake_index(self._children)
 
             def get(self, name: str) -> Node:
                 return (self._children or {})[name]
@@ -1217,13 +1233,8 @@ Units are in 512-byte sectors
             def is_file(self) -> bool:
                 return False
 
-            def listdir(self, ignore_dos=False):
-                if ignore_dos:
-                    return [name for name in self._children if name not in self._dos_names]
-                return list(self._children)
-
-            def get(self, name):
-                return self._children.get(name)
+            def iterdir(self):
+                return _fake_index(self._children, self._dos_names)
 
         return _FakeFile, _FakeDir
 

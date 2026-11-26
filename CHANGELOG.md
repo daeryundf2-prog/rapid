@@ -85,6 +85,26 @@
   00-23 and minutes 00-59. **Output change:** such rows keep `timestamp_raw`,
   leave `timestamp_utc` empty and carry `timestamp-not-normalized`
   (`tests/test_ai_agents.py::AdversarialAgentTests::test_out_of_range_offsets_are_not_normalized`).
+- Native E01 extraction (Python and Rust engines) lost one of two entries in
+  an NTFS directory whose names differ only in case (`Foo.txt` and `foo.txt`:
+  POSIX namespace, case-sensitive directories). The walk listed the names and
+  looked each one up again by name; NTFS looks names up case-insensitively,
+  so both names reached the same record. The other record was never
+  extracted, one twin's name could hold the other twin's content, and the
+  loss was counted in `alias_skips` as if it were an 8.3 alias. Both engines
+  now follow each directory entry by its own MFT reference (dissect
+  `IndexEntry.dereference`; Rust `Ntfs::directory_entries`), so every record
+  is extracted once under its own name; a twin the output drive folds onto
+  another name gets the `<stem>~mft<record>[-n]<extension>` name and is
+  listed in `output_name_collisions`. A DOS 8.3 alias of a record already
+  listed under its long name is still skipped and counted in `alias_skips`,
+  and a record named only in the DOS namespace is still recovered. The
+  priority pass expands `Users/*` the same way. **Output change:** images
+  with case twins recover more files and report fewer `alias_skips`. The Rust
+  extension ABI is now 5 (an older build, which loses twins, is refused). On
+  a drive that folds case (Windows, default macOS), a parallel Rust copy that
+  meets a twin reruns sequentially
+  (`tests/test_e01_extract_rust_parity.py::CaseTwinTests`).
 - Native E01 extraction (Python and Rust engines) wrote two distinct NTFS
   records to one output file and counted both: names equal after
   `_safe_component` cut them at 180 characters (or replaced characters), or
@@ -105,9 +125,6 @@
   copy falls back to the sequential walk when two planned names meet on the
   drive
   (`tests/test_e01_extract_rust_parity.py::OutputNameCollisionTests`).
-  Not fixed here: POSIX case twins in one NTFS folder are still looked up by
-  name case-insensitively (as dissect does), so only one twin is reached and
-  the other counts as an alias skip.
 - With the Rust EVTX engine, the eventlog-file row counted chunks handed to
   the Python decoder (`native_evtx_engine_python_fallback_chunk_count`) but
   not why or where. One valid non-ASCII ANSI string gave a count of 1 and no

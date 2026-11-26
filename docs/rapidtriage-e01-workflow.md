@@ -44,7 +44,7 @@ When neither `ewfmount` nor an EWF-capable Sleuth Kit is available, `extract_e01
 
 - reads segmented EWF sets directly via `pyewf` (segment discovery from the `.E01`-`.Exx` naming pattern)
 - parses MBR/GPT partition tables natively and selects the largest supported filesystem (manual `--e01-partition-start-sector` override is honored)
-- walks the allocated NTFS tree and performs a best-effort deleted-MFT-record sweep into `_deleted_mft/`
+- walks the allocated NTFS tree and performs a best-effort deleted-MFT-record sweep into `_deleted_mft/`; each directory entry is followed by its own MFT reference, never looked up by name, so entries whose names differ only in case (POSIX namespace, case-sensitive directories) are each recovered, while a DOS 8.3 alias of a record already listed under its long name is skipped and counted in `alias_skips`
 - enforces a safety cap of 200,000 recovered files; when the cap is hit the run records `truncated` in `command_history`/`native_extraction_stats` and adds an explicit warning
 - gives every recovered record its own output file or folder: when another record of the image already took the name (equal after `_safe_component`'s 180-character cut or character replacement, a Win32 device-name prefix, the `_deleted_mft` sweep folder, or the output drive's case/Unicode/8.3 folding), the later record in walk order is written as `<stem>~mft<record>[-n]<extension>`; `native_output_name_collisions` in the recovered manifest lists each one with its source path and MFT segment/sequence (first 1,000), and `native_extraction_stats` counts `name_collision_renames` / `name_collisions_unresolved`. Both extraction engines name files identically.
 
