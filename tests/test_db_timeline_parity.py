@@ -173,8 +173,10 @@ build_run_case_db(Path(sys.argv[1]), json.loads(sys.argv[2]), root=sys.argv[1])
             write_timeline_result(result, golden_file)
             data = golden_file.read_bytes()
             self.assertEqual(hashlib.sha256(data).hexdigest(), "ee26735f6525eccfef40d9e254ff6f948eb9e777d946bba910b80dea38652a74")
+            # The report gained #40's unmapped-row/unconfirmed-timezone lines and
+            # the activity-count section; event rows are unchanged (JSON above).
             report = build_timeline_report(result).encode("utf-8")
-            self.assertEqual(hashlib.sha256(report).hexdigest(), "0d3d6d89e9ee8f426cea833366433461715eb88da80691eaec5b83049835541c")
+            self.assertEqual(hashlib.sha256(report).hexdigest(), "f94083e37d3f0ba2c53e1234ab724f6d515cb77348dc764767f6e18c4b1abc33")
 
             original = root / "reference.db"
             # The original importer expanded each row twice, independently
