@@ -29,6 +29,7 @@ from .._walk import iter_evidence_paths
 from .antiforensics import redact_recovery_passwords, redact_recovery_passwords_in
 from .evtx_engine import (
     NativeEvtxChunkDecoder,
+    count_python_fallback,
     requested_evtx_engine,
     resolve_evtx_engine,
     validate_evtx_engine,
@@ -2403,7 +2404,7 @@ def collect_native_evtx_events(
                     yield record
                 counters["template_parse_count"] = counters.get("template_parse_count", 0) + decoder.template_parse_count
                 if isinstance(decoder, NativeEvtxChunkDecoder) and decoder.used_python:
-                    bump("native_decoder_python_fallback_chunk_count")
+                    count_python_fallback(counters, decoder, chunk_index=chunk_index, chunk_offset=chunk_offset)
             missing_chunks = [index for index in range(declared_chunks) if index not in walked_active_chunks]
             counters["missing_declared_chunk_count"] = len(missing_chunks)
             counters["first_missing_declared_chunk_index"] = missing_chunks[0] if missing_chunks else -1

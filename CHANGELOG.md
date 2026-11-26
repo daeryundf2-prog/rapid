@@ -85,6 +85,20 @@
   00-23 and minutes 00-59. **Output change:** such rows keep `timestamp_raw`,
   leave `timestamp_utc` empty and carry `timestamp-not-normalized`
   (`tests/test_ai_agents.py::AdversarialAgentTests::test_out_of_range_offsets_are_not_normalized`).
+- With the Rust EVTX engine, the eventlog-file row counted chunks handed to
+  the Python decoder (`native_evtx_engine_python_fallback_chunk_count`) but
+  not why or where. One valid non-ASCII ANSI string gave a count of 1 and no
+  way to find the record. The row now adds
+  `native_evtx_engine_python_fallback_reason_counts` (per bounded reason
+  code: `non-ascii-ansi-string`, `surrogate-character-reference`,
+  `element-nesting-too-deep`, `unrecognized-native-reason`) and cites the
+  first switch with `native_evtx_engine_python_fallback_first_reason`,
+  `…_first_chunk_index`, `…_first_chunk_offset`, `…_first_record_offset`
+  (absolute) and `…_first_record_id` (`null` when nothing switched). These
+  are separate from `native_fallback_record_count`, which counts records
+  read by the legacy token scan. **Output change:** new eventlog-file fields
+  on Rust-engine runs only; event rows are unchanged
+  (`tests/test_evtx_engine_diff.py::ProviderEngineSwitchTests::test_python_fallback_cites_reason_and_first_record`).
 - The Rust EVTX engine spelled some finite doubles differently from Python's
   `repr`. When a value lies exactly halfway between its two shortest
   round-trip spellings, CPython keeps the even last digit and Rust rounded up:

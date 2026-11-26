@@ -94,6 +94,8 @@ RAPIDTRIAGE_EVTX_ENGINE=rust rapidtriage run ...  # or --eventlog-evtx-engine ru
 
 The default stays `python`. With `rust` requested, the eventlog-file row carries `native_evtx_engine`, `native_evtx_engine_requested` and `native_evtx_engine_python_fallback_chunk_count`; when the module is missing or was built for another decoder version, Python is used and `native_evtx_engine_notice_ko` says why.
 
+A chunk the Rust decoder cannot reproduce exactly is finished by the Python decoder. The row says why and where: `native_evtx_engine_python_fallback_reason_counts` counts switched chunks per reason (`non-ascii-ansi-string`, `surrogate-character-reference`, `element-nesting-too-deep`, or `unrecognized-native-reason`), and `native_evtx_engine_python_fallback_first_reason`, `…_first_chunk_index`, `…_first_chunk_offset`, `…_first_record_offset` (absolute file offsets) and `…_first_record_id` cite the first switch in the file. These fields are `null` when no chunk switched. They are unrelated to `native_fallback_record_count`, which counts records decoded by the legacy token scan.
+
 Checks:
 
 ```sh

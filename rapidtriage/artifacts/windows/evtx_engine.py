@@ -31,6 +31,22 @@ _NATIVE_DECODED = 0
 _NATIVE_DECODE_ERROR = 1
 _NATIVE_INDEX_ERROR = 2
 
+# Why the native decoder handed a chunk to Python (its ``Unsupported`` codes,
+# ``engines/rust/crates/rapidcore/src/evtx_binxml.rs``). A code this table does
+# not know is recorded as the last entry, so the set of reasons stays bounded.
+NATIVE_FALLBACK_REASONS = (
+    "non-ascii-ansi-string",
+    "surrogate-character-reference",
+    "element-nesting-too-deep",
+    "unrecognized-native-reason",
+)
+
+# Integer ``collect_native_evtx_events`` stats for chunks switched to Python.
+_FALLBACK_CHUNK_STAT = "native_decoder_python_fallback_chunk_count"
+_FALLBACK_REASON_STAT = "native_decoder_python_fallback_reason_chunk_count:"
+_FALLBACK_FIRST_STAT = "native_decoder_python_fallback_first_"
+_FALLBACK_FIRST_FIELDS = ("chunk_index", "chunk_offset", "record_offset", "record_id")
+
 # Row kernels the Rust engine also runs; a build missing any of them is stale.
 NATIVE_ENGINE_FUNCTIONS = (
     "redact_recovery_passwords_in",
@@ -76,6 +92,45 @@ def load_native_evtx_decoder() -> tuple[Any, str]:
     return module, ""
 
 
+def count_python_fallback(stats: dict[str, int], decoder: NativeEvtxChunkDecoder, *, chunk_index: int, chunk_offset: int) -> None:
+    """Count one chunk the native decoder handed to Python, by reason; cite the file's first one."""
+    stats[_FALLBACK_CHUNK_STAT] = stats.get(_FALLBACK_CHUNK_STAT, 0) + 1
+    reason_key = _FALLBACK_REASON_STAT + decoder.fallback_reason
+    stats[reason_key] = stats.get(reason_key, 0) + 1
+    if _FALLBACK_FIRST_STAT + "reason_index" in stats:
+        return
+    stats[_FALLBACK_FIRST_STAT + "reason_index"] = NATIVE_FALLBACK_REASONS.index(decoder.fallback_reason)
+    stats[_FALLBACK_FIRST_STAT + "chunk_index"] = chunk_index
+    stats[_FALLBACK_FIRST_STAT + "chunk_offset"] = chunk_offset
+    stats[_FALLBACK_FIRST_STAT + "record_offset"] = chunk_offset + decoder.fallback_record_offset
+    stats[_FALLBACK_FIRST_STAT + "record_id"] = decoder.fallback_record_id
+
+
+def python_fallback_fields(native_stats: Mapping[str, int]) -> dict[str, object]:
+    """eventlog-file fields for chunks the Rust engine handed to Python.
+
+    The reason counts and the first switched chunk and record (absolute file
+    offsets) say why and where; ``None`` when no chunk switched. Unrelated to
+    ``native_fallback_record_count`` (records decoded by the legacy token scan).
+    """
+    first_index = native_stats.get(_FALLBACK_FIRST_STAT + "reason_index")
+    fields: dict[str, object] = {
+        "native_evtx_engine_python_fallback_chunk_count": int(native_stats.get(_FALLBACK_CHUNK_STAT, 0)),
+        "native_evtx_engine_python_fallback_reason_counts": {
+            reason: int(native_stats[_FALLBACK_REASON_STAT + reason])
+            for reason in NATIVE_FALLBACK_REASONS
+            if native_stats.get(_FALLBACK_REASON_STAT + reason)
+        },
+        "native_evtx_engine_python_fallback_first_reason": (
+            None if first_index is None else NATIVE_FALLBACK_REASONS[int(first_index)]
+        ),
+    }
+    for name in _FALLBACK_FIRST_FIELDS:
+        value = native_stats.get(_FALLBACK_FIRST_STAT + name)
+        fields[f"native_evtx_engine_python_fallback_first_{name}"] = None if value is None else int(value)
+    return fields
+
+
 @dataclass(frozen=True)
 class EvtxEngineSelection:
     requested: str
@@ -92,9 +147,7 @@ class EvtxEngineSelection:
             "native_evtx_engine_requested": self.requested,
         }
         if self.native_module is not None:
-            fields["native_evtx_engine_python_fallback_chunk_count"] = int(
-                native_stats.get("native_decoder_python_fallback_chunk_count", 0)
-            )
+            fields.update(python_fallback_fields(native_stats))
         if self.notice_ko:
             fields["native_evtx_engine_notice_ko"] = self.notice_ko
         return fields
@@ -137,16 +190,21 @@ class NativeEvtxChunkDecoder:
     pathologically deep element trees) switch the rest of the chunk to the
     Python decoder. The records already decoded in this chunk are replayed
     first so its name/template caches, token budget and template-parse count
-    are exactly what a Python-only walk would have had.
+    are exactly what a Python-only walk would have had. The switch keeps the
+    native reason (``fallback_reason``, one of ``NATIVE_FALLBACK_REASONS``) and
+    the chunk-relative offset and record id of the record that caused it.
     """
 
-    __slots__ = ("_chunk", "_decoded", "_native", "_python")
+    __slots__ = ("_chunk", "_decoded", "_native", "_python", "fallback_reason", "fallback_record_id", "fallback_record_offset")
 
     def __init__(self, module: Any, chunk: bytes, *, render_xml: bool) -> None:
         self._chunk = chunk
         self._native = module.EvtxChunkDecoder(chunk, render_xml)
         self._python: Any = None
         self._decoded: list[tuple[int, int]] = []
+        self.fallback_reason = ""
+        self.fallback_record_offset = 0
+        self.fallback_record_id = 0
 
     @property
     def template_parse_count(self) -> int:
@@ -169,6 +227,10 @@ class NativeEvtxChunkDecoder:
                 from .eventlog import EvtxDecodeError
 
                 raise EvtxDecodeError(payload)
+            self.fallback_reason = payload if payload in NATIVE_FALLBACK_REASONS else NATIVE_FALLBACK_REASONS[-1]
+            self.fallback_record_offset = record_offset
+            # The record header (signature, size, record id) was validated before decoding.
+            self.fallback_record_id = struct.unpack_from("<Q", self._chunk, record_offset + 8)[0]
             self._switch_to_python()
         return self._python.decode_record(record_offset, record_size)
 

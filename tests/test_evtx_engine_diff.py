@@ -38,11 +38,13 @@ from evtx_engine_corpus import (
     Chunk,
     Event,
     add_event,
+    ansi,
     build_edge_corpus,
     file_bytes,
     iter_mixed_chunks,
     mutate_chunks,
     real64,
+    wstr,
 )
 from windows_artifact_fixtures import (
     build_chunk_template_evtx,
@@ -72,7 +74,7 @@ DECODE_ERRORS = (EvtxDecodeError, IndexError, struct.error, ValueError, Recursio
 ENGINE_FIELDS = (
     "native_evtx_engine",
     "native_evtx_engine_requested",
-    "native_evtx_engine_python_fallback_chunk_count",
+    *evtx_engine.python_fallback_fields({}),
     "native_evtx_engine_notice_ko",
 )
 WHEN = datetime(2025, 5, 27, 1, 51, 29, tzinfo=timezone.utc)
@@ -184,7 +186,8 @@ class NativeEvtxTestCase(unittest.TestCase):
             collect_native_evtx_events(path, stats=native_stats, native_decoder=NATIVE, **kwargs),
         )
         self.assertEqual(problems, [], f"{path.name} {kwargs}")
-        native_stats.pop("native_decoder_python_fallback_chunk_count", None)
+        for key in [key for key in native_stats if key.startswith("native_decoder_python_fallback_")]:
+            native_stats.pop(key)
         self.assertEqual(python_stats, native_stats, path.name)
         return count
 
@@ -204,6 +207,14 @@ class CorpusRowDiffTests(NativeEvtxTestCase):
         path = self.write("fallback.evtx", build_edge_corpus()["python-fallback-chunks.evtx"])
         rows = list(collect_native_evtx_events(path, stats=stats, native_decoder=NATIVE, record_detail="triage"))
         self.assertEqual(stats["native_decoder_python_fallback_chunk_count"], 3)
+        fields = evtx_engine.python_fallback_fields(stats)
+        self.assertEqual(
+            fields["native_evtx_engine_python_fallback_reason_counts"],
+            {"non-ascii-ansi-string": 1, "surrogate-character-reference": 1, "element-nesting-too-deep": 1},
+        )
+        self.assertEqual(fields["native_evtx_engine_python_fallback_first_reason"], "non-ascii-ansi-string")
+        self.assertEqual(fields["native_evtx_engine_python_fallback_first_chunk_index"], 0)
+        self.assertEqual(fields["native_evtx_engine_python_fallback_first_record_id"], 1002)
         self.assertEqual(stats["decoded_record_count"] + stats.get("fallback_record_count", 0), 15)
         self.assertTrue(rows)
         stats = {}
@@ -303,6 +314,60 @@ class ProviderEngineSwitchTests(NativeEvtxTestCase):
                     self.assertIn(f'<Data Name="Counter">{text}</Data>', row["details"]["event_message"], engine)
                     rows[engine] = row
                 self.assertEqual(json.dumps(rows["rust"], ensure_ascii=False), json.dumps(rows["python"], ensure_ascii=False))
+
+    def test_python_fallback_cites_reason_and_first_record(self) -> None:
+        expected_engine_fields = {
+            "ansi": {
+                "native_evtx_engine_python_fallback_chunk_count": 1,
+                "native_evtx_engine_python_fallback_reason_counts": {"non-ascii-ansi-string": 1},
+                "native_evtx_engine_python_fallback_first_reason": "non-ascii-ansi-string",
+                "native_evtx_engine_python_fallback_first_chunk_index": 0,
+                "native_evtx_engine_python_fallback_first_chunk_offset": 4096,
+                "native_evtx_engine_python_fallback_first_record_id": 2,
+            },
+            "ascii": {
+                "native_evtx_engine_python_fallback_chunk_count": 0,
+                "native_evtx_engine_python_fallback_reason_counts": {},
+                "native_evtx_engine_python_fallback_first_reason": None,
+                "native_evtx_engine_python_fallback_first_chunk_index": None,
+                "native_evtx_engine_python_fallback_first_chunk_offset": None,
+                "native_evtx_engine_python_fallback_first_record_offset": None,
+                "native_evtx_engine_python_fallback_first_record_id": None,
+            },
+        }
+        labels = {"ansi": "자료".encode("cp949"), "ascii": b"plain\x07text"}
+        for variant, label in labels.items():
+            with self.subTest(variant=variant):
+                chunk = Chunk()
+                for record_id, value in ((1, wstr("before")), (2, ansi(label)), (3, wstr("after"))):
+                    event = Event(record_id, 133801632000000009 + record_id, provider="fixture", computer="test.invalid", event_id=17, data=[("Label", value)])
+                    self.assertTrue(add_event(chunk, event))
+                root = self.tmp / variant
+                path = root / "Windows/System32/winevt/Logs/Application.evtx"
+                path.parent.mkdir(parents=True)
+                path.write_bytes(file_bytes([chunk.finish()], next_record_id=4))
+                python_rows = self.collect_rows(root, evtx_engine="python")
+                native_rows = self.collect_rows(root, evtx_engine="rust")
+                (file_row,) = (row for row in native_rows if row["artifact_type"] == "eventlog-file")
+                details = file_row["details"]
+                self.assertEqual(details["native_evtx_engine"], "rust")
+                for key, value in expected_engine_fields[variant].items():
+                    self.assertEqual(details[key], value, key)
+                if variant == "ansi":
+                    (cited,) = (
+                        row
+                        for row in native_rows
+                        if row["artifact_type"] == "eventlog-event" and row["details"]["evtx_record_offset"] == details["native_evtx_engine_python_fallback_first_record_offset"]
+                    )
+                    self.assertEqual(cited["details"]["data"]["Label"], "자료")
+                    blob = path.read_bytes()
+                    offset = details["native_evtx_engine_python_fallback_first_record_offset"]
+                    self.assertEqual(blob[offset : offset + 4], b"**\x00\x00")
+                    self.assertEqual(struct.unpack_from("<Q", blob, offset + 8)[0], 2)
+                self.assertEqual(details["native_fallback_record_count"], 0)
+                for key in [key for key in details if key.startswith("native_evtx_engine")]:
+                    details.pop(key)
+                self.assertEqual(native_rows, python_rows)
 
 
 class EngineSelectionTests(unittest.TestCase):

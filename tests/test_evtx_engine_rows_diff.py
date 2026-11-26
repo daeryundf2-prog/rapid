@@ -672,7 +672,7 @@ class JsonRowKernelTests(unittest.TestCase):
 ENGINE_FIELDS = (
     "native_evtx_engine",
     "native_evtx_engine_requested",
-    "native_evtx_engine_python_fallback_chunk_count",
+    *evtx_engine.python_fallback_fields({}),
     "native_evtx_engine_notice_ko",
 )
 
