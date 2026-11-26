@@ -46,10 +46,12 @@ def engine_stats(stats: Mapping[str, int]) -> list[tuple[str, int]]:
 
 
 def tree_manifest(root: Path) -> dict[str, Any]:
+    # os.walk, not Path.rglob: on Windows rglob drops a name whose lower() equals another's
+    # (Kelvin sign "\u212a.txt" next to "k.txt"), although NTFS keeps both files.
+    found = [Path(top) / name for top, dirnames, filenames in os.walk(root) for name in (*dirnames, *filenames)]
     files: dict[str, tuple[int, str]] = {}
     dirs: list[str] = []
-    for path in sorted(root.rglob("*")):
-        rel = path.relative_to(root).as_posix()
+    for rel, path in sorted((path.relative_to(root).as_posix(), path) for path in found):
         if path.is_file():
             files[rel] = (path.stat().st_size, hashlib.sha256(path.read_bytes()).hexdigest())
         else:
@@ -404,7 +406,8 @@ class OutputNameCollisionTests(EngineParityBase):
     def assert_every_record_recovered(self, run: tuple) -> None:
         result, tree, _ = run
         files, stats, renames = tree["files"], result["stats"], result["output_name_collisions"]
-        self.assertEqual(stats["files"], len(files))
+        listing = ascii({"renames": renames, "collide": sorted(rel for rel in files if rel.startswith("Collide/"))})
+        self.assertEqual(stats["files"], len(files), listing)
         self.assertEqual(stats["name_collisions_unresolved"], 0)
         self.assertEqual(stats["name_collision_renames"], len(renames))
         recovered = Counter(digest for rel, (_, digest) in files.items() if rel.startswith(("Collide/", "_deleted_mft~")))
