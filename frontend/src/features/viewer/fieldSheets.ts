@@ -1760,7 +1760,8 @@ export function layoutFields(row: GridRow | null): Record<string, unknown> {
   const { details, ...rest } = row.fields;
   const merged: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(rest)) {
-    if (key === "artifact_record") continue;
+    // `detailsOmitted` (a list row's left-out keys) is disclosed by the record section, not a field.
+    if (key === "artifact_record" || key === "detailsOmitted") continue;
     merged[key] = value;
   }
   if (isRecord(details)) Object.assign(merged, details);

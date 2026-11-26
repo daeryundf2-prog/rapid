@@ -147,6 +147,23 @@
   only: affected Real32/Real64 values and JSON floats now have Python's text
   (`tests/test_evtx_engine_diff.py::ProviderEngineSwitchTests::test_real64_ties_spell_like_python_repr`,
   `evtx_binxml::tests::float_repr_breaks_shortest_ties_to_even_like_python`).
+- Console list APIs on large cases (`view=list`, row index of large `files` /
+  `timeline` outputs, `/tree` and filter caches): the row index now exists only
+  when `json.load` reads the same rows (every element and member is parsed and
+  the bytes between them checked once per file revision), so a corrupt or split
+  line fails like the full parse instead of serving rows at shifted positions.
+  Indexes, kind-filter matches and head-scan values are keyed by the file
+  revision `(device, inode, size, mtime)`, re-check it on every read (a file
+  replaced or appended to meanwhile falls back to the full parse) and are
+  bounded in memory; the file is no longer memory-mapped. `sort=timestamp` on
+  the timeline is the console's own evidence-time order (wall clocks of
+  undetermined zone apart, 100 ns ticks, events without a time first in `desc`;
+  `tests/fixtures/timeline-sort-parity.json` pins it for both sides).
+  `view=list` names every value it leaves out (`raw.nested`,
+  `pagination.<manifest>`), keeps lists of flat records (Prefetch volumes,
+  attachments) that grid columns read, and the viewer says when a row's full
+  record is not loaded yet and does not copy it as the record
+  (`tests/test_console_api_review.py`).
 - On Windows an analysis could vanish from the analysis list for one read. The
   state reader treated the sharing error raised while another thread
   `os.replace`d `analysis.json` (a heartbeat or progress write) as "no state".

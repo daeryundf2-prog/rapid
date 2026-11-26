@@ -56,6 +56,7 @@ from .dashboard import (
     read_case_notes,
     write_case_notes,
 )
+from .evidence_sort import timeline_order
 from .files_ntfs import join_files_page, ntfs_si_modified_resolver
 from .fs_tree import (
     FS_INDEX_CACHE,
@@ -87,6 +88,7 @@ from .json_rows import (
     JsonRowIndex,
     LazyRows,
     PrefetchedRows,
+    StaleIndexError,
     large_output_index,
 )
 from .list_view import parse_view, project_artifact_row, project_page
@@ -113,7 +115,6 @@ from .row_conditions import (
     output_stamp,
     parse_row_conditions,
     rows_page,
-    time_order,
 )
 from .runops import (
     build_run_output_preview,
@@ -571,9 +572,10 @@ def build_runs_router(
         ``view=list`` returns the lean listing page (``list_view``: no report-grade page blocks).
 
         ``sort=timestamp`` (``order`` = ``asc`` | ``desc``, or a ``:asc``/``:desc`` suffix; needs
-        ``limit > 0``) orders the whole timeline - after the row conditions, when given - by the
-        event time (UTC instant; a wall clock of unknown zone by its own value; events without a
-        time last, record order within ties). Rows carry ``record_index``; the page reports
+        ``limit > 0``) orders the whole timeline - after the row conditions, when given - in the
+        console's own evidence-time order (``evidence_sort``: instants by UTC 100 ns ticks, then
+        wall clocks of undetermined zone, then unparseable text, then events without a time;
+        ``desc`` reverses it; ties keep record order). Rows carry ``record_index``; the page reports
         ``sort = {key, order, status: "ready", progress, position?}`` (``locate=<record_index>`` →
         ``position`` in the sorted, filtered order, ``null`` when filtered out). The order is cached
         per timeline revision. Another sort key or order is a Korean 422.
@@ -613,31 +615,64 @@ def build_runs_router(
             raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
         timeline_path = get_output_path(store, run_id, "timeline")
         index = large_output_index(timeline_path)
+        page: dict[str, object] | None = None
         if index is not None and index.count("events") is not None:
             # Large output: rows are read from the row index; a full pass streams it in chunks.
-            head = index.payload_with_placeholders(["events"])
-            events: Sequence[object] = LazyRows(index, "events")
-        else:
+            try:
+                page = _timeline_rows_page(
+                    index.payload_with_placeholders(["events"]),
+                    LazyRows(index, "events"),
+                    ("timeline", run_id, index.stamp),
+                    conditions,
+                    sort_order,
+                    offset=offset,
+                    limit=limit,
+                    locate=locate,
+                )
+            except StaleIndexError:
+                LOGGER.info("timeline of run %s changed while read through its row index; parsing it whole", run_id)
+        if page is None:
+            stamp = output_stamp(timeline_path)
             head = get_named_output(store, run_id, "timeline")
+            # Cache under the revision only when the payload read is that revision (not rewritten meanwhile).
+            scope = ("timeline", run_id, stamp) if output_stamp(timeline_path) == stamp else None
             events = head.get("events") if isinstance(head.get("events"), list) else []
-        stamp = output_stamp(timeline_path)
+            page = _timeline_rows_page(head, events, scope, conditions, sort_order, offset=offset, limit=limit, locate=locate)
+        return with_applied_filters(project_page(page, "events") if list_view else page, applied_filters)
+
+
+    def _timeline_rows_page(
+        head: Mapping[str, object],
+        events: Sequence[object],
+        scope: tuple[object, ...] | None,
+        conditions: RowConditions | None,
+        sort_order: str | None,
+        *,
+        offset: int,
+        limit: int,
+        locate: int | None,
+    ) -> dict[str, object]:
+        """Filtered and/or sorted timeline page over ``events``; ``scope`` (run + timeline revision)
+        prefixes the ``MATCH_CACHE`` keys (``None``: nothing is cached)."""
+
+        def cache_key(*parts: object) -> tuple[object, ...] | None:
+            return (*scope, *parts) if scope is not None else None
+
         matched = (
-            matched_indices(events, conditions.predicate("timeline"), ("timeline", run_id, stamp, conditions.cache_key()))
+            matched_indices(events, conditions.predicate("timeline"), cache_key(conditions.cache_key()))
             if conditions is not None
             else None
         )
         if sort_order is None:
             positions: Sequence[int] = matched if matched is not None else range(len(events))
         else:
-            ordered = MATCH_CACHE.get_or_compute(
-                ("timeline-order", run_id, stamp, sort_order), lambda: time_order(events, "timeline", sort_order)
-            )
-            if matched is None:
+            ordered = MATCH_CACHE.get_or_compute(cache_key("order", sort_order), lambda: timeline_order(events, sort_order))
+            if matched is None or conditions is None:
                 positions = ordered
             else:
                 keep = set(matched)
                 positions = MATCH_CACHE.get_or_compute(
-                    ("timeline-order", run_id, stamp, sort_order, conditions.cache_key()),
+                    cache_key("order", sort_order, conditions.cache_key()),
                     lambda: (item for item in ordered if item in keep),
                 )
         rows, pagination = rows_page(
@@ -655,7 +690,7 @@ def build_runs_router(
             if locate is not None:
                 sort_block["position"] = next((i for i, item in enumerate(positions) if item == locate), None)
             page["sort"] = sort_block
-        return with_applied_filters(project_page(page, "events") if list_view else page, applied_filters)
+        return page
 
 
     def _timeline_sort_order(sort: str | None, order: str | None) -> str | None:
@@ -697,9 +732,9 @@ def build_runs_router(
             index = large_output_index(get_output_path(store, run_id, output_name))
         except OSError:
             index = None
-        if index is None:
-            return None
-        total = index.count(collection)
+        total = index.count(collection) if index is not None else None
+        if index is None or (total is None and collection in index.keys()):
+            return None  # no index, or the collection is not an array: page the parsed payload
         try:
             payload = index.payload_with_placeholders([collection, *placeholders])
             page = paginate_payload(
@@ -712,7 +747,7 @@ def build_runs_router(
                 window_total=total or 0,
             )
         except JsonLayoutError:
-            LOGGER.warning("row index of %s is unusable; parsing the whole output", output_name)
+            LOGGER.info("row index of %s is stale; parsing the whole output", output_name)
             return None
         return page, index
 
@@ -1079,7 +1114,7 @@ def build_runs_router(
                                 artifact_payload,
                                 match_cache_key=(
                                     "artifact-filter",
-                                    output_stamp(filter_path, artifact_payload.get("records_path")),
+                                    output_stamp(filter_path),  # kind_matches adds the JSONL file's revision
                                     needle,
                                     tuple(sorted(wanted_types or ())),
                                     repr(wanted_channels.describe()) if wanted_channels is not None else None,
@@ -1474,20 +1509,75 @@ def build_runs_router(
         if indexed is not None:
             # Large output: the page came from the row index; the full lists stay unparsed.
             page, index = indexed
-            return _files_page_tail(
+            try:
+                return _files_page_tail(
+                    run_id,
+                    _files_record_index(page, collection, limit),
+                    collection,
+                    LazyRows(index, "candidates"),
+                    LazyRows(index, "inventory") if index.count("inventory") is not None else None,
+                    join,
+                    list_view,
+                    applied_filters,
+                )
+            except StaleIndexError:
+                LOGGER.info("files of run %s changed while read through its row index; parsing them whole", run_id)
+
+        def respond(use_index: bool) -> dict[str, object]:
+            return _files_listing(
                 run_id,
-                _files_record_index(page, collection, limit),
-                collection,
-                LazyRows(index, "candidates"),
-                LazyRows(index, "inventory") if index.count("inventory") is not None else None,
-                join,
-                list_view,
-                applied_filters,
+                collection=collection,
+                wanted=wanted,
+                flag_query=flag_query,
+                conditions=conditions,
+                path_prefix=path_prefix,
+                recursive=recursive,
+                special=special,
+                offset=offset,
+                limit=limit,
+                cursor=cursor,
+                join=join,
+                list_view=list_view,
+                applied_filters=applied_filters,
+                use_index=use_index,
             )
+
+        try:
+            return respond(True)
+        except StaleIndexError:
+            LOGGER.info("files of run %s changed while read through its row index; parsing them whole", run_id)
+            return respond(False)
+
+
+    def _files_listing(
+        run_id: str,
+        *,
+        collection: str,
+        wanted: frozenset[str],
+        flag_query: FlagQuery,
+        conditions: RowConditions | None,
+        path_prefix: str | None,
+        recursive: str | None,
+        special: str | None,
+        offset: int,
+        limit: int,
+        cursor: str | None,
+        join: FlagsJoin,
+        list_view: bool,
+        applied_filters: dict[str, list[str]],
+        use_index: bool,
+    ) -> dict[str, object]:
+        """A ``GET /files`` page other than the unfiltered row-index page; with ``use_index`` a
+        folder / special node of a large output reads its rows through the row index (a row index
+        gone stale meanwhile raises :class:`StaleIndexError`: the caller retries without it)."""
         # A folder / special node of a large output: its rows are read through the row index.
         big = (
             large_output_index(get_output_path(store, run_id, "files"))
-            if limit > 0 and conditions is None and not flag_query.active and (path_prefix is not None or special is not None)
+            if use_index
+            and limit > 0
+            and conditions is None
+            and not flag_query.active
+            and (path_prefix is not None or special is not None)
             else None
         )
         if big is not None and big.count(collection) is None:

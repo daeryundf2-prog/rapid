@@ -7,14 +7,19 @@ per-row parser profiles / manifests / validation plans (``mft_full_parser_profil
 megabytes of duplicate-group blocks no grid column shows. ``view=list`` (opt in; the default
 response is unchanged for every other consumer) keeps what the console reads from a list:
 
-* Rows: ``details`` keeps every flat value (scalar or list of scalars: grid columns,
-  promoted ``details.<key>`` columns, the quick filter, row conditions read only those)
-  and of the nested values only :data:`DETAILS_NESTED_KEPT`, reduced to their flat members.
-  The row reports the dropped keys in ``details_omitted`` (sorted; absent when nothing was
-  dropped). The viewer fetches the full row (plain ``kind=&offset=<record_index>&limit=1``).
+* Rows (artifacts only; files and timeline rows are never cut): ``details`` keeps every
+  listable value -- a scalar, a list of scalars, or a list of flat records (Prefetch
+  ``volumes``, attachment lists: grid columns, promoted ``details.<key>`` columns, the quick
+  filter and row conditions read only those) -- and of the other nested values only
+  :data:`DETAILS_NESTED_KEPT`, reduced to their listable members. Every value left out is
+  named in the row's ``details_omitted`` (sorted; ``key`` for a whole value, ``key.member``
+  for a member of a kept container; absent when nothing was left out). The viewer loads the
+  full row (plain ``kind=&offset=<record_index>&limit=1``) for a row that has
+  ``details_omitted``, and says so until it has it.
 * Page: flat values, the row list and the control blocks of :data:`PAGE_BLOCKS_KEPT`
-  (``pagination`` without its report-grade manifests); the dropped page keys are reported
-  in ``view_omitted``. Pages report ``view: "list"``.
+  (``pagination`` without its report-grade manifests); every page key or ``pagination``
+  member left out is named in ``view_omitted`` (``pagination.<name>`` for the latter). Pages
+  report ``view: "list"``.
 """
 
 from __future__ import annotations
@@ -30,7 +35,7 @@ VIEW_MESSAGE = "view는 list만 쓸 수 있습니다"
 # sender/text), ``exif_gps_profile`` (geo view), ``source_hashes`` (grid SHA-256), ``recovery``
 # (grid recovery columns), ``coverage`` (부분 결과 condition), the EVTX EventData containers
 # (family columns ``event_data.<name>``, derived columns) and ``commercial_uplift_evidence``
-# ``source_refs`` (chat view service). ``None`` = every flat member, else only those members.
+# ``source_refs`` (chat view service). ``None`` = every listable member, else only those members.
 DETAILS_NESTED_KEPT: Mapping[str, frozenset[str] | None] = {
     "raw": None,
     "exif_gps_profile": None,
@@ -82,7 +87,18 @@ def parse_view(view: str | None) -> bool:
 
 
 def _flat(value: object) -> bool:
+    """A scalar or a list of scalars."""
     return isinstance(value, _SCALARS) or (isinstance(value, list) and all(isinstance(item, _SCALARS) for item in value))
+
+
+def _listable(value: object) -> bool:
+    """A flat value or a list of scalars and flat records (one level: ``[{"device": …, "serial": …}]``)."""
+    if _flat(value):
+        return True
+    return isinstance(value, list) and all(
+        isinstance(item, _SCALARS) or (isinstance(item, Mapping) and all(_flat(member) for member in item.values()))
+        for item in value
+    )
 
 
 def project_details(details: Mapping[str, object]) -> tuple[dict[str, object], list[str]]:
@@ -90,16 +106,20 @@ def project_details(details: Mapping[str, object]) -> tuple[dict[str, object], l
     kept: dict[str, object] = {}
     omitted: list[str] = []
     for key, value in details.items():
-        if _flat(value):
+        if _listable(value):
             kept[key] = value
             continue
         if not isinstance(value, Mapping) or key not in DETAILS_NESTED_KEPT:
             omitted.append(key)
             continue
         members = DETAILS_NESTED_KEPT[key]
-        kept[key] = {
-            name: item for name, item in value.items() if _flat(item) and (members is None or name in members)
-        }
+        container: dict[str, object] = {}
+        for name, item in value.items():
+            if (members is None or name in members) and _listable(item):
+                container[name] = item
+            else:
+                omitted.append(f"{key}.{name}")
+        kept[key] = container
     return kept, sorted(omitted)
 
 
@@ -122,10 +142,10 @@ def project_page(
     omitted: list[str] = []
     for key, value in page.items():
         if key == rows_key:
-            rows = value if isinstance(value, list) else []
-            projected[key] = [project_row(row) for row in rows] if project_row is not None else rows
+            projected[key] = [project_row(row) for row in value] if project_row is not None and isinstance(value, list) else value
         elif key == "pagination" and isinstance(value, Mapping):
             projected[key] = {name: item for name, item in value.items() if name not in PAGINATION_MANIFESTS}
+            omitted.extend(f"pagination.{name}" for name in value if name in PAGINATION_MANIFESTS)
         elif _flat(value) or key in PAGE_BLOCKS_KEPT:
             projected[key] = value
         else:

@@ -12,9 +12,20 @@ from unittest import mock
 try:
     from fastapi.testclient import TestClient
 
-    from rapidtriage.api.app import artifact_filter, create_app, fs_tree, json_rows, tree
-    from rapidtriage.api.app.json_rows import JsonLayoutError, JsonRowIndex, LazyRows, large_output_index
-    from rapidtriage.api.app.list_view import project_details
+    from rapidtriage.api.app import (
+        artifact_filter,
+        create_app,
+        fs_tree,
+        json_rows,
+        tree,
+    )
+    from rapidtriage.api.app.json_rows import (
+        JsonLayoutError,
+        JsonRowIndex,
+        LazyRows,
+        large_output_index,
+    )
+    from rapidtriage.api.app.list_view import PAGINATION_MANIFESTS, project_details
 
     HAS_FASTAPI = True
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
@@ -127,14 +138,18 @@ class ConsoleApiScaleTests(unittest.TestCase):
         self.assertIn("mft_full_parser_profile", full["artifacts"][0]["details"])
         row = page["artifacts"][1]
         self.assertEqual(row["record_index"], 1)
-        self.assertEqual(row["details_omitted"], ["mft_full_parser_profile", "record_header_samples"])
+        omitted = ["commercial_uplift_evidence.grade", "commercial_uplift_evidence.matrix", "mft_full_parser_profile", "raw.nested"]
+        self.assertEqual(row["details_omitted"], omitted)
+        # A list of flat records stays (Prefetch volumes, attachment lists are read by grid columns).
+        self.assertEqual(row["details"]["record_header_samples"], [{"offset": 0, "bytes": "46494c45"}])
         self.assertEqual(row["details"]["file_name"], "file1.txt")
         self.assertEqual(row["details"]["risk_flags"], ["deleted"])
         self.assertEqual(row["details"]["raw"], {"sender": "kim", "ids": [1, 2]})
         self.assertEqual(row["details"]["event_data"], {"TargetUserName": "admin"})
         self.assertEqual(row["details"]["commercial_uplift_evidence"], {"source_refs": ["service:Slack"]})
         self.assertEqual(page["view"], "list")
-        self.assertEqual(page["view_omitted"], ["artifact_type_profiles", "summary"])
+        manifests = [f"pagination.{name}" for name in sorted(PAGINATION_MANIFESTS)]
+        self.assertEqual(page["view_omitted"], ["artifact_type_profiles", *manifests, "summary"])
         self.assertNotIn("pagination_manifest", page["pagination"])
         self.assertEqual(page["pagination"]["total"], len(ARTIFACTS))
         self.assertEqual(page["record_count"], len(ARTIFACTS))
@@ -161,7 +176,8 @@ class ConsoleApiScaleTests(unittest.TestCase):
         self.assertIn("ntfs_join", files)
         self.assertIn("flags_join", files)
         self.assertEqual(files["pagination"]["total"], 3)
-        self.assertEqual(files["view_omitted"], ["duplicate_content_groups", "hash_cache_manifest", "summary"])
+        manifests = [f"pagination.{name}" for name in sorted(PAGINATION_MANIFESTS)]
+        self.assertEqual(files["view_omitted"], ["duplicate_content_groups", "hash_cache_manifest", *manifests, "summary"])
         self.assertIn("duplicate_content_groups", self.call("files", "limit=2"))
         timeline = self.call("timeline", "limit=2&view=list")
         self.assertEqual([event["event_type"] for event in timeline["events"]], ["e0", "e1"])
@@ -173,7 +189,7 @@ class ConsoleApiScaleTests(unittest.TestCase):
         projected, omitted = project_details(details)
         self.assertEqual(details, ARTIFACTS[0]["details"])
         self.assertIsNot(projected["raw"], details["raw"])
-        self.assertEqual(omitted, ["mft_full_parser_profile", "record_header_samples"])
+        self.assertEqual(omitted, ["commercial_uplift_evidence.grade", "commercial_uplift_evidence.matrix", "mft_full_parser_profile", "raw.nested"])
 
     # --- row index of large outputs ----------------------------------------------------
 
@@ -226,10 +242,11 @@ class ConsoleApiScaleTests(unittest.TestCase):
 
     def test_timeline_sort_orders_the_whole_list_on_the_server(self) -> None:
         page = self.call("timeline", "sort=timestamp&order=desc&limit=3&view=list")
-        self.assertEqual([event["record_index"] for event in page["events"]], [2, 4, 0])
+        # The console's order (evidence_sort): events without a time come first in desc, last in asc.
+        self.assertEqual([event["record_index"] for event in page["events"]], [5, 2, 4])
         self.assertEqual((page["pagination"]["total"], page["pagination"]["has_more"]), (6, True))
         self.assertEqual(page["sort"], {"key": "timestamp", "order": "desc", "status": "ready", "progress": 1})
-        self.assertEqual(self.timeline_types("sort=timestamp:desc&offset=3&limit=10"), ["e3", "e1", "e5"])
+        self.assertEqual(self.timeline_types("sort=timestamp:desc&offset=3&limit=10"), ["e0", "e3", "e1"])
         ascending = self.call("timeline", "sort=timestamp&limit=10&locate=0")
         self.assertEqual([event["event_type"] for event in ascending["events"]], ["e1", "e3", "e0", "e4", "e2", "e5"])
         self.assertEqual(ascending["sort"]["position"], 2)

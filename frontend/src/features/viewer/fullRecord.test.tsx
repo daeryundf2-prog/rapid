@@ -10,6 +10,7 @@ import type { GridRow } from "../../contracts/collection";
 import { COLLECTIONS } from "../grid/columns/index";
 import { installFetch, jsonResponse } from "../grid/testSupport";
 import { resetViewerAdapter, setViewerTarget, useViewerRowContext } from "./adapter";
+import { PARTIAL_COPY_REASON, useFullRecordStatus } from "./fullRecord";
 
 const FULL_DETAILS = {
   file_name: "a.txt",
@@ -98,5 +99,31 @@ describe("viewer full record", () => {
     const { result } = renderHook(() => useViewerRowContext());
     expect(result.current?.fields.details).toEqual(LIST_DETAILS);
     expect(calls).toHaveLength(0);
+  });
+
+  it("reports the left-out keys until loaded, and a failure with a retry", async () => {
+    let fail = true;
+    const calls = installFetch({
+      "/artifacts": () =>
+        fail
+          ? new Response("boom", { status: 500 })
+          : jsonResponse({
+              artifacts: {
+                "windows-filesystem": { artifacts: [{ record_index: 42, details: FULL_DETAILS }] },
+              },
+            }),
+    });
+    const row = listRow(["mft_full_parser_profile", "raw.nested"]);
+    const { result } = renderHook(() => useFullRecordStatus(row, "run-1"));
+    expect(result.current).toMatchObject({
+      status: "loading",
+      omitted: ["mft_full_parser_profile", "raw.nested"],
+    });
+    await waitFor(() => expect(result.current?.status).toBe("failed"));
+    fail = false;
+    act(() => result.current?.retry());
+    await waitFor(() => expect(result.current).toBeNull());
+    expect(calls).toHaveLength(2);
+    expect(PARTIAL_COPY_REASON).toContain("전체 레코드");
   });
 });

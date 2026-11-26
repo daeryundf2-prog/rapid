@@ -347,7 +347,7 @@ class RunJob:
 class OutputJsonCache:
     """Small thread-safe LRU for parsed run-output JSON payloads.
 
-    Entries are keyed by ``(resolved path, mtime_ns, size)`` so a rewritten
+    Entries are keyed by ``(resolved path, mtime_ns, size, inode)`` so a rewritten
     output file self-invalidates on the next read — stale revisions simply age
     out through LRU eviction. The cache is shared by every ``RunJobStore`` in
     the process so the memory bound applies globally.
@@ -362,14 +362,15 @@ class OutputJsonCache:
     def __init__(self, *, max_entries: int = OUTPUT_JSON_CACHE_MAX_ENTRIES, max_bytes: int = OUTPUT_JSON_CACHE_MAX_BYTES) -> None:
         self._max_entries = max(1, int(max_entries))
         self._max_bytes = max(0, int(max_bytes))
-        self._entries: OrderedDict[tuple[str, int, int], tuple[dict[str, object], int]] = OrderedDict()
+        self._entries: OrderedDict[tuple[str, int, int, int], tuple[dict[str, object], int]] = OrderedDict()
         self._total_bytes = 0
         self._lock = threading.Lock()
 
     def read(self, path: Path) -> dict[str, object]:
         resolved = Path(path).expanduser().resolve()
         stat = resolved.stat()  # raises FileNotFoundError like read_text would
-        key = (str(resolved), stat.st_mtime_ns, stat.st_size)
+        # The inode tells an atomically replaced output of the same size and mtime apart.
+        key = (str(resolved), stat.st_mtime_ns, stat.st_size, stat.st_ino)
         with self._lock:
             hit = self._entries.get(key)
             if hit is not None:
@@ -556,7 +557,7 @@ class RunJobStore:
         """Drop cached parsed outputs — all entries, or one run's outputs.
 
         Rewrites already self-invalidate because cache keys embed
-        ``(resolved path, mtime_ns, size)``; explicit invalidation additionally
+        ``(resolved path, mtime_ns, size, inode)``; explicit invalidation additionally
         frees memory and covers byte-identical rewrites.
         """
         if run_id is None:

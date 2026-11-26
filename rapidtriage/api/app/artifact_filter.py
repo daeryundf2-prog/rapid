@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import unicodedata
 from array import array
@@ -12,6 +13,7 @@ from pathlib import Path
 
 from ...core.artifact_profiles import payload_record_count
 from ...core.eventlog_channels import GROUP_LABELS, ChannelFilter
+from .json_rows import Revision, file_revision
 from .jsonl_records import (
     expand_row,
     iter_artifact_records,
@@ -179,10 +181,11 @@ def filter_artifact_page(
     only when ``record_limit`` is given. Every returned row carries its
     original ``record_index``.
 
-    ``match_cache_key`` (a JSONL-backed kind in record order; it must name the kind file's
-    revision and every filter): the first request scans the whole kind once and keeps the
-    matching records' byte offsets (:func:`kind_matches`); later pages read only their own rows.
-    The page is the one the streaming scan returns (same ``scanned`` / ``truncated``).
+    ``match_cache_key`` (a JSONL-backed kind in record order; it must name the kind payload's
+    revision and every filter; :func:`kind_matches` adds the JSONL file's own revision): the
+    first request scans the whole kind once and keeps the matching records' byte offsets; later
+    pages read only their own rows. The page is the one the streaming scan returns (same
+    ``scanned`` / ``truncated``); when the JSONL changed since the scan it is streamed again.
     """
     needle = nfc_fold(path_contains) if path_contains else ""
     wanted_types = frozenset(artifact_types) if artifact_types else None
@@ -196,17 +199,19 @@ def filter_artifact_page(
             stop = offset + limit
             has_more = len(found.records) > stop
             window = range(offset, min(stop, len(found.records)))
-            return _filter_page(
-                payload,
-                [{**row, "record_index": found.records[i]} for i, row in zip(window, found.read(records_path, window))],
-                offset=offset,
-                limit=limit,
-                matched=len(found.records),
-                has_more=has_more,
-                exhausted=not has_more,
-                scanned=found.ordinals[stop] if has_more else found.scanned,
-                **describe,
-            )
+            found_rows = found.read(records_path, window)
+            if found_rows is not None:
+                return _filter_page(
+                    payload,
+                    [{**row, "record_index": found.records[i]} for i, row in zip(window, found_rows)],
+                    offset=offset,
+                    limit=limit,
+                    matched=len(found.records),
+                    has_more=has_more,
+                    exhausted=not has_more,
+                    scanned=found.ordinals[stop] if has_more else found.scanned,
+                    **describe,
+                )
     rows: list[object] = []
     matched = 0
     scanned = 0
@@ -244,26 +249,33 @@ def filter_artifact_page(
 
 @dataclass(frozen=True)
 class KindMatches:
-    """Matching records of one filtered kind, in record order."""
+    """Matching records of one filtered kind, in record order, of one JSONL file revision."""
 
     records: array  # record_index of each match
     offsets: array  # byte offset of its JSONL line
     ordinals: array  # rows scanned up to and including it (the streaming scan's ``scanned``)
     scanned: int  # rows of the whole kind
+    revision: Revision  # the JSONL file the offsets belong to
+    profiles: Mapping[str, Mapping[str, object]] | None = None
 
-    def read(self, records_path: Path, window: range) -> list[dict[str, object]]:
+    def read(self, records_path: Path, window: range) -> list[dict[str, object]] | None:
+        """The matches at ``window``; ``None`` when the JSONL is no longer the scanned revision."""
         rows: list[dict[str, object]] = []
         with open(records_path, "rb") as handle:
+            if file_revision(os.fstat(handle.fileno())) != self.revision:
+                return None
             for position in window:
                 handle.seek(self.offsets[position])
                 row = parse_record_line(handle.readline().strip(), path=records_path, line_number=0)
-                rows.append(expand_row(row, self.profiles) if row is not None else {})
+                if row is None:
+                    return None
+                rows.append(expand_row(row, self.profiles))
         return rows
-
-    profiles: Mapping[str, Mapping[str, object]] | None = None
 
 
 KIND_MATCH_CACHE_SIZE = 32
+# Matches kept across all entries (three int64 each, ~96 MB); a kind with more is not cached.
+KIND_MATCH_CACHE_MAX_MATCHES = 4_000_000
 _KIND_MATCHES: OrderedDict[tuple[object, ...], KindMatches | None] = OrderedDict()
 _KIND_MATCH_LOCK = threading.Lock()
 
@@ -275,7 +287,13 @@ def kind_matches(
     matches: Callable[[Mapping[str, object]], bool],
     scan_cap: int,
 ) -> KindMatches | None:
-    """Cached matches of one kind under ``key`` (``None``: the kind has more than ``scan_cap`` rows)."""
+    """Cached matches of one kind under ``key`` + the JSONL revision (``None``: the kind has more than
+    ``scan_cap`` rows, more matches than the cache keeps, or the file changed during the scan)."""
+    try:
+        revision = file_revision(os.stat(records_path))
+    except OSError:
+        return None
+    key = (*key, revision)
     with _KIND_MATCH_LOCK:
         if key in _KIND_MATCHES:
             _KIND_MATCHES.move_to_end(key)
@@ -290,15 +308,24 @@ def kind_matches(
             break  # the streaming scan would stop here (truncated): not cacheable
         scanned += 1
         if matches(expand_row(row, profiles)):
+            if len(records) >= KIND_MATCH_CACHE_MAX_MATCHES:
+                return None
             records.append(index)
             offsets.append(offset)
             ordinals.append(scanned)
     else:
-        found = KindMatches(records, offsets, ordinals, scanned, profiles)
+        found = KindMatches(records, offsets, ordinals, scanned, revision, profiles)
+    try:
+        if file_revision(os.stat(records_path)) != revision:
+            return None  # rewritten while scanned: neither cached nor used
+    except OSError:
+        return None
     with _KIND_MATCH_LOCK:
         _KIND_MATCHES[key] = found
-        while len(_KIND_MATCHES) > KIND_MATCH_CACHE_SIZE:
-            _KIND_MATCHES.popitem(last=False)
+        total = sum(len(item.records) for item in _KIND_MATCHES.values() if item is not None)
+        while len(_KIND_MATCHES) > 1 and (len(_KIND_MATCHES) > KIND_MATCH_CACHE_SIZE or total > KIND_MATCH_CACHE_MAX_MATCHES):
+            _evicted, dropped = _KIND_MATCHES.popitem(last=False)
+            total -= len(dropped.records) if dropped is not None else 0
     return found
 
 

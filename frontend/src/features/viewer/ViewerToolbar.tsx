@@ -38,6 +38,7 @@ import { useViewerRowContext, useViewerTarget } from "./adapter";
 import { markDisabledReason, targetAsGridRow } from "./citation";
 import { writeClipboard } from "./commands";
 import { layoutFields } from "./fieldSheets";
+import { PARTIAL_COPY_REASON, useFullRecordStatus } from "./fullRecord";
 import { type PivotId, recordPivots } from "./pivots";
 
 /** Menu icons of the pivots. */
@@ -150,6 +151,7 @@ export function ViewerToolbar({
 }: ViewerToolbarProps) {
   const target = useViewerTarget();
   const row = useViewerRowContext();
+  const partialRecord = useFullRecordStatus(row, target?.runId ?? null);
   const { route, navigate } = useRoute();
   const [noteOpen, setNoteOpen] = useState(false);
   const [applied, setApplied] = useState<{ key: string; actions: string[]; cleared: string[] }>({
@@ -330,9 +332,13 @@ export function ViewerToolbar({
     label: "레코드 JSON 복사",
     command: "viewer.copyRecordJson",
     icon: "copy",
-    disabledReason: row ? undefined : "뷰어에 표시된 레코드가 없습니다.",
+    disabledReason: !row
+      ? "뷰어에 표시된 레코드가 없습니다."
+      : partialRecord
+        ? PARTIAL_COPY_REASON
+        : undefined,
     onSelect: () => {
-      if (!row) return;
+      if (!row || partialRecord) return;
       const details = row.fields.details;
       const record = details && typeof details === "object" ? details : layoutFields(row);
       writeClipboard(JSON.stringify(record, null, 2)).then(

@@ -786,42 +786,18 @@ MATCH_CACHE = MatchedIndexCache()
 
 
 def output_stamp(*paths: object) -> tuple[object, ...]:
-    """``(path, size, mtime_ns)`` per path (``None`` skipped): the list revision of a cache key."""
+    """``(path, size, mtime_ns, inode)`` per path (``None`` skipped): the list revision of a cache key
+    (the inode tells an atomically replaced file of the same size and mtime apart)."""
     stamp: list[object] = []
     for raw in paths:
         if not raw:
             continue
         try:
             stat = Path(str(raw)).stat()
-            stamp.append((str(raw), stat.st_size, stat.st_mtime_ns))
+            stamp.append((str(raw), stat.st_size, stat.st_mtime_ns, stat.st_ino))
         except OSError:
-            stamp.append((str(raw), -1, -1))
+            stamp.append((str(raw), -1, -1, -1))
     return tuple(stamp)
-
-
-def _sort_moment(row: Mapping[str, object], collection: str) -> dt.datetime | None:
-    moment = row_time(row, collection)
-    if moment is None and _scalar(row.get("timestamp")):
-        moment = parse_moment(row.get("timestamp"))  # a wall clock of unknown zone still orders
-    if moment is not None and moment.tzinfo is None:
-        moment = moment.replace(tzinfo=dt.timezone.utc)
-    return moment
-
-
-def time_order(rows: Iterable[object], collection: str, order: str) -> array:
-    """Positions of ``rows`` ordered by the row time (``asc`` | ``desc``); ties keep record order and
-    rows without a time come last in both orders."""
-    timed: list[tuple[float, int]] = []
-    untimed: list[int] = []
-    for index, row in enumerate(rows):
-        moment = _sort_moment(row, collection) if isinstance(row, Mapping) else None
-        if moment is None:
-            untimed.append(index)
-        else:
-            seconds = moment.timestamp()
-            timed.append((seconds if order == "asc" else -seconds, index))
-    timed.sort()
-    return array("L", [index for _key, index in timed] + untimed)
 
 
 def matched_indices(

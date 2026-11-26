@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import codecs
 import json
+import os
 import re
 import threading
 from collections import OrderedDict
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 from fastapi import HTTPException
 
@@ -48,15 +49,18 @@ from .helpers import (
     run_not_finished_message,
     run_progress_payload,
 )
+from .json_rows import JsonLayoutError, file_revision, large_output_index
 from .jsonl_records import iter_artifact_records, jsonl_records_path
 from .triage_flags import kind_flag_counts, tree_flags_section
 
 SUMMARY_SCAN_BYTES = 65536
 # A top-level value cut by the head window is retried with a larger window up to this size.
 SUMMARY_SCAN_MAX_BYTES = 64 * 1024 * 1024
-# read_output_key results per file revision (summaries, parser_errors, duplicate groups).
-KEY_CACHE_SIZE = 256
-_KEY_CACHE: OrderedDict[tuple[str, int, int, str], Any] = OrderedDict()
+# read_output_key head-scan results per file revision (summaries, parser_errors, duplicate groups),
+# bounded by their decoded size in characters. A value the head scan cannot reach is kept by the
+# parsed-output LRU or the row index of a large output instead.
+KEY_CACHE_MAX_CHARS = 32 * 1024 * 1024
+_KEY_CACHE: OrderedDict[tuple[object, ...], tuple[Any, int]] = OrderedDict()
 _KEY_LOCK = threading.Lock()
 
 # Rows that are pivots/strings, not evidence records (W2 ``*-string-candidate``).
@@ -273,52 +277,72 @@ def _top_level_value_start(text: str, key: str) -> int | None:
     return None
 
 
-def _scan_output_key(path: Path, key: str, size: int) -> Any:
-    """Top-level ``key`` of the output decoded from a growing head window (``_MISSING`` = not found)."""
+def _scan_output_key(handle: IO[bytes], key: str, size: int) -> tuple[Any, int] | object:
+    """``(value, decoded length)`` of top-level ``key`` from a growing head window of ``handle``
+    (``_MISSING`` = not found)."""
     window = SUMMARY_SCAN_BYTES
-    with path.open("rb") as handle:
-        while True:
-            handle.seek(0)
-            data = handle.read(window)
-            # Incremental decoder: a multi-byte character cut by the window end is left out.
-            text = codecs.getincrementaldecoder("utf-8")().decode(data, final=len(data) >= size)
-            start = _top_level_value_start(text, key)
-            if start is None:
-                return _MISSING
-            try:
-                return json.JSONDecoder().raw_decode(text, start)[0]
-            except json.JSONDecodeError:
-                if len(data) >= size or window >= SUMMARY_SCAN_MAX_BYTES:
-                    return _MISSING  # the value is longer than the window: parse the whole file
-            window = min(window * 4, SUMMARY_SCAN_MAX_BYTES)
+    while True:
+        handle.seek(0)
+        data = handle.read(window)
+        # Incremental decoder: a multi-byte character cut by the window end is left out.
+        text = codecs.getincrementaldecoder("utf-8")().decode(data, final=len(data) >= size)
+        start = _top_level_value_start(text, key)
+        if start is None:
+            return _MISSING
+        try:
+            value, end = json.JSONDecoder().raw_decode(text, start)
+            return value, end - start
+        except json.JSONDecodeError:
+            if len(data) >= size or window >= SUMMARY_SCAN_MAX_BYTES:
+                return _MISSING  # the value is longer than the window: parse the whole file
+        window = min(window * 4, SUMMARY_SCAN_MAX_BYTES)
+
+
+def _parsed_output_key(path: Path, key: str) -> Any:
+    """Top-level ``key`` from the whole output: the row index of a large output (it keeps parsed
+    values), else the shared parsed-output LRU."""
+    index = large_output_index(path)
+    if index is not None:
+        if key not in index.keys():
+            return None
+        try:
+            return index.value(key)
+        except JsonLayoutError:
+            pass  # rewritten since it was indexed: parse the file as it is now
+    payload = read_output_json(path)
+    return payload.get(key) if isinstance(payload, dict) else None
 
 
 def read_output_key(path: Path, key: str) -> Any:
     """Return a top-level key of a run output JSON via a bounded head scan.
 
     The head window grows (up to ``SUMMARY_SCAN_MAX_BYTES``) while the value is cut by it;
-    a key that is not a top-level member of the head falls back to a full parse. Values are
-    cached per file revision ``(path, mtime_ns, size, key)``: they are shared, read-only.
+    a key that is not a top-level member of the head falls back to the whole output. Head-scan
+    values are cached per file revision ``(path, dev, inode, size, mtime_ns, key)`` read from the
+    scanned handle itself (``KEY_CACHE_MAX_CHARS`` in all): they are shared, read-only.
     """
     try:
-        stat = path.stat()
-        cache_key = (str(path), stat.st_mtime_ns, stat.st_size, key)
-        with _KEY_LOCK:
-            if cache_key in _KEY_CACHE:
-                _KEY_CACHE.move_to_end(cache_key)
-                return _KEY_CACHE[cache_key]
-        value = _scan_output_key(path, key, stat.st_size)
-        if value is _MISSING:
-            # Full-parse fallback goes through the shared LRU so large outputs
-            # (tens of MB) are not re-parsed on every tree/issues request.
-            payload = read_output_json(path)
-            value = payload.get(key) if isinstance(payload, dict) else None
+        with path.open("rb") as handle:
+            revision = file_revision(os.fstat(handle.fileno()))
+            cache_key = (str(path), *revision, key)
+            with _KEY_LOCK:
+                cached = _KEY_CACHE.get(cache_key)
+                if cached is not None:
+                    _KEY_CACHE.move_to_end(cache_key)
+                    return cached[0]
+            found = _scan_output_key(handle, key, revision[2])
+        if not isinstance(found, tuple):
+            return _parsed_output_key(path, key)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return None
-    with _KEY_LOCK:
-        _KEY_CACHE[cache_key] = value
-        while len(_KEY_CACHE) > KEY_CACHE_SIZE:
-            _KEY_CACHE.popitem(last=False)
+    value, length = found
+    if length <= KEY_CACHE_MAX_CHARS:
+        with _KEY_LOCK:
+            _KEY_CACHE[cache_key] = (value, length)
+            total = sum(item[1] for item in _KEY_CACHE.values())
+            while len(_KEY_CACHE) > 1 and total > KEY_CACHE_MAX_CHARS:
+                _evicted, (_value, dropped) = _KEY_CACHE.popitem(last=False)
+                total -= dropped
     return value
 
 
