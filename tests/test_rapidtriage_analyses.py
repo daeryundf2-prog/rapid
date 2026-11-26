@@ -2573,5 +2573,35 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertFalse(unnamed["in_use"])
         self.assertEqual(analysis_kinds.analysis_row_title("ntfs-meta", {"details": unnamed}, 0), "MFT 엔트리 #70 (이름 없음) (삭제됨)")
 
+
+@unittest.skipUnless(HAS_FASTAPI, "fastapi is required for analysis API tests")
+class StateReadRetryTests(unittest.TestCase):
+    def test_a_sharing_error_does_not_hide_the_newest_analysis(self) -> None:
+        # Windows refuses opens while another thread os.replace()s analysis.json (a heartbeat or
+        # progress write); the newest search-index state must still be the latest one.
+        with tempfile.TemporaryDirectory() as temp:
+            output_dir = Path(temp)
+            for analysis_id, created_at in (("older", "2026-01-01T00:00:00+00:00"), ("newer", "2026-01-01T00:00:01+00:00")):
+                directory = analyses.analyses_root(output_dir) / analysis_id
+                directory.mkdir(parents=True)
+                state = {"analysis_id": analysis_id, "kind": "search-index", "status": "failed", "created_at": created_at}
+                analyses.atomic_write_json(directory / analyses.STATE_FILE_NAME, state)
+            newer = analyses.analyses_root(output_dir) / "newer" / analyses.STATE_FILE_NAME
+            real = Path.read_text
+            denied: list[Path] = []
+
+            def read_text(path: Path, *args: object, **kwargs: object) -> str:
+                if path == newer and not denied:
+                    denied.append(path)
+                    raise PermissionError(13, "The process cannot access the file because it is being used by another process")
+                return real(path, *args, **kwargs)
+
+            with patch.object(Path, "read_text", read_text):
+                latest = analyses.AnalysisRunner().latest(output_dir, ["search-index"])
+            self.assertEqual(denied, [newer])
+            self.assertEqual(latest["analysis_id"], "newer")
+            with patch.object(Path, "read_text", side_effect=PermissionError(13, "locked")), patch.object(analyses.time, "sleep"):
+                self.assertIsNone(analyses.read_state_file(newer))
+
 if __name__ == "__main__":
     unittest.main()

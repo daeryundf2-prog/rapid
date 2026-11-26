@@ -123,10 +123,26 @@ def write_terminal_json(path: Path, payload: Mapping[str, object]) -> None:
         path.write_text(_state_text(payload), encoding="utf-8")
 
 
-def read_state_file(path: Path) -> dict[str, object] | None:
+def read_state_file(path: Path, *, attempts: int = REPLACE_ATTEMPTS) -> dict[str, object] | None:
+    """The stored state, or ``None`` when it is missing or unreadable.
+
+    A sharing error is retried: on Windows an ``os.replace`` of the state file (a progress or
+    heartbeat write) briefly refuses opens, and reporting ``None`` then would make the analysis
+    vanish from ``list_states``/``latest`` for that one read.
+    """
+    for attempt in range(attempts):
+        try:
+            text = path.read_text(encoding="utf-8")
+            break
+        except PermissionError:
+            if attempt == attempts - 1:
+                return None
+            time.sleep(0.05)
+        except OSError:
+            return None
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        payload = json.loads(text)
+    except ValueError:
         return None
     return payload if isinstance(payload, dict) else None
 
