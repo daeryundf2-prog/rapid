@@ -37,6 +37,54 @@
   UTC and adds the wall-clock count when there is one. Rows without an offset
   keep their caveat; one without a local label now gets one too
   (`tests/test_d27_timeline.py::ReportTimeBasisTests`).
+- A Taskband Favorites or FavoritesResolve value holding exactly 4,096 pins
+  (the frame cap) followed by its proper end was labelled
+  `partial`/`frame-cap`, the same as a value with 4,097 pins, because the cap
+  was checked before the end marker. **Output change:** such values are now
+  `decoded` with `end_status` `terminator` or `end-of-value`; `frame-cap` is
+  reported only when another frame follows
+  (`tests/test_taskband_featureusage.py::TaskbarProviderTests::test_clean_end_at_exactly_the_frame_cap_is_complete`).
+- Journald marked an entry with sequence number 0, or with a monotonic time of
+  2^55 or more, as fully `parsed` with no limitation, although systemd's
+  entry check rejects both. **Output change:** such entries are `partial` and
+  carry `invalid-sequence-number` (citing header offset +16) or
+  `monotonic-out-of-range` (+32). The raw values and a valid UTC time are kept
+  (`tests/test_journald.py::JournalTests::test_sequence_and_monotonic_validity_are_checked_separately`).
+- A lastlog row could name a single account for a UID that two accounts share
+  when the passwd file exceeded the 4 MiB lookup cap and the second alias lay
+  past it; the summary still read `parsed` with `capped=false`. A truncated
+  passwd file now names nobody, and lastlog rows and their summary carry
+  `account_lookup` (`complete`, `truncated` or `unavailable`), separate from
+  the record scan's `capped`. **Output change:** `user` is empty on every
+  lastlog row when passwd exceeds 4 MiB; new `account_lookup` field
+  (`tests/test_linux_login_accounting.py::LinuxLoginAccountingTests::test_truncated_passwd_never_settles_a_shared_uid`).
+- KnowledgeC exported the string value of every known `/app/` stream as the
+  subject app's `bundle_id` before consulting stored identifiers, so a
+  `/app/webUsage` page URL became the bundle ID even when the linked metadata
+  stored `ZBUNDLEID=org.example.browser`. Stored identifiers (object, then
+  structured metadata) now come first, and the value names the app only on
+  `/app/inFocus`, `/app/usage`, `/app/activity` and `/app/mediaUsage`.
+  **Output change:** `/app/webUsage` and `/app/intents` rows without a stored
+  identifier have an empty `bundle_id`; a bundle-ID value that disagrees with
+  a stored identifier adds the warning `subject-bundle-conflict`
+  (`tests/test_knowledgec.py::KnowledgeCTest::test_value_names_the_subject_only_for_streams_whose_payload_is_the_app`).
+- A Codex rollout that repeated the same prompt in two turns, with a replay
+  (`response_item`) recorded only in the second turn, lost the first turn's
+  prompt and exported two rows for the second turn (wrong time, working
+  directory and source line). Replays were matched by role and text across the
+  whole file. They are now matched only within the same turn, identified by the
+  `turn_context` record's `turn_id` when recorded. **Output change:** such
+  prompts keep their own turn's row; when one turn holds more progress copies
+  than replays, the unpaired copy carries the new flag
+  `replay-pairing-ambiguous`
+  (`tests/test_ai_agents.py::AgentTests::test_replay_matching_stays_within_the_source_turn`).
+- Coding-agent transcript timestamps with an out-of-range UTC offset minute
+  (`2024-01-01T12:00:00+01:60`, `-00:60`) were rolled over by the
+  date parser into a different, apparently exact UTC instant
+  (`2024-01-01T10:00:00+00:00`). RFC 3339 §5.6 limits the offset to hours
+  00-23 and minutes 00-59. **Output change:** such rows keep `timestamp_raw`,
+  leave `timestamp_utc` empty and carry `timestamp-not-normalized`
+  (`tests/test_ai_agents.py::AdversarialAgentTests::test_out_of_range_offsets_are_not_normalized`).
 - On Windows an analysis could vanish from the analysis list for one read. The
   state reader treated the sharing error raised while another thread
   `os.replace`d `analysis.json` (a heartbeat or progress write) as "no state".

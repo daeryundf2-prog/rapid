@@ -219,6 +219,48 @@ class AgentTests(AgentFixture):
         self.assertEqual([(r.details["source_line"], r.details["text"]) for r in rows],
                          [(2, "again"), (3, "again"), (4, "answer")])
 
+    def test_replay_matching_stays_within_the_source_turn(self):
+        def turn(ident, minute, replayed, cwd=None):
+            stamp = f"2024-01-01T00:{minute}:00Z"
+            context = {"cwd": cwd or "/" + ident, **({"turn_id": ident} if ident.startswith("t") else {})}
+            records = [{"type": "turn_context", "payload": context},
+                       {"type": "event_msg", "timestamp": stamp,
+                        "payload": {"type": "user_message", "message": "same text"}}]
+            if replayed:
+                records.append({"type": "response_item", "timestamp": stamp, "payload": {
+                    "type": "message", "role": "user", "content": [{"type": "input_text", "text": "same text"}]}})
+            return records
+
+        def rows(*turns):
+            path = self.lines(".codex/sessions/turns.jsonl", *(r for t in turns for r in t))
+            result = [(r.details["source_line"], r.details["cwd"], r.details["timestamp_utc"], r.details["flags"])
+                      for r in self.rows("codex-cli")]
+            path.unlink()
+            return result
+
+        def stamp(minute):
+            return f"2024-01-01T00:{minute}:00+00:00"
+
+        base = ["schema-version-not-validated", "version-unknown"]
+        # A replay recorded only in the second turn must not consume the first turn's prompt.
+        for first, second in (("t-first", "t-second"), ("first", "second")):
+            self.assertEqual(rows(turn(first, "01", False), turn(second, "02", True)),
+                             [(2, "/" + first, stamp("01"), base), (5, "/" + second, stamp("02"), base)])
+        # The same text three times; only the last turn has a replay.
+        self.assertEqual([r[:3] for r in rows(turn("t1", "01", False), turn("t2", "02", False), turn("t3", "03", True))],
+                         [(2, "/t1", stamp("01")), (4, "/t2", stamp("02")), (7, "/t3", stamp("03"))])
+        # Control: each turn has its replay, so each turn yields exactly its replay row.
+        self.assertEqual([r[:3] for r in rows(turn("t1", "01", True), turn("t2", "02", True), turn("t3", "03", True))],
+                         [(3, "/t1", stamp("01")), (6, "/t2", stamp("02")), (9, "/t3", stamp("03"))])
+        # A turn_context repeated with the same recorded turn_id (after compaction) stays one turn.
+        repeated = turn("t1", "01", False) + [{"type": "turn_context", "payload": {"turn_id": "t1", "cwd": "/t1"}},
+                                              turn("t1", "01", True)[-1]]
+        self.assertEqual([r[:3] for r in rows(repeated)], [(4, "/t1", stamp("01"))])
+        # Two progress copies and one replay in one turn: the unpaired copy says the pairing is by order.
+        ambiguous = turn("t1", "01", False) + turn("t1", "02", True)[1:]
+        self.assertEqual(rows(ambiguous), [(3, "/t1", stamp("02"), base + ["replay-pairing-ambiguous"]),
+                                           (4, "/t1", stamp("02"), base)])
+
     def test_editor_windows_and_linux_key_layouts(self):
         for prefix in ("Users/profile/AppData/Roaming/Code", "home/profile/.config/Code - Insiders"):
             path = self.root / prefix / "User/globalStorage/state.vscdb"
@@ -332,6 +374,24 @@ class AdversarialAgentTests(AgentFixture):
             self.assertEqual(row.details["timestamp_raw"], raw)
             self.assertIsNone(row.details["timestamp_utc"])
             self.assertIn("timestamp-not-normalized", row.details["flags"])
+
+    def test_out_of_range_offsets_are_not_normalized(self):
+        # RFC 3339 section 5.6: time-numoffset hour 00-23, minute 00-59. Python's parser would
+        # otherwise roll "+01:60" over to "+02:00" and report an exact but unsupported instant.
+        for raw in ("2024-01-01T12:00:00+01:60", "2024-01-01T12:00:00-00:60", "2024-01-01T12:00:00+24:00",
+                    "2024-01-01T12:00:00+99:99"):
+            self.assertIsNone(utc(raw, ""), raw)
+        self.assertEqual(utc("2024-01-01T12:00:00+23:59", ""), "2023-12-31T12:01:00+00:00")
+        times = ["2024-11-03T01:30:00-04:00", "2024-11-03T01:30:00-05:00", "2024-01-01T12:00:00+01:60",
+                 "2024-01-01T12:00:00-00:60", "2016-12-31T23:59:60Z"]
+        self.lines(".codex/sessions/offsets.jsonl", *({"type": "event_msg", "timestamp": raw,
+                                                       "payload": {"type": "user_message", "message": str(i)}}
+                                                      for i, raw in enumerate(times)))
+        rows = [r.details for r in self.rows("codex-cli")]
+        self.assertEqual([r["timestamp_raw"] for r in rows], times)
+        self.assertEqual([r["timestamp_utc"] for r in rows],
+                         ["2024-11-03T05:30:00+00:00", "2024-11-03T06:30:00+00:00", None, None, None])
+        self.assertEqual(["timestamp-not-normalized" in r["flags"] for r in rows], [False, False, True, True, True])
 
     def test_unknown_versions_are_flagged_not_guessed(self):
         self.lines(".codex/sessions/known.jsonl", {"type": "session_meta", "payload": {"id": "k", "cli_version": "9.9.9"}},

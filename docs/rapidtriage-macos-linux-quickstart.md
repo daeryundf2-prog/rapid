@@ -85,7 +85,13 @@ App focus and usage, lock and backlight state, Safari history, web usage,
 notifications, intents and battery percentage retain their stream names.
 Unknown streams carry a flag and their stored values. Read the stream and
 source device together when interpreting synced activity. `bundle_id` comes
-only from stored app identifiers; the producing source is `source_bundle_id`.
+only from stored app identifiers: the object's or the linked metadata's bundle
+ID first, then the string value of `/app/inFocus`, `/app/usage`,
+`/app/activity` and `/app/mediaUsage`, whose value is the bundle ID. The value
+of other streams (a `/app/webUsage` page, an `/app/intents` app name) never
+becomes `bundle_id`; without an identifier the subject stays empty. A value
+that differs from the stored identifier adds `subject-bundle-conflict`. The
+producing source is `source_bundle_id`.
 Raw start and end values are seconds from 2001-01-01 00:00:00 UTC, rounded to
 the microsecond in `start_at` and `end_at`. Non-numeric or out-of-range dates
 keep their raw value, have no UTC time and are flagged. [Core Foundation absolute time](https://developer.apple.com/documentation/corefoundation/cfabsolutetime)
@@ -96,7 +102,11 @@ regular and compact layouts through object offsets in both hash modes.
 Real time is UTC microseconds since the Unix epoch, kept as `realtime_raw`;
 values outside systemd's valid range (zero, or 2^55 and above) get no UTC
 time and a `timestamp-out-of-range` limitation. Monotonic time
-(`monotonic_raw`) is meaningful with its boot ID. The entry and its field
+(`monotonic_raw`) is meaningful with its boot ID; 2^55 and above adds a
+`monotonic-out-of-range` limitation, and a sequence number of zero adds
+`invalid-sequence-number`, as systemd's own entry check rejects both. The
+raw values and an otherwise valid UTC time are kept, each limitation cites
+its header field, and the entry is `partial`. The entry and its field
 objects have separate offsets, so a damaged or compressed field can be
 located even if its value is unavailable. Each decoded field is checked
 against its stored DATA hash: Jenkins lookup3 for unkeyed files, SipHash-2-4

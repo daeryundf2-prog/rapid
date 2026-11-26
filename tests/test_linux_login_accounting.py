@@ -78,6 +78,34 @@ class LinuxLoginAccountingTests(unittest.TestCase):
         self.assertEqual(records[0]["length"], 292)
         self.assertIsNone(records[0]["timestamp_usec"])
         self.assertEqual(records[0]["timestamp"], "2023-11-14T22:13:20+00:00")
+        self.assertEqual([r["account_lookup"] for r in records], ["complete", "complete"])
+        self.assertEqual(next(r.details["account_lookup"] for r in rows if r.artifact_type == SUMMARY
+                              and r.details["log_kind"] == "lastlog"), "complete")
+
+    def test_truncated_passwd_never_settles_a_shared_uid(self):
+        (self.logs / "lastlog").write_bytes(lastlog())  # UID 0
+        (self.root / "etc").mkdir()
+        prefix = b"first:x:0:0::/:/bin/sh\n" + b"".join(
+            b"sample%d:x:%d:1:synthetic accounting record:/:/bin/sh\n" % (i, i) for i in range(1, 40))
+        second = b"second:x:0:0::/:/bin/sh\n"
+        (self.root / "etc/passwd").write_bytes(prefix + second)
+
+        def lastlog_rows(cap):
+            with patch("rapidtriage.artifacts.linux_login.MAX_PASSWD_BYTES", cap):
+                rows = self.rows()
+            entry, = (r.details for r in rows if r.artifact_type == "linux-lastlog")
+            summary, = (r.details for r in rows if r.artifact_type == SUMMARY)
+            return (entry["uid"], entry["user"], entry["account_lookup"], summary["account_lookup"],
+                    summary["coverage_status"], summary["capped"])
+
+        # The second alias ends exactly at the cap: the whole file is read and the UID is shared.
+        self.assertEqual(lastlog_rows(len(prefix) + len(second)), (0, "", "complete", "complete", "parsed", False))
+        # The second alias starts at the cap: the prefix alone names one account, which is not settled.
+        self.assertEqual(lastlog_rows(len(prefix)), (0, "", "truncated", "truncated", "parsed", False))
+        (self.root / "etc/passwd").write_bytes(prefix)
+        self.assertEqual(lastlog_rows(len(prefix)), (0, "first", "complete", "complete", "parsed", False))
+        (self.root / "etc/passwd").unlink()
+        self.assertEqual(lastlog_rows(len(prefix)), (0, "", "unavailable", "unavailable", "parsed", False))
 
     def test_unknown_layout_and_short_files_are_visible(self):
         (self.logs / "wtmp").write_bytes(utmp() + bytes(16))  # incompatible 400-byte stride

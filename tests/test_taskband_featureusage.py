@@ -221,6 +221,23 @@ class TaskbarProviderTests(unittest.TestCase):
             rows, summary = decode_taskband_value("Favorites", data)
         self.assertEqual((rows, summary["oversized_frames"], summary["end_status"]), ([], 2, "terminator"))
 
+    def test_clean_end_at_exactly_the_frame_cap_is_complete(self) -> None:
+        from rapidtriage.artifacts.windows.taskband import MAX_TASKBAND_ENTRIES as cap
+
+        item = pidl("도구.lnk")
+        link = lnk("..\\도구.lnk")
+        kinds = {"Favorites": (b"\0" + dword(len(item)) + item, b"\xff", "terminator"),
+                 "FavoritesResolve": (dword(len(link)) + link, b"", "end-of-value")}
+        for name, (frame, end, status) in kinds.items():
+            for count, expected in ((cap - 1, (cap - 1, status, "decoded")), (cap, (cap, status, "decoded")),
+                                    (cap + 1, (cap, "frame-cap", "partial"))):
+                with self.subTest(name=name, count=count):
+                    data = frame * count + end
+                    rows, summary = decode_taskband_value(name, data)
+                    self.assertEqual((len(rows), summary["end_status"], summary["decode_status"]), expected)
+                    self.assertEqual(summary["frames_seen"], min(count, cap))
+                    self.assertEqual(summary["end_offset"], len(data) if count <= cap else cap * len(frame))
+
     def test_mutated_values_never_raise_and_stay_in_bounds(self) -> None:
         rng = random.Random(20261126)
         seeds = [

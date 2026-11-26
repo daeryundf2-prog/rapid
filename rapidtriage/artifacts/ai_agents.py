@@ -168,46 +168,80 @@ def message_key(role, text):
     return role, hashlib.sha256(text.encode("utf-8", "surrogatepass")).digest()
 
 
+def next_turn(record, turn):
+    """Codex persists a ``turn_context`` before each user turn's records. A recorded ``turn_id``
+    names the turn (a context repeated after compaction keeps it); without one, each context
+    starts a new turn. ``turn`` is ``(identity, contexts seen)``."""
+    if record.get("type") != "turn_context":
+        return turn
+    count = turn[1] + 1
+    ident = mapping(record.get("payload")).get("turn_id")
+    return (("turn_id", ident) if isinstance(ident, str) and ident else ("turn_context", count)), count
+
+
+def progress_message(record):
+    payload = mapping(record.get("payload"))
+    event = payload.get("type")
+    text = payload.get("message")
+    if record.get("type") == "event_msg" and event in ("user_message", "agent_message") and isinstance(text, str):
+        return "user" if event == "user_message" else "assistant", text
+    return None
+
+
 def replay_counts(path):
-    """Count replay messages so duplicate progress events do not double the transcript."""
-    counts = Counter()
-    messages = 0
+    """Count replay and progress messages per turn so duplicate progress events do not double the
+    transcript. A replay only stands in for a progress message of the same turn."""
+    replays = Counter()
+    progress = Counter()
+    progress_seen = replays_seen = 0
+    turn = (("turn_context", 0), 0)
     for _, obj, _reason in line_records(path):
         record = mapping(obj)
-        if record.get("type") != "response_item":
-            continue
+        turn = next_turn(record, turn)
         payload = mapping(record.get("payload"))
         role = payload.get("role")
-        if payload.get("type") == "message" and role in ("user", "assistant"):
-            counts[message_key(role, content(payload.get("content")))] += 1
-            messages += 1
-            if messages == ROWS_PER_SOURCE:
+        message = progress_message(record)
+        if message is not None:
+            if progress_seen < ROWS_PER_SOURCE:
+                progress[turn[0], message_key(*message)] += 1
+                progress_seen += 1
+        elif record.get("type") == "response_item" and payload.get("type") == "message" and role in ("user", "assistant"):
+            replays[turn[0], message_key(role, content(payload.get("content")))] += 1
+            replays_seen += 1
+            if replays_seen == ROWS_PER_SOURCE:
                 break
-    return counts
+    # More progress copies than replays in one turn: which copies the replays stand for is not recorded.
+    ambiguous = {key for key, count in replays.items() if progress[key] > count}
+    return replays, ambiguous
 
 
 def json_lines(src, path, mode):
     replay = None
+    turn = (("turn_context", 0), 0)
     for location, doc, reason in line_records(path):
         src.location = location
         if reason:
             yield src.note(reason, **({"damaged_count": 1} if reason != "stream-byte-limit" else {}))
             continue
-        if src.agent == "codex-cli" and mode == "session" and mapping(doc).get("type") == "event_msg":
-            payload = mapping(doc.get("payload"))
-            event = payload.get("type")
-            text = payload.get("message")
-            if event in ("user_message", "agent_message") and isinstance(text, str):
-                if replay is None:
-                    replay = replay_counts(path)
-                role = "user" if event == "user_message" else "assistant"
-                key = message_key(role, text)
-                if replay[key]:
-                    replay[key] -= 1
-                else:
-                    yield src.row("message", role=role, timestamp=doc.get("timestamp"), text=text,
-                                  record_format="event_msg")
-            continue
+        if src.agent == "codex-cli" and mode == "session":
+            record = mapping(doc)
+            turn = next_turn(record, turn)
+            if record.get("type") == "event_msg":
+                message = progress_message(record)
+                if message is not None:
+                    if replay is None:
+                        replay = replay_counts(path)
+                    counts, ambiguous = replay
+                    key = turn[0], message_key(*message)
+                    if counts[key]:
+                        counts[key] -= 1
+                    else:
+                        row = src.row("message", role=message[0], timestamp=record.get("timestamp"), text=message[1],
+                                      record_format="event_msg")
+                        if key in ambiguous:
+                            row.details["flags"].append("replay-pairing-ambiguous")
+                        yield row
+                continue
         yield from parse_record(src, doc, mode)
 
 

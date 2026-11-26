@@ -7,6 +7,7 @@
     "log_kind": { "enum": ["utmp", "wtmp", "btmp", "lastlog"] },
     "layout": { "type": "string" },
     "user": { "type": "string" },
+    "account_lookup": { "enum": ["complete", "truncated", "unavailable"], "description": "Lastlog only: whether the UID-to-name lookup read the whole passwd file. `user` is empty unless it is complete." },
     "tty": { "type": "string" },
     "host": { "type": "string" },
     "id": { "type": "string" },

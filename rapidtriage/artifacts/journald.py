@@ -29,6 +29,7 @@ STATE = ("offline", "online", "archived")
 HEADER_SIZE = 208  # through tail_entry_monotonic, present in every format revision
 OBJECT_HEADER = struct.Struct("<BB6xQ")
 REALTIME_LIMIT = 1 << 55  # systemd's VALID_REALTIME(): 0 < realtime < 2^55 microseconds
+MONOTONIC_LIMIT = 1 << 55  # systemd's VALID_MONOTONIC(): monotonic < 2^55 microseconds
 _M32 = 0xFFFFFFFF
 _M64 = 0xFFFFFFFFFFFFFFFF
 
@@ -289,11 +290,17 @@ class _Reader:
             else:
                 fields[key] = value
         fields.setdefault("_BOOT_ID", boot.hex())
+        # systemd check_object() rejects an entry whose seqnum is 0 or whose clocks fail
+        # VALID_REALTIME/VALID_MONOTONIC. The raw values stay; each bad field is cited.
+        if seq == 0:
+            issues.append({"reason": "invalid-sequence-number", "source_offset": offset + 16})
         timestamp = None
         if 0 < realtime < REALTIME_LIMIT:
             timestamp = (EPOCH + dt.timedelta(microseconds=realtime)).isoformat()
         else:
             issues.append({"reason": "timestamp-out-of-range", "source_offset": offset + 24})
+        if monotonic >= MONOTONIC_LIMIT:
+            issues.append({"reason": "monotonic-out-of-range", "source_offset": offset + 32})
         return _row(
             path, "entry", offset, length=size, entry_array_offset=array, data_offsets=data_offsets,
             sequence_number=seq, timestamp=timestamp, realtime_raw=realtime, monotonic_raw=monotonic,

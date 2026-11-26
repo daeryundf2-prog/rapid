@@ -30,17 +30,23 @@ ROTATED_LOG = re.compile(r"(wtmp|btmp)(\.[0-9]{1,4}|-[0-9]{8})?(\.(?:gz|bz2|xz|z
 MAX_ROTATED_FILES = 64
 
 
-def _passwd_names(root: Path) -> dict[int, str]:
+def _passwd_names(root: Path) -> tuple[dict[int, str], str]:
+    """UID -> account name, and whether the lookup saw the whole passwd file.
+
+    A UID shared by two accounts maps to "". A passwd file beyond the read cap names
+    nobody: an alias past the cap could share any UID, so a name unique within the
+    prefix is not a settled owner.
+    """
     path = root / "etc/passwd"
     if not path_is_within(path, root) or not path.is_file():
-        return {}
+        return {}, "unavailable"
     try:
         with path.open("rb") as handle:
             data = handle.read(MAX_PASSWD_BYTES + 1)
     except OSError:
-        return {}
+        return {}, "unavailable"
     if len(data) > MAX_PASSWD_BYTES:
-        data = data[:MAX_PASSWD_BYTES].rpartition(b"\n")[0]
+        return {}, "truncated"
     names = {}
     for line in data.splitlines():
         fields = line.split(b":")
@@ -48,7 +54,7 @@ def _passwd_names(root: Path) -> dict[int, str]:
             uid = int(fields[2])
             name = fields[0].decode("utf-8", "replace")
             names[uid] = name if names.get(uid, name) == name else ""
-    return names
+    return names, "complete"
 
 
 def _slot_ranges(handle: BinaryIO, slots: int, width: int, sparse: bool) -> Iterator[range]:
@@ -158,7 +164,7 @@ def _alignment_score(handle: BinaryIO, size: int, width: int, lastlog: bool) -> 
     return valid, -(size % width), -invalid
 
 
-def _parse_file(path: Path, kind: str, names: dict[int, str]) -> Iterator[ArtifactRecord]:
+def _parse_file(path: Path, kind: str, accounts: tuple[dict[int, str], str] | None) -> Iterator[ArtifactRecord]:
     lastlog = kind == "lastlog"
     width = LASTLOG_SIZE if lastlog else UTMP_SIZE
     alternate = 296 if lastlog else 400
@@ -166,6 +172,9 @@ def _parse_file(path: Path, kind: str, names: dict[int, str]) -> Iterator[Artifa
         "parser": "linux-login-accounting", "parser_version": "1", "reportability": "triage",
         "log_kind": kind, "source_path": str(path), "layout": f"glibc-le-{width}",
     }
+    names = {}
+    if accounts is not None:
+        names, base["account_lookup"] = accounts
     examined = emitted = damaged = truncated = tail = 0
     size = 0
     capped = False
@@ -274,4 +283,4 @@ def collect_login_accounting(root: Path) -> Iterator[ArtifactRecord]:
         if status:
             yield _unread_summary(path, kind, "compressed" if status == "unsupported-compression" else "", status)
         else:
-            yield from _parse_file(path, kind, _passwd_names(root) if kind == "lastlog" else {})
+            yield from _parse_file(path, kind, _passwd_names(root) if kind == "lastlog" else None)

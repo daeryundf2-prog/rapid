@@ -31,7 +31,9 @@ _TOKEN = re.compile(
 )
 _PRIVATE_KEY = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.DOTALL)
 # RFC 3339 date-time only: no week dates, basic format, space separator or local wall time.
-_RFC3339 = re.compile(r"(\d{4}-\d{2}-\d{2})[Tt](\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?([Zz]|[+-]\d{2}:\d{2})")
+# The offset is range-checked here (section 5.6: hour 00-23, minute 00-59) because the datetime
+# parser would roll an out-of-range minute such as "+01:60" over into the next hour.
+_RFC3339 = re.compile(r"(\d{4}-\d{2}-\d{2})[Tt](\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?([Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)")
 
 
 def clean(value: object) -> str:
