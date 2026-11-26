@@ -384,6 +384,7 @@ TIMELINE_EXCLUDED_TYPES: frozenset[str] = frozenset(
         "shellbag-hive-summary",
         "registry-summary",
         "linux-login-accounting-summary",
+        "registry-taskband-summary",
         "eventlog-summary",
         "windows-execution-summary",
         "mobile-correlation-summary",

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Explorer Taskband value decode summary",
+  "type": "object",
+  "required": ["value_name", "value_size", "decode_status", "end_status", "end_offset", "trailing_bytes", "frames_seen", "pins_decoded", "undecoded_frames", "undecoded_frame_indices", "oversized_frames", "frame_cap", "value_byte_cap", "frame_byte_cap", "user", "key_path", "key_last_written_at", "key_last_written_filetime", "source_path", "source_offset", "source_hashes"],
+  "properties": {
+    "value_name": { "type": "string" },
+    "value_size": { "type": "integer", "minimum": 0 },
+    "decode_status": { "enum": ["decoded", "partial"] },
+    "end_status": { "enum": ["terminator", "end-of-value", "missing-terminator", "unrecognized-entry-tag", "truncated-frame-header", "zero-length-frame", "frame-exceeds-value", "frame-cap", "value-too-large"] },
+    "end_offset": { "type": "integer", "minimum": 0 },
+    "trailing_bytes": { "type": "integer", "minimum": 0 },
+    "frames_seen": { "type": "integer", "minimum": 0 },
+    "pins_decoded": { "type": "integer", "minimum": 0 },
+    "undecoded_frames": { "type": "integer", "minimum": 0 },
+    "undecoded_frame_indices": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "maxItems": 32 },
+    "oversized_frames": { "type": "integer", "minimum": 0 },
+    "frame_cap": { "type": "integer", "minimum": 1 },
+    "value_byte_cap": { "type": "integer", "minimum": 1 },
+    "frame_byte_cap": { "type": "integer", "minimum": 1 },
+    "user": { "type": "string" },
+    "key_path": { "type": "string" },
+    "key_last_written_at": { "type": "string" },
+    "key_last_written_filetime": { "type": ["string", "null"], "pattern": "^[0-9]+$" },
+    "source_path": { "type": "string" },
+    "source_offset": { "type": "integer", "minimum": 0 },
+    "source_hashes": { "type": "object", "required": ["sha256"] }
+  }
+}

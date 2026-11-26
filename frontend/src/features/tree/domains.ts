@@ -520,6 +520,7 @@ export const DOMAINS: readonly DomainDef[] = [
             "details.user",
             "details.tty",
             "details.host",
+            "details.address",
             "details.type_name",
             "details.pid",
             "details.session",
@@ -546,6 +547,7 @@ export const DOMAINS: readonly DomainDef[] = [
         target: {
           ...a("linux-system", ["linux-login-accounting-summary"]),
           cols: [
+            "details.coverage_status",
             "details.layout",
             "details.rows_emitted",
             "details.damaged_records",
@@ -946,6 +948,22 @@ export const DOMAINS: readonly DomainDef[] = [
         target: {
           ...a("windows-registry", ["registry-taskband-pin"]),
           cols: ["details.application", "details.value_name", "details.pin_index", "details.user"],
+        },
+      },
+      {
+        id: "reg-taskband-summary",
+        label: "작업 표시줄 고정 항목 해석 요약",
+        detail: true,
+        target: {
+          ...a("windows-registry", ["registry-taskband-summary"]),
+          cols: [
+            "details.value_name",
+            "details.decode_status",
+            "details.end_status",
+            "details.frames_seen",
+            "details.pins_decoded",
+            "details.undecoded_frames",
+          ],
         },
       },
       {

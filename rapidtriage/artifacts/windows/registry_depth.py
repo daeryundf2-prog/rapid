@@ -50,7 +50,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ...core.models import ArtifactRecord
-from .taskband import taskband_entries
+from .taskband import decode_taskband_value
 
 DEPTH_PARSER = "windows-registry-depth"
 DEPTH_PARSER_VERSION = "registry-depth-v1"
@@ -970,21 +970,26 @@ def taskband_rows(source: KeySource) -> Iterable[DepthRow]:
     for value_name, value in key.values.items():
         if value_name.casefold() not in {"favorites", "favoritesresolve"} or not isinstance(value, bytes):
             continue
-        for fields in taskband_entries(value_name, value):
+        common = {"user": source.user, "value_name": value_name, "key_last_written_filetime": key.last_written_filetime}
+        pins, coverage = decode_taskband_value(value_name, value)
+        for fields in pins:
             yield DepthRow(
                 "registry-taskband-pin",
                 "작업 표시줄 고정 항목",
                 key,
-                {
-                    "user": source.user,
-                    "value_name": value_name,
-                    "key_last_written_filetime": key.last_written_filetime,
-                    **fields,
-                },
+                {**common, **fields},
                 timestamp=key.last_written,
                 timestamp_label="last_written" if key.last_written else "",
                 preview=str(fields["application"]),
             )
+        # Every walk is disclosed: undecoded frames, a lost boundary or a cap leave fewer pins than entries.
+        yield DepthRow(
+            "registry-taskband-summary",
+            "작업 표시줄 고정 항목 해석 요약",
+            key,
+            {**common, **coverage},
+            preview=f"{value_name}: {coverage['pins_decoded']}/{coverage['frames_seen']} ({coverage['end_status']})",
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -5,7 +5,9 @@ from __future__ import annotations
 import datetime as dt
 import errno
 import hashlib
+import ipaddress
 import os
+import re
 import struct
 from collections.abc import Iterator
 from pathlib import Path
@@ -23,10 +25,9 @@ MAX_LOGIN_ROWS = 10_000
 MAX_PASSWD_BYTES = 4 * 1024 * 1024
 TYPES = ("EMPTY", "RUN_LVL", "BOOT_TIME", "NEW_TIME", "OLD_TIME",
          "INIT_PROCESS", "LOGIN_PROCESS", "USER_PROCESS", "DEAD_PROCESS", "ACCOUNTING")
-LOG_PATHS = (
-    "run/utmp", "var/run/utmp",
-    "var/log/wtmp", "var/log/wtmp.1", "var/log/btmp", "var/log/btmp.1", "var/log/lastlog",
-)
+# Rotations: numbered (logrotate default) and dated (dateext). Compressed copies are disclosed, not read.
+ROTATED_LOG = re.compile(r"(wtmp|btmp)(\.[0-9]{1,4}|-[0-9]{8})?(\.(?:gz|bz2|xz|zst|lz4|Z))?")
+MAX_ROTATED_FILES = 64
 
 
 def _passwd_names(root: Path) -> dict[int, str]:
@@ -85,13 +86,24 @@ def _timestamp(seconds: int, usec: int) -> str:
     return (epoch + dt.timedelta(seconds=seconds, microseconds=usec)).isoformat()
 
 
+def _address(raw: bytes) -> str:
+    """``ut_addr_v6``: IPv4 in the first word (network order) and zeros after it, or IPv6."""
+    if not any(raw):
+        return ""
+    if not any(raw[4:]):
+        return str(ipaddress.IPv4Address(raw[:4]))
+    return str(ipaddress.IPv6Address(raw))
+
+
 def _utmp(data: bytes) -> dict[str, object] | None:
     kind, pid = struct.unpack_from("<h2xi", data)
-    session, seconds, usec = struct.unpack_from("<iii", data, 336)
+    termination, exit_code, session, seconds, usec = struct.unpack_from("<hhiii", data, 332)
     if not 0 < kind < len(TYPES) or not 0 <= usec < 1_000_000:
         return None
     return {
         "user": _string(data[44:76]), "tty": _string(data[8:40]), "host": _string(data[76:332]),
+        "id": _string(data[40:44]), "address": _address(data[348:364]),
+        "exit_termination": termination, "exit_status": exit_code,
         "uid": None, "pid": pid, "type": kind, "type_name": TYPES[kind], "session": session,
         "timestamp_sec": seconds, "timestamp_usec": usec, "timestamp": _timestamp(seconds, usec),
     }
@@ -103,6 +115,7 @@ def _lastlog(data: bytes, uid: int, names: dict[int, str]) -> dict[str, object] 
         return None
     return {
         "user": names.get(uid, ""), "tty": _string(data[4:36]), "host": _string(data[36:292]),
+        "id": "", "address": "", "exit_termination": None, "exit_status": None,
         "uid": uid, "pid": None, "type": None, "type_name": "", "session": None,
         "timestamp_sec": seconds, "timestamp_usec": None, "timestamp": _timestamp(seconds, 0),
     }
@@ -212,15 +225,53 @@ def _parse_file(path: Path, kind: str, names: dict[int, str]) -> Iterator[Artifa
     })
 
 
+def _unread_summary(path: Path, kind: str, layout: str, status: str) -> ArtifactRecord:
+    try:
+        size = path.stat().st_size
+    except OSError:
+        size = 0
+    return ArtifactRecord(PROVIDER, SUMMARY, str(path), True, {
+        "parser": "linux-login-accounting", "parser_version": "1", "reportability": "triage",
+        "log_kind": kind, "source_path": str(path), "layout": layout,
+        "coverage_status": status, "file_size": size, "records_examined": 0,
+        "rows_emitted": 0, "damaged_records": 0, "truncated_records": 0, "trailing_bytes": 0,
+        "capped": status == "skipped-file-cap", "row_cap": MAX_LOGIN_ROWS, "scan_record_cap": MAX_RECORDS_READ,
+    })
+
+
+def _log_candidates(root: Path) -> Iterator[tuple[Path, str, str]]:
+    """``(path, kind, status)``: an empty status is read; any other names why the file is only disclosed."""
+    yield root / "run/utmp", "utmp", ""
+    yield root / "var/run/utmp", "utmp", ""
+    logs = root / "var/log"
+    try:
+        with os.scandir(logs) as entries:
+            matches = [match for entry in entries if (match := ROTATED_LOG.fullmatch(entry.name))]
+    except OSError:
+        matches = []
+    files = {"wtmp": 0, "btmp": 0}
+    for match in sorted(matches, key=lambda match: (match[1] != "wtmp", len(match[0]), match[0])):
+        kind = match[1]
+        files[kind] += 1
+        if files[kind] > MAX_ROTATED_FILES + 1:  # the live file plus its rotations
+            yield logs / match[0], kind, "skipped-file-cap"
+        elif match[3]:
+            yield logs / match[0], kind, "unsupported-compression"
+        else:
+            yield logs / match[0], kind, ""
+    yield logs / "lastlog", "lastlog", ""
+
+
 def collect_login_accounting(root: Path) -> Iterator[ArtifactRecord]:
     seen: set[Path] = set()
-    for relative in LOG_PATHS:
-        candidate = root / relative
+    for candidate, kind, status in _log_candidates(root):
         if not path_is_within(candidate, root) or not candidate.is_file():
             continue
         path = candidate.resolve()
         if path in seen:  # commonly var/run is a symlink to run
             continue
         seen.add(path)
-        kind = candidate.name.split(".")[0]
-        yield from _parse_file(path, kind, _passwd_names(root) if kind == "lastlog" else {})
+        if status:
+            yield _unread_summary(path, kind, "compressed" if status == "unsupported-compression" else "", status)
+        else:
+            yield from _parse_file(path, kind, _passwd_names(root) if kind == "lastlog" else {})

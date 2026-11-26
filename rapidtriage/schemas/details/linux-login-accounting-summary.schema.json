@@ -7,7 +7,7 @@
     "source_path": { "type": "string" },
     "log_kind": { "enum": ["utmp", "wtmp", "btmp", "lastlog"] },
     "layout": { "type": "string" },
-    "coverage_status": { "type": "string" },
+    "coverage_status": { "enum": ["parsed", "partial", "unknown-layout", "read-error", "unsupported-compression", "skipped-file-cap"] },
     "rows_emitted": { "type": "integer", "minimum": 0 },
     "records_examined": { "type": "integer", "minimum": 0 },
     "damaged_records": { "type": "integer", "minimum": 0 },

@@ -11,9 +11,20 @@ from rapidtriage.core.artifact_store import artifact_record_with_fields
 from rapidtriage.core.artifacts import run_artifact_collection
 from rapidtriage.core.run.profiles import RUN_PROFILES
 from rapidtriage.core.schema_validation import load_schema, validate
-from rapidtriage.core.timeline import TimelineBuilder, TimelineStats, extract_artifact_events
+from rapidtriage.core.timeline import (
+    TimelineBuilder,
+    TimelineStats,
+    extract_artifact_events,
+)
 from tests.test_linux_login_accounting import lastlog, utmp
-from tests.test_parser_quality_registry import REG_BINARY, REG_DWORD, HiveWriter, Key, dword, write_hive
+from tests.test_parser_quality_registry import (
+    REG_BINARY,
+    REG_DWORD,
+    HiveWriter,
+    Key,
+    dword,
+    write_hive,
+)
 from tests.test_taskband_featureusage import TICKS, make_export, taskband_values
 
 
@@ -50,6 +61,7 @@ class TaskbarLoginIntegrationTests(unittest.TestCase):
             builder = TimelineBuilder(stats)
             schemas = {
                 "registry-taskband-pin": "registry-taskband-pin",
+                "registry-taskband-summary": "registry-taskband-summary",
                 "execution-feature-usage": "execution-feature-usage",
                 "linux-login-accounting-summary": "linux-login-accounting-summary",
                 **{f"linux-{name}": "linux-login-accounting" for name in ("utmp", "wtmp", "btmp", "lastlog")},
@@ -72,7 +84,7 @@ class TaskbarLoginIntegrationTests(unittest.TestCase):
                 builder.extend(extract_artifact_events(payload, output / f"{kind}.json", stats=stats))
 
             self.assertEqual(row_counts, {
-                "registry-taskband-pin": 8, "execution-feature-usage": 7,
+                "registry-taskband-pin": 8, "registry-taskband-summary": 4, "execution-feature-usage": 7,
                 "linux-utmp": 1, "linux-wtmp": 2, "linux-btmp": 1, "linux-lastlog": 1,
                 "linux-login-accounting-summary": 4,
             })

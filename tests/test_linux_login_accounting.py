@@ -11,14 +11,17 @@ from rapidtriage.artifacts.linux import LinuxSystemArtifactsProvider
 from rapidtriage.artifacts.linux_login import SUMMARY
 
 
-def utmp(kind=7, usec=123456):
+def utmp(kind=7, usec=123456, address=bytes([192, 0, 2, 7]) + bytes(12)):
     data = bytearray(384)
     struct.pack_into("<h", data, 0, kind)
     struct.pack_into("<i", data, 4, 321)
     data[8:13] = b"pts/2"
+    data[40:42] = b"ts"
     data[44:50] = "시험".encode()
     data[76:87] = b"example.org"
+    struct.pack_into("<hh", data, 332, 15, 2)
     struct.pack_into("<iii", data, 336, 99, 1_700_000_000, usec)
+    data[348:364] = address
     return bytes(data)
 
 
@@ -61,6 +64,8 @@ class LinuxLoginAccountingTests(unittest.TestCase):
         record = records[1]
         self.assertEqual((record["user"], record["tty"], record["host"]), ("시험", "pts/2", "example.org"))
         self.assertEqual((record["pid"], record["type"], record["session"]), (321, 8, 99))
+        self.assertEqual((record["id"], record["address"]), ("ts", "192.0.2.7"))
+        self.assertEqual((record["exit_termination"], record["exit_status"]), (15, 2))
         self.assertEqual((record["timestamp_sec"], record["timestamp_usec"]), (1_700_000_000, 123456))
         self.assertEqual(record["timestamp"], "2023-11-14T22:13:20.123456+00:00")
         self.assertEqual(record["length"], 384)
@@ -155,3 +160,27 @@ class LinuxLoginAccountingTests(unittest.TestCase):
         (evidence / "var/log/wtmp").symlink_to(other / "wtmp")
         self.assertEqual([r.artifact_type for r in LinuxSystemArtifactsProvider().collect(evidence)],
                          ["linux-utmp", SUMMARY])
+
+    def test_ipv6_and_empty_addresses(self):
+        ipv6 = bytes.fromhex("20010db8000000000000000000000001")
+        (self.logs / "wtmp").write_bytes(utmp(address=ipv6) + utmp(address=bytes(16)))
+        records = [r.details for r in self.rows() if r.artifact_type == "linux-wtmp"]
+        self.assertEqual([r["address"] for r in records], ["2001:db8::1", ""])
+
+    def test_rotations_are_read_and_compressed_ones_disclosed(self):
+        for name in ("wtmp", "wtmp.1", "wtmp-20261101", "btmp-20261101"):
+            (self.logs / name).write_bytes(utmp())
+        (self.logs / "wtmp.2.gz").write_bytes(b"\x1f\x8b compressed")
+        (self.logs / "wtmpx").write_bytes(utmp())  # not a login accounting name
+        rows = self.rows()
+        read = [Path(r.details["source_path"]).name for r in rows if r.artifact_type in {"linux-wtmp", "linux-btmp"}]
+        self.assertEqual(read, ["wtmp", "wtmp.1", "wtmp-20261101", "btmp-20261101"])
+        compressed, = (r.details for r in rows if r.details["source_path"].endswith(".gz"))
+        self.assertEqual((compressed["coverage_status"], compressed["layout"], compressed["log_kind"]),
+                         ("unsupported-compression", "compressed", "wtmp"))
+        with patch("rapidtriage.artifacts.linux_login.MAX_ROTATED_FILES", 1):
+            statuses = {Path(r.details["source_path"]).name: r.details["coverage_status"]
+                        for r in self.rows() if r.artifact_type == SUMMARY}
+        self.assertEqual(statuses["wtmp-20261101"], "skipped-file-cap")
+        self.assertEqual(statuses["wtmp.2.gz"], "skipped-file-cap")
+        self.assertEqual(statuses["wtmp.1"], "parsed")

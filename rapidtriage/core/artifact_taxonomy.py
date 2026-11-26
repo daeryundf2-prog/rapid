@@ -64,6 +64,7 @@ KNOWN_DYNAMIC_ARTIFACT_TYPES = {
     "execution-pca",
     "execution-feature-usage",
     "registry-taskband-pin",
+    "registry-taskband-summary",
     "linux-utmp",
     "linux-wtmp",
     "linux-btmp",

@@ -17,6 +17,7 @@ describe("로그인 및 작업 표시줄 기록", () => {
       ["linux-system", "linux-lastlog"],
       ["linux-system", "linux-login-accounting-summary"],
       ["windows-registry", "registry-taskband-pin"],
+      ["windows-registry", "registry-taskband-summary"],
       ["windows-registry", "execution-feature-usage"],
     ] as const) {
       const matches = nodes.filter((node) => node.target.kind === kind && node.target.types?.includes(type));
