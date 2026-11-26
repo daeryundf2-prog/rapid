@@ -59,7 +59,11 @@ pub(crate) fn push_json_float(out: &mut String, number: f64) {
     if number.is_nan() {
         out.push_str("NaN");
     } else if number.is_infinite() {
-        out.push_str(if number > 0.0 { "Infinity" } else { "-Infinity" });
+        out.push_str(if number > 0.0 {
+            "Infinity"
+        } else {
+            "-Infinity"
+        });
     } else {
         out.push_str(&python_float_repr(number));
     }
@@ -183,7 +187,10 @@ pub(crate) fn encode_json(
 /// `json.dumps(row, ensure_ascii=False, separators=(",", ":"), default=default)`,
 /// or `None` when the Python encoder must run (same text or same exception).
 #[pyfunction]
-fn dump_json_row<'py>(row: &Bound<'py, PyAny>, default: &Bound<'py, PyAny>) -> Option<Bound<'py, PyString>> {
+fn dump_json_row<'py>(
+    row: &Bound<'py, PyAny>,
+    default: &Bound<'py, PyAny>,
+) -> Option<Bound<'py, PyString>> {
     let mut out = String::with_capacity(4096);
     encode_json(&mut out, row, Some(default), &COMPACT, 0).ok()?;
     Some(PyString::new_bound(row.py(), &out))

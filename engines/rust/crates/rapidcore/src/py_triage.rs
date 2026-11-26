@@ -26,12 +26,19 @@ fn is_removed_control(byte: u8) -> bool {
 }
 
 /// `str(value or "")`.
-fn text_or_empty<'py>(py: Python<'py>, value: Option<Bound<'py, PyAny>>) -> Kernel<Bound<'py, PyString>> {
+fn text_or_empty<'py>(
+    py: Python<'py>,
+    value: Option<Bound<'py, PyAny>>,
+) -> Kernel<Bound<'py, PyString>> {
     text_or(py, value, "")
 }
 
 /// `str(value or default)`.
-fn text_or<'py>(py: Python<'py>, value: Option<Bound<'py, PyAny>>, default: &str) -> Kernel<Bound<'py, PyString>> {
+fn text_or<'py>(
+    py: Python<'py>,
+    value: Option<Bound<'py, PyAny>>,
+    default: &str,
+) -> Kernel<Bound<'py, PyString>> {
     match value {
         Some(value) if value.is_truthy()? => {
             if kind(&value) == Kind::Str {
@@ -53,15 +60,23 @@ fn str_len(text: &Bound<'_, PyString>) -> Kernel<usize> {
 fn str_prefix<'py>(text: &Bound<'py, PyString>, limit: usize) -> Kernel<Bound<'py, PyString>> {
     let end = ffi::Py_ssize_t::try_from(limit).map_err(|_| Fallback)?;
     // SAFETY: `text` is a live `str`; PyUnicode_Substring returns a new reference or NULL with an exception set.
-    let slice = unsafe { Bound::from_owned_ptr_or_err(text.py(), ffi::PyUnicode_Substring(text.as_ptr(), 0, end))? };
+    let slice = unsafe {
+        Bound::from_owned_ptr_or_err(text.py(), ffi::PyUnicode_Substring(text.as_ptr(), 0, end))?
+    };
     slice.downcast_into::<PyString>().map_err(|_| Fallback)
 }
 
 /// `_bounded_text(value, limit)` on `text = str(value or "")`.
-fn bounded_text<'py>(text: Bound<'py, PyString>, limit: usize) -> Kernel<(Bound<'py, PyString>, bool)> {
+fn bounded_text<'py>(
+    text: Bound<'py, PyString>,
+    limit: usize,
+) -> Kernel<(Bound<'py, PyString>, bool)> {
     let raw = text.to_str()?;
     let text = if raw.bytes().any(is_removed_control) {
-        let kept: String = raw.chars().filter(|character| !(character.is_ascii() && is_removed_control(*character as u8))).collect();
+        let kept: String = raw
+            .chars()
+            .filter(|character| !(character.is_ascii() && is_removed_control(*character as u8)))
+            .collect();
         PyString::new_bound(text.py(), &kept)
     } else {
         text
@@ -94,7 +109,10 @@ fn as_mapping<'py>(value: Option<Bound<'py, PyAny>>) -> Kernel<Option<Bound<'py,
     }
 }
 
-fn mapping_get<'py>(mapping: &Option<Bound<'py, PyDict>>, key: &str) -> Kernel<Option<Bound<'py, PyAny>>> {
+fn mapping_get<'py>(
+    mapping: &Option<Bound<'py, PyDict>>,
+    key: &str,
+) -> Kernel<Option<Bound<'py, PyAny>>> {
     match mapping {
         Some(mapping) => Ok(mapping.get_item(key)?),
         None => Ok(None),
@@ -118,7 +136,12 @@ fn sequence_items<'py>(value: Option<Bound<'py, PyAny>>) -> Kernel<Vec<Bound<'py
 
 /// `slim[key] = items` then `cap_list_field(slim, key, limit)`: the list keeps
 /// its position, the markers follow it.
-fn cap_list(slim: &Bound<'_, PyDict>, key: &str, items: Vec<Bound<'_, PyAny>>, limit: usize) -> Kernel<()> {
+fn cap_list(
+    slim: &Bound<'_, PyDict>,
+    key: &str,
+    items: Vec<Bound<'_, PyAny>>,
+    limit: usize,
+) -> Kernel<()> {
     let py = slim.py();
     let total = items.len();
     slim.set_item(key, PyList::new_bound(py, &items[..total.min(limit)]))?;
@@ -205,7 +228,10 @@ impl EventlogTriageProjector {
                 slim.set_item("rule", rule.copy()?)?;
             }
         }
-        let (message, cut) = bounded_text(text_or_empty(py, details.get_item("event_message")?)?, self.text_max_chars)?;
+        let (message, cut) = bounded_text(
+            text_or_empty(py, details.get_item("event_message")?)?,
+            self.text_max_chars,
+        )?;
         if str_len(&message)? > 0 {
             slim.set_item("event_message", message)?;
             if cut {
@@ -222,11 +248,19 @@ impl EventlogTriageProjector {
                         };
                         let entry = PyDict::new_bound(py);
                         entry.set_item("name", text_or_empty(py, item.get_item("name")?)?)?;
-                        let (value, _) = bounded_text(text_or_empty(py, item.get_item("value")?)?, self.text_max_chars)?;
+                        let (value, _) = bounded_text(
+                            text_or_empty(py, item.get_item("value")?)?,
+                            self.text_max_chars,
+                        )?;
                         entry.set_item("value", value)?;
                         projected.push(entry.into_any());
                     }
-                    cap_list(&slim, "event_data_items", projected, self.event_data_max_items)?;
+                    cap_list(
+                        &slim,
+                        "event_data_items",
+                        projected,
+                        self.event_data_max_items,
+                    )?;
                 }
                 Kind::Other if items.is_instance_of::<PyList>() => return Err(Fallback),
                 _ => {}
@@ -236,7 +270,11 @@ impl EventlogTriageProjector {
             Some(parser) => parser.eq(self.native_parser.bind(py))?,
             None => false,
         };
-        let event_data = as_mapping(details.get_item(if is_native { "binxml_event_data_fields" } else { "data" })?)?;
+        let event_data = as_mapping(details.get_item(if is_native {
+            "binxml_event_data_fields"
+        } else {
+            "data"
+        })?)?;
         match &event_data {
             Some(data) if !data.is_empty() => self.bounded_event_data(&slim, data)?,
             _ if is_native => {
@@ -260,7 +298,12 @@ impl EventlogTriageProjector {
                     for value in values {
                         bounded.push(bounded_text(value, self.text_max_chars)?.0.into_any());
                     }
-                    cap_list(&slim, "event_data_values", bounded, self.event_data_max_items)?;
+                    cap_list(
+                        &slim,
+                        "event_data_values",
+                        bounded,
+                        self.event_data_max_items,
+                    )?;
                 } else {
                     let mut strings = Vec::new();
                     for item in sequence_items(details.get_item("extracted_strings")?)? {
@@ -282,7 +325,10 @@ impl EventlogTriageProjector {
         let projection = PyDict::new_bound(py);
         for (key, value) in self.record_projection.bind(py).iter() {
             if kind(&value) == Kind::List {
-                projection.set_item(key, PyList::new_bound(py, value.downcast::<PyList>()?.iter()))?;
+                projection.set_item(
+                    key,
+                    PyList::new_bound(py, value.downcast::<PyList>()?.iter()),
+                )?;
             } else {
                 projection.set_item(key, value)?;
             }
@@ -314,14 +360,21 @@ impl EventlogTriageProjector {
                 let lowered = if key_str.is_ascii() {
                     key_str.to_ascii_lowercase()
                 } else {
-                    key_text.call_method0("lower")?.downcast::<PyString>()?.to_str()?.to_owned()
+                    key_text
+                        .call_method0("lower")?
+                        .downcast::<PyString>()?
+                        .to_str()?
+                        .to_owned()
                 };
                 let limit = if self.payload_event_data_keys.contains(&lowered) {
                     self.payload_max_chars
                 } else {
                     self.text_max_chars
                 };
-                let (text, cut) = bounded_text(value.downcast_into::<PyString>().map_err(|_| Fallback)?, limit)?;
+                let (text, cut) = bounded_text(
+                    value.downcast_into::<PyString>().map_err(|_| Fallback)?,
+                    limit,
+                )?;
                 if cut {
                     truncated = true;
                     cut_fields.push(key_text.clone());
@@ -337,7 +390,10 @@ impl EventlogTriageProjector {
             slim.set_item("event_data_truncated", true)?;
         }
         if !cut_fields.is_empty() {
-            slim.set_item("event_data_truncated_fields", PyList::new_bound(py, cut_fields))?;
+            slim.set_item(
+                "event_data_truncated_fields",
+                PyList::new_bound(py, cut_fields),
+            )?;
         }
         Ok(())
     }
@@ -374,21 +430,42 @@ impl EventlogTriageProjector {
         };
         slim.set_item(
             "evtx_integrity_status",
-            if trailing_valid { "trailing-size-valid" } else { "trailing-size-unverified" },
+            if trailing_valid {
+                "trailing-size-valid"
+            } else {
+                "trailing-size-unverified"
+            },
         )?;
-        slim.set_item("evtx_sequence_status", text_or(py, mapping_get(&sequence, "status")?, "unknown")?)?;
+        slim.set_item(
+            "evtx_sequence_status",
+            text_or(py, mapping_get(&sequence, "status")?, "unknown")?,
+        )?;
         slim.set_item(
             "evtx_channel_hint_source",
-            text_or(py, mapping_get(&indicators, "channel_hint_source")?, "unknown")?,
+            text_or(
+                py,
+                mapping_get(&indicators, "channel_hint_source")?,
+                "unknown",
+            )?,
         )?;
         slim.set_item(
             "evtx_chunk_boundary_status",
-            text_or(py, mapping_get(&chunk_context, "chunk_boundary_status")?, "unknown")?,
+            text_or(
+                py,
+                mapping_get(&chunk_context, "chunk_boundary_status")?,
+                "unknown",
+            )?,
         )?;
-        slim.set_item("evtx_report_grade_status", text_or(py, mapping_get(&report_grade, "status")?, "unknown")?)?;
+        slim.set_item(
+            "evtx_report_grade_status",
+            text_or(py, mapping_get(&report_grade, "status")?, "unknown")?,
+        )?;
         if let Some(offset) = chunk_offset {
             if offset >= self.file_header_size {
-                slim.set_item("evtx_chunk_index", (offset - self.file_header_size) / self.chunk_size)?;
+                slim.set_item(
+                    "evtx_chunk_index",
+                    (offset - self.file_header_size) / self.chunk_size,
+                )?;
             }
         }
         Ok(())
@@ -434,7 +511,9 @@ impl EventlogTriageProjector {
         int_text: PyObject,
     ) -> PyResult<Self> {
         if chunk_size <= 0 {
-            return Err(pyo3::exceptions::PyValueError::new_err("chunk_size must be positive"));
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "chunk_size must be positive",
+            ));
         }
         Ok(Self {
             identity_keys: identity_keys.into_iter().map(Bound::unbind).collect(),

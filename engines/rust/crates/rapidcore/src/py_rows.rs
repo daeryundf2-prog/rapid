@@ -125,7 +125,9 @@ fn nested_same(value: &Bound<'_, PyAny>, template: &Bound<'_, PyAny>, depth: u32
         return Err(Fallback);
     }
     let (value_kind, template_kind) = (kind(value), kind(template));
-    if matches!(value_kind, Kind::Other | Kind::Tuple) || matches!(template_kind, Kind::Other | Kind::Tuple) {
+    if matches!(value_kind, Kind::Other | Kind::Tuple)
+        || matches!(template_kind, Kind::Other | Kind::Tuple)
+    {
         return Err(Fallback);
     }
     if value_kind != template_kind {
@@ -189,7 +191,11 @@ fn all_dicts(list: &Bound<'_, PyList>) -> Kernel<bool> {
 
 /// `artifact_profiles._common(left, right)`: `None` when nothing is shared;
 /// the same `left` object when nothing changed.
-fn common<'py>(left: &Bound<'py, PyAny>, right: &Bound<'py, PyAny>, depth: u32) -> Kernel<Option<Bound<'py, PyAny>>> {
+fn common<'py>(
+    left: &Bound<'py, PyAny>,
+    right: &Bound<'py, PyAny>,
+    depth: u32,
+) -> Kernel<Option<Bound<'py, PyAny>>> {
     if depth >= MAX_DEPTH {
         return Err(Fallback);
     }
@@ -222,7 +228,11 @@ fn common<'py>(left: &Bound<'py, PyAny>, right: &Bound<'py, PyAny>, depth: u32) 
     }
     if left_kind == Kind::List && right_kind == Kind::List {
         let (left_list, right_list) = (left.downcast::<PyList>()?, right.downcast::<PyList>()?);
-        if left_list.is_empty() || left_list.len() != right_list.len() || !all_dicts(left_list)? || !all_dicts(right_list)? {
+        if left_list.is_empty()
+            || left_list.len() != right_list.len()
+            || !all_dicts(left_list)?
+            || !all_dicts(right_list)?
+        {
             return Ok(None);
         }
         let mut items: Vec<Bound<'py, PyAny>> = Vec::with_capacity(left_list.len());
@@ -253,7 +263,11 @@ fn common<'py>(left: &Bound<'py, PyAny>, right: &Bound<'py, PyAny>, depth: u32) 
 }
 
 /// `artifact_profiles._residue(value, template)`: `None` stands for `_MISSING`.
-fn residue<'py>(value: &Bound<'py, PyAny>, template: &Bound<'py, PyAny>, depth: u32) -> Kernel<Option<Bound<'py, PyAny>>> {
+fn residue<'py>(
+    value: &Bound<'py, PyAny>,
+    template: &Bound<'py, PyAny>,
+    depth: u32,
+) -> Kernel<Option<Bound<'py, PyAny>>> {
     if depth >= MAX_DEPTH {
         return Err(Fallback);
     }
@@ -266,7 +280,8 @@ fn residue<'py>(value: &Bound<'py, PyAny>, template: &Bound<'py, PyAny>, depth: 
     }
     let py = value.py();
     if value_kind == Kind::Dict && template_kind == Kind::Dict {
-        let (value_dict, template_dict) = (value.downcast::<PyDict>()?, template.downcast::<PyDict>()?);
+        let (value_dict, template_dict) =
+            (value.downcast::<PyDict>()?, template.downcast::<PyDict>()?);
         let out = PyDict::new_bound(py);
         for (key, item) in value_dict.iter() {
             match template_dict.get_item(&key)? {
@@ -281,7 +296,8 @@ fn residue<'py>(value: &Bound<'py, PyAny>, template: &Bound<'py, PyAny>, depth: 
         return Ok((!out.is_empty()).then(|| out.into_any()));
     }
     if value_kind == Kind::List && template_kind == Kind::List {
-        let (value_list, template_list) = (value.downcast::<PyList>()?, template.downcast::<PyList>()?);
+        let (value_list, template_list) =
+            (value.downcast::<PyList>()?, template.downcast::<PyList>()?);
         if value_list.len() == template_list.len() {
             let mut items: Vec<Option<Bound<'py, PyAny>>> = Vec::with_capacity(value_list.len());
             for (item, part) in value_list.iter().zip(template_list.iter()) {
@@ -305,11 +321,19 @@ fn residue<'py>(value: &Bound<'py, PyAny>, template: &Bound<'py, PyAny>, depth: 
 /// returns True, or returns False without touching `templates` when the
 /// Python implementation must run.
 #[pyfunction]
-fn profile_observe_details(templates: &Bound<'_, PyDict>, details: &Bound<'_, PyAny>, missing: &Bound<'_, PyAny>) -> bool {
+fn profile_observe_details(
+    templates: &Bound<'_, PyDict>,
+    details: &Bound<'_, PyAny>,
+    missing: &Bound<'_, PyAny>,
+) -> bool {
     observe_details(templates, details, missing).is_ok()
 }
 
-fn observe_details(templates: &Bound<'_, PyDict>, details: &Bound<'_, PyAny>, missing: &Bound<'_, PyAny>) -> Kernel<()> {
+fn observe_details(
+    templates: &Bound<'_, PyDict>,
+    details: &Bound<'_, PyAny>,
+    missing: &Bound<'_, PyAny>,
+) -> Kernel<()> {
     if kind(details) != Kind::Dict || !templates.is_exact_instance_of::<PyDict>() {
         return Err(Fallback);
     }
@@ -339,7 +363,10 @@ fn observe_details(templates: &Bound<'_, PyDict>, details: &Bound<'_, PyAny>, mi
 /// `_common(left, right)` -> `(hoisted, template)`, or `None` when the Python
 /// implementation must run.
 #[pyfunction]
-fn profile_common<'py>(left: &Bound<'py, PyAny>, right: &Bound<'py, PyAny>) -> Option<(bool, PyObject)> {
+fn profile_common<'py>(
+    left: &Bound<'py, PyAny>,
+    right: &Bound<'py, PyAny>,
+) -> Option<(bool, PyObject)> {
     let py = left.py();
     match common(left, right, 0) {
         Ok(Some(template)) => Some((true, template.unbind())),
@@ -368,7 +395,10 @@ fn strip_level(row: &Bound<'_, PyAny>, level: &Bound<'_, PyAny>) -> Kernel<()> {
         match (kind(details), kind(templates)) {
             (Kind::Other, _) | (_, Kind::Other) => return Err(Fallback),
             (Kind::Dict, Kind::Dict) => {
-                let (details, templates) = (details.downcast::<PyDict>()?, templates.downcast::<PyDict>()?);
+                let (details, templates) = (
+                    details.downcast::<PyDict>()?,
+                    templates.downcast::<PyDict>()?,
+                );
                 for (key, template) in templates.iter() {
                     if let Some(value) = details.get_item(&key)? {
                         detail_updates.push((key, residue(&value, &template, 0)?));
@@ -386,7 +416,8 @@ fn strip_level(row: &Bound<'_, PyAny>, level: &Bound<'_, PyAny>) -> Kernel<()> {
                     Kind::Other => return Err(Fallback),
                     Kind::Dict => {
                         envelope_update = Some(
-                            residue(&envelope, &envelope_template, 0)?.unwrap_or_else(|| PyDict::new_bound(py).into_any()),
+                            residue(&envelope, &envelope_template, 0)?
+                                .unwrap_or_else(|| PyDict::new_bound(py).into_any()),
                         );
                     }
                     _ => {}
@@ -438,11 +469,17 @@ fn merge<'py>(
     }
     let py = template.py();
     if template_kind == Kind::Dict && residue_kind == Kind::Dict {
-        let (template, residue) = (template.downcast::<PyDict>()?, residue.downcast::<PyDict>()?);
+        let (template, residue) = (
+            template.downcast::<PyDict>()?,
+            residue.downcast::<PyDict>()?,
+        );
         let merged = PyDict::new_bound(py);
         for (key, value) in template.iter() {
             match residue.get_item(&key)? {
-                Some(part) => merged.set_item(&key, merge(&value, &part, missing, python_merge, depth + 1)?)?,
+                Some(part) => merged.set_item(
+                    &key,
+                    merge(&value, &part, missing, python_merge, depth + 1)?,
+                )?,
                 None => merged.set_item(&key, value)?,
             }
         }
@@ -454,7 +491,10 @@ fn merge<'py>(
         return Ok(merged.into_any());
     }
     if template_kind == Kind::List && residue_kind == Kind::List {
-        let (template, residue) = (template.downcast::<PyList>()?, residue.downcast::<PyList>()?);
+        let (template, residue) = (
+            template.downcast::<PyList>()?,
+            residue.downcast::<PyList>()?,
+        );
         if template.len() == residue.len() {
             let mut items = Vec::with_capacity(template.len());
             for (item, part) in template.iter().zip(residue.iter()) {
