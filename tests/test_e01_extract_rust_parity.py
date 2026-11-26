@@ -335,18 +335,16 @@ class RustEngineParityTests(EngineParityBase):
         self.assertGreater(result["stats"]["files"], 0)
 
 
-def _folds_names(directory: Path) -> bool:
-    """Whether the output drive opens one file for two names of the fixture: different case
-    (macOS, Windows) or different Unicode normalization (APFS, also when case-sensitive)."""
-    for written, other in (("case-probe", "CASE-PROBE"), ("caf\u00e9-probe", "cafe\u0301-probe")):
-        probe = directory / written
-        probe.write_bytes(b"")
-        try:
-            if (directory / other).exists():
-                return True
-        finally:
-            probe.unlink()
-    return False
+def _folds_normalization(directory: Path) -> bool:
+    """Whether the output drive opens one file for the composed and decomposed spelling of a name
+    (APFS, case-sensitive or not; not NTFS or ext4). The fixture's composed/decomposed records
+    are all reached by the walk; its case twins are not (see ``colliding_sources``)."""
+    probe = directory / "caf\u00e9-probe"
+    probe.write_bytes(b"")
+    try:
+        return (directory / "cafe\u0301-probe").exists()
+    finally:
+        probe.unlink()
 
 
 def colliding_sources(builder: ntfs_volume_gen.VolumeBuilder) -> dict[int, tuple[str, bytes, bool]]:
@@ -449,7 +447,7 @@ class OutputNameCollisionTests(EngineParityBase):
                 self.fail(missing)
             self.skipTest(missing)
         python = self.run_engine("python")
-        folds = _folds_names(Path(self.temp.name))
+        folds = _folds_normalization(Path(self.temp.name))
         for threads in ("1", "4", "8"):
             with self.subTest(threads=threads):
                 rust = self.run_engine("rust", extra_env={e01_extract_engine.E01_EXTRACT_THREADS_ENV: threads})
