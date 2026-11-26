@@ -57,7 +57,27 @@
   mismatches are flagged. Undecodable fields and damaged structures carry
   diagnostics. Both collectors are selectable in run plans and contribute
   events to the timeline.
-
+- Explorer taskbar records from NTUSER hives and `.reg` exports, on both
+  registry engines: `execution-feature-usage` rows now carry the user, the
+  value name and the raw key LastWrite FILETIME, and report a count only for an
+  integer value within the DWORD range; `registry-taskband-pin` rows resolve
+  Favorites item ID lists and FavoritesResolve Shell Links;
+  `registry-taskband-summary` discloses each value's walk (undecoded frames,
+  why it stopped, caps).
+  **Output change:** a registry row whose own timestamp restates its key-scoped
+  LastWrite now joins the single per-key timeline event instead of adding one
+  event per value (affects `registry-known-dll`, `registry-network-share`,
+  registry `execution-pca`, `execution-feature-usage`, `registry-taskband-pin`,
+  `ssh-known-host`, `desktop-wallpaper` and enabled `startup-item` rows;
+  artifact rows are unchanged). Every key-scoped timeline event now lists the
+  rows it stands for in `details.key_rows` (artifact type, output, row index,
+  value; up to 1,000, then `key_rows_truncated`) with the full
+  `details.key_row_count`.
+- Linux login accounting in `linux-system`: utmp, wtmp, btmp (live and
+  uncompressed rotations) and sparse lastlog in the 384/292-byte glibc x86
+  layouts, with per-file `linux-login-accounting-summary` rows for damage,
+  truncation, caps, unknown layouts and compressed rotations. See
+  `docs/rapidtriage-parser-coverage.md`.
 - Opt-in Rust EVTX chunk decoder (`rapidcore_native.EvtxChunkDecoder`),
   selected with `RAPIDTRIAGE_EVTX_ENGINE=rust` or
   `--eventlog-evtx-engine rust`. The default stays Python. Rows are identical to

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Linux login accounting file summary",
+  "type": "object",
+  "required": ["source_path", "log_kind", "layout", "coverage_status", "rows_emitted", "records_examined", "damaged_records", "truncated_records", "trailing_bytes", "capped"],
+  "properties": {
+    "source_path": { "type": "string" },
+    "log_kind": { "enum": ["utmp", "wtmp", "btmp", "lastlog"] },
+    "layout": { "type": "string" },
+    "coverage_status": { "enum": ["parsed", "partial", "unknown-layout", "read-error", "unsupported-compression", "skipped-file-cap"] },
+    "rows_emitted": { "type": "integer", "minimum": 0 },
+    "records_examined": { "type": "integer", "minimum": 0 },
+    "damaged_records": { "type": "integer", "minimum": 0 },
+    "truncated_records": { "type": "integer", "minimum": 0 },
+    "trailing_bytes": { "type": "integer", "minimum": 0 },
+    "capped": { "type": "boolean" }
+  }
+}

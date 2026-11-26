@@ -36,6 +36,8 @@ export const TIMESTAMP_KIND_LABELS: Readonly<Record<string, string>> = {
   "last-logon": "마지막 로그온",
   "password-last-set": "암호 마지막 변경",
   "last-failed-logon": "마지막 로그온 실패",
+  "failed-logon": "로그온 실패",
+  "session-record": "로그인·세션 기록",
   "account-expires": "계정 만료",
   "target-created": "대상 생성",
   "target-modified": "대상 수정",

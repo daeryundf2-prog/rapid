@@ -63,6 +63,13 @@ KNOWN_DYNAMIC_ARTIFACT_TYPES = {
     "registry-install-state",
     "execution-pca",
     "execution-feature-usage",
+    "registry-taskband-pin",
+    "registry-taskband-summary",
+    "linux-utmp",
+    "linux-wtmp",
+    "linux-btmp",
+    "linux-lastlog",
+    "linux-login-accounting-summary",
     # Parser-quality r1: types built from expressions (conditional/derived).
     "media-image-unreadable",
     "prefetch-invalid-content",

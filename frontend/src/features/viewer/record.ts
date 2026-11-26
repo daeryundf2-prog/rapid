@@ -159,6 +159,7 @@ export function recordByteRange(row: GridRow | null): { offset: number; length?:
     ["offset", ["length", "size"]],
   ];
   for (const [offsetKey, lengthKeys] of pairs) {
+    if (offsetKey === "source_offset" && fields.source_offset_unit === "line") continue;
     const offset = num(fields[offsetKey]);
     if (offset === null) continue;
     const length = lengthKeys.map((key) => num(fields[key])).find((value) => value !== null && value > 0);

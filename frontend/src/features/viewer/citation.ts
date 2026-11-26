@@ -46,12 +46,23 @@ export function recordCitationParts(row: GridRow | null | undefined, tz: string)
   const parts: string[] = [];
   const id = recordIdentifier(row);
   if (id) parts.push(`레코드=${id.label} ${id.value}`);
+  const fields = layoutFields(row);
+  if (fields.source_offset_unit === "line" && typeof fields.source_offset === "number") {
+    parts.push(`원본 줄=${fields.source_offset}`);
+  }
+  if (row.artifactType === "execution-feature-usage" || row.artifactType === "registry-taskband-pin") {
+    if (typeof fields.key_path === "string") parts.push(`키=${fields.key_path}`);
+    if (typeof fields.value_name === "string") parts.push(`값=${fields.value_name}`);
+    if (typeof fields.value_data_offset === "number") {
+      parts.push(`값 내부 오프셋=${formatOffset(fields.value_data_offset)}`);
+    }
+  }
+  if (typeof fields.record_sha256 === "string") parts.push(`레코드 sha256=${fields.record_sha256}`);
   const layout = recordLayout(row);
   const entry = layout.core.find((e) => e.format === "time" && evidenceTime(scalarOf(e.raw), tz) !== null);
   const value = entry ? scalarOf(entry.raw) : row.timestamp;
   const reading = evidenceTime(value, tz);
   if (reading) {
-    const fields = layoutFields(row);
     const own = entry?.key === "timestamp" ? (fields.timestamp_kind ?? fields.timestamp_label) : undefined;
     const kind = typeof own === "string" && own ? own : (entry?.timeKind ?? "");
     const kindText = kind ? `${entry?.label ?? timestampKindLabel(kind)}: ` : "";

@@ -50,6 +50,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ...core.models import ArtifactRecord
+from .taskband import decode_taskband_value
 
 DEPTH_PARSER = "windows-registry-depth"
 DEPTH_PARSER_VERSION = "registry-depth-v1"
@@ -98,11 +99,11 @@ SHARE_KIND_LABELS = {
     "other": "기타",
 }
 FEATURE_USAGE_LABELS = {
-    "AppSwitched": "작업 표시줄 앱 전환",
-    "ShowJumpView": "점프 목록 열기",
-    "AppLaunch": "작업 표시줄 고정 앱 실행",
-    "AppBadgeUpdated": "앱 배지 갱신",
-    "TrayButtonClicked": "트레이 단추 클릭",
+    "appswitched": "작업 표시줄 앱 전환",
+    "showjumpview": "점프 목록 열기",
+    "applaunch": "작업 표시줄 고정 앱 실행",
+    "appbadgeupdated": "앱 배지 갱신",
+    "traybuttonclicked": "트레이 단추 클릭",
 }
 OFFICE_MRU_KINDS = {"file mru": ("file", "최근 파일"), "place mru": ("place", "최근 폴더")}
 OFFICE_ITEM = re.compile(r"^(?:\[F(?P<flags>[0-9A-Fa-f]+)\])?(?:\[T(?P<time>[0-9A-Fa-f]{1,16})\])?(?:\[O(?P<o>[0-9A-Fa-f]+)\])?\*(?P<path>.+)$")
@@ -179,11 +180,18 @@ class KeyView:
     line: int = 0
     ancestry: frozenset[int] = frozenset()
 
+    @property
+    def last_written_filetime(self) -> str | None:
+        # Preserve all 64 bits in JSON consumers with binary64 number semantics.
+        ticks = getattr(self.native, "last_written_filetime", None)
+        return str(ticks) if ticks is not None else None
+
 
 class KeySource:
     """``key(rel)`` and ``subkeys(view)`` over a hive or an export (one hive kind, one user)."""
 
     hive_kind = ""
+    user = ""
     keys_visited = 0
     budget_exhausted = False
 
@@ -210,8 +218,9 @@ class KeySource:
 
 
 class HiveKeySource(KeySource):
-    def __init__(self, hive: object, hive_kind: str) -> None:
+    def __init__(self, hive: object, hive_kind: str, user: str = "") -> None:
         self.hive = hive
+        self.user = user
         self.hive_kind = hive_kind
         self._ccs: str | None = None
 
@@ -265,6 +274,7 @@ class ExportKeySource(KeySource):
         self.hive_kind = hive_kind
         self.mount = mount
         self.user_sid = user_sid
+        self.user = user_sid
         self.keys: dict[str, KeyView] = {}
         self.children: dict[str, dict[str, str]] = {}
 
@@ -927,11 +937,11 @@ def pca_registry_rows(source: KeySource) -> Iterable[DepthRow]:
 def feature_usage_rows(source: KeySource) -> Iterable[DepthRow]:
     base = source.key(f"{EXPLORER}\\FeatureUsage")
     for feature in source.subkeys(base) if base is not None else []:
-        label = FEATURE_USAGE_LABELS.get(feature.name, feature.name)
+        label = FEATURE_USAGE_LABELS.get(feature.name.casefold(), feature.name)
         for name, value in sorted(feature.values.items()):
             if not name:
                 continue
-            count = as_int(value)
+            count = value if isinstance(value, int) and 0 <= value <= 0xFFFFFFFF else None
             yield DepthRow(
                 "execution-feature-usage",
                 f"FeatureUsage({label})",
@@ -940,6 +950,9 @@ def feature_usage_rows(source: KeySource) -> Iterable[DepthRow]:
                     "feature": feature.name,
                     "feature_label": label,
                     "application": name,
+                    "user": source.user,
+                    "value_name": name,
+                    "key_last_written_filetime": feature.last_written_filetime,
                     "executable_name": base_name(name) if "\\" in name else name,
                     "count": count,
                     "evidence_note": "횟수는 작업 표시줄 상호작용 누적 값이며 시각은 키 단위입니다.",
@@ -948,6 +961,35 @@ def feature_usage_rows(source: KeySource) -> Iterable[DepthRow]:
                 timestamp_label="last_written" if feature.last_written else "",
                 preview=f"{label}: {name} ({count if count is not None else '-'}회)",
             )
+
+
+def taskband_rows(source: KeySource) -> Iterable[DepthRow]:
+    key = source.key(f"{EXPLORER}\\Taskband")
+    if key is None:
+        return
+    for value_name, value in key.values.items():
+        if value_name.casefold() not in {"favorites", "favoritesresolve"} or not isinstance(value, bytes):
+            continue
+        common = {"user": source.user, "value_name": value_name, "key_last_written_filetime": key.last_written_filetime}
+        pins, coverage = decode_taskband_value(value_name, value)
+        for fields in pins:
+            yield DepthRow(
+                "registry-taskband-pin",
+                "작업 표시줄 고정 항목",
+                key,
+                {**common, **fields},
+                timestamp=key.last_written,
+                timestamp_label="last_written" if key.last_written else "",
+                preview=str(fields["application"]),
+            )
+        # Every walk is disclosed: undecoded frames, a lost boundary or a cap leave fewer pins than entries.
+        yield DepthRow(
+            "registry-taskband-summary",
+            "작업 표시줄 고정 항목 해석 요약",
+            key,
+            {**common, **coverage},
+            preview=f"{value_name}: {coverage['pins_decoded']}/{coverage['frames_seen']} ({coverage['end_status']})",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1284,6 +1326,7 @@ DECODERS_BY_HIVE: dict[str, tuple[Callable[[KeySource], Iterable[DepthRow]], ...
         default_browser_rows,
         pca_registry_rows,
         feature_usage_rows,
+        taskband_rows,
         install_state_rows,
         startup_approved_rows,
         ssh_client_rows,
@@ -1310,7 +1353,10 @@ def hive_depth_records(context: object, stats: DepthStats) -> Iterable[ArtifactR
     kind = hive_kind_for_path(context.path)  # type: ignore[attr-defined]
     if not kind:
         return
-    source = HiveKeySource(context.hive, kind)  # type: ignore[attr-defined]
+    from .registry import registry_profile_folder
+
+    user = (registry_profile_folder(context.path) or context.user_sid) if kind == "NTUSER" else ""  # type: ignore[attr-defined]
+    source = HiveKeySource(context.hive, kind, user)  # type: ignore[attr-defined]
     for row in iter_depth_rows(source, stats):
         record = context.row(  # type: ignore[attr-defined]
             row.artifact_type,
