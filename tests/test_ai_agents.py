@@ -7,6 +7,7 @@ import shutil
 import sqlite3
 import tempfile
 import unittest
+import weakref
 from collections import Counter
 from contextlib import closing
 from pathlib import Path
@@ -394,6 +395,59 @@ class AdversarialAgentTests(AgentFixture):
         self.assertEqual(len(rows), 31)
         self.assertEqual(rows[-1].details["reason"], "empty-or-oversize-editor-value")
         self.assertEqual(rows[-1].details["source_key"], "bubbleId:s:big")
+
+    def test_capped_wal_read_closes_every_cursor_before_the_copy_is_deleted(self):
+        # An unfinished cursor keeps SQLite's file handle open after connection.close(), and
+        # Windows cannot delete an open file. Checked at close time, so it fails on every OS.
+        self._editor_db("home/p/.config/Cursor",
+                        [(f"bubbleId:s:{i}", json.dumps({"type": 1, "text": f"m{i}"})) for i in range(10)], wal=True)
+        unclosed = []
+        connect = sqlite3.connect
+
+        class Tracking(sqlite3.Connection):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.cursors = []
+
+            def execute(self, *args):
+                cursor = super().execute(*args)
+                self.cursors.append(weakref.ref(cursor))
+                return cursor
+
+            def close(self):
+                for cursor in filter(None, (ref() for ref in self.cursors)):
+                    try:
+                        cursor.fetchone()
+                    except sqlite3.ProgrammingError:
+                        continue
+                    unclosed.append(cursor)
+                super().close()
+
+        scratch = Path(tempfile.mkdtemp(prefix="scratch-"))
+        self.addCleanup(shutil.rmtree, scratch, True)
+        with patch.object(tempfile, "tempdir", str(scratch)), \
+                patch("rapidtriage.core.sqlite_snapshot.sqlite3.connect",
+                      lambda *args, **kwargs: connect(*args, factory=Tracking, **kwargs)), \
+                patch("rapidtriage.artifacts.ai_agents.ROWS_PER_SOURCE", 3):
+            rows = self.rows("editor-chat")
+            self.assertEqual(list(scratch.iterdir()), [])
+        self.assertEqual([r.details.get("reason") for r in rows], [None] * 3 + ["row-limit"])
+        self.assertEqual(unclosed, [])
+
+    def test_snapshot_cleanup_failure_is_a_warning_not_a_source_row(self):
+        self._editor_db("Users/p/AppData/Roaming/Code", [("bubbleId:s:1", json.dumps({"type": 1, "text": "kept"}))])
+        scratch = Path(tempfile.mkdtemp(prefix="scratch-"))
+        self.addCleanup(shutil.rmtree, scratch, True)
+
+        def locked(holder):
+            holder._finalizer.detach()
+            raise PermissionError("file in use")
+
+        with patch.object(tempfile, "tempdir", str(scratch)), \
+                patch.object(tempfile.TemporaryDirectory, "cleanup", autospec=True, side_effect=locked), \
+                self.assertWarnsRegex(RuntimeWarning, "working copy could not be removed"):
+            rows = self.rows("editor-chat")
+        self.assertEqual([(r.artifact_type, r.details["text"]) for r in rows], [("agent-message", "kept")])
 
     def test_sqlite_wal_is_read_from_a_copy_and_sidecars_are_never_touched(self):
         path, db = self._editor_db("Users/p/Library/Application Support/Cursor",

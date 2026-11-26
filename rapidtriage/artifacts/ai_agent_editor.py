@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
 
@@ -89,28 +90,37 @@ def editor(src, path: Path):
         return
     provenance = {}
     with open_sqlite_snapshot(path, provenance=provenance) as db:
-        db.execute("PRAGMA trusted_schema=OFF")
+        db.execute("PRAGMA trusted_schema=OFF").close()
         snapshot = sqlite_snapshot_reference(provenance)
+        with closing(db.execute("PRAGMA main.table_list")) as listing:
+            # Table names are fixed. Never run a view or virtual table supplied by evidence.
+            tables = {name for _, name, kind, *_ in listing if kind == "table"}
         found = False
         for table in ("ItemTable", "cursorDiskKV"):
-            # Table names are fixed. Never run a view or virtual table supplied by evidence.
-            if not any(name == table and kind == "table" for _, name, kind, *_ in db.execute("PRAGMA main.table_list")):
+            if table not in tables:
                 continue
             found = True
             conditions = " OR ".join("key LIKE ?" for _ in KEYS)
-            rows = db.execute(f"SELECT rowid, substr(key,1,512), CASE WHEN length(CAST(value AS BLOB)) <= ? THEN value END "
-                              f'FROM "{table}" WHERE {conditions} ORDER BY rowid', (VALUE_BYTES, *KEYS))
-            for rowid, key, raw in rows:
-                source = replace(src, location={"source_table": table, "source_rowid": rowid,
-                                                "source_key": clean(key), "snapshot_id": snapshot["snapshot_id"]})
-                if raw is None:
-                    yield source.note("empty-or-oversize-editor-value")
-                    continue
-                try:
-                    doc = json.loads(raw)
-                except (ValueError, TypeError, RecursionError):
-                    yield source.note("invalid-editor-json")
-                    continue
-                yield from editor_value(source, key, doc)
+            # Closing the cursor finalizes its statement even when the consumer stops at a cap,
+            # so the connection really releases the private copy (Windows cannot delete open files).
+            with closing(db.execute(
+                    f"SELECT rowid, substr(key,1,512), CASE WHEN length(CAST(value AS BLOB)) <= ? THEN value END "
+                    f'FROM "{table}" WHERE {conditions} ORDER BY rowid', (VALUE_BYTES, *KEYS))) as rows:
+                yield from _editor_rows(src, table, snapshot, rows)
         if not found:
             yield src.note("editor-tables-missing")
+
+
+def _editor_rows(src, table, snapshot, rows):
+    for rowid, key, raw in rows:
+        source = replace(src, location={"source_table": table, "source_rowid": rowid,
+                                        "source_key": clean(key), "snapshot_id": snapshot["snapshot_id"]})
+        if raw is None:
+            yield source.note("empty-or-oversize-editor-value")
+            continue
+        try:
+            doc = json.loads(raw)
+        except (ValueError, TypeError, RecursionError):
+            yield source.note("invalid-editor-json")
+            continue
+        yield from editor_value(source, key, doc)
