@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import math
 import os
 import random
 import struct
@@ -34,10 +35,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from carving_r3_fixtures import evtx as carving_evtx
 from evtx_engine_corpus import (
     CHUNK_SIZE,
+    Chunk,
+    Event,
+    add_event,
     build_edge_corpus,
     file_bytes,
     iter_mixed_chunks,
     mutate_chunks,
+    real64,
 )
 from windows_artifact_fixtures import (
     build_chunk_template_evtx,
@@ -58,6 +63,7 @@ from rapidtriage.artifacts.windows.eventlog import (
     render_evtx_element_xml,
 )
 from rapidtriage.cli.helpers import eventlog_collector_options
+from rapidtriage.core.artifacts import _dump_row, _row_dumper
 from rapidtriage.core.json_safe import json_default
 
 NATIVE, NATIVE_REASON = evtx_engine.load_native_evtx_decoder()
@@ -266,6 +272,37 @@ class ProviderEngineSwitchTests(NativeEvtxTestCase):
         file_row = next(row for row in rows if row["artifact_type"] == "eventlog-file")
         self.assertEqual(file_row["details"]["native_evtx_engine"], "rust")
         self.assertEqual(file_row["details"]["native_evtx_engine_python_fallback_chunk_count"], 0)
+
+    def test_real64_ties_spell_like_python_repr(self) -> None:
+        # 2**50 + 0.25 lies exactly between the shortest spellings ...624.2 and ...624.3;
+        # CPython's repr keeps the even digit. Numeric equality would hide the defect.
+        value = float.fromhex("0x1.0000000000001p+50")
+        cases = {
+            value: "1125899906842624.2",
+            -value: "-1125899906842624.2",
+            math.nextafter(value, 0.0): "1125899906842624",
+            math.nextafter(value, math.inf): "1125899906842624.5",
+        }
+        dump_native = _row_dumper(NATIVE)
+        for number, text in cases.items():
+            with self.subTest(number=number.hex()):
+                literal = text if "." in text else f"{text}.0"
+                self.assertEqual(_dump_row({"v": number}), f'{{"v":{literal}}}')
+                self.assertEqual(dump_native({"v": number}), f'{{"v":{literal}}}')
+                chunk = Chunk()
+                event = Event(1, 133801632000000009, provider="fixture", computer="test.invalid", event_id=17, data=[("Counter", real64(number))])
+                self.assertTrue(add_event(chunk, event))
+                root = self.tmp / number.hex()
+                path = root / "Windows/System32/winevt/Logs/Application.evtx"
+                path.parent.mkdir(parents=True)
+                path.write_bytes(file_bytes([chunk.finish()], next_record_id=2))
+                rows = {}
+                for engine in ("python", "rust"):
+                    (row,) = (row for row in self.collect_rows(root, evtx_engine=engine) if row["artifact_type"] == "eventlog-event")
+                    self.assertEqual(row["details"]["data"]["Counter"], text, engine)
+                    self.assertIn(f'<Data Name="Counter">{text}</Data>', row["details"]["event_message"], engine)
+                    rows[engine] = row
+                self.assertEqual(json.dumps(rows["rust"], ensure_ascii=False), json.dumps(rows["python"], ensure_ascii=False))
 
 
 class EngineSelectionTests(unittest.TestCase):

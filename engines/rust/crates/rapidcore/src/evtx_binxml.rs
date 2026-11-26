@@ -460,8 +460,10 @@ pub fn python_float_repr(number: f64) -> String {
     }
     let scientific = format!("{:e}", number.abs());
     let (mantissa, exponent) = scientific.split_once('e').unwrap_or((&scientific, "0"));
-    let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
+    let mut digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
     let decpt = exponent.parse::<i32>().unwrap_or(0) + 1;
+    let scale = decpt - digits.len() as i32;
+    round_shortest_tie_to_even(number.abs(), &mut digits, scale);
     if decpt <= -4 || decpt > 16 {
         let exp = decpt - 1;
         let (head, tail) = digits.split_at(1);
@@ -481,6 +483,49 @@ pub fn python_float_repr(number: f64) -> String {
         format!("{sign}{left}.{right}")
     } else {
         format!("{sign}{digits}{}.0", "0".repeat((decpt - length) as usize))
+    }
+}
+
+/// CPython's `repr` (dtoa mode 0) picks the shortest spelling nearest to the value and breaks an
+/// exact tie between two such spellings toward the even last digit; Rust's shortest formatter
+/// rounds the tie up. `digits` × 10^`scale` is Rust's spelling of `magnitude`: when it ends in an
+/// odd digit, the value lies exactly halfway below it, and the spelling one unit lower also reads
+/// back as `magnitude`, take the lower (even) spelling as Python does.
+fn round_shortest_tie_to_even(magnitude: f64, digits: &mut String, scale: i32) {
+    let Ok(spelled) = digits.parse::<u64>() else {
+        return;
+    };
+    if spelled % 2 == 0 || !is_decimal_midpoint(magnitude, 2 * spelled - 1, scale) {
+        return;
+    }
+    let lower = (spelled - 1).to_string();
+    if format!("{lower}e{scale}").parse::<f64>() == Ok(magnitude) {
+        *digits = lower;
+    }
+}
+
+/// Whether the finite positive `magnitude` equals `odd_numerator` × 10^`scale` / 2 exactly.
+fn is_decimal_midpoint(magnitude: f64, odd_numerator: u64, scale: i32) -> bool {
+    let bits = magnitude.to_bits();
+    let biased = (bits >> 52) as i32;
+    let fraction = bits & ((1 << 52) - 1);
+    let (significand, exponent) = if biased == 0 {
+        (fraction, -1074)
+    } else {
+        (fraction | (1 << 52), biased - 1075)
+    };
+    // magnitude = odd × 2^p (odd is odd); the midpoint is odd_numerator × 5^scale × 2^(scale - 1).
+    let shift = significand.trailing_zeros();
+    let odd = u128::from(significand >> shift);
+    if exponent + shift as i32 != scale - 1 {
+        return false;
+    }
+    let numerator = u128::from(odd_numerator);
+    let power = 5u128.checked_pow(scale.unsigned_abs());
+    if scale >= 0 {
+        power.and_then(|power| power.checked_mul(numerator)) == Some(odd)
+    } else {
+        power.and_then(|power| power.checked_mul(odd)) == Some(numerator)
     }
 }
 
@@ -1539,6 +1584,33 @@ mod tests {
             assert_eq!(python_float_repr(number), expected, "{number}");
         }
         assert_eq!(real_text(3.0), "3");
+    }
+
+    /// Exact ties between two shortest spellings: CPython keeps the even last digit, while
+    /// Rust's shortest formatter rounds up.
+    #[test]
+    fn float_repr_breaks_shortest_ties_to_even_like_python() {
+        let cases = [
+            (0x4310_0000_0000_0001, "1125899906842624.2"),
+            (0xc310_0000_0000_0001, "-1125899906842624.2"),
+            (0x4310_0000_0000_0000, "1125899906842624.0"),
+            (0x4310_0000_0000_0002, "1125899906842624.5"),
+            (0x4310_0000_0000_0003, "1125899906842624.8"),
+            (0x4300_0000_0000_0001, "562949953421312.1"),
+            (0x42be_999e_ed89_54d0, "33645145196884.812"),
+            (0x42d6_75a1_6dac_77c8, "98777901216223.12"),
+        ];
+        for (bits, expected) in cases {
+            assert_eq!(
+                python_float_repr(f64::from_bits(bits)),
+                expected,
+                "{bits:#x}"
+            );
+        }
+        assert_eq!(
+            real_text(f64::from_bits(0x4310_0000_0000_0001)),
+            "1125899906842624.2"
+        );
     }
 
     #[test]

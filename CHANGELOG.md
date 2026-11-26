@@ -85,6 +85,19 @@
   00-23 and minutes 00-59. **Output change:** such rows keep `timestamp_raw`,
   leave `timestamp_utc` empty and carry `timestamp-not-normalized`
   (`tests/test_ai_agents.py::AdversarialAgentTests::test_out_of_range_offsets_are_not_normalized`).
+- The Rust EVTX engine spelled some finite doubles differently from Python's
+  `repr`. When a value lies exactly halfway between its two shortest
+  round-trip spellings, CPython keeps the even last digit and Rust rounded up:
+  `2**50 + 0.25` became `1125899906842624.3` instead of `1125899906842624.2`.
+  This changed the string-valued `data` field, the rendered event XML and JSON
+  row bytes (`python_float_repr`, shared by `real_text` and
+  `push_json_float`). The Rust formatter now breaks those ties to even. A
+  13-million-double fuzz against CPython 3.12 (random bits, subnormals, short
+  mantissas, parsed decimals, f32 widenings and 2 million exact midpoints)
+  shows no differences. **Output change** for the Rust engine
+  only: affected Real32/Real64 values and JSON floats now have Python's text
+  (`tests/test_evtx_engine_diff.py::ProviderEngineSwitchTests::test_real64_ties_spell_like_python_repr`,
+  `evtx_binxml::tests::float_repr_breaks_shortest_ties_to_even_like_python`).
 - On Windows an analysis could vanish from the analysis list for one read. The
   state reader treated the sharing error raised while another thread
   `os.replace`d `analysis.json` (a heartbeat or progress write) as "no state".
