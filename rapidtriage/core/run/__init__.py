@@ -1735,6 +1735,12 @@ def _run_triage_stages(
             "replay_of": dict(replay_of) if replay_of else None,
             "image_extracted_root": str(image_result.extract_dir) if image_result else None,
             "image_extraction_command": str(image_result.to_dict().get("command")) if image_result else None,
+            # native_e01_extract_engine* when a non-default E01 extraction engine was requested.
+            **{
+                key: value
+                for key, value in (getattr(image_result, "recovered_root_manifest", None) or {}).items()
+                if key.startswith("native_e01_extract_engine")
+            },
             "tool_build": run_tool_build_identity(),
         },
         input_root=input_root,

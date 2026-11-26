@@ -1,0 +1,21 @@
+[package]
+name = "rapid-extract"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "NTFS file extraction walk mirroring rapidtriage's native E01 path (dissect.ntfs semantics), with optional PyO3 bindings"
+
+[lib]
+name = "rapid_extract"
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+flate2 = { version = "1", default-features = false, features = ["miniz_oxide"] }
+pyo3 = { version = "0.22", features = ["extension-module"], optional = true }
+
+[build-dependencies]
+pyo3-build-config = { version = "0.22", optional = true }
+
+[features]
+python = ["dep:pyo3", "dep:pyo3-build-config"]

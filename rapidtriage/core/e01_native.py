@@ -25,6 +25,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from .e01_extract_engine import e01_extract_engine_status, run_rust_extraction
+
 try:  # optional native decoders
     import pyewf  # type: ignore[import-not-found]
 except ImportError:  # pragma: no cover - environment dependent
@@ -601,11 +603,22 @@ def select_native_partition(
 
 
 _INVALID_NAME_CHARS = '<>:"/\\|?*'
+_WINDOWS_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", *(f"{port}{n}" for port in ("COM", "LPT") for n in "0123456789¹²³")}
+)
+
+
+def _is_windows_device_name(name: str) -> bool:
+    """Win32 opens the device, not a file in the output folder, for ``CON``, ``nul.txt``,
+    ``COM1 .log``, ... (the name before the first dot, trailing spaces ignored)."""
+    return name.split(".", 1)[0].rstrip(" ").upper() in _WINDOWS_DEVICE_NAMES
 
 
 def _safe_component(name: str) -> str:
     cleaned = "".join("_" if ch in _INVALID_NAME_CHARS or ord(ch) < 0x20 else ch for ch in name)
     cleaned = cleaned.rstrip(" .") or "_"
+    if os.name == "nt" and _is_windows_device_name(cleaned):
+        cleaned = "_" + cleaned
     return cleaned[:180]
 
 
@@ -908,7 +921,8 @@ def extract_e01_native(
             raise ValueError("no supported filesystem partition found in the native partition table")
         selected = next(p for p in partitions if int(p.get("start_sector") or -1) == start_sector)
         byte_offset = int(selected.get("byte_offset") or start_sector * sector_size)
-        reader = EwfSectorReader(handle, base=byte_offset, size=int(selected.get("size_bytes") or 0))
+        partition_size = int(selected.get("size_bytes") or 0)
+        reader = EwfSectorReader(handle, base=byte_offset, size=partition_size)
         reader.seek(0)
         boot = reader.read(512) or b""
         oem = boot[3:11]
@@ -938,14 +952,35 @@ def extract_e01_native(
             "min_free_bytes": guard.reserve,
             "free_bytes_at_start": guard.free_at_start,
         }
-        root = fs.mft.get(5)
-        done: set[int] = set()
-        _recover_priority_paths(root, extract_dir, stats, done=done, on_progress=on_progress, guard=guard)
-        _walk_ntfs_dir(root, extract_dir, stats, limit=stats["file_limit"], on_progress=on_progress, done=done, guard=guard)
-        if include_deleted:
-            _sweep_deleted_mft_records(
-                fs, extract_dir, stats, limit=stats["file_limit"], on_progress=on_progress, guard=guard
+        extract_engine = e01_extract_engine_status()
+        if not (
+            extract_engine["active"] == "rust"
+            and run_rust_extraction(
+                extract_engine,
+                handle=handle,
+                segments=segments,
+                byte_offset=byte_offset,
+                size=partition_size,
+                extract_dir=extract_dir,
+                stats=stats,
+                include_deleted=include_deleted,
+                priority_paths=PRIORITY_RECOVERY_PATHS,
+                on_progress=on_progress,
+                free_at_start=guard.free_at_start,
+                min_free_bytes=guard.reserve,
+                free_space_probe=guard._probe,
             )
+        ):
+            root = fs.mft.get(5)
+            done: set[int] = set()
+            _recover_priority_paths(root, extract_dir, stats, done=done, on_progress=on_progress, guard=guard)
+            _walk_ntfs_dir(
+                root, extract_dir, stats, limit=stats["file_limit"], on_progress=on_progress, done=done, guard=guard
+            )
+            if include_deleted:
+                _sweep_deleted_mft_records(
+                    fs, extract_dir, stats, limit=stats["file_limit"], on_progress=on_progress, guard=guard
+                )
         system_artifacts: dict[str, str] = {}
         if system_dir is not None:
             # Dump $MFT (record 0) outside the recovered tree so reference-diff
@@ -957,7 +992,9 @@ def extract_e01_native(
                 system_artifacts["mft"] = str(mft_path)
             except Exception:
                 stats["errors"] += 1
+        engine_fields = {"extract_engine": extract_engine} if extract_engine["requested"] != "python" else {}
         return {
+            **engine_fields,
             "media_size_bytes": int(handle.get_media_size()),
             "sector_size_bytes": sector_size,
             "partition_table": partitions,

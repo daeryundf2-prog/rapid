@@ -7,7 +7,7 @@ import re
 import shlex
 import shutil
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -2136,6 +2136,7 @@ def _extract_e01_native_fallback(
     on_progress: ExtractProgress | None = None,
 ) -> E01ExtractionResult:
     """Recover files with pyewf + dissect.ntfs (in-process, no external tools)."""
+    from .e01_extract_engine import extract_engine_metadata
     from .e01_native import (
         MAX_NATIVE_EXTRACT_FILES,
         NATIVE_EXTRACT_FILES_CEILING,
@@ -2222,17 +2223,23 @@ def _extract_e01_native_fallback(
         recommended_start_sector=recommended_sector,
     )
     stats = dict(result.get("stats") or {})
+    # Present only when RAPIDTRIAGE_E01_EXTRACT_ENGINE asked for a non-default engine.
+    extract_engine = dict(result.get("extract_engine") or {})
+    engine_label = "pyewf+rapid-extract(rust)" if extract_engine.get("active") == "rust" else "pyewf+dissect.ntfs"
     recovered_manifest = build_recovered_root_manifest(extract_dir)
     recovered_manifest = {
         **recovered_manifest,
         "native_extraction_stats": stats,
-        "engine": "pyewf+dissect.ntfs",
+        "engine": engine_label,
+        **({"extract_engine": extract_engine} if extract_engine else {}),
+        # native_e01_extract_engine* (engine used, requested, version, fallback reason, notice).
+        **extract_engine_metadata(extract_engine),
         "system_artifacts": dict(result.get("system_artifacts") or {}),
     }
     command_history.append(
         {
             "stage": "native-filesystem-recovery",
-            "engine": "pyewf+dissect.ntfs",
+            "engine": engine_label,
             "files": stats.get("files"),
             "deleted_files": stats.get("deleted_files"),
             "errors": stats.get("errors"),
@@ -2285,6 +2292,8 @@ def _extract_e01_native_fallback(
         "best-effort deleted-record sweep; ADS streams, reparse targets, and "
         "encrypted volumes are not expanded.",
     ]
+    if extract_engine.get("notice_ko"):
+        warnings.append(str(extract_engine["notice_ko"]))
     if stats.get("truncated"):
         # The active cap, applied separately to the allocated tree and to the deleted-record
         # sweep: RAPIDTRIAGE_NATIVE_MAX_EXTRACT_FILES when set, else sized from the $MFT.
@@ -2492,6 +2501,16 @@ def build_e01_resume_status(
     }
 
 
+def _files_in_fixed_order(root: Path) -> Iterator[Path]:
+    """Files under ``root`` depth first with names sorted, not in the order the output file
+    system lists them: where that is creation order (exFAT, tmpfs), the manifest's first
+    ``max_files`` entries would otherwise depend on the extraction engine and its copy threads."""
+    for top, dirs, files in os.walk(root):
+        dirs.sort()
+        for name in sorted(files):
+            yield Path(top) / name
+
+
 def build_recovered_root_manifest(
     root: Path,
     *,
@@ -2505,7 +2524,7 @@ def build_recovered_root_manifest(
     skipped_large_count = 0
     error_count = 0
     truncated = False
-    for path in root.rglob("*"):
+    for path in _files_in_fixed_order(root):
         if not path.is_file():
             continue
         if visited_count >= max_files:
