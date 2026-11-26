@@ -87,6 +87,37 @@ class KnowledgeCTest(unittest.TestCase):
         self.assertEqual(notification["source_bundle_id"], "example.producer")
         self.assertEqual(notification["structured_metadata"]["Z_OTHER__BUNDLEID"], "example.alternate")
 
+    def test_value_names_the_subject_only_for_streams_whose_payload_is_the_app(self):
+        # /app/webUsage and /app/intents store a page URL or app name as the value, not the bundle ID.
+        path = self.root / "Users" / "profile" / knowledgec.USER_DB
+        path.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(path)) as db:
+            db.executescript("""
+                CREATE TABLE ZOBJECT (Z_PK INTEGER PRIMARY KEY, ZSTREAMNAME TEXT, ZSTARTDATE REAL,
+                                      ZVALUESTRING TEXT, ZSOURCE INTEGER, ZSTRUCTUREDMETADATA INTEGER);
+                CREATE TABLE ZSOURCE (Z_PK INTEGER PRIMARY KEY, ZBUNDLEID TEXT);
+                CREATE TABLE ZSTRUCTUREDMETADATA (Z_PK INTEGER PRIMARY KEY, ZBUNDLEID TEXT);
+                INSERT INTO ZSOURCE VALUES (5, 'org.example.producer');
+                INSERT INTO ZSTRUCTUREDMETADATA VALUES (1, 'org.example.browser');
+                INSERT INTO ZOBJECT VALUES (1, '/app/webUsage', 0.5, 'https://example.invalid/page', NULL, 1);
+                INSERT INTO ZOBJECT VALUES (2, '/app/webUsage', 0.5, 'https://example.invalid/page', 5, NULL);
+                INSERT INTO ZOBJECT VALUES (3, '/app/intents', 0.5, 'Example App', 5, NULL);
+                INSERT INTO ZOBJECT VALUES (4, '/app/inFocus', 0.5, 'org.example.focus', 5, NULL);
+                INSERT INTO ZOBJECT VALUES (5, '/app/inFocus', 0.5, 'org.example.focus', 5, 1);
+            """)
+            db.commit()
+        rows = [row.details for row in self.rows()]
+        self.assertEqual([(r["value"], r["bundle_id"], r["source_bundle_id"]) for r in rows], [
+            ("https://example.invalid/page", "org.example.browser", None),
+            ("https://example.invalid/page", None, "org.example.producer"),
+            ("Example App", None, "org.example.producer"),
+            ("org.example.focus", "org.example.focus", "org.example.producer"),
+            ("org.example.focus", "org.example.browser", "org.example.producer"),
+        ])
+        self.assertEqual(rows[0]["structured_metadata"], {"ZBUNDLEID": "org.example.browser"})
+        self.assertEqual([r["warnings"] for r in rows[:4]], [[], [], [], []])
+        self.assertEqual(rows[4]["warnings"], ["subject-bundle-conflict"])
+
     def test_user_only_wal_visible_and_evidence_identical(self):
         path = self.root / "Users" / "sample" / knowledgec.USER_DB
         path.parent.mkdir(parents=True)

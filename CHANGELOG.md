@@ -37,6 +37,16 @@
   UTC and adds the wall-clock count when there is one. Rows without an offset
   keep their caveat; one without a local label now gets one too
   (`tests/test_d27_timeline.py::ReportTimeBasisTests`).
+- KnowledgeC exported the string value of every known `/app/` stream as the
+  subject app's `bundle_id` before consulting stored identifiers, so a
+  `/app/webUsage` page URL became the bundle ID even when the linked metadata
+  stored `ZBUNDLEID=org.example.browser`. Stored identifiers (object, then
+  structured metadata) now come first, and the value names the app only on
+  `/app/inFocus`, `/app/usage`, `/app/activity` and `/app/mediaUsage`.
+  **Output change:** `/app/webUsage` and `/app/intents` rows without a stored
+  identifier have an empty `bundle_id`; a bundle-ID value that disagrees with
+  a stored identifier adds the warning `subject-bundle-conflict`
+  (`tests/test_knowledgec.py::KnowledgeCTest::test_value_names_the_subject_only_for_streams_whose_payload_is_the_app`).
 - A Codex rollout that repeated the same prompt in two turns, with a replay
   (`response_item`) recorded only in the second turn, lost the first turn's
   prompt and exported two rows for the second turn (wrong time, working

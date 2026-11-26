@@ -26,6 +26,8 @@ KNOWN_STREAMS = frozenset({
     "/device/isLocked", "/device/isPluggedIn", "/display/isBacklit", "/notification/usage",
     "/safari/history",
 })
+# Streams whose ZVALUESTRING is the subject app's bundle ID (APOLLO knowledge_app_* modules).
+VALUE_BUNDLE_STREAMS = frozenset({"/app/activity", "/app/inFocus", "/app/mediaUsage", "/app/usage"})
 VALUE_COLUMNS = ("ZVALUESTRING", "ZVALUEINTEGER", "ZVALUEDOUBLE", "ZVALUEBINARY", "ZVALUEDATE")
 OBJECT_COLUMNS = ("ZSTREAMNAME", "ZSTARTDATE", "ZENDDATE", "ZBUNDLEID", "ZVALUETYPE",
                   "ZSOURCE", "ZSTRUCTUREDMETADATA")
@@ -174,17 +176,24 @@ def _event_details(obj: dict, source: dict, meta: dict, warnings: list[str]) -> 
         warnings.append("invalid-end-time")
     values = {k: v for k, v in obj.items() if k.startswith("ZVALUE") and k != "ZVALUETYPE"}
     # Only stored identifiers name the subject app. The producing source bundle
-    # stays in source_bundle_id and is never substituted for it.
+    # stays in source_bundle_id and is never substituted for it. An explicit
+    # identifier wins; the string value names the app only on streams whose
+    # payload is the bundle ID (not /app/webUsage's page or /app/intents' app name).
     bundle = obj.get("ZBUNDLEID")
-    if not bundle and stream.startswith("/app/") and stream in KNOWN_STREAMS:
-        bundle = obj.get("ZVALUESTRING")
+    ambiguous = False
     if not bundle:
         metadata_bundles = {v for k, v in meta.items() if isinstance(v, str) and v and
                             (k.upper().endswith("__BUNDLEID") or k.upper() == "ZBUNDLEID")}
-        if len(metadata_bundles) > 1:
+        ambiguous = len(metadata_bundles) > 1
+        if ambiguous:
             warnings.append("ambiguous-metadata-bundle")
         else:
             bundle = next(iter(metadata_bundles), None)
+    payload = obj.get("ZVALUESTRING") if stream in VALUE_BUNDLE_STREAMS else None
+    if bundle and payload and payload != bundle:
+        warnings.append("subject-bundle-conflict")
+    elif not bundle and not ambiguous:
+        bundle = payload
     return {
         "stream": stream, "unknown_stream": unknown,
         "timestamp": start, "start_at": start, "end_at": end,
