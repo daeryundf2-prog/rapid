@@ -172,7 +172,8 @@ build_run_case_db(Path(sys.argv[1]), json.loads(sys.argv[2]), root=sys.argv[1])
             golden_file = root / "relative-timeline.json"
             write_timeline_result(result, golden_file)
             data = golden_file.read_bytes()
-            self.assertEqual(hashlib.sha256(data).hexdigest(), "ee26735f6525eccfef40d9e254ff6f948eb9e777d946bba910b80dea38652a74")
+            # D27 #1 changed only summary.time_policy.dedupe_key (the time basis joins the key).
+            self.assertEqual(hashlib.sha256(data).hexdigest(), "b59da98ece921535d3e48130504bc7b50ebaa98b37c8828c469bb89e92848fba")
             # The report gained #40's unmapped-row/unconfirmed-timezone lines and
             # the activity-count section; event rows are unchanged (JSON above).
             report = build_timeline_report(result).encode("utf-8")

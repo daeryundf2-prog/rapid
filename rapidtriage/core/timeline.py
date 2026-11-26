@@ -700,7 +700,10 @@ def run_timeline(
             "time_policy": {
                 "event_sources": "아티팩트 내부 시각(TIMELINE_FIELD_MAP)과 파일시스템 fs_* 시각만 사용",
                 "acquisition_copy_times": "취득 사본의 호스트 시각(source_file_*·사본 stat)은 이벤트로 쓰지 않음",
-                "dedupe_key": "(source record, timestamp): 같은 레코드·같은 시각의 라벨 변형은 labels[]로 한 이벤트",
+                "dedupe_key": (
+                    "(source record, 시각 기준, timestamp): 같은 레코드·같은 시각의 라벨 변형은 labels[]로 한 이벤트. "
+                    "오프셋 없는 현지 벽시계 시각은 숫자가 같아도 UTC 시각과 합치지 않음"
+                ),
                 "key_level_times": "ShimCache/UserAssist/BAM 키 LastWrite는 키당 한 이벤트",
                 "inventory_key_times": (
                     "Amcache 인벤토리(드라이버·장치·바로 가기·DeviceCensus) 하위 키 LastWrite는 인벤토리 재작성 시각이므로 "
@@ -725,7 +728,7 @@ def _summary(payload: Mapping[str, object]) -> Mapping[str, object]:
 
 
 class TimelineBuilder:
-    """Collects events: one event per ``(source record, timestamp)``.
+    """Collects events: one event per ``(source record, time basis, timestamp)``.
 
     A second event of the same record and instant (a label variant such as
     ``run``/``run-1``, ``created``/``cookie-created``, accessed == modified,
@@ -733,7 +736,9 @@ class TimelineBuilder:
     its label joins ``labels`` and, when it came from another artifact row,
     the row is listed in ``details.also_in``. An ``eventlog-detection`` for
     the same record/time as its ``eventlog-event`` is merged into that event
-    (``details.detections``) instead of becoming a second event.
+    (``details.detections``) instead of becoming a second event. An offset-free
+    local wall clock never merges with a UTC instant: equal digits do not show
+    that the two times coincide.
     """
 
     MAX_ALSO_IN = 5
@@ -743,7 +748,7 @@ class TimelineBuilder:
     def __init__(self, stats: TimelineStats) -> None:
         self.stats = stats
         self._events: list[dict[str, object]] = []
-        self._index: dict[tuple[str, str], int] = {}
+        self._index: dict[tuple[str, str, str], int] = {}
 
     def extend(self, events: Iterable[dict[str, object]]) -> None:
         for event in events:
@@ -756,7 +761,7 @@ class TimelineBuilder:
         if not record_key:
             self._events.append(event)
             return
-        key = (str(record_key), _instant_key(event.get("timestamp")))
+        key = (str(record_key), _time_basis(event.get("timezone")), _instant_key(event.get("timestamp")))
         existing_index = self._index.get(key)
         if existing_index is None:
             self._index[key] = len(self._events)
@@ -826,6 +831,13 @@ def _instant_key(value: object) -> str:
         return str(ticks)
     parsed = parse_iso_utc(value)
     return parsed.isoformat() if parsed is not None else str(value)
+
+
+def _time_basis(timezone: object) -> str:
+    """Basis a normalized event time is measured on: its own label for an
+    offset-free local wall clock, else ``UTC`` (an instant with a known offset)."""
+    label = str(timezone or "UTC")
+    return label if label in LOCAL_TIMEZONE_LABELS else "UTC"
 
 
 def _second_key(value: object) -> str:
@@ -1453,19 +1465,31 @@ def canonical_label(label: str, artifact_type: str = "") -> str:
     return text or "observed"
 
 
-def _instant(value: object) -> str:
-    ticks = event_timestamp_utc_ticks(value)[0]
-    if ticks is not None:
-        return str(ticks)
-    parsed = parse_event_timestamp(value)
-    return parsed.isoformat() if parsed is not None else ""
-
-
-def _same_instant(events: Sequence[dict[str, object]], value: object) -> dict[str, object] | None:
-    instant = _instant(value)
-    if not instant:
+def _time_identity(value: object, timezone: object) -> tuple[str, str] | None:
+    """``(basis, instant)`` of a raw evidence time as the timeline stores it:
+    UTC ticks when the offset is known, wall-clock ticks on the value's own
+    label when it is an offset-free local time. ``None`` when unparseable."""
+    normalized = normalize_event_time(value, stats=None, event_type="", field_path="", timezone=str(timezone or "UTC"))
+    if normalized is None:
         return None
-    return next((event for event in events if _instant(event["timestamp"]) == instant), None)
+    text, label, _source_timezone = normalized
+    return _time_basis(label), _instant_key(text)
+
+
+def _same_instant(events: Sequence[dict[str, object]], value: object, timezone: object) -> dict[str, object] | None:
+    identity = _time_identity(value, timezone)
+    if identity is None:
+        return None
+    return next((event for event in events if _time_identity(event["timestamp"], event.get("timezone")) == identity), None)
+
+
+def _repeated_field_timezone(field_rows: Sequence[dict[str, object]], value: object) -> str | None:
+    """Zone for a row time that declares none: the text of a mapped field of the
+    row repeated verbatim is that field's value, so it takes the field's zone
+    (instead of the UTC default). ``None`` when no field, or fields of two zones, match."""
+    text = str(value).strip() if isinstance(value, str) else ""
+    zones = {str(row.get("timezone") or "UTC") for row in field_rows if text and str(row["timestamp"]).strip() == text}
+    return zones.pop() if len(zones) == 1 else None
 
 
 def iter_artifact_detail_events(
@@ -1542,12 +1566,14 @@ def iter_artifact_detail_events(
     row_events: list[dict[str, object]] = [
         entry for entry in mapped if entry.get("scope") not in ("key", "inventory") and not entry.get("element_identity")
     ]
+    # Row times of the field map, before the row's own ``timestamp`` joins them.
+    field_rows = list(row_events)
     if explicit is not None and any(
         (
             entry.get("scope") == "inventory"
             or (entry.get("scope") == "key" and entry["timestamp_kind"] == canonical_label(explicit[1], artifact_type))
         )
-        and _instant(entry["timestamp"]) == _instant(explicit[0])
+        and _same_instant([entry], explicit[0], explicit[2]) is not None
         for entry in mapped
     ):
         # Registry plugins can also publish the shared key time as the row timestamp.
@@ -1561,7 +1587,10 @@ def iter_artifact_detail_events(
         # is never read.
         value, kind, timezone = explicit
         kind = canonical_label(kind, artifact_type)
-        twin = _same_instant(row_events, value)
+        declared = details.get("timestamp_timezone")
+        if not (isinstance(declared, str) and declared):
+            timezone = _repeated_field_timezone(field_rows, value) or timezone
+        twin = _same_instant(row_events, value, timezone)
         if twin is not None:
             if kind != twin["timestamp_kind"]:
                 twin.setdefault("extra_labels", []).append(kind)
@@ -1580,7 +1609,7 @@ def iter_artifact_detail_events(
     # A key LastWrite equal to an entry time of the same row (BAM: the last
     # execution wrote the key) is that entry's event, labelled twice.
     for item in [entry for entry in mapped if entry.get("scope") == "key"]:
-        twin = _same_instant(row_events, item["timestamp"])
+        twin = _same_instant(row_events, item["timestamp"], item.get("timezone"))
         if twin is not None:
             twin.setdefault("extra_labels", []).append(str(item["timestamp_kind"]))
             mapped.remove(item)
@@ -1595,7 +1624,9 @@ def iter_artifact_detail_events(
         yield {
             "timestamp": item.get("timestamp"),
             "timestamp_kind": label,
-            "timezone": str(item.get("timestamp_timezone") or item.get("timezone") or "UTC"),
+            "timezone": str(
+                item.get("timestamp_timezone") or item.get("timezone") or _repeated_field_timezone(field_rows, item.get("timestamp")) or "UTC"
+            ),
             "event_type": f"artifact-{artifact_type}-{label}",
             "field_path": f"details.timeline_events[{position}].timestamp",
             # Same record as the row: an item repeating a mapped field merges.

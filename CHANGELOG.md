@@ -4,6 +4,18 @@
 
 ### Fixed
 
+- The timeline merged an offset-free local wall clock with a UTC instant
+  whose digits matched. A registry row with the local-unknown installation
+  time `2024-11-03T01:30:00` and the key LastWrite `2024-11-03T01:30:00Z`
+  became one `local-unknown` event labelled `installed, last-written`, and
+  the known UTC instant disappeared. Same-instant merges now compare the time
+  basis as well as the digits: a UTC instant and an offset-free
+  `local-unknown`/`exif-local`/`local`/`device-local` wall clock stay two
+  events with their own labels and zones, in either order. Times with explicit
+  offsets for one UTC instant still merge. A row's own `timestamp` or
+  `timeline_events` item that declares no zone and repeats the text of a mapped
+  field verbatim takes that field's zone instead of the UTC default, so it
+  still joins that event (`tests/test_d27_timeline.py::TimeBasisMergeTests`).
 - On Windows an analysis could vanish from the analysis list for one read. The
   state reader treated the sharing error raised while another thread
   `os.replace`d `analysis.json` (a heartbeat or progress write) as "no state".
