@@ -8,10 +8,11 @@ use std::sync::{Arc, Mutex};
 
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict};
+use pyo3::types::{PyBytes, PyDict, PyList};
 
 use crate::ewf::EwfImage;
 use crate::extract::{catch_panic, extract, Options, Outcome, SpaceReserve, Stats};
+use crate::names::Collision;
 use crate::ntfs::{Media, Ntfs, Res, Volume};
 
 /// A Python object with `seek(offset)` / `read(n)` (a pyewf handle or `RawMediaHandle`). Calls
@@ -149,6 +150,23 @@ fn stats_dict<'py>(py: Python<'py>, stats: &Stats) -> PyResult<Bound<'py, PyDict
     Ok(dict)
 }
 
+/// `output_name_collisions` entries, keys in the order `e01_native._OutputNames` writes them.
+fn collisions_list<'py>(py: Python<'py>, collisions: &[Collision]) -> PyResult<Bound<'py, PyList>> {
+    let list = PyList::empty_bound(py);
+    for entry in collisions {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("status", entry.status)?;
+        dict.set_item("kind", entry.kind)?;
+        dict.set_item("output_path", &entry.output_path)?;
+        dict.set_item("source_name", &entry.source_name)?;
+        dict.set_item("source_path", &entry.source_path)?;
+        dict.set_item("mft_segment", entry.mft_segment)?;
+        dict.set_item("mft_sequence", entry.mft_sequence)?;
+        list.append(dict)?;
+    }
+    Ok(list)
+}
+
 /// Run the priority pass, the tree walk and (optionally) the deleted sweep on the NTFS volume at
 /// `base` (`size` bytes) of the media, writing under `extract_dir`. Media bytes come from the Rust
 /// EWF reader (or the raw file) when `segments` are understood and `reader` is not "python", else
@@ -243,6 +261,7 @@ fn extract_tree(
         Ok((
             Outcome {
                 stats,
+                collisions,
                 walk_seconds,
                 copy_seconds,
                 rerun_reason,
@@ -252,6 +271,7 @@ fn extract_tree(
         )) => {
             let dict = PyDict::new_bound(py);
             dict.set_item("stats", stats_dict(py, &stats)?)?;
+            dict.set_item("output_name_collisions", collisions_list(py, &collisions)?)?;
             dict.set_item("walk_seconds", walk_seconds)?;
             dict.set_item("copy_seconds", copy_seconds)?;
             dict.set_item("rerun_reason", rerun_reason)?;

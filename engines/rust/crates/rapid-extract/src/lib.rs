@@ -7,10 +7,11 @@
 pub mod ewf;
 pub mod extract;
 pub mod lznt1;
+pub mod names;
 pub mod ntfs;
 
 #[cfg(feature = "python")]
 mod py;
 
 /// Contract version checked by `rapidtriage.core.e01_extract_engine`.
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = 4;

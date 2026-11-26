@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from rapidtriage.cli import main
@@ -92,6 +93,13 @@ def _fake_ntfs_tree() -> _FakeNtfsRecord:
 
 def _fresh_walk_stats() -> dict[str, int]:
     return {"files": 0, "bytes": 0, "errors": 0, "depth_skips": 0, "truncated": 0, "alias_skips": 0}
+
+
+def _output_root(directory: Path, stats: dict[str, int]) -> Any:
+    """The extraction root the native walk writes below (``_OutputNames.root``)."""
+    from rapidtriage.core.e01_native import _OutputNames
+
+    return _OutputNames(directory, stats, reserve_deleted_dir=True).root
 
 
 class RapidTriageE01Tests(unittest.TestCase):
@@ -522,12 +530,12 @@ Units are in 512-byte sectors
         stats = _fresh_walk_stats()
         seen: list[tuple[int, int]] = []
         with tempfile.TemporaryDirectory() as tmp_dir:
-            _walk_ntfs_dir(_fake_ntfs_tree(), Path(tmp_dir), stats, limit=10, on_progress=lambda s: seen.append((s["files"], s["bytes"])))
+            _walk_ntfs_dir(_fake_ntfs_tree(), _output_root(Path(tmp_dir), stats), stats, limit=10, on_progress=lambda s: seen.append((s["files"], s["bytes"])))
         self.assertEqual(seen, [(1, 4), (2, 6)])
         stats.update(files=0, bytes=0)
         capped: list[int] = []
         with tempfile.TemporaryDirectory() as tmp_dir:
-            _walk_ntfs_dir(_fake_ntfs_tree(), Path(tmp_dir), stats, limit=1, on_progress=lambda s: capped.append(s["truncated"]))
+            _walk_ntfs_dir(_fake_ntfs_tree(), _output_root(Path(tmp_dir), stats), stats, limit=1, on_progress=lambda s: capped.append(s["truncated"]))
         self.assertEqual(capped, [0, 1])  # the skipped file past the cap is reported too
 
     def test_priority_pass_recovers_hives_and_logs_before_the_cap_is_spent_on_program_files(self) -> None:
@@ -570,8 +578,8 @@ Units are in 512-byte sectors
         done: set[int] = set()
         with tempfile.TemporaryDirectory() as tmp_dir:
             out = Path(tmp_dir)
-            _recover_priority_paths(root, out, stats, done=done)
-            _walk_ntfs_dir(root, out, stats, limit=6, done=done)
+            _recover_priority_paths(root, _output_root(out, stats), stats, done=done)
+            _walk_ntfs_dir(root, _output_root(out, stats), stats, limit=6, done=done)
             recovered = sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file())
         for path in (
             "Windows/System32/config/SYSTEM",
@@ -588,8 +596,8 @@ Units are in 512-byte sectors
         done = set()
         with tempfile.TemporaryDirectory() as tmp_dir:
             out = Path(tmp_dir)
-            _recover_priority_paths(root, out, stats, done=done)
-            _walk_ntfs_dir(root, out, stats, limit=2, done=done)
+            _recover_priority_paths(root, _output_root(out, stats), stats, done=done)
+            _walk_ntfs_dir(root, _output_root(out, stats), stats, limit=2, done=done)
             recovered = sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file())
         self.assertEqual(len(recovered), 4)
         self.assertNotIn("Program Files/app0.dll", recovered)
@@ -624,7 +632,7 @@ Units are in 512-byte sectors
         # The allocated walk already used the whole cap (files == limit).
         stats = {"files": 2, "bytes": 0, "errors": 0, "truncated": 5, "deleted_files": 0, "deleted_read_errors": 0}
         with tempfile.TemporaryDirectory() as tmp_dir, patch.object(e01_native, "_mft_record_count", return_value=3):
-            e01_native._sweep_deleted_mft_records(Fs(), Path(tmp_dir), stats, limit=2)
+            e01_native._sweep_deleted_mft_records(Fs(), _output_root(Path(tmp_dir), stats).names.deleted_dir, stats, limit=2)
             recovered = sorted(p.name for p in (Path(tmp_dir) / "_deleted_mft").iterdir())
         self.assertEqual(stats["deleted_files"], 2)
         self.assertEqual(recovered, ["0-gone.docx", "1-gone.docx"])
@@ -642,7 +650,7 @@ Units are in 512-byte sectors
         for observer in (hostile_observer, failing_observer):
             stats = _fresh_walk_stats()
             with tempfile.TemporaryDirectory() as tmp_dir:
-                _walk_ntfs_dir(_fake_ntfs_tree(), Path(tmp_dir), stats, limit=10, on_progress=observer)
+                _walk_ntfs_dir(_fake_ntfs_tree(), _output_root(Path(tmp_dir), stats), stats, limit=10, on_progress=observer)
                 self.assertEqual((Path(tmp_dir) / "Users" / "b.bin").read_bytes(), b"bb")
             self.assertEqual((stats["files"], stats["bytes"], stats["errors"]), (2, 6, 0))
 
@@ -675,7 +683,7 @@ Units are in 512-byte sectors
         done: set[int] = set()
         stats = _fresh_walk_stats()
         with tempfile.TemporaryDirectory() as tmp_dir:
-            _walk_ntfs_dir(root, Path(tmp_dir), stats, limit=10, done=done)
+            _walk_ntfs_dir(root, _output_root(Path(tmp_dir), stats), stats, limit=10, done=done)
             recovered = sorted(p.relative_to(tmp_dir).as_posix() for p in Path(tmp_dir).rglob("*") if p.is_file())
         self.assertEqual(recovered, ["System32/a.dll", "WinSxS/a.dll"])
         self.assertEqual(done, set())
@@ -1134,7 +1142,8 @@ Units are in 512-byte sectors
 
             stats = {"files": 0, "bytes": 0, "errors": 0, "disk_space_skips": 0}
             target = Path(tmp_dir) / "x.bin"
-            e01_native._dump_ntfs_record(Rec(), target, stats, guard)
+            entry = _output_root(Path(tmp_dir), stats).child("x.bin", Rec(), "x.bin")
+            e01_native._dump_ntfs_record(Rec(), entry, stats, guard)
         self.assertEqual(stats, {"files": 0, "bytes": 0, "errors": 0, "disk_space_skips": 1})
         self.assertFalse(target.exists())
 
@@ -1170,7 +1179,7 @@ Units are in 512-byte sectors
         stats = {"files": 0, "bytes": 0, "errors": 0, "truncated": 0, "deleted_files": 0,
                  "deleted_read_errors": 0, "disk_space_skips": 0}
         with tempfile.TemporaryDirectory() as tmp_dir, patch.object(e01_native, "_mft_record_count", return_value=2):
-            e01_native._sweep_deleted_mft_records(Fs(), Path(tmp_dir), stats, limit=10, guard=FullDisk())
+            e01_native._sweep_deleted_mft_records(Fs(), _output_root(Path(tmp_dir), stats).names.deleted_dir, stats, limit=10, guard=FullDisk())
         self.assertEqual((stats["deleted_files"], stats["deleted_read_errors"], stats["disk_space_skips"]), (0, 0, 2))
 
     def _fake_ntfs_fixtures(self):
@@ -1240,7 +1249,7 @@ Units are in 512-byte sectors
         root = _FakeDir(children)
         stats = self._fresh_stats(3)
         with tempfile.TemporaryDirectory() as tmp_dir:
-            e01_native._walk_ntfs_dir(root, Path(tmp_dir), stats, limit=3)
+            e01_native._walk_ntfs_dir(root, _output_root(Path(tmp_dir), stats), stats, limit=3)
         self.assertEqual(stats["files"], 3)
         self.assertEqual(stats["truncated"], 5)
 
@@ -1259,7 +1268,7 @@ Units are in 512-byte sectors
         stats = self._fresh_stats(100)
         with tempfile.TemporaryDirectory() as tmp_dir:
             out = Path(tmp_dir)
-            e01_native._walk_ntfs_dir(root, out, stats, limit=100)
+            e01_native._walk_ntfs_dir(root, _output_root(out, stats), stats, limit=100)
             self.assertEqual(stats["files"], 3)
             self.assertEqual(stats["alias_skips"], 1)
             self.assertTrue((out / "alpha.txt").is_file())

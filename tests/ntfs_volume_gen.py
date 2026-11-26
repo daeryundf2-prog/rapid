@@ -707,6 +707,22 @@ def add_name_collisions(b: VolumeBuilder) -> None:
     b.add_file(root, "k.txt", b"ascii k " * 700, namespace=NS_POSIX)
     for device in ("CON", "aux.txt", "NUL", "com1.log", "LPT9 .txt"):
         b.add_file(root, device, f"device name {device}".encode() * 20, namespace=NS_POSIX)
+    # The spelling a device name gets on Windows, as a source name of its own.
+    b.add_file(root, "_CON", b"underscore CON " * 20, namespace=NS_POSIX)
+    # Legal names that only differ after the 180th character, which _safe_component cuts.
+    for suffix in ("A", "B"):
+        b.add_file(root, "p" * 180 + suffix, suffix.encode())
+    # Directories a normalization-insensitive drive (APFS) folds into one, each with a same-named
+    # and an own child. (Case twins are not used here: the walk's name lookup, like dissect's, is
+    # case-insensitive, so only one twin is reached.)
+    for form in ("NFC", "NFD"):
+        name = unicodedata.normalize(form, "r\u00e9sum\u00e9")
+        folder = b.add_dir(root, name)
+        b.entries[folder].links[0] = Link(root, name, NS_POSIX)
+        b.add_file(folder, "same.txt", f"same.txt in {form}".encode())
+        b.add_file(folder, f"only-{form}.txt", f"only in {form}".encode())
+    # A source entry named like the deleted-record sweep folder.
+    b.add_file(b.root, "_deleted_mft", b"allocated file named _deleted_mft")
 
 
 def build_disk_image(

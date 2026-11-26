@@ -85,6 +85,56 @@
   00-23 and minutes 00-59. **Output change:** such rows keep `timestamp_raw`,
   leave `timestamp_utc` empty and carry `timestamp-not-normalized`
   (`tests/test_ai_agents.py::AdversarialAgentTests::test_out_of_range_offsets_are_not_normalized`).
+- Native E01 extraction (Python and Rust engines) wrote two distinct NTFS
+  records to one output file and counted both: names equal after
+  `_safe_component` cut them at 180 characters (or replaced characters), or
+  names the output drive folds together (`é.txt` composed and decomposed on
+  APFS, case twins on Windows/macOS), left only the later body while
+  `files`/`bytes` counted two. A source entry named `_deleted_mft` also made
+  the deleted-record sweep fail the whole extraction. Each (output folder,
+  MFT record) pair now gets its own name: the first record in walk order
+  keeps it, later ones become `<stem>~mft<record>[-n]<extension>` (the
+  extension kept), checked against the names given in this run and against
+  what the output drive resolves before writing; nothing is overwritten or
+  merged. **Output change:** `extract_e01_native` returns
+  `output_name_collisions` (status, kind, output path, source name and path,
+  MFT segment and sequence; first 1,000), the recovered manifest carries it as
+  `native_output_name_collisions`, stats add `name_collision_renames` and
+  `name_collisions_unresolved`, and the run warns when either is non-zero. The
+  Rust extension ABI is now 4 (older builds are refused). The parallel Rust
+  copy falls back to the sequential walk when two planned names meet on the
+  drive
+  (`tests/test_e01_extract_rust_parity.py::OutputNameCollisionTests`).
+  Not fixed here: POSIX case twins in one NTFS folder are still looked up by
+  name case-insensitively (as dissect does), so only one twin is reached and
+  the other counts as an alias skip.
+- With the Rust EVTX engine, the eventlog-file row counted chunks handed to
+  the Python decoder (`native_evtx_engine_python_fallback_chunk_count`) but
+  not why or where. One valid non-ASCII ANSI string gave a count of 1 and no
+  way to find the record. The row now adds
+  `native_evtx_engine_python_fallback_reason_counts` (per bounded reason
+  code: `non-ascii-ansi-string`, `surrogate-character-reference`,
+  `element-nesting-too-deep`, `unrecognized-native-reason`) and cites the
+  first switch with `native_evtx_engine_python_fallback_first_reason`,
+  `…_first_chunk_index`, `…_first_chunk_offset`, `…_first_record_offset`
+  (absolute) and `…_first_record_id` (`null` when nothing switched). These
+  are separate from `native_fallback_record_count`, which counts records
+  read by the legacy token scan. **Output change:** new eventlog-file fields
+  on Rust-engine runs only; event rows are unchanged
+  (`tests/test_evtx_engine_diff.py::ProviderEngineSwitchTests::test_python_fallback_cites_reason_and_first_record`).
+- The Rust EVTX engine spelled some finite doubles differently from Python's
+  `repr`. When a value lies exactly halfway between its two shortest
+  round-trip spellings, CPython keeps the even last digit and Rust rounded up:
+  `2**50 + 0.25` became `1125899906842624.3` instead of `1125899906842624.2`.
+  This changed the string-valued `data` field, the rendered event XML and JSON
+  row bytes (`python_float_repr`, shared by `real_text` and
+  `push_json_float`). The Rust formatter now breaks those ties to even. A
+  13-million-double fuzz against CPython 3.12 (random bits, subnormals, short
+  mantissas, parsed decimals, f32 widenings and 2 million exact midpoints)
+  shows no differences. **Output change** for the Rust engine
+  only: affected Real32/Real64 values and JSON floats now have Python's text
+  (`tests/test_evtx_engine_diff.py::ProviderEngineSwitchTests::test_real64_ties_spell_like_python_repr`,
+  `evtx_binxml::tests::float_repr_breaks_shortest_ties_to_even_like_python`).
 - On Windows an analysis could vanish from the analysis list for one read. The
   state reader treated the sharing error raised while another thread
   `os.replace`d `analysis.json` (a heartbeat or progress write) as "no state".
