@@ -6,7 +6,8 @@ import json
 import re
 import sqlite3
 import zipfile
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote_plus, urlparse
@@ -2910,6 +2911,7 @@ def build_browser_history_download_citation_manifest(
     download_rows: Sequence[Mapping[str, object]],
     unified_timeline: Sequence[Mapping[str, object]],
 ) -> dict[str, object]:
+    resolve_path = lru_cache(maxsize=16)(_resolved_browser_path)
     history_citations = [
         browser_row_citation(
             browser=browser,
@@ -2918,6 +2920,7 @@ def build_browser_history_download_citation_manifest(
             source_path=source_path,
             source_hashes=source_hashes,
             row=row,
+            resolve_path=resolve_path,
             row_type="visit",
             source_index=index,
             default_source_table=str(row.get("source_table") or "history"),
@@ -2934,6 +2937,7 @@ def build_browser_history_download_citation_manifest(
             source_path=source_path,
             source_hashes=source_hashes,
             row=row,
+            resolve_path=resolve_path,
             row_type="download",
             source_index=index,
             default_source_table=str(row.get("source_table") or "downloads"),
@@ -3374,6 +3378,10 @@ def browser_storage_row_citation(
     }
 
 
+def _resolved_browser_path(path: str) -> str:
+    return str(Path(path).resolve())
+
+
 def browser_row_citation(
     *,
     browser: str,
@@ -3388,6 +3396,7 @@ def browser_row_citation(
     timestamp: str,
     url: str,
     target_path: str = "",
+    resolve_path: Callable[[str], str] = _resolved_browser_path,
 ) -> dict[str, object]:
     source_table = str(row.get("source_table") or default_source_table)
     source_row_id = row.get("source_row_id")
@@ -3398,7 +3407,7 @@ def browser_row_citation(
         "source_table": source_table,
         "source_index": source_index,
         "source_row_id": source_row_id,
-        "source_path": str(row_source_path.resolve()),
+        "source_path": resolve_path(str(row_source_path)),
     }
     snapshot = sqlite_snapshot_reference(row.get("sqlite_snapshot"))
     citation_payload = {
@@ -6413,6 +6422,8 @@ def build_unified_browser_timeline(
     ai_rows: Sequence[Mapping[str, object]],
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
+    resolve_path = lru_cache(maxsize=16)(_resolved_browser_path)
+    history_path = str(source_path)
     ai_urls = {str(row.get("url") or ""): row for row in ai_rows}
     for index, row in enumerate(history_rows):
         url = str(row.get("url") or "")
@@ -6434,7 +6445,7 @@ def build_unified_browser_timeline(
                 "visit_duration_micros": int(row.get("visit_duration_micros") or 0),
                 "ai_service": ai_row.get("ai_service") or detect_ai_service(url, str(row.get("title") or "")),
                 "query_hint": row.get("query_hint") or extract_query_hint(url),
-                "source_path": str(source_path.resolve()),
+                "source_path": resolve_path(history_path),
                 "source_sha256": str(source_hashes.get("sha256") or ""),
                 "source_table": str(row.get("source_table") or "history"),
                 "source_index": index,
@@ -6460,7 +6471,7 @@ def build_unified_browser_timeline(
                 "total_bytes": int(row.get("total_bytes") or 0),
                 "state": int(row.get("state") or 0),
                 "ended_at": row.get("ended_at"),
-                "source_path": str(row_source_path.resolve()),
+                "source_path": resolve_path(str(row_source_path)),
                 "source_sha256": str(row_source_hashes.get("sha256") or ""),
                 "source_database": str(row.get("source_database") or row_source_path.name),
                 "source_table": str(row.get("source_table") or "downloads"),
@@ -7563,13 +7574,14 @@ def chromium_history_row_reader(context: BrowserRowContext):
         records: list[ArtifactRecord] = []
         if not sqlite_table_exists(connection, "urls"):
             return records
-        urls: dict[int, tuple[str, str]] = {}
+        urls: dict[int, tuple[str, str, str]] = {}
         url_select = select_columns(connection, "urls", ("id", "url", "title", "visit_count", "typed_count", "last_visit_time", "hidden"))
         for row in connection.execute(f"SELECT {url_select} FROM urls ORDER BY id"):
             url_id = int(row["id"])
             url = str(row["url"] or "")
             title = str(row["title"] or "")
-            urls[url_id] = (url, title)
+            domain = normalize_host(safe_parse_url(url).netloc)
+            urls[url_id] = (url, title, domain)
             records.append(
                 browser_row_record(
                     context,
@@ -7583,7 +7595,7 @@ def chromium_history_row_reader(context: BrowserRowContext):
                         "row_kind": "url",
                         "url": url,
                         "title": title,
-                        "domain": normalize_host(safe_parse_url(url).netloc),
+                        "domain": domain,
                         "visit_count": browser_int(row["visit_count"]) or 0,
                         "typed_count": browser_int(row["typed_count"]) or 0,
                         "hidden": bool(row["hidden"]),
@@ -7601,7 +7613,7 @@ def chromium_history_row_reader(context: BrowserRowContext):
             visit_url = {int(row["id"]): browser_int(row["url"]) for row in visit_rows}
             for row in visit_rows:
                 url_id = browser_int(row["url"])
-                url, title = urls.get(url_id or -1, ("", ""))
+                url, title, domain = urls.get(url_id or -1, ("", "", ""))
                 from_visit = browser_int(row["from_visit"]) or 0
                 from_url_id = visit_url.get(from_visit)
                 duration = browser_int(row["visit_duration"]) or 0
@@ -7618,10 +7630,10 @@ def chromium_history_row_reader(context: BrowserRowContext):
                             "url": url,
                             "title": title,
                             "url_id": url_id,
-                            "domain": normalize_host(safe_parse_url(url).netloc),
+                            "domain": domain,
                             "visit_time_raw": browser_int(row["visit_time"]),
                             "from_visit": from_visit,
-                            "from_url": urls.get(from_url_id or -1, ("", ""))[0] if from_visit else "",
+                            "from_url": urls.get(from_url_id or -1, ("", "", ""))[0] if from_visit else "",
                             "opener_visit": browser_int(row["opener_visit"]) or 0,
                             **chromium_transition_profile(row["transition"]),
                             "visit_duration_micros": duration,
@@ -7641,7 +7653,7 @@ def chromium_history_row_reader(context: BrowserRowContext):
             }
             for index, row in enumerate(connection.execute(f"SELECT rowid AS source_rowid, {term_select} FROM keyword_search_terms ORDER BY rowid")):
                 url_id = browser_int(row["url_id"])
-                url, title = urls.get(url_id or -1, ("", ""))
+                url, title, domain = urls.get(url_id or -1, ("", "", ""))
                 records.append(
                     browser_row_record(
                         context,
@@ -7658,7 +7670,7 @@ def chromium_history_row_reader(context: BrowserRowContext):
                             "url_id": url_id,
                             "url": url,
                             "title": title,
-                            "search_engine_host": normalize_host(safe_parse_url(url).netloc),
+                            "search_engine_host": domain,
                         },
                     )
                 )
@@ -7697,13 +7709,14 @@ def chromium_cookie_reader(context: BrowserRowContext):
             presence.append(f"length({name}) AS {name}_length" if name in columns else f"0 AS {name}_length")
         records = []
         for row in connection.execute(f"SELECT rowid AS source_rowid, {select}, {', '.join(presence)} FROM cookies ORDER BY creation_utc, rowid"):
+            created_at = webkit_micros_to_iso(row["creation_utc"])
             samesite = browser_int(row["samesite"])
             records.append(
                 browser_row_record(
                     context,
                     "browser-cookie",
                     source,
-                    timestamp=webkit_micros_to_iso(row["creation_utc"]),
+                    timestamp=created_at,
                     timestamp_kind="created",
                     source_table="cookies",
                     source_row_id=browser_int(row["source_rowid"]),
@@ -7712,7 +7725,7 @@ def chromium_cookie_reader(context: BrowserRowContext):
                         "name": str(row["name"] or ""),
                         "path": str(row["path"] or ""),
                         "top_frame_site_key": str(row["top_frame_site_key"] or ""),
-                        "created_at": webkit_micros_to_iso(row["creation_utc"]),
+                        "created_at": created_at,
                         "last_accessed_at": webkit_micros_to_iso(row["last_access_utc"]),
                         "last_updated_at": webkit_micros_to_iso(row["last_update_utc"]),
                         "expires_at": webkit_micros_to_iso(row["expires_utc"]),
@@ -7858,12 +7871,13 @@ def chromium_login_reader(context: BrowserRowContext):
         row_id = "id" if "id" in columns else "rowid"
         records = []
         for row in connection.execute(f"SELECT {row_id} AS source_rowid, {select}, {password_length} FROM logins ORDER BY date_created, {row_id}"):
+            created_at = webkit_micros_to_iso(row["date_created"])
             records.append(
                 browser_row_record(
                     context,
                     "browser-login",
                     source,
-                    timestamp=webkit_micros_to_iso(row["date_created"]),
+                    timestamp=created_at,
                     timestamp_kind="created",
                     source_table="logins",
                     source_row_id=browser_int(row["source_rowid"]),
@@ -7876,7 +7890,7 @@ def chromium_login_reader(context: BrowserRowContext):
                         "password_element": str(row["password_element"] or ""),
                         "display_name": str(row["display_name"] or ""),
                         "federation_url": str(row["federation_url"] or ""),
-                        "date_created": webkit_micros_to_iso(row["date_created"]),
+                        "date_created": created_at,
                         "date_last_used": webkit_micros_to_iso(row["date_last_used"]),
                         "date_password_modified": webkit_micros_to_iso(row["date_password_modified"]),
                         "date_synced": webkit_micros_to_iso(row["date_synced"]),
@@ -7900,13 +7914,14 @@ def chromium_web_data_reader(context: BrowserRowContext):
         if sqlite_table_exists(connection, "autofill"):
             select = select_columns(connection, "autofill", ("name", "value", "count", "date_created", "date_last_used"))
             for row in connection.execute(f"SELECT rowid AS source_rowid, {select} FROM autofill ORDER BY date_created, rowid"):
+                created_at = unix_seconds_to_iso(row["date_created"])
                 name = str(row["name"] or "")
                 records.append(
                     browser_row_record(
                         context,
                         "browser-autofill",
                         source,
-                        timestamp=unix_seconds_to_iso(row["date_created"]),
+                        timestamp=created_at,
                         timestamp_kind="created",
                         source_table="autofill",
                         source_row_id=browser_int(row["source_rowid"]),
@@ -7914,7 +7929,7 @@ def chromium_web_data_reader(context: BrowserRowContext):
                             "field_name": name,
                             **browser_pii_value(name, row["value"], default_mask=True),
                             "use_count": browser_int(row["count"]) or 0,
-                            "date_created": unix_seconds_to_iso(row["date_created"]),
+                            "date_created": created_at,
                             "date_last_used": unix_seconds_to_iso(row["date_last_used"]),
                         },
                     )
@@ -8603,13 +8618,14 @@ def firefox_places_reader(context: BrowserRowContext):
         records: list[ArtifactRecord] = []
         if not sqlite_table_exists(connection, "moz_places"):
             return records
-        places: dict[int, tuple[str, str]] = {}
+        places: dict[int, tuple[str, str, str]] = {}
         select = select_columns(connection, "moz_places", ("id", "url", "title", "visit_count", "typed", "hidden", "last_visit_date"))
         for row in connection.execute(f"SELECT {select} FROM moz_places ORDER BY id"):
             place_id = int(row["id"])
             url = str(row["url"] or "")
             title = str(row["title"] or "")
-            places[place_id] = (url, title)
+            domain = normalize_host(safe_parse_url(url).netloc)
+            places[place_id] = (url, title, domain)
             records.append(
                 browser_row_record(
                     context,
@@ -8623,7 +8639,7 @@ def firefox_places_reader(context: BrowserRowContext):
                         "row_kind": "url",
                         "url": url,
                         "title": title,
-                        "domain": normalize_host(safe_parse_url(url).netloc),
+                        "domain": domain,
                         "visit_count": browser_int(row["visit_count"]) or 0,
                         "typed_count": browser_int(row["typed"]) or 0,
                         "hidden": bool(row["hidden"]),
@@ -8636,7 +8652,7 @@ def firefox_places_reader(context: BrowserRowContext):
             visit_place = {int(row["id"]): browser_int(row["place_id"]) for row in visits}
             for row in visits:
                 place_id = browser_int(row["place_id"])
-                url, title = places.get(place_id or -1, ("", ""))
+                url, title, domain = places.get(place_id or -1, ("", "", ""))
                 from_visit = browser_int(row["from_visit"]) or 0
                 visit_type = browser_int(row["visit_type"])
                 records.append(
@@ -8652,9 +8668,9 @@ def firefox_places_reader(context: BrowserRowContext):
                             "url": url,
                             "title": title,
                             "url_id": place_id,
-                            "domain": normalize_host(safe_parse_url(url).netloc),
+                            "domain": domain,
                             "from_visit": from_visit,
-                            "from_url": places.get(visit_place.get(from_visit) or -1, ("", ""))[0] if from_visit else "",
+                            "from_url": places.get(visit_place.get(from_visit) or -1, ("", "", ""))[0] if from_visit else "",
                             "transition": visit_type,
                             "transition_core": FIREFOX_VISIT_TYPES.get(visit_type or -1, ""),
                             "transition_qualifiers": [],
