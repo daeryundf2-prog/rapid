@@ -29,6 +29,16 @@
   2,525 slack to 500,000 + 25. The BinXML event collector
   (`collect_native_evtx_events`) read byte 48 already and its rows are
   unchanged.
+- Native E01 extraction names files and directories with a Win32 device name
+  (`CON`, `nul.txt`, `COM1.log`, ...) with a leading `_` on Windows, where the
+  plain name opened the device instead of a file in the extraction folder.
+  **Output change (Windows only):** such entries are now recovered as
+  `_CON`, `_nul.txt`, ... Other platforms keep the names.
+- The recovered-root manifest of E01/disk-image extractions lists files depth
+  first with names sorted instead of in the output drive's listing order, so
+  its first 5,000 entries (and the inventory fingerprint) no longer depend on
+  the order files were created in on drives that list in creation order
+  (exFAT, tmpfs). **Output change:** manifest entry order.
 
 ### Added
 
@@ -37,6 +47,18 @@
   `--eventlog-evtx-engine rust`. The default stays Python. Rows are identical to
   the Python decoder's (`tests/test_evtx_engine_diff.py`). See
   `docs/architecture/rust-bootstrap.md`.
+- Opt-in Rust engine for the native E01 -> NTFS file extraction
+  (`RAPIDTRIAGE_E01_EXTRACT_ENGINE=rust`, built with
+  `python scripts/build-e01-extract-native.py`): its own EWF v1 reader and
+  parallel copies (`RAPIDTRIAGE_E01_EXTRACT_THREADS`), with the tree and stats
+  of the Python engine (`tests/test_e01_extract_rust_parity.py`). It hands the
+  image to the Python engine, and records why, when it fails, when the output
+  drive nears its free-space reserve, when corrupt metadata asks for a read
+  over 256 MiB, and on Windows without long-path support when an output path
+  reaches 248 characters. Parallel copies whose targets meet on the output
+  drive (names equal after sanitizing, case or Unicode normalization) are redone
+  sequentially. Segment sets the Rust EWF reader does not take (Ex01, damaged
+  chunk tables) and chunks that fail their checksum are read through pyewf.
 - Indicator extraction can use a Rust worker for URLs, IPv4 addresses and hashes. Set `RAPIDTRIAGE_RUST_INDICATORS=1` to enable it. The worker reads JSONL artifact record streams itself, applying the Python field policy, and returns only scalar fields with candidates. Rows and Unicode text outside its exact subset go to Python. Other outputs send ASCII scalar fields in batches. The indicator output and run disclosures record worker use and fallback; after a worker failure Python resumes from the last applied checkpoint. [Build and validation instructions](docs/architecture/rust-indicators.md)
 - Opt-in Rust $MFT / $UsnJrnl:$J parser (`engines/rust/crates/rapid-ntfs`,
   module `rapid_ntfs_native`), selected with `RAPIDTRIAGE_NTFS_ENGINE=rust` for
