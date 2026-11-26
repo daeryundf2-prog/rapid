@@ -123,21 +123,23 @@ class _Anchor:
 class _Boot:
     numerator: int
     denominator: int
+    # The boot record dates continuous time zero. It only applies before the
+    # first clock record: a record at the same tick may carry a different
+    # wall time, and the record is the measured calibration.
+    origin: _Anchor
     # Clock adjustments establish new origins. Keep every anchor so that a
     # later correction cannot change the time assigned to an earlier event.
     anchors: dict[int, _Anchor] = field(default_factory=dict)
     ordered_ticks: list[int] | None = None
 
-    def preceding_anchor(self, ticks: int) -> _Anchor | None:
+    def preceding_anchor(self, ticks: int) -> _Anchor:
         if self.ordered_ticks is None:
             self.ordered_ticks = sorted(self.anchors)
         pos = bisect_right(self.ordered_ticks, ticks) - 1
-        return self.anchors[self.ordered_ticks[pos]] if pos >= 0 else None
+        return self.anchors[self.ordered_ticks[pos]] if pos >= 0 else self.origin
 
     def timestamp(self, ticks: int) -> str:
         anchor = self.preceding_anchor(ticks)
-        if anchor is None:
-            return ""
         ns = anchor.wall_ns + (ticks - anchor.ticks) * self.numerator // self.denominator
         seconds, fraction = divmod(ns, 1_000_000_000)
         try:
@@ -203,25 +205,28 @@ class Sidecars:
                 num, den, wall = struct.unpack_from("<IIq", data, pos + 24)
                 if not num or not den:
                     raise SidecarError("invalid-timesync-timebase", pos + 24)
+                origin = _Anchor(0, wall, source_path, pos)
                 boot = self._boots.get(uuid)
                 if boot is None:
-                    boot = self._boots[uuid] = _Boot(num, den)
+                    boot = self._boots[uuid] = _Boot(num, den, origin)
                 elif (num, den) != (boot.numerator, boot.denominator):
                     raise SidecarError("conflicting-timesync-timebase", pos + 24)
-                ticks, size = 0, 48
+                elif wall != boot.origin.wall_ns:
+                    raise SidecarError("conflicting-timesync-boot-time", pos + 32)
+                size = 48
             elif tag == b"Ts\x20\x00" and boot is not None:
                 if pos + 32 > len(data):
                     raise SidecarError("truncated-timesync-record", pos)
                 ticks, wall = struct.unpack_from("<Qq", data, pos + 8)
+                existing = boot.anchors.get(ticks)
+                if existing is None:
+                    boot.anchors[ticks] = _Anchor(ticks, wall, source_path, pos)
+                    boot.ordered_ticks = None
+                elif existing.wall_ns != wall:
+                    raise SidecarError("conflicting-timesync-anchor", pos)
                 size = 32
             else:
                 raise SidecarError("invalid-timesync-record", pos)
-            existing = boot.anchors.get(ticks)
-            if existing is None:
-                boot.anchors[ticks] = _Anchor(ticks, wall, source_path, pos)
-                boot.ordered_ticks = None
-            elif existing.wall_ns != wall:
-                raise SidecarError("conflicting-timesync-anchor", pos)
             self._clock_count += 1
             pos += size
 

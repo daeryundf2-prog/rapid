@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from rapidtriage.artifacts.unified_trace import parse_trace
-from tests.unified_trace_fixture import BOOT, CACHE, MAIN, chunk, make_trace
+from tests.unified_trace_fixture import BOOT, CACHE, MAIN, chunk, entry, make_trace
 
 
 def resolve(kind, uuid, address):
@@ -60,7 +60,7 @@ class UnifiedTraceTests(unittest.TestCase):
         self.assertEqual(sum(d['damaged_chunk_count'] for d in diagnostics), 1)
 
     def test_catalog_and_padding_damage_count_as_one_chunk(self):
-        body, padding = decode(chunk(0x600b, b'x')[:-1])
+        body, padding = decode(chunk(0x600b, b'x')[:-1] + b'\x01')
         self.assertEqual((body['diagnostic'], body['offset'], body['damaged_chunk_count']),
                          ('damaged-catalog', 0, 1))
         self.assertEqual((padding['diagnostic'], padding['offset'], padding['chunk_offset'],
@@ -92,8 +92,27 @@ class UnifiedTraceTests(unittest.TestCase):
         self.assertEqual(remnant['offset'], last['offset'])
         data[last['offset']:last['offset'] + remnant['length']] = bytes(remnant['length'])
         self.assertEqual(len(decode(data)), 3)
-        # Remove one byte of the enclosing chunkset's terminal alignment.
-        self.assertEqual(decode(data[:-1])[-1]['diagnostic'], 'damaged-chunk-padding')
+        # A stream may stop inside its final alignment, but present alignment bytes must be zero.
+        self.assertEqual(decode(data[:-4]), decode(data))
+        data[-1] = 1
+        self.assertEqual(decode(data)[-1]['diagnostic'], 'damaged-chunk-padding')
+
+    def test_public_size_never_reaches_stored_private_bytes(self):
+        items = struct.pack('<BBBBHH', 0x02, 1, 0x22, 4, 0, 7) + b'secret\0'
+        tail = entry(4, 0, 2, 0x150, 5, struct.pack('<I', 0) + items)
+        resolver = lambda *args: ('%{public}s', '') if args[-1] == 0x150 else resolve(*args)
+        data = bytearray(make_trace(private=tail))
+        self.assertEqual(len(decode(data, resolver)), 4)
+        firehose = data.index(struct.pack('<I', 0x6001))
+        size, private = struct.unpack_from('<HH', data, firehose + 32)
+        for field, value in ((0, size + len(tail)), (2, size - 8)):
+            with self.subTest(field=field):
+                damaged = bytearray(data)
+                struct.pack_into('<H', damaged, firehose + 32 + field, value)
+                rows = decode(damaged, resolver)
+                self.assertEqual(rows, [{'diagnostic': 'damaged-firehose', 'offset': firehose,
+                                         'damaged_chunk_count': 1}])
+        self.assertEqual(private, 0x1000 - len(tail))
 
     def test_message_bound_applies_to_assembled_output(self):
         with patch('rapidtriage.artifacts.unified_trace.MAX_TEXT', 24):

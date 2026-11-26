@@ -263,8 +263,10 @@ def _message(row, proc, kind, level, flags, address, body, resolve):
 
 def _firehose(data, offset, processes, boot, resolve, wall_time):
     try:
-        proc1, proc2, size, base = struct.unpack_from('<QI4xH6xQ', data)
-        if not 16 <= size <= len(data) - 16:
+        proc1, proc2, size, private, base = struct.unpack_from('<QI4xHH4xQ', data)
+        # Both sizes count from the size field. Stored private bytes fill the
+        # chunk tail, so a public size reaching into them is corrupt.
+        if not 16 <= size <= private <= 0x1000 or 16 + size + 0x1000 - private > len(data):
             raise ValueError('public-size')
     except (struct.error, ValueError):
         yield _damaged('damaged-firehose', offset - 16)
@@ -330,8 +332,10 @@ def _chunks(data, base, budget):
             yield None, None, start, _damaged('damaged-chunk-size', start)
             return
         yield tag, data[pos + 16:end], start, None
-        pos = end + (-length) % 8
-        if pos > len(data) or any(data[end:pos]):
+        # A stream may end before the alignment of its last chunk. Only
+        # alignment bytes that are present must be zero.
+        pos = min(end + (-length) % 8, len(data))
+        if any(data[end:pos]):
             yield None, None, start, _damaged('damaged-chunk-padding', base + end, chunk_offset=start)
             return
 

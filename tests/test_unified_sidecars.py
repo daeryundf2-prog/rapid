@@ -103,6 +103,16 @@ class UnifiedSidecarTests(unittest.TestCase):
             self.index.add_timesync(make_timesync(UUID, 0, 1, BASE_NS, []))
         self.assertEqual(self.index.wall_time(UUID, 10), "")
 
+    def test_clock_record_at_tick_zero_takes_precedence_over_boot_time(self):
+        stepped = BASE_NS - 1_070_000_000
+        self.index.add_timesync(make_timesync(BOOT, 1, 1, BASE_NS, [(0, stepped), (500, BASE_NS)]), "boot.timesync")
+        self.assertEqual(self.index.wall_time(BOOT, 10), "2001-09-09T01:46:38.930000010Z")
+        self.assertEqual(self.index.clock_source(BOOT, 10), ("boot.timesync", 48))
+        self.index.add_timesync(make_timesync(BOOT, 1, 1, BASE_NS, [(0, stepped)]))
+        with self.assertRaises(sidecars.SidecarError) as caught:
+            self.index.add_timesync(make_timesync(BOOT, 1, 1, BASE_NS + 1, []))
+        self.assertEqual((str(caught.exception), caught.exception.offset), ("conflicting-timesync-boot-time", 32))
+
     def test_clock_source_tracks_preceding_record_across_files(self):
         first = make_timesync(BOOT, 1, 1, BASE_NS, [(100, BASE_NS + 41), (300, BASE_NS + 42)])
         second = make_timesync(BOOT, 1, 1, BASE_NS, [(200, BASE_NS + 43)])

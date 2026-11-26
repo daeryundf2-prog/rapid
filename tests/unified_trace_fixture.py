@@ -19,8 +19,11 @@ def entry(kind, level, flags, address, delta, body):
     return aligned(pack('<BBHIQIHH', kind, level, flags, address, 7, delta, 0, len(body)) + body)
 
 
-def make_trace():
-    """Four entries (log/activity/signpost/trace) in one uncompressed chunkset."""
+def make_trace(private=b''):
+    """Four entries (log/activity/signpost/trace) in one uncompressed chunkset.
+
+    `private` fills the Firehose tail that the private-data offset reserves.
+    """
     header = (pack('<II', 125, 3) + bytes(32) + pack('<IIQ', 0x6100, 8, 1000)
               + pack('<II', 0x6101, 56) + bytes(56) + pack('<II', 0x6102, 24)
               + bytes.fromhex(BOOT) + bytes(8) + pack('<II', 0x6103, 48) + bytes(48))
@@ -37,7 +40,8 @@ def make_trace():
         entry(6, 0x81, 0x204, 0x200, 3, pack('<IHQ', 0, 7, 99)),
         entry(3, 0, 2, 0x140, 4, pack('<IIBB', 0, 123, 4, 1)),
     ))
-    firehose = chunk(0x6001, pack('<QI4xHH4xQ', 17, 3, 16 + len(records), 4096, 1000) + records)
+    firehose = chunk(0x6001, pack('<QI4xHH4xQ', 17, 3, 16 + len(records), 0x1000 - len(private), 1000)
+                     + records + private)
     catalog = (pack('<8HQ', 32, 32 + len(labels), 1, 32 + len(labels) + len(process),
                     1, 0, 0, 0, 1000) + uuids + labels + process
                + pack('<QQIIII', 1001, 1004, len(firehose), 0x100, 0, 0))

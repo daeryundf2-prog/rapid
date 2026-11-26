@@ -11,9 +11,9 @@ python -m rapidtriage timeline ./evidence --artifacts ./unified.json --output ./
 
 Each `macos-unified-log-event` cites the trace file, physical byte offset and length. The catalog joins the Firehose process key to a PID, image UUID and subsystem/category table. A process image path comes from UUIDText. `format_source_path`, `format_uuid` and `format_offset` locate a referenced format in UUIDText or the shared cache. The format offset is a virtual string-table address.
 
-The boot UUID identifies the clock domain. `continuous_time` holds integer ticks and `continuous_time_raw` preserves the decimal digits for clients with limited integer precision. For a matching timesync boot, the latest calibration at or before the event supplies the origin. Rapid applies the timebase numerator and denominator with integer arithmetic and writes UTC with nanosecond precision. `timesync_source_path` and `timesync_source_offset` identify the calibration. Events without calibration retain their ticks. The timeline uses calibrated timestamps and its usual date range.
+The boot UUID identifies the clock domain. `continuous_time` holds integer ticks and `continuous_time_raw` preserves the decimal digits for clients with limited integer precision. For a matching timesync boot, the latest calibration record at or before the event supplies the origin. The boot record's wall time dates tick zero and applies only to events before the first calibration record. Rapid applies the timebase numerator and denominator with integer arithmetic and writes UTC with nanosecond precision. `timesync_source_path` and `timesync_source_offset` identify the calibration. Events without calibration retain their ticks. The timeline uses calibrated timestamps and its usual date range.
 
-`message_status` describes the rendered message. For example, the synthetic log template `%{public}s / %{private}s` produces `ok / <private>`. Private descriptors and private or sensitive annotations produce `<private>`. Missing formats or unsupported encodings leave the message empty and keep the structured event.
+`message_status` describes the rendered message. For example, the synthetic log template `%{public}s / %{private}s` produces `ok / <private>`. Private descriptors and private or sensitive annotations produce `<private>`. The private data area at the end of a Firehose chunk is never read. A public size that reaches into it marks the chunk damaged. Missing formats or unsupported encodings leave the message empty and keep the structured event.
 
 ## Coverage
 
@@ -25,7 +25,7 @@ The boot UUID identifies the clock domain. `continuous_time` holds integer ticks
 | Timesync | Boot records and subsequent clock calibrations, including successive adjustments and multiple boot UUIDs. |
 | Compression | This checkout bundles no LZ4 decoder. A framed `bv41` block produces a `compressed-unsupported` diagnostic, its byte offset and a format reference. |
 
-A `macos-unified-log-diagnostic` cites a skipped or damaged structure. Sum `damaged_chunk_count` on diagnostic rows for the number of damaged chunks observed. Multiple malformed entries in the same Firehose chunk count once. A malformed frame with no reliable end terminates that stream. Later files can still contribute events. Missing sidecars, compressed blocks, oversize data, absolute/dynamic or extended format addressing, context arguments, custom printf conversions and non-Firehose record types can leave coverage incomplete.
+A `macos-unified-log-diagnostic` cites a skipped or damaged structure. Sum `damaged_chunk_count` on diagnostic rows for the number of damaged chunks observed. Multiple malformed entries in the same Firehose chunk count once. A malformed frame with no reliable end terminates that stream. A stream may end inside the 8-byte alignment of its last chunk; any alignment bytes present must be zero. Later files can still contribute events. Missing sidecars, compressed blocks, oversize data, absolute/dynamic or extended format addressing, context arguments, custom printf conversions and non-Firehose record types can leave coverage incomplete.
 
 ## Limits and synthetic check
 
