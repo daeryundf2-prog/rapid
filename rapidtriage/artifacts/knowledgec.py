@@ -167,12 +167,14 @@ def _event_details(obj: dict, source: dict, meta: dict, warnings: list[str]) -> 
     if unknown:
         warnings.append("unknown-stream")
     start_raw, end_raw = obj.get("ZSTARTDATE"), obj.get("ZENDDATE")
-    start, end = isoformat_from_macos_absolute(start_raw), isoformat_from_macos_absolute(end_raw)
+    start, end = _absolute_time(start_raw), _absolute_time(end_raw)
     if start_raw is not None and not start:
         warnings.append("invalid-start-time")
     if end_raw is not None and not end:
         warnings.append("invalid-end-time")
     values = {k: v for k, v in obj.items() if k.startswith("ZVALUE") and k != "ZVALUETYPE"}
+    # Only stored identifiers name the subject app. The producing source bundle
+    # stays in source_bundle_id and is never substituted for it.
     bundle = obj.get("ZBUNDLEID")
     if not bundle and stream.startswith("/app/") and stream in KNOWN_STREAMS:
         bundle = obj.get("ZVALUESTRING")
@@ -182,7 +184,7 @@ def _event_details(obj: dict, source: dict, meta: dict, warnings: list[str]) -> 
         if len(metadata_bundles) > 1:
             warnings.append("ambiguous-metadata-bundle")
         else:
-            bundle = next(iter(metadata_bundles), source.get("ZBUNDLEID"))
+            bundle = next(iter(metadata_bundles), None)
     return {
         "stream": stream, "unknown_stream": unknown,
         "timestamp": start, "start_at": start, "end_at": end,
@@ -191,9 +193,18 @@ def _event_details(obj: dict, source: dict, meta: dict, warnings: list[str]) -> 
         "bundle_id": bundle, "source_bundle_id": source.get("ZBUNDLEID"),
         "source_device": source.get("ZDEVICEID"), "source_id": obj.get("ZSOURCE"),
         "structured_metadata": meta, "structured_metadata_id": obj.get("ZSTRUCTUREDMETADATA"),
-        "coverage_status": "partial" if any(w.startswith("value-truncated:") for w in warnings) else "parsed",
+        "coverage_status": "partial" if any(w.startswith(("value-truncated:", "invalid-")) for w in warnings)
+        else "parsed",
         "warnings": warnings,
     }
+
+
+def _absolute_time(raw: object) -> str | None:
+    # Core Data stores dates as numeric seconds since 2001-01-01 UTC. Text or
+    # binary in a date column is kept raw and flagged rather than reinterpreted.
+    if not isinstance(raw, (int, float)):
+        return None
+    return isoformat_from_macos_absolute(raw) or None
 
 
 def _diagnostic(base: dict, reason: str) -> ArtifactRecord:

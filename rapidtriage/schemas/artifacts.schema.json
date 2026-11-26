@@ -138,10 +138,11 @@
             "then": {
               "properties": {
                 "details": {
-                  "required": ["source_row_id", "stream", "unknown_stream", "start_raw", "end_raw", "start_at", "end_at", "structured_metadata"],
+                  "required": ["source_row_id", "stream", "unknown_stream", "start_raw", "end_raw", "timestamp", "start_at", "end_at", "structured_metadata"],
                   "properties": {
                     "stream": { "type": "string" },
                     "unknown_stream": { "type": "boolean" },
+                    "timestamp": { "type": ["string", "null"] },
                     "start_at": { "type": ["string", "null"] },
                     "end_at": { "type": ["string", "null"] },
                     "structured_metadata": { "type": "object" }
@@ -158,13 +159,15 @@
             "then": {
               "properties": {
                 "details": {
-                  "required": ["source_offset", "length", "entry_array_offset", "data_offsets", "timestamp", "fields", "journal_state", "compact", "keyed_hash", "limitations"],
+                  "required": ["source_offset", "length", "entry_array_offset", "data_offsets", "timestamp", "realtime_raw", "monotonic_raw", "fields", "journal_state", "compact", "keyed_hash", "limitations"],
                   "properties": {
                     "source_offset": { "type": "integer", "minimum": 0 },
                     "length": { "type": "integer", "minimum": 0 },
                     "entry_array_offset": { "type": "integer", "minimum": 0 },
                     "data_offsets": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
                     "timestamp": { "type": ["string", "null"] },
+                    "realtime_raw": { "type": "integer", "minimum": 0 },
+                    "monotonic_raw": { "type": "integer", "minimum": 0 },
                     "fields": { "type": "object" },
                     "journal_state": { "enum": ["offline", "online", "archived"] },
                     "compact": { "type": "boolean" },

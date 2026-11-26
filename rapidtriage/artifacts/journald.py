@@ -28,6 +28,88 @@ FIELD_NAME = re.compile(rb"[A-Z_0-9]{1,64}")
 STATE = ("offline", "online", "archived")
 HEADER_SIZE = 208  # through tail_entry_monotonic, present in every format revision
 OBJECT_HEADER = struct.Struct("<BB6xQ")
+REALTIME_LIMIT = 1 << 55  # systemd's VALID_REALTIME(): 0 < realtime < 2^55 microseconds
+_M32 = 0xFFFFFFFF
+_M64 = 0xFFFFFFFFFFFFFFFF
+
+
+def _jenkins_hash64(data: bytes) -> int:
+    """Bob Jenkins' lookup3 ``hashlittle2`` with zero seeds, combined as ``(c << 32) | b``.
+
+    This is the DATA hash of journals without the keyed-hash flag. The algorithm is
+    public domain (lookup3.c, 2006); zero-padding the final block matches its tail rules.
+    """
+    length = len(data)
+    a = b = c = (0xDEADBEEF + length) & _M32
+    if not length:
+        return c << 32 | b
+    pad = -length % 12
+    words = struct.unpack(f"<{(length + pad) // 4}I", data + bytes(pad))
+    last = len(words) - 3
+    for i in range(0, last, 3):
+        a = (a + words[i]) & _M32
+        b = (b + words[i + 1]) & _M32
+        c = (c + words[i + 2]) & _M32
+        a = ((a - c) & _M32) ^ ((c << 4 | c >> 28) & _M32)
+        c = (c + b) & _M32
+        b = ((b - a) & _M32) ^ ((a << 6 | a >> 26) & _M32)
+        a = (a + c) & _M32
+        c = ((c - b) & _M32) ^ ((b << 8 | b >> 24) & _M32)
+        b = (b + a) & _M32
+        a = ((a - c) & _M32) ^ ((c << 16 | c >> 16) & _M32)
+        c = (c + b) & _M32
+        b = ((b - a) & _M32) ^ ((a << 19 | a >> 13) & _M32)
+        a = (a + c) & _M32
+        c = ((c - b) & _M32) ^ ((b << 4 | b >> 28) & _M32)
+        b = (b + a) & _M32
+    a = (a + words[last]) & _M32
+    b = (b + words[last + 1]) & _M32
+    c = (c + words[last + 2]) & _M32
+    c = ((c ^ b) - ((b << 14 | b >> 18) & _M32)) & _M32
+    a = ((a ^ c) - ((c << 11 | c >> 21) & _M32)) & _M32
+    b = ((b ^ a) - ((a << 25 | a >> 7) & _M32)) & _M32
+    c = ((c ^ b) - ((b << 16 | b >> 16) & _M32)) & _M32
+    a = ((a ^ c) - ((c << 4 | c >> 28) & _M32)) & _M32
+    b = ((b ^ a) - ((a << 14 | a >> 18) & _M32)) & _M32
+    c = ((c ^ b) - ((b << 24 | b >> 8) & _M32)) & _M32
+    return c << 32 | b
+
+
+def _siphash24(data: bytes, key: bytes) -> int:
+    """SipHash-2-4 with a 64-bit result: the DATA hash of keyed-hash journals (key = file ID)."""
+    k0, k1 = struct.unpack("<QQ", key)
+    v0, v1 = k0 ^ 0x736F6D6570736575, k1 ^ 0x646F72616E646F6D
+    v2, v3 = k0 ^ 0x6C7967656E657261, k1 ^ 0x7465646279746573
+    length = len(data)
+    whole = length & ~7
+    final = int.from_bytes(data[whole:], "little") | (length & 0xFF) << 56
+    for message in (*struct.unpack(f"<{whole // 8}Q", data[:whole]), final):
+        v3 ^= message
+        for _ in range(2):
+            v0 = (v0 + v1) & _M64
+            v1 = (v1 << 13 | v1 >> 51) & _M64 ^ v0
+            v0 = (v0 << 32 | v0 >> 32) & _M64
+            v2 = (v2 + v3) & _M64
+            v3 = (v3 << 16 | v3 >> 48) & _M64 ^ v2
+            v0 = (v0 + v3) & _M64
+            v3 = (v3 << 21 | v3 >> 43) & _M64 ^ v0
+            v2 = (v2 + v1) & _M64
+            v1 = (v1 << 17 | v1 >> 47) & _M64 ^ v2
+            v2 = (v2 << 32 | v2 >> 32) & _M64
+        v0 ^= message
+    v2 ^= 0xFF
+    for _ in range(4):
+        v0 = (v0 + v1) & _M64
+        v1 = (v1 << 13 | v1 >> 51) & _M64 ^ v0
+        v0 = (v0 << 32 | v0 >> 32) & _M64
+        v2 = (v2 + v3) & _M64
+        v3 = (v3 << 16 | v3 >> 48) & _M64 ^ v2
+        v0 = (v0 + v3) & _M64
+        v3 = (v3 << 21 | v3 >> 43) & _M64 ^ v0
+        v2 = (v2 + v1) & _M64
+        v1 = (v1 << 17 | v1 >> 47) & _M64 ^ v2
+        v2 = (v2 << 32 | v2 >> 32) & _M64
+    return v0 ^ v1 ^ v2 ^ v3
 
 
 class JournalError(ValueError):
@@ -80,6 +162,9 @@ class _Reader:
             raise JournalError("invalid-state", 16)
         self.state = STATE[header[16]]
         self.compact = bool(self.flags & 16)
+        self.keyed = bool(self.flags & 4)
+        self.file_id = header[24:40]
+        self.computed_hashes: dict[int, int] = {}
         self.start, arena_size = struct.unpack_from("<QQ", header, 88)
         if self.start < HEADER_SIZE or self.start % 8 or self.start > self.end:
             raise JournalError("invalid-header-size", 88)
@@ -111,19 +196,19 @@ class _Reader:
             raise JournalError("truncated-object", offset)
         return flags, min(size, self.end - offset), clipped
 
-    def field(self, offset: int, expected_hash: int | None) -> tuple[str, object]:
+    def field(self, offset: int, item_hash: int | None, reference: int, issues: list[dict]) -> tuple[str, object]:
         prefix = 72 if self.compact else 64
         flags, size, _ = self.object(offset, 1, prefix + 1)
         file_flag = {0: 0, 1: 1, 2: 2, 4: 8}.get(flags)
         if file_flag is None or self.flags & file_flag != file_flag:
             raise JournalError("invalid-compression-flags", offset)
+        data_hash, = struct.unpack("<Q", self.read(offset + 16, 8))
+        if item_hash is not None and data_hash != item_hash:
+            issues.append({"reason": "item-hash-mismatch", "source_offset": offset, "reference_offset": reference,
+                           "item_hash": f"{item_hash:016x}", "data_hash": f"{data_hash:016x}"})
         if flags in (2, 4):
             raise JournalError("compressed-unsupported", offset, codec="LZ4" if flags == 2 else "ZSTD",
                                format_reference=FORMAT_REFERENCE)
-        if expected_hash is not None:
-            data_hash, = struct.unpack("<Q", self.read(offset + 16, 8))
-            if data_hash != expected_hash:
-                raise JournalError("item-hash-mismatch", offset)
         if size - prefix > MAX_PAYLOAD:
             raise JournalError("field-size-limit", offset)
         payload = self.read(offset + prefix, size - prefix)
@@ -138,6 +223,16 @@ class _Reader:
                 raise JournalError("field-size-limit", offset)
             if not decoder.eof or decoder.unused_data:
                 raise JournalError("invalid-xz", offset)
+        # The stored hash covers the uncompressed "NAME=value" payload. A DATA object
+        # shared by many entries is hashed once per file.
+        computed = self.computed_hashes.get(offset)
+        if computed is None:
+            computed = _siphash24(payload, self.file_id) if self.keyed else _jenkins_hash64(payload)
+            self.computed_hashes[offset] = computed
+        if computed != data_hash:
+            issues.append({"reason": "data-hash-mismatch", "source_offset": offset, "reference_offset": reference,
+                           "hash_function": "siphash24" if self.keyed else "jenkins-lookup3",
+                           "data_hash": f"{data_hash:016x}", "computed_hash": f"{computed:016x}"})
         name, separator, value = payload.partition(b"=")
         if not separator or not FIELD_NAME.fullmatch(name):
             raise JournalError("invalid-field-name", offset)
@@ -169,7 +264,7 @@ class _Reader:
             address = reference[0]
             data_offsets.append(address)
             try:
-                key, value = self.field(address, None if self.compact else reference[1])
+                key, value = self.field(address, None if self.compact else reference[1], reference_offset, issues)
             except JournalError as error:
                 if error.details["reason"] == "byte-limit":
                     raise
@@ -186,20 +281,24 @@ class _Reader:
                     fields[key] = [prior, value]
             else:
                 fields[key] = value
-        for key, value in (("__REALTIME_TIMESTAMP", realtime), ("__MONOTONIC_TIMESTAMP", monotonic)):
+        # The entry header is authoritative for both clocks (realtime_raw/monotonic_raw).
+        # A stored DATA field with a reserved name keeps its own value and is flagged.
+        for key, value, position in (("__REALTIME_TIMESTAMP", realtime, 24), ("__MONOTONIC_TIMESTAMP", monotonic, 32)):
             if key in fields:
-                issues.append({"reason": "reserved-timestamp-field", "source_offset": offset})
-            fields[key] = value
+                issues.append({"reason": "reserved-timestamp-field", "source_offset": offset + position, "field": key})
+            else:
+                fields[key] = value
         fields.setdefault("_BOOT_ID", boot.hex())
-        try:
+        timestamp = None
+        if 0 < realtime < REALTIME_LIMIT:
             timestamp = (EPOCH + dt.timedelta(microseconds=realtime)).isoformat()
-        except OverflowError:
-            timestamp = None
+        else:
             issues.append({"reason": "timestamp-out-of-range", "source_offset": offset + 24})
         return _row(
             path, "entry", offset, length=size, entry_array_offset=array, data_offsets=data_offsets,
-            sequence_number=seq, timestamp=timestamp, boot_id=boot.hex(), fields=fields,
-            journal_state=self.state, compact=self.compact, keyed_hash=bool(self.flags & 4),
+            sequence_number=seq, timestamp=timestamp, realtime_raw=realtime, monotonic_raw=monotonic,
+            boot_id=boot.hex(), fields=fields,
+            journal_state=self.state, compact=self.compact, keyed_hash=self.keyed,
             limitations=issues, coverage_status="partial" if issues else "parsed",
         )
 
@@ -267,10 +366,11 @@ class JournaldProvider:
                 return
         budget = _Budget()
         files = 0
-        for path in iter_evidence_paths(directory):
-            if not path.name.endswith((".journal", ".journal~")) or path.is_symlink() or not path.is_file():
-                continue
-            if not path.resolve().is_relative_to(directory):
+        # Sorted, so the file cap and row order do not depend on directory enumeration order.
+        candidates = sorted(path for path in iter_evidence_paths(directory)
+                            if path.name.endswith((".journal", ".journal~")))
+        for path in candidates:
+            if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(directory):
                 continue
             if files >= MAX_FILES:
                 yield _diagnostic(path, JournalError("file-limit", 0))

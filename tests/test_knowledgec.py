@@ -60,6 +60,9 @@ class KnowledgeCTest(unittest.TestCase):
         self.assertEqual(events[2].details["value"], 0)
         self.assertEqual(events[8].details["value"], 0.75)
         self.assertEqual(events[6].details["bundle_id"], "example.subject")
+        # The producing source bundle is reported separately, never as the subject app.
+        self.assertEqual([events[i].details["bundle_id"] for i in (2, 9)], [None, None])
+        self.assertEqual(events[9].details["source_bundle_id"], "example.producer")
         self.assertEqual(events[6].details["structured_metadata"]['extra"field'], "한글 자료")
         self.assertEqual(events[-1].details["value"], {"hex": "00ff"})
         self.assertEqual([e.details["stream"] for e in events if e.details["unknown_stream"]], ["/new/synthetic"])
@@ -118,11 +121,30 @@ class KnowledgeCTest(unittest.TestCase):
         row, = self.rows()
         self.assertEqual(row.details["scope"], "user")
         self.assertEqual(row.details["coverage_status"], "partial")
-        self.assertEqual(row.details["timestamp"], "")
+        self.assertIsNone(row.details["timestamp"])
         self.assertEqual(row.details["start_raw"], 1e300)
         self.assertEqual(row.details["value"], {"hex": "00" * knowledgec.MAX_VALUE_BYTES})
         self.assertIn("value-truncated:ZVALUEBINARY", row.details["warnings"])
         self.assertIn("invalid-start-time", row.details["warnings"])
+
+    def test_cocoa_time_fraction_and_non_numeric_dates(self):
+        path = self.root / knowledgec.USER_DB
+        path.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(path)) as db:
+            db.execute("CREATE TABLE ZOBJECT (ZSTREAMNAME, ZSTARTDATE, ZENDDATE)")
+            db.execute("INSERT INTO ZOBJECT VALUES ('/app/usage', 785808000.000001, 785808000.9999996)")
+            db.execute("INSERT INTO ZOBJECT VALUES ('/app/usage', '785808000', x'00')")
+            db.commit()
+        exact, text = (row.details for row in self.rows())
+        # 785808000 s after 2001-01-01T00:00:00Z; the end rounds half-even to the microsecond.
+        self.assertEqual((exact["start_at"], exact["end_at"]),
+                         ("2025-11-26T00:00:00.000001+00:00", "2025-11-26T00:00:01+00:00"))
+        self.assertEqual((exact["start_raw"], exact["end_raw"]), (785808000.000001, 785808000.9999996))
+        self.assertEqual(exact["coverage_status"], "parsed")
+        self.assertEqual((text["start_at"], text["end_at"], text["timestamp"]), (None, None, None))
+        self.assertEqual((text["start_raw"], text["end_raw"]), ("785808000", {"hex": "00"}))
+        self.assertEqual(text["coverage_status"], "partial")
+        self.assertEqual(text["warnings"], ["invalid-start-time", "invalid-end-time"])
 
     def test_caps_report_partial_coverage(self):
         _fixture(self.system_db)

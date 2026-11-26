@@ -8,12 +8,27 @@ from unittest.mock import patch
 
 from rapidtriage.artifacts import journald
 
+FILE_ID = bytes(range(16, 32))
+
+
+def data_hash(payload, flag, keyed):
+    """The stored DATA hash: of the uncompressed payload, keyed by the file ID when requested."""
+    if flag == 1:
+        try:
+            payload = lzma.decompress(payload)
+        except lzma.LZMAError:
+            return 0
+    elif flag:
+        return 0  # opaque LZ4/ZSTD fixtures cannot be hashed
+    return journald._siphash24(payload, FILE_ID) if keyed else journald._jenkins_hash64(payload)
+
 
 def make_journal(entries, *, compact=False, keyed=False, state=0):
-    """Build indexed ENTRY/DATA objects with opaque, matching item/DATA hash words."""
+    """Build indexed ENTRY/DATA objects whose item and DATA hash words match the payloads."""
     data = bytearray(272)
     data[:8] = b"LPKSHHRH"
     data[16] = state
+    data[24:40] = FILE_ID
     offsets = {"entries": [], "arrays": [], "data": []}
     objects = []
     header_flags = (16 if compact else 0) | (4 if keyed else 0)
@@ -32,7 +47,7 @@ def make_journal(entries, *, compact=False, keyed=False, state=0):
         for field in fields:
             flag, payload = field if isinstance(field, tuple) else (0, field)
             header_flags |= {0: 0, 1: 1, 2: 2, 4: 8}[flag]
-            hash_word = len(offsets["data"]) + 11
+            hash_word = data_hash(payload, flag, keyed)
             metadata = struct.pack("<6Q", hash_word, 0, 0, 0, 0, 1)
             if compact:
                 metadata += bytes(8)
@@ -131,11 +146,89 @@ class JournalTests(unittest.TestCase):
         struct.pack_into("<Q", data, entry + 64 + 32 + 8, 99)
         first, second = self.rows(data)
         self.assertEqual(first["fields"]["MESSAGE"], "keep")
+        # A disagreeing item hash is flagged; the readable value is kept for review.
+        self.assertEqual(first["fields"]["SECOND"], "bad")
+        self.assertEqual(first["coverage_status"], "partial")
         self.assertEqual(first["limitations"], [
             {"source_offset": 123, "reason": "invalid-object-offset", "reference_offset": entry + 80},
-            {"source_offset": offsets["data"][2], "reason": "item-hash-mismatch", "reference_offset": entry + 96},
+            {"source_offset": offsets["data"][2], "reason": "item-hash-mismatch", "reference_offset": entry + 96,
+             "item_hash": "0000000000000063", "data_hash": f"{data_hash(b'SECOND=bad', 0, False):016x}"},
         ])
         self.assertEqual(second["fields"]["MESSAGE"], "later")
+
+    def test_hash_functions_match_reference_vectors(self):
+        # lookup3.c (public domain) driver vectors and hashlittle2 output for the same inputs.
+        self.assertEqual(journald._jenkins_hash64(b""), 0xDEADBEEFDEADBEEF)
+        self.assertEqual(journald._jenkins_hash64(b"Four score and seven years ago"), 0x17770551CE7226E6)
+        self.assertEqual(journald._jenkins_hash64(b"A" * 12), 0x02EEA781C8B1BAD4)
+        self.assertEqual(journald._jenkins_hash64(b"MESSAGE=hello"), 0x87DDEFF2FD1BD06D)
+        # SipHash-2-4 paper (Appendix A) and reference vectors.h, key 00..0f.
+        key = bytes(range(16))
+        self.assertEqual(journald._siphash24(bytes(range(15)), key), 0xA129CA6149BE45E5)
+        self.assertEqual(journald._siphash24(b"", key), 0x726FDB47DD0E0E31)
+        self.assertEqual(journald._siphash24(b"MESSAGE=hello", key), 0xC1E47240469D2E88)
+
+    def test_data_hash_recomputed_with_the_file_hash_function(self):
+        for compact in (False, True):
+            for keyed in (False, True):
+                with self.subTest(compact=compact, keyed=keyed):
+                    data, offsets = make_journal(
+                        [[b"MESSAGE=keep", (1, lzma.compress(b"XZ=value"))]], compact=compact, keyed=keyed)
+                    row, = self.rows(data)
+                    self.assertEqual(row["coverage_status"], "parsed")
+                    message = offsets["data"][0]
+                    prefix = 72 if compact else 64
+                    data[message + prefix + 9] = ord("E")
+                    row, = self.rows(data)
+                    self.assertEqual(row["fields"]["MESSAGE"], "kEep")
+                    self.assertEqual(row["limitations"], [{
+                        "reason": "data-hash-mismatch", "source_offset": message,
+                        "reference_offset": offsets["entries"][0] + 64,
+                        "hash_function": "siphash24" if keyed else "jenkins-lookup3",
+                        "data_hash": f"{data_hash(b'MESSAGE=keep', 0, keyed):016x}",
+                        "computed_hash": f"{data_hash(b'MESSAGE=kEep', 0, keyed):016x}",
+                    }])
+        # The keyed hash depends on the file ID; the Jenkins hash does not.
+        for keyed in (False, True):
+            data, _ = make_journal([[b"MESSAGE=keep"]], keyed=keyed)
+            data[24] ^= 1
+            row, = self.rows(data)
+            self.assertEqual([issue["reason"] for issue in row["limitations"]], ["data-hash-mismatch"] if keyed else [])
+
+    def test_realtime_validity_and_raw_clock_values(self):
+        data, offsets = make_journal([[b"MESSAGE=x"]])
+        entry = offsets["entries"][0]
+        for realtime, expected in ((1, "1970-01-01T00:00:00.000001+00:00"),
+                                   (1_764_115_200_123_456, "2025-11-26T00:00:00.123456+00:00"),
+                                   (2**55 - 1, "3111-09-16T23:10:18.963967+00:00"), (0, None), (2**55, None)):
+            with self.subTest(realtime=realtime):
+                struct.pack_into("<Q", data, entry + 24, realtime)
+                row, = self.rows(data)
+                self.assertEqual(row["timestamp"], expected)
+                self.assertEqual((row["realtime_raw"], row["monotonic_raw"]), (realtime, 50))
+                self.assertEqual(row["fields"]["__REALTIME_TIMESTAMP"], realtime)
+                self.assertEqual([issue["reason"] for issue in row["limitations"]],
+                                 [] if expected else ["timestamp-out-of-range"])
+
+    def test_stored_reserved_clock_field_is_kept_and_flagged(self):
+        data, offsets = make_journal([[b"__REALTIME_TIMESTAMP=5", b"MESSAGE=x"]])
+        row, = self.rows(data)
+        self.assertEqual(row["fields"]["__REALTIME_TIMESTAMP"], "5")
+        self.assertEqual(row["realtime_raw"], 1_000_001)
+        self.assertEqual(row["timestamp"], "1970-01-01T00:00:01.000001+00:00")
+        self.assertEqual(row["limitations"], [{"reason": "reserved-timestamp-field",
+                                               "source_offset": offsets["entries"][0] + 24,
+                                               "field": "__REALTIME_TIMESTAMP"}])
+
+    def test_file_cap_follows_sorted_paths(self):
+        data, _ = make_journal([[b"MESSAGE=x"]])
+        for name in ("system@b.journal", "system@a.journal~", "system.journal"):
+            (self.path.parent / name).write_bytes(data)
+        with patch.object(journald, "MAX_FILES", 2):
+            rows = list(journald.JournaldProvider().collect(self.root))
+        self.assertEqual([Path(row.path).name for row in rows],
+                         ["system.journal", "system@a.journal~", "system@b.journal"])
+        self.assertEqual(rows[-1].details["reason"], "file-limit")
 
     def test_header_and_conflicting_boot_field_preserved_with_offsets(self):
         data, offsets = make_journal([[b"_BOOT_ID=" + b"1" * 32]])
