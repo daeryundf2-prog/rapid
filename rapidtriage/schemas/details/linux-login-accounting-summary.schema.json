@@ -13,6 +13,7 @@
     "damaged_records": { "type": "integer", "minimum": 0 },
     "truncated_records": { "type": "integer", "minimum": 0 },
     "trailing_bytes": { "type": "integer", "minimum": 0 },
-    "capped": { "type": "boolean" }
+    "capped": { "type": "boolean" },
+    "account_lookup": { "enum": ["complete", "truncated", "unavailable"], "description": "Lastlog only: passwd lookup completeness, independent of coverage_status and capped." }
   }
 }

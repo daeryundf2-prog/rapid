@@ -37,6 +37,14 @@
   UTC and adds the wall-clock count when there is one. Rows without an offset
   keep their caveat; one without a local label now gets one too
   (`tests/test_d27_timeline.py::ReportTimeBasisTests`).
+- A lastlog row could name a single account for a UID that two accounts share
+  when the passwd file exceeded the 4 MiB lookup cap and the second alias lay
+  past it; the summary still read `parsed` with `capped=false`. A truncated
+  passwd file now names nobody, and lastlog rows and their summary carry
+  `account_lookup` (`complete`, `truncated` or `unavailable`), separate from
+  the record scan's `capped`. **Output change:** `user` is empty on every
+  lastlog row when passwd exceeds 4 MiB; new `account_lookup` field
+  (`tests/test_linux_login_accounting.py::LinuxLoginAccountingTests::test_truncated_passwd_never_settles_a_shared_uid`).
 - KnowledgeC exported the string value of every known `/app/` stream as the
   subject app's `bundle_id` before consulting stored identifiers, so a
   `/app/webUsage` page URL became the bundle ID even when the linked metadata
