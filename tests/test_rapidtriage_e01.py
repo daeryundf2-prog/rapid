@@ -969,6 +969,23 @@ Units are in 512-byte sectors
                     self.assertEqual(recorded["native_e01_extract_engine_fallback_reason"], fallback["fallback_reason"])
                     self.assertIn(fallback["notice_ko"], result.warnings)
 
+    def test_recovered_root_manifest_does_not_follow_creation_order(self) -> None:
+        # The parallel Rust engine creates files in another order than the Python walk; on drives
+        # that list in creation order (exFAT, tmpfs) the capped manifest must still be the same.
+        from rapidtriage.core.e01 import build_recovered_root_manifest
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            listed = []
+            for name, order in (("one", ("b/z.txt", "a.txt", "b/c.txt", "y.txt")), ("two", ("y.txt", "b/c.txt", "a.txt", "b/z.txt"))):
+                root = Path(tmp_dir) / name
+                for rel in order:
+                    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                    (root / rel).write_text(rel)
+                manifest = build_recovered_root_manifest(root, max_files=3)
+                listed.append([entry["relative_path"] for entry in manifest["files"]])
+        self.assertEqual(listed[0], listed[1])
+        self.assertEqual(listed[0], ["a.txt", "y.txt", str(Path("b/c.txt"))])
+
     def test_dump_ntfs_system_record_streams_bounded_chunks(self) -> None:
         from rapidtriage.core.e01_native import _dump_ntfs_system_record
 

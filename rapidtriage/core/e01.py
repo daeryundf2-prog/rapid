@@ -7,7 +7,7 @@ import re
 import shlex
 import shutil
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -2501,6 +2501,16 @@ def build_e01_resume_status(
     }
 
 
+def _files_in_fixed_order(root: Path) -> Iterator[Path]:
+    """Files under ``root`` depth first with names sorted, not in the order the output file
+    system lists them: where that is creation order (exFAT, tmpfs), the manifest's first
+    ``max_files`` entries would otherwise depend on the extraction engine and its copy threads."""
+    for top, dirs, files in os.walk(root):
+        dirs.sort()
+        for name in sorted(files):
+            yield Path(top) / name
+
+
 def build_recovered_root_manifest(
     root: Path,
     *,
@@ -2514,7 +2524,7 @@ def build_recovered_root_manifest(
     skipped_large_count = 0
     error_count = 0
     truncated = False
-    for path in root.rglob("*"):
+    for path in _files_in_fixed_order(root):
         if not path.is_file():
             continue
         if visited_count >= max_files:
