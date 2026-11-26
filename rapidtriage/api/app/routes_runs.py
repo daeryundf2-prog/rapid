@@ -1574,6 +1574,7 @@ def build_runs_router(
                 LazyRows(big, "inventory") if big.count("inventory") is not None else None,
                 join,
                 list_view,
+                applied_filters,
             )
         return _files_page_tail(
             run_id,
