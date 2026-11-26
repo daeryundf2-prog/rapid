@@ -79,8 +79,9 @@ class BuildSourceTextTests(unittest.TestCase):
         self.root = Path(temp.name)
 
     def write(self, name: str, text: str, encoding: str = "utf-8") -> Path:
+        # newline="": the file holds exactly these characters on every OS (no \n → \r\n on Windows).
         path = self.root / name
-        path.write_text(text, encoding=encoding)
+        path.write_text(text, encoding=encoding, newline="")
         return path
 
     def test_masks_a_recovery_key_and_says_so(self) -> None:
@@ -95,6 +96,12 @@ class BuildSourceTextTests(unittest.TestCase):
         payload = build_source_text(self.write("plain.log", "a,b\n1,2\n"))
         self.assertEqual(payload["text"], "a,b\n1,2\n")
         self.assertFalse(payload["redacted"])
+
+    def test_windows_line_ends_are_kept_as_the_file_has_them(self) -> None:
+        # Evidence text is byte-faithful apart from masking: CRLF stays CRLF.
+        path = self.root / "crlf.log"
+        path.write_bytes(f"a\r\n{KEY}\r\nb\r\n".encode())
+        self.assertEqual(build_source_text(path)["text"], f"a\r\n{MASKED}\r\nb\r\n")
 
     def test_a_key_the_cap_cuts_in_two_never_shows_in_part(self) -> None:
         for before in range(40, 101):
@@ -137,9 +144,9 @@ class ConsoleTextViewRedactionTests(unittest.TestCase):
             run_dir = Path(temp) / "run"
             root.mkdir()
             run_dir.mkdir()
-            (root / "notes.txt").write_text(f"복구 키\n{KEY}\n", encoding="utf-8")
+            (root / "notes.txt").write_text(f"복구 키\n{KEY}\n", encoding="utf-8", newline="")
             # Past the preview's 20000 characters: the console offers 더 보기 for the rest.
-            (root / "long.txt").write_text("줄\n" * 15000 + f"{KEY}\n", encoding="utf-8")
+            (root / "long.txt").write_text("줄\n" * 15000 + f"{KEY}\n", encoding="utf-8", newline="")
             client, run_id = open_run(root, run_dir)
 
             def get(route: str, path: str, **params: object) -> dict[str, object]:
@@ -222,7 +229,7 @@ class PreviewRedactionTests(unittest.TestCase):
             root.mkdir()
             run_dir.mkdir()
             for name, body in PREVIEW_FILES.items():
-                (root / name).write_text(body, encoding="utf-8")
+                (root / name).write_text(body, encoding="utf-8", newline="")
             with zipfile.ZipFile(root / "export.zip", "w") as archive:
                 for name in ("secrets.json", "notes.log", "WinSCP.ini"):
                     archive.writestr(f"inner/{name}", PREVIEW_FILES[name])
@@ -251,9 +258,9 @@ class PreviewRedactionTests(unittest.TestCase):
             run_dir = Path(temp) / "run"
             root.mkdir()
             run_dir.mkdir()
-            (root / "plain.json").write_text('{"a": 1}', encoding="utf-8")
-            (root / "plain.xml").write_text("<a>1</a>", encoding="utf-8")
-            (root / "plain.ps1").write_text("Write-Host 1\n", encoding="utf-8")
+            (root / "plain.json").write_text('{"a": 1}', encoding="utf-8", newline="")
+            (root / "plain.xml").write_text("<a>1</a>", encoding="utf-8", newline="")
+            (root / "plain.ps1").write_text("Write-Host 1\n", encoding="utf-8", newline="")
             client, run_id = open_run(root, run_dir)
             for path in ("plain.json", "plain.xml", "plain.ps1"):
                 with self.subTest(path=path):
