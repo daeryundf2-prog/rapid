@@ -219,6 +219,48 @@ class AgentTests(AgentFixture):
         self.assertEqual([(r.details["source_line"], r.details["text"]) for r in rows],
                          [(2, "again"), (3, "again"), (4, "answer")])
 
+    def test_replay_matching_stays_within_the_source_turn(self):
+        def turn(ident, minute, replayed, cwd=None):
+            stamp = f"2024-01-01T00:{minute}:00Z"
+            context = {"cwd": cwd or "/" + ident, **({"turn_id": ident} if ident.startswith("t") else {})}
+            records = [{"type": "turn_context", "payload": context},
+                       {"type": "event_msg", "timestamp": stamp,
+                        "payload": {"type": "user_message", "message": "same text"}}]
+            if replayed:
+                records.append({"type": "response_item", "timestamp": stamp, "payload": {
+                    "type": "message", "role": "user", "content": [{"type": "input_text", "text": "same text"}]}})
+            return records
+
+        def rows(*turns):
+            path = self.lines(".codex/sessions/turns.jsonl", *(r for t in turns for r in t))
+            result = [(r.details["source_line"], r.details["cwd"], r.details["timestamp_utc"], r.details["flags"])
+                      for r in self.rows("codex-cli")]
+            path.unlink()
+            return result
+
+        def stamp(minute):
+            return f"2024-01-01T00:{minute}:00+00:00"
+
+        base = ["schema-version-not-validated", "version-unknown"]
+        # A replay recorded only in the second turn must not consume the first turn's prompt.
+        for first, second in (("t-first", "t-second"), ("first", "second")):
+            self.assertEqual(rows(turn(first, "01", False), turn(second, "02", True)),
+                             [(2, "/" + first, stamp("01"), base), (5, "/" + second, stamp("02"), base)])
+        # The same text three times; only the last turn has a replay.
+        self.assertEqual([r[:3] for r in rows(turn("t1", "01", False), turn("t2", "02", False), turn("t3", "03", True))],
+                         [(2, "/t1", stamp("01")), (4, "/t2", stamp("02")), (7, "/t3", stamp("03"))])
+        # Control: each turn has its replay, so each turn yields exactly its replay row.
+        self.assertEqual([r[:3] for r in rows(turn("t1", "01", True), turn("t2", "02", True), turn("t3", "03", True))],
+                         [(3, "/t1", stamp("01")), (6, "/t2", stamp("02")), (9, "/t3", stamp("03"))])
+        # A turn_context repeated with the same recorded turn_id (after compaction) stays one turn.
+        repeated = turn("t1", "01", False) + [{"type": "turn_context", "payload": {"turn_id": "t1", "cwd": "/t1"}},
+                                              turn("t1", "01", True)[-1]]
+        self.assertEqual([r[:3] for r in rows(repeated)], [(4, "/t1", stamp("01"))])
+        # Two progress copies and one replay in one turn: the unpaired copy says the pairing is by order.
+        ambiguous = turn("t1", "01", False) + turn("t1", "02", True)[1:]
+        self.assertEqual(rows(ambiguous), [(3, "/t1", stamp("02"), base + ["replay-pairing-ambiguous"]),
+                                           (4, "/t1", stamp("02"), base)])
+
     def test_editor_windows_and_linux_key_layouts(self):
         for prefix in ("Users/profile/AppData/Roaming/Code", "home/profile/.config/Code - Insiders"):
             path = self.root / prefix / "User/globalStorage/state.vscdb"

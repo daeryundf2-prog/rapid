@@ -37,6 +37,16 @@
   UTC and adds the wall-clock count when there is one. Rows without an offset
   keep their caveat; one without a local label now gets one too
   (`tests/test_d27_timeline.py::ReportTimeBasisTests`).
+- A Codex rollout that repeated the same prompt in two turns, with a replay
+  (`response_item`) recorded only in the second turn, lost the first turn's
+  prompt and exported two rows for the second turn (wrong time, working
+  directory and source line). Replays were matched by role and text across the
+  whole file. They are now matched only within the same turn, identified by the
+  `turn_context` record's `turn_id` when recorded. **Output change:** such
+  prompts keep their own turn's row; when one turn holds more progress copies
+  than replays, the unpaired copy carries the new flag
+  `replay-pairing-ambiguous`
+  (`tests/test_ai_agents.py::AgentTests::test_replay_matching_stays_within_the_source_turn`).
 - Coding-agent transcript timestamps with an out-of-range UTC offset minute
   (`2024-01-01T12:00:00+01:60`, `-00:60`) were rolled over by the
   date parser into a different, apparently exact UTC instant
