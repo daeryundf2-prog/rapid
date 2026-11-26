@@ -387,7 +387,7 @@ def build_parser() -> argparse.ArgumentParser:
             """
         ),
     )
-    kakao_memory_carve.add_argument("root", help="Extracted KakaoTalk folder containing KakaoTalk.DMP or memory dumps")
+    kakao_memory_carve.add_argument("root", help="Extracted KakaoTalk folder containing KakaoTalk.DMP or memory dumps; hiberfil.sys/pagefile.sys/swapfile.sys are scanned as residue")
     kakao_memory_carve.add_argument("--output", default="rapidtriage-kakaotalk-memory-carve.json", help="JSON output path")
     kakao_memory_carve.add_argument("--carve-dir", help="Directory for carved SQLite files when --write-carves is set")
     kakao_memory_carve.add_argument("--write-carves", action="store_true", help="Write carved SQLite fragments to --carve-dir")
@@ -410,7 +410,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Probe post-patch KakaoTalk chatLogs_*.edb with redacted SQLCipher key residues from memory",
         description="Probe post-patch KakaoTalk chatLogs_*.edb with redacted SQLCipher key residues from memory",
     )
-    kakao_sqlcipher_probe.add_argument("root", help="Extracted KakaoTalk folder containing chatLogs_*.edb and memory dumps")
+    kakao_sqlcipher_probe.add_argument("root", help="Extracted KakaoTalk folder containing chatLogs_*.edb and memory dumps; hiberfil.sys/pagefile.sys/swapfile.sys are scanned as residue")
     kakao_sqlcipher_probe.add_argument("--output", default="rapidtriage-kakaotalk-sqlcipher-probe.json", help="JSON output path")
     kakao_sqlcipher_probe.add_argument("--sqlcipher-bin", default="sqlcipher", help="SQLCipher binary to use for temp-copy probes")
     kakao_sqlcipher_probe.add_argument("--max-keys", type=int, default=DEFAULT_MEMORY_SQLCIPHER_KEY_RESIDUE_LIMIT, help="Maximum unique SQLCipher key residues to test (0 means all)")
@@ -436,7 +436,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     kakao_key_store.add_argument("root", help="Extracted KakaoTalk folder containing appstate.dat and chatLogs_*.edb")
     kakao_key_store.add_argument("--output", default="rapidtriage-kakaotalk-key-store.json", help="JSON output path")
-    kakao_key_store.add_argument("--max-memory-sources", type=int, default=2, help="Maximum memory dumps to check for key-store residency (0 disables memory checks)")
+    kakao_key_store.add_argument("--max-memory-sources", type=int, default=2, help="Maximum memory dumps to check for key-store residency; hiberfil.sys/pagefile.sys/swapfile.sys are also scanned (0 disables memory checks)")
     kakao_key_store.add_argument("--json", action="store_true", help="Print JSON payload to stdout")
 
     kakao_userdir = sub.add_parser(
