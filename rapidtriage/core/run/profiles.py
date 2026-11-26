@@ -121,6 +121,7 @@ RUN_PROFILES: dict[str, RunProfile] = {
             "media-image",
             "generic-documents",
             "memory-volatility",
+            "kakaotalk-memory",
             "synthetic-media",
             "windows-os-account",
             "eventlog",

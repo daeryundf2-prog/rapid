@@ -16,6 +16,7 @@ from ..core.kakaotalk import (
         KakaoTalkDecryptError,
         run_kakaotalk_decrypt,
         run_kakaotalk_key_store_inspect,
+        run_kakaotalk_macos_collect,
         run_kakaotalk_memory_carve,
         run_kakaotalk_sqlcipher_probe,
         run_kakaotalk_userdir_bruteforce,
@@ -243,6 +244,65 @@ def handle_kakaotalk_collect_windows(args: argparse.Namespace, parser: argparse.
             )
         return 0
 
+
+
+def handle_kakaotalk_collect_macos(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
+        output_root = Path(args.output_root).expanduser().resolve()
+        try:
+            payload = run_kakaotalk_macos_collect(
+                output_root=output_root,
+                operator=args.operator,
+                consent_statement=args.consent_statement,
+                authority_reference=args.authority_reference,
+                lldb_bin=args.lldb_bin,
+                save_core_style=args.save_core_style,
+                timeout_seconds=args.timeout_seconds,
+                attach=args.attach_live_process,
+            )
+        except KakaoTalkDecryptError as exc:
+            parser.error(str(exc))
+        manifest_path = Path(str(payload["summary"]["manifest_path"]))
+        audit_output = audit_path_for(manifest_path)
+        write_audit_record(
+            audit_output,
+            command="kakaotalk-collect-macos",
+            options={
+                "output_root": str(output_root),
+                "operator": args.operator,
+                "authority_reference": args.authority_reference,
+                "lldb_bin": args.lldb_bin,
+                "save_core_style": args.save_core_style,
+                "attach_live_process": args.attach_live_process,
+                "live_state_altered": payload["summary"]["live_state_altered"],
+                "consent_obtained": payload["summary"]["consent_obtained"],
+                "status": payload["summary"]["status"],
+                "secrets_redacted": True,
+            },
+            output_files=[("kakaotalk-macos-collection-manifest", manifest_path)],
+            notes=[
+                "Collect only a live session within authorized legal scope, with the account holder present and consenting.",
+                "macOS enforces task-port access control; refusals are reported, never bypassed.",
+                "lldb attaches only with --attach-live-process; attaching stops and alters the live process, and the attach window is recorded per core.",
+                "The consent statement and operator are recorded in the manifest.",
+            ],
+        )
+        payload["audit_output"] = str(audit_output)
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            print(f"Saved KakaoTalk macOS collection manifest: {summary['manifest_path']}")
+            print(f"Saved audit JSON: {audit_output}")
+            if summary["preflight_blockers"]:
+                print("Preflight blockers:")
+                for blocker in summary["preflight_blockers"]:
+                    print(f"  - {blocker}")
+            print(
+                f"Cores saved: {summary['core_dump_saved_count']}/{summary['core_dump_count']}  "
+                f"consent: {summary['consent_obtained']}  "
+                f"status: {summary['status']}"
+            )
+        return 0
 
 
 def handle_kakaotalk_memory_carve(args: argparse.Namespace, parser: argparse.ArgumentParser, rule_set) -> int:
@@ -487,6 +547,7 @@ HANDLERS = {
     "kakaotalk-decrypt": handle_kakaotalk_decrypt,
     "kakaotalk-macos-report": handle_kakaotalk_macos_report,
     "kakaotalk-collect-windows": handle_kakaotalk_collect_windows,
+    "kakaotalk-collect-macos": handle_kakaotalk_collect_macos,
     "kakaotalk-memory-carve": handle_kakaotalk_memory_carve,
     "kakaotalk-sqlcipher-probe": handle_kakaotalk_sqlcipher_probe,
     "kakaotalk-key-store-inspect": handle_kakaotalk_key_store_inspect,

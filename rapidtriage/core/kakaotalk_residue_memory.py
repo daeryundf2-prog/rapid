@@ -14,6 +14,10 @@ table. Page numbers are physical frame numbers from the set descriptors.
 Pre-Windows 8 files, wiped headers and unknown header sizes are reported as
 unsupported rather than guessed. pagefile.sys / swapfile.sys: raw 4 KiB page
 scan; page number = file offset // 4096.
+
+Any other source handed to ``iter_residue_segments`` is a process dump too
+large to hold in memory (the main run's cap): it is read with the same raw
+page reader, but its hits keep the process-memory evidence class.
 """
 
 from __future__ import annotations
@@ -36,6 +40,9 @@ DEFAULT_RESIDUE_SEGMENT_BYTES = 64 * 1024 * 1024
 RESIDUE_SEGMENT_OVERLAP_BYTES = 64 * 1024
 RESIDUE_EVIDENCE_CLASS = "memory-residue"
 RESIDUE_CONFIDENCE = "triage"
+SEGMENTED_DUMP_KIND = "process-dump"
+SEGMENTED_DUMP_EVIDENCE_CLASS = "process-memory"
+SEGMENTED_DUMP_CONFIDENCE = "needs-validation"
 RESIDUE_PROVENANCE_KEYS = (
     "source_kind",
     "page_number",
@@ -80,6 +87,14 @@ class ResidueSourceStatus:
     segments_scanned: int = 0
     errors: list[str] = field(default_factory=list)
 
+    @property
+    def evidence_class(self) -> str:
+        return SEGMENTED_DUMP_EVIDENCE_CLASS if self.kind == SEGMENTED_DUMP_KIND else RESIDUE_EVIDENCE_CLASS
+
+    @property
+    def confidence(self) -> str:
+        return SEGMENTED_DUMP_CONFIDENCE if self.kind == SEGMENTED_DUMP_KIND else RESIDUE_CONFIDENCE
+
     def to_dict(self) -> dict[str, object]:
         return {
             "source_path": str(self.path),
@@ -90,8 +105,8 @@ class ResidueSourceStatus:
             "pages_read": self.pages_read,
             "segments_scanned": self.segments_scanned,
             "errors": list(self.errors),
-            "evidence_class": RESIDUE_EVIDENCE_CLASS,
-            "confidence": RESIDUE_CONFIDENCE,
+            "evidence_class": self.evidence_class,
+            "confidence": self.confidence,
         }
 
 
@@ -129,8 +144,8 @@ class ResidueSegment:
             else page_source_offset + within_page,
             "page_number": page_number,
             "page_offset": within_page,
-            "evidence_class": RESIDUE_EVIDENCE_CLASS,
-            "confidence": RESIDUE_CONFIDENCE,
+            "evidence_class": self.source.evidence_class,
+            "confidence": self.source.confidence,
         }
 
     def remap(
@@ -172,7 +187,7 @@ def iter_residue_segments(
     """
     with tempfile.TemporaryDirectory(prefix="rapidtriage-kakao-residue-") as temp_dir:
         for index, source in enumerate(sources):
-            kind = RESIDUE_SOURCE_KINDS.get(source.name.lower(), "pagefile")
+            kind = RESIDUE_SOURCE_KINDS.get(source.name.lower(), SEGMENTED_DUMP_KIND)
             status = ResidueSourceStatus(path=source.resolve(), kind=kind, size=0)
             statuses.append(status)
             try:

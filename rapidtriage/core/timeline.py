@@ -331,6 +331,13 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     # KakaoTalk_<yyyymmdd>_<hhmmssSSS> file name is a local wall-clock save time.
     "kakaotalk-message": (F("timestamp", "message"),),
     "kakaotalk-shared-picture": (F("download_time", "saved", timezone="local-unknown"),),
+    # Memory analyses (kakaotalk_memory.py): message JSON residue sendAt (UTC) and minidump header times.
+    "kakaotalk-memory-message-residue": (F("timestamp", "message-residue"),),
+    "kakaotalk-memory-dump": (F("dump_time", "memory-dump-written"), F("process_create_time", "process-created")),
+    "kakaotalk-memory-dump-skipped": (),
+    "kakaotalk-memory-key-residue": (),
+    "kakaotalk-memory-sqlite-carve": (),
+    "kakaotalk-memory-residue-source": (),
     # media-image/media-video evidence times come through the row-level
     # timestamp/timestamp_kind contract (EXIF DateTimeOriginal, mp4 mvhd).
     "media-image": (F("exif_gps_profile.gps_datetime_utc_candidate", "gps-fix"),),
@@ -370,6 +377,7 @@ TIMELINE_EXCLUDED_TYPES: frozenset[str] = frozenset(
         "windows-execution-summary",
         "mobile-correlation-summary",
         "kakaotalk-windows-correlation-summary",
+        "kakaotalk-memory-analysis-summary",
         "synthetic-media-scan-status",
         "synthetic-media-scan-summary",
         # Derived lead rows that re-copy the time of their source cache/history row.
