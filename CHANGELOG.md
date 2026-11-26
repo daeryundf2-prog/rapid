@@ -4,6 +4,39 @@
 
 ### Fixed
 
+- The timeline merged an offset-free local wall clock with a UTC instant
+  whose digits matched. A registry row with the local-unknown installation
+  time `2024-11-03T01:30:00` and the key LastWrite `2024-11-03T01:30:00Z`
+  became one `local-unknown` event labelled `installed, last-written`, and
+  the known UTC instant disappeared. Same-instant merges now compare the time
+  basis as well as the digits: a UTC instant and an offset-free
+  `local-unknown`/`exif-local`/`local`/`device-local` wall clock stay two
+  events with their own labels and zones, in either order. Times with explicit
+  offsets for one UTC instant still merge. A row's own `timestamp` or
+  `timeline_events` item that declares no zone and repeats the text of a mapped
+  field verbatim takes that field's zone instead of the UTC default, so it
+  still joins that event (`tests/test_d27_timeline.py::TimeBasisMergeTests`).
+- Timeline key-row citations did not name their input file. Two registry
+  exports passed to one `timeline` run whose rows share a key LastWrite each
+  contributed row 0, and both `details.key_rows` entries read
+  `(artifacts_windows-registry, 0)`, so neither value could be traced back to
+  its file. Every artifact event's `details.source_record`, each
+  `details.key_rows` entry and each `details.also_in` entry now also carry
+  `input_file`, the timeline input the row was read from
+  (`tests/test_d27_timeline.py::KeyRowCitationTests`).
+- The timeline Markdown report stated "모든 이벤트 시각은 UTC ISO 8601" and
+  `summary.timezone.note` began "모든 이벤트 시각은 UTC로 저장합니다" even when
+  events were offset-free local wall clocks (`timezone=local-unknown`), so the
+  header and the rows disagreed about which times carry an offset. The storage
+  line is now counted from the report's own rows: UTC instants with `+00:00`,
+  offset-free local wall clocks kept as their original text (not UTC), or both.
+  `summary.timezone` adds `utc_event_count`, `local_wall_clock_event_count`
+  and `local_wall_clock_by_timezone`; its `storage` is `UTC`,
+  `UTC+local-wall-clock` or `local-wall-clock`, and its `display`/`note` say
+  the same. The run report's disclosure section says offset-known times are
+  UTC and adds the wall-clock count when there is one. Rows without an offset
+  keep their caveat; one without a local label now gets one too
+  (`tests/test_d27_timeline.py::ReportTimeBasisTests`).
 - On Windows an analysis could vanish from the analysis list for one read. The
   state reader treated the sharing error raised while another thread
   `os.replace`d `analysis.json` (a heartbeat or progress write) as "no state".

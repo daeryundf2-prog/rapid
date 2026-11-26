@@ -169,14 +169,22 @@ build_run_case_db(Path(sys.argv[1]), json.loads(sys.argv[2]), root=sys.argv[1])
             for event in result["events"]:
                 if "input_file" in event:
                     event["input_file"] = Path(event["input_file"]).name
+                details = event["details"]
+                for record in (details.get("source_record"), *details.get("also_in", ()), *details.get("key_rows", ())):
+                    if isinstance(record, dict) and "input_file" in record:
+                        record["input_file"] = Path(record["input_file"]).name
             golden_file = root / "relative-timeline.json"
             write_timeline_result(result, golden_file)
             data = golden_file.read_bytes()
-            self.assertEqual(hashlib.sha256(data).hexdigest(), "ee26735f6525eccfef40d9e254ff6f948eb9e777d946bba910b80dea38652a74")
+            # D27 #1 changed only summary.time_policy.dedupe_key (the time basis joins the key);
+            # D27 #8 added source_record.input_file (normalized to its name above);
+            # D27 #11 added the time-basis counts to summary.timezone and reworded its note.
+            self.assertEqual(hashlib.sha256(data).hexdigest(), "9ebd31aba114013974ee4a5817bb0ba61ce83be4ac8162dc43571ac4f91ddff9")
             # The report gained #40's unmapped-row/unconfirmed-timezone lines and
-            # the activity-count section; event rows are unchanged (JSON above).
+            # the activity-count section; D27 #11 replaced the storage line with
+            # counted bases. Event rows are unchanged (JSON above).
             report = build_timeline_report(result).encode("utf-8")
-            self.assertEqual(hashlib.sha256(report).hexdigest(), "f94083e37d3f0ba2c53e1234ab724f6d515cb77348dc764767f6e18c4b1abc33")
+            self.assertEqual(hashlib.sha256(report).hexdigest(), "4d2e18b62504b141b6a29bc25e9690b7a0d2636c01482998ec5ac3b7721604d4")
 
             original = root / "reference.db"
             # The original importer expanded each row twice, independently
