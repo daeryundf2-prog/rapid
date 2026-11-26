@@ -161,7 +161,7 @@ def run_rust_extraction(
     module, _problem = load_extract_extension()
     if module is None:
         return False
-    before = set(extract_dir.iterdir()) if extract_dir.is_dir() else None
+    before = _tree_paths(extract_dir) if extract_dir.is_dir() else None
 
     def notify(view: Mapping[str, int]) -> None:
         # As ``_notify_progress``: progress is advisory, so an observer that raises must not
@@ -217,17 +217,35 @@ def run_rust_extraction(
     return True
 
 
-def _discard_new_entries(extract_dir: Path, before: set[Path] | None) -> None:
+def _tree_paths(root: Path) -> set[str]:
+    """Every path under ``root`` (symlinks not followed)."""
+    return {os.path.join(top, name) for top, dirs, files in os.walk(root) for name in (*dirs, *files)}
+
+
+def _discard_new_entries(extract_dir: Path, before: set[str] | None) -> None:
+    """Remove what the failed Rust run wrote, at any depth: a rerun into an extraction folder
+    that already holds directories (an interrupted run) must not keep files the Python engine
+    that redoes the image would not write."""
     if not extract_dir.exists():
         return
     if before is None:
         shutil.rmtree(extract_dir, ignore_errors=True)
         return
-    for entry in set(extract_dir.iterdir()) - before:
-        if entry.is_dir() and not entry.is_symlink():
-            shutil.rmtree(entry, ignore_errors=True)
-        else:
-            entry.unlink(missing_ok=True)
+    for top, dirs, files in os.walk(extract_dir):
+        for name in files:
+            path = os.path.join(top, name)
+            if path not in before:
+                Path(path).unlink(missing_ok=True)
+        kept = []
+        for name in dirs:
+            path = os.path.join(top, name)
+            if path in before:
+                kept.append(name)
+            elif os.path.islink(path):
+                Path(path).unlink(missing_ok=True)
+            else:
+                shutil.rmtree(path, ignore_errors=True)
+        dirs[:] = kept
 
 
 def _fallback(requested: str, notice: str, reason: str) -> dict[str, str]:

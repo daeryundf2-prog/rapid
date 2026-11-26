@@ -603,11 +603,22 @@ def select_native_partition(
 
 
 _INVALID_NAME_CHARS = '<>:"/\\|?*'
+_WINDOWS_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", *(f"{port}{n}" for port in ("COM", "LPT") for n in "0123456789¹²³")}
+)
+
+
+def _is_windows_device_name(name: str) -> bool:
+    """Win32 opens the device, not a file in the output folder, for ``CON``, ``nul.txt``,
+    ``COM1 .log``, ... (the name before the first dot, trailing spaces ignored)."""
+    return name.split(".", 1)[0].rstrip(" ").upper() in _WINDOWS_DEVICE_NAMES
 
 
 def _safe_component(name: str) -> str:
     cleaned = "".join("_" if ch in _INVALID_NAME_CHARS or ord(ch) < 0x20 else ch for ch in name)
     cleaned = cleaned.rstrip(" .") or "_"
+    if os.name == "nt" and _is_windows_device_name(cleaned):
+        cleaned = "_" + cleaned
     return cleaned[:180]
 
 

@@ -25,6 +25,7 @@ from typing import Any
 from unittest.mock import patch
 
 from rapidtriage.core import e01_extract_engine, e01_native
+from tests import ntfs_volume_gen
 from tests.ntfs_volume_gen import build_disk_image
 
 REQUIRE = os.environ.get("RAPIDTRIAGE_REQUIRE_RUST_E01_EXTRACT") == "1"
@@ -253,6 +254,71 @@ class RustEngineParityTests(EngineParityBase):
         self.assertNotIn("Users/alice/Documents/compressed.log", python[1]["files"])
         self.assertIsNone(rust[0]["extract_engine"]["rerun_reason"])
 
+    def test_output_path_collisions_are_identical_at_any_thread_count(self) -> None:
+        # Names that meet on the output drive only after _safe_component ("x." and "x") or the
+        # drive's own folding (case, NFC/NFD, sigma forms): parallel copies must not race on them.
+        image = Path(self.temp.name) / "collisions.raw"
+        build_disk_image(image, bulk_files=40, bulk_dirs=2, seed=3, collisions=True)
+        original, type(self).image = type(self).image, image
+        try:
+            python = self.run_engine("python")
+            for threads in ("1", "4", "8"):
+                with self.subTest(threads=threads):
+                    rust = self.run_engine("rust", extra_env={e01_extract_engine.E01_EXTRACT_THREADS_ENV: threads})
+                    self.assert_same(python, rust)
+                    if threads != "1":
+                        self.assertTrue(rust[0]["extract_engine"]["rerun_reason"].startswith("output path collision"))
+        finally:
+            type(self).image = original
+        # Win32 device names are renamed on Windows only, where "CON" would open the console.
+        self.assertIn("Collide/_CON" if os.name == "nt" else "Collide/CON", python[1]["files"])
+
+    def test_oversized_metadata_reads_are_refused_not_allocated(self) -> None:
+        # Corrupt metadata asking for a 4 TiB read or a 2^40-cluster compressed runlist: dissect
+        # attempts it (MemoryError or worse); the extension must fail the run over, not abort.
+        module, _ = e01_extract_engine.load_extract_extension()
+        for name, attrs in (
+            ("sparse-si", lambda times: (
+                ntfs_volume_gen.nonresident_attr(0x10, [(None, 1 << 30)], 1 << 42, instance=0),
+                ntfs_volume_gen.resident_attr(0x80, b"small", instance=8),
+            )),
+            ("compressed", lambda times: (
+                ntfs_volume_gen.resident_attr(0x10, ntfs_volume_gen.standard_information(times), instance=0),
+                ntfs_volume_gen.nonresident_attr(0x80, [(None, 1 << 40)], 1 << 20, instance=8, compression_unit=4, flags=1),
+            )),
+        ):
+            with self.subTest(name), tempfile.TemporaryDirectory(dir=self.temp.name) as out:
+                image = Path(out) / "image.raw"
+                build_disk_image(image, bulk_files=0, bulk_dirs=1, seed=5, builder=_OversizedBuilder(5, attrs))
+                handle = e01_native.RawMediaHandle(image)
+                try:
+                    partitions, _ = e01_native.native_partition_table(handle)
+                    for threads in (1, 4):
+                        with self.assertRaisesRegex(RuntimeError, "^unsupported-input"):
+                            module.extract_tree(
+                                handle, int(partitions[0]["byte_offset"]), int(partitions[0]["size_bytes"]),
+                                str(Path(out) / f"tree{threads}"), 200_000, True, [], None,
+                                segments=[str(image)], media_size=handle.get_media_size(), threads=threads,
+                            )
+                finally:
+                    handle.close()
+
+    def test_damaged_chunk_table_is_left_to_pyewf(self) -> None:
+        # libewf reads past a table whose entry checksum fails (table2); the Rust reader refuses
+        # the segment set, so every read goes through pyewf and the output stays identical.
+        segments = self.acquire("table-footer", "-c", "deflate:fast", "-S", "4MiB")
+        first = bytearray(segments[0].read_bytes())
+        table = first.index(b"table\x00")
+        count = int.from_bytes(first[table + 76 : table + 80], "little")
+        first[table + 76 + 24 + count * 4] ^= 0xFF
+        segments[0].write_bytes(first)
+        module, _ = e01_extract_engine.load_extract_extension()
+        with self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
+            module.ewf_read([str(s) for s in segments], 0, 4096)
+        python = self.run_engine("python", segments=segments)
+        rust = self.run_engine("rust", segments=segments)
+        self.assert_same(python, rust, reader=("python-handle",))
+
     def test_free_space_reserve_falls_back_to_python_guard(self) -> None:
         # A reserve larger than any drive: Python's guard skips every file; Rust must not write
         # past it, so it hands the image to the Python engine and the fallback is recorded.
@@ -282,6 +348,28 @@ class RustEngineParityTests(EngineParityBase):
             result = e01_native.extract_e01_native(self.image, [self.image], out / "tree", on_progress=observer)
         self.assertEqual(result["extract_engine"]["active"], "rust")
         self.assertGreater(result["stats"]["files"], 0)
+
+
+class _OversizedBuilder(ntfs_volume_gen.VolumeBuilder):
+    """Adds ``Edge/victim.bin`` whose $STANDARD_INFORMATION and $DATA come from ``attrs(times)``."""
+
+    def __init__(self, seed: int, attrs: Any) -> None:
+        super().__init__(seed)
+        self.victim_attrs = attrs
+
+    def build_volume(self, label: str = "SYNTHETIC") -> bytes:
+        self.add_file(self.makedirs("Edge"), "victim.bin", b"x")
+        return super().build_volume(label)
+
+    def _file_record(self, entry: Any) -> bytes:
+        if not entry.links or entry.links[0].name != "victim.bin":
+            return super()._file_record(entry)
+        si, data = self.victim_attrs(entry.times)
+        names = [
+            ntfs_volume_gen.resident_attr(0x30, value, instance=1 + i, indexed=True)
+            for i, (_link, value) in enumerate(self._fn_values(entry))
+        ]
+        return ntfs_volume_gen.mft_record(entry.record, [si, *names, data], flags=1)
 
 
 class PanicException(BaseException):
@@ -351,6 +439,22 @@ class EngineFallbackTests(EngineParityBase):
         self.assertEqual(metadata["native_e01_extract_engine_requested"], "rust")
         self.assertIsNone(metadata["native_e01_extract_engine_version"])
         self.assertEqual(metadata["native_e01_extract_engine_fallback_reason"], engine["fallback_reason"])
+
+    def test_failed_rust_run_leaves_nothing_below_existing_directories(self) -> None:
+        # A rerun into an extraction folder that already holds directories (an interrupted run):
+        # what the failed Rust run wrote inside them must go too, not only new top-level entries.
+        python = self.run_engine("python", blockers=("Windows",))
+        with patch.object(e01_extract_engine, "load_extract_extension", return_value=(_FailingExtension, "")):
+            result, tree, _ = self.run_engine("rust", blockers=("Windows",))
+        self.assertEqual(result["extract_engine"]["active"], "python")
+        self.assertNotIn("Windows/partial.bin", tree["files"])
+        self.assertEqual(tree, python[1])
+
+    def test_windows_device_names(self) -> None:
+        for name in ("CON", "con.txt", "Nul", "COM1.log", "lpt9 .txt", "COM\u00b9", "CONIN$"):
+            self.assertTrue(e01_native._is_windows_device_name(name), name)
+        for name in ("CONSOLE", "COM10", "xCON", "aux_", "COM", "LPT0x.txt"):
+            self.assertFalse(e01_native._is_windows_device_name(name), name)
 
     def test_keyboard_interrupt_is_not_an_engine_failure(self) -> None:
         class _Interrupted(_PanickingExtension):
