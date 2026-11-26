@@ -9,6 +9,7 @@ import { bytesLabel } from "../fieldFormat";
 import { isTextPrefixPreview } from "../modes";
 import { errorText, useAsync } from "../useAsync";
 import { countHits, highlight, keywordPattern } from "./Highlight";
+import { RedactionNote } from "./RedactionNote";
 
 /** What the text views read past the preview: the server's source-text cap (SOURCE_TEXT_MAX_BYTES). */
 export const FULL_TEXT_MAX_BYTES = 2 * 1024 * 1024;
@@ -81,7 +82,8 @@ export function SourceView({ runId, preview, terms }: SourceViewProps) {
   );
   const head = prefix.status === "ok" ? prefix.data : null;
   const text = full?.text ?? head?.text ?? preview.text ?? "";
-  const redacted = (full ?? head)?.redacted === true;
+  // The text shown is the loaded one, else the preview's: each says whether the server masked it.
+  const redacted = (full ?? head ?? preview).redacted === true;
 
   const loadMore = async () => {
     setLoadState({ busy: true, error: null });
@@ -121,12 +123,7 @@ export function SourceView({ runId, preview, terms }: SourceViewProps) {
           {bytesLabel(preview.size)} 파일의 처음 2 MB만 읽어 표시합니다. 전체 내용은 원본 열기로 확인하세요.
         </p>
       ) : null}
-      {redacted ? (
-        <p className="viewer-note" data-testid="source-redacted-note">
-          BitLocker 복구 키·저장된 비밀번호·개인 키 같은 비밀 값은 가려서 표시합니다. 가리지 않은 원본은 원본
-          열기로 내려받아 확인하세요.
-        </p>
-      ) : null}
+      {redacted ? <RedactionNote /> : null}
       {prefix.status === "loading" ? (
         <p className="viewer-note">텍스트 불러오는 중…</p>
       ) : prefix.status === "error" ? (

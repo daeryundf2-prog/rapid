@@ -192,6 +192,8 @@ export interface SourcePreview {
   text?: string;
   truncated?: boolean;
   message?: string;
+  /** Some text in this preview is masked or withheld by the server (redact_document_text). */
+  redacted?: boolean;
   /** Present only for `archive.zip::entry` previews. */
   container_path?: string;
   viewer_limitations?: string[];

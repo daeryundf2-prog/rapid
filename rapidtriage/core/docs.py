@@ -941,6 +941,28 @@ def extract_text(
 ) -> str:
     """Plain text of a document; checksum-valid BitLocker recovery passwords are masked
     whatever the file name (:func:`~rapidtriage.artifacts.windows.antiforensics.redact_recovery_key_text`)."""
+    return extract_redacted_text(
+        path,
+        kind,
+        max_input_bytes=max_input_bytes,
+        max_archive_member_bytes=max_archive_member_bytes,
+        max_archive_total_bytes=max_archive_total_bytes,
+        max_archive_member_count=max_archive_member_count,
+        max_pdf_stream_decompressed_bytes=max_pdf_stream_decompressed_bytes,
+    )[0]
+
+
+def extract_redacted_text(
+    path: Path,
+    kind: str,
+    *,
+    max_input_bytes: int = MAX_EXTRACT_TEXT_BYTES,
+    max_archive_member_bytes: int = MAX_ZIP_TEXT_MEMBER_BYTES,
+    max_archive_total_bytes: int = MAX_ZIP_TEXT_TOTAL_BYTES,
+    max_archive_member_count: int = MAX_ZIP_TEXT_MEMBER_COUNT,
+    max_pdf_stream_decompressed_bytes: int = MAX_PDF_STREAM_DECOMPRESSED_BYTES,
+) -> tuple[str, bool]:
+    """``(text, redacted)``: :func:`extract_text`, and whether masking changed it (the console says so)."""
     text = _extract_text(
         path,
         kind,
@@ -950,7 +972,8 @@ def extract_text(
         max_archive_member_count=max_archive_member_count,
         max_pdf_stream_decompressed_bytes=max_pdf_stream_decompressed_bytes,
     )
-    return redact_document_text(path, text)
+    redacted = redact_document_text(path, text)
+    return redacted, redacted != text
 
 
 def _extract_text(

@@ -3,6 +3,7 @@ import type { SourcePreview } from "../../../api/viewer";
 import { isRenderablePdf } from "../modes";
 import { countHits, keywordPattern } from "./Highlight";
 import { PdfView, usePdfDocument } from "./PdfView";
+import { RedactionNote } from "./RedactionNote";
 import { TextLines } from "./SourceView";
 
 type Presentation = "pdf" | "text";
@@ -69,6 +70,7 @@ function ExtractedText({ preview, terms }: { preview: SourcePreview; terms: stri
         {(preview.extension || "").replace(".", "").toUpperCase()} 문서에서 추출한 텍스트입니다. 서식·이미지는
         포함되지 않으며, 인용 전에 원본을 확인하세요.
       </p>
+      {preview.redacted ? <RedactionNote /> : null}
       <TextLines text={text} terms={terms} label={`${preview.name} 추출 텍스트`} />
       {preview.truncated ? (
         <p className="viewer-note">

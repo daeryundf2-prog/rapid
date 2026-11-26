@@ -2,6 +2,7 @@ import { useState } from "react";
 import { type EmailAttachmentPackage, fetchEmailAttachment, type SourcePreview } from "../../../api/viewer";
 import { errorText } from "../useAsync";
 import { highlight, keywordPattern } from "./Highlight";
+import { RedactionNote } from "./RedactionNote";
 
 function formatBytes(value: number | undefined): string {
   const size = value ?? 0;
@@ -53,6 +54,7 @@ export function EmailView({ runId, preview, terms, onCopy }: EmailViewProps) {
         </p>
       ) : null}
       <p className="viewer-note">메시지 {email.message_count ?? messages.length}개</p>
+      {preview.redacted ? <RedactionNote /> : null}
       {messages.map((message) => (
         <article key={message.index} className="email-message" aria-label={message.subject || "(제목 없음)"}>
           <h3 className="viewer-subtitle">{highlight(message.subject || "(제목 없음)", pattern)}</h3>

@@ -2,6 +2,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installFetch, jsonResponse, preview } from "../testSupport";
+import { DocumentView } from "./DocumentView";
+import { EmailView } from "./EmailView";
 import { ImageView } from "./ImageView";
 import { MediaView } from "./MediaView";
 import { FULL_TEXT_MAX_BYTES, LINE_WINDOW, SourceView } from "./SourceView";
@@ -227,5 +229,65 @@ describe("SourceView — secrets in the text views", () => {
     expect(await screen.findByTestId("source-redacted-note")).toBeTruthy();
     expect(screen.getByText(`복구 키: ${MASKED_KEY}`)).toBeTruthy();
     expect(calls.map((call) => call.url.pathname)).toEqual(["/api/runs/run-1/source-text"]);
+  });
+});
+
+describe("server-masked previews say so in every text view", () => {
+  const masked = { text: `키 ${MASKED_KEY}`, redacted: true } as const;
+
+  it("source view (JSON, XML, plain text)", () => {
+    for (const extension of [".json", ".xml", ".ps1"]) {
+      render(
+        <SourceView
+          runId="run-1"
+          preview={preview({ name: `a${extension}`, extension, preview_type: "text", ...masked })}
+          terms={[]}
+        />,
+      );
+      expect(screen.getByTestId("source-redacted-note")).toBeTruthy();
+      expect(screen.getByText(`키 ${MASKED_KEY}`)).toBeTruthy();
+      cleanup();
+    }
+  });
+
+  it("extracted document text", () => {
+    render(
+      <DocumentView
+        runId="run-1"
+        preview={preview({ name: "memo.docx", extension: ".docx", preview_type: "text", ...masked })}
+        terms={[]}
+        onOpenOriginal={() => undefined}
+      />,
+    );
+    expect(screen.getByTestId("source-redacted-note")).toBeTruthy();
+  });
+
+  it("email bodies", () => {
+    render(
+      <EmailView
+        runId="run-1"
+        preview={preview({
+          name: "mail.eml",
+          extension: ".eml",
+          preview_type: "email",
+          redacted: true,
+          email: { messages: [{ index: 1, subject: "키", body_preview: MASKED_KEY }] },
+        })}
+        terms={[]}
+        onCopy={() => undefined}
+      />,
+    );
+    expect(screen.getByTestId("source-redacted-note")).toBeTruthy();
+  });
+
+  it("no note when nothing was masked", () => {
+    render(
+      <SourceView
+        runId="run-1"
+        preview={preview({ name: "a.log", extension: ".log", preview_type: "text", text: "평문" })}
+        terms={[]}
+      />,
+    );
+    expect(screen.queryByTestId("source-redacted-note")).toBeNull();
   });
 });

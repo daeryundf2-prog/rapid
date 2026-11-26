@@ -1,7 +1,9 @@
 """The console's text views get the file's text with secrets masked as in the server preview.
 
 ``GET /api/runs/{run}/source-text`` (``runops.build_source_text``) serves the text-prefix view and
-"더 보기"; only ``source-file`` (원본 열기) hands out raw bytes.
+"더 보기"; every ``source-preview`` text (plain text, documents, JSON, XML, e-mail, ZIP entries)
+goes through the same ``docs.redact_document_text``. Only ``source-file`` (원본 열기) hands out raw
+bytes.
 """
 
 from __future__ import annotations
@@ -10,6 +12,7 @@ import json
 import re
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from rapidtriage.api.app.runops import build_source_text
@@ -137,23 +140,7 @@ class ConsoleTextViewRedactionTests(unittest.TestCase):
             (root / "notes.txt").write_text(f"복구 키\n{KEY}\n", encoding="utf-8")
             # Past the preview's 20000 characters: the console offers 더 보기 for the rest.
             (root / "long.txt").write_text("줄\n" * 15000 + f"{KEY}\n", encoding="utf-8")
-            summary_path = run_dir / "rapidtriage-run-summary.json"
-            summary_path.write_text(
-                json.dumps(
-                    {
-                        "profile_version": "rapidtriage-run-summary-v1",
-                        "mode": "fraud",
-                        "root": str(root),
-                        "output_dir": str(run_dir),
-                        "source": {"type": "folder", "source_path": str(root), "analysis_root": str(root)},
-                        "outputs": {"summary": str(summary_path)},
-                    }
-                ),
-                encoding="utf-8",
-            )
-            store = RunJobStore()
-            run_id = store.import_completed_run(run_dir).run_id
-            client = api_test_client(store)
+            client, run_id = open_run(root, run_dir)
 
             def get(route: str, path: str, **params: object) -> dict[str, object]:
                 response = client.get(f"/api/runs/{run_id}/{route}", params={"path": path, **params})
@@ -182,6 +169,117 @@ class ConsoleTextViewRedactionTests(unittest.TestCase):
                 f"/api/runs/{run_id}/source-text", params={"path": "notes.txt", "max_bytes": 3 * 1024 * 1024}
             )
             self.assertEqual(too_large.status_code, 422)
+
+
+# A saved password in the formats the secret policy (system_extras.redact_secret_store_text) masks:
+# WinSCP session INI / .reg exports by file type, FileZilla <Pass> by content.
+PEM = "-----BEGIN RSA PRIVATE KEY-----\n" + "QUJD" * 20 + "\n-----END RSA PRIVATE KEY-----"
+FILEZILLA_PASS = '<Pass encoding="base64">c2VjcmV0cGFzcw==</Pass>'
+WINSCP_PASSWORD = "A35C7B9F00112233"
+# What must not appear anywhere in a preview: a key group, the PEM body, the saved passwords.
+SECRETS = ("222222", "QUJD", "c2VjcmV0cGFzcw", WINSCP_PASSWORD)
+
+
+def escaped_json(text: str) -> str:
+    return "".join(f"\\u{ord(char):04x}" for char in text)
+
+
+PREVIEW_FILES = {
+    # JSON: the key plain and \u-escaped, the PEM with escaped newlines, a FileZilla password.
+    "secrets.json": (
+        '{"note": "복구 키 ' + KEY + '", "escaped": "' + escaped_json(KEY) + '", '
+        '"pem": ' + json.dumps(PEM) + ", " + '"site": ' + json.dumps(FILEZILLA_PASS) + "}"
+    ),
+    "secrets.jsonl": json.dumps({"note": KEY}) + "\n" + json.dumps({"pem": PEM, "site": FILEZILLA_PASS}) + "\n",
+    # XML: the key in an attribute, in text and as character references; the PEM; a FileZilla server.
+    "secrets.xml": (
+        f'<root id="{KEY}"><note>{KEY}</note><pem>{PEM}</pem>'
+        f"<escaped>{''.join(f'&#{ord(char)};' for char in KEY)}</escaped>"
+        f"<Servers><Server>{FILEZILLA_PASS}</Server></Servers></root>"
+    ),
+    # Extensions the document extractor does not list: the plain-text preview.
+    "deploy.ps1": f"$key = '{KEY}'\n{PEM}\n",
+    "winscp.reg": (
+        "REGEDIT4\n\n[HKEY_CURRENT_USER\\Software\\Martin Prikryl\\WinSCP 2\\Sessions\\host]\n"
+        f'"Password"="{WINSCP_PASSWORD}"\n"Note"="{KEY}"\n'
+    ),
+    # Listed text kinds: the document extractor's preview.
+    "WinSCP.ini": f"[Sessions\\host]\nHostName=example\nPassword={WINSCP_PASSWORD}\n; {KEY}\n{PEM}\n",
+    "notes.log": f"{KEY}\n{PEM}\n",
+    "server.cfg": f"key={KEY}\n{FILEZILLA_PASS}\n",
+    "mail.eml": f"Subject: key {KEY}\nFrom: a@example.org\nTo: b@example.org\n\nbody {KEY}\n{PEM}\n",
+}
+
+
+@unittest.skipUnless(HAS_FASTAPI, "fastapi is required for RapidTriage API tests")
+class PreviewRedactionTests(unittest.TestCase):
+    """Every textual source-preview path masks a BitLocker key, a PEM block and a saved password."""
+
+    def test_no_preview_path_returns_a_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "evidence"
+            run_dir = Path(temp) / "run"
+            root.mkdir()
+            run_dir.mkdir()
+            for name, body in PREVIEW_FILES.items():
+                (root / name).write_text(body, encoding="utf-8")
+            with zipfile.ZipFile(root / "export.zip", "w") as archive:
+                for name in ("secrets.json", "notes.log", "WinSCP.ini"):
+                    archive.writestr(f"inner/{name}", PREVIEW_FILES[name])
+            client, run_id = open_run(root, run_dir)
+
+            paths = [*PREVIEW_FILES, "export.zip::inner/secrets.json", "export.zip::inner/notes.log"]
+            paths.append("export.zip::inner/WinSCP.ini")
+            expected_types = {".json": "json", ".jsonl": "json", ".xml": "xml", ".eml": "email"}
+            for path in paths:
+                with self.subTest(path=path):
+                    response = client.get(f"/api/runs/{run_id}/source-preview", params={"path": path})
+                    self.assertEqual(response.status_code, 200, response.text)
+                    payload = response.json()
+                    self.assertEqual(payload["preview_type"], expected_types.get(Path(path).suffix, "text"))
+                    self.assertTrue(payload["redacted"])
+                    shown = json.dumps(payload, ensure_ascii=False)
+                    self.assertEqual([secret for secret in SECRETS if secret in shown], [])
+                    self.assertIn("XXXX53", shown)
+
+            raw = client.get(f"/api/runs/{run_id}/source-file", params={"path": "secrets.json"})
+            self.assertIn(KEY, raw.content.decode("utf-8"))
+
+    def test_a_plain_file_is_not_marked(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "evidence"
+            run_dir = Path(temp) / "run"
+            root.mkdir()
+            run_dir.mkdir()
+            (root / "plain.json").write_text('{"a": 1}', encoding="utf-8")
+            (root / "plain.xml").write_text("<a>1</a>", encoding="utf-8")
+            (root / "plain.ps1").write_text("Write-Host 1\n", encoding="utf-8")
+            client, run_id = open_run(root, run_dir)
+            for path in ("plain.json", "plain.xml", "plain.ps1"):
+                with self.subTest(path=path):
+                    payload = client.get(f"/api/runs/{run_id}/source-preview", params={"path": path}).json()
+                    self.assertFalse(payload["redacted"])
+
+
+def open_run(root: Path, run_dir: Path) -> tuple[object, str]:
+    """An API client for an imported run whose evidence root is ``root``, and the run id."""
+    summary_path = run_dir / "rapidtriage-run-summary.json"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "profile_version": "rapidtriage-run-summary-v1",
+                "mode": "fraud",
+                "root": str(root),
+                "output_dir": str(run_dir),
+                "source": {"type": "folder", "source_path": str(root), "analysis_root": str(root)},
+                "outputs": {"summary": str(summary_path)},
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = RunJobStore()
+    run_id = store.import_completed_run(run_dir).run_id
+    return api_test_client(store), run_id
 
 
 if __name__ == "__main__":
