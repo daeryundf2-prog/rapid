@@ -105,6 +105,34 @@ describe("fetchSearchPage on the index", () => {
     });
   });
 
+  it("waits for a query slot while the run's slots are taken, and stops waiting on cancel", async () => {
+    vi.useFakeTimers();
+    try {
+      const answer = indexOf(3);
+      let busy = 2;
+      const calls = installFetch({
+        "/search/query": (url, init) =>
+          busy-- > 0 ? jsonResponse({ detail: "검색이 너무 많이 실행 중입니다" }, 429) : answer(url, init),
+      });
+      const request = fetchSearchPage("r1", { search: SPEC, offset: 0, limit: PAGE });
+      await vi.runAllTimersAsync();
+      expect((await request).rows).toHaveLength(3);
+      expect(calls).toHaveLength(3);
+
+      busy = 1;
+      const stop = new AbortController();
+      const cancelled = fetchSearchPage("r2", { search: SPEC, offset: 0, limit: PAGE }, stop.signal);
+      const settled = expect(cancelled).rejects.toBeDefined();
+      await vi.advanceTimersByTimeAsync(0);
+      stop.abort();
+      await settled;
+      await vi.runAllTimersAsync();
+      expect(calls).toHaveLength(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("gives a query error back to the grid and leaves nothing pending", async () => {
     installFetch({
       "/search/query": () => jsonResponse({ detail: "질의 1번째 글자: 닫는 괄호가 없습니다" }, 400),

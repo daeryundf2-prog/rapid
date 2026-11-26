@@ -2,10 +2,45 @@
 // one search's count.
 
 import { type AnalysisState, normalizeAnalysis } from "../../api/analyses";
-import { api } from "../../api/client";
+import { ApiError, api } from "../../api/client";
 import type { RawRow } from "../../api/collections";
 
 const enc = encodeURIComponent;
+
+/**
+ * Waits before asking again while the run's query slots are taken. The server gives a run four and
+ * answers 429 rather than queueing; a page or count the console stopped keeps its slot until the
+ * engine's next progress check, so switching searches briefly finds them full.
+ */
+const SLOT_WAITS_MS = [100, 200, 400, 800, 1200, 1600, 2000, 2000] as const;
+
+function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/** `api` for a query endpoint: a 429 (all slots taken) waits for a slot instead of failing the search. */
+async function queryApi<T>(path: string, body: unknown, signal: AbortSignal | undefined): Promise<T> {
+  const request = () => api<T>(path, { method: "POST", body: JSON.stringify(body), signal });
+  for (const wait of SLOT_WAITS_MS) {
+    try {
+      return await request();
+    } catch (error) {
+      if (!(error instanceof ApiError && error.status === 429)) throw error;
+    }
+    await pause(wait, signal);
+  }
+  return request();
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -71,15 +106,15 @@ export async function querySearchIndex(
   request: { readonly q: string; readonly limit: number; readonly cursor?: string },
   signal?: AbortSignal,
 ): Promise<SearchIndexPage> {
-  const raw = await api<unknown>(`/api/runs/${enc(runId)}/search/query`, {
-    method: "POST",
-    body: JSON.stringify({
+  const raw = await queryApi<unknown>(
+    `/api/runs/${enc(runId)}/search/query`,
+    {
       q: request.q,
       aggregates: false,
       page: { limit: request.limit, ...(request.cursor ? { cursor: request.cursor } : {}) },
-    }),
+    },
     signal,
-  });
+  );
   const body = isRecord(raw) ? raw : {};
   const page = isRecord(body.page) ? body.page : {};
   const parsed = isRecord(body.query) && isRecord(body.query.parsed) ? body.query.parsed : {};
@@ -105,11 +140,7 @@ export interface SearchCount {
 
 /** `POST /search/count` for one search. */
 export async function countSearch(runId: string, q: string, signal?: AbortSignal): Promise<SearchCount> {
-  const raw = await api<unknown>(`/api/runs/${enc(runId)}/search/count`, {
-    method: "POST",
-    body: JSON.stringify({ terms: [{ q }] }),
-    signal,
-  });
+  const raw = await queryApi<unknown>(`/api/runs/${enc(runId)}/search/count`, { terms: [{ q }] }, signal);
   const items = isRecord(raw) && Array.isArray(raw.items) ? raw.items : [];
   const item = isRecord(items[0]) ? items[0] : {};
   const domains = isRecord(item.by_domain) ? item.by_domain : {};
