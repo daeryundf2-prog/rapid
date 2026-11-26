@@ -6,6 +6,7 @@ import { CommandButton } from "../commands/CommandButton";
 import { useCommandState } from "../commands/registry";
 import { SearchOptionsButton } from "../features/case/SearchOptionsPopover";
 import { useSearchState } from "../features/case/searchState";
+import { parseSearchInput } from "../features/search/queryModel";
 import { Icon } from "../icons";
 import { keyLabel } from "../shortcuts";
 import { useRoute } from "../state/hooks";
@@ -40,8 +41,8 @@ function GlobalSearch() {
       announce("검색어를 입력하세요");
       return;
     }
-    // S4's search options read the keywords; the grid builds the FTS request (searchPath()).
-    useSearchState.getState().setKeywords(q.split(/[\s,]+/).filter(Boolean));
+    // S4's search options read the searches; the grid builds the request from the route (gridBridge).
+    useSearchState.getState().setKeywords([...parseSearchInput(q).searches]);
     openCollection("search", { q });
     // The analyst's next key is J: hand focus to the results grid once it renders.
     focusGridWhenReady();

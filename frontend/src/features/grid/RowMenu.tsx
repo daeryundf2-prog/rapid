@@ -18,9 +18,10 @@ export const ROW_MENU_COMMAND_IDS = [
 
 /**
  * Row-specific entries listed only when they apply to the focused row (no permanently
- * disabled noise on every other row): cross-case rows → "다른 케이스에서 열기".
+ * disabled noise on every other row): cross-case rows → "다른 케이스에서 열기", search index hits →
+ * "원본 목록에서 보기".
  */
-export const ROW_MENU_CONTEXTUAL_IDS = ["grid.openOtherCase"] as const;
+export const ROW_MENU_CONTEXTUAL_IDS = ["grid.openOtherCase", "grid.openHomeList"] as const;
 
 /** Record pivots (viewer redesign §5), listed after a separator; disabled with a reason when absent. */
 export const ROW_MENU_PIVOT_IDS = [

@@ -15,6 +15,7 @@ import { encodeRowRef, type RowRef } from "../contracts/rowRef";
 import type { ViewerTarget } from "../contracts/viewer";
 import { useSearchState } from "../features/case/searchState";
 import { type RouteState, useGridLocalStore } from "../features/grid/adapter";
+import { parseSearchInput, searchSpecOf } from "../features/search/queryModel";
 import { collectionChanged, stageHasViewer, stageOf } from "../router";
 import { useAppStore } from "../state/store";
 
@@ -41,17 +42,10 @@ function sameCollection(a: CollectionRef, b: CollectionRef): boolean {
   );
 }
 
-/** Search spec for the grid from the routed keywords + S4's options popover. */
+/** Search spec for the grid from the routed searches + S4's options popover. */
 export function searchSpec(q: string | undefined): CollectionQuery["search"] {
-  const keywords = (q ?? "").split(/[\s,]+/).filter(Boolean);
-  if (keywords.length === 0) return undefined;
-  const { options } = useSearchState.getState();
-  return {
-    keywords,
-    mode: options.mode,
-    sources: options.sources.length ? options.sources : undefined,
-    hideKnownGood: options.hideKnownGood,
-  };
+  const selection = parseSearchInput(q ?? "");
+  return selection.searches.length ? searchSpecOf(selection, useSearchState.getState().options) : undefined;
 }
 
 /** The grid route the shell route implies. */
@@ -180,7 +174,8 @@ export function connectGridToShell(): () => void {
       const pendingDeepLink =
         !userTouchedGrid &&
         app.route.row !== undefined &&
-        app.route.row.collection === app.route.collection &&
+        // A search hit keeps its own collection in its ref (files, artifacts, …).
+        (app.route.row.collection === app.route.collection || app.route.collection === "search") &&
         rowKey(app.route.row) !== rowKey(grid.target.ref);
       if (pendingDeepLink) {
         // Auto-focus of row 0 before the grid restores the `row=` deep link: ignore it.

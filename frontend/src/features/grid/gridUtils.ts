@@ -60,6 +60,8 @@ export function matchesFilter(row: GridRow, needle: string): boolean {
 
 export function backendLabel(backend: string): string {
   switch (backend) {
+    case "index":
+      return "색인";
     case "fts":
       return "FTS";
     case "scan":
@@ -87,6 +89,8 @@ export function resultSentence(count: number, backend: string, elapsedMs: number
  * URL `row=` can be resolved to a server page. Null when the locator carries none.
  */
 export function indexFromRef(ref: RowRef): number | null {
+  // A search hit keeps its record's address: that is no position in the search results.
+  if (ref.source) return null;
   if (!["files", "docs", "timeline", "indicators", "artifacts", "analysis"].includes(ref.collection))
     return null;
   if ((ref.collection === "artifacts" || ref.collection === "analysis") && !ref.kind) return null;
