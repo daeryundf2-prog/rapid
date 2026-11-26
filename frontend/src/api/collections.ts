@@ -5,7 +5,6 @@
 // features/grid/columns/<collection>.ts so the API layer stays shape-agnostic.
 
 import {
-  type CollectionQuery,
   hasRecordFields,
   type RecordFieldFilters,
   type ServerSort,
@@ -932,36 +931,6 @@ async function fetchArtifactKindsPage(
     truncated: false,
     elapsedMs: Math.round(now() - started),
     kinds,
-  };
-}
-
-/** Unified search (FTS when the run has a case DB, else a bounded scan). Not paged by the API. */
-export async function fetchSearchRows(
-  runId: string,
-  query: Pick<CollectionQuery, "search" | "extension">,
-  limit: number,
-  signal?: AbortSignal,
-): Promise<RawPage> {
-  const spec = query.search;
-  if (!spec || spec.keywords.length === 0) {
-    return { rows: [], total: 0, offset: 0, backend: "none", truncated: false, elapsedMs: 0 };
-  }
-  const params = new URLSearchParams();
-  for (const keyword of spec.keywords) params.append("keyword", keyword);
-  params.set("limit", String(Math.min(limit, 1000)));
-  params.set("search_mode", spec.mode);
-  for (const source of spec.sources ?? []) params.append("source", source);
-  for (const extension of query.extension ?? []) params.append("extension", extension);
-  if (spec.hideKnownGood) params.set("hide_known_good", "true");
-  const payload = await api<Record<string, unknown>>(`/api/runs/${enc(runId)}/search?${params}`, { signal });
-  const rows = asRows(payload.matches);
-  return {
-    rows,
-    total: rows.length,
-    offset: 0,
-    backend: typeof payload.backend === "string" ? payload.backend : "scan",
-    truncated: payload.truncated === true,
-    elapsedMs: asNumber(payload.elapsed_ms) ?? 0,
   };
 }
 

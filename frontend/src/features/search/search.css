@@ -1,0 +1,280 @@
+/* 탐색 › 검색 결과 workspace (features/search). Fixed header regions (chips, status line, compare
+   table) above the results grid; only the grid body scrolls (the compare table inside its own
+   capped box). Colours, sizes and spacing come from tokens/tokens.css. */
+
+.search-pane {
+  /* Sizes of this pane, derived from the control, row and spacing tokens. */
+  --search-chip-h: calc(var(--control-h) - var(--space-1)); /* 24px beside the 28px controls */
+  --search-chip-max: calc(35 * var(--space-2));
+  --search-name-max: calc(25 * var(--space-2));
+  --search-hair: calc(var(--space-1) / 2);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.search-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.search-body > * {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* --- chips: one per search --------------------------------------------------------------- */
+
+.search-bar {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--line-subtle);
+  background: var(--bg-panel);
+}
+
+.search-chips {
+  flex: 1 1 var(--search-chip-max);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  /* Three rows of chips at most: the grid keeps its height, the rest scrolls here. */
+  max-height: calc(3 * var(--control-h));
+  margin: 0;
+  padding: var(--search-hair) 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+/* `.search-chip.chip`: these outrank the shared chip sizes (tokens/controls.css). */
+.search-chip.chip {
+  flex: none;
+  gap: 0;
+  height: var(--search-chip-h);
+  max-width: min(var(--search-chip-max), 100%);
+  padding: 0;
+}
+
+.search-chip.chip[data-shown] {
+  border-color: var(--accent);
+  background: var(--bg-selected);
+}
+
+.search-chip.chip > .chip-open,
+.search-chip.chip > .chip-remove {
+  display: inline-flex;
+  align-items: center;
+  /* The full chip height as the target: the buttons reach over the chip's 1px edge. */
+  height: var(--search-chip-h);
+  margin-block: -1px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.search-chip.chip > .chip-open {
+  gap: var(--space-1);
+  min-width: 0;
+  padding: 0 var(--space-1) 0 var(--space-2);
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+
+.search-chip.chip > .chip-remove {
+  flex: none;
+  justify-content: center;
+  width: var(--search-chip-h);
+  margin: 0;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--text-muted);
+}
+
+.search-chip.chip > .chip-open:hover,
+.search-chip.chip > .chip-remove:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.search-chip.chip > .chip-open:active,
+.search-chip.chip > .chip-remove:active {
+  background: var(--surface-3);
+}
+
+/* The check keeps its slot in both states, so selecting a chip never changes its width. */
+.search-chip-check {
+  flex: none;
+  color: var(--accent);
+  opacity: 0;
+}
+
+.search-chip[data-shown] .search-chip-check {
+  opacity: 1;
+}
+
+.search-chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-chip-count {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.search-chip .icon[data-icon="spinner"] {
+  flex: none;
+  animation: rt-spin 1s linear infinite;
+}
+
+.search-chip .icon[data-icon="alert"] {
+  flex: none;
+  color: var(--warn);
+}
+
+.search-bar-controls {
+  /* May shrink, so its controls wrap on a narrow pane instead of running off the edge. */
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+/* --- status line: what a search is doing, the index state ----------------------------------- */
+
+.search-status {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--line-subtle);
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.search-status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-height: var(--control-h-roomy);
+  margin: 0;
+  padding: var(--search-hair) 0;
+}
+
+/* The wait sentence may wrap on a narrow pane (the shared wait panel keeps one line). */
+.search-status-line .wait-panel-label {
+  white-space: normal;
+}
+
+.search-status-line progress {
+  width: calc(5 * var(--space-6));
+  max-width: 100%;
+}
+
+.search-status-detail {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.search-status-error {
+  color: var(--danger);
+}
+
+/* --- compare table --------------------------------------------------------------------------- */
+
+.search-compare-note {
+  flex: none;
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.search-compare {
+  flex: none;
+  /* The two header rows and six searches; more scroll inside this box, never the pane. */
+  max-height: min(calc(8 * var(--row-h)), 40%);
+  overflow: auto;
+  border-bottom: 1px solid var(--line-subtle);
+  background: var(--bg-panel);
+}
+
+.search-compare table {
+  border-collapse: collapse;
+  font-size: var(--fs-table-aux);
+}
+
+.search-compare th,
+.search-compare td {
+  height: var(--row-h);
+  padding: 0 var(--space-2);
+  border-bottom: 1px solid var(--line-subtle);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.search-compare thead th {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.search-compare th[scope="colgroup"] {
+  text-align: center;
+}
+
+.search-compare th.search-compare-name {
+  max-width: var(--search-name-max);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The search names stay in view while the counts scroll sideways. */
+.search-compare th[scope="row"],
+.search-compare thead tr:first-child th:first-child {
+  position: sticky;
+  left: 0;
+  background: var(--bg-panel);
+  color: var(--text);
+  text-align: left;
+}
+
+.search-compare-zero {
+  color: var(--text-subtle);
+}
+
+.search-compare-open {
+  min-width: var(--search-chip-h);
+  height: var(--search-chip-h);
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.search-compare-open:hover {
+  background: var(--bg-hover);
+  color: var(--accent-hover);
+}
+
+.search-compare .icon[data-icon="spinner"] {
+  animation: rt-spin 1s linear infinite;
+}

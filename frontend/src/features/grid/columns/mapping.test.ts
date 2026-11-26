@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CollectionId } from "../../../contracts/collection";
 import { EMPTY_CATALOG_FOR_TESTS, setCatalog } from "../../flags/catalog";
+import { fullRecordKey } from "../../viewer/fullRecord";
 import { buildViewerTarget } from "../gridCommands";
+import { indexFromRef } from "../gridUtils";
 import { bookmarkTarget } from "../reviewActions";
 import { COLLECTIONS, presetColumnIds } from "./index";
 
@@ -182,6 +184,62 @@ describe("API row -> GridRow mapping", () => {
     );
     expect(docs.ref.locator).toBe("/results/7");
     expect(bookmarkTarget(docs)).toEqual({ source: "docs", pointer: "/results/7" });
+  });
+
+  it("search index hits keep their record's address, so marks and the viewer treat them as that record", () => {
+    const artifact = map("search", {
+      doc_id: 7,
+      collection: "artifacts",
+      kind: "eventlog",
+      locator: "/artifacts/12",
+      domain: "eventlog",
+      artifact_type: "eventlog-event",
+      title: "4688 · Security",
+      path: "C:/Windows/Security.evtx",
+      ts: "2025-05-01T00:01:03.000+00:00",
+      fields: { event_id: "4688" },
+      snippet: { text: "…AnyDesk.exe --service", marks: [[1, 8]] },
+      matched: [
+        { term: "AnyDesk", field: "kw" },
+        { term: "service", field: "kw" },
+      ],
+    });
+    expect(artifact.ref).toEqual({
+      collection: "artifacts",
+      kind: "eventlog",
+      locator: "/artifacts/12",
+      source: "artifacts",
+    });
+    expect(artifact.rowKey).toBe("artifacts:eventlog:/artifacts/12");
+    expect(bookmarkTarget(artifact)).toEqual({ source: "artifacts:eventlog", pointer: "/artifacts/12" });
+    expect(artifact).toMatchObject({
+      title: "4688 · Security",
+      timestamp: "2025-05-01T00:01:03.000+00:00",
+      artifactType: "eventlog-event",
+      sourcePath: "C:/Windows/Security.evtx",
+    });
+    expect(artifact.fields).toMatchObject({
+      keywords: "AnyDesk, service",
+      preview: "…AnyDesk.exe --service",
+    });
+    // The index keeps a few fields only: the viewer loads the full record of an artifact hit.
+    expect(fullRecordKey(artifact, "r1")).not.toBeNull();
+    // Its locator is the record's own, never a position in the search results.
+    expect(indexFromRef(artifact.ref)).toBeNull();
+
+    const doc = map("search", {
+      doc_id: 9,
+      collection: "docs",
+      kind: "",
+      locator: "/candidates/3",
+      domain: "media",
+      title: "a.txt",
+      path: "/Users/a.txt",
+      hashes: { sha256: SHA },
+    });
+    expect(doc.ref).toEqual({ collection: "docs", locator: "/candidates/3", source: "docs" });
+    expect(bookmarkTarget(doc)).toEqual({ source: "docs", pointer: "/candidates/3" });
+    expect(doc.sha256).toBe(SHA);
   });
 
   it("review: bookmark id locator, status mapping, tags", () => {

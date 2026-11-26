@@ -154,7 +154,10 @@ export interface CollectionQuery {
   sort?: ServerSort;
   /** Search-collection only. */
   search?: {
+    /** The searches shown together (one chip each); a scan request sends them as its keywords. */
     keywords: string[];
+    /** `all`: only rows every search matches (index searches). Default `any`. */
+    combine?: "any" | "all";
     mode: "exact" | "fuzzy" | "regex";
     sources?: string[];
     hideKnownGood?: boolean;
@@ -167,7 +170,7 @@ export interface CollectionPage<Row = GridRow> {
   total: number | null;
   offset: number;
   limit: number;
-  /** "fts" | "scan" | "file" — surfaced in the grid footer. */
+  /** "index" | "fts" | "scan" | "file" — surfaced in the grid footer. */
   backend: string;
   truncated: boolean;
   elapsedMs: number;

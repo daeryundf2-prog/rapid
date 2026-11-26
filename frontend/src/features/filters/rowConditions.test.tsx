@@ -7,7 +7,7 @@ import type { GridRow } from "../../contracts/collection";
 import { parseHash, serializeRoute } from "../../router";
 import { resetAppStore, useAppStore } from "../../state/store";
 import { useAnalysisStore } from "../analysis/store";
-import { collectionQueryKey } from "../grid/useCollectionQuery";
+import { collectionQueryKey } from "../grid/collectionQueryKey";
 import { ClockSection, IncidentRange, ResultSection } from "./ConditionSections";
 import { normalizeFilters, saveCondition, savedConditions } from "./conditionMemory";
 import { pathExtension, rowContentTypes } from "./contentTypes";

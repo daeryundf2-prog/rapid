@@ -1064,7 +1064,7 @@ export function DataGrid(props: DataGridProps = {}) {
   // One polite sentence per result of a query the analyst asked for (collection, filters, sort).
   // Background refetches (job polling, review overlays) that only change the count stay silent,
   // and the elapsed time is not part of the key.
-  const resultCount = compactMode ? displayCount : (cq.total ?? displayCount);
+  const resultCount = compactMode ? displayCount : (cq.total ?? cq.countedTotal ?? displayCount);
   const filterSig = useFilterStore((s) => JSON.stringify(s.filters));
   const querySig = `${runId}|${collectionKey}|${q}|${routeSort ? `${routeSort.key}:${routeSort.order}` : ""}|${filterSig}`;
   const announcedFor = useRef("");
@@ -1169,7 +1169,7 @@ export function DataGrid(props: DataGridProps = {}) {
   }, [ref.id, filterRowShown, treeTypes, cq.loadedRows]);
   /** Header row (+ the column filter row when shown) precede the data rows in aria-rowindex. */
   const headRows = filterRowShown ? 2 : 1;
-  const rowCountAria = (compactMode ? displayCount : (cq.total ?? -1)) + headRows;
+  const rowCountAria = (compactMode ? displayCount : (cq.total ?? cq.countedTotal ?? -1)) + headRows;
   // Files NTFS columns: until an NTFS-meta analysis is joined their headers link to running it.
   const ntfsJoin = ref.id === "files" ? ntfsJoinOf(cq.pageMeta) : null;
   const hintsActive = ref.id === "files" && !cq.isLoading && ntfsJoin === null;
@@ -1223,7 +1223,7 @@ export function DataGrid(props: DataGridProps = {}) {
                 }
               : compactMode
                 ? { icon: "filter", text: "조건에 맞는 행이 없습니다. 불러온 행 안에서만 필터합니다." }
-                : { icon: "inbox", text: "이 노드에는 표시할 행이 없습니다." };
+                : { icon: "inbox", text: def.emptyText ?? "이 노드에는 표시할 행이 없습니다." };
 
   const serverFiltering =
     cq.serverColumnFilters || storeTypes.length > 0 || Boolean(storePath) || Boolean(serverPathFilter(q));
@@ -1575,7 +1575,7 @@ export function DataGrid(props: DataGridProps = {}) {
           ) : null}
         </div>
         {/* First page: what is loading and for how long, over the skeleton rows. */}
-        {displayCount === 0 && cq.isLoading && runId ? (
+        {displayCount === 0 && cq.isLoading && runId && ref.id !== "search" ? (
           <WaitPanel
             className="floating grid-wait"
             label={serverFiltering ? "조건에 맞는 행 찾는 중…" : `${def.label} 목록 불러오는 중…`}
@@ -1600,7 +1600,7 @@ export function DataGrid(props: DataGridProps = {}) {
       <GridFooter
         page={currentPage}
         pageCount={cq.pageCount}
-        total={cq.total}
+        total={cq.total ?? cq.countedTotal}
         shown={displayCount}
         backend={cq.backend}
         elapsedMs={cq.elapsedMs}

@@ -13,6 +13,7 @@ import { DerivedPane } from "../features/derived/DerivedPane";
 import { FsExplorerLayout, fsExplorerOpen } from "../features/explorers/FsExplorer";
 import { RegistryExplorer } from "../features/explorers/RegistryExplorer";
 import { DataGrid } from "../features/grid/DataGrid";
+import { SearchWorkspace } from "../features/search/SearchWorkspace";
 import { ProcessPage, ProcessPanel } from "../features/stages/ProcessStage";
 import { ReportPage, ReportPanel, ReviewPanel } from "../features/stages/ReviewReportStage";
 import { EvidenceTree } from "../features/tree/EvidenceTree";
@@ -68,6 +69,10 @@ function GridSlot() {
       <DataGrid />
     </ViewSwitch>
   );
+  // 검색 결과: the run's searches as chips, the status line and the compare table above the grid.
+  if (route.runId && route.collection === "search") {
+    return <SearchWorkspace runId={route.runId}>{grid}</SearchWorkspace>;
+  }
   // 파일 시스템 탐색기 (r4 §2.2): folder tree beside the grid of the selected folder.
   return route.runId && fsExplorerOpen(route) ? <FsExplorerLayout>{grid}</FsExplorerLayout> : grid;
 }

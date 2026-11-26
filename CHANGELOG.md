@@ -247,6 +247,26 @@
 
 ### Added
 
+- The console searches a run through its search index instead of scanning the
+  outputs. The first page of hits is shown as soon as the index answers
+  (`POST /search/query` with `aggregates: false`, then cursor pages as the grid
+  scrolls); totals are counted apart (`POST /search/count`) and shown on the
+  grid without sizing it. A run without a usable index, or a search with an
+  option only the scan has (fuzzy or regex mode, hide known-good, the timeline
+  source), still uses `GET /search`, and the status line above the grid says so.
+  That line also shows what a running search is looking through, the elapsed
+  time and a cancel button, and the index state: none (with 색인 만들기), a build's
+  progress with its cancel, or stale. Every search of a run stays as a chip with
+  its own count (kept per run in the browser). A chip shows its search alone;
+  함께 보기 shows several at once, as rows any of them match or only rows all of
+  them match, and 검색 비교 opens a table of each search's total, the rows only it
+  has, the rows it shares with each other search and its rows per forensic
+  domain; every number opens those rows. Plain words typed in the search box
+  are one search each as before; a text that uses the query grammar (an
+  operator or a `field:` clause) is one search. An index hit keeps the address
+  of its record, so review marks apply to the record, the viewer loads the full
+  artifact record, and 원본 목록에서 보기 in the row menu opens the hit in its own
+  list (`frontend/src/features/search/`).
 - The console viewer shows a file in a view of its own type instead of a hex
   dump. A PDF renders as pages in the browser's PDF viewer, from the bytes of
   `GET /api/runs/{run}/source-file`, whether or not text could be extracted; a

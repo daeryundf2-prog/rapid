@@ -107,6 +107,8 @@ export interface CollectionDef {
   id: CollectionId;
   /** Korean label for headings and the empty state. */
   label: string;
+  /** Sentence of the empty grid when the default ("이 노드에는 표시할 행이 없습니다.") would mislead. */
+  emptyText?: string;
   columns: ColumnSpec[];
   /** Kind-aware column set (e.g. eventlog adds 이벤트ID/채널/메시지); defaults to `columns`. */
   /** Columns of one kind; `types` = the grid's 유형 filter (artifact type families pick their own set). */

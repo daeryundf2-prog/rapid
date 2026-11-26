@@ -2,6 +2,7 @@ import { act, configure, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetArtifactCountsCache } from "../../api/collections";
 import type { CollectionQuery } from "../../contracts/collection";
+import { collectionQueryKey } from "./collectionQueryKey";
 import {
   filesHandler,
   installFetch,
@@ -10,7 +11,7 @@ import {
   resetGridStore,
   sortedArtifactsHandler,
 } from "./testSupport";
-import { categoryScopeText, collectionQueryKey, PAGE_SIZE, useCollectionQuery } from "./useCollectionQuery";
+import { categoryScopeText, PAGE_SIZE, useCollectionQuery } from "./useCollectionQuery";
 
 // Async waits must not depend on machine speed (CI under load).
 configure({ asyncUtilTimeout: 5000 });
@@ -78,7 +79,7 @@ describe("useCollectionQuery paging", () => {
     expect(calls.length).toBe(1);
   });
 
-  it("surfaces the search backend, truncated flag and elapsed time (whole collection)", async () => {
+  it("surfaces the scan search's backend, truncated flag and elapsed time (an option only the scan has)", async () => {
     const calls = installFetch({
       "/search": () =>
         jsonResponse({
@@ -110,6 +111,45 @@ describe("useCollectionQuery paging", () => {
     expect(url.searchParams.get("hide_known_good")).toBe("true");
     expect(url.searchParams.getAll("extension")).toEqual([".txt"]);
     expect(result.current.getRow(1)?.rowKey).toBe("search:docs-index:/results/2");
+  });
+
+  it("an index search shows its first page at once; the count arrives apart and never sizes the list", async () => {
+    const calls = installFetch({
+      "/search/index": () => jsonResponse({ status: "ready", doc_count: 1030611 }),
+      "/search/count": () =>
+        jsonResponse({ items: [{ count: 506941, count_exact: true, by_domain: { eventlog: 506941 } }] }),
+      "/search/query": (_url, init) => {
+        const body: { page: { limit: number; cursor?: string } } = JSON.parse(String(init?.body));
+        const start = Number(body.page.cursor ?? 0);
+        return jsonResponse({
+          rows: Array.from({ length: body.page.limit }, (_, i) => ({
+            doc_id: start + i,
+            collection: "artifacts",
+            kind: "eventlog",
+            locator: `/artifacts/${start + i}`,
+          })),
+          page: { next_cursor: String(start + body.page.limit) },
+          elapsed_ms: 67,
+        });
+      },
+    });
+    const { wrapper } = queryWrapper();
+    const q: CollectionQuery = {
+      ref: { id: "search" },
+      offset: 0,
+      limit: PAGE_SIZE,
+      search: { keywords: ["진료실1"], mode: "exact" },
+    };
+    const { result } = renderHook(() => useCollectionQuery(q, { runId: "run-1" }), { wrapper });
+    await waitFor(() => expect(result.current.countedTotal).toBe(506941));
+    await waitFor(() => expect(result.current.loadedCount).toBe(PAGE_SIZE));
+    // The list holds the loaded rows and grows page by page; the count is only shown.
+    expect(result.current.total).toBeNull();
+    expect(result.current.backend).toBe("index");
+    expect(result.current.getRow(0)?.rowKey).toBe("artifacts:eventlog:/artifacts/0");
+    expect(calls.find((c) => c.url.endsWith("/search/count"))?.body).toEqual({ terms: [{ q: "진료실1" }] });
+    act(() => result.current.ensureRange(240, 249));
+    await waitFor(() => expect(result.current.getRow(260)?.rowKey).toBe("artifacts:eventlog:/artifacts/260"));
   });
 
   it("artifacts of one kind page through GET /artifacts?offset&limit and use the kind total", async () => {
