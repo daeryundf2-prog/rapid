@@ -1,0 +1,133 @@
+/* 선택 항목 분석 / 관련 항목 표시 dialog (fe-audit A6). Token values only. */
+
+.action-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.action-anchor {
+  margin: 0;
+  display: flex;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--text-muted);
+}
+
+.action-anchor strong {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.action-relations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.action-relations legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+  font-weight: 600;
+}
+
+.action-relation {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--control-h-roomy);
+}
+
+.action-minutes {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: var(--space-1);
+  color: var(--text-muted);
+}
+
+.action-minutes input {
+  width: 4.5em;
+  height: var(--control-h);
+  padding: 0 var(--space-1);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background: var(--surface-0);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.action-profile {
+  padding: var(--space-3);
+  background: var(--surface-2);
+  border-radius: var(--radius);
+}
+
+.action-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+}
+
+.action-facts > div {
+  display: contents;
+}
+
+.action-facts dt {
+  color: var(--text-muted);
+}
+
+.action-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+  font-variant-numeric: tabular-nums;
+}
+
+.action-mark {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.action-mark label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.action-note {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.action-error {
+  margin: 0;
+  color: var(--danger);
+}
+
+.action-agent summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.action-agent pre {
+  max-height: 220px;
+  overflow: auto;
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-table-aux);
+  background: var(--surface-0);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+}

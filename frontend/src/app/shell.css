@@ -335,8 +335,12 @@ kbd {
   background: var(--bg-selected);
 }
 
-.case-picker-option.is-current {
-  box-shadow: inset 2px 0 0 var(--accent);
+.case-picker-current {
+  display: inline-flex;
+  flex: none;
+  width: 16px;
+  margin-left: var(--space-2);
+  color: var(--accent);
 }
 
 .case-picker-option-text {
@@ -525,6 +529,27 @@ kbd {
 
   .topbar-case > :not(.case-picker) {
     flex: none;
+  }
+}
+
+/* Phones: 실행 keeps its icon (the label stays the accessible name) and the case name gives way,
+   so the global search shows its placeholder instead of one letter (fe-audit A4). */
+@media (max-width: 599.98px) {
+  .topbar-case [data-command="case.run-dialog"] > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .topbar-case {
+    max-width: 40%;
+  }
+
+  .topbar-search {
+    flex: 1 1 auto;
   }
 }
 
@@ -722,7 +747,6 @@ kbd {
 
 .palette-option.active {
   background: var(--bg-selected);
-  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 /* Labels are 400; only the characters the query matched are 600 (review #12). */
@@ -822,6 +846,11 @@ kbd {
   /* Above the grid footer (26px) and its horizontal scrollbar (12px): at 12px it sat on both. */
   bottom: calc(26px + 12px + var(--space-2));
   z-index: 500;
+}
+
+/* A dialog owns the screen: the floating 뷰어 열기 handle (z 500) sat over its footer at 390. */
+body:has(.case-modal-backdrop) .drawer-handle {
+  display: none;
 }
 
 .viewer-drawer {

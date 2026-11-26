@@ -148,6 +148,10 @@ export function CasePickerCombobox() {
                 onMouseMove={() => setActive(index)}
                 onClick={() => choose(option)}
               >
+                {/* The open case: a check in the accent ink (the tint is the keyboard/hover row). */}
+                <span className="case-picker-current" aria-hidden="true">
+                  {option.runId === route.runId ? <Icon name="check" /> : null}
+                </span>
                 <span className="case-picker-option-text">
                   <span className="case-picker-option-name">{option.name}</span>
                   <span className="case-picker-option-meta">

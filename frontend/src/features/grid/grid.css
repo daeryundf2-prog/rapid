@@ -192,7 +192,13 @@
   font-size: var(--fs-table-aux);
 }
 
+/* Toolbar buttons keep their label on one line: "조건" split into 조/건 at 390 (fe-audit A4). */
 .grid-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  flex: none;
   height: var(--control-h);
   padding: 0 var(--space-3);
   background: var(--bg-raised);
@@ -200,11 +206,18 @@
   border: 1px solid var(--line);
   border-radius: var(--radius);
   font: inherit;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.grid-btn:hover {
+.grid-btn:hover:not(:disabled) {
   border-color: var(--accent);
+}
+
+.grid-btn:disabled {
+  background: var(--disabled-bg);
+  color: var(--disabled-text);
+  cursor: not-allowed;
 }
 
 .grid-btn[aria-disabled="true"] {
@@ -319,11 +332,10 @@
 }
 
 /* Selection / hover / focus (review #1): three distinct signals that never stack into a box.
-   Selected = the accent tint (--bg-selected, shared with the tree) + a 2px accent bar on the
-   whole row; hover = a 4% text tint; the 1px accent outline is for keyboard focus only. */
+   Selected = the accent tint (--bg-selected, shared with the tree) with its checked box;
+   hover = a 4% text tint; the 1px accent outline is for keyboard focus only. */
 .grid-row.is-selected {
   background: var(--bg-selected);
-  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 /* Cells inherit the row background; the tint is painted on the row and the sticky cells
@@ -411,11 +423,6 @@
 
 .grid-hcell {
   position: relative;
-}
-
-/* The accent bar must stay on top of the sticky select cell, which covers the row's own edge. */
-.grid-row.is-selected > .grid-cell-select {
-  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .grid-sort {

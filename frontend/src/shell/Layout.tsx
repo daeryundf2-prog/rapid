@@ -19,6 +19,7 @@ import {
 } from "../commands/builtin";
 import { CommandButton } from "../commands/CommandButton";
 import { ToastRegion } from "../components/ToastRegion";
+import { ActionsHost } from "../features/actions/ActionsHost";
 import { Landing } from "../features/case/Landing";
 import { ReviewToolsHost } from "../features/review/ReviewToolsHost";
 import { readClassicLayout, useViewPrefs, writeClassicLayout } from "../features/review/viewPrefs";
@@ -498,6 +499,7 @@ export function Layout() {
       <CommandPalette />
       <HelpOverlay />
       <ReviewToolsHost />
+      <ActionsHost />
     </div>
   );
 }

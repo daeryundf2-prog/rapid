@@ -79,4 +79,8 @@ export const KEY_MAP = {
   classicSplit: "`",
   /** Media gallery examiner protection (AXIOM E3): blur images. B stays 북마크. */
   mediaBlur: "Shift+B",
+  /** Timeline overview strip (fe-audit D1): previous / next range of the same width, zoom out. */
+  timelinePrev: "[",
+  timelineNext: "]",
+  timelineZoomOut: "-",
 } as const;
