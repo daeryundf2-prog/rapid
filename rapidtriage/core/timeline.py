@@ -216,6 +216,11 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     "registry-install-state": (F("install_date", "installed", timezone="local-unknown"), F("key_last_written_at", "last-written")),
     "execution-pca": (F("last_run_at", "run"), F("event_at", "pca-event"), F("key_last_written_at", "last-written", scope="key")),
     "execution-feature-usage": (F("key_last_written_at", "last-written", scope="key"),),
+    "registry-taskband-pin": (F("key_last_written_at", "last-written", scope="key"),),
+    "linux-utmp": (F("timestamp", "session-record"),),
+    "linux-wtmp": (F("timestamp", "session-record"),),
+    "linux-btmp": (F("timestamp", "failed-login"),),
+    "linux-lastlog": (F("timestamp", "last-login"),),
     "bitlocker-recovery-key-file": (F("key_created_at", "created"),),
     # --- R5 L2: OS / system rows (registry_depth.py, system_extras.py) ---------------------
     "startup-item": (
@@ -378,6 +383,7 @@ TIMELINE_EXCLUDED_TYPES: frozenset[str] = frozenset(
         "registry-key-tree-node",
         "shellbag-hive-summary",
         "registry-summary",
+        "linux-login-accounting-summary",
         "eventlog-summary",
         "windows-execution-summary",
         "mobile-correlation-summary",
@@ -1512,10 +1518,15 @@ def iter_artifact_detail_events(
         entry for entry in mapped if entry.get("scope") not in ("key", "inventory") and not entry.get("element_identity")
     ]
     if explicit is not None and any(
-        entry.get("scope") == "inventory" and _instant(entry["timestamp"]) == _instant(explicit[0]) for entry in mapped
+        (
+            entry.get("scope") == "inventory"
+            or (entry.get("scope") == "key" and entry["timestamp_kind"] == canonical_label(explicit[1], artifact_type))
+        )
+        and _instant(entry["timestamp"]) == _instant(explicit[0])
+        for entry in mapped
     ):
-        # Amcache inventory rows restate the key LastWrite as the row
-        # ``timestamp``: it is the collapsed inventory event, not a row event.
+        # Registry plugins can also publish the shared key time as the row timestamp.
+        # Keep the shared scope when both fields describe the same event.
         explicit = None
     if explicit is not None:
         # Row-level contract (W5): ``timestamp`` + ``timestamp_kind`` (+ label /

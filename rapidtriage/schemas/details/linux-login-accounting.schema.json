@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Linux login accounting record",
+  "type": "object",
+  "required": ["log_kind", "layout", "user", "tty", "host", "uid", "pid", "type", "type_name", "session", "timestamp", "timestamp_sec", "timestamp_usec", "source_path", "source_offset", "source_length", "record_sha256"],
+  "properties": {
+    "log_kind": { "enum": ["utmp", "wtmp", "btmp", "lastlog"] },
+    "layout": { "type": "string" },
+    "user": { "type": "string" },
+    "tty": { "type": "string" },
+    "host": { "type": "string" },
+    "uid": { "type": ["integer", "null"], "minimum": 0 },
+    "pid": { "type": ["integer", "null"] },
+    "type": { "type": ["integer", "null"] },
+    "type_name": { "type": "string" },
+    "session": { "type": ["integer", "null"] },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "timestamp_sec": { "type": "integer" },
+    "timestamp_usec": { "type": ["integer", "null"], "minimum": 0, "maximum": 999999 },
+    "source_path": { "type": "string" },
+    "source_offset": { "type": "integer", "minimum": 0 },
+    "source_length": { "enum": [292, 384] },
+    "record_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

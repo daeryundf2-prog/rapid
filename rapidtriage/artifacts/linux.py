@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ..core.models import ArtifactRecord
 from ._walk import iter_evidence_paths
+from .linux_login import collect_login_accounting
 
 PARSER_VERSION = "linux-system-v2"
 SKIP_USERS = {"daemon", "nobody", "sync", "shutdown", "halt", "mail", "news", "uucp", "operator", "games"}
@@ -75,6 +76,7 @@ class LinuxSystemArtifactsProvider:
         return True
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
+        yield from collect_login_accounting(root)
         if not looks_like_linux_evidence(root):
             return
         yield from collect_linux_users(root)

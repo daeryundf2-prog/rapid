@@ -145,6 +145,19 @@ export function summarizeArtifact(
         .join(" · "),
     };
   }
+  if (type === "registry-taskband-pin" || type === "execution-feature-usage") {
+    return {
+      title: firstStr(details, ["application", "target_path", "value_name"]) ?? name,
+      detail: firstStr(details, ["feature_label", "value_name"]) ?? "",
+    };
+  }
+  if (["linux-utmp", "linux-wtmp", "linux-btmp", "linux-lastlog"].includes(type)) {
+    const uid = strOrNull(details.uid);
+    return {
+      title: strOrNull(details.user) ?? (uid ? `UID ${uid}` : strOrNull(details.type_name) ?? name),
+      detail: [str(details.tty), str(details.host)].filter(Boolean).join(" · "),
+    };
+  }
   if (type.startsWith("registry-")) {
     const key = firstStr(details, ["key_path", "source_key_path"]);
     const value = firstStr(details, ["name", "value_name"]);
@@ -211,12 +224,13 @@ const OFFSET_KEYS = [
   "entry_offset",
   "offset",
 ];
-const LENGTH_KEYS = ["evtx_record_size", "record_size", "candidate_length", "length"];
+const LENGTH_KEYS = ["evtx_record_size", "record_size", "source_length", "candidate_length", "length"];
 
 /** Byte/record locator the viewer can jump to; undefined when the row has none. */
 export function recordHighlight(details: Details): RecordHighlight | undefined {
   const out: RecordHighlight = {};
   for (const key of OFFSET_KEYS) {
+    if (key === "source_offset" && details.source_offset_unit === "line") continue;
     const n = num(details[key]);
     if (n !== null) {
       out.offset = n;

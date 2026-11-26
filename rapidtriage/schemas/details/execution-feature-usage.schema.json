@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Explorer FeatureUsage counter",
+  "type": "object",
+  "required": ["feature", "application", "count", "user", "key_path", "value_name", "key_last_written_at", "key_last_written_filetime", "source_path", "source_offset", "source_hashes"],
+  "properties": {
+    "feature": { "type": "string" },
+    "application": { "type": "string" },
+    "count": { "type": ["integer", "null"], "minimum": 0, "maximum": 4294967295 },
+    "user": { "type": "string" },
+    "key_path": { "type": "string" },
+    "value_name": { "type": "string" },
+    "key_last_written_at": { "type": "string" },
+    "key_last_written_filetime": { "type": ["string", "null"], "pattern": "^[0-9]+$" },
+    "source_path": { "type": "string" },
+    "source_offset": { "type": "integer", "minimum": 0 },
+    "source_hashes": { "type": "object", "required": ["sha256"] }
+  }
+}

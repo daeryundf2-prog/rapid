@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Explorer Taskband entry",
+  "type": "object",
+  "required": ["application", "app_id", "target_path", "target_path_source", "pin_index", "value_data_offset", "value_data_length", "user", "key_path", "value_name", "key_last_written_at", "key_last_written_filetime", "source_path", "source_offset", "source_hashes"],
+  "properties": {
+    "application": { "type": "string" },
+    "app_id": { "type": "string" },
+    "target_path": { "type": "string" },
+    "target_path_source": { "type": "string" },
+    "pin_index": { "type": "integer", "minimum": 0 },
+    "value_data_offset": { "type": "integer", "minimum": 0 },
+    "value_data_length": { "type": "integer", "minimum": 1 },
+    "user": { "type": "string" },
+    "key_path": { "type": "string" },
+    "value_name": { "type": "string" },
+    "key_last_written_at": { "type": "string" },
+    "key_last_written_filetime": { "type": ["string", "null"], "pattern": "^[0-9]+$" },
+    "source_path": { "type": "string" },
+    "source_offset": { "type": "integer", "minimum": 0 },
+    "source_hashes": { "type": "object", "required": ["sha256"] }
+  }
+}

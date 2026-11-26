@@ -511,6 +511,49 @@ export const DOMAINS: readonly DomainDef[] = [
         },
       },
       { id: "os-linux", label: "Linux 시스템", target: a("linux-system") },
+      {
+        id: "os-linux-sessions",
+        label: "Linux 로그인·세션 기록",
+        target: {
+          ...a("linux-system", ["linux-utmp", "linux-wtmp", "linux-btmp"]),
+          cols: [
+            "details.user",
+            "details.tty",
+            "details.host",
+            "details.type_name",
+            "details.pid",
+            "details.session",
+          ],
+        },
+        typeLabels: {
+          "linux-utmp": "현재 세션(utmp)",
+          "linux-wtmp": "세션 이력(wtmp)",
+          "linux-btmp": "로그인 실패(btmp)",
+        },
+      },
+      {
+        id: "os-linux-lastlog",
+        label: "사용자별 마지막 로그인(lastlog)",
+        target: {
+          ...a("linux-system", ["linux-lastlog"]),
+          cols: ["details.uid", "details.user", "details.tty", "details.host"],
+        },
+      },
+      {
+        id: "os-linux-login-summary",
+        label: "Linux 로그인 기록 파싱 요약",
+        detail: true,
+        target: {
+          ...a("linux-system", ["linux-login-accounting-summary"]),
+          cols: [
+            "details.layout",
+            "details.rows_emitted",
+            "details.damaged_records",
+            "details.truncated_records",
+            "details.capped",
+          ],
+        },
+      },
       { id: "os-macos", label: "macOS 시스템", target: a("macos-system") },
       {
         id: "os-knowledgec",
@@ -755,7 +798,7 @@ export const DOMAINS: readonly DomainDef[] = [
       {
         id: "exec-feature-usage",
         label: "작업 표시줄 사용(FeatureUsage)",
-        target: a("windows-registry", ["execution-feature-usage"]),
+        target: { ...a("windows-registry", ["execution-feature-usage"]), cols: ["details.user"] },
       },
       {
         id: "exec-pca-files",
@@ -896,6 +939,14 @@ export const DOMAINS: readonly DomainDef[] = [
         id: "reg-activity",
         label: "사용자 활동(검색어·최근 문서·입력 경로)",
         target: a("windows-registry", ["registry-user-activity"]),
+      },
+      {
+        id: "reg-taskband",
+        label: "작업 표시줄 고정 항목(Taskband)",
+        target: {
+          ...a("windows-registry", ["registry-taskband-pin"]),
+          cols: ["details.application", "details.value_name", "details.pin_index", "details.user"],
+        },
       },
       {
         id: "reg-shellbags",
