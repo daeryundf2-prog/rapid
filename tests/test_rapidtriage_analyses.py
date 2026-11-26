@@ -1595,9 +1595,18 @@ class AnalysisApiTests(unittest.TestCase):
 
     def test_running_rows_bounded_by_flushed_row_count(self) -> None:
         slow_scan, entered, gate = self._blocking_scan(block_on_call=2)  # blob1.bin scanned, blob2.bin held
+        real_write_state = analyses.AnalysisContext.write_state
+
+        def write_state_except_heartbeat(context: analyses.AnalysisContext, **kwargs: bool) -> None:
+            # The process-wide heartbeat (every HEARTBEAT_INTERVAL_SECONDS, possibly mid-sleep
+            # already) would count the pending row into row_count at a random point below.
+            if threading.current_thread() is not analyses.ANALYSIS_RUNNER._heartbeat:
+                real_write_state(context, **kwargs)
+
         with (
             patch.object(analysis_kinds, "_scan_source", slow_scan),
             patch.object(analyses, "PROGRESS_WRITE_INTERVAL_SECONDS", 3600),
+            patch.object(analyses.AnalysisContext, "write_state", write_state_except_heartbeat),
         ):
             created = self.submit("carve", {"ext": ".bin"})
             analysis_id = str(created["analysis_id"])
