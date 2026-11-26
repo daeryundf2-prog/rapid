@@ -3,10 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseHash } from "../../router";
 import { useAppStore } from "../../state/store";
 import { mockFetch, renderWithQuery } from "../case/testUtils";
-import { getRegisteredCommands } from "./adapter";
+import { getRegisteredCommands, registerCommand } from "./adapter";
 import { buildTreeCommands } from "./commands";
 import { EvidenceTree } from "./EvidenceTree";
-import { buildTreeModel, filterEmptyNodes, flattenVisible, type TreeModelNode } from "./model";
+import { buildTreeModel, evidenceNode, filterEmptyNodes, flattenVisible, type TreeModelNode } from "./model";
 import { resetTreePrefs, SHOW_EMPTY_KEY, useTreePrefs } from "./treePrefs";
 
 const counts = {
@@ -283,6 +283,37 @@ describe("EvidenceTree (탐색 domain tree)", () => {
 });
 
 describe("tree commands", () => {
+  it("keeps ids unique when two partitions share a number (0-based GPT table)", () => {
+    const partition = {
+      description: "",
+      filesystem: "fat",
+      size_bytes: 1,
+      byte_offset: 0,
+      recommended: false,
+    };
+    const node = evidenceNode(
+      {
+        name: "real.E01",
+        path: "D:/real.E01",
+        kind: "image",
+        size_bytes: 1,
+        partitions: [
+          { ...partition, number: 1, start_sector: 2048, selected: false },
+          { ...partition, number: 1, start_sector: 534528, selected: false },
+          { ...partition, number: 2, start_sector: 567296, selected: true },
+        ],
+      } as unknown as Parameters<typeof evidenceNode>[0],
+      undefined,
+    );
+    const commands = buildTreeCommands("r1", [node]);
+    const ids = commands.map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toContain("tree.goto.evidence.partition.534528");
+    // Registering them all (what useTreeCommands does) must not throw.
+    const unregister = commands.map((c) => registerCommand(c));
+    for (const off of unregister) off();
+  });
+
   it("registers one tree.goto.* command per node with disabled reasons", () => {
     const model = buildTreeModel({ summary: { summary: { counts } } });
     const commands = buildTreeCommands("r1", model);
@@ -436,5 +467,23 @@ describe("hidden-family count is final (review #7)", () => {
     const first = toggle.textContent;
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(screen.getByTestId("tree-empty-toggle").textContent).toBe(first);
+  });
+});
+
+describe("tree wait panel", () => {
+  it("says the tree is loading for as long as /tree has not answered", async () => {
+    const { fetchMock } = mockFetch(routes());
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).split("?")[0]?.endsWith("/tree")) await gate;
+      return fetchMock(input, init);
+    });
+    renderWithQuery(<EvidenceTree runId="r1" />);
+    expect((await screen.findByTestId("tree-wait")).querySelector(".wait-panel-elapsed")).toBeTruthy();
+    release();
+    await waitFor(() => expect(screen.queryByTestId("tree-wait")).toBeNull());
   });
 });

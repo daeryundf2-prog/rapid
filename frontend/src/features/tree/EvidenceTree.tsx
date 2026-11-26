@@ -1,6 +1,7 @@
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { announce } from "../../a11y";
 import { focusGridWhenReady } from "../../commands/builtin";
+import { WaitPanel } from "../../components/WaitPanel";
 import { Icon } from "../../icons";
 import { useAppStore } from "../../state/store";
 import { navigate } from "./adapter";
@@ -365,14 +366,9 @@ export function EvidenceTree({ runId }: { runId: string }) {
           );
         })}
       </ul>
-      {loading ? (
-        // Not a live region: the shell's single polite region (announce()) carries status text,
-        // and a second polite region while the tree loads broke the one-region rule.
-        <p className="case-tree-loading">
-          <Icon name="spinner" className="spin" />
-          건수와 아티팩트 목록을 불러오는 중…
-        </p>
-      ) : null}
+      {/* Until `/tree`, the summary and the analysis jobs answered (seconds on a large case); it
+          floats at the foot of the pane (tree.css), so the nodes do not move. */}
+      {treeSettled ? null : <WaitPanel className="floating" label="트리 불러오는 중…" testId="tree-wait" />}
       <p className="case-tree-reason">{blockedReason}</p>
       {/* The count is final once `/tree` answered (before that, kinds look unknown, not empty). */}
       {treeSettled && emptyView.hiddenCount > 0 ? (

@@ -1,6 +1,8 @@
 import { fetchTimelinePage } from "../../../api/collections";
+import type { GridRow } from "../../../contracts/collection";
 import { exactEvidenceTime } from "../../../utils/time";
 import { timestampKindLabel } from "../../../utils/timeKinds";
+import { artifactTypeLabel } from "../../filters/typeLabels";
 import type { CollectionDef } from "../types";
 import {
   col,
@@ -17,6 +19,41 @@ import { TIME_KINDS_SEPARATOR, timeKindsCell } from "./TimelineCells";
 
 /** Time-kind labels moved to utils/timeKinds.ts (shared with the record view); re-exported. */
 export { TIMESTAMP_KIND_LABELS, timestampKindLabel } from "../../../utils/timeKinds";
+
+/** Korean names of the timeline event `source` (core/timeline.py: files, docs, artifacts). */
+export const TIMELINE_SOURCE_LABELS: Readonly<Record<string, string>> = {
+  files: "파일",
+  docs: "문서",
+  artifacts: "아티팩트",
+};
+
+/** Korean names of the docs source's events (core/timeline.py document events). */
+const DOCUMENT_EVENT_LABELS: Readonly<Record<string, string>> = {
+  "document-modified": "문서 수정",
+  "document-keyword-hit": "문서 키워드 일치",
+};
+
+/**
+ * 이벤트 column text: the event type's own Korean name (eventlog-event …); a files event
+ * (`file-<kind>`) as 파일 · kind; else the Korean name of the artifact row it came from plus the
+ * time kind its id carries (`artifact-<type>-<kind>`, core/timeline.py:
+ * `artifact-jumplist-automatic-target-accessed` → "자동 Jump List 파일 · 대상 접근"); else the id.
+ * The kind stays in the text: 시각 종류 is not a 분석 기본 column, and two events of one record
+ * (생성 / 수정) must not read the same.
+ */
+export function timelineEventLabel(row: GridRow): string {
+  const eventType = row.artifactType ?? "";
+  const own = eventType ? (artifactTypeLabel(eventType) ?? DOCUMENT_EVENT_LABELS[eventType]) : null;
+  if (own) return own;
+  if (row.provider === "files" && eventType.startsWith("file-"))
+    return `파일 · ${timestampKindLabel(eventType.slice("file-".length))}`;
+  const sourceType = str(row.fields.sourceArtifactType);
+  const sourceLabel = sourceType ? artifactTypeLabel(sourceType) : null;
+  if (!sourceLabel) return eventType;
+  const prefix = `artifact-${sourceType}-`;
+  const kind = eventType.startsWith(prefix) ? eventType.slice(prefix.length) : "";
+  return kind ? `${sourceLabel} · ${timestampKindLabel(kind)}` : sourceLabel;
+}
 
 export function timestampKindOf(raw: Record<string, unknown>): string {
   return str(raw.timestamp_kind ?? raw.ts_kind ?? raw.timestamp_label);
@@ -142,8 +179,15 @@ export const timelineCollection: CollectionDef = {
       },
       render: timeKindsCell,
     }),
-    col.field("source", "출처", 90, ["analysis", "compact", "source"], (r) => r.provider),
-    col.field("eventType", "이벤트", 160, ["analysis", "compact"], (r) => r.artifactType),
+    // 출처 / 이벤트 read in Korean; the raw ids stay the filter value and the tooltip.
+    col.field("source", "출처", 90, ["analysis", "compact", "source"], (r) => r.provider, {
+      format: (r) => TIMELINE_SOURCE_LABELS[r.provider ?? ""] ?? r.provider ?? "",
+      tooltip: (r) => r.provider ?? "",
+    }),
+    col.field("eventType", "이벤트", 160, ["analysis", "compact"], (r) => r.artifactType, {
+      format: timelineEventLabel,
+      tooltip: (r) => r.artifactType ?? "",
+    }),
     col.title("요약", 380),
     col.review(),
     col.path(420),

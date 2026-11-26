@@ -595,27 +595,33 @@ export function isMixedGrid(kind: string | undefined, types?: readonly string[])
   return !kind || (types?.length ?? 0) > 1;
 }
 
-const mixedColumns = (): ColumnSpec[] => [
-  { ...typeColumn, width: 130, minWidth: 130 },
-  { ...col.title("항목", 220), minWidth: 200 },
-  flagsColumn(["analysis", "compact"]),
-  ...mixedSummaryColumns(),
-  { ...col.review(), width: 88, minWidth: 88 },
-  { ...timeColumn, presets: ["source"] },
-  col.path(200, ["source"]),
-  quietDetailColumn,
-  ...tail
-    .filter((column) => column.id !== "path")
-    .map((column): ColumnSpec => (column.id === "provider" ? { ...column, presets: ["source"] } : column)),
-];
+// 날짜 및 시각 leads (P1, like the generic 시각 · 유형 · 항목 layout): the first column stays in view
+// (sticky) however wide the summary columns make the grid, at 1440px beside the viewer and 1024px.
+const mixedColumns = (): ColumnSpec[] => {
+  const [time, ...summary] = mixedSummaryColumns();
+  return [
+    time as ColumnSpec,
+    { ...typeColumn, width: 130, minWidth: 130 },
+    { ...col.title("항목", 220), minWidth: 200 },
+    flagsColumn(["analysis", "compact"]),
+    ...summary,
+    { ...col.review(), width: 88, minWidth: 88 },
+    { ...timeColumn, presets: ["source"] },
+    col.path(200, ["source"]),
+    quietDetailColumn,
+    ...tail
+      .filter((column) => column.id !== "path")
+      .map((column): ColumnSpec => (column.id === "provider" ? { ...column, presets: ["source"] } : column)),
+  ];
+};
 
-/** Mixed layout priority: 항목 > 주요 > 특이사항 > 유형 > 시각 > 지원 > 추가 > 선별. */
+/** Mixed layout priority: 항목 > 날짜 및 시각 > 주요 > 특이사항 > 유형 > 지원 > 추가 > 선별. */
 export const MIXED_PRIORITY = [
   "title",
+  "sum:time",
   "sum:main",
   "flags",
   "type",
-  "sum:time",
   "sum:support",
   "sum:extra",
   "review",

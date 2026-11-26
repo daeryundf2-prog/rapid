@@ -792,6 +792,13 @@
   border-bottom: 1px solid var(--line-subtle);
 }
 
+/* Wait pill (components/WaitPanel) over the skeleton rows. */
+.grid-wait {
+  top: calc(32px + 2 * var(--row-h));
+  left: 50%;
+  transform: translateX(-50%);
+}
+
 /* Error card (review #11): replaces the empty state, centred like it. */
 .grid-error-card {
   position: absolute;

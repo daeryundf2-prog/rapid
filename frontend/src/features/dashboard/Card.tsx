@@ -5,6 +5,7 @@
  */
 
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
+import { WaitPanel } from "../../components/WaitPanel";
 import { Icon, type IconName } from "../../icons";
 import { readStoredJson, writeStored } from "../../state/storage";
 
@@ -193,15 +194,9 @@ export function Card({
   );
 }
 
-/** X18 loading card body. */
+/** X18 loading card body: the wait panel (label + elapsed seconds once the load is not instant). */
 export function CardLoading({ label = "불러오는 중…" }: { label?: string }) {
-  return (
-    // Not a live region: the shell's single polite region (announce()) carries status text.
-    <p className="dash-loading">
-      <Icon name="spinner" className="dash-spin" />
-      {label}
-    </p>
-  );
+  return <WaitPanel label={label} />;
 }
 
 /** X9 empty state: what the card is for and how to fill it. */

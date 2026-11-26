@@ -63,6 +63,38 @@ describe("timeline labels[] (parser-quality r2: one event per record and instant
     expect(cell.querySelector(".sr-only")?.textContent).toBe("(같은 시각: 수정, 접근)");
   });
 
+  it("shows 출처 and 이벤트 in Korean and keeps the raw ids as the filter value and tooltip", () => {
+    const row = mapEvent({
+      ...merged,
+      source: "artifacts",
+      event_type: "artifact-jumplist-automatic-target-accessed",
+      details: { artifact_type: "jumplist-automatic" },
+    });
+    const source = column(timelineCollection.columns, "source");
+    const event = column(timelineCollection.columns, "eventType");
+    expect(source.format?.(row)).toBe("아티팩트");
+    expect(source.value(row)).toBe("artifacts");
+    // The time kind the id carries stays readable (시각 종류 is not a 분석 기본 column).
+    expect(event.format?.(row)).toBe("자동 Jump List 파일 · 대상 접근");
+    expect(event.value(row)).toBe("artifact-jumplist-automatic-target-accessed");
+    expect(event.tooltip?.(row)).toBe("artifact-jumplist-automatic-target-accessed");
+    const created = mapEvent({
+      ...merged,
+      source: "artifacts",
+      event_type: "artifact-jumplist-automatic-target-created",
+      details: { artifact_type: "jumplist-automatic" },
+    });
+    expect(event.format?.(created)).toBe("자동 Jump List 파일 · 대상 생성");
+    // Files and docs events read in Korean too.
+    expect(event.format?.(mapEvent({ ...merged, event_type: "file-mft-changed" }))).toBe("파일 · MFT 변경");
+    expect(event.format?.(mapEvent({ ...merged, source: "docs", event_type: "document-keyword-hit" }))).toBe(
+      "문서 키워드 일치",
+    );
+    // An event type with its own name wins; an unknown one stays as its id.
+    expect(event.format?.(mapEvent({ ...merged, event_type: "eventlog-event" }))).toBe("EVTX 이벤트");
+    expect(event.format?.(mapEvent({ ...merged, event_type: "no-such-event" }))).toBe("no-such-event");
+  });
+
   it("a single-kind event renders just its label (labels absent or one entry)", () => {
     const row = mapEvent({ ...merged, labels: undefined, timestamp_kind: "run-2" });
     expect(column(timelineCollection.columns, "tsKind").format?.(row)).toBe("실행 2회차");

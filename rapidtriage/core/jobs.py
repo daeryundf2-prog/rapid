@@ -306,11 +306,15 @@ class RunJob:
         request_payload = payload.get("request")
         request = RunRequest.from_dict(request_payload if isinstance(request_payload, Mapping) else {})
         summary_payload = payload.get("summary")
+        origin = str(payload.get("origin") or "web")
+        if origin == "imported" and isinstance(summary_payload, Mapping):
+            # Catalogs saved before imports named the image hold the extraction folder as root.
+            request = replace(request, root=summary_evidence_root(summary_payload) or request.root)
         return cls(
             run_id=str(payload.get("run_id") or uuid.uuid4().hex[:12]),
             request=request,
             status=normalize_run_status(payload.get("status") or "failed"),
-            origin=str(payload.get("origin") or "web"),
+            origin=origin,
             created_at=str(payload.get("created_at") or now_iso()),
             updated_at=str(payload.get("updated_at") or now_iso()),
             started_at=str(payload["started_at"]) if payload.get("started_at") else None,
@@ -667,7 +671,7 @@ class RunJobStore:
         safety = summary.get("safety")
         safety_options = safety if isinstance(safety, Mapping) else {}
         request = RunRequest(
-            root=str(summary.get("root") or ""),
+            root=summary_evidence_root(summary),
             mode=str(summary.get("mode") or ""),
             output_dir=str(summary.get("output_dir") or summary_path.parent),
             input_kind=str(summary["input_kind"]) if summary.get("input_kind") else None,
@@ -2259,6 +2263,18 @@ def resolve_run_summary_path(output_dir_or_summary: Path) -> Path:
     if not candidate.is_file():
         raise FileNotFoundError(str(candidate))
     return candidate
+
+
+def summary_evidence_root(summary: Mapping[str, object]) -> str:
+    """Evidence a run summary describes: the image for an image run, else the scanned folder.
+
+    An image run analyses its extraction (``root`` is ``<output>/_e01/fs``) and records the
+    image as ``source.source_path`` next to the ``source.stage_dir`` it was extracted into.
+    """
+    source = summary.get("source")
+    if isinstance(source, Mapping) and source.get("stage_dir") and source.get("source_path"):
+        return str(source["source_path"])
+    return str(summary.get("root") or "")
 
 
 def run_output_dir(summary: Mapping[str, object]) -> Path:

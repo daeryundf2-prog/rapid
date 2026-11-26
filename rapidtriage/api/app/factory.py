@@ -47,6 +47,22 @@ from .search_index_service import (
     auto_incremental_after_analysis,
 )
 
+# Console pages are revalidated on every load: index.html names the hashed bundle, and a page
+# kept by heuristic caching (ETag/Last-Modified only) kept loading the previous build after an
+# update. The hashed assets themselves stay cacheable.
+HTML_CACHE_CONTROL = "no-cache"
+
+
+class ConsoleStaticFiles(StaticFiles):
+    """StaticFiles that marks HTML responses ``Cache-Control: no-cache``."""
+
+    async def get_response(self, path: str, scope):  # type: ignore[no-untyped-def]
+        response = await super().get_response(path, scope)
+        if response.headers.get("content-type", "").startswith("text/html"):
+            response.headers["Cache-Control"] = HTML_CACHE_CONTROL
+        return response
+
+
 ANALYSIS_POST_PATH = re.compile(r"/api/runs/[^/]+/analyses")
 # Review-tool bodies (AXIOM E3) also get Korean 422 messages, the tag batch included.
 REVIEW_TOOL_BODY_PATH = re.compile(r"/api/cases/[^/]+/(tags(/[^/]+)?|histogram-baselines)|/api/case-db/review-batch")
@@ -220,11 +236,11 @@ def create_app(
     )
 
     if static_dir.is_dir():
-        api.mount("/assets", StaticFiles(directory=static_dir), name="rapidtriage-assets")
+        api.mount("/assets", ConsoleStaticFiles(directory=static_dir), name="rapidtriage-assets")
 
         v2_dir = static_dir / "v2"
         if v2_dir.is_dir():
-            api.mount("/v2", StaticFiles(directory=v2_dir, html=True), name="rapidtriage-v2")
+            api.mount("/v2", ConsoleStaticFiles(directory=v2_dir, html=True), name="rapidtriage-v2")
 
         # RAPIDTRIAGE_CONSOLE=v2 (default): v2 bundle at "/", v1 console kept at "/legacy" for one release.
         # RAPIDTRIAGE_CONSOLE=v1: legacy v1 console at "/", v2 bundle at "/v2".
@@ -232,14 +248,14 @@ def create_app(
         if console_mode not in {"v1", "v2"}:
             raise RuntimeError(f"RAPIDTRIAGE_CONSOLE must be 'v1' or 'v2', got {console_mode!r}")
         if console_mode == "v2" and v2_dir.is_dir():
-            api.mount("/legacy", StaticFiles(directory=static_dir, html=True), name="rapidtriage-legacy")
+            api.mount("/legacy", ConsoleStaticFiles(directory=static_dir, html=True), name="rapidtriage-legacy")
             root_index = v2_dir / "index.html"
         else:
             root_index = static_dir / "index.html"
 
         @api.get("/", include_in_schema=False)
         def index() -> FileResponse:
-            return FileResponse(root_index)
+            return FileResponse(root_index, headers={"Cache-Control": HTML_CACHE_CONTROL})
 
         @api.get("/favicon.ico", include_in_schema=False)
         def favicon() -> FileResponse:

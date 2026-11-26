@@ -14,7 +14,7 @@
 //
 // scripts/families-mock.mjs stays the vitest / Playwright fixture (stable ids for tests).
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,8 +22,17 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
 const out = join(here, "..", "src", "features", "flags", "families.fallback.json");
-const python = process.env.RAPIDTRIAGE_PYTHON || "python";
+// The checkout's own virtualenv first: on Windows the only `python` on PATH is often the
+// Microsoft Store alias (WindowsApps\python.exe), which exits 9009 instead of running.
+const venvPython = join(
+  repoRoot,
+  ".venv",
+  ...(process.platform === "win32" ? ["Scripts", "python.exe"] : ["bin", "python"]),
+);
+const python = process.env.RAPIDTRIAGE_PYTHON || (existsSync(venvPython) ? venvPython : "python");
 const UNAVAILABLE_EXIT = 3;
+// cmd.exe / the Store alias: "command not found" (`Python was not found; run without arguments...`).
+const WINDOWS_NOT_FOUND_EXIT = 9009;
 const PY = [
   "import json, sys",
   "try:",
@@ -56,7 +65,8 @@ try {
   });
   payload = JSON.parse(readFileSync(tmp, "utf8"));
 } catch (error) {
-  const missingPython = error?.code === "ENOENT";
+  const missingPython =
+    error?.code === "ENOENT" || (process.platform === "win32" && error?.status === WINDOWS_NOT_FOUND_EXIT);
   const missingModule = error?.status === UNAVAILABLE_EXIT;
   const lines = String(error?.stderr ?? error?.message ?? error)
     .trim()

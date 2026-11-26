@@ -672,6 +672,56 @@ button.chip:hover {
   }
 }
 
+/* --- wait panel (components/WaitPanel): spinner · what is loading · elapsed seconds --- */
+
+.wait-panel {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.wait-panel-spin {
+  flex: none;
+  animation: rt-spin 1s linear infinite;
+}
+
+.wait-panel-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wait-panel-elapsed {
+  flex: none;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Over a pane (tree, grid, 접수): it floats, so nothing in the pane moves when it comes and
+   goes; the pane's own CSS gives the position. */
+.wait-panel.floating {
+  position: absolute;
+  z-index: 3;
+  max-width: calc(100% - 2 * var(--space-2));
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-pop);
+  pointer-events: none;
+}
+
+@keyframes rt-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* --- path (review #9): parent folder, middle ellipsis, mono --------------------- */
 
 .mid-path {

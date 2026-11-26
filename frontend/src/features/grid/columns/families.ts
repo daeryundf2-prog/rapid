@@ -620,12 +620,16 @@ function summaryColumn(
   };
 }
 
-/** 주요 · 지원 · 추가 세부 정보 · 날짜 및 시각 (rows of several families in one grid). */
+/**
+ * 날짜 및 시각 · 주요 · 지원 · 추가 세부 정보 (rows of several families in one grid). The time comes
+ * first: the mixed layout leads with it like the generic 시각 · 유형 · 항목 one, so a narrow grid
+ * never pushes the examiner's most-used column behind the horizontal scroll.
+ */
 export function mixedSummaryColumns(): ColumnSpec[] {
   return [
+    summaryColumn("sum:time", "날짜 및 시각", (row) => factsOf(row).time, 170),
     summaryColumn("sum:main", "주요 세부 정보", (row) => factsOf(row).facts[0], 220),
     summaryColumn("sum:support", "지원 세부 정보", (row) => factsOf(row).facts[1], 180),
     summaryColumn("sum:extra", "추가 세부 정보", (row) => factsOf(row).facts[2], 180),
-    summaryColumn("sum:time", "날짜 및 시각", (row) => factsOf(row).time, 170),
   ];
 }

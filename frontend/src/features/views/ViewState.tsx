@@ -1,21 +1,21 @@
 /**
  * Loading / empty / error cards shared by the explorer views (plan X18):
- * a loading card with an optional 취소 action and descriptive empty states.
+ * a loading card (the wait panel: label + elapsed seconds) with an optional 취소 action and
+ * descriptive empty states.
  */
 
 import type { ReactNode } from "react";
+import { WaitPanel } from "../../components/WaitPanel";
 
 export function LoadingCard({ label, onCancel }: { label: string; onCancel?: () => void }) {
   return (
-    <div className="view-state" role="status" aria-live="polite" aria-busy="true">
-      <span className="view-spinner" aria-hidden="true" />
-      <p className="view-state-title">{label}</p>
+    <WaitPanel className="view-state" label={label}>
       {onCancel ? (
         <button type="button" className="view-link" onClick={onCancel}>
           취소
         </button>
       ) : null}
-    </div>
+    </WaitPanel>
   );
 }
 
