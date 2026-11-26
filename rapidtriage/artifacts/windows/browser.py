@@ -8,7 +8,6 @@ import sqlite3
 import zipfile
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from functools import lru_cache
-from itertools import islice
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote_plus, urlparse
@@ -6424,7 +6423,7 @@ def build_unified_browser_timeline(
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     resolve_path = lru_cache(maxsize=16)(_resolved_browser_path)
-    resolved_history_path = resolve_path(str(source_path)) if history_rows else ""
+    history_path = str(source_path)
     ai_urls = {str(row.get("url") or ""): row for row in ai_rows}
     for index, row in enumerate(history_rows):
         url = str(row.get("url") or "")
@@ -6446,7 +6445,7 @@ def build_unified_browser_timeline(
                 "visit_duration_micros": int(row.get("visit_duration_micros") or 0),
                 "ai_service": ai_row.get("ai_service") or detect_ai_service(url, str(row.get("title") or "")),
                 "query_hint": row.get("query_hint") or extract_query_hint(url),
-                "source_path": resolved_history_path,
+                "source_path": resolve_path(history_path),
                 "source_sha256": str(source_hashes.get("sha256") or ""),
                 "source_table": str(row.get("source_table") or "history"),
                 "source_index": index,
@@ -7570,17 +7569,6 @@ def select_columns(connection: sqlite3.Connection, table: str, wanted: Sequence[
     return ", ".join(name if name in present else f"NULL AS {name}" for name in wanted)
 
 
-def _link_visit_referrers(
-    records: list[ArtifactRecord], first_visit: int, visit_urls: dict[int, str], missing_url: str
-) -> None:
-    # The referring visit can sort before or after its target. Keep the URL
-    # index, then fill the output rows without retaining a second list of SQLite rows.
-    for record in islice(records, first_visit, None):
-        from_visit = record.details["from_visit"]
-        if from_visit:
-            record.details["from_url"] = visit_urls.get(from_visit, missing_url)
-
-
 def chromium_history_row_reader(context: BrowserRowContext):
     def reader(connection: sqlite3.Connection, source: Path) -> list[ArtifactRecord]:
         records: list[ArtifactRecord] = []
@@ -7621,14 +7609,13 @@ def chromium_history_row_reader(context: BrowserRowContext):
                 "visits",
                 ("id", "url", "visit_time", "from_visit", "transition", "segment_id", "visit_duration", "opener_visit", "external_referrer_url", "app_id"),
             )
-            first_visit = len(records)
-            visit_urls: dict[int, str] = {}
-            for row in connection.execute(f"SELECT {visit_select} FROM visits ORDER BY visit_time, id"):
+            visit_rows = list(connection.execute(f"SELECT {visit_select} FROM visits ORDER BY visit_time, id"))
+            visit_url = {int(row["id"]): browser_int(row["url"]) for row in visit_rows}
+            for row in visit_rows:
                 url_id = browser_int(row["url"])
                 url, title, domain = urls.get(url_id or -1, ("", "", ""))
-                visit_id = int(row["id"])
-                visit_urls[visit_id] = url
                 from_visit = browser_int(row["from_visit"]) or 0
+                from_url_id = visit_url.get(from_visit)
                 duration = browser_int(row["visit_duration"]) or 0
                 records.append(
                     browser_row_record(
@@ -7638,7 +7625,7 @@ def chromium_history_row_reader(context: BrowserRowContext):
                         timestamp=webkit_micros_to_iso(row["visit_time"]),
                         timestamp_kind="visited",
                         source_table="visits",
-                        source_row_id=visit_id,
+                        source_row_id=int(row["id"]),
                         fields={
                             "url": url,
                             "title": title,
@@ -7646,7 +7633,7 @@ def chromium_history_row_reader(context: BrowserRowContext):
                             "domain": domain,
                             "visit_time_raw": browser_int(row["visit_time"]),
                             "from_visit": from_visit,
-                            "from_url": "",
+                            "from_url": urls.get(from_url_id or -1, ("", "", ""))[0] if from_visit else "",
                             "opener_visit": browser_int(row["opener_visit"]) or 0,
                             **chromium_transition_profile(row["transition"]),
                             "visit_duration_micros": duration,
@@ -7658,7 +7645,6 @@ def chromium_history_row_reader(context: BrowserRowContext):
                         },
                     )
                 )
-            _link_visit_referrers(records, first_visit, visit_urls, urls.get(-1, ("", "", ""))[0])
         if sqlite_table_exists(connection, "keyword_search_terms"):
             term_select = select_columns(connection, "keyword_search_terms", ("keyword_id", "url_id", "term", "normalized_term"))
             last_visit = {
@@ -8662,13 +8648,11 @@ def firefox_places_reader(context: BrowserRowContext):
             )
         if sqlite_table_exists(connection, "moz_historyvisits"):
             select = select_columns(connection, "moz_historyvisits", ("id", "place_id", "visit_date", "visit_type", "from_visit"))
-            first_visit = len(records)
-            visit_urls: dict[int, str] = {}
-            for row in connection.execute(f"SELECT {select} FROM moz_historyvisits ORDER BY visit_date, id"):
+            visits = list(connection.execute(f"SELECT {select} FROM moz_historyvisits ORDER BY visit_date, id"))
+            visit_place = {int(row["id"]): browser_int(row["place_id"]) for row in visits}
+            for row in visits:
                 place_id = browser_int(row["place_id"])
                 url, title, domain = places.get(place_id or -1, ("", "", ""))
-                visit_id = int(row["id"])
-                visit_urls[visit_id] = url
                 from_visit = browser_int(row["from_visit"]) or 0
                 visit_type = browser_int(row["visit_type"])
                 records.append(
@@ -8679,14 +8663,14 @@ def firefox_places_reader(context: BrowserRowContext):
                         timestamp=unix_micros_to_iso(row["visit_date"]),
                         timestamp_kind="visited",
                         source_table="moz_historyvisits",
-                        source_row_id=visit_id,
+                        source_row_id=int(row["id"]),
                         fields={
                             "url": url,
                             "title": title,
                             "url_id": place_id,
                             "domain": domain,
                             "from_visit": from_visit,
-                            "from_url": "",
+                            "from_url": places.get(visit_place.get(from_visit) or -1, ("", "", ""))[0] if from_visit else "",
                             "transition": visit_type,
                             "transition_core": FIREFOX_VISIT_TYPES.get(visit_type or -1, ""),
                             "transition_qualifiers": [],
@@ -8695,7 +8679,6 @@ def firefox_places_reader(context: BrowserRowContext):
                         },
                     )
                 )
-            _link_visit_referrers(records, first_visit, visit_urls, places.get(-1, ("", "", ""))[0])
         return records
 
     return reader
