@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..ai_agent_kinds import AI_AGENT_LABELS
 from ..extract import SUPPORTED_DOC_KINDS
 
 __all__ = [
@@ -56,6 +57,7 @@ GENERAL_FORENSIC_ARTIFACT_KINDS = (
     "browser",
     # R5 L3: BitTorrent clients / .torrent / eMule (artifacts/p2p.py).
     "p2p",
+    *AI_AGENT_LABELS,
     "recent-files",
     "email",
     "cloud-export",

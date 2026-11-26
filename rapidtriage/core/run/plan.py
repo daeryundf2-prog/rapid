@@ -50,6 +50,7 @@ import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 
+from ..ai_agent_kinds import AI_AGENT_LABELS
 from ..json_safe import json_default
 
 __all__ = [
@@ -122,7 +123,7 @@ GROUP_CATALOG: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("prepare", "증거 준비", ("image-extract",)),
     ("fingerprint", "입력 지문", ("fingerprint",)),
     ("os-account", "운영체제·계정·레지스트리", ("windows-os-account", "windows-registry", "windows-shellbags")),
-    ("execution", "실행 흔적", ("windows-execution", "windows-prefetch", "recent-files")),
+    ("execution", "실행 흔적", ("windows-execution", "windows-prefetch", "recent-files", *AI_AGENT_LABELS)),
     ("eventlog", "이벤트 로그", ("eventlog",)),
     ("filesystem", "파일시스템·검색 색인", ("windows-filesystem", "windows-search-index")),
     ("web", "웹·브라우저", ("browser", "p2p")),
@@ -217,6 +218,7 @@ TASK_LABELS: dict[str, str] = {
     "windows-filesystem": "파일시스템 기록",
     "windows-search-index": "Windows 검색 색인",
     "browser": "브라우저(캐시·WebCache 포함)",
+    **AI_AGENT_LABELS,
     "p2p": "P2P·토렌트(eMule 포함)",
     "email": "이메일(PST·ICS 포함)",
     "kakaotalk-windows": "카카오톡 (Windows)",

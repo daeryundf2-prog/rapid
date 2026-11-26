@@ -34,6 +34,12 @@ export const ANALYSIS_TYPE_LABELS: Readonly<Record<string, string>> = {
  * out of their tree group in the 유형 list.
  */
 export const TYPE_LABEL_OVERRIDES: Readonly<Record<string, string>> = {
+  "agent-message": "코딩 에이전트 메시지",
+  "agent-tool-call": "코딩 에이전트 도구 호출",
+  "agent-tool-result": "코딩 에이전트 도구 결과",
+  "agent-settings": "코딩 에이전트 설정",
+  "agent-mcp-server": "MCP 서버 설정",
+  "agent-parse-note": "코딩 에이전트 읽기 제한·오류",
   "startup-item": "시작 프로그램 항목",
   "desktop-wallpaper": "바탕 화면 배경",
   "p2p-transfer": "P2P 전송 기록",

@@ -106,6 +106,9 @@ _BROWSER_FIELDS: tuple[TimelineField, ...] = (
 TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     "macos-knowledgec-event": (F("start_at", "started"), F("end_at", "ended")),
     "linux-journald-entry": (F("timestamp", "logged"),),
+    "agent-message": (F("timestamp_utc", "message"),),
+    "agent-tool-call": (F("timestamp_utc", "tool-call"),),
+    "agent-tool-result": (F("timestamp_utc", "tool-result"),),
     # --- execution -------------------------------------------------------
     "prefetch-file": (
         F("last_run_times[*]", "run"),

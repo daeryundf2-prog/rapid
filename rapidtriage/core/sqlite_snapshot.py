@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import gc
 import hashlib
 import json
 import shutil
 import sqlite3
 import stat
 import tempfile
+import warnings
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -94,6 +96,25 @@ def _fingerprint(path: Path) -> dict[str, object]:
     }
 
 
+def _remove_working_copy(holder: tempfile.TemporaryDirectory) -> None:
+    """Delete the private copy; a failure is a warning, never an error about the evidence.
+
+    Windows cannot delete a file SQLite still holds open, which happens when a caller's
+    cursor outlives the connection (``close()`` then leaves the handle open until the
+    statement is finalized). One collection pass releases unreachable cursors before the
+    retry; a copy that still cannot be removed is reported by path and left for the OS.
+    """
+    try:
+        holder.cleanup()
+    except OSError:
+        gc.collect()
+        try:
+            holder.cleanup()
+        except OSError as exc:
+            warnings.warn(f"SQLite working copy could not be removed: {holder.name}: {exc}",
+                          RuntimeWarning, stacklevel=3)
+
+
 @contextmanager
 def open_sqlite_snapshot(
     path: Path, *, provenance: dict[str, object] | None = None
@@ -102,7 +123,9 @@ def open_sqlite_snapshot(
         ("database", ""), ("wal", "-wal"), ("shm", "-shm"), ("journal", "-journal")
     )}
     try:
-        with tempfile.TemporaryDirectory(prefix="rapidtriage-sqlite-") as directory:
+        holder = tempfile.TemporaryDirectory(prefix="rapidtriage-sqlite-")
+        try:
+            directory = holder.name
             before = {kind: _fingerprint(source) for kind, source in paths.items()}
             if not before["database"]["exists"]:
                 raise SqliteSnapshotError(f"SQLite source database is missing: {path}")
@@ -144,6 +167,8 @@ def open_sqlite_snapshot(
                 yield connection
             finally:
                 connection.close()
+        finally:
+            _remove_working_copy(holder)
     except OSError as exc:
         raise SqliteSnapshotError(f"SQLite snapshot filesystem failure: {exc}") from exc
 
