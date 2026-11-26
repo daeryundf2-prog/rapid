@@ -394,8 +394,11 @@ class MemoryCapTests(unittest.TestCase):
         original_row = memory_module.memory_cap_stage_check_row
 
         def breach_on_artifacts(stage, memory_cap_bytes, *, sequence=0, current_rss_bytes=None):
-            if str(stage).startswith("artifacts:"):
-                current_rss_bytes = memory_cap_bytes * 4
+            # Every stage gets a fixed RSS. The real reading is ru_maxrss (a high-water mark) on
+            # POSIX; after a long test run it can already pass the 1 GiB cap, and an earlier stage
+            # would then breach first.
+            over = str(stage).startswith("artifacts:")
+            current_rss_bytes = memory_cap_bytes * 4 if over else memory_cap_bytes // 4
             return original_row(stage, memory_cap_bytes, sequence=sequence, current_rss_bytes=current_rss_bytes)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
