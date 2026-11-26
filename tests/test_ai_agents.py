@@ -333,6 +333,24 @@ class AdversarialAgentTests(AgentFixture):
             self.assertIsNone(row.details["timestamp_utc"])
             self.assertIn("timestamp-not-normalized", row.details["flags"])
 
+    def test_out_of_range_offsets_are_not_normalized(self):
+        # RFC 3339 section 5.6: time-numoffset hour 00-23, minute 00-59. Python's parser would
+        # otherwise roll "+01:60" over to "+02:00" and report an exact but unsupported instant.
+        for raw in ("2024-01-01T12:00:00+01:60", "2024-01-01T12:00:00-00:60", "2024-01-01T12:00:00+24:00",
+                    "2024-01-01T12:00:00+99:99"):
+            self.assertIsNone(utc(raw, ""), raw)
+        self.assertEqual(utc("2024-01-01T12:00:00+23:59", ""), "2023-12-31T12:01:00+00:00")
+        times = ["2024-11-03T01:30:00-04:00", "2024-11-03T01:30:00-05:00", "2024-01-01T12:00:00+01:60",
+                 "2024-01-01T12:00:00-00:60", "2016-12-31T23:59:60Z"]
+        self.lines(".codex/sessions/offsets.jsonl", *({"type": "event_msg", "timestamp": raw,
+                                                       "payload": {"type": "user_message", "message": str(i)}}
+                                                      for i, raw in enumerate(times)))
+        rows = [r.details for r in self.rows("codex-cli")]
+        self.assertEqual([r["timestamp_raw"] for r in rows], times)
+        self.assertEqual([r["timestamp_utc"] for r in rows],
+                         ["2024-11-03T05:30:00+00:00", "2024-11-03T06:30:00+00:00", None, None, None])
+        self.assertEqual(["timestamp-not-normalized" in r["flags"] for r in rows], [False, False, True, True, True])
+
     def test_unknown_versions_are_flagged_not_guessed(self):
         self.lines(".codex/sessions/known.jsonl", {"type": "session_meta", "payload": {"id": "k", "cli_version": "9.9.9"}},
                    {"type": "response_item", "payload": {"type": "message", "role": "user", "content": "a"}})

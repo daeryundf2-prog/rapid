@@ -37,6 +37,13 @@
   UTC and adds the wall-clock count when there is one. Rows without an offset
   keep their caveat; one without a local label now gets one too
   (`tests/test_d27_timeline.py::ReportTimeBasisTests`).
+- Coding-agent transcript timestamps with an out-of-range UTC offset minute
+  (`2024-01-01T12:00:00+01:60`, `-00:60`) were rolled over by the
+  date parser into a different, apparently exact UTC instant
+  (`2024-01-01T10:00:00+00:00`). RFC 3339 §5.6 limits the offset to hours
+  00-23 and minutes 00-59. **Output change:** such rows keep `timestamp_raw`,
+  leave `timestamp_utc` empty and carry `timestamp-not-normalized`
+  (`tests/test_ai_agents.py::AdversarialAgentTests::test_out_of_range_offsets_are_not_normalized`).
 - On Windows an analysis could vanish from the analysis list for one read. The
   state reader treated the sharing error raised while another thread
   `os.replace`d `analysis.json` (a heartbeat or progress write) as "no state".
