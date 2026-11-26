@@ -85,6 +85,29 @@
   00-23 and minutes 00-59. **Output change:** such rows keep `timestamp_raw`,
   leave `timestamp_utc` empty and carry `timestamp-not-normalized`
   (`tests/test_ai_agents.py::AdversarialAgentTests::test_out_of_range_offsets_are_not_normalized`).
+- Native E01 extraction (Python and Rust engines) wrote two distinct NTFS
+  records to one output file and counted both: names equal after
+  `_safe_component` cut them at 180 characters (or replaced characters), or
+  names the output drive folds together (`é.txt` composed and decomposed on
+  APFS, case twins on Windows/macOS), left only the later body while
+  `files`/`bytes` counted two. A source entry named `_deleted_mft` also made
+  the deleted-record sweep fail the whole extraction. Each (output folder,
+  MFT record) pair now gets its own name: the first record in walk order
+  keeps it, later ones become `<stem>~mft<record>[-n]<extension>` (the
+  extension kept), checked against the names given in this run and against
+  what the output drive resolves before writing; nothing is overwritten or
+  merged. **Output change:** `extract_e01_native` returns
+  `output_name_collisions` (status, kind, output path, source name and path,
+  MFT segment and sequence; first 1,000), the recovered manifest carries it as
+  `native_output_name_collisions`, stats add `name_collision_renames` and
+  `name_collisions_unresolved`, and the run warns when either is non-zero. The
+  Rust extension ABI is now 4 (older builds are refused). The parallel Rust
+  copy falls back to the sequential walk when two planned names meet on the
+  drive
+  (`tests/test_e01_extract_rust_parity.py::OutputNameCollisionTests`).
+  Not fixed here: POSIX case twins in one NTFS folder are still looked up by
+  name case-insensitively (as dissect does), so only one twin is reached and
+  the other counts as an alias skip.
 - With the Rust EVTX engine, the eventlog-file row counted chunks handed to
   the Python decoder (`native_evtx_engine_python_fallback_chunk_count`) but
   not why or where. One valid non-ASCII ANSI string gave a count of 1 and no

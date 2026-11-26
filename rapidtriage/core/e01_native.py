@@ -627,7 +627,192 @@ def _record_sequence(rec: Any) -> int:
     return int(index or 0)
 
 
-def _dump_ntfs_record(rec: Any, out_path: Path, stats: dict[str, int], guard: ExtractSpaceGuard | None = None) -> None:
+# Output tree names (``_OutputNames``). Each recovered file or directory is one (output directory,
+# MFT record) pair; when its name is taken (two records whose names _safe_component makes equal,
+# or that the output drive folds together: case, Unicode normalization, 8.3 aliases), the later
+# record in walk order gets a tagged name instead of overwriting or merging into the first.
+DELETED_SWEEP_DIR = "_deleted_mft"
+# Names one record tries (the plain name, then tagged ones) before it is reported unresolved.
+_OUTPUT_NAME_ATTEMPTS = 32
+# Entries kept in ``output_name_collisions``; the stats count every collision.
+OUTPUT_NAME_COLLISION_REPORT_LIMIT = 1000
+_O_BINARY = getattr(os, "O_BINARY", 0)
+
+
+def _tagged_name(base: str, segment: int | None, attempt: int) -> str:
+    """``base``, then ``<stem>~mft<segment>[-<attempt>]<extension>`` within 180 characters; the
+    extension (up to 16 characters) is kept so parsers that select files by suffix still see it."""
+    if attempt == 0:
+        return base
+    tag = f"~mft{'' if segment is None else segment}" + (f"-{attempt}" if attempt > 1 else "")
+    dot = base.rfind(".")
+    extension = base[dot:] if 0 < dot and len(base) - dot <= 16 else ""
+    stem = base[: len(base) - len(extension)]
+    return stem[: max(1, 180 - len(tag) - len(extension))] + tag + extension
+
+
+def _file_identity(status: os.stat_result) -> tuple[int, int] | None:
+    """The output drive's identity of a file or directory; None where the drive reports none."""
+    return (status.st_dev, status.st_ino) if status.st_ino else None
+
+
+class _OutputEntry:
+    """One recovered file or directory: the source record it stands for and, once written, its path."""
+
+    __slots__ = ("base", "children", "identity", "names", "parent", "path", "segment", "sequence", "source_name", "source_path")
+
+    def __init__(
+        self,
+        names: _OutputNames,
+        parent: _OutputEntry | None,
+        base: str,
+        rec: Any,
+        source_name: str,
+        source_path: str | None,
+    ) -> None:
+        self.names = names
+        self.parent = parent
+        self.base = base
+        self.segment: int | None = getattr(rec, "segment", None)
+        try:
+            self.sequence: int | None = int(rec.header.SequenceNumber)
+        except (AttributeError, TypeError, ValueError):
+            self.sequence = None
+        self.source_name = source_name
+        self.source_path = source_path
+        self.path: Path | None = None
+        self.identity: tuple[int, int] | None = None
+        self.children: dict[object, _OutputEntry] = {}
+
+    def child(self, base: str, rec: Any, source_name: str) -> _OutputEntry:
+        """The entry of ``rec`` below this directory: one per MFT record, whatever name reached it
+        (a record without a segment number, which dissect always sets, by its output name)."""
+        segment = getattr(rec, "segment", None)
+        key: object = segment if segment is not None else ("name", base)
+        found = self.children.get(key)
+        if found is None:
+            source_path = None if self.source_path is None else "/".join(filter(None, (self.source_path, source_name)))
+            found = self.children[key] = _OutputEntry(self.names, self, base, rec, source_name, source_path)
+        return found
+
+
+class _OutputNames:
+    """Gives every recovered record its own output file or directory (see ``_tagged_name``).
+
+    A name is taken when another record was given the same path in this run, or when the drive
+    resolves the path to a file or directory written for another record (checked before writing;
+    the drive decides what it folds). Renamed records are listed in ``report`` with their source
+    path and MFT identity; one that runs out of names is reported ``unresolved`` and not written.
+    """
+
+    def __init__(self, root: Path, stats: dict[str, int], *, reserve_deleted_dir: bool = False) -> None:
+        self.stats = stats
+        self.root = _OutputEntry(self, None, "", None, "", "")
+        self.root.path = root
+        self._root_made = False
+        self._paths: dict[str, _OutputEntry] = {}
+        self._live: dict[tuple[int, int], _OutputEntry] = {}
+        self.report: list[dict[str, object]] = []
+        # The deleted-record sweep folder; its records have no source directory.
+        self.deleted_dir = _OutputEntry(self, self.root, DELETED_SWEEP_DIR, None, DELETED_SWEEP_DIR, None)
+        if reserve_deleted_dir:
+            self._paths[os.fspath(root / DELETED_SWEEP_DIR)] = self.deleted_dir
+
+    def _taken(self, path: Path, entry: _OutputEntry) -> bool:
+        if self._paths.setdefault(os.fspath(path), entry) is not entry:
+            return True
+        try:
+            identity = _file_identity(os.lstat(path))
+        except OSError:
+            return False
+        return identity is not None and self._live.get(identity, entry) is not entry
+
+    def _claim(self, entry: _OutputEntry, path: Path, identity: tuple[int, int] | None, kind: str, attempt: int) -> bool:
+        if identity is not None and self._live.get(identity, entry) is not entry:
+            return False
+        if identity is not None:
+            self._live[identity] = entry
+        entry.path, entry.identity = path, identity
+        if attempt:
+            self.stats["name_collision_renames"] = self.stats.get("name_collision_renames", 0) + 1
+            self._record(entry, kind, "renamed", path)
+        return True
+
+    def _record(self, entry: _OutputEntry, kind: str, status: str, path: Path | None) -> None:
+        if len(self.report) < OUTPUT_NAME_COLLISION_REPORT_LIMIT:
+            root = self.root.path
+            assert root is not None
+            self.report.append(
+                {
+                    "status": status,
+                    "kind": kind,
+                    "output_path": None if path is None else path.relative_to(root).as_posix(),
+                    "source_name": entry.source_name,
+                    "source_path": entry.source_path,
+                    "mft_segment": entry.segment,
+                    "mft_sequence": entry.sequence,
+                }
+            )
+
+    def unresolved(self, entry: _OutputEntry) -> None:
+        """``entry`` (a file) was not written: no name was left for it or for its directory."""
+        self.stats["name_collisions_unresolved"] = self.stats.get("name_collisions_unresolved", 0) + 1
+        self._record(entry, "file", "unresolved", None)
+
+    def directory(self, entry: _OutputEntry) -> Path | None:
+        """``entry``'s output directory, created with its parents; None when no name is left."""
+        if entry.parent is None:
+            assert entry.path is not None
+            if not self._root_made:
+                entry.path.mkdir(parents=True, exist_ok=True)
+                self._root_made = True
+            return entry.path
+        if entry.path is not None:
+            return entry.path
+        parent = self.directory(entry.parent)
+        if parent is None:
+            return None
+        for attempt in range(_OUTPUT_NAME_ATTEMPTS):
+            path = parent / _tagged_name(entry.base, entry.segment, attempt)
+            if self._taken(path, entry):
+                continue
+            path.mkdir(exist_ok=True)  # a file in the folder before the run raises (counted by the caller)
+            if self._claim(entry, path, _file_identity(os.stat(path)), "directory", attempt):
+                return path
+        return None
+
+    def create_file(self, entry: _OutputEntry, parent: Path) -> int | None:
+        """Open ``entry``'s output file in ``parent`` for writing (``entry.path``); None when no
+        name is left. An ``OSError`` leaves ``entry.path`` at the name that could not be opened."""
+        for attempt in range(_OUTPUT_NAME_ATTEMPTS):
+            path = parent / _tagged_name(entry.base, entry.segment, attempt)
+            if self._taken(path, entry):
+                continue
+            entry.path = path
+            # Not truncated before the check: the path may reach another record's file.
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | _O_BINARY, 0o666)
+            try:
+                claimed = self._claim(entry, path, _file_identity(os.fstat(fd)), "file", attempt)
+                if claimed:
+                    os.ftruncate(fd, 0)
+                    return fd
+            except BaseException:
+                os.close(fd)
+                raise
+            os.close(fd)
+        return None
+
+    def discard(self, entry: _OutputEntry) -> None:
+        """Remove ``entry``'s file after a failed copy; its name stays taken."""
+        if entry.identity is not None:
+            self._live.pop(entry.identity, None)
+            entry.identity = None
+        if entry.path is not None:
+            with contextlib.suppress(OSError):
+                entry.path.unlink(missing_ok=True)
+
+
+def _dump_ntfs_record(rec: Any, entry: _OutputEntry, stats: dict[str, int], guard: ExtractSpaceGuard | None = None) -> None:
     try:
         size = int(rec.size())
     except Exception:
@@ -636,7 +821,13 @@ def _dump_ntfs_record(rec: Any, out_path: Path, stats: dict[str, int], guard: Ex
     if guard is not None and not guard.allows(size):
         stats["disk_space_skips"] += 1
         return
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    assert entry.parent is not None
+    names = entry.names
+    parent = names.directory(entry.parent)
+    if parent is None:
+        names.unresolved(entry)
+        stats["errors"] += 1
+        return
     try:
         src = rec.open()
     except Exception:
@@ -644,7 +835,12 @@ def _dump_ntfs_record(rec: Any, out_path: Path, stats: dict[str, int], guard: Ex
         return
     remaining = size
     try:
-        with out_path.open("wb") as dst:
+        fd = names.create_file(entry, parent)
+        if fd is None:
+            names.unresolved(entry)
+            stats["errors"] += 1
+            return
+        with os.fdopen(fd, "wb") as dst:
             while remaining > 0:
                 chunk = src.read(min(8 << 20, remaining))
                 if not chunk:
@@ -653,10 +849,7 @@ def _dump_ntfs_record(rec: Any, out_path: Path, stats: dict[str, int], guard: Ex
                 remaining -= len(chunk)
     except Exception:
         stats["errors"] += 1
-        try:
-            out_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+        names.discard(entry)
         return
     stats["files"] += 1
     stats["bytes"] += size - max(remaining, 0)
@@ -677,7 +870,7 @@ def _notify_progress(on_progress: ExtractProgress | None, stats: dict[str, int])
 
 def _walk_ntfs_dir(
     node: Any,
-    out_dir: Path,
+    out_dir: _OutputEntry,
     stats: dict[str, int],
     depth: int = 0,
     limit: int | None = None,
@@ -722,7 +915,7 @@ def _walk_ntfs_dir(
                 stats["alias_skips"] += 1
                 continue
             seen_segments.add(segment)
-        target = out_dir / _safe_component(name)
+        target = out_dir.child(_safe_component(name), rec, name)
         try:
             if rec.is_dir():
                 _walk_ntfs_dir(rec, target, stats, depth + 1, limit, on_progress, done, guard, record_done)
@@ -764,12 +957,13 @@ PRIORITY_RECOVERY_PATHS: tuple[str, ...] = (
 )
 
 
-def _priority_targets(root: Any, pattern: str) -> list[tuple[str, Any]]:
-    """(relative path, record) pairs for one PRIORITY_RECOVERY_PATHS entry; missing parts yield none."""
-    found: list[tuple[str, Any]] = [("", root)]
+def _priority_targets(root: Any, pattern: str) -> list[tuple[tuple[str, Any], ...]]:
+    """The (name, record) chains below ``root`` for one PRIORITY_RECOVERY_PATHS entry; missing parts yield none."""
+    found: list[tuple[tuple[str, Any], ...]] = [()]
     for part in pattern.split("/"):
-        nxt: list[tuple[str, Any]] = []
-        for rel, node in found:
+        nxt: list[tuple[tuple[str, Any], ...]] = []
+        for chain in found:
+            node = chain[-1][1] if chain else root
             try:
                 names = [n for n in node.listdir(ignore_dos=True) if n not in (".", "..")] if part == "*" else [part]
             except Exception:
@@ -781,14 +975,14 @@ def _priority_targets(root: Any, pattern: str) -> list[tuple[str, Any]]:
                     continue
                 if child is None or (part == "*" and not child.is_dir()):
                     continue
-                nxt.append((f"{rel}/{name}" if rel else name, child))
+                nxt.append((*chain, (name, child)))
         found = nxt
     return found
 
 
 def _recover_priority_paths(
     root: Any,
-    extract_dir: Path,
+    extract_dir: _OutputEntry,
     stats: dict[str, int],
     *,
     done: set[int],
@@ -801,8 +995,11 @@ def _recover_priority_paths(
     tree walk that follows gets what is left); only the disk-space guard stops them.
     """
     for pattern in PRIORITY_RECOVERY_PATHS:
-        for rel, rec in _priority_targets(root, pattern):
-            target = extract_dir.joinpath(*(_safe_component(part) for part in rel.split("/")))
+        for chain in _priority_targets(root, pattern):
+            target = extract_dir
+            for name, node in chain:
+                target = target.child(_safe_component(name), node, name)
+            rec = chain[-1][1]
             try:
                 if rec.is_dir():
                     _walk_ntfs_dir(
@@ -839,17 +1036,17 @@ def _mft_record_count(fs: Any) -> int:
 
 def _sweep_deleted_mft_records(
     fs: Any,
-    extract_dir: Path,
+    deleted_dir: _OutputEntry,
     stats: dict[str, int],
     limit: int | None = None,
     on_progress: ExtractProgress | None = None,
     guard: ExtractSpaceGuard | None = None,
 ) -> None:
-    """Best-effort recovery of MFT records whose in-use flag is cleared."""
+    """Best-effort recovery of MFT records whose in-use flag is cleared, into ``deleted_dir``
+    (``_OutputNames.deleted_dir``) as ``<record>-<name>``."""
     if limit is None:
         limit = native_extract_file_limit()
     total = _mft_record_count(fs)
-    deleted_dir = extract_dir / "_deleted_mft"
     consecutive_missing = 0
     for index in range(total):
         try:
@@ -872,7 +1069,7 @@ def _sweep_deleted_mft_records(
             stats["truncated"] += 1
             _notify_progress(on_progress, stats)
             continue
-        target = deleted_dir / f"{index}-{_safe_component(filename)}"
+        target = deleted_dir.child(f"{index}-{_safe_component(filename)}", rec, filename)
         before_files, before_errors = stats["files"], stats["errors"]
         _dump_ntfs_record(rec, target, stats, guard)
         if stats["files"] != before_files:
@@ -945,6 +1142,8 @@ def extract_e01_native(
             "deleted_files": 0,
             "deleted_read_errors": 0,
             "alias_skips": 0,
+            "name_collision_renames": 0,
+            "name_collisions_unresolved": 0,
             "disk_space_skips": 0,
             "file_limit": native_extract_file_limit(mft_records),
             "file_limit_from_env": int(native_extract_file_limit_override() is not None),
@@ -953,6 +1152,7 @@ def extract_e01_native(
             "free_bytes_at_start": guard.free_at_start,
         }
         extract_engine = e01_extract_engine_status()
+        collisions: list[dict[str, object]] = []
         if not (
             extract_engine["active"] == "rust"
             and run_rust_extraction(
@@ -963,6 +1163,7 @@ def extract_e01_native(
                 size=partition_size,
                 extract_dir=extract_dir,
                 stats=stats,
+                collisions=collisions,
                 include_deleted=include_deleted,
                 priority_paths=PRIORITY_RECOVERY_PATHS,
                 on_progress=on_progress,
@@ -973,14 +1174,16 @@ def extract_e01_native(
         ):
             root = fs.mft.get(5)
             done: set[int] = set()
-            _recover_priority_paths(root, extract_dir, stats, done=done, on_progress=on_progress, guard=guard)
+            names = _OutputNames(extract_dir, stats, reserve_deleted_dir=include_deleted)
+            _recover_priority_paths(root, names.root, stats, done=done, on_progress=on_progress, guard=guard)
             _walk_ntfs_dir(
-                root, extract_dir, stats, limit=stats["file_limit"], on_progress=on_progress, done=done, guard=guard
+                root, names.root, stats, limit=stats["file_limit"], on_progress=on_progress, done=done, guard=guard
             )
             if include_deleted:
                 _sweep_deleted_mft_records(
-                    fs, extract_dir, stats, limit=stats["file_limit"], on_progress=on_progress, guard=guard
+                    fs, names.deleted_dir, stats, limit=stats["file_limit"], on_progress=on_progress, guard=guard
                 )
+            collisions = names.report
         system_artifacts: dict[str, str] = {}
         if system_dir is not None:
             # Dump $MFT (record 0) outside the recovered tree so reference-diff
@@ -1001,6 +1204,9 @@ def extract_e01_native(
             "selected_partition": selected,
             "selected_start_sector": start_sector,
             "stats": stats,
+            # Records written under another name than their own (or not at all) because the name
+            # was taken: source path and MFT identity per entry (first 1,000; stats count all).
+            "output_name_collisions": collisions,
             "system_artifacts": system_artifacts,
             "volume_name": getattr(fs, "volume_name", "") or "",
             "serial": getattr(fs, "serial", None),

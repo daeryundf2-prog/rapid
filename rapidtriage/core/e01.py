@@ -2235,6 +2235,9 @@ def _extract_e01_native_fallback(
         # native_e01_extract_engine* (engine used, requested, version, fallback reason, notice).
         **extract_engine_metadata(extract_engine),
         "system_artifacts": dict(result.get("system_artifacts") or {}),
+        # Records whose output name another record already took: tagged name (or none), source
+        # path and MFT segment/sequence of each (first 1,000; stats count all).
+        "native_output_name_collisions": list(result.get("output_name_collisions") or []),
     }
     command_history.append(
         {
@@ -2244,6 +2247,8 @@ def _extract_e01_native_fallback(
             "deleted_files": stats.get("deleted_files"),
             "errors": stats.get("errors"),
             "truncated": stats.get("truncated"),
+            "name_collision_renames": stats.get("name_collision_renames"),
+            "name_collisions_unresolved": stats.get("name_collisions_unresolved"),
         }
     )
     checkpoint_payload.update(
@@ -2320,6 +2325,20 @@ def _extract_e01_native_fallback(
             f"Native extraction stopped writing when the output drive reached its {min_free_gib:.0f} GB "
             f"free-space reserve ({stats.get('disk_space_skips'):,} entries not recovered). Free space "
             f"or choose another output drive, or lower {NATIVE_MIN_FREE_GB_ENV}, and re-run."
+        )
+    if stats.get("name_collision_renames"):
+        warnings.append(
+            f"{stats.get('name_collision_renames'):,} recovered files or folders would have reached a "
+            "file or folder another record of the image was written to (names equal after the "
+            "180-character cut or character replacement, or folded together by the output drive). "
+            "Each was written as <name>~mft<record> instead; native_output_name_collisions lists the "
+            "source path and MFT record of each renamed entry (the first 1,000)."
+        )
+    if stats.get("name_collisions_unresolved"):
+        warnings.append(
+            f"{stats.get('name_collisions_unresolved'):,} recovered files were not written because no "
+            "free output name was left for them or their folder; they are listed as unresolved in "
+            "native_output_name_collisions and counted as errors."
         )
     return E01ExtractionResult(
         source_path=source_path,

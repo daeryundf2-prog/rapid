@@ -42,7 +42,7 @@ E01_EXTRACT_READER_ENV = "RAPIDTRIAGE_E01_EXTRACT_READER"
 E01_EXTRACT_ENGINES = ("python", "rust")
 E01_EXTRACT_NATIVE_MODULE = "rapid_extract_native"
 # Must equal ABI_VERSION in engines/rust/crates/rapid-extract/src/lib.rs.
-E01_EXTRACT_NATIVE_ABI_VERSION = 3
+E01_EXTRACT_NATIVE_ABI_VERSION = 4
 # engines/rust/crates/rapid-extract version this package was checked against
 # (tests/test_e01_extract_rust_parity.py). A build reporting another version is stale and refused:
 # bump the crate version and this constant together.
@@ -149,6 +149,7 @@ def run_rust_extraction(
     size: int,
     extract_dir: Path,
     stats: dict[str, int],
+    collisions: list[dict[str, object]],
     include_deleted: bool,
     priority_paths: tuple[str, ...],
     on_progress: Callable[[Mapping[str, int]], None] | None,
@@ -156,8 +157,9 @@ def run_rust_extraction(
     min_free_bytes: int = 0,
     free_space_probe: Callable[[], int] | None = None,
 ) -> bool:
-    """Run the Rust walk into ``stats``; False (``status`` switched to the Python fallback, any
-    files it wrote removed, ``stats`` untouched) when the extension fails on this image."""
+    """Run the Rust walk into ``stats`` and ``collisions`` (``output_name_collisions``); False
+    (``status`` switched to the Python fallback, any files it wrote removed, ``stats`` and
+    ``collisions`` untouched) when the extension fails on this image."""
     module, _problem = load_extract_extension()
     if module is None:
         return False
@@ -208,6 +210,7 @@ def run_rust_extraction(
         status.update(_fallback("rust", notice, reason))
         return False
     stats.update({key: int(value) for key, value in dict(result["stats"]).items()})
+    collisions.extend(dict(entry) for entry in result["output_name_collisions"])
     status["media_reader"] = str(result["media_reader"])
     status["python_reads"] = int(result["python_reads"])
     status["rerun_reason"] = result["rerun_reason"]

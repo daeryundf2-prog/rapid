@@ -10,6 +10,9 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::names::{
+    opened_id, path_id, target_id, Collision, FileId, OutputNames, DELETED_DIR, ROOT,
+};
 use crate::ntfs::{DirectReader, Media, Ntfs, Record, Stream, VolRead};
 
 const CHUNK: i128 = 8 << 20;
@@ -38,11 +41,13 @@ pub struct Stats {
     pub deleted_files: i128,
     pub deleted_read_errors: i128,
     pub alias_skips: i128,
+    pub name_collision_renames: i128,
+    pub name_collisions_unresolved: i128,
     pub file_limit: i128,
 }
 
 impl Stats {
-    pub fn pairs(&self) -> [(&'static str, i128); 9] {
+    pub fn pairs(&self) -> [(&'static str, i128); 11] {
         [
             ("files", self.files),
             ("bytes", self.bytes),
@@ -52,6 +57,11 @@ impl Stats {
             ("deleted_files", self.deleted_files),
             ("deleted_read_errors", self.deleted_read_errors),
             ("alias_skips", self.alias_skips),
+            ("name_collision_renames", self.name_collision_renames),
+            (
+                "name_collisions_unresolved",
+                self.name_collisions_unresolved,
+            ),
             ("file_limit", self.file_limit),
         ]
     }
@@ -95,32 +105,24 @@ pub struct Options<'a> {
     pub space: Option<SpaceReserve>,
 }
 
-/// A deferred `_dump_ntfs_record` side effect of the planning walk, keyed by (target, record).
-enum Job {
-    /// `out_path.parent.mkdir(...)` for a record whose stream then failed to open.
-    Mkdir { key: JobKey, dir: PathBuf },
-    Copy {
-        key: JobKey,
-        stream: Stream,
-        size: i128,
-    },
+/// A deferred file copy of the planning walk (`_dump_ntfs_record` past its checks), keyed by
+/// (target, record). The directories it needs are [`OutputNames::dirs`].
+struct Job {
+    key: JobKey,
+    stream: Stream,
+    size: i128,
 }
 
 type JobKey = (PathBuf, u64);
+
+/// One step of a priority path: (name, MFT segment, sequence).
+type Link = (String, u64, u16);
 
 /// How a deferred copy went; a second planning walk replays these in walk order.
 #[derive(Clone, Copy)]
 enum JobOutcome {
     Copied(i128),
     ReadFailed,
-}
-
-impl Job {
-    fn key(&self) -> &JobKey {
-        match self {
-            Job::Mkdir { key, .. } | Job::Copy { key, .. } => key,
-        }
-    }
 }
 
 /// What a Python `try` around the call site would see.
@@ -184,6 +186,7 @@ pub struct Walker<'a, M: Media> {
     plan: Option<Vec<Job>>,
     known: HashMap<JobKey, JobOutcome>,
     space: Option<SpaceState>,
+    names: OutputNames,
 }
 
 impl<'a, M: Media> Walker<'a, M> {
@@ -237,7 +240,7 @@ impl<'a, M: Media> Walker<'a, M> {
     }
 
     /// `_dump_ntfs_record`.
-    fn dump(&mut self, record: &Record, out_path: &Path) -> Result<(), Raised> {
+    fn dump(&mut self, record: &Record, entry: usize) -> Result<(), Raised> {
         let size = match self.ntfs.data_size(record) {
             Ok(size) => size,
             Err(_) => {
@@ -246,33 +249,20 @@ impl<'a, M: Media> Walker<'a, M> {
             }
         };
         self.reserve_space(size).map_err(Raised::Fatal)?;
-        if let Some(plan) = self.plan.as_mut() {
-            check_output_path(out_path).map_err(Raised::Fatal)?;
-            let key: JobKey = (out_path.to_path_buf(), record.segment);
-            match self.ntfs.data_stream(record) {
-                Ok(stream) => {
-                    match self.known.get(&key).copied() {
-                        None => self.stats.files += 1,
-                        Some(JobOutcome::Copied(bytes)) => {
-                            self.stats.files += 1;
-                            self.stats.bytes += bytes;
-                        }
-                        Some(JobOutcome::ReadFailed) => self.stats.errors += 1,
-                    }
-                    plan.push(Job::Copy { key, stream, size });
-                }
-                Err(_) => {
-                    let dir = out_path.parent().map(Path::to_path_buf).unwrap_or_default();
-                    plan.push(Job::Mkdir { key, dir });
-                    self.stats.errors += 1;
-                }
-            }
+        let parent = self
+            .names
+            .directory(
+                self.names.parent(entry),
+                &mut self.stats.name_collision_renames,
+            )
+            .map_err(|_| Raised::Counted)?;
+        let Some(parent) = parent else {
+            self.names
+                .unresolved(entry, &mut self.stats.name_collisions_unresolved);
+            self.stats.errors += 1;
             return Ok(());
-        }
-        check_output_path(out_path).map_err(Raised::Fatal)?;
-        if let Some(parent) = out_path.parent() {
-            fs::create_dir_all(parent).map_err(|_| Raised::Counted)?;
-        }
+        };
+        check_output_path(&parent.join(self.names.base(entry))).map_err(Raised::Fatal)?;
         let stream = match self.ntfs.data_stream(record) {
             Ok(stream) => stream,
             Err(_) => {
@@ -280,10 +270,45 @@ impl<'a, M: Media> Walker<'a, M> {
                 return Ok(());
             }
         };
-        let created = fs::File::create(out_path).map_err(|e| e.to_string());
-        let copied = created.and_then(|mut file| {
-            copy_into(&stream, size, &mut file, &mut *self.ntfs.vol.borrow_mut())
-        });
+        if self.plan.is_some() {
+            let planned =
+                self.names
+                    .plan_file(entry, &parent, &mut self.stats.name_collision_renames);
+            let Some(path) = planned else {
+                self.names
+                    .unresolved(entry, &mut self.stats.name_collisions_unresolved);
+                self.stats.errors += 1;
+                return Ok(());
+            };
+            let key: JobKey = (path, record.segment);
+            match self.known.get(&key).copied() {
+                None => self.stats.files += 1,
+                Some(JobOutcome::Copied(bytes)) => {
+                    self.stats.files += 1;
+                    self.stats.bytes += bytes;
+                }
+                Some(JobOutcome::ReadFailed) => self.stats.errors += 1,
+            }
+            if let Some(plan) = self.plan.as_mut() {
+                plan.push(Job { key, stream, size });
+            }
+            return Ok(());
+        }
+        let created =
+            self.names
+                .create_file(entry, &parent, &mut self.stats.name_collision_renames);
+        let copied = match created {
+            Ok(Some(mut file)) => {
+                copy_into(&stream, size, &mut file, &mut *self.ntfs.vol.borrow_mut())
+            }
+            Ok(None) => {
+                self.names
+                    .unresolved(entry, &mut self.stats.name_collisions_unresolved);
+                self.stats.errors += 1;
+                return Ok(());
+            }
+            Err(error) => Err(error.to_string()),
+        };
         match copied {
             Ok(copied) => {
                 self.stats.files += 1;
@@ -291,7 +316,7 @@ impl<'a, M: Media> Walker<'a, M> {
             }
             Err(_) => {
                 self.stats.errors += 1;
-                let _ = fs::remove_file(out_path);
+                self.names.discard(entry);
             }
         }
         Ok(())
@@ -302,7 +327,7 @@ impl<'a, M: Media> Walker<'a, M> {
     fn walk_dir(
         &mut self,
         node: &Record,
-        out_dir: &Path,
+        out_dir: usize,
         depth: u32,
         limit: i128,
         record_done: bool,
@@ -346,10 +371,13 @@ impl<'a, M: Media> Walker<'a, M> {
                 self.stats.alias_skips += 1;
                 continue;
             }
-            let target = out_dir.join(safe_component(name));
+            let base = safe_component(name);
+            let target = self
+                .names
+                .child(out_dir, base, record.segment, record.sequence, name);
             let outcome = (|| -> Result<(), Raised> {
                 if record.is_dir() {
-                    self.walk_dir(&record, &target, depth + 1, limit, record_done)
+                    self.walk_dir(&record, target, depth + 1, limit, record_done)
                         .map_err(Raised::Fatal)?;
                 } else {
                     if self.done.contains(&segment) {
@@ -359,7 +387,7 @@ impl<'a, M: Media> Walker<'a, M> {
                         self.stats.truncated += 1;
                         return self.on_progress();
                     }
-                    self.dump(&record, &target)?;
+                    self.dump(&record, target)?;
                     if record_done {
                         self.done.insert(segment);
                     }
@@ -376,12 +404,13 @@ impl<'a, M: Media> Walker<'a, M> {
         Ok(())
     }
 
-    /// `_priority_targets`.
-    fn priority_targets(&self, root: Record, pattern: &str) -> Vec<(String, Record)> {
-        let mut found: Vec<(String, Record)> = vec![(String::new(), root)];
+    /// `_priority_targets`: below `root`, for one pattern, each target record with the chain of
+    /// (name, MFT segment, sequence) that leads to it.
+    fn priority_targets(&self, root: Record, pattern: &str) -> Vec<(Vec<Link>, Record)> {
+        let mut found: Vec<(Vec<Link>, Record)> = vec![(Vec::new(), root)];
         for part in pattern.split('/') {
             let mut next = Vec::new();
-            for (rel, node) in &found {
+            for (chain, node) in &found {
                 let names = if part == "*" {
                     match self.ntfs.listdir(node, true) {
                         Ok(names) => names
@@ -400,12 +429,9 @@ impl<'a, M: Media> Walker<'a, M> {
                     if part == "*" && !child.is_dir() {
                         continue;
                     }
-                    let path = if rel.is_empty() {
-                        name
-                    } else {
-                        format!("{rel}/{name}")
-                    };
-                    next.push((path, child));
+                    let mut longer = chain.clone();
+                    longer.push((name, child.segment, child.sequence));
+                    next.push((longer, child));
                 }
             }
             found = next;
@@ -415,27 +441,31 @@ impl<'a, M: Media> Walker<'a, M> {
 
     /// `_recover_priority_paths`: exempt from the file cap (the files count toward it, so the tree
     /// walk gets what is left); only the free-space reserve stops them.
-    fn recover_priority(&mut self, extract_dir: &Path, patterns: &[String]) -> Result<(), String> {
+    fn recover_priority(&mut self, patterns: &[String]) -> Result<(), String> {
         for pattern in patterns {
             let root = match self.ntfs.mft_record(5) {
                 Ok(root) => root,
                 Err(message) => return Err(format!("root record unreadable: {message}")),
             };
-            for (rel, record) in self.priority_targets(root, pattern) {
+            for (chain, record) in self.priority_targets(root, pattern) {
                 self.ntfs.check_refused()?;
-                let target = rel.split('/').fold(extract_dir.to_path_buf(), |acc, part| {
-                    acc.join(safe_component(part))
-                });
+                let mut target = ROOT;
+                for (name, segment, sequence) in &chain {
+                    target =
+                        self.names
+                            .child(target, safe_component(name), *segment, *sequence, name);
+                }
+                let record = &record;
                 let outcome = (|| -> Result<(), Raised> {
                     if record.is_dir() {
-                        self.walk_dir(&record, &target, 0, i128::MAX, true)
+                        self.walk_dir(record, target, 0, i128::MAX, true)
                             .map_err(Raised::Fatal)?;
                     } else {
                         let segment = record.segment;
                         if self.done.contains(&segment) {
                             return Ok(());
                         }
-                        self.dump(&record, &target)?;
+                        self.dump(record, target)?;
                         self.done.insert(segment);
                         self.on_progress()?;
                     }
@@ -454,7 +484,7 @@ impl<'a, M: Media> Walker<'a, M> {
     /// `_sweep_deleted_mft_records`.
     fn sweep_deleted(&mut self, extract_dir: &Path) -> Result<(), String> {
         let total = self.ntfs.mft_size().div_euclid(RECORD_COUNT_DIVISOR).max(0) as u64;
-        let deleted_dir = extract_dir.join("_deleted_mft");
+        let deleted_dir = extract_dir.join(crate::names::DELETED_SWEEP_DIR);
         let mut consecutive_missing: u64 = 0;
         for index in 0..total {
             self.ntfs.check_refused()?;
@@ -482,9 +512,16 @@ impl<'a, M: Media> Walker<'a, M> {
                 self.on_progress().map_err(fatal_message)?;
                 continue;
             }
-            let target = deleted_dir.join(format!("{index}-{}", safe_component(&filename)));
+            let base = format!("{index}-{}", safe_component(&filename));
+            let target = self.names.child(
+                DELETED_DIR,
+                base,
+                record.segment,
+                record.sequence,
+                &filename,
+            );
             let (before_files, before_errors) = (self.stats.files, self.stats.errors);
-            match self.dump(&record, &target) {
+            match self.dump(&record, target) {
                 Ok(()) => {}
                 Err(Raised::Counted) => {
                     return Err(format!(
@@ -586,37 +623,6 @@ fn fold_key(path: &Path) -> String {
     path.to_string_lossy().to_lowercase()
 }
 
-/// A file on the output drive: (device, inode) on Unix; elsewhere the canonical path, which
-/// Windows resolves from the opened file (the stored spelling of every component).
-#[cfg(unix)]
-type FileId = (u64, u64);
-#[cfg(not(unix))]
-type FileId = PathBuf;
-
-#[cfg(unix)]
-fn path_id(path: &Path) -> std::io::Result<FileId> {
-    use std::os::unix::fs::MetadataExt;
-    let meta = fs::symlink_metadata(path)?;
-    Ok((meta.dev(), meta.ino()))
-}
-
-#[cfg(not(unix))]
-fn path_id(path: &Path) -> std::io::Result<FileId> {
-    fs::canonicalize(path)
-}
-
-#[cfg(unix)]
-fn opened_id(file: &fs::File, _path: &Path) -> std::io::Result<FileId> {
-    use std::os::unix::fs::MetadataExt;
-    let meta = file.metadata()?;
-    Ok((meta.dev(), meta.ino()))
-}
-
-#[cfg(not(unix))]
-fn opened_id(_file: &fs::File, path: &Path) -> std::io::Result<FileId> {
-    fs::canonicalize(path)
-}
-
 /// A file one copy unit wrote; `ok` is the outcome of its last copy.
 struct Owned {
     path: PathBuf,
@@ -624,20 +630,20 @@ struct Owned {
     ok: bool,
 }
 
-/// One planned copy on a worker, with the effects the sequential walk would have: `File::create`
-/// truncates a file an earlier job of the unit wrote (keeping its stored name), and a failed copy
-/// is gone before the next job writes the same file. Failed files stay on disk until every worker
-/// is done, so no other unit can create the same file unnoticed in the meantime. `Err` (the walk
-/// must run sequentially) when the target is a file or directory another unit reached, or
-/// creating it fails other than on what was in the output folder before the run.
+/// One planned copy on a worker, with the effects the sequential walk would have: a failed copy is
+/// gone before the next job of the unit writes the same file (the sequential walk removes it, and
+/// the name is free again). Failed files stay on disk until every worker is done, so no other unit
+/// can create the same file unnoticed in the meantime. `Err` (the walk must run sequentially) when
+/// the target reaches a file or directory another target reached (names the output drive folds
+/// together, which the sequential walk renames), or creating it fails other than on what was in
+/// the output folder before the run.
 #[allow(clippy::too_many_arguments)]
 fn copy_job<V: VolRead>(
     target: &Path,
     stream: &Stream,
     size: i128,
-    unit: usize,
     owned: &mut Vec<Owned>,
-    claims: &Mutex<HashMap<FileId, usize>>,
+    claims: &Mutex<HashMap<FileId, PathBuf>>,
     existing: &HashSet<PathBuf>,
     reader: &mut V,
 ) -> Result<JobOutcome, String> {
@@ -647,6 +653,9 @@ fn copy_job<V: VolRead>(
             if let Some(at) = owned.iter().position(|o| !o.ok && o.id == id) {
                 let failed = owned.remove(at);
                 fs::remove_file(&failed.path).map_err(|e| collision(e.to_string()))?;
+                if let Ok(mut claims) = claims.lock() {
+                    claims.remove(&failed.id);
+                }
             }
         }
     }
@@ -665,14 +674,14 @@ fn copy_job<V: VolRead>(
             .lock()
             .map_err(|_| collision("claims poisoned".into()))?;
         match claims.get(&id) {
-            Some(&other) if other != unit => {
+            Some(other) if other != target => {
                 return Err(collision("another target reached the same file".into()));
             }
             Some(_) => {}
             None => {
                 // `FileId` is `Copy` on Unix only (a `PathBuf` elsewhere).
                 #[allow(clippy::clone_on_copy)]
-                claims.insert(id.clone(), unit);
+                claims.insert(id.clone(), target.to_path_buf());
             }
         }
     }
@@ -695,20 +704,23 @@ fn copy_job<V: VolRead>(
     })
 }
 
-/// What the parallel copies did: each `Job::Copy`'s outcome (`None` for `Job::Mkdir`), or why
-/// they cannot stand in for the sequential walk (an output path collision).
-type Executed = Result<Vec<Option<JobOutcome>>, String>;
+/// What the parallel copies did: each job's outcome, or why they cannot stand in for the
+/// sequential walk (an output path collision).
+type Executed = Result<Vec<JobOutcome>, String>;
 
-/// Run the planned side effects on `threads` workers. Directories are created first, in walk
-/// order, so each keeps the spelling the sequential walk gives it on a case- or
-/// normalization-insensitive drive. Jobs whose targets fold to the same path stay in walk order on
-/// one worker; units start in image order. Two units reaching the same file (names the output
-/// file system folds together beyond `fold_key`, a file where another target needs a directory)
-/// is detected, and the walk then runs sequentially. With a `space` reserve the drive is re-read
-/// while copying, and the copies stop with an error once the bytes still to write no longer fit
-/// above the reserve (another writer took the space the plan counted on).
+/// Run the planned side effects on `threads` workers. Directories (`dirs`, the plan's
+/// [`OutputNames::dirs`]) are created first, in walk order, so each keeps the spelling the
+/// sequential walk gives it; two of them that the output drive folds into one folder are a
+/// collision. Jobs whose targets fold to the same path stay in walk order on one worker; units
+/// start in image order. Two targets reaching the same file (names the output file system folds
+/// together, a file where another target needs a directory) are detected, and the walk then runs
+/// sequentially, which renames the later one. With a `space` reserve the drive is re-read while
+/// copying, and the copies stop with an error once the bytes still to write no longer fit above
+/// the reserve (another writer took the space the plan counted on).
+#[allow(clippy::too_many_arguments)]
 fn execute<M: Media>(
     ntfs: &Ntfs<M>,
+    dirs: &[PathBuf],
     jobs: &[Job],
     threads: usize,
     stats: &Stats,
@@ -716,56 +728,42 @@ fn execute<M: Media>(
     space: Option<&SpaceReserve>,
     existing: &HashSet<PathBuf>,
 ) -> Result<Executed, String> {
-    let mut made: Option<&Path> = None;
-    for job in jobs {
-        let dir = match job {
-            Job::Mkdir { dir, .. } => Some(dir.as_path()),
-            Job::Copy { key, .. } => key.0.parent(),
+    let mut folders: HashMap<FileId, &Path> = HashMap::new();
+    for dir in dirs {
+        let made = fs::create_dir_all(dir).and_then(|()| target_id(dir));
+        let reason = match made {
+            Err(error) => Some(error.to_string()),
+            Ok(id) => folders
+                .insert(id, dir)
+                .map(|other| format!("the folder of {} too", other.display())),
         };
-        let Some(dir) = dir else { continue };
-        if made == Some(dir) {
-            continue;
-        }
-        if let Err(error) = fs::create_dir_all(dir) {
+        if let Some(reason) = reason {
             return Ok(Err(format!(
-                "output path collision at {}: {error}",
+                "output path collision at {}: {reason}",
                 dir.display()
             )));
         }
-        made = Some(dir);
     }
     let mut units: Vec<Vec<usize>> = Vec::new();
     let mut unit_of: HashMap<String, usize> = HashMap::new();
     for (index, job) in jobs.iter().enumerate() {
-        if let Job::Copy { key, .. } = job {
-            let unit = *unit_of.entry(fold_key(&key.0)).or_insert_with(|| {
-                units.push(Vec::new());
-                units.len() - 1
-            });
-            units[unit].push(index);
-        }
+        let unit = *unit_of.entry(fold_key(&job.key.0)).or_insert_with(|| {
+            units.push(Vec::new());
+            units.len() - 1
+        });
+        units[unit].push(index);
     }
-    let start_of = |unit: &Vec<usize>| match &jobs[unit[0]] {
-        Job::Copy { stream, .. } => stream.first_lcn(),
-        Job::Mkdir { .. } => -1,
-    };
-    units.sort_by_cached_key(|unit| start_of(unit));
+    units.sort_by_cached_key(|unit| jobs[unit[0]].stream.first_lcn());
     let vol = ntfs.vol.borrow();
     let direct = vol.direct();
     let next = AtomicUsize::new(0);
     let copied_files = AtomicUsize::new(0);
     let bytes = AtomicI64::new(0);
     let abort = AtomicBool::new(false);
-    let planned_bytes: i128 = jobs
-        .iter()
-        .map(|job| match job {
-            Job::Copy { size, .. } => (*size).max(0),
-            Job::Mkdir { .. } => 0,
-        })
-        .sum();
+    let planned_bytes: i128 = jobs.iter().map(|job| job.size.max(0)).sum();
     let results: Mutex<Vec<(usize, JobOutcome)>> = Mutex::new(Vec::new());
     let written: Mutex<Vec<Owned>> = Mutex::new(Vec::new());
-    let claims: Mutex<HashMap<FileId, usize>> = Mutex::new(HashMap::new());
+    let claims: Mutex<HashMap<FileId, PathBuf>> = Mutex::new(HashMap::new());
     // (collision, fatal) reasons from the workers.
     let stopped: Mutex<(Option<String>, Option<String>)> = Mutex::new((None, None));
     let stop = |collision: Option<String>, fatal: Option<String>| {
@@ -797,14 +795,11 @@ fn execute<M: Media>(
                             if abort.load(Ordering::Relaxed) {
                                 break 'units;
                             }
-                            let Job::Copy { key, stream, size } = &jobs[index] else {
-                                continue;
-                            };
+                            let job = &jobs[index];
                             let outcome = copy_job(
-                                &key.0,
-                                stream,
-                                *size,
-                                unit,
+                                &job.key.0,
+                                &job.stream,
+                                job.size,
                                 &mut owned,
                                 &claims,
                                 existing,
@@ -897,14 +892,11 @@ fn execute<M: Media>(
     {
         outcomes[index] = Some(outcome);
     }
-    if jobs
-        .iter()
-        .zip(&outcomes)
-        .any(|(job, outcome)| matches!(job, Job::Copy { .. }) && outcome.is_none())
-    {
-        return Err("a planned copy never ran".into());
-    }
-    Ok(Ok(outcomes))
+    outcomes
+        .into_iter()
+        .collect::<Option<Vec<JobOutcome>>>()
+        .map(Ok)
+        .ok_or_else(|| "a planned copy never ran".to_string())
 }
 
 /// Every path under `dir` (symlinks not followed); empty when `dir` does not exist.
@@ -953,6 +945,7 @@ fn new_walker<'a, M: Media>(
     limit: i128,
     every: u64,
     space: Option<&SpaceReserve>,
+    names: OutputNames,
 ) -> Walker<'a, M> {
     Walker {
         ntfs,
@@ -974,6 +967,7 @@ fn new_walker<'a, M: Media>(
                 files: 0,
                 bytes: 0,
             }),
+        names,
     }
 }
 
@@ -985,9 +979,9 @@ fn walk_all<M: Media>(
     let root = ntfs
         .mft_record(5)
         .map_err(|m| format!("root record unreadable: {m}"))?;
-    walker.recover_priority(&options.extract_dir, &options.priority_paths)?;
+    walker.recover_priority(&options.priority_paths)?;
     let limit = walker.stats.file_limit;
-    walker.walk_dir(&root, &options.extract_dir, 0, limit, false)?;
+    walker.walk_dir(&root, ROOT, 0, limit, false)?;
     if options.include_deleted {
         walker.sweep_deleted(&options.extract_dir)?;
     }
@@ -998,6 +992,9 @@ fn walk_all<M: Media>(
 /// What one `extract` call did, besides the stats.
 pub struct Outcome {
     pub stats: Stats,
+    /// Records written under a tagged name or not at all because their name was taken
+    /// (`output_name_collisions`, the first [`crate::names::REPORT_LIMIT`]).
+    pub collisions: Vec<Collision>,
     pub walk_seconds: f64,
     pub copy_seconds: f64,
     /// Why the parallel plan could not be used, which made the walk run again sequentially (exact
@@ -1012,13 +1009,15 @@ pub struct Outcome {
 /// copies then run in parallel and each one's outcome is recorded. If any failed, a second walk
 /// replays the recorded outcomes in walk order, which yields exactly the sequential counters as
 /// long as it plans the same side effects. Only when a failure moved a decision (a cap boundary,
-/// say) does the walk run again sequentially, after removing everything written.
+/// say) or two planned names meet on the output drive does the walk run again sequentially,
+/// after removing everything written.
 pub fn extract<'a, M: Media>(
     ntfs: &'a Ntfs<M>,
     mut options: Options<'a>,
 ) -> Result<Outcome, String> {
     let (options_limit, options_every) = (options.limit, options.progress_every);
     let space = options.space.clone();
+    let (extract_dir, include_deleted) = (options.extract_dir.clone(), options.include_deleted);
     let fresh = |progress: ProgressFn<'a>, planning: bool, known: HashMap<JobKey, JobOutcome>| {
         let mut walker = new_walker(
             ntfs,
@@ -1027,6 +1026,7 @@ pub fn extract<'a, M: Media>(
             options_limit,
             options_every,
             space.as_ref(),
+            OutputNames::new(&extract_dir, include_deleted, planning),
         );
         walker.known = known;
         walker
@@ -1043,6 +1043,7 @@ pub fn extract<'a, M: Media>(
         let copying = Instant::now();
         let executed = execute(
             ntfs,
+            &planner.names.dirs,
             &jobs,
             options.threads,
             &planner.stats,
@@ -1054,34 +1055,31 @@ pub fn extract<'a, M: Media>(
         match executed {
             Err(collision) => rerun_reason = Some(collision),
             Ok(outcomes) => {
-                let copies: Vec<(&JobKey, JobOutcome)> = jobs
+                if outcomes
                     .iter()
-                    .zip(&outcomes)
-                    .filter_map(|(job, outcome)| outcome.map(|o| (job.key(), o)))
-                    .collect();
-                if copies
-                    .iter()
-                    .all(|(_, o)| matches!(o, JobOutcome::Copied(_)))
+                    .all(|outcome| matches!(outcome, JobOutcome::Copied(_)))
                 {
-                    planner.stats.bytes = copies
+                    planner.stats.bytes = outcomes
                         .iter()
-                        .map(|(_, o)| if let JobOutcome::Copied(n) = o { *n } else { 0 })
+                        .map(|o| if let JobOutcome::Copied(n) = o { *n } else { 0 })
                         .sum();
                     planner.plan = None;
                     planner.progress = progress;
                     planner.flush_progress().map_err(fatal_message)?;
                     return Ok(Outcome {
                         stats: planner.stats,
+                        collisions: planner.names.report,
                         walk_seconds,
                         copy_seconds: copying.elapsed().as_secs_f64(),
                         rerun_reason: None,
                     });
                 }
-                let known: HashMap<JobKey, JobOutcome> = copies
+                let known: HashMap<JobKey, JobOutcome> = jobs
                     .iter()
-                    .map(|(key, outcome)| ((*key).clone(), *outcome))
+                    .zip(&outcomes)
+                    .map(|(job, outcome)| (job.key.clone(), *outcome))
                     .collect();
-                let unique = known.len() == copies.len();
+                let unique = known.len() == jobs.len();
                 let mut replay = fresh(progress, true, known);
                 let replayed = if unique {
                     walk_all(&mut replay, ntfs, &options)
@@ -1089,15 +1087,17 @@ pub fn extract<'a, M: Media>(
                     Err("duplicate job keys".into())
                 };
                 let same_plan = replayed.is_ok()
+                    && replay.names.dirs == planner.names.dirs
                     && replay.plan.as_ref().is_some_and(|again| {
                         again.len() == jobs.len()
-                            && again.iter().zip(&jobs).all(|(a, b)| a.key() == b.key())
+                            && again.iter().zip(&jobs).all(|(a, b)| a.key == b.key)
                     });
                 if same_plan {
                     replay.plan = None;
                     replay.flush_progress().map_err(fatal_message)?;
                     return Ok(Outcome {
                         stats: replay.stats,
+                        collisions: replay.names.report,
                         walk_seconds,
                         copy_seconds: copying.elapsed().as_secs_f64(),
                         rerun_reason: None,
@@ -1120,6 +1120,7 @@ pub fn extract<'a, M: Media>(
     walker.flush_progress().map_err(fatal_message)?;
     Ok(Outcome {
         stats: walker.stats,
+        collisions: walker.names.report,
         walk_seconds: sequential.elapsed().as_secs_f64(),
         copy_seconds: 0.0,
         rerun_reason,
