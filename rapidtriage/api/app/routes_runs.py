@@ -1453,6 +1453,8 @@ def build_runs_router(
             partial=partial,
             content=content,
         )
+        # Same errors as reading the output (404 / 409 / 403), without parsing it.
+        get_output_path(store, run_id, "files")
         join = flags_join(_run_output_dir_or_none(get_job(store, run_id).summary))
         unfiltered = not (flag_query.active or wanted or conditions is not None or path_prefix is not None or special is not None)
         indexed = (
