@@ -89,6 +89,7 @@ export const KIND_CATEGORY: Readonly<Record<string, KindMeta>> = {
   "linux-journald": { category: "operating-system", icon: "cpu" },
   "macos-system": { category: "operating-system", icon: "cpu" },
   "macos-knowledgec": { category: "operating-system", icon: "cpu" },
+  "macos-unified-log": { category: "operating-system", icon: "cpu" },
   "memory-volatility": { category: "operating-system", icon: "layers" },
   "windows-os-account": { category: "encryption-login", icon: "key" },
   "mobile-export": { category: "connected-devices", icon: "smartphone" },

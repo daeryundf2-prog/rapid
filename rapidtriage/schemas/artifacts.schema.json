@@ -153,6 +153,30 @@
           },
           {
             "if": {
+              "properties": { "artifact_type": { "const": "macos-unified-log-event" } },
+              "not": { "required": ["profile_ref"] }
+            },
+            "then": {
+              "properties": {
+                "details": {
+                  "required": ["source_path", "source_offset", "continuous_time", "event_type", "process", "subsystem", "category", "message"],
+                  "properties": {
+                    "source_path": { "type": "string" },
+                    "source_offset": { "type": "integer", "minimum": 0 },
+                    "continuous_time": { "type": "integer", "minimum": 0 },
+                    "timestamp": { "type": ["string", "null"], "format": "date-time" },
+                    "event_type": { "enum": ["log", "activity", "signpost", "trace"] },
+                    "process": { "type": "string" },
+                    "subsystem": { "type": "string" },
+                    "category": { "type": "string" },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
               "properties": { "artifact_type": { "const": "linux-journald-entry" } },
               "not": { "required": ["profile_ref"] }
             },
@@ -173,6 +197,25 @@
                     "compact": { "type": "boolean" },
                     "keyed_hash": { "type": "boolean" },
                     "limitations": { "type": "array" }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": { "artifact_type": { "const": "macos-unified-log-diagnostic" } },
+              "not": { "required": ["profile_ref"] }
+            },
+            "then": {
+              "properties": {
+                "details": {
+                  "required": ["source_path", "source_offset", "reason"],
+                  "properties": {
+                    "source_path": { "type": "string" },
+                    "source_offset": { "type": "integer", "minimum": 0 },
+                    "reason": { "type": "string" },
+                    "format_reference": { "type": "string" }
                   }
                 }
               }

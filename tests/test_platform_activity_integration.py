@@ -24,13 +24,35 @@ class PlatformActivityIntegrationTests(unittest.TestCase):
     def test_kinds_are_selectable_in_every_run_profile(self):
         for mode, profile in RUN_PROFILES.items():
             plan = build_run_plan(mode=mode, skip_tasks=["linux-journald"])
-            for kind in ("linux-journald", "macos-knowledgec"):
+            for kind in ("linux-journald", "macos-knowledgec", "macos-unified-log"):
                 self.assertIn(kind, profile.artifacts_kinds)
                 task = find_task(plan, kind)
                 self.assertEqual(task["group"], "cross-platform")
                 self.assertEqual(task["status"], "skipped" if kind == "linux-journald" else "queued")
         self.assertEqual(artifact_type_domain("macos-knowledgec", "macos-knowledgec-event"), "os")
         self.assertEqual(artifact_type_domain("linux-journald", "linux-journald-entry"), "eventlog")
+        self.assertEqual(artifact_type_domain("macos-unified-log", "macos-unified-log-event"), "eventlog")
+
+    def test_unified_log_schema_requires_raw_clock_and_citations(self):
+        schema = load_schema("artifacts.schema.json")["properties"]["artifacts"]["items"]
+        validate = Draft202012Validator(schema).is_valid
+        details = {
+            "source_path": "Persist/fixture.tracev3", "source_offset": 8, "continuous_time": 45,
+            "event_type": "trace", "process": "", "subsystem": "", "category": "", "message": "",
+        }
+        row = {
+            "provider": "macos-unified-log", "artifact_type": "macos-unified-log-event",
+            "path": details["source_path"], "supported": True, "details": details,
+        }
+        self.assertTrue(validate(row))  # A boot calibration can be missing.
+        for key in ("source_path", "source_offset", "continuous_time"):
+            with self.subTest(key=key):
+                self.assertFalse(validate({**row, "details": {k: v for k, v in details.items() if k != key}}))
+        row["artifact_type"] = "macos-unified-log-diagnostic"
+        row["details"] = {"source_path": row["path"], "source_offset": 0, "reason": "damaged-chunk"}
+        self.assertTrue(validate(row))
+        del row["details"]["source_offset"]
+        self.assertFalse(validate(row))
 
     def test_selected_kinds_preserve_locators_through_streaming_and_timeline(self):
         with tempfile.TemporaryDirectory() as tmp:

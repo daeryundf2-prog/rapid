@@ -48,6 +48,12 @@
 
 ### Added
 
+- The `macos-unified-log` collector extracts log, activity, signpost and trace
+  events from stored tracev3 chunksets in offline evidence. Calibrated events
+  appear on the timeline with source offsets. Compressed blocks, damaged
+  records and missing format strings carry explicit coverage information.
+  [Formats, limits and synthetic example](docs/rapidtriage-macos-unified-log.md)
+
 - The `macos-knowledgec` collector reads system and per-user KnowledgeC
   activity streams, including committed WAL rows. It retains raw time values
   alongside UTC timestamps and flags unknown streams.

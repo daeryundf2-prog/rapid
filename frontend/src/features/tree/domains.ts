@@ -1092,6 +1092,12 @@ export const DOMAINS: readonly DomainDef[] = [
         target: a("linux-journald", ["linux-journald-entry", "linux-journald-diagnostic"]),
         typeLabels: { "linux-journald-entry": "저널 항목", "linux-journald-diagnostic": "수집 진단" },
       },
+      {
+        id: "evt-macos-unified",
+        label: "macOS 통합 로그",
+        target: a("macos-unified-log", ["macos-unified-log-event", "macos-unified-log-diagnostic"]),
+        typeLabels: { "macos-unified-log-event": "로그 이벤트", "macos-unified-log-diagnostic": "수집 진단" },
+      },
       { id: "evt-events", label: "EVTX 이벤트", target: a("eventlog", ["eventlog-event"]) },
       { id: "evt-detections", label: "탐지 규칙 일치", target: a("eventlog", ["eventlog-detection"]) },
       { id: "evt-logon", label: "로그온 세션", target: a("eventlog", ["eventlog-logon-session"]) },

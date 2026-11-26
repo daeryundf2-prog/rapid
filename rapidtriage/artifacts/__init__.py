@@ -28,6 +28,7 @@ from .memory import MemoryVolatilityProvider
 from .mobile import MobileExportProvider
 from .p2p import P2PArtifactsProvider
 from .synthetic_media import SyntheticMediaProvider
+from .unified_log import UnifiedLogProvider
 from .windows.browser import WindowsBrowserArtifactsProvider
 from .windows.eventlog import WindowsEventLogProvider
 from .windows.execution import WindowsExecutionProvider
@@ -113,6 +114,7 @@ def _builtin_providers() -> list[object]:
         JournaldProvider(),
         MacOsSystemArtifactsProvider(),
         KnowledgeCProvider(),
+        UnifiedLogProvider(),
         MediaImageProvider(),
         MemoryVolatilityProvider(),
         SyntheticMediaProvider(),

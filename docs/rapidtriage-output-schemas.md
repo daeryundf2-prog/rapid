@@ -791,6 +791,9 @@ The `manifest-windows-artifacts.json` sample also fixes the current artifact row
   - `wer-report`
   - `wmi-repository-file`
   - `zone-identifier`
+- `macos-unified-log`
+  - `macos-unified-log-event` carries the record byte offset, raw continuous time, optional calibrated UTC, process, subsystem, category, message and rendering status.
+  - `macos-unified-log-diagnostic` carries the source path, byte offset and reason. [Field descriptions](rapidtriage-macos-unified-log.md)
 - `macos-system`
   - `macos-user-profile`
   - `macos-browser-history-downloads`
