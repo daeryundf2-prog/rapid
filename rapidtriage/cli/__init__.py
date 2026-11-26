@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
+from ..artifacts.windows.registry_engine import REGISTRY_ENGINE_ENV
 from ..core.rules import RuleConfigError, load_rule_set
 from . import analyze, benchmark, case, collect, kakao, readiness, runops, scan
 from . import validation as _validation
@@ -51,6 +53,9 @@ def main(argv=None) -> int:
             stream.reconfigure(encoding="utf-8")
     parser = build_parser()
     args = parser.parse_args(argv)
+    if getattr(args, "registry_engine", None):
+        # Process-wide switch read by NativeRegistryHive (and inherited by child processes).
+        os.environ[REGISTRY_ENGINE_ENV] = args.registry_engine
     rule_set = None
     if getattr(args, "rules", None):
         try:

@@ -1,0 +1,20 @@
+[package]
+name = "rapid-registry"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Windows registry hive (regf) reader mirroring rapidtriage's NativeRegistryHive, with optional PyO3 bindings"
+
+[lib]
+name = "rapid_registry"
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"], optional = true }
+
+[build-dependencies]
+pyo3-build-config = { version = "0.22", optional = true }
+
+[features]
+python = ["dep:pyo3", "dep:pyo3-build-config"]

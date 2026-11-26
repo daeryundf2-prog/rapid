@@ -26,6 +26,11 @@ from .registry_depth import (
     iter_export_keys,
     read_export_lines,
 )
+from .registry_engine import (
+    load_registry_extension,
+    registry_engine_row_fields,
+    registry_engine_status,
+)
 
 PARSER_VERSION = "registry-native-walk-v14"
 REGISTRY_EXPORT_PATTERN = re.compile(r"^\[(?P<key>.+)]$")
@@ -431,7 +436,7 @@ def collect_registry_hive(
         keys_examined = key_tree_status in {"walked", "partial"}
         recovery_candidates = [*free_candidates, *native_parent_key_candidates(hive, free_candidates)]
         scan_end = min(stat_result.st_size, MAX_HIVE_STRING_SCAN_BYTES)
-        strings = extract_utf16le_strings(bytes(hive._data[:scan_end]))
+        strings = hive.utf16le_strings(scan_end)
         # R5 L2: PuTTY/WinSCP password values never reach the string pivot — neither the current
         # values nor the data of deleted/free vk cells named Password/ProxyPassword/… (old passwords).
         secrets = hive_secret_strings(hive) | deleted_secret_value_strings(hive._data, recovery_candidates)
@@ -495,6 +500,7 @@ def collect_registry_hive(
                 "native_walk": metadata["native_walk"],
                 "transaction_log_disclosure": disclosure["message_ko"],
                 "transaction_log_disclosure_status": disclosure["status"],
+                **registry_engine_row_fields(hive.engine_status),
             }
         )
         if completeness["status"] != "complete":
@@ -4803,7 +4809,11 @@ class NativeRegistryValue:
 
 
 class NativeRegistryHive:
-    """Read-only regf reader over ``mmap`` (bytes for in-memory blobs)."""
+    """Read-only regf reader over ``mmap`` (bytes for in-memory blobs).
+
+    ``open``/``from_bytes`` return a :class:`RustRegistryHive` when the Rust engine is selected
+    (``RAPIDTRIAGE_REGISTRY_ENGINE=rust``, see ``registry_engine.py``); ``engine_status`` records
+    the requested/active engine and any fallback notice."""
 
     def __init__(self, data: object, *, path: Path | None = None, handle: object = None) -> None:
         self._data = data
@@ -4816,6 +4826,19 @@ class NativeRegistryHive:
         self.minor_version = int(self.header.get("minor_version") or 0)
         self.errors: Counter[str] = Counter()
         self._root: NativeRegistryKey | None = None
+        self.engine_status: dict[str, str] = {"requested": "python", "active": "python", "notice_ko": ""}
+
+    @classmethod
+    def _create(cls, data: object, *, path: Path | None = None, handle: object = None) -> NativeRegistryHive:
+        status = registry_engine_status()
+        native = load_registry_extension()[0] if status["active"] == "rust" else None
+        hive = (
+            RustRegistryHive(data, path=path, handle=handle, native=native)
+            if native is not None
+            else cls(data, path=path, handle=handle)
+        )
+        hive.engine_status = status
+        return hive
 
     @classmethod
     def open(cls, path: Path) -> NativeRegistryHive | None:
@@ -4838,13 +4861,13 @@ class NativeRegistryHive:
         except OSError:
             handle.close()
             return None
-        return cls(data, path=path, handle=handle)
+        return cls._create(data, path=path, handle=handle)
 
     @classmethod
     def from_bytes(cls, blob: bytes) -> NativeRegistryHive | None:
         if len(blob) < 512 or not blob.startswith(REGISTRY_HIVE_SIGNATURE):
             return None
-        return cls(blob)
+        return cls._create(blob)
 
     def close(self) -> None:
         closer = getattr(self._data, "close", None)
@@ -5122,6 +5145,78 @@ class NativeRegistryHive:
 
     def values_dict(self, key: NativeRegistryKey) -> RegistryValueMap:
         return RegistryValueMap((str(value.name), self.value_data(value)) for value in self.values(key))
+
+    def utf16le_strings(self, scan_end: int) -> list[str]:
+        """String pivot over the first ``scan_end`` bytes (``extract_utf16le_strings``)."""
+        return extract_utf16le_strings(bytes(self._data[:scan_end]))  # type: ignore[index]
+
+
+class RustRegistryHive(NativeRegistryHive):
+    """``NativeRegistryHive`` whose cell reads run in the ``rapid_registry_native`` extension.
+
+    The extension reads the same buffer with the geometry computed above and records walk errors
+    into this hive's ``errors`` Counter, so every consumer sees identical keys, values, errors
+    and rows (``tests/test_registry_rust_differential.py``). Keys and values are the extension's
+    ``NativeRegistryKey``/``NativeRegistryValue`` objects with the same attributes."""
+
+    def __init__(self, data: object, *, path: Path | None = None, handle: object = None, native: object) -> None:
+        super().__init__(data, path=path, handle=handle)
+        self._native = native.RegistryReader(  # type: ignore[attr-defined]
+            data, self.errors, self.hbin_end, self.minor_version, int(self.header.get("root_cell_offset") or 0)
+        )
+
+    def close(self) -> None:
+        self._native.close()  # releases the buffer before the mmap closes
+        super().close()
+
+    def key_at(self, relative_offset: int) -> NativeRegistryKey | None:
+        return self._native.key_at(relative_offset)
+
+    def subkeys(self, key: NativeRegistryKey) -> list[NativeRegistryKey]:
+        return self._native.subkeys(key)
+
+    def subkey(self, key: NativeRegistryKey, name: str) -> NativeRegistryKey | None:
+        return self._native.subkey(key, name)
+
+    def open_key(self, relative_path: str, *, start: NativeRegistryKey | None = None) -> NativeRegistryKey | None:
+        return self._native.open_key(relative_path, start or self.root)
+
+    def iter_keys(
+        self,
+        start: NativeRegistryKey | None = None,
+        components: tuple[str, ...] = (),
+    ) -> Iterable[tuple[tuple[str, ...], NativeRegistryKey]]:
+        first = start or self.root
+        if first is None:
+            return
+        yield from self._native.iter_keys(first, tuple(components))
+
+    def values(self, key: NativeRegistryKey) -> list[NativeRegistryValue]:
+        return self._native.values(key)
+
+    def value_at(self, relative_offset: int) -> NativeRegistryValue | None:
+        return self._native.value_at(relative_offset)
+
+    def value(self, key: NativeRegistryKey, name: str) -> NativeRegistryValue | None:
+        return self._native.value(key, name)
+
+    def cell_allocated(self, relative_offset: int) -> bool | None:
+        return self._native.cell_allocated(relative_offset)
+
+    def value_data_allocated(self, value: NativeRegistryValue) -> bool | None:
+        return self._native.value_data_allocated(value)
+
+    def value_bytes(self, value: NativeRegistryValue) -> bytes:
+        return self._native.value_bytes(value)
+
+    def value_data(self, value: NativeRegistryValue) -> object:
+        return self._native.value_data(value)
+
+    def values_dict(self, key: NativeRegistryKey) -> RegistryValueMap:
+        return RegistryValueMap(self._native.value_items(key))
+
+    def utf16le_strings(self, scan_end: int) -> list[str]:
+        return self._native.utf16le_strings(scan_end)
 
 
 def decode_native_registry_name(raw: bytes, *, compressed: bool) -> tuple[str, str]:
@@ -6547,6 +6642,8 @@ def build_native_key_tree_record(
 
 def iter_registry_free_cell_candidates(hive: NativeRegistryHive) -> tuple[list[dict[str, object]], dict[str, int]]:
     """hbin walk over the whole hive; returns free nk/vk cells (no cap) and allocator stats."""
+    if isinstance(hive, RustRegistryHive):
+        return hive._native.free_cell_candidates()
     data = hive._data
     candidates: list[dict[str, object]] = []
     stats: Counter[str] = Counter()

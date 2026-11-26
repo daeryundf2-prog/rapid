@@ -4,6 +4,7 @@ members = [
   "crates/rapid-indicators",
   "crates/rapid-worker",
   "crates/rapid-ntfs",
+  "crates/rapid-registry",
 ]
 resolver = "2"
 
