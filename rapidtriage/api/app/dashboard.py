@@ -147,7 +147,10 @@ def _normalize_partitions(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
         start = _int_or_none(row.get("start_sector"))
         partitions.append(
             {
-                "number": _int_or_none(row.get("partition_number")) or _int_or_none(row.get("slot")) or index,
+                # Position in the on-disk table (1-based): the native decoder numbers GPT/MBR entries
+                # from 0 and Sleuth Kit from 1, and `partition_number or slot or index` turned entry 0
+                # into a duplicate of entry 1 (two "파티션 1" rows, a crash in the console tree).
+                "number": index,
                 "description": str(row.get("description") or ""),
                 "filesystem": str(row.get("filesystem_guess") or "unknown"),
                 "size_bytes": _int_or_none(row.get("size_bytes")),

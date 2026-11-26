@@ -15,6 +15,10 @@ from ...core.extraction_failures import ADS_SOURCE_ID, iter_recovered_ads_rows
 from ...core.filetime import filetime_to_iso_7
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
+from ...core.provider_progress import (
+    PROVIDER_SCAN_REPORT_EVERY,
+    report_provider_progress,
+)
 from ...core.recovery import (
     CANDIDATE_KIND_DELETED_ENTRY,
     CANDIDATE_KIND_EXISTING,
@@ -211,14 +215,23 @@ class WindowsFilesystemProvider:
         return True
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
+        # Each phase walks the whole evidence tree; on a full volume most of them yield few or
+        # no rows for minutes, so the phase is reported (run progress message) as it starts.
+        report_provider_progress("$MFT·$UsnJrnl 원본 검사 중")
         yield from collect_native_ntfs_artifacts(root)
+        report_provider_progress("$LogFile 검사 중")
         yield from collect_ntfs_logfile_artifacts(root)
+        report_provider_progress("휴지통($Recycle.Bin) 검사 중")
         yield from collect_recycle_bin_artifacts(root)
+        report_provider_progress("대체 데이터 스트림(ADS) 검사 중")
         yield from collect_ads_stream_artifacts(root)
         yield from collect_recovered_ads_artifacts(root)
+        report_provider_progress("파일 서명 검사 준비 중 · 파일 목록 정리")
         yield from collect_signature_mismatch_artifacts(root)
+        report_provider_progress("NTFS 볼륨 정보 확인 중")
         # R5 L2: $Boot VBR + $MFT record 3 ($Volume) -> ntfs-volume-information.
         yield from collect_ntfs_volume_information(root, self.name)
+        report_provider_progress("MFT·USN 내보내기 파일(CSV/JSON) 검사 중")
         for path in sorted(iter_evidence_paths(root, "*"), key=lambda item: str(item).lower()):
             if not path.is_file() or path.suffix.lower() not in SUPPORTED_SUFFIXES:
                 continue
@@ -920,7 +933,15 @@ def collect_signature_mismatch_artifacts(root: Path) -> Iterable[ArtifactRecord]
     }
     by_extension: dict[str, int] = {}
     pending: list[ArtifactRecord] = []
-    for path in sorted((item for item in iter_evidence_paths(root, "*") if item.is_file()), key=lambda item: str(item).lower()):
+    paths = sorted((item for item in iter_evidence_paths(root, "*") if item.is_file()), key=lambda item: str(item).lower())
+    for checked, path in enumerate(paths):
+        if checked and checked % PROVIDER_SCAN_REPORT_EVERY == 0:
+            # Mismatch rows are buffered until the totals are known: this message is the
+            # scan's only progress (about an hour on a full Windows volume).
+            report_provider_progress(
+                f"파일 서명 검사 중 · {checked:,}/{len(paths):,}개 확인"
+                f" · 불일치 {stats['mismatch_count']:,}개"
+            )
         stats["files_seen"] += 1
         if path.name.startswith("$I") or path.name.startswith("$R"):
             stats["skipped_recycle_bin_index_or_data"] += 1

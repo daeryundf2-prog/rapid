@@ -568,12 +568,18 @@ def run_triage_mode(
 
     try:
         record_memory_cap("prepare")
-        input_root, image_result = prepare_run_input_root(
-            root,
-            input_kind=input_kind,
-            output_dir=output_dir,
-            e01_partition_start_sector=e01_partition_start_sector,
-        )
+        extract_reporter = image_extract_reporter(progress)
+        try:
+            input_root, image_result = prepare_run_input_root(
+                root,
+                input_kind=input_kind,
+                output_dir=output_dir,
+                e01_partition_start_sector=e01_partition_start_sector,
+                on_extract_progress=extract_reporter,
+            )
+        finally:
+            # The last throttled-away update: the task ends on the recovered tree's real counts.
+            extract_reporter.flush()
         progress.set_run_root(str(input_root.root_path))
         if image_result is None:
             progress.task_finished("image-extract", status="skipped", reason=REASON_FOLDER_INPUT)
@@ -1050,6 +1056,9 @@ def _run_triage_stages(
     docs_text_spool_path = output_dir / DOCS_TEXT_SPOOL_NAME
     docs_text_spool_path.unlink(missing_ok=True)
 
+    def report_docs(documents: int, message: str) -> None:
+        progress.task_progress("docs", rows=documents, message=message)
+
     def produce_docs_payload() -> dict[str, object]:
         if not case_db:
             return run_docs_search(
@@ -1059,6 +1068,7 @@ def _run_triage_stages(
                 rule_set=rule_set,
                 index_output=docs_index_path,
                 manifest=manifest_payload,
+                on_progress=report_docs,
             )
         with DocumentTextSpool(docs_text_spool_path) as spool:
             return run_docs_search(
@@ -1069,6 +1079,7 @@ def _run_triage_stages(
                 index_output=docs_index_path,
                 manifest=manifest_payload,
                 text_sink=spool.write,
+                on_progress=report_docs,
             )
 
     docs_planned = stage_planned_out("docs")
@@ -1387,6 +1398,7 @@ def _run_triage_stages(
             root=str(input_root.root_path),
             source={"type": input_root.kind, "analysis_root": str(input_root.root_path)},
             docs_text_spool=docs_text_spool_path,
+            on_progress=lambda rows, message: progress.task_progress("persist", rows=rows, message=message),
         )
     else:
         docs_text_spool_path.unlink(missing_ok=True)
@@ -2399,6 +2411,7 @@ def tracked_artifact_collection(
         collector_options=collector_options,
         check_cancel=progress.cancel_checker(kind),
         on_rows=progress.rows_reporter(kind),
+        on_message=progress.message_reporter(kind),
     )
 
 
@@ -2437,6 +2450,7 @@ def timed_artifact_collection(
     collector_options: Mapping[str, object] | None = None,
     check_cancel: Callable[[], bool] | None = None,
     on_rows: Callable[[int], None] | None = None,
+    on_message: Callable[[str], None] | None = None,
 ) -> tuple[dict[str, object], str, str, int]:
     start = time.perf_counter()
     started_at = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -2451,10 +2465,54 @@ def timed_artifact_collection(
         use_cache=False,
         check_cancel=check_cancel,
         on_rows=on_rows,
+        on_message=on_message,
     )
     completed_at = dt.datetime.now(dt.timezone.utc).isoformat()
     duration_ms = max(0, int((time.perf_counter() - start) * 1000))
     return payload, started_at, completed_at, duration_ms
+
+
+class _ImageExtractReporter:
+    """Native E01 recovery progress -> the plan's image-extract task (files so far + a GB message).
+
+    The prepare stage can run for an hour on a large image; without this the progress file (and the
+    console) showed 0/0 until extraction ended. One progress write per `interval` seconds at most;
+    :meth:`flush` writes the last throttled-away stats once extraction returns or fails.
+    """
+
+    def __init__(self, progress: RunProgress, *, interval: float = 1.0) -> None:
+        self._progress = progress
+        self._interval = interval
+        self._last_write = float("-inf")
+        self._pending: tuple[int, ...] | None = None
+
+    def __call__(self, stats: Mapping[str, int]) -> None:
+        self._pending = tuple(
+            int(stats.get(key) or 0) for key in ("files", "bytes", "deleted_files", "truncated", "disk_space_skips")
+        )
+        now = time.monotonic()
+        if now - self._last_write >= self._interval:
+            self._last_write = now
+            self.flush()
+
+    def flush(self) -> None:
+        if self._pending is None:
+            return
+        files, size, deleted, skipped, no_space = self._pending
+        self._pending = None
+        message = f"파일 {files:,}개 · {size / (1 << 30):.1f} GB 추출"
+        if deleted:
+            message += f" · 삭제 파일 {deleted:,}개"
+        if skipped:
+            message += f" · 상한 초과 {skipped:,}개 건너뜀"
+        if no_space:
+            message += f" · 디스크 여유 공간 부족으로 {no_space:,}개 중단"
+        self._progress.task_set_message("image-extract", message, rows=files)
+
+
+def image_extract_reporter(progress: RunProgress, *, interval: float = 1.0) -> _ImageExtractReporter:
+    """``on_progress`` callable for native E01 extraction; call ``flush()`` when extraction ends."""
+    return _ImageExtractReporter(progress, interval=interval)
 
 
 def prepare_run_input_root(
@@ -2463,6 +2521,7 @@ def prepare_run_input_root(
     input_kind: str | None,
     output_dir: Path,
     e01_partition_start_sector: int | None = None,
+    on_extract_progress: Callable[[Mapping[str, int]], None] | None = None,
 ) -> tuple[
     InputRoot,
     E01ExtractionResult | DiskImageExtractionResult | ArchiveImageExtractionResult | VirtualDiskExtractionResult | None,
@@ -2477,6 +2536,7 @@ def prepare_run_input_root(
                 root_path,
                 output_dir / "_e01",
                 partition_start_sector=e01_partition_start_sector,
+                on_progress=on_extract_progress,
             )
         except E01ExtractionError as exc:
             guidance = e01_failure_guidance(str(exc))

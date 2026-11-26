@@ -6,7 +6,7 @@ import itertools
 import json
 import os
 import sqlite3
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -176,6 +176,13 @@ IMPORT_COMMIT_INTERVAL = 20000
 CASE_SEARCH_STABLE_WINDOW = 500
 
 
+# Rows between two ``import_run_output`` progress callbacks of one phase.
+IMPORT_PROGRESS_INTERVAL = 1000
+
+ImportProgress = Callable[[str, int], None]
+"""``(phase, rows imported in that phase)``; phase is files/docs/artifacts/indicators/timeline."""
+
+
 def commit_periodically(connection: sqlite3.Connection, count: int, citations: CitationAllocator) -> None:
     if count % IMPORT_COMMIT_INTERVAL == 0:
         citations.flush()
@@ -262,6 +269,11 @@ class CaseDatabase:
         self._resolved_path_keys: dict[str, str] = {}
         self._artifact_ids: dict[tuple[str, int], int] = {}
         self._hash_record_count = 0
+        self._import_progress: ImportProgress | None = None
+
+    def _report_import(self, phase: str, count: int, *, force: bool = False) -> None:
+        if self._import_progress is not None and (force or count % IMPORT_PROGRESS_INTERVAL == 0):
+            self._import_progress(phase, count)
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -504,8 +516,12 @@ class CaseDatabase:
         case_name: str | None = None,
         document_texts: Iterable[tuple[str, str, str | None]] | None = None,
         hash_files: bool = True,
+        on_progress: ImportProgress | None = None,
     ) -> dict[str, object]:
         """Import a run's outputs (files, docs, artifacts, indicators, timeline).
+
+        ``on_progress(phase, rows)`` is called as each phase starts and every
+        ``IMPORT_PROGRESS_INTERVAL`` rows (the run's persist step takes minutes).
 
         Large outputs are streamed (artifact JSONL, timeline events), so
         memory stays bounded. ``document_texts`` optionally supplies the
@@ -538,6 +554,7 @@ class CaseDatabase:
         self._resolved_path_keys = {}
         self._artifact_ids = {}
         self._hash_record_count = 0
+        self._import_progress = on_progress
         counts = {
             "evidence_source_count": 1,
             "file_record_count": self._import_files(case_id, evidence_source_id, outputs, hash_files=hash_files),
@@ -1640,6 +1657,7 @@ class CaseDatabase:
             ((row, True) for row in iter_output_member(outputs, "files", "inventory")),
         )
         count = 0
+        self._report_import("files", 0, force=True)
         with self.connect() as connection, CitationAllocator(connection, case_id, "file") as citations:
             for row, inventory_only in rows:
                 if not isinstance(row, Mapping):
@@ -1710,6 +1728,7 @@ class CaseDatabase:
                 )
                 count += 1
                 commit_periodically(connection, count, citations)
+                self._report_import("files", count)
         return count
 
     def _import_docs(
@@ -1723,6 +1742,7 @@ class CaseDatabase:
         rows = iter_output_member(outputs, "docs", "candidates")
         texts = iter(document_texts) if document_texts is not None else None
         count = 0
+        self._report_import("docs", 0, force=True)
         with self.connect() as connection, CitationAllocator(connection, case_id, "indexed_document") as citations:
             for row in rows:
                 if not isinstance(row, Mapping):
@@ -1793,10 +1813,12 @@ class CaseDatabase:
                     )
                 count += 1
                 commit_periodically(connection, count, citations)
+                self._report_import("docs", count)
         return count
 
     def _import_artifacts(self, case_id: str, evidence_source_id: int, outputs: Mapping[str, object]) -> int:
         count = 0
+        self._report_import("artifacts", 0, force=True)
         with self.connect() as connection, CitationAllocator(connection, case_id, "artifact") as citations:
             if artifact_fts_is_external(connection):
                 # Compressed layout (fresh run-persist DB): batched load.
@@ -1808,6 +1830,7 @@ class CaseDatabase:
                     outputs=outputs,
                     file_id_for=self._file_id_for,
                     artifact_ids=self._artifact_ids,
+                    on_rows=lambda rows: self._report_import("artifacts", rows, force=True),
                 )
             for output_name, raw_path in sorted(outputs.items()):
                 name = str(output_name)
@@ -1858,6 +1881,7 @@ class CaseDatabase:
                     self._artifact_ids[(name, int(row_index))] = int(cursor.lastrowid)
                     count += 1
                     commit_periodically(connection, count, citations)
+                    self._report_import("artifacts", count)
         return count
 
     def _file_id_for(self, path: str) -> int | None:
@@ -1897,6 +1921,7 @@ class CaseDatabase:
     def _import_timeline(self, case_id: str, evidence_source_id: int, outputs: Mapping[str, object]) -> int:
         rows = iter_output_member(outputs, "timeline", "events")
         count = 0
+        self._report_import("timeline", 0, force=True)
         with self.connect() as connection, CitationAllocator(connection, case_id, "event") as citations:
             if self.bulk_load:
                 return bulk_import_run_events(
@@ -1907,6 +1932,7 @@ class CaseDatabase:
                     rows=rows,
                     file_id_for=self._file_id_for,
                     artifact_ids=self._artifact_ids,
+                    on_rows=lambda done: self._report_import("timeline", done, force=True),
                 )
             for row in rows:
                 if not isinstance(row, Mapping):
@@ -1963,9 +1989,11 @@ class CaseDatabase:
                 )
                 count += 1
                 commit_periodically(connection, count, citations)
+                self._report_import("timeline", count)
         return count
 
     def _import_indicators(self, case_id: str, evidence_source_id: int, outputs: Mapping[str, object]) -> int:
+        self._report_import("indicators", 0, force=True)
         payload = read_output(outputs, "indicators")
         indicator_rows = payload.get("indicators") if isinstance(payload, Mapping) else None
         scanner_rows = payload.get("ioc_scanner_hits") if isinstance(payload, Mapping) else None

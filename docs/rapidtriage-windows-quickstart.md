@@ -140,7 +140,7 @@ python -m rapidtriage doctor
 Common warnings:
 
 - `tool:tesseract`: OCR is disabled until Tesseract is installed and on `PATH`.
-- `tools:e01`: direct E01 extraction is disabled until libewf/Sleuth Kit tools are available.
+- `tools:e01`: WARN when neither libewf/Sleuth Kit tools nor a working `native-e01` extra (pyewf + dissect.ntfs) is available. With only the extra it is OK with an engineering-grade caution; `details.native_versions` and `details.native_problems` show the decoder versions and why an installed extra is unusable.
 - `web-port`: another process is using the configured port; rerun with `-Port 8877`.
 
 The default app data directory on Windows is:

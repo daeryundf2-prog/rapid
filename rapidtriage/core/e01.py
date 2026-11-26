@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .audit import compute_sha256
-from .e01_native import native_e01_available
+from .e01_native import ExtractProgress, native_e01_available
 from .extraction_failures import (
     E01_EXTRACT_DIR_NAME,
     E01_LEGACY_EXTRACT_DIR_NAMES,
@@ -1647,6 +1647,7 @@ def extract_e01_to_directory(
     runner: CommandRunner = default_runner,
     tool_resolver: ToolResolver = shutil.which,
     stream_runner: StreamRunner | None = None,
+    on_progress: ExtractProgress | None = None,
 ) -> E01ExtractionResult:
     source_path = e01_path.expanduser().resolve()
     if not source_path.is_file():
@@ -1736,9 +1737,9 @@ def extract_e01_to_directory(
 
     if resolved_engine == "native":
         if not native_enabled:
-            from .e01_native import native_e01_missing_modules
+            from .e01_native import native_e01_status
 
-            missing_modules = ", ".join(native_e01_missing_modules())
+            missing_modules = "; ".join(native_e01_status()["problems"])
             raise E01ExtractionError(
                 f"native E01 engine requested but modules are unavailable: {missing_modules}. "
                 "Install the `native-e01` extra (pyewf + dissect.ntfs), select engine=external, "
@@ -1757,6 +1758,7 @@ def extract_e01_to_directory(
             missing_tools=list(missing),
             command_history=command_history,
             engine_note="requested",
+            on_progress=on_progress,
         )
 
     native_failure: E01ExtractionError | None = None
@@ -1775,6 +1777,7 @@ def extract_e01_to_directory(
                 missing_tools=list(missing),
                 command_history=command_history,
                 engine_note="preferred",
+                on_progress=on_progress,
             )
         except E01ExtractionError as exc:
             native_failure = exc
@@ -1807,6 +1810,7 @@ def extract_e01_to_directory(
                 tool_preflight=tool_preflight,
                 missing_tools=missing,
                 command_history=command_history,
+                on_progress=on_progress,
             )
         if blocked:
             blocked_payload: dict[str, object] = {
@@ -2129,9 +2133,17 @@ def _extract_e01_native_fallback(
     missing_tools: list[str],
     command_history: list[dict[str, object]],
     engine_note: str = "fallback",
+    on_progress: ExtractProgress | None = None,
 ) -> E01ExtractionResult:
     """Recover files with pyewf + dissect.ntfs (in-process, no external tools)."""
-    from .e01_native import NATIVE_MOUNT_STRATEGY, extract_e01_native
+    from .e01_native import (
+        MAX_NATIVE_EXTRACT_FILES,
+        NATIVE_EXTRACT_FILES_CEILING,
+        NATIVE_MAX_EXTRACT_FILES_ENV,
+        NATIVE_MIN_FREE_GB_ENV,
+        NATIVE_MOUNT_STRATEGY,
+        extract_e01_native,
+    )
 
     recovery_scope = build_tsk_recover_recovery_scope()
     recovery_scope = {
@@ -2185,6 +2197,7 @@ def _extract_e01_native_fallback(
             extract_dir,
             partition_start_sector=partition_start_sector,
             system_dir=stage / "_system",
+            on_progress=on_progress,
         )
     except Exception as exc:
         checkpoint_payload["stages"] = {
@@ -2273,11 +2286,31 @@ def _extract_e01_native_fallback(
         "encrypted volumes are not expanded.",
     ]
     if stats.get("truncated"):
+        # The active cap, applied separately to the allocated tree and to the deleted-record
+        # sweep: RAPIDTRIAGE_NATIVE_MAX_EXTRACT_FILES when set, else sized from the $MFT.
+        file_limit = int(stats.get("file_limit") or 0)
+        if stats.get("file_limit_from_env"):
+            origin = f"set by {NATIVE_MAX_EXTRACT_FILES_ENV}"
+            remedy = f"raise or unset {NATIVE_MAX_EXTRACT_FILES_ENV}"
+        else:
+            origin = (
+                f"default, sized from {int(stats.get('mft_record_count') or 0):,} $MFT records "
+                f"(floor {MAX_NATIVE_EXTRACT_FILES:,}, ceiling {NATIVE_EXTRACT_FILES_CEILING:,})"
+            )
+            remedy = f"set {NATIVE_MAX_EXTRACT_FILES_ENV} above the cap"
         warnings.append(
-            f"Native extraction hit the {200_000:,}-file safety cap "
-            f"({stats.get('truncated'):,} further entries skipped). Re-run "
-            "with a narrower partition selection or raise the limit if "
-            "complete coverage is required."
+            f"Native extraction hit the {file_limit:,}-file safety cap ({origin}; "
+            f"{stats.get('truncated'):,} further entries skipped; the cap applies to allocated "
+            "files and to deleted records separately; Windows forensic sources (hives, event "
+            "logs, Prefetch, ...) are recovered first and never capped). Re-run with a narrower "
+            f"partition selection or {remedy} if complete coverage is required."
+        )
+    if stats.get("disk_space_skips"):
+        min_free_gib = int(stats.get("min_free_bytes") or 0) / (1 << 30)
+        warnings.append(
+            f"Native extraction stopped writing when the output drive reached its {min_free_gib:.0f} GB "
+            f"free-space reserve ({stats.get('disk_space_skips'):,} entries not recovered). Free space "
+            f"or choose another output drive, or lower {NATIVE_MIN_FREE_GB_ENV}, and re-run."
         )
     return E01ExtractionResult(
         source_path=source_path,
@@ -4352,6 +4385,8 @@ def image_workflow_analyst_review_profile(number: int, details: Mapping[str, obj
                 and not bool(native_capabilities.get("direct_ad1_l01_lx01_aff_aff4_parser")),
                 "encrypted-or-corrupt-corpus-required": any("encrypted" in item or "corrupt" in item for item in blockers),
                 "vendor-export-required": number == 25 or scan_strategy == "vendor-export-first",
+                # In-process pyewf + dissect.ntfs recovery is engineering-grade: the card must disclose it.
+                "engineering-grade-native-decoder": bool(native_capabilities.get("python_native_ewf_extraction")),
             }.items()
             if enabled
         ],

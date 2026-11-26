@@ -4689,6 +4689,16 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(source["kind"], "image")
             self.assertEqual(source["size_bytes"], 123456789)
             self.assertEqual([p["number"] for p in source["partitions"]], [1, 2])
+            # A 0-based native table (EFI = 0, MSR = 1, ...) still numbers 1, 2, 3 without duplicates.
+            e01_path = run_dir / "rapidtriage-e01.json"
+            e01 = json.loads(e01_path.read_text(encoding="utf-8"))
+            rows = e01["partition_selection"]["partition_browser_rows"]
+            for zero_based, row in enumerate(rows):
+                row["partition_number"] = zero_based
+            rows.append(dict(rows[0], partition_number=len(rows), start_sector=9_999_999))
+            e01_path.write_text(json.dumps(e01), encoding="utf-8")
+            renumbered = client.get(f"/api/runs/{run_id}/dashboard").json()["evidence_source"]["partitions"]
+            self.assertEqual([p["number"] for p in renumbered], [1, 2, 3])
             self.assertEqual(source["partitions"][1]["filesystem"], "ntfs")
             self.assertTrue(source["partitions"][1]["selected"])
             self.assertFalse(source["partitions"][0]["selected"])

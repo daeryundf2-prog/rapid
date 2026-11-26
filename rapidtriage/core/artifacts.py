@@ -26,6 +26,7 @@ from .eventlog_channels import EVENTLOG_KIND, ChannelCounter
 from .input_root import InputRoot, resolve_input_root
 from .json_safe import json_default
 from .models import ArtifactRecord
+from .provider_progress import ProviderMessageSink, provider_progress_sink
 from .rules import RuleSet, StreamingArtifactAnnotator, annotate_artifacts_payload
 
 SUPPORTED_ARTIFACT_KINDS = tuple(sorted(artifact_collectors()))
@@ -66,12 +67,14 @@ def run_artifact_collection(
     use_cache: bool = True,
     check_cancel: Callable[[], bool] | None = None,
     on_rows: Callable[[int], None] | None = None,
+    on_message: ProviderMessageSink | None = None,
 ) -> dict[str, object]:
     """Collect one artifact kind into a per-kind payload.
 
-    ``check_cancel``/``on_rows`` (streaming collections only; default ``None``
-    keeps the CLI ``artifacts`` behaviour) are the run plan's cooperative
-    cancel check and row counter, see :func:`stream_artifact_collection`.
+    ``check_cancel``/``on_rows``/``on_message`` (streaming collections only;
+    default ``None`` keeps the CLI ``artifacts`` behaviour) are the run plan's
+    cooperative cancel check, row counter and provider phase messages, see
+    :func:`stream_artifact_collection`.
 
     Rows carry an ArtifactRecordV1 *envelope* (``fields`` rebuilt from
     ``details`` on demand). With ``records_path`` the provider is consumed
@@ -101,6 +104,7 @@ def run_artifact_collection(
             preview_limit=preview_limit,
             check_cancel=check_cancel,
             on_rows=on_rows,
+            on_message=on_message,
         )
 
     parser_errors: list[dict[str, str]] = []
@@ -268,9 +272,12 @@ class _ProviderPump:
     advanced and closed only by the provider thread.
     """
 
-    def __init__(self, collector: object, root: Path, *, kind: str) -> None:
+    def __init__(
+        self, collector: object, root: Path, *, kind: str, on_message: ProviderMessageSink | None = None
+    ) -> None:
         self._collector = collector
         self._root = root
+        self._on_message = on_message
         self._items: deque[object] = deque()
         self._stop = threading.Event()
         self._ready = threading.Event()
@@ -286,6 +293,10 @@ class _ProviderPump:
         self.thread.start()
 
     def _produce(self) -> None:
+        with provider_progress_sink(self._on_message):
+            self._produce_rows()
+
+    def _produce_rows(self) -> None:
         generator = None
         try:
             generator = iter(self._collector.collect(self._root))  # type: ignore[attr-defined]
@@ -383,8 +394,13 @@ def stream_artifact_collection(
     preview_limit: int = ARTIFACT_PREVIEW_LIMIT,
     check_cancel: Callable[[], bool] | None = None,
     on_rows: Callable[[int], None] | None = None,
+    on_message: ProviderMessageSink | None = None,
 ) -> dict[str, object]:
     """Bounded-memory collection: provider generator -> hoisted JSONL.
+
+    ``on_message`` receives the provider's phase messages
+    (:func:`~.provider_progress.report_provider_progress`), the only sign of
+    life of a provider that walks a large tree without yielding rows.
 
     Run plan (P2 §3.3 a): ``check_cancel`` is asked every
     ``CANCEL_CHECK_ROWS`` rows or ``CANCEL_CHECK_SECONDS``; when it returns
@@ -431,7 +447,11 @@ def stream_artifact_collection(
     generator = None
     pump: _ProviderPump | None = None
     try:
-        with raw_path.open("w", encoding="utf-8", newline="\n", buffering=_STREAM_BUFFER_BYTES) as raw:
+        with (
+            raw_path.open("w", encoding="utf-8", newline="\n", buffering=_STREAM_BUFFER_BYTES) as raw,
+            # Without a pump the provider generator runs on this thread.
+            provider_progress_sink(on_message),
+        ):
             source: Iterator[object] | tuple[()]
             if check_cancel is None:
                 generator = iter(collector.collect(input_root.root_path))  # type: ignore[attr-defined]
@@ -440,7 +460,7 @@ def stream_artifact_collection(
                 cancelled = True
                 source = ()
             else:
-                pump = _ProviderPump(collector, input_root.root_path, kind=collector_kind)
+                pump = _ProviderPump(collector, input_root.root_path, kind=collector_kind, on_message=on_message)
                 pump.start()
                 source = pump.iterate(check_cancel)
             for index, item in enumerate(source, start=1):

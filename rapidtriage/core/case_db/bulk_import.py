@@ -173,12 +173,13 @@ def bulk_import_run_artifacts(
     file_id_for: Callable[[str], int | None],
     artifact_ids: dict[tuple[str, int], int],
     batch_rows: int = BULK_IMPORT_BATCH_ROWS,
+    on_rows: Callable[[int], None] | None = None,
 ) -> int:
     """Insert every ``artifacts_*`` output row (compressed layout only).
 
     ``citations`` is the caller's ``CitationAllocator`` (``next()``);
     ``artifact_ids`` receives ``(output_name, row_index) -> id`` for the
-    timeline import.
+    timeline import. ``on_rows`` gets the running row count after each batch.
     """
     next_id = next_autoincrement_id(connection, "artifact")
     count = 0
@@ -229,6 +230,8 @@ def bulk_import_run_artifacts(
         connection.executemany(_ARTIFACT_INSERT_SQL, rows)
         connection.executemany(_ARTIFACT_FTS_INSERT_SQL, fts_rows)
         count += len(rows)
+        if on_rows is not None:
+            on_rows(count)
     connection.execute(ARTIFACT_FTS_COMPRESSED_INSERT_TRIGGER_SQL)
     return count
 
@@ -243,8 +246,10 @@ def bulk_import_run_events(
     file_id_for: Callable[[str], int | None],
     artifact_ids: Mapping[tuple[str, int], int],
     batch_rows: int = BULK_IMPORT_BATCH_ROWS,
+    on_rows: Callable[[int], None] | None = None,
 ) -> int:
-    """Insert timeline events in ``executemany`` batches (same rows/ids as per-row)."""
+    """Insert timeline events in ``executemany`` batches (same rows/ids as per-row);
+    ``on_rows`` gets the running row count after each batch."""
     next_id = next_autoincrement_id(connection, "event")
     count = 0
     batch: list[tuple[object, ...]] = []
@@ -302,6 +307,10 @@ def bulk_import_run_events(
         count += 1
         if len(batch) >= batch_rows:
             flush()
+            if on_rows is not None:
+                on_rows(count)
     if batch:
         flush()
+        if on_rows is not None:
+            on_rows(count)
     return count

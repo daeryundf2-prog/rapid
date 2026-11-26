@@ -12,11 +12,17 @@ trusted-tool extraction (ewfmount/tsk_recover) and native decode.
 from __future__ import annotations
 
 import contextlib
+import importlib.metadata
 import io
+import itertools
 import os
+import shutil
 import struct
+import sys
 import uuid
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 try:  # optional native decoders
@@ -76,13 +82,29 @@ MBR_TYPE_DESCRIPTIONS = {
 }
 
 SWAP_DESCRIPTIONS = ("swap",)
+# File cap policy (allocated tree and deleted-record sweep each get the cap):
+# the default is sized from the volume's $MFT record count, so a normal volume
+# is recovered completely. A fixed 200k cap left most entries of a full Windows
+# volume unrecovered, in directory-walk order (whatever came late in the walk
+# was simply missing). MAX_NATIVE_EXTRACT_FILES is the floor
+# (and the cap when the $MFT size cannot be read); NATIVE_EXTRACT_FILES_CEILING
+# bounds a corrupt or absurd $MFT size. The real resource bound is disk space:
+# extraction stops writing once the output drive would drop below
+# RAPIDTRIAGE_NATIVE_MIN_FREE_GB (default 20 GB, left for the later stages).
+# RAPIDTRIAGE_NATIVE_MAX_EXTRACT_FILES still sets a fixed cap (quick triage).
 MAX_NATIVE_EXTRACT_FILES = 200_000
+NATIVE_EXTRACT_FILES_CEILING = 4_000_000
 MAX_NATIVE_EXTRACT_BYTES = 0  # 0 = unbounded; callers may cap later
 NATIVE_MAX_EXTRACT_FILES_ENV = "RAPIDTRIAGE_NATIVE_MAX_EXTRACT_FILES"
+NATIVE_MIN_FREE_GB_ENV = "RAPIDTRIAGE_NATIVE_MIN_FREE_GB"
+DEFAULT_NATIVE_MIN_FREE_BYTES = 20 << 30
+# Free space is re-read after this many files or bytes (and before any file the estimate cannot fit).
+SPACE_CHECK_EVERY_FILES = 256
+SPACE_CHECK_EVERY_BYTES = 1 << 30
 
 
-def native_extract_file_limit() -> int:
-    """Active per-image extraction cap; env override for large real evidence."""
+def native_extract_file_limit_override() -> int | None:
+    """The fixed cap set through ``RAPIDTRIAGE_NATIVE_MAX_EXTRACT_FILES`` (``None`` when unset/invalid)."""
     raw = os.environ.get(NATIVE_MAX_EXTRACT_FILES_ENV, "").strip()
     if raw:
         try:
@@ -91,20 +113,128 @@ def native_extract_file_limit() -> int:
                 return value
         except ValueError:
             pass
-    return MAX_NATIVE_EXTRACT_FILES
+    return None
+
+
+def native_extract_file_limit(mft_records: int = 0) -> int:
+    """Active per-image extraction cap: the env override, else sized from the $MFT record count."""
+    override = native_extract_file_limit_override()
+    if override is not None:
+        return override
+    return min(NATIVE_EXTRACT_FILES_CEILING, max(MAX_NATIVE_EXTRACT_FILES, int(mft_records)))
+
+
+def native_min_free_bytes() -> int:
+    """Free space extraction leaves on the output drive (``RAPIDTRIAGE_NATIVE_MIN_FREE_GB``)."""
+    raw = os.environ.get(NATIVE_MIN_FREE_GB_ENV, "").strip()
+    if raw:
+        try:
+            value = float(raw)
+            if value >= 0:
+                return int(value * (1 << 30))
+        except ValueError:
+            pass
+    return DEFAULT_NATIVE_MIN_FREE_BYTES
+
+
+class ExtractSpaceGuard:
+    """Stops native extraction from filling the output drive.
+
+    ``allows(size)`` keeps a running free-space estimate (re-read every
+    ``SPACE_CHECK_EVERY_FILES`` files / ``SPACE_CHECK_EVERY_BYTES`` bytes and
+    before a file the estimate cannot fit). Once a file would leave less than
+    ``reserve`` bytes free, nothing more is written (``tripped``).
+    """
+
+    def __init__(self, directory: Path, reserve: int) -> None:
+        self.directory = directory
+        self.reserve = reserve
+        self.free = self._probe()
+        self.free_at_start = self.free
+        self.tripped = False
+        self._files = 0
+        self._bytes = 0
+
+    def _probe(self) -> int:
+        probe = self.directory
+        while not probe.exists() and probe.parent != probe:
+            probe = probe.parent
+        try:
+            return int(shutil.disk_usage(probe).free)
+        except OSError:
+            return -1  # unknown: the guard does not block
+
+    def allows(self, size: int) -> bool:
+        if self.tripped:
+            return False
+        if self.free < 0:
+            return True  # free space unreadable at start: not guarded
+        if self._files >= SPACE_CHECK_EVERY_FILES or self._bytes >= SPACE_CHECK_EVERY_BYTES or self.free - size < self.reserve:
+            probed = self._probe()
+            if probed >= 0:
+                self.free = probed
+            self._files = self._bytes = 0
+        if self.free - size < self.reserve:
+            self.tripped = True
+            return False
+        self._files += 1
+        self._bytes += size
+        self.free -= size
+        return True
+
+
+# pyproject `native-e01` extra: dissect.ntfs>=3.10.
+NATIVE_NTFS_MIN_VERSION = (3, 10)
+
+
+def _version_tuple(text: str | None) -> tuple[int, ...] | None:
+    parts: list[int] = []
+    for piece in (text or "").split("."):
+        digits = "".join(itertools.takewhile(str.isdigit, piece))
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts) or None
+
+
+def _distribution_version(name: str) -> str | None:
+    """Installed version, or None for vendored/frozen builds without dist metadata."""
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def native_e01_status() -> dict[str, Any]:
+    """Import + smoke check of the native-e01 extra, with the versions in use.
+
+    ``problems`` is empty only when both modules import, a pyewf handle can be
+    constructed (exercises the libewf binding) and dissect.ntfs is not older
+    than the declared minimum; doctor, the evidence adapter and ``run`` gate on it.
+    """
+    problems: list[str] = []
+    versions: dict[str, str | None] = {"pyewf": None, "dissect.ntfs": None}
+    if pyewf is None:
+        problems.append("pyewf is not importable")
+    else:
+        try:
+            versions["pyewf"] = str(pyewf.get_version())
+            pyewf.handle()
+        except Exception as exc:
+            problems.append(f"pyewf is importable but unusable ({type(exc).__name__}: {exc})")
+    if NTFS is None:
+        problems.append("dissect.ntfs is not importable")
+    else:
+        versions["dissect.ntfs"] = _distribution_version("dissect.ntfs")
+        parsed = _version_tuple(versions["dissect.ntfs"])
+        if parsed is not None and parsed < NATIVE_NTFS_MIN_VERSION:
+            minimum = ".".join(map(str, NATIVE_NTFS_MIN_VERSION))
+            problems.append(f"dissect.ntfs {versions['dissect.ntfs']} is older than the required {minimum}")
+    return {"available": not problems, "versions": versions, "problems": problems}
 
 
 def native_e01_available() -> bool:
-    return pyewf is not None and NTFS is not None
-
-
-def native_e01_missing_modules() -> list[str]:
-    missing = []
-    if pyewf is None:
-        missing.append("pyewf")
-    if NTFS is None:
-        missing.append("dissect.ntfs")
-    return missing
+    return bool(native_e01_status()["available"])
 
 
 class EwfSectorReader(io.RawIOBase):
@@ -484,11 +614,14 @@ def _record_sequence(rec: Any) -> int:
     return int(index or 0)
 
 
-def _dump_ntfs_record(rec: Any, out_path: Path, stats: dict[str, int]) -> None:
+def _dump_ntfs_record(rec: Any, out_path: Path, stats: dict[str, int], guard: ExtractSpaceGuard | None = None) -> None:
     try:
         size = int(rec.size())
     except Exception:
         stats["errors"] += 1
+        return
+    if guard is not None and not guard.allows(size):
+        stats["disk_space_skips"] += 1
         return
     out_path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -516,13 +649,34 @@ def _dump_ntfs_record(rec: Any, out_path: Path, stats: dict[str, int]) -> None:
     stats["bytes"] += size - max(remaining, 0)
 
 
+ExtractProgress = Callable[[Mapping[str, int]], None]
+"""Called after each recovered file with the running stats (files, bytes, errors, …)."""
+
+
+def _notify_progress(on_progress: ExtractProgress | None, stats: dict[str, int]) -> None:
+    """Hand the observer a read-only view; progress is advisory, so an observer that
+    raises must neither abort recovery nor be counted as an unreadable file."""
+    if on_progress is None:
+        return
+    with contextlib.suppress(Exception):
+        on_progress(MappingProxyType(stats))
+
+
 def _walk_ntfs_dir(
     node: Any,
     out_dir: Path,
     stats: dict[str, int],
     depth: int = 0,
     limit: int | None = None,
+    on_progress: ExtractProgress | None = None,
+    done: set[int] | None = None,
+    guard: ExtractSpaceGuard | None = None,
+    record_done: bool = False,
 ) -> None:
+    # ``done``: MFT segments the priority pass recovered; the full walk skips them. Only the
+    # priority pass records into it (``record_done``): recording every file of the full walk
+    # would hold one entry per file of the volume and silently drop the other paths of a
+    # hard-linked file (WinSxS / System32), which the walk has always recovered at each path.
     if depth > 64:
         stats["depth_skips"] += 1
         return
@@ -558,15 +712,99 @@ def _walk_ntfs_dir(
         target = out_dir / _safe_component(name)
         try:
             if rec.is_dir():
-                _walk_ntfs_dir(rec, target, stats, depth + 1, limit)
+                _walk_ntfs_dir(rec, target, stats, depth + 1, limit, on_progress, done, guard, record_done)
             elif rec.is_file():
+                if done is not None and segment is not None and segment in done:
+                    continue  # already recovered by the priority pass
                 if stats["files"] >= limit:
                     stats["truncated"] += 1
+                    _notify_progress(on_progress, stats)  # the walk past the cap still takes minutes on a full volume
                     continue
-                _dump_ntfs_record(rec, target, stats)
+                _dump_ntfs_record(rec, target, stats, guard)
+                if record_done and done is not None and segment is not None:
+                    done.add(segment)
+                _notify_progress(on_progress, stats)
         except Exception:
             stats["errors"] += 1
             continue
+
+
+# Forensic sources recovered before the full tree walk, so the file cap is never spent on
+# Program Files / ProgramData first: the walk follows directory order, and on a full Windows
+# volume the cap ran out in Users\ before Windows\ (no hives, event logs or Prefetch at all).
+# "*" expands to every child directory (one per user profile).
+PRIORITY_RECOVERY_PATHS: tuple[str, ...] = (
+    "Windows/System32/config",
+    "Windows/System32/winevt/Logs",
+    "Windows/Prefetch",
+    "Windows/appcompat/Programs",
+    "Windows/System32/sru",
+    "Windows/System32/Tasks",
+    "Windows/inf/setupapi.dev.log",
+    "Users/*/NTUSER.DAT",
+    "Users/*/NTUSER.DAT.LOG1",
+    "Users/*/NTUSER.DAT.LOG2",
+    "Users/*/AppData/Local/Microsoft/Windows/UsrClass.dat",
+    "Users/*/AppData/Roaming/Microsoft/Windows/Recent",
+    "Users/*/AppData/Roaming/Microsoft/Windows/PowerShell/PSReadLine",
+    "$Recycle.Bin",
+)
+
+
+def _priority_targets(root: Any, pattern: str) -> list[tuple[str, Any]]:
+    """(relative path, record) pairs for one PRIORITY_RECOVERY_PATHS entry; missing parts yield none."""
+    found: list[tuple[str, Any]] = [("", root)]
+    for part in pattern.split("/"):
+        nxt: list[tuple[str, Any]] = []
+        for rel, node in found:
+            try:
+                names = [n for n in node.listdir(ignore_dos=True) if n not in (".", "..")] if part == "*" else [part]
+            except Exception:
+                continue
+            for name in names:
+                try:
+                    child = node.get(name)
+                except Exception:
+                    continue
+                if child is None or (part == "*" and not child.is_dir()):
+                    continue
+                nxt.append((f"{rel}/{name}" if rel else name, child))
+        found = nxt
+    return found
+
+
+def _recover_priority_paths(
+    root: Any,
+    extract_dir: Path,
+    stats: dict[str, int],
+    *,
+    done: set[int],
+    on_progress: ExtractProgress | None = None,
+    guard: ExtractSpaceGuard | None = None,
+) -> None:
+    """Recover PRIORITY_RECOVERY_PATHS first, at the same relative paths the full walk uses.
+
+    These forensic sources are exempt from the file cap (they count toward it, so the
+    tree walk that follows gets what is left); only the disk-space guard stops them.
+    """
+    for pattern in PRIORITY_RECOVERY_PATHS:
+        for rel, rec in _priority_targets(root, pattern):
+            target = extract_dir.joinpath(*(_safe_component(part) for part in rel.split("/")))
+            try:
+                if rec.is_dir():
+                    _walk_ntfs_dir(
+                        rec, target, stats, limit=sys.maxsize, on_progress=on_progress, done=done, guard=guard, record_done=True
+                    )
+                elif rec.is_file():
+                    segment = getattr(rec, "segment", None)
+                    if segment is not None and segment in done:
+                        continue
+                    _dump_ntfs_record(rec, target, stats, guard)
+                    if segment is not None:
+                        done.add(segment)
+                    _notify_progress(on_progress, stats)
+            except Exception:
+                stats["errors"] += 1
 
 
 def _mft_record_count(fs: Any) -> int:
@@ -591,6 +829,8 @@ def _sweep_deleted_mft_records(
     extract_dir: Path,
     stats: dict[str, int],
     limit: int | None = None,
+    on_progress: ExtractProgress | None = None,
+    guard: ExtractSpaceGuard | None = None,
 ) -> None:
     """Best-effort recovery of MFT records whose in-use flag is cleared."""
     if limit is None:
@@ -613,16 +853,20 @@ def _sweep_deleted_mft_records(
             filename = rec.filename or f"record-{index}"
         except Exception:
             continue
-        if stats["files"] >= limit:
+        # Deleted records get their own budget: the sweep runs after the allocated walk, so a
+        # shared cap (reached by the live tree on any full Windows volume) recovered none of them.
+        if stats["deleted_files"] + stats["deleted_read_errors"] >= limit:
             stats["truncated"] += 1
+            _notify_progress(on_progress, stats)
             continue
         target = deleted_dir / f"{index}-{_safe_component(filename)}"
-        before_errors = stats["errors"]
-        _dump_ntfs_record(rec, target, stats)
-        if stats["errors"] != before_errors:
-            stats["deleted_read_errors"] += 1
-        else:
+        before_files, before_errors = stats["files"], stats["errors"]
+        _dump_ntfs_record(rec, target, stats, guard)
+        if stats["files"] != before_files:
             stats["deleted_files"] += 1
+        elif stats["errors"] != before_errors:
+            stats["deleted_read_errors"] += 1
+        _notify_progress(on_progress, stats)
 
 
 def _dump_ntfs_system_record(rec: Any, out_path: Path) -> int:
@@ -649,6 +893,7 @@ def extract_e01_native(
     partition_start_sector: int | None = None,
     include_deleted: bool = True,
     system_dir: Path | None = None,
+    on_progress: ExtractProgress | None = None,
 ) -> dict[str, Any]:
     """Open an EWF segment set, select a partition, and recover files via NTFS.
 
@@ -675,6 +920,8 @@ def extract_e01_native(
                 "Mount or export the image with a trusted tool, then select the resulting folder."
             )
         fs = NTFS(reader)
+        mft_records = _mft_record_count(fs)
+        guard = ExtractSpaceGuard(extract_dir, native_min_free_bytes())
         stats: dict[str, int] = {
             "files": 0,
             "bytes": 0,
@@ -684,12 +931,21 @@ def extract_e01_native(
             "deleted_files": 0,
             "deleted_read_errors": 0,
             "alias_skips": 0,
-            "file_limit": native_extract_file_limit(),
+            "disk_space_skips": 0,
+            "file_limit": native_extract_file_limit(mft_records),
+            "file_limit_from_env": int(native_extract_file_limit_override() is not None),
+            "mft_record_count": mft_records,
+            "min_free_bytes": guard.reserve,
+            "free_bytes_at_start": guard.free_at_start,
         }
         root = fs.mft.get(5)
-        _walk_ntfs_dir(root, extract_dir, stats, limit=stats["file_limit"])
+        done: set[int] = set()
+        _recover_priority_paths(root, extract_dir, stats, done=done, on_progress=on_progress, guard=guard)
+        _walk_ntfs_dir(root, extract_dir, stats, limit=stats["file_limit"], on_progress=on_progress, done=done, guard=guard)
         if include_deleted:
-            _sweep_deleted_mft_records(fs, extract_dir, stats, limit=stats["file_limit"])
+            _sweep_deleted_mft_records(
+                fs, extract_dir, stats, limit=stats["file_limit"], on_progress=on_progress, guard=guard
+            )
         system_artifacts: dict[str, str] = {}
         if system_dir is not None:
             # Dump $MFT (record 0) outside the recovered tree so reference-diff
