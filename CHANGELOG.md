@@ -37,6 +37,13 @@
   UTC and adds the wall-clock count when there is one. Rows without an offset
   keep their caveat; one without a local label now gets one too
   (`tests/test_d27_timeline.py::ReportTimeBasisTests`).
+- A Taskband Favorites or FavoritesResolve value holding exactly 4,096 pins
+  (the frame cap) followed by its proper end was labelled
+  `partial`/`frame-cap`, the same as a value with 4,097 pins, because the cap
+  was checked before the end marker. **Output change:** such values are now
+  `decoded` with `end_status` `terminator` or `end-of-value`; `frame-cap` is
+  reported only when another frame follows
+  (`tests/test_taskband_featureusage.py::TaskbarProviderTests::test_clean_end_at_exactly_the_frame_cap_is_complete`).
 - Journald marked an entry with sequence number 0, or with a monotonic time of
   2^55 or more, as fully `parsed` with no limitation, although systemd's
   entry check rejects both. **Output change:** such entries are `partial` and

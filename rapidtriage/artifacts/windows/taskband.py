@@ -25,9 +25,6 @@ def decode_taskband_value(value_name: str, data: bytes) -> tuple[list[dict[str, 
     if len(data) > MAX_TASKBAND_VALUE_BYTES:
         end_status = "value-too-large"
     while not end_status:
-        if frames >= MAX_TASKBAND_ENTRIES:
-            end_status = "frame-cap"
-            break
         if favorites:
             if offset >= len(data):
                 end_status = "missing-terminator"
@@ -36,13 +33,18 @@ def decode_taskband_value(value_name: str, data: bytes) -> tuple[list[dict[str, 
                 end_status = "terminator"
                 offset += 1
                 break
+        elif offset == len(data):
+            end_status = "end-of-value"
+            break
+        # A list ending cleanly right after the last allowed frame is complete; only a further frame is refused.
+        if frames >= MAX_TASKBAND_ENTRIES:
+            end_status = "frame-cap"
+            break
+        if favorites:
             if data[offset] != 0:
                 end_status = "unrecognized-entry-tag"
                 break
             header = offset + 1
-        elif offset == len(data):
-            end_status = "end-of-value"
-            break
         else:
             header = offset
         if header + 4 > len(data):
