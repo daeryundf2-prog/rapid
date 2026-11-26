@@ -1000,10 +1000,14 @@ def iter_artifact_output_row_views(
         if not isinstance(row, dict):
             continue
         if profiles and row.get(PROFILE_REF_KEY):
-            yield (
-                index,
-                expand_profile(row, profiles, copy_templates=False),
-                expand_profile(row, profiles, copy_templates=False, include_type_templates=False),
-            )
+            # Decode codes and restore per-file context once for both views.
+            # _merge_profile_level copies the detail dict before applying the
+            # type template, so the varying view retains its compact contents.
+            varying = expand_profile(row, profiles, copy_templates=False, include_type_templates=False)
+            full = varying.copy()
+            ref = full.pop(PROFILE_REF_KEY, None)
+            if ref is not None:
+                _merge_profile_level(full, profiles[str(ref)], copy_templates=False)
+            yield index, full, varying
         else:
             yield index, row, row
