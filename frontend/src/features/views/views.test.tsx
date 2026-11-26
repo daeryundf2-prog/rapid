@@ -244,23 +244,35 @@ describe("thumbnail loading", () => {
   it("loads the server thumbnail and falls back to the original only when it fails", async () => {
     const calls = installFetch({
       "/source-thumbnail": (url) =>
-        url.searchParams.get("path")?.endsWith("bad.png")
+        /bad\.(png|svg)$/.test(url.searchParams.get("path") ?? "")
           ? jsonResponse({ detail: "unsupported" }, 415)
           : new Response("thumb", { status: 200 }),
-      "/source-file": () => new Response("original", { status: 200 }),
+      "/source-file": (url) =>
+        url.searchParams.get("path")?.endsWith(".svg")
+          ? new Response("<svg><script>alert(1)</script></svg>", {
+              headers: { "content-type": "image/svg+xml" },
+            })
+          : new Response("original", { status: 200 }),
     });
     const ok = await loadThumbBlob("run-1", "C:/x/a.jpg", new AbortController().signal);
-    expect(await ok.text()).toBe("thumb");
+    expect(ok).toBeInstanceOf(Blob);
+    expect(await (ok as Blob).text()).toBe("thumb");
     expect(calls.map((c) => c.url.split("?")[0])).toEqual(["/api/runs/run-1/source-thumbnail"]);
     expect(new URL(calls[0]?.url ?? "", "http://x").searchParams.get("size")).toBe(String(THUMB_SIZE));
 
     const fallback = await loadThumbBlob("run-1", "C:/x/bad.png", new AbortController().signal);
-    expect(await fallback.text()).toBe("original");
+    expect(fallback).toBeInstanceOf(Blob);
+    expect(await (fallback as Blob).text()).toBe("original");
     expect(calls.slice(1).map((c) => c.url.split("?")[0])).toEqual([
       "/api/runs/run-1/source-thumbnail",
       "/api/runs/run-1/source-file",
     ]);
     expect(THUMB_CONCURRENCY).toBe(6);
+
+    // An SVG original never becomes a blob: URL (the console's origin): a data: URL instead.
+    const svg = await loadThumbBlob("run-1", "C:/x/bad.svg", new AbortController().signal);
+    expect(typeof svg).toBe("string");
+    expect(String(svg)).toMatch(/^data:image\/svg\+xml;base64,/);
   });
 });
 

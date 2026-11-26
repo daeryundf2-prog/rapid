@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { SourcePreview } from "../../../api/viewer";
 import { isRenderablePdf } from "../modes";
 import { countHits, keywordPattern } from "./Highlight";
-import { PdfView } from "./PdfView";
+import { PdfView, usePdfDocument } from "./PdfView";
 import { TextLines } from "./SourceView";
 
 type Presentation = "pdf" | "text";
@@ -17,7 +17,9 @@ interface DocumentViewProps {
 /**
  * A document: the PDF itself, rendered from its bytes, and the text source-preview extracted from
  * it (PDF/DOCX/…). A PDF opens on its pages, unless the route's keywords hit the extracted text:
- * then the highlighted text comes first. The toggle switches either way for this file.
+ * then the highlighted text comes first. The toggle switches either way for this file. The PDF's
+ * bytes are fetched the first time its pages show and kept until the file changes or the viewer
+ * closes, so toggling back does not fetch them again.
  */
 export function DocumentView({ runId, preview, terms, onOpenOriginal }: DocumentViewProps) {
   const text = preview.text ?? "";
@@ -25,6 +27,9 @@ export function DocumentView({ runId, preview, terms, onOpenOriginal }: Document
   const hits = useMemo(() => countHits(text, keywordPattern(terms)), [text, terms]);
   const [chosen, setChosen] = useState<Presentation | null>(null);
   const presentation: Presentation = pdf ? (chosen ?? (hits > 0 ? "text" : "pdf")) : "text";
+  const [pagesShown, setPagesShown] = useState(false);
+  if (presentation === "pdf" && !pagesShown) setPagesShown(true);
+  const pdfDocument = usePdfDocument(runId, preview, pdf && (pagesShown || presentation === "pdf"));
   return (
     <div className="viewer-document" data-presentation={presentation}>
       {pdf ? (
@@ -38,7 +43,7 @@ export function DocumentView({ runId, preview, terms, onOpenOriginal }: Document
         </fieldset>
       ) : null}
       {presentation === "pdf" ? (
-        <PdfView runId={runId} preview={preview} onOpenOriginal={onOpenOriginal} />
+        <PdfView preview={preview} document={pdfDocument} onOpenOriginal={onOpenOriginal} />
       ) : (
         <ExtractedText preview={preview} terms={terms} />
       )}

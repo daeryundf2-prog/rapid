@@ -69,6 +69,43 @@ describe("ImageView — a format the browser cannot decode", () => {
   });
 });
 
+describe("ImageView — an SVG original", () => {
+  it("shows it from a data: URL, never a blob: URL in the console's origin", async () => {
+    installFetch({
+      "source-file": () =>
+        new Response('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', {
+          headers: { "content-type": "image/svg+xml" },
+        }),
+      "source-image-gallery": () => ({
+        offset: 0,
+        limit: 12,
+        returned: 0,
+        total: 0,
+        has_next: false,
+        items: [],
+      }),
+    });
+    render(
+      <ImageView
+        runId="run-1"
+        preview={preview({
+          path: "C:/evidence/logo.svg",
+          name: "logo.svg",
+          extension: ".svg",
+          mime_type: "image/svg+xml",
+          preview_type: "image",
+          image: {},
+        })}
+        onOpenPath={() => undefined}
+        onOpenOriginal={() => undefined}
+      />,
+    );
+    const image = await screen.findByAltText("logo.svg");
+    expect(image.getAttribute("src")).toMatch(/^data:image\/svg\+xml;base64,/);
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+});
+
 describe("MediaView — a codec the browser cannot play", () => {
   it("replaces the player with the reason and 원본 열기", async () => {
     installFetch({ "source-file": () => new Response("mp4v") });

@@ -482,6 +482,38 @@ export async function fetchSourceBlob(runId: string, path: string, signal?: Abor
   return response.blob();
 }
 
+/** Largest SVG shown in an `<img>`: it becomes a `data:` URL, a third larger than the file. */
+export const SVG_INLINE_MAX_BYTES = 8 * 1024 * 1024;
+
+/**
+ * The original for an `<img>`, never as a URL that renders active content in the console's origin
+ * (a `blob:` URL shares it, and "open image in new tab" makes it a document). An SVG — the one
+ * image type that runs script as a document — comes back as a `data:` URL, whose origin is opaque.
+ * Other image types stay blobs; any non-image type is relabelled application/octet-stream, which
+ * `<img>` still sniffs and decodes and a new tab only downloads.
+ */
+export async function fetchSourceImage(
+  runId: string,
+  path: string,
+  signal?: AbortSignal,
+): Promise<Blob | string> {
+  const blob = await fetchSourceBlob(runId, path, signal);
+  const type = (blob.type.split(";")[0] ?? "").trim().toLowerCase();
+  if (type !== "image/svg+xml") {
+    return type.startsWith("image/") ? blob : blob.slice(0, blob.size, "application/octet-stream");
+  }
+  if (blob.size > SVG_INLINE_MAX_BYTES) {
+    throw new Error("SVG가 8 MB를 넘어 화면에 표시하지 않습니다. 원본 열기로 내려받아 확인하세요.");
+  }
+  const svg = blob.slice(0, blob.size, "image/svg+xml");
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("SVG를 읽지 못했습니다."));
+    reader.readAsDataURL(svg);
+  });
+}
+
 /** Server-side cached JPEG thumbnail (≤ 512 px; GET /source-thumbnail). */
 export const THUMBNAIL_DEFAULT_SIZE = 160;
 

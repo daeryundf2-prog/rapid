@@ -233,7 +233,9 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
       if (!target?.sourcePath) return;
       try {
         const blob = await fetchSourceBlob(target.runId, target.sourcePath);
-        const url = URL.createObjectURL(blob);
+        // Bytes only: were the link ever navigated instead of downloaded, an evidence HTML/SVG
+        // would otherwise run as a document in the console's origin (a blob: URL shares it).
+        const url = URL.createObjectURL(blob.slice(0, blob.size, "application/octet-stream"));
         const anchor = document.createElement("a");
         anchor.href = url;
         anchor.download = baseName(

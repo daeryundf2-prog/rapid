@@ -1,6 +1,7 @@
+import { fetchSourcePrefix } from "../../../api/sourceText";
 import { fetchSourceBlob, type SourcePreview } from "../../../api/viewer";
 import { bytesLabel } from "../fieldFormat";
-import { useBlobUrl } from "../useAsync";
+import { type BlobUrlState, useBlobUrl } from "../useAsync";
 import { Unavailable } from "./Unavailable";
 
 /** The PDF is loaded whole as a blob (auth header) for the browser's own viewer; larger files open externally. */
@@ -16,30 +17,58 @@ export class PdfSignatureError extends Error {
   }
 }
 
-/** The original as an `application/pdf` blob, only when its bytes carry the PDF header. */
+function hasPdfHeader(head: Uint8Array): boolean {
+  return new TextDecoder("latin1").decode(head.subarray(0, PDF_HEADER_WINDOW)).includes(PDF_HEADER);
+}
+
+/**
+ * The original as an `application/pdf` blob, only when its bytes carry the PDF header. The header
+ * is read first from the start of the stream, so a large file that is not a PDF is never fetched whole.
+ */
 async function fetchPdfBlob(runId: string, path: string, signal: AbortSignal): Promise<Blob> {
-  const blob = await fetchSourceBlob(runId, path, signal);
-  const head = new TextDecoder("latin1").decode(await blob.slice(0, PDF_HEADER_WINDOW).arrayBuffer());
-  if (!head.includes(PDF_HEADER)) throw new PdfSignatureError();
-  // The blob's type decides how the frame treats the bytes: always PDF, never the server's guess
-  // from the file name (evidence named .pdf must not run as a page in the console's origin).
+  const head = await fetchSourcePrefix(runId, path, PDF_HEADER_WINDOW, signal);
+  if (!hasPdfHeader(head.bytes)) throw new PdfSignatureError();
+  const blob = head.complete ? new Blob([head.bytes]) : await fetchSourceBlob(runId, path, signal);
+  // The bytes framed are the ones checked, even if the file changed between the two reads.
+  if (!head.complete && !hasPdfHeader(new Uint8Array(await blob.slice(0, PDF_HEADER_WINDOW).arrayBuffer()))) {
+    throw new PdfSignatureError();
+  }
+  // The blob's type alone decides how the frame treats the bytes: always PDF, never the server's
+  // guess from the file name. This is the only guard between evidence and the console's origin
+  // (a blob: document shares it), so it must stay: the frame cannot be sandboxed, because Chrome
+  // refuses to run its PDF viewer in any sandboxed frame, whatever the allow-* tokens.
   return blob.slice(0, blob.size, "application/pdf");
 }
 
+export interface PdfDocument {
+  /** At most PDF_INLINE_MAX_BYTES: fetched and shown here. */
+  inline: boolean;
+  /** False where PDFs download instead of rendering in the page (phones, a switched-off viewer). */
+  embeddable: boolean;
+  pdf: BlobUrlState;
+}
+
+/**
+ * The PDF's bytes as a blob URL, loaded once `wanted` and kept (not refetched) while the caller
+ * stays mounted; the URL is revoked when it unmounts or the file changes.
+ */
+export function usePdfDocument(runId: string, preview: SourcePreview, wanted: boolean): PdfDocument {
+  const inline = preview.size <= PDF_INLINE_MAX_BYTES;
+  const embeddable = navigator.pdfViewerEnabled !== false;
+  const pdf = useBlobUrl(wanted && inline && embeddable ? `${runId}|${preview.path}` : null, (signal) =>
+    fetchPdfBlob(runId, preview.path, signal),
+  );
+  return { inline, embeddable, pdf };
+}
+
 interface PdfViewProps {
-  runId: string;
   preview: SourcePreview;
+  document: PdfDocument;
   onOpenOriginal: () => void;
 }
 
 /** The PDF's pages in the browser's own PDF viewer, fed the original's bytes. */
-export function PdfView({ runId, preview, onOpenOriginal }: PdfViewProps) {
-  const inline = preview.size <= PDF_INLINE_MAX_BYTES;
-  // False where PDFs download instead of rendering in the page (phones, a switched-off viewer).
-  const embeddable = navigator.pdfViewerEnabled !== false;
-  const pdf = useBlobUrl(inline && embeddable ? `${runId}|${preview.path}` : null, (signal) =>
-    fetchPdfBlob(runId, preview.path, signal),
-  );
+export function PdfView({ preview, document: { inline, embeddable, pdf }, onOpenOriginal }: PdfViewProps) {
   if (!inline) {
     return (
       <Unavailable onOpenOriginal={onOpenOriginal}>

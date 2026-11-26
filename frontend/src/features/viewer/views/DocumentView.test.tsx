@@ -71,6 +71,85 @@ describe("DocumentView — PDF", () => {
     expect(framedTypes).toEqual([]);
   });
 
+  it("frames an HTML/JS polyglot that starts with %PDF- only as application/pdf, never as a page", async () => {
+    const polyglot = "%PDF-1.4\n<html><body><script>parent.document.title='PWNED'</script></body></html>";
+    installFetch({
+      "source-file": () => new Response(polyglot, { headers: { "content-type": "text/html" } }),
+    });
+    show(pdf({ size: polyglot.length }));
+    const element = await frame();
+    // The browser's PDF viewer gets the bytes (and rejects them); no HTML is ever handed to the frame.
+    expect(framedTypes).toEqual(["application/pdf"]);
+    expect(element.getAttribute("src")).toBe("blob:pdf");
+    expect(element.hasAttribute("srcdoc")).toBe(false);
+  });
+
+  it("reads only the head of a large file without the PDF header, never the whole file", async () => {
+    const chunk = new Uint8Array(1024).fill(0x41);
+    let pulls = 0;
+    let cancelled = false;
+    const calls = installFetch({
+      "source-file": () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              pulls += 1;
+              if (pulls <= 64) controller.enqueue(chunk);
+              else controller.close();
+            },
+            cancel() {
+              cancelled = true;
+            },
+          }),
+        ),
+    });
+    show(pdf({ size: 64 * 1024 }));
+    expect(await screen.findByText(/PDF 서명/)).toBeTruthy();
+    expect(calls).toHaveLength(1);
+    expect(cancelled).toBe(true);
+    expect(pulls).toBeLessThan(4);
+    expect(framedTypes).toEqual([]);
+  });
+
+  it("fetches a PDF past the header window whole only after its header checked out", async () => {
+    const body = `%PDF-1.7\n${"x".repeat(4096)}`;
+    const calls = installFetch({ "source-file": () => new Response(body) });
+    show(pdf({ size: body.length }));
+    await frame();
+    expect(calls).toHaveLength(2);
+    expect(framedTypes).toEqual(["application/pdf"]);
+  });
+
+  it("keeps the PDF's bytes across PDF ↔ text toggles and frees them when the view closes", async () => {
+    const calls = installFetch({ "source-file": () => new Response("%PDF-1.4") });
+    const { unmount } = render(
+      <DocumentView
+        runId="run-1"
+        preview={pdf({ preview_type: "text", text: "본문" })}
+        terms={[]}
+        onOpenOriginal={() => undefined}
+      />,
+    );
+    await frame();
+    fireEvent.click(toggle("추출 텍스트"));
+    expect(document.querySelector("iframe")).toBeNull();
+    fireEvent.click(toggle("PDF"));
+    expect((await frame()).getAttribute("src")).toBe("blob:pdf");
+    expect(calls).toHaveLength(1);
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+    unmount();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:pdf");
+  });
+
+  it("does not fetch the PDF while only the extracted text has been shown", async () => {
+    const calls = installFetch({ "source-file": () => new Response("%PDF-1.4") });
+    show(pdf({ preview_type: "text", text: "이 계약은 무효" }), ["계약"]);
+    expect(toggle("추출 텍스트").getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(toggle("추출 텍스트"));
+    expect(calls).toHaveLength(0);
+  });
+
   it("opens on the highlighted text when the keywords hit it; the toggle shows the pages", async () => {
     installFetch({ "source-file": () => new Response("%PDF-1.4") });
     show(pdf({ preview_type: "text", text: "이 계약은 무효\n다른 줄" }), ["계약"]);

@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from "react";
-import { fetchSourceBlob, fetchSourceThumbnailBlob } from "../../../api/viewer";
+import { fetchSourceImage, fetchSourceThumbnailBlob } from "../../../api/viewer";
 import { useBlobUrl } from "../useAsync";
 
 interface EvidenceImageProps {
@@ -23,7 +23,7 @@ export function EvidenceImage(props: EvidenceImageProps) {
   const { runId, path, alt, className } = props;
   const [decodable, setDecodable] = useState(true);
   const original = useBlobUrl(decodable ? `${runId}|${path}` : null, (signal) =>
-    fetchSourceBlob(runId, path, signal),
+    fetchSourceImage(runId, path, signal),
   );
   if (!decodable) return <ServerRendition {...props} />;
   if (original.status === "error")
