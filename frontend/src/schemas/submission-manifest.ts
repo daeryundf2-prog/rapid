@@ -18,8 +18,16 @@ max_items: number
 }
 summary: {
 case_bookmark_count: number
+/**
+ * Bookmarks and case-DB review marks marked for the report (all with include_all): hashed items + missing ones
+ */
+report_candidate_count?: number
 hashed_item_count: number
 skipped_count: number
+/**
+ * Report candidates the submission cannot carry (listed in skipped); the case report and reviewer bundle refuse while it is not 0
+ */
+missing_count?: number
 total_size: number
 }
 items: {
@@ -31,6 +39,9 @@ review: {
 [k: string]: unknown | undefined
 }
 reference: {
+[k: string]: unknown | undefined
+}
+snapshot?: {
 [k: string]: unknown | undefined
 }
 evidence: {
@@ -50,6 +61,7 @@ sha256: string
 skipped: {
 bookmark_id: string
 summary: string
+note?: string
 path: string
 reason: string
 }[]

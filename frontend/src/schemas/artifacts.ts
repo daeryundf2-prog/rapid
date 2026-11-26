@@ -29,6 +29,16 @@ skip_reasons?: {
 }
 export_roots?: unknown[]
 acquisition_roots?: unknown[]
+/**
+ * EventLog kind: rows per raw channel name (core/eventlog_channels.py)
+ */
+channel_counts?: {
+[k: string]: number | undefined
+}
+channel_service_control_manager_count?: number
+channel_overflow_group_counts?: {
+[k: string]: number | undefined
+}
 }
 artifacts: {
 provider: string
