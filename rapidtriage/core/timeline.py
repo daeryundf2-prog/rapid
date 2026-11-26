@@ -219,8 +219,8 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     "registry-taskband-pin": (F("key_last_written_at", "last-written", scope="key"),),
     "linux-utmp": (F("timestamp", "session-record"),),
     "linux-wtmp": (F("timestamp", "session-record"),),
-    "linux-btmp": (F("timestamp", "failed-login"),),
-    "linux-lastlog": (F("timestamp", "last-login"),),
+    "linux-btmp": (F("timestamp", "failed-logon"),),
+    "linux-lastlog": (F("timestamp", "last-logon"),),
     "bitlocker-recovery-key-file": (F("key_created_at", "created"),),
     # --- R5 L2: OS / system rows (registry_depth.py, system_extras.py) ---------------------
     "startup-item": (

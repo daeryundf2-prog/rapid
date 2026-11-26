@@ -93,6 +93,6 @@ class TaskbarLoginIntegrationTests(unittest.TestCase):
             self.assertEqual(labels, {
                 ("execution-feature-usage", "last-written"): 1, ("registry-taskband-pin", "last-written"): 1,
                 ("linux-utmp", "session-record"): 1, ("linux-wtmp", "session-record"): 2,
-                ("linux-btmp", "failed-login"): 1, ("linux-lastlog", "last-login"): 1,
+                ("linux-btmp", "failed-logon"): 1, ("linux-lastlog", "last-logon"): 1,
             })
             self.assertFalse(any(e["path"].endswith(".reg") for e in events))

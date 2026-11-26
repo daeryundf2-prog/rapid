@@ -154,7 +154,7 @@ export function summarizeArtifact(
   if (["linux-utmp", "linux-wtmp", "linux-btmp", "linux-lastlog"].includes(type)) {
     const uid = strOrNull(details.uid);
     return {
-      title: strOrNull(details.user) ?? (uid ? `UID ${uid}` : strOrNull(details.type_name) ?? name),
+      title: strOrNull(details.user) ?? (uid ? `UID ${uid}` : (strOrNull(details.type_name) ?? name)),
       detail: [str(details.tty), str(details.host)].filter(Boolean).join(" · "),
     };
   }
