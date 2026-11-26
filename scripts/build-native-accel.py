@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -47,14 +48,19 @@ def main() -> int:
         ],
         cwd=RUST_ROOT,
         capture_output=True,
-        text=True,
+        # cargo writes UTF-8; the locale codec (cp949 on Korean Windows) crashed the reader thread.
+        encoding="utf-8",
+        errors="replace",
     )
     if build.returncode != 0:
         result = {"ok": False, "stage": "cargo", "stderr": build.stderr[-4000:]}
         print(json.dumps(result) if args.json else result)
         return 1
 
-    produced = RUST_ROOT / "target" / "release" / src_name
+    # CARGO_TARGET_DIR moves the build output (needed when the checkout path is not ASCII:
+    # the MinGW linker cannot write to such a path).
+    target_dir = Path(os.environ["CARGO_TARGET_DIR"]) if os.environ.get("CARGO_TARGET_DIR") else RUST_ROOT / "target"
+    produced = target_dir / "release" / src_name
     if not produced.exists():
         result = {"ok": False, "stage": "locate", "expected": str(produced)}
         print(json.dumps(result) if args.json else result)
