@@ -8,7 +8,7 @@ import json
 import logging
 import re
 import zipfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +39,7 @@ from ...core.visible_capabilities import build_visible_capability_response
 from .analyses import run_scope
 from .analysis_kinds import cross_case_eligibility
 from .artifact_filter import (
+    FILES_COLLECTIONS,
     annotate_page_counts,
     field_matching_records,
     files_page_base,
@@ -55,9 +56,11 @@ from .dashboard import (
     read_case_notes,
     write_case_notes,
 )
+from .evidence_sort import timeline_order
 from .files_ntfs import join_files_page, ntfs_si_modified_resolver
 from .fs_tree import (
     FS_INDEX_CACHE,
+    build_fs_index,
     files_output_key,
     files_restriction,
     files_roots,
@@ -79,6 +82,16 @@ from .helpers import (
     run_progress_payload,
     validate_run_evidence_source,
 )
+from .json_rows import (
+    PREFETCH_ROWS_MAX,
+    JsonLayoutError,
+    JsonRowIndex,
+    LazyRows,
+    PrefetchedRows,
+    StaleIndexError,
+    large_output_index,
+)
+from .list_view import parse_view, project_artifact_row, project_page
 from .models import (
     RunCaseNotesRequest,
     RunCreateRequest,
@@ -97,10 +110,11 @@ from .query_filters import strict_query_filters, with_applied_filters
 from .row_conditions import (
     MATCH_CACHE,
     RowConditions,
-    filter_rows_page,
+    matched_indices,
     needs_ntfs_time,
     output_stamp,
     parse_row_conditions,
+    rows_page,
 )
 from .runops import (
     build_run_output_preview,
@@ -548,8 +562,23 @@ def build_runs_router(
         content: list[str] = Query(default=[]),
         geo: str | None = Query(default=None),
         applied_filters: dict[str, list[str]] = Depends(strict_query_filters),
+        view: str | None = Query(default=None),
+        sort: str | None = Query(default=None),
+        order: str | None = Query(default=None),
+        locate: int | None = Query(default=None, ge=0),
     ) -> dict[str, object]:
         """Paged timeline events.
+
+        ``view=list`` returns the lean listing page (``list_view``: no report-grade page blocks).
+
+        ``sort=timestamp`` (``order`` = ``asc`` | ``desc``, or a ``:asc``/``:desc`` suffix; needs
+        ``limit > 0``) orders the whole timeline - after the row conditions, when given - in the
+        console's own evidence-time order (``evidence_sort``: instants by UTC 100 ns ticks, then
+        wall clocks of undetermined zone, then unparseable text, then events without a time;
+        ``desc`` reverses it; ties keep record order). Rows carry ``record_index``; the page reports
+        ``sort = {key, order, status: "ready", progress, position?}`` (``locate=<record_index>`` →
+        ``position`` in the sorted, filtered order, ``null`` when filtered out). The order is cached
+        per timeline revision. Another sort key or order is a Korean 422.
 
         Row conditions (plan r4 §2.3) as on ``GET /artifacts``: ``from``, ``to``, ``weekday``,
         ``hours``, ``offhours``, ``tz``, ``partial``, ``content`` (row time = the event's
@@ -563,6 +592,7 @@ def build_runs_router(
         An undeclared query parameter is a Korean 422 listing the supported ones (never
         ignored); every page echoes the filters it applied as ``applied_filters``.
         """
+        list_view = parse_view(view)
         reject_geo(geo)
         conditions = row_conditions_or_422(
             time_from=time_from,
@@ -574,29 +604,152 @@ def build_runs_router(
             partial=partial,
             content=content,
         )
-        payload = get_named_output(store, run_id, "timeline")
-        if conditions is None:
-            return with_applied_filters(
-                paginate_payload(payload, "events", offset=offset, limit=limit, cursor=cursor), applied_filters
-            )
+        sort_order = _timeline_sort_order(sort, order)
+        if conditions is None and sort_order is None:
+            indexed = _indexed_page(run_id, "timeline", "events", offset=offset, limit=limit, cursor=cursor)
+            page = indexed[0] if indexed is not None else None
+            if page is None:
+                page = paginate_payload(get_named_output(store, run_id, "timeline"), "events", offset=offset, limit=limit, cursor=cursor)
+            return with_applied_filters(project_page(page, "events") if list_view else page, applied_filters)
         if limit <= 0:
             raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
-        events = payload.get("events") if isinstance(payload.get("events"), list) else []
-        rows, pagination = filter_rows_page(
-            events,
-            conditions.predicate("timeline"),
-            collection="events",
-            offset=offset,
-            limit=limit,
-            cache_key=("timeline", run_id, output_stamp(get_output_path(store, run_id, "timeline")), conditions.cache_key()),
+        timeline_path = get_output_path(store, run_id, "timeline")
+        index = large_output_index(timeline_path)
+        page: dict[str, object] | None = None
+        if index is not None and index.count("events") is not None:
+            # Large output: rows are read from the row index; a full pass streams it in chunks.
+            try:
+                page = _timeline_rows_page(
+                    index.payload_with_placeholders(["events"]),
+                    LazyRows(index, "events"),
+                    ("timeline", run_id, index.stamp),
+                    conditions,
+                    sort_order,
+                    offset=offset,
+                    limit=limit,
+                    locate=locate,
+                )
+            except StaleIndexError:
+                LOGGER.info("timeline of run %s changed while read through its row index; parsing it whole", run_id)
+        if page is None:
+            stamp = output_stamp(timeline_path)
+            head = get_named_output(store, run_id, "timeline")
+            # Cache under the revision only when the payload read is that revision (not rewritten meanwhile).
+            scope = ("timeline", run_id, stamp) if output_stamp(timeline_path) == stamp else None
+            events = head.get("events") if isinstance(head.get("events"), list) else []
+            page = _timeline_rows_page(head, events, scope, conditions, sort_order, offset=offset, limit=limit, locate=locate)
+        return with_applied_filters(project_page(page, "events") if list_view else page, applied_filters)
+
+
+    def _timeline_rows_page(
+        head: Mapping[str, object],
+        events: Sequence[object],
+        scope: tuple[object, ...] | None,
+        conditions: RowConditions | None,
+        sort_order: str | None,
+        *,
+        offset: int,
+        limit: int,
+        locate: int | None,
+    ) -> dict[str, object]:
+        """Filtered and/or sorted timeline page over ``events``; ``scope`` (run + timeline revision)
+        prefixes the ``MATCH_CACHE`` keys (``None``: nothing is cached)."""
+
+        def cache_key(*parts: object) -> tuple[object, ...] | None:
+            return (*scope, *parts) if scope is not None else None
+
+        matched = (
+            matched_indices(events, conditions.predicate("timeline"), cache_key(conditions.cache_key()))
+            if conditions is not None
+            else None
         )
-        pagination["conditions"] = conditions.describe()
-        page = {key: value for key, value in payload.items() if key != "events"}
+        if sort_order is None:
+            positions: Sequence[int] = matched if matched is not None else range(len(events))
+        else:
+            ordered = MATCH_CACHE.get_or_compute(cache_key("order", sort_order), lambda: timeline_order(events, sort_order))
+            if matched is None or conditions is None:
+                positions = ordered
+            else:
+                keep = set(matched)
+                positions = MATCH_CACHE.get_or_compute(
+                    cache_key("order", sort_order, conditions.cache_key()),
+                    lambda: (item for item in ordered if item in keep),
+                )
+        rows, pagination = rows_page(
+            events, positions, collection="events", offset=offset, limit=limit, filtered=conditions is not None
+        )
+        if conditions is not None:
+            pagination["conditions"] = conditions.describe()
+        page = {key: value for key, value in head.items() if key != "events"}
         page["events"] = rows
         page["record_count"] = len(events)
         page["matched"] = pagination["matched"]
         page["pagination"] = pagination
-        return with_applied_filters(page, applied_filters)
+        if sort_order is not None:
+            sort_block: dict[str, object] = {"key": "timestamp", "order": sort_order, "status": "ready", "progress": 1}
+            if locate is not None:
+                sort_block["position"] = next((i for i, item in enumerate(positions) if item == locate), None)
+            page["sort"] = sort_block
+        return page
+
+
+    def _timeline_sort_order(sort: str | None, order: str | None) -> str | None:
+        """``asc`` / ``desc`` of a timeline ``sort=timestamp`` (``None`` without ``sort``); else a Korean 422."""
+        key = (sort or "").strip()
+        if not key:
+            return None
+        head, _, suffix = key.rpartition(":")
+        if head and suffix.lower() in SORT_ORDERS:
+            key, order = head, order or suffix
+        if key != "timestamp":
+            raise HTTPException(status_code=422, detail="타임라인은 시각(timestamp) 정렬만 지원합니다")
+        value = (order or "asc").strip().lower()
+        if value not in SORT_ORDERS:
+            raise HTTPException(status_code=422, detail="정렬 방향(order)은 asc 또는 desc여야 합니다")
+        return value
+
+
+    def _indexed_page(
+        run_id: str,
+        output_name: str,
+        collection: str,
+        *,
+        offset: int,
+        limit: int,
+        cursor: str | None,
+        placeholders: Sequence[str] = (),
+        base: Callable[[dict[str, object]], dict[str, object]] | None = None,
+    ) -> tuple[dict[str, object], JsonRowIndex] | None:
+        """Unfiltered page of ``collection`` read through the row index of a large output.
+
+        ``None`` when the output is small enough for the parsed-output cache, has no index
+        (``json_rows``) or ``limit`` asks for the whole payload: the caller pages the parsed
+        payload. The page equals ``paginate_payload`` over the parsed payload (same key order).
+        """
+        if limit <= 0:
+            return None
+        try:
+            index = large_output_index(get_output_path(store, run_id, output_name))
+        except OSError:
+            index = None
+        total = index.count(collection) if index is not None else None
+        if index is None or (total is None and collection in index.keys()):
+            return None  # no index, or the collection is not an array: page the parsed payload
+        try:
+            payload = index.payload_with_placeholders([collection, *placeholders])
+            page = paginate_payload(
+                base(payload) if base is not None else payload,
+                collection,
+                offset=offset,
+                limit=limit,
+                cursor=cursor,
+                row_window=(lambda start, count: index.rows(collection, start, start + count)) if total else (lambda _start, _count: []),
+                window_total=total or 0,
+            )
+        except JsonLayoutError:
+            LOGGER.info("row index of %s is stale; parsing the whole output", output_name)
+            return None
+        return page, index
 
 
     @router.get("/api/runs/{run_id}/timeline-histogram")
@@ -674,8 +827,14 @@ def build_runs_router(
         content: list[str] = Query(default=[]),
         geo: str | None = Query(default=None),
         applied_filters: dict[str, list[str]] = Depends(strict_query_filters),
+        view: str | None = Query(default=None),
     ) -> dict[str, object]:
         """Page per-kind artifact rows; every row carries its JSONL ``record_index``.
+
+        ``view=list`` (the console grid) returns lean kind pages (``list_view``): row
+        ``details`` without the nested parser profiles / manifests (dropped keys in
+        ``details_omitted``) and no report-grade page blocks. The same request without
+        ``view`` (e.g. ``kind=<kind>&offset=<record_index>&limit=1``) gives the full row.
 
         Row conditions (plan r4 §2.3, ``row_conditions``): ``from``/``to`` (inclusive ISO-8601
         bounds on the row time; no offset = ``tz``), ``weekday`` (repeatable or comma-joined
@@ -768,6 +927,7 @@ def build_runs_router(
         without ``sort`` is ignored. ``locate=<record_index>`` adds
         ``sort.position`` (that record's 0-based position in the sorted order).
         """
+        list_view = parse_view(view)
         job = get_job(store, run_id)
         live: dict[str, object] | None = None
         if job.summary is None:
@@ -859,7 +1019,7 @@ def build_runs_router(
             if live is not None:
                 response["live"] = live
             response["applied_filters"] = applied_filters
-            return response
+            return _artifacts_list_view(response) if list_view else response
         artifacts = {}
         kind_payloads: dict[str, dict[str, object]] = {}
         for name in sorted(outputs):
@@ -948,10 +1108,20 @@ def build_runs_router(
                         artifacts[name.removeprefix("artifacts_")] = kind_page
                         continue
                     if (needle or wanted_types or wanted_channels or fields or conditions) and limit > 0:
+                        filter_path = get_output_path(store, run_id, name)
                         artifacts[name.removeprefix("artifacts_")] = _echo_conditions(
                             filter_artifact_page(
                                 artifact_payload,
-                                payload_path=get_output_path(store, run_id, name),
+                                match_cache_key=(
+                                    "artifact-filter",
+                                    output_stamp(filter_path),  # kind_matches adds the JSONL file's revision
+                                    needle,
+                                    tuple(sorted(wanted_types or ())),
+                                    repr(wanted_channels.describe()) if wanted_channels is not None else None,
+                                    repr(fields),
+                                    conditions.cache_key() if conditions is not None else None,
+                                ),
+                                payload_path=filter_path,
                                 path_contains=needle,
                                 offset=offset,
                                 limit=limit,
@@ -991,6 +1161,16 @@ def build_runs_router(
                 if isinstance(page, dict) and isinstance(page.get("sort"), dict)
             ]
             response["sort_supported"] = bool(statuses) and all(status != "unsupported" for status in statuses)
+        return _artifacts_list_view(response) if list_view else response
+
+
+    def _artifacts_list_view(response: dict[str, object]) -> dict[str, object]:
+        pages = response.get("artifacts")
+        if isinstance(pages, dict):
+            response["artifacts"] = {
+                kind: project_page(page, "artifacts", project_artifact_row) if isinstance(page, dict) else page
+                for kind, page in pages.items()
+            }
         return response
 
 
@@ -1169,13 +1349,17 @@ def build_runs_router(
 
     def _files_path_restriction(
         payload: Mapping[str, object],
+        full_payload: Callable[[], Mapping[str, object]],
         run_id: str,
         collection: str,
         path_prefix: str | None,
         recursive: str | None,
         special: str | None,
     ) -> tuple[Sequence[int] | None, dict[str, object] | None]:
-        """Row positions of the fs-tree folder / special node (``None`` = no such filter)."""
+        """Row positions of the fs-tree folder / special node (``None`` = no such filter).
+
+        ``payload`` needs only the output's top-level values; ``full_payload`` (with the rows)
+        is read only when the fs-tree index of this files revision is not built yet."""
         wanted_special = parse_special(special)
         if path_prefix is None and wanted_special is None:
             if recursive is not None and recursive.strip():
@@ -1184,7 +1368,8 @@ def build_runs_router(
         deep = parse_bool(recursive, "recursive")
         restrict: Sequence[int] | None = None
         folder: str | None = None
-        index = FS_INDEX_CACHE.get(files_output_key(run_id, get_output_path(store, run_id, "files")), payload)
+        key = files_output_key(run_id, get_output_path(store, run_id, "files"))
+        index = FS_INDEX_CACHE.get_or_build(key, lambda: build_fs_index(key, full_payload()))
         if path_prefix is not None:
             parts = parse_folder_path(path_prefix, files_roots(payload))
             restrict = files_restriction(index, collection, parts, recursive=deep)
@@ -1219,8 +1404,13 @@ def build_runs_router(
         content: list[str] = Query(default=[]),
         geo: str | None = Query(default=None),
         applied_filters: dict[str, list[str]] = Depends(strict_query_filters),
+        view: str | None = Query(default=None),
     ) -> dict[str, object]:
         """Paged file rows joined with the newest ``ntfs-meta`` analysis.
+
+        ``view=list`` (the console grid) returns the lean listing page (``list_view``): the
+        rows and paging/join blocks without the output's duplicate / hash-cache /
+        report-grade blocks (dropped keys in ``view_omitted``).
 
         파일 시스템 탐색기 (plan r4 §2.2): ``path_prefix`` = a folder of
         ``GET /fs-tree`` (relative to the volume root, ``/`` separators,
@@ -1279,7 +1469,7 @@ def build_runs_router(
         An undeclared query parameter is a Korean 422 listing the supported
         ones; every page echoes the filters it applied as ``applied_filters``.
         """
-        payload = get_named_output(store, run_id, "files")
+        list_view = parse_view(view)
         collection = scope
         wanted = frozenset(item.strip() for item in category if item.strip())
         sort_flags = is_flags_sort(sort)
@@ -1298,8 +1488,115 @@ def build_runs_router(
             partial=partial,
             content=content,
         )
+        # Same errors as reading the output (404 / 409 / 403), without parsing it.
+        get_output_path(store, run_id, "files")
         join = flags_join(_run_output_dir_or_none(get_job(store, run_id).summary))
-        restrict, path_filter = _files_path_restriction(payload, run_id, collection, path_prefix, recursive, special)
+        unfiltered = not (flag_query.active or wanted or conditions is not None or path_prefix is not None or special is not None)
+        indexed = (
+            _indexed_page(
+                run_id,
+                "files",
+                collection,
+                offset=offset,
+                limit=limit,
+                cursor=cursor,
+                placeholders=FILES_COLLECTIONS,
+                base=lambda payload: files_page_base(payload, collection),
+            )
+            if unfiltered and not (recursive and recursive.strip())
+            else None
+        )
+        if indexed is not None:
+            # Large output: the page came from the row index; the full lists stay unparsed.
+            page, index = indexed
+            try:
+                return _files_page_tail(
+                    run_id,
+                    _files_record_index(page, collection, limit),
+                    collection,
+                    LazyRows(index, "candidates"),
+                    LazyRows(index, "inventory") if index.count("inventory") is not None else None,
+                    join,
+                    list_view,
+                    applied_filters,
+                )
+            except StaleIndexError:
+                LOGGER.info("files of run %s changed while read through its row index; parsing them whole", run_id)
+
+        def respond(use_index: bool) -> dict[str, object]:
+            return _files_listing(
+                run_id,
+                collection=collection,
+                wanted=wanted,
+                flag_query=flag_query,
+                conditions=conditions,
+                path_prefix=path_prefix,
+                recursive=recursive,
+                special=special,
+                offset=offset,
+                limit=limit,
+                cursor=cursor,
+                join=join,
+                list_view=list_view,
+                applied_filters=applied_filters,
+                use_index=use_index,
+            )
+
+        try:
+            return respond(True)
+        except StaleIndexError:
+            LOGGER.info("files of run %s changed while read through its row index; parsing them whole", run_id)
+            return respond(False)
+
+
+    def _files_listing(
+        run_id: str,
+        *,
+        collection: str,
+        wanted: frozenset[str],
+        flag_query: FlagQuery,
+        conditions: RowConditions | None,
+        path_prefix: str | None,
+        recursive: str | None,
+        special: str | None,
+        offset: int,
+        limit: int,
+        cursor: str | None,
+        join: FlagsJoin,
+        list_view: bool,
+        applied_filters: dict[str, list[str]],
+        use_index: bool,
+    ) -> dict[str, object]:
+        """A ``GET /files`` page other than the unfiltered row-index page; with ``use_index`` a
+        folder / special node of a large output reads its rows through the row index (a row index
+        gone stale meanwhile raises :class:`StaleIndexError`: the caller retries without it)."""
+        # A folder / special node of a large output: its rows are read through the row index.
+        big = (
+            large_output_index(get_output_path(store, run_id, "files"))
+            if use_index
+            and limit > 0
+            and conditions is None
+            and not flag_query.active
+            and (path_prefix is not None or special is not None)
+            else None
+        )
+        if big is not None and big.count(collection) is None:
+            big = None
+        payload = big.payload_with_placeholders(FILES_COLLECTIONS) if big is not None else get_named_output(store, run_id, "files")
+        restrict, path_filter = _files_path_restriction(
+            payload,
+            (lambda: {**payload, **{key: LazyRows(big, key) for key in FILES_COLLECTIONS if big.count(key) is not None}})
+            if big is not None
+            else (lambda: get_named_output(store, run_id, "files")),
+            run_id,
+            collection,
+            path_prefix,
+            recursive,
+            special,
+        )
+        if big is not None and (restrict is None or len(restrict) > PREFETCH_ROWS_MAX):
+            big = None
+            payload = get_named_output(store, run_id, "files")
         if (flag_query.active or wanted or conditions is not None or restrict is not None) and limit <= 0:
             raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
         source_rows: list[object] | None = None
@@ -1317,7 +1614,13 @@ def build_runs_router(
                 ntfs_time = ntfs_si_modified_resolver(time_scope, source_rows) if time_scope is not None else None
             row_filter = conditions.predicate("files", ntfs_time)
         if flag_query.active or restrict is not None:
-            all_rows = source_rows if source_rows is not None else (payload.get(collection) if isinstance(payload.get(collection), list) else [])
+            all_rows: Sequence[object] = (
+                source_rows
+                if source_rows is not None
+                else PrefetchedRows(big, collection, restrict or ())
+                if big is not None
+                else (payload.get(collection) if isinstance(payload.get(collection), list) else [])
+            )
             page_rows, flag_pagination = filter_files_rows(
                 all_rows,
                 collection=collection,
@@ -1349,13 +1652,55 @@ def build_runs_router(
                 conditions,
             )
         else:
-            page = dict(paginate_payload(files_page_base(payload, collection), collection, offset=offset, limit=limit, cursor=cursor))
-            pagination = page.get("pagination") if limit > 0 and isinstance(page.get("pagination"), dict) else {}
-            rows = page.get(collection) if isinstance(page.get(collection), list) else []
-            # ``record_index`` = position in that list of rapidtriage-files.json (locator ``/<scope>/<n>``).
-            page[collection] = with_record_index(rows, int(pagination.get("offset") or 0))
-        candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
-        inventory = payload.get("inventory") if isinstance(payload.get("inventory"), list) else None
+            page = _files_record_index(
+                paginate_payload(files_page_base(payload, collection), collection, offset=offset, limit=limit, cursor=cursor),
+                collection,
+                limit,
+            )
+        if big is not None:
+            return _files_page_tail(
+                run_id,
+                page,
+                collection,
+                LazyRows(big, "candidates"),
+                LazyRows(big, "inventory") if big.count("inventory") is not None else None,
+                join,
+                list_view,
+                applied_filters,
+            )
+        return _files_page_tail(
+            run_id,
+            page,
+            collection,
+            payload.get("candidates") if isinstance(payload.get("candidates"), list) else [],
+            payload.get("inventory") if isinstance(payload.get("inventory"), list) else None,
+            join,
+            list_view,
+            applied_filters,
+        )
+
+
+    def _files_record_index(page: Mapping[str, object], collection: str, limit: int) -> dict[str, object]:
+        """An unfiltered files page whose rows carry ``record_index`` (position in that list of
+        rapidtriage-files.json, locator ``/<scope>/<n>``)."""
+        page = dict(page)
+        pagination = page.get("pagination") if limit > 0 and isinstance(page.get("pagination"), dict) else {}
+        rows = page.get(collection) if isinstance(page.get(collection), list) else []
+        page[collection] = with_record_index(rows, int(pagination.get("offset") or 0))
+        return page
+
+
+    def _files_page_tail(
+        run_id: str,
+        page: dict[str, object],
+        collection: str,
+        candidates: Sequence[object],
+        inventory: Sequence[object] | None,
+        join: FlagsJoin,
+        list_view: bool,
+        applied_filters: dict[str, list[str]],
+    ) -> dict[str, object]:
+        """Counts, NTFS join and flags of a ``GET /files`` page (``candidates``/``inventory`` = full lists)."""
         page["scope"] = collection
         page["candidate_count"] = len(candidates)
         page["inventory_count"] = len(inventory) if inventory is not None else None
@@ -1374,7 +1719,7 @@ def build_runs_router(
             joined[collection] = join.attach(joined[collection], f"files:{collection}")
         joined["flags_join"] = dict(join.info)
         joined["applied_filters"] = applied_filters
-        return joined
+        return project_page(joined, collection) if list_view else joined
 
 
     @router.get("/api/runs/{run_id}/docs")

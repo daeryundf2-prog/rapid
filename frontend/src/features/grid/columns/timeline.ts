@@ -104,7 +104,7 @@ export const timelineCollection: CollectionDef = {
   label: "타임라인",
   source: "paged",
   fetch: (runId, query, signal) =>
-    fetchTimelinePage(runId, query.offset, query.limit, signal, query.rowConditions),
+    fetchTimelinePage(runId, query.offset, query.limit, signal, query.rowConditions, query.sort),
   mapRow: (raw, position) => {
     // A condition-filtered page (r4 §2.3) numbers its events by `record_index` (position in `events`).
     const index =
@@ -147,6 +147,8 @@ export const timelineCollection: CollectionDef = {
   columns: [
     {
       ...col.timestamp(190, ["analysis", "compact", "source"]),
+      // Server sort of the whole (filtered) timeline (`GET /timeline?sort=timestamp`).
+      sortKey: "timestamp",
       // 시각 tooltip: the formatted time plus what it means ("수정", "실행 3회차", …) and its zone note.
       tooltip: (r) => {
         const time = r.timestamp

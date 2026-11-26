@@ -42,6 +42,7 @@ import {
   severityLabel,
 } from "../fieldFormat";
 import { humanizeKey, layoutFields, type RecordLayout, recordLayout, type SheetEntry } from "../fieldSheets";
+import { PARTIAL_COPY_REASON, useFullRecordStatus } from "../fullRecord";
 import { isDirectoryTarget } from "../modes";
 import { artifactRowRoute, TIMELINE_WINDOW_MS, timelineWindowRoute } from "../pivots";
 import { makeRecordField, type RecordField, recordByteRange } from "../record";
@@ -100,7 +101,15 @@ function KeyTerm({ name, label: given }: { name: string; label?: string | null }
  * 20×20 copy icon button (review #3): shown on row hover / focus; a successful copy swaps the
  * icon for a check for a moment — the row's width never changes.
  */
-function CopyButton({ text, label }: { text: string; label: string }) {
+function CopyButton({
+  text,
+  label,
+  disabledReason,
+}: {
+  text: string;
+  label: string;
+  disabledReason?: string;
+}) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -108,20 +117,22 @@ function CopyButton({ text, label }: { text: string; label: string }) {
     return () => clearTimeout(timer);
   }, [copied]);
   return (
-    <button
-      type="button"
-      className="icon-btn meta-copy"
-      aria-label={`${label} 복사`}
-      title={copied ? "복사됨" : `${label} 복사`}
-      data-copied={copied ? "" : undefined}
-      onClick={() => {
-        writeClipboard(text)
-          .then(() => setCopied(true))
-          .catch(() => setCopied(false));
-      }}
-    >
-      <Icon name={copied ? "check" : "copy"} size={14} />
-    </button>
+    <DisabledReason reason={disabledReason}>
+      <button
+        type="button"
+        className="icon-btn meta-copy"
+        aria-label={`${label} 복사`}
+        title={copied ? "복사됨" : `${label} 복사`}
+        data-copied={copied ? "" : undefined}
+        onClick={() => {
+          writeClipboard(text)
+            .then(() => setCopied(true))
+            .catch(() => setCopied(false));
+        }}
+      >
+        <Icon name={copied ? "check" : "copy"} size={14} />
+      </button>
+    </DisabledReason>
   );
 }
 
@@ -776,15 +787,37 @@ function RecordSection({
   const fields = layoutFields(row);
   const offset = recordByteRange(row)?.offset ?? null;
   const json = JSON.stringify(isPlainObject(row?.fields.details) ? row?.fields.details : fields, null, 2);
+  // A `view=list` grid row until its full record is loaded: say what is missing, never copy it as the record.
+  const partial = useFullRecordStatus(row, runId);
   return (
     <section aria-labelledby="viewer-record-title" className="meta-record" data-sheet={layout.sheet.id}>
       <h3 className="viewer-subtitle" id="viewer-record-title">
         레코드
         <span className="meta-sheet-label"> · {layout.sheet.label}</span>
         <span className="meta-record-actions">
-          <CopyButton text={json} label="레코드 JSON" />
+          <CopyButton
+            text={json}
+            label="레코드 JSON"
+            disabledReason={partial ? PARTIAL_COPY_REASON : undefined}
+          />
         </span>
       </h3>
+      {partial ? (
+        <p className="meta-notice" role="status" data-testid="record-partial">
+          {partial.status === "failed"
+            ? `전체 레코드를 불러오지 못했습니다(${partial.error ?? ""}). 목록 보기에서 빠진 필드가 아래에 없습니다: `
+            : "전체 레코드를 불러오는 중입니다. 목록 보기에서 빠진 필드: "}
+          <span className="mono viewer-break">{partial.omitted.join(", ")}</span>
+          {partial.status === "failed" ? (
+            <>
+              {" "}
+              <button type="button" className="viewer-button" onClick={partial.retry}>
+                다시 시도
+              </button>
+            </>
+          ) : null}
+        </p>
+      ) : null}
       {layout.core.length ? (
         <section aria-label="레코드 핵심" className="meta-record-group">
           <h4>핵심</h4>

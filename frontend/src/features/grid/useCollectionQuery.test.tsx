@@ -32,7 +32,7 @@ describe("useCollectionQuery paging", () => {
     const { wrapper } = queryWrapper();
     const { result } = renderHook(() => useCollectionQuery(filesQuery, { runId: "run-1" }), { wrapper });
     await waitFor(() => expect(result.current.total).toBe(600));
-    expect(calls.map((c) => c.url)).toEqual(["/api/runs/run-1/files?offset=0&limit=250"]);
+    expect(calls.map((c) => c.url)).toEqual(["/api/runs/run-1/files?offset=0&limit=250&view=list"]);
     expect(result.current.pageCount).toBe(3);
     expect(result.current.loadedCount).toBe(250);
     expect(result.current.backend).toBe("file");

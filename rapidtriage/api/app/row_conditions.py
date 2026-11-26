@@ -786,16 +786,17 @@ MATCH_CACHE = MatchedIndexCache()
 
 
 def output_stamp(*paths: object) -> tuple[object, ...]:
-    """``(path, size, mtime_ns)`` per path (``None`` skipped): the list revision of a cache key."""
+    """``(path, size, mtime_ns, inode)`` per path (``None`` skipped): the list revision of a cache key
+    (the inode tells an atomically replaced file of the same size and mtime apart)."""
     stamp: list[object] = []
     for raw in paths:
         if not raw:
             continue
         try:
             stat = Path(str(raw)).stat()
-            stamp.append((str(raw), stat.st_size, stat.st_mtime_ns))
+            stamp.append((str(raw), stat.st_size, stat.st_mtime_ns, stat.st_ino))
         except OSError:
-            stamp.append((str(raw), -1, -1))
+            stamp.append((str(raw), -1, -1, -1))
     return tuple(stamp)
 
 
@@ -822,7 +823,19 @@ def filter_rows_page(
 
     ``record_index`` is the row's position in ``rows``; ``matched`` is exact (the list is scanned
     to the end once per ``cache_key``: later pages reuse the matched positions, :data:`MATCH_CACHE`)."""
-    indices = matched_indices(rows, predicate, cache_key)
+    return rows_page(rows, matched_indices(rows, predicate, cache_key), collection=collection, offset=offset, limit=limit)
+
+
+def rows_page(
+    rows: Sequence[object],
+    indices: Sequence[int],
+    *,
+    collection: str,
+    offset: int,
+    limit: int,
+    filtered: bool = True,
+) -> tuple[list[object], dict[str, object]]:
+    """Page of the ``rows`` at ``indices`` (matched / sorted positions) -> ``(rows with record_index, pagination)``."""
     matched = len(indices)
     window = indices[offset : offset + limit] if limit > 0 else indices[offset:]
     page: list[object] = [{**rows[index], "record_index": index} for index in window]  # type: ignore[dict-item]
@@ -837,7 +850,7 @@ def filter_rows_page(
         "next_offset": offset + len(page) if has_more else None,
         "previous_offset": max(0, offset - limit) if offset > 0 and limit > 0 else None,
         "has_more": has_more,
-        "filtered": True,
+        "filtered": filtered,
         "scanned": len(rows),
         "truncated": False,
     }

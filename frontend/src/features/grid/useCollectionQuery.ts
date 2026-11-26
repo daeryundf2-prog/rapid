@@ -131,11 +131,12 @@ export function columnResolver(
 /** Re-request interval while the server builds a sort index (plan artifact-columns §4.2). */
 export const SORT_POLL_MS = 1000;
 
-/** The sort the server applies: artifacts of exactly one kind, or one analysis job's rows. */
+/** The sort the server applies: artifacts of exactly one kind, one analysis job's rows, or the timeline. */
 export function serverSortOf(query: CollectionQuery): CollectionQuery["sort"] {
   if (!query.sort) return undefined;
   if (query.ref.id === "artifacts" && query.ref.kind) return query.sort;
   if (query.ref.id === "analysis" && query.ref.analysisId) return query.sort;
+  if (query.ref.id === "timeline") return query.sort;
   return undefined;
 }
 

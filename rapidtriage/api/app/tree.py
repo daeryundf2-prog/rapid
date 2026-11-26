@@ -10,12 +10,15 @@ near the top of the pretty-printed output).
 
 from __future__ import annotations
 
+import codecs
 import json
+import os
+import re
 import threading
 from collections import OrderedDict
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 from fastapi import HTTPException
 
@@ -46,10 +49,19 @@ from .helpers import (
     run_not_finished_message,
     run_progress_payload,
 )
+from .json_rows import JsonLayoutError, file_revision, large_output_index
 from .jsonl_records import iter_artifact_records, jsonl_records_path
 from .triage_flags import kind_flag_counts, tree_flags_section
 
 SUMMARY_SCAN_BYTES = 65536
+# A top-level value cut by the head window is retried with a larger window up to this size.
+SUMMARY_SCAN_MAX_BYTES = 64 * 1024 * 1024
+# read_output_key head-scan results per file revision (summaries, parser_errors, duplicate groups),
+# bounded by their decoded size in characters. A value the head scan cannot reach is kept by the
+# parsed-output LRU or the row index of a large output instead.
+KEY_CACHE_MAX_CHARS = 32 * 1024 * 1024
+_KEY_CACHE: OrderedDict[tuple[object, ...], tuple[Any, int]] = OrderedDict()
+_KEY_LOCK = threading.Lock()
 
 # Rows that are pivots/strings, not evidence records (W2 ``*-string-candidate``).
 NON_EVIDENCE_TYPE_SUFFIXES: tuple[str, ...] = ("-string-candidate",)
@@ -239,29 +251,99 @@ def kind_facets(store: RunJobStore, run_id: str, kind: str) -> dict[str, Any]:
     return facets
 
 
+_JSON_TOKEN = re.compile(r'"(?:[^"\\]|\\.)*"|[{}\[\]]')
+_JSON_SPACE = re.compile(r"[ \t\r\n]*")
+_MISSING = object()
+
+
+def _top_level_value_start(text: str, key: str) -> int | None:
+    """Index in ``text`` (a prefix of a JSON object) where the value of top-level ``key`` starts.
+
+    Strings are skipped whole, so a nested ``key``, a string value equal to it or a key
+    inside a string never matches; ``None`` when the prefix holds no such member.
+    """
+    quoted = json.dumps(key, ensure_ascii=False)
+    depth = 0
+    for token in _JSON_TOKEN.finditer(text):
+        lexeme = token.group()
+        if lexeme in "{[":
+            depth += 1
+        elif lexeme in "}]":
+            depth -= 1
+        elif depth == 1 and lexeme == quoted:
+            colon = _JSON_SPACE.match(text, token.end()).end()
+            if colon < len(text) and text[colon] == ":":
+                return _JSON_SPACE.match(text, colon + 1).end()
+    return None
+
+
+def _scan_output_key(handle: IO[bytes], key: str, size: int) -> tuple[Any, int] | object:
+    """``(value, decoded length)`` of top-level ``key`` from a growing head window of ``handle``
+    (``_MISSING`` = not found)."""
+    window = SUMMARY_SCAN_BYTES
+    while True:
+        handle.seek(0)
+        data = handle.read(window)
+        # Incremental decoder: a multi-byte character cut by the window end is left out.
+        text = codecs.getincrementaldecoder("utf-8")().decode(data, final=len(data) >= size)
+        start = _top_level_value_start(text, key)
+        if start is None:
+            return _MISSING
+        try:
+            value, end = json.JSONDecoder().raw_decode(text, start)
+            return value, end - start
+        except json.JSONDecodeError:
+            if len(data) >= size or window >= SUMMARY_SCAN_MAX_BYTES:
+                return _MISSING  # the value is longer than the window: parse the whole file
+        window = min(window * 4, SUMMARY_SCAN_MAX_BYTES)
+
+
+def _parsed_output_key(path: Path, key: str) -> Any:
+    """Top-level ``key`` from the whole output: the row index of a large output (it keeps parsed
+    values), else the shared parsed-output LRU."""
+    index = large_output_index(path)
+    if index is not None:
+        if key not in index.keys():
+            return None
+        try:
+            return index.value(key)
+        except JsonLayoutError:
+            pass  # rewritten since it was indexed: parse the file as it is now
+    payload = read_output_json(path)
+    return payload.get(key) if isinstance(payload, dict) else None
+
+
 def read_output_key(path: Path, key: str) -> Any:
     """Return a top-level key of a run output JSON via a bounded head scan.
 
-    Falls back to a full parse when the key is absent from the head region.
+    The head window grows (up to ``SUMMARY_SCAN_MAX_BYTES``) while the value is cut by it;
+    a key that is not a top-level member of the head falls back to the whole output. Head-scan
+    values are cached per file revision ``(path, dev, inode, size, mtime_ns, key)`` read from the
+    scanned handle itself (``KEY_CACHE_MAX_CHARS`` in all): they are shared, read-only.
     """
     try:
         with path.open("rb") as handle:
-            head = handle.read(SUMMARY_SCAN_BYTES).decode("utf-8", errors="replace")
-        marker = head.find(f'"{key}"')
-        if marker >= 0:
-            colon = head.find(":", marker)
-            if colon >= 0:
-                try:
-                    decoded, _ = json.JSONDecoder().raw_decode(head, colon + 1)
-                    return decoded
-                except json.JSONDecodeError:
-                    pass
-        # Full-parse fallback goes through the shared LRU so large outputs
-        # (tens of MB) are not re-parsed on every tree/issues request.
-        payload = read_output_json(path)
-    except (OSError, json.JSONDecodeError):
+            revision = file_revision(os.fstat(handle.fileno()))
+            cache_key = (str(path), *revision, key)
+            with _KEY_LOCK:
+                cached = _KEY_CACHE.get(cache_key)
+                if cached is not None:
+                    _KEY_CACHE.move_to_end(cache_key)
+                    return cached[0]
+            found = _scan_output_key(handle, key, revision[2])
+        if not isinstance(found, tuple):
+            return _parsed_output_key(path, key)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return None
-    return payload.get(key) if isinstance(payload, dict) else None
+    value, length = found
+    if length <= KEY_CACHE_MAX_CHARS:
+        with _KEY_LOCK:
+            _KEY_CACHE[cache_key] = (value, length)
+            total = sum(item[1] for item in _KEY_CACHE.values())
+            while len(_KEY_CACHE) > 1 and total > KEY_CACHE_MAX_CHARS:
+                _evicted, (_value, dropped) = _KEY_CACHE.popitem(last=False)
+                total -= dropped
+    return value
 
 
 def read_output_summary(path: Path) -> dict[str, Any]:

@@ -130,11 +130,16 @@ async function jsonPaged(
   extra = "",
   /** The server filtered the rows (folder, flags, row conditions): `matched` is the total, like a category page. */
   serverFiltered = false,
+  /** Server sort of the whole (filtered) collection (timeline `sort=timestamp`). */
+  sort?: ServerSort,
 ): Promise<RawPage> {
   const started = now();
   const filter = `${scope ? `&scope=${enc(scope)}` : ""}${category ? `&category=${enc(category)}` : ""}${extra}`;
+  // Files / timeline pages: the lean list view (no report-grade page blocks the grid never reads).
+  const view = endpoint === "files" || endpoint === "timeline" ? "&view=list" : "";
+  const sortQuery = sort ? `&sort=${enc(sort.key)}&order=${sort.order}` : "";
   const payload = await api<Record<string, unknown>>(
-    `/api/runs/${enc(runId)}/${endpoint}?offset=${offset}&limit=${limit}${filter}`,
+    `/api/runs/${enc(runId)}/${endpoint}?offset=${offset}&limit=${limit}${filter}${sortQuery}${view}`,
     { signal },
   );
   // `scope=inventory` pages may name their list `inventory` or keep `candidates`.
@@ -154,6 +159,7 @@ async function jsonPaged(
     backend: "file",
     elapsedMs: Math.round(now() - started),
     ...(Object.keys(meta).length ? { meta } : {}),
+    ...(sort ? { sort: sortStateOf(payload as ArtifactKindPage, sort) } : {}),
   };
   const pagination =
     payload.pagination && typeof payload.pagination === "object" && !Array.isArray(payload.pagination)
@@ -350,6 +356,7 @@ export const fetchTimelinePage = (
   limit: number,
   signal?: AbortSignal,
   conditions?: Record<string, string | string[]>,
+  sort?: ServerSort,
 ) =>
   jsonPaged(
     runId,
@@ -362,6 +369,7 @@ export const fetchTimelinePage = (
     undefined,
     flagQueryString({ conditions }),
     Object.keys(conditions ?? {}).length > 0,
+    sort,
   );
 export const fetchIndicatorsPage = (runId: string, offset: number, limit: number, signal?: AbortSignal) =>
   jsonPaged(runId, "indicators", "indicators", offset, limit, signal);
@@ -410,7 +418,11 @@ async function crossKindRequest(
   signal?: AbortSignal,
 ): Promise<{ artifacts?: Record<string, ArtifactKindPage>; cross_kind?: CrossKindBlock }> {
   const params = new URLSearchParams(
-    artifactsQueryString({ ...query, offset: query.after ? undefined : query.offset || undefined }),
+    artifactsQueryString({
+      ...query,
+      offset: query.after ? undefined : query.offset || undefined,
+      view: "list",
+    }),
   );
   if (query.after) params.set("after", query.after);
   return api(`/api/runs/${enc(runId)}/artifacts?${params}`, { signal });
@@ -602,7 +614,7 @@ async function artifactWindow(
   query: ArtifactsQuery,
   signal?: AbortSignal,
 ): Promise<Record<string, ArtifactKindPage>> {
-  const url = `/api/runs/${enc(runId)}/artifacts?${artifactsQueryString({ ...query, offset: query.offset || undefined })}`;
+  const url = `/api/runs/${enc(runId)}/artifacts?${artifactsQueryString({ ...query, offset: query.offset || undefined, view: "list" })}`;
   let payload: { artifacts?: Record<string, ArtifactKindPage> };
   try {
     payload = await api<{ artifacts?: Record<string, ArtifactKindPage> }>(url, { signal });
@@ -613,6 +625,26 @@ async function artifactWindow(
     payload = await api<{ artifacts?: Record<string, ArtifactKindPage> }>(url, { signal });
   }
   return payload.artifacts ?? {};
+}
+
+/**
+ * The full row of one artifact record (`details` with every nested block): the grid's list
+ * pages are `view=list` (rows report the dropped keys in `details_omitted`). Unfiltered
+ * `kind=&offset=<record_index>&limit=1` pages by JSONL record, so the row is that record.
+ */
+export async function fetchArtifactRecord(
+  runId: string,
+  kind: string,
+  recordIndex: number,
+  signal?: AbortSignal,
+): Promise<RawRow | null> {
+  const query = artifactsQueryString({ kind: [kind], offset: recordIndex, limit: 1 });
+  const payload = await api<{ artifacts?: Record<string, ArtifactKindPage> }>(
+    `/api/runs/${enc(runId)}/artifacts?${query}`,
+    { signal },
+  );
+  const row = asRows(payload.artifacts?.[kind]?.artifacts)[0];
+  return row && row.record_index === recordIndex ? row : null;
 }
 
 function kindTotal(page: ArtifactKindPage): number | null {

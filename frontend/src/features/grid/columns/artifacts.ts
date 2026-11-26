@@ -754,6 +754,10 @@ export const artifactsCollection: CollectionDef = {
         // 특이사항 (U-F4): raw API value + the parsed list the cells read.
         ...(Array.isArray(raw.flags) ? { flags: raw.flags, flagList: parseFlags(raw.flags) } : {}),
         details,
+        // `view=list` row: the nested `details` keys left out (the viewer loads the full record).
+        ...(Array.isArray(raw.details_omitted) && raw.details_omitted.length
+          ? { detailsOmitted: raw.details_omitted.map(str) }
+          : {}),
       },
     );
   },
