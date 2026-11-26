@@ -109,6 +109,7 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     "agent-message": (F("timestamp_utc", "message"),),
     "agent-tool-call": (F("timestamp_utc", "tool-call"),),
     "agent-tool-result": (F("timestamp_utc", "tool-result"),),
+    "macos-unified-log-event": (F("timestamp", "logged"),),
     # --- execution -------------------------------------------------------
     "prefetch-file": (
         F("last_run_times[*]", "run"),
@@ -1900,6 +1901,10 @@ def field_label(name: str, value: object) -> str:
 def build_artifact_summary(artifact_type: str, artifact_path: str, context: Mapping[str, object]) -> str:
     if artifact_type == "macos-knowledgec-event":
         return " ".join(str(item) for item in ("KnowledgeC", context.get("stream"), context.get("bundle_id")) if item)
+    if artifact_type == "macos-unified-log-event":
+        return " · ".join(str(item) for item in (
+            "macOS 통합 로그", context.get("event_type"), context.get("process"), context.get("message"),
+        ) if item)
     if artifact_type == "linux-journald-entry":
         return f"journald #{context.get('sequence_number', '')}"
     if artifact_type in EVENTLOG_TYPES:

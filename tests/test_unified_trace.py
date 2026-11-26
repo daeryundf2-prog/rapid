@@ -59,6 +59,13 @@ class UnifiedTraceTests(unittest.TestCase):
         self.assertEqual([d['offset'] for d in diagnostics], [rows[0]['offset'], rows[2]['offset']])
         self.assertEqual(sum(d['damaged_chunk_count'] for d in diagnostics), 1)
 
+    def test_catalog_and_padding_damage_count_as_one_chunk(self):
+        body, padding = decode(chunk(0x600b, b'x')[:-1])
+        self.assertEqual((body['diagnostic'], body['offset'], body['damaged_chunk_count']),
+                         ('damaged-catalog', 0, 1))
+        self.assertEqual((padding['diagnostic'], padding['offset'], padding['chunk_offset'],
+                          padding['damaged_chunk_count']), ('damaged-chunk-padding', 17, 0, 0))
+
     def test_compressed_and_malformed_chunksets_allow_later_records(self):
         compressed = chunk(0x600d, b'bv41' + struct.pack('<II', 6, 7) + b'\x60abcdefbv4$')
         bad = chunk(0x600d, b'bv4-' + struct.pack('<I', 50))

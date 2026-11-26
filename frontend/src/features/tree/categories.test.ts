@@ -31,6 +31,7 @@ const ENGINE_KINDS = [
   "linux-journald",
   "macos-system",
   "macos-knowledgec",
+  "macos-unified-log",
   "media-image",
   "media-player",
   "memory-volatility",

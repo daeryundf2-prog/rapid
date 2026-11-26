@@ -132,6 +132,7 @@ KIND_LABELS: dict[str, str] = {
     "linux-system": "Linux 시스템",
     "macos-system": "macOS 시스템",
     "macos-knowledgec": "macOS 활동 기록(KnowledgeC)",
+    "macos-unified-log": "macOS 통합 로그",
     "linux-journald": "Linux 시스템 저널",
 }
 

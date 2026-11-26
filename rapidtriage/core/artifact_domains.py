@@ -47,6 +47,7 @@ ARTIFACT_DOMAIN_TABLE: tuple[tuple[str, str, tuple[str, ...] | None], ...] = (
     ("registry", "windows-shellbags", None),
     ("eventlog", "eventlog", None),
     ("eventlog", "linux-journald", None),
+    ("eventlog", "macos-unified-log", None),
     ("web", "browser", None),
     ("messaging", "email", None),
     ("messaging", "kakaotalk-windows", None),

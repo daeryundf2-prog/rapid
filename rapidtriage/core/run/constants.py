@@ -94,6 +94,7 @@ CROSS_PLATFORM_SYSTEM_ARTIFACT_KINDS = (
     "linux-journald",
     "macos-system",
     "macos-knowledgec",
+    "macos-unified-log",
 )
 PARSER_CRASH_ISOLATION_GAP_ID = "#71"
 MEMORY_CAP_GAP_ID = "#72"

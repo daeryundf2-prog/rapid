@@ -13,8 +13,11 @@ MAX_TEXT = 4096
 KINDS = {2: 'activity', 3: 'trace', 4: 'log', 6: 'signpost'}
 
 
-def _damaged(reason, offset):
-    return {'diagnostic': reason, 'offset': offset, 'damaged_chunk_count': 1}
+def _damaged(reason, offset, *, chunk_offset=None):
+    row = {'diagnostic': reason, 'offset': offset, 'damaged_chunk_count': 1}
+    if chunk_offset is not None:
+        row['chunk_offset'] = chunk_offset
+    return row
 
 
 class _Cursor:
@@ -270,7 +273,6 @@ def _firehose(data, offset, processes, boot, resolve, wall_time):
     process = resolve('uuidtext', proc.main, -1)[1] if proc.main else ''
     # The public region starts at the size field. The private region is never read.
     public, pos = data[:16 + size], 32
-    damaged = False
     while pos < len(public) and public[pos]:
         start = pos
         try:
@@ -280,8 +282,7 @@ def _firehose(data, offset, processes, boot, resolve, wall_time):
             if end > len(public):
                 raise ValueError('entry-size')
         except (struct.error, ValueError):
-            yield {'diagnostic': 'damaged-entry', 'offset': offset + start,
-                   'damaged_chunk_count': int(not damaged)}
+            yield _damaged('damaged-entry', offset + start, chunk_offset=offset - 16)
             return
         pos = end
         while pos < min(len(public), end + (-length) % 8) and public[pos] == 0:
@@ -303,9 +304,7 @@ def _firehose(data, offset, processes, boot, resolve, wall_time):
             row['message_status'] = f'unsupported-{exc}'
         except (ValueError, struct.error):
             row['message_status'] = 'damaged-entry'
-            yield {'diagnostic': 'damaged-entry', 'offset': offset + start,
-                   'damaged_chunk_count': int(not damaged)}
-            damaged = True
+            yield _damaged('damaged-entry', offset + start, chunk_offset=offset - 16)
         yield row
     if pos < len(public) and any(public[pos:]):
         # Type zero marks remnant data. Report its extent, never interpret or
@@ -317,22 +316,23 @@ def _firehose(data, offset, processes, boot, resolve, wall_time):
 def _chunks(data, base, budget):
     pos = 0
     while pos < len(data):
+        start = base + pos
         if budget[0] == 0:
-            yield None, None, base + pos, 'chunk-limit'
+            yield None, None, start, {'diagnostic': 'chunk-limit', 'offset': start}
             return
         budget[0] -= 1
         if len(data) - pos < 16:
-            yield None, None, base + pos, 'damaged-chunk-header'
+            yield None, None, start, _damaged('damaged-chunk-header', start)
             return
         tag, _, length = struct.unpack_from('<IIQ', data, pos)
         end = pos + 16 + length
         if end > len(data):
-            yield None, None, base + pos, 'damaged-chunk-size'
+            yield None, None, start, _damaged('damaged-chunk-size', start)
             return
-        yield tag, data[pos + 16:end], base + pos, ''
+        yield tag, data[pos + 16:end], start, None
         pos = end + (-length) % 8
         if pos > len(data) or any(data[end:pos]):
-            yield None, None, base + end, 'damaged-chunk-padding'
+            yield None, None, start, _damaged('damaged-chunk-padding', base + end, chunk_offset=start)
             return
 
 
@@ -341,10 +341,7 @@ def _decode(data, resolve, wall_time):
     budget = [MAX_CHUNKS]
     for tag, body, offset, error in _chunks(memoryview(data), 0, budget):
         if error:
-            if error == 'chunk-limit':
-                yield {'diagnostic': error, 'offset': offset}
-            else:
-                yield _damaged(error, offset)
+            yield error
         elif tag == 0x1000:
             processes, boot = {}, ''
             try:
@@ -377,12 +374,11 @@ def _decode(data, resolve, wall_time):
             if size != len(body) - 12 or trailer != b'bv4$':
                 yield _damaged('damaged-chunkset', offset)
                 continue
-            for inner, payload, location, reason in _chunks(body[8:8 + size], offset + 24, budget):
-                if reason == 'chunk-limit':
-                    yield {'diagnostic': reason, 'offset': location}
-                    return
-                if reason:
-                    yield _damaged(reason, location)
+            for inner, payload, location, error in _chunks(body[8:8 + size], offset + 24, budget):
+                if error:
+                    yield error
+                    if error['diagnostic'] == 'chunk-limit':
+                        return
                 elif inner == 0x6001:
                     yield from _firehose(payload, location + 16, processes, boot, resolve, wall_time)
                 else:
@@ -399,8 +395,13 @@ def parse_trace(data: bytes, resolve, wall_time):
     if not data:
         yield _damaged('damaged-chunk-header', 0)
         return
+    damaged_chunks = set()
     for index, row in enumerate(_decode(data, resolve, wall_time)):
         if index >= MAX_ROWS:
             yield {'diagnostic': 'trace-row-limit', 'offset': row['offset']}
             return
+        if 'damaged_chunk_count' in row:
+            origin = row.get('chunk_offset', row['offset'])
+            row['damaged_chunk_count'] = int(origin not in damaged_chunks)
+            damaged_chunks.add(origin)
         yield row

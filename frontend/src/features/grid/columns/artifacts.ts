@@ -477,6 +477,14 @@ export const KIND_COLUMNS: Record<string, KindColumnDef[]> = {
     { header: "크기", keys: ["source_size"], width: 100, bytes: true },
     { header: "수정", keys: ["modified_at"], width: 170 },
   ],
+  "macos-unified-log": [
+    { header: "이벤트 유형", keys: ["event_type"], width: 110 },
+    { header: "프로세스", keys: ["process"], width: 180 },
+    { header: "하위 시스템", keys: ["subsystem"], width: 180 },
+    { header: "범주", keys: ["category"], width: 150 },
+    { header: "메시지·진단 사유", keys: ["message", "reason"], width: 360 },
+    { header: "원본 오프셋", keys: ["source_offset"], width: 120, number: true, mono: true },
+  ],
   // Accounts (SAM): 계정 · RID · 마지막 로그온 · 로그온 수.
   "windows-os-account": SAM_COLUMNS,
   "windows-filesystem": [

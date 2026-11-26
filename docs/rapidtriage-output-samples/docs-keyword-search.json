@@ -148,6 +148,13 @@
         "artifact_count": 0
       },
       {
+        "name": "macos-unified-log",
+        "description": "Structured events from offline macOS Unified Log archives",
+        "target_platform": "macos",
+        "supported": true,
+        "artifact_count": 0
+      },
+      {
         "name": "media-image-artifacts",
         "description": "Image inventory with dimensions, hashes, perceptual hash, OCR queue hints, and similarity buckets",
         "target_platform": "any",
