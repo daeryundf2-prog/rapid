@@ -42,7 +42,7 @@ E01_EXTRACT_READER_ENV = "RAPIDTRIAGE_E01_EXTRACT_READER"
 E01_EXTRACT_ENGINES = ("python", "rust")
 E01_EXTRACT_NATIVE_MODULE = "rapid_extract_native"
 # Must equal ABI_VERSION in engines/rust/crates/rapid-extract/src/lib.rs.
-E01_EXTRACT_NATIVE_ABI_VERSION = 5
+E01_EXTRACT_NATIVE_ABI_VERSION = 6
 # engines/rust/crates/rapid-extract version this package was checked against
 # (tests/test_e01_extract_rust_parity.py). A build reporting another version is stale and refused:
 # bump the crate version and this constant together.

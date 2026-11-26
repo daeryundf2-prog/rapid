@@ -2340,6 +2340,13 @@ def _extract_e01_native_fallback(
             "free output name was left for them or their folder; they are listed as unresolved in "
             "native_output_name_collisions and counted as errors."
         )
+    if stats.get("time_restore_skips"):
+        warnings.append(
+            f"{stats.get('time_restore_skips'):,} recovered files keep their extraction time as file "
+            "time: their MFT record has no $STANDARD_INFORMATION or $FILE_NAME time from 1970 on, or "
+            "the output drive refused it. Parser fields read from those copies' file times "
+            "(source_file_mtime, ...) are not evidence times."
+        )
     return E01ExtractionResult(
         source_path=source_path,
         stage_dir=stage,

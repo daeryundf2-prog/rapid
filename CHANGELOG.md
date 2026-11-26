@@ -4,6 +4,18 @@
 
 ### Fixed
 
+- Native E01 extraction (`python-native-ewf`, both the Python and the Rust
+  engine) wrote every recovered file without its NTFS times, so each copy
+  carried the extraction time. Parsers that read a copy's file time
+  (`source_file_mtime`, event log file `modified_at`, profile and search index
+  times, and the hashes and ids derived from them) reported extraction time as
+  evidence time, and two runs of one image gave different rows. Each recovered
+  file, deleted-sweep file and the `MFT.bin` dump now gets its record's
+  `$STANDARD_INFORMATION` last access / modification time (else the first
+  `$FILE_NAME` pair); a record with no time from 1970 on keeps the extraction
+  time and is counted in `time_restore_skips`, with a warning
+  (`tests/test_e01_native_times.py`, mtimes in
+  `tests/test_e01_extract_rust_parity.py`; extension ABI 6).
 - "더 보기" in the console's text view decoded the original as UTF-8 only, so
   a CP949, UTF-16 or UTF-32 file turned into replacement characters once
   expanded. It now decodes in the order of the server preview

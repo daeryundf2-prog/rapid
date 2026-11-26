@@ -14,4 +14,4 @@ pub mod ntfs;
 mod py;
 
 /// Contract version checked by `rapidtriage.core.e01_extract_engine`.
-pub const ABI_VERSION: u32 = 5;
+pub const ABI_VERSION: u32 = 6;

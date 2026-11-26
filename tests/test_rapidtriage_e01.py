@@ -1036,7 +1036,7 @@ Units are in 512-byte sectors
         payload = b"MFT-RECORD" * 5000
         with tempfile.TemporaryDirectory() as tmp_dir:
             out = Path(tmp_dir) / "_system" / "MFT.bin"
-            written = _dump_ntfs_system_record(_FakeRec(payload), out)
+            written = _dump_ntfs_system_record(_FakeRec(payload), out, {})
             self.assertEqual(written, len(payload))
             self.assertEqual(out.read_bytes(), payload)
 
