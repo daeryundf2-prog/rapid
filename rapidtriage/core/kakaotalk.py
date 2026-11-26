@@ -6,6 +6,7 @@ import datetime as dt
 import hashlib
 import hmac
 import json
+import mmap
 import os
 import re
 import shutil
@@ -2220,8 +2221,9 @@ def derive_kakaotalk_postpatch_v2_dek_candidates(
     root: Path,
     memory_sources: Sequence[Path],
     include_raw: bool = False,
+    diagnostics: list[dict[str, object]] | None = None,
 ) -> list[dict[str, object]]:
-    """Derive post-BigBang v2 per-database SQLCipher keys from appstate/profile.
+    """Derive post-BigBang v2 per-database keys from appstate/profile.
 
     Observed KakaoTalk v2 flow:
     1. HMAC-SHA256(object_key, entropy || "ikm-wrap") unwraps profile.dat to IKM.
@@ -2229,6 +2231,14 @@ def derive_kakaotalk_postpatch_v2_dek_candidates(
        runtime object.
     3. HKDF-SHA256(bound_ikm, salt=appstate.salt, info=info_prefix + backslash path)
        derives the AES-KW KEK for each wrapped DEK.
+
+    bound_ikm is confirmed first with the salt-0x20 locality rule (bound_ikm is
+    stored 0x20 bytes before the appstate salt in memory, checked by one AES-KW
+    unwrap); the HMAC unwrap chain (steps 1-2) is the fallback when no salt hit
+    confirms. ``key_confirmation_method`` records which one confirmed the key; when
+    ``diagnostics`` is given, one record per appstate.dat is appended to it with the
+    salt-locality attempt (sources scanned, salt hits tested, truncation, read errors),
+    the method used and why the fallback ran or why the key store was skipped.
     """
 
     key_store_files = [path for path in find_kakaotalk_key_store_files(root) if path.name.lower() == "appstate.dat"]
@@ -2241,78 +2251,77 @@ def derive_kakaotalk_postpatch_v2_dek_candidates(
     except ImportError:
         return []
 
-    profiles = [
-        path
-        for path in sorted(root.rglob("profile.dat"), key=lambda item: str(item).lower())
-        if path.is_file() and path.stat().st_size >= 24 and path.stat().st_size % 8 == 0
-    ]
-    if not profiles:
-        return []
-
     file_index = build_kakaotalk_relative_file_index(root)
     chatlog_names = {path.name.lower() for path in find_chatlog_databases(root)}
-    materials: list[dict[str, object]] = []
-    seen_materials: set[tuple[str, str, str]] = set()
-    for source in memory_sources:
-        try:
-            data = source.read_bytes()
-        except OSError:
-            continue
-        ranges = build_memory_address_ranges(data)
-        source_materials = extract_kakaotalk_postpatch_v2_materials_from_blob(
-            data,
-            source=source,
-            profiles=profiles,
-            ranges=ranges,
-            aes_module=AES,
-        )
-        for material in source_materials:
-            material_key = (
-                str(material.get("source_path") or ""),
-                str(material.get("object_candidate_va") or ""),
-                str(material.get("ikm_sha256") or ""),
-            )
-            if material_key in seen_materials:
-                continue
-            seen_materials.add(material_key)
-            materials.append(material)
-
+    chain_materials: list[dict[str, object]] | None = None
     candidates: list[dict[str, object]] = []
     seen_candidates: set[tuple[str, str, str]] = set()
     for key_store_path in key_store_files:
+        record: dict[str, object] = {"key_store_path": str(key_store_path.resolve())}
+        if diagnostics is not None:
+            diagnostics.append(record)
         try:
             decoded = MiniCborDecoder(key_store_path.read_bytes()).decode()
-        except (OSError, KakaoTalkKeyStoreParseError, ValueError):
+        except (OSError, KakaoTalkKeyStoreParseError, ValueError) as exc:
+            record["skipped"] = f"unreadable key store: {exc}"
             continue
         if not isinstance(decoded, dict):
+            record["skipped"] = "key store is not a CBOR map"
             continue
         info_prefix = cbor_byte_array_to_text(decoded.get("info_prefix"))
         if info_prefix != "v2:":
+            record["skipped"] = f"info_prefix {info_prefix!r} is not v2:"
             continue
         app_salt = cbor_byte_array_to_bytes(decoded.get("salt"))
         if len(app_salt) != 32:
+            record["skipped"] = f"appstate salt is {len(app_salt)} bytes, 32 expected"
             continue
         wrapped_dek_map = decoded.get("wrapped_dek_map")
         if not isinstance(wrapped_dek_map, list):
+            record["skipped"] = "wrapped_dek_map is not a CBOR array"
             continue
-        for material in materials:
-            object_key = material.get("object_key")
-            ikm = material.get("ikm")
-            if not isinstance(object_key, bytes) or not isinstance(ikm, bytes):
+        entries: list[tuple[int, str, str, bytes]] = []
+        for index, pair in enumerate(wrapped_dek_map):
+            if not isinstance(pair, list) or len(pair) != 2:
                 continue
-            bound_ikm = hmac.new(object_key, ikm + b"entropy-bound-kek", hashlib.sha256).digest()
-            for index, pair in enumerate(wrapped_dek_map):
-                if not isinstance(pair, list) or len(pair) != 2:
-                    continue
-                relative_path = cbor_byte_array_to_text(pair[0])
-                wrapped_dek = cbor_byte_array_to_bytes(pair[1])
-                if len(wrapped_dek) != 40:
-                    continue
-                normalized_path = normalize_kakaotalk_relative_path(relative_path)
-                backslash_path = normalized_path.replace("/", "\\")
-                info = info_prefix.encode("utf-8") + backslash_path.encode("utf-8")
+            relative_path = cbor_byte_array_to_text(pair[0])
+            wrapped_dek = cbor_byte_array_to_bytes(pair[1])
+            if len(wrapped_dek) != 40:
+                continue
+            entries.append((index, relative_path, normalize_kakaotalk_relative_path(relative_path), wrapped_dek))
+        if not entries:
+            record["skipped"] = "no 40-byte wrapped DEK"
+            continue
+        salt_locality: dict[str, object] = {}
+        materials = collect_postpatch_v2_salt_locality_materials(
+            memory_sources,
+            app_salt=app_salt,
+            info=postpatch_v2_hkdf_info(info_prefix, entries[0][2]),
+            wrapped_dek=entries[0][3],
+            attempt=salt_locality,
+        )
+        record["salt_locality"] = salt_locality
+        if materials:
+            record["key_confirmation_method"] = "salt-locality-0x20"
+        else:
+            if chain_materials is None:
+                chain_materials = collect_postpatch_v2_hmac_chain_materials(root, memory_sources, aes_module=AES)
+            materials = chain_materials
+            record["key_confirmation_method"] = "hmac-unwrap-chain" if materials else "none"
+            record["fallback_reason"] = (
+                f"no salt-0x20 candidate unwrapped the first wrapped DEK "
+                f"({salt_locality.get('salt_hits_tested', 0)} salt hits tested in "
+                f"{salt_locality.get('sources_scanned', 0)} memory sources"
+                f"{', hit cap reached' if salt_locality.get('salt_hits_truncated') else ''})"
+            )
+            record["hmac_chain_material_count"] = len(materials)
+        for material in materials:
+            bound_ikm = material.get("bound_ikm")
+            if not isinstance(bound_ikm, bytes):
+                continue
+            for index, relative_path, normalized_path, wrapped_dek in entries:
                 try:
-                    kek = HKDF(bound_ikm, 32, app_salt, SHA256, context=info)
+                    kek = HKDF(bound_ikm, 32, app_salt, SHA256, context=postpatch_v2_hkdf_info(info_prefix, normalized_path))
                     derived_key = AES.new(kek, AES.MODE_KW).unseal(wrapped_dek)
                 except (ValueError, KeyError):
                     continue
@@ -2344,13 +2353,21 @@ def derive_kakaotalk_postpatch_v2_dek_candidates(
                     "wrapped_dek_length": len(wrapped_dek),
                     "wrapped_dek_sha256": hashlib.sha256(wrapped_dek).hexdigest(),
                     "derived_key_sha256": hashlib.sha256(derived_key).hexdigest(),
+                    "key_confirmation_method": material.get("key_confirmation_method", ""),
+                    "key_confirmation": material.get("key_confirmation", {}),
+                    "key_confirmation_fallback_reason": record.get("fallback_reason", ""),
                     "ikm_sha256": material.get("ikm_sha256", ""),
                     "object_key_sha256": material.get("object_key_sha256", ""),
                     "entropy_sha256": material.get("entropy_sha256", ""),
                     "app_salt_sha256": hashlib.sha256(app_salt).hexdigest(),
                     "info_prefix": info_prefix,
                     "info_path_style": "backslash",
-                    "algorithm": "HMAC-SHA256(object_key, IKM || entropy-bound-kek); HKDF-SHA256(bound_ikm, appstate_salt, info_prefix || backslash_path); AES-KW unwrap(wrapped_dek)",
+                    "algorithm": (
+                        "bound_ikm read 0x20 bytes before the appstate salt in memory"
+                        if material.get("key_confirmation_method") == "salt-locality-0x20"
+                        else "HMAC-SHA256(object_key, IKM || entropy-bound-kek)"
+                    )
+                    + "; HKDF-SHA256(bound_ikm, appstate_salt, info_prefix || backslash_path); AES-KW unwrap(wrapped_dek)",
                     "validation": {
                         "source": "kakaotalk-postpatch-v2-dek-derivation",
                         "raw_key_redacted": not include_raw,
@@ -2361,6 +2378,131 @@ def derive_kakaotalk_postpatch_v2_dek_candidates(
                     candidate["key_hex"] = derived_key.hex()
                 candidates.append(candidate)
     return candidates
+
+
+def postpatch_v2_hkdf_info(info_prefix: str, normalized_path: str) -> bytes:
+    return info_prefix.encode("utf-8") + normalized_path.replace("/", "\\").encode("utf-8")
+
+
+def collect_postpatch_v2_salt_locality_materials(
+    memory_sources: Sequence[Path],
+    *,
+    app_salt: bytes,
+    info: bytes,
+    wrapped_dek: bytes,
+    attempt: dict[str, object],
+) -> list[dict[str, object]]:
+    """Confirm bound_ikm via the salt-0x20 locality rule (one AES-KW unwrap per salt hit).
+
+    ``attempt`` is filled with what was tried: sources scanned, salt hits tested,
+    whether the per-source hit cap was reached, and per-source read errors.
+    """
+
+    from .kakaotalk_algorithms import find_postpatch_v2_bound_ikm_by_salt_locality
+
+    materials: list[dict[str, object]] = []
+    seen: set[bytes] = set()
+    errors: list[str] = []
+    sources_scanned = 0
+    hits_tested = 0
+    truncated = False
+    for source in memory_sources:
+        try:
+            with source.open("rb") as handle:
+                if os.fstat(handle.fileno()).st_size == 0:
+                    continue
+                with mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as data:
+                    hit = find_postpatch_v2_bound_ikm_by_salt_locality(
+                        data,
+                        appstate_salt=app_salt,
+                        info=info,
+                        wrapped_dek=wrapped_dek,
+                    )
+        except (OSError, ValueError) as exc:
+            errors.append(f"{source}: {exc}")
+            continue
+        sources_scanned += 1
+        hits_tested += int(hit["salt_hits_tested"])  # type: ignore[call-overload]
+        truncated = truncated or bool(hit["salt_hits_truncated"])
+        bound_ikm = hit["bound_ikm"]
+        if not isinstance(bound_ikm, bytes) or bound_ikm in seen:
+            continue
+        seen.add(bound_ikm)
+        materials.append(
+            {
+                "bound_ikm": bound_ikm,
+                "key_confirmation_method": "salt-locality-0x20",
+                "key_confirmation": {
+                    "source_path": str(source.resolve()),
+                    "salt_hit_offset": hit["salt_hit_offset"],
+                    "bound_ikm_offset": hit["bound_ikm_offset"],
+                    "salt_hits_tested": hit["salt_hits_tested"],
+                    "bound_ikm_sha256": hashlib.sha256(bound_ikm).hexdigest(),
+                    "check": "AES-KW integrity of one wrapped DEK",
+                },
+            }
+        )
+    attempt.update(
+        sources_scanned=sources_scanned,
+        salt_hits_tested=hits_tested,
+        salt_hits_truncated=truncated,
+        errors=errors,
+    )
+    return materials
+
+
+def collect_postpatch_v2_hmac_chain_materials(
+    root: Path,
+    memory_sources: Sequence[Path],
+    *,
+    aes_module: object,
+) -> list[dict[str, object]]:
+    """Fallback: recover bound_ikm through the profile.dat HMAC unwrap chain."""
+
+    profiles = [
+        path
+        for path in sorted(root.rglob("profile.dat"), key=lambda item: str(item).lower())
+        if path.is_file() and path.stat().st_size >= 24 and path.stat().st_size % 8 == 0
+    ]
+    if not profiles:
+        return []
+    materials: list[dict[str, object]] = []
+    seen_materials: set[tuple[str, str, str]] = set()
+    for source in memory_sources:
+        try:
+            data = source.read_bytes()
+        except OSError:
+            continue
+        ranges = build_memory_address_ranges(data)
+        source_materials = extract_kakaotalk_postpatch_v2_materials_from_blob(
+            data,
+            source=source,
+            profiles=profiles,
+            ranges=ranges,
+            aes_module=aes_module,
+        )
+        for material in source_materials:
+            material_key = (
+                str(material.get("source_path") or ""),
+                str(material.get("object_candidate_va") or ""),
+                str(material.get("ikm_sha256") or ""),
+            )
+            if material_key in seen_materials:
+                continue
+            seen_materials.add(material_key)
+            object_key = material.get("object_key")
+            ikm = material.get("ikm")
+            if not isinstance(object_key, bytes) or not isinstance(ikm, bytes):
+                continue
+            material["bound_ikm"] = hmac.new(object_key, ikm + b"entropy-bound-kek", hashlib.sha256).digest()
+            material["key_confirmation_method"] = "hmac-unwrap-chain"
+            material["key_confirmation"] = {
+                "source_path": material.get("source_path", ""),
+                "object_candidate_va": material.get("object_candidate_va", ""),
+                "check": "AES-KW integrity of profile.dat and wrapped DEK",
+            }
+            materials.append(material)
+    return materials
 
 
 def extract_kakaotalk_postpatch_v2_materials_from_blob(
