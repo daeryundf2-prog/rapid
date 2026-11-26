@@ -104,6 +104,8 @@ _BROWSER_FIELDS: tuple[TimelineField, ...] = (
 # artifact_type -> fields that are evidence timestamps. Types not listed emit
 # no events (their unmapped timestamp-like fields are counted in the summary).
 TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
+    "macos-knowledgec-event": (F("start_at", "started"), F("end_at", "ended")),
+    "linux-journald-entry": (F("timestamp", "logged"),),
     # --- execution -------------------------------------------------------
     "prefetch-file": (
         F("last_run_times[*]", "run"),
@@ -1857,6 +1859,10 @@ def field_label(name: str, value: object) -> str:
 
 
 def build_artifact_summary(artifact_type: str, artifact_path: str, context: Mapping[str, object]) -> str:
+    if artifact_type == "macos-knowledgec-event":
+        return " ".join(str(item) for item in ("KnowledgeC", context.get("stream"), context.get("bundle_id")) if item)
+    if artifact_type == "linux-journald-entry":
+        return f"journald #{context.get('sequence_number', '')}"
     if artifact_type in EVENTLOG_TYPES:
         label = "EventLog detection" if artifact_type == "eventlog-detection" else "EventLog event"
         if context.get("recovery_candidate"):

@@ -271,6 +271,7 @@ describe("tree model (탐색 domain tree, console-ia §4)", () => {
     const open = flattenVisible(model, new Set(["domain:eventlog"]));
     expect(open.filter((f) => f.level === 2).map((f) => f.node.label)).toEqual([
       "전체 이벤트 로그(EVTX·ETL)",
+      "Linux 시스템 저널",
       "EVTX 이벤트",
       "탐지 규칙 일치",
       "로그온 세션",

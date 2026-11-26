@@ -89,7 +89,9 @@ WINDOWS_FORENSIC_ARTIFACT_KINDS = (
 )
 CROSS_PLATFORM_SYSTEM_ARTIFACT_KINDS = (
     "linux-system",
+    "linux-journald",
     "macos-system",
+    "macos-knowledgec",
 )
 PARSER_CRASH_ISOLATION_GAP_ID = "#71"
 MEMORY_CAP_GAP_ID = "#72"

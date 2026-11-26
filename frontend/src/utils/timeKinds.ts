@@ -13,6 +13,7 @@ export const TIMESTAMP_KIND_LABELS: Readonly<Record<string, string>> = {
   // Files timeline events (core/timeline.py FILE_EVENT_FIELDS: fs_changed_at).
   "mft-changed": "MFT 변경",
   event: "이벤트",
+  logged: "저널 기록",
   run: "실행",
   "last-run": "마지막 실행",
   "last-written": "키 마지막 기록",

@@ -127,8 +127,22 @@
         "artifact_count": 0
       },
       {
+        "name": "linux-journald",
+        "description": "Linux systemd journal entries",
+        "target_platform": "linux",
+        "supported": true,
+        "artifact_count": 0
+      },
+      {
         "name": "macos-system-artifacts",
         "description": "macOS user, browser, quarantine, TCC privacy permission, and LaunchAgent triage artifacts",
+        "target_platform": "macos",
+        "supported": true,
+        "artifact_count": 0
+      },
+      {
+        "name": "macos-knowledgec",
+        "description": "macOS CoreDuet KnowledgeC activity intervals",
         "target_platform": "macos",
         "supported": true,
         "artifact_count": 0

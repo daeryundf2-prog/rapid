@@ -24,7 +24,7 @@ features added in R2/R3 ride inside their provider task):
 * ``media-docs``: ``media-image``, ``generic-documents``, ``synthetic-media``
 * ``remote-system``: ``windows-remote-access``, ``windows-system``
 * ``memory``: ``memory-volatility``; ``mobile``: ``android-apk``;
-  ``cross-platform``: ``linux-system``, ``macos-system``
+  ``cross-platform``: ``linux-system``, ``linux-journald``, ``macos-system``, ``macos-knowledgec``
 
 Kinds outside the run profile (and plugin providers) are collected by the
 manifest stage and are tasks of the ``manifest`` group. The stage groups
@@ -136,7 +136,7 @@ GROUP_CATALOG: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("remote-system", "원격 접속·시스템", ("windows-remote-access", "windows-system")),
     ("memory", "메모리", ("memory-volatility", "kakaotalk-memory")),
     ("mobile", "모바일 앱", ("android-apk", "windows-phone-link")),
-    ("cross-platform", "리눅스·macOS", ("linux-system", "macos-system")),
+    ("cross-platform", "리눅스·macOS", ("linux-system", "linux-journald", "macos-system", "macos-knowledgec")),
     ("manifest", "매니페스트(프로필 밖 공급자)", ("manifest",)),
     ("docs", "문서 검색·색인", ("docs",)),
     ("files", "파일 인벤토리", ("files",)),
@@ -235,6 +235,8 @@ TASK_LABELS: dict[str, str] = {
     "android-apk": "Android APK",
     "linux-system": "Linux 시스템",
     "macos-system": "macOS 시스템",
+    "macos-knowledgec": "macOS 활동 기록(KnowledgeC)",
+    "linux-journald": "Linux 시스템 저널",
     # R5 L1
     "email-clients": "메일 클라이언트(Thunderbird·Windows 메일)",
     "media-player": "미디어 플레이어 재생 기록",

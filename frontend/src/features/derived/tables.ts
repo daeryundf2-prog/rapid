@@ -82,7 +82,9 @@ const KIND_LABELS: Record<string, string> = {
   "windows-filesystem": "파일시스템 기록",
   "windows-system": "Windows 시스템",
   "linux-system": "Linux 시스템",
+  "linux-journald": "Linux 시스템 저널",
   "macos-system": "macOS 시스템",
+  "macos-knowledgec": "macOS 활동 기록(KnowledgeC)",
   "files:candidates": "파일(후보)",
   "files:inventory": "파일(인벤토리)",
 };

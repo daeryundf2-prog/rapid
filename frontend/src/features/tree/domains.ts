@@ -512,6 +512,12 @@ export const DOMAINS: readonly DomainDef[] = [
       },
       { id: "os-linux", label: "Linux 시스템", target: a("linux-system") },
       { id: "os-macos", label: "macOS 시스템", target: a("macos-system") },
+      {
+        id: "os-knowledgec",
+        label: "macOS 활동 기록(KnowledgeC)",
+        target: a("macos-knowledgec", ["macos-knowledgec-event", "macos-knowledgec-diagnostic"]),
+        typeLabels: { "macos-knowledgec-event": "활동 기록", "macos-knowledgec-diagnostic": "수집 진단" },
+      },
       { id: "os-installed", label: "설치 프로그램(Windows)", target: a("windows-system", ["uwp-package"]) },
       { id: "os-installed-linux", label: "설치 패키지(Linux)", target: a("linux-system", ["linux-package"]) },
       { id: "os-tasks", label: "작업 스케줄러", target: a("windows-system", ["task-scheduler-task"]) },
@@ -1006,6 +1012,12 @@ export const DOMAINS: readonly DomainDef[] = [
     icon: "list",
     nodes: [
       { id: "evt-all", label: "전체 이벤트 로그(EVTX·ETL)", target: a("eventlog") },
+      {
+        id: "evt-journald",
+        label: "Linux 시스템 저널",
+        target: a("linux-journald", ["linux-journald-entry", "linux-journald-diagnostic"]),
+        typeLabels: { "linux-journald-entry": "저널 항목", "linux-journald-diagnostic": "수집 진단" },
+      },
       { id: "evt-events", label: "EVTX 이벤트", target: a("eventlog", ["eventlog-event"]) },
       { id: "evt-detections", label: "탐지 규칙 일치", target: a("eventlog", ["eventlog-detection"]) },
       { id: "evt-logon", label: "로그온 세션", target: a("eventlog", ["eventlog-logon-session"]) },
