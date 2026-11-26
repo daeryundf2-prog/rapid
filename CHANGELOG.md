@@ -4,6 +4,16 @@
 
 ### Fixed
 
+- One EVTX record holding a character reference to a lone UTF-16 surrogate
+  (`&#xD800;`, found in damaged logs) or one JSON export row with a `"\ud800"`
+  escape made the whole streamed eventlog collection fail (`failed-isolated`,
+  no rows), because UTF-8 output cannot hold a surrogate. The reference is now
+  kept as its text `&#xd800;` (as invalid character references already were),
+  and the JSON escape as its text `\ud800`. The row discloses this with
+  `evtx_lone_surrogate_references` / `export_lone_surrogate_escapes` and the
+  caution labels `lone-surrogate-character-reference` /
+  `lone-surrogate-json-escape`. No text is dropped
+  (`tests/test_eventlog_lone_surrogates.py`).
 - EVTX structural scanners read the chunk free-space offset from byte 44, which
   holds the last-event-record offset, instead of byte 48 (chunk header layout:
   libyal libevtx "Windows XML Event Log (EVTX) format", section "Chunk header").

@@ -22,7 +22,7 @@ from typing import NamedTuple
 from ...core.artifact_profiles import cap_list_field
 from ...core.filetime import event_timestamp_utc_ticks
 from ...core.forensic_accuracy import build_accuracy_gate
-from ...core.json_safe import json_default
+from ...core.json_safe import escape_lone_surrogates, json_default
 from ...core.models import ArtifactRecord
 from ...core.safe_xml import UnsafeXmlError, safe_xml_fromstring, safe_xml_parse
 from .._walk import iter_evidence_paths
@@ -160,6 +160,8 @@ EVENTLOG_TRIAGE_IDENTITY_KEYS = (
     "timestamp_utc_basis",
     "event_data_source",
     "event_data_duplicate_names",
+    "evtx_lone_surrogate_references",
+    "export_lone_surrogate_escapes",
 )
 # Pivot fields kept only when non-empty (consumers read them with .get()).
 EVENTLOG_TRIAGE_PIVOT_KEYS = (
@@ -241,6 +243,24 @@ MAX_NATIVE_EVTX_RECORD_SIZE = 16 * 1024 * 1024
 MAX_NATIVE_EVTX_STRINGS = 200
 MAX_NATIVE_EVTX_BINXML_TOKENS = 500
 MAX_NATIVE_EVTX_NESTED_BINXML_BYTES = 1024 * 1024
+# BinXML character references to a lone UTF-16 surrogate (U+D800..U+DFFF) are not
+# characters, and UTF-8 output cannot hold them. They are kept as their reference
+# text (``&#xd800;``, the form invalid character references already take) and the
+# row discloses them (``evtx_lone_surrogate_references`` and this caution label).
+LONE_SURROGATE_CAUTION_LABEL = "lone-surrogate-character-reference"
+# JSON exports: a ``"\ud800"`` escape is kept as its escape text (``\ud800``), the row
+# carries ``export_lone_surrogate_escapes`` and this caution label.
+LONE_SURROGATE_ESCAPE_CAUTION_LABEL = "lone-surrogate-json-escape"
+
+
+def is_lone_surrogate(code_point: int) -> bool:
+    return 0xD800 <= code_point <= 0xDFFF
+
+
+def lone_surrogate_reference_text(code_point: int) -> str:
+    return f"&#x{code_point:x};"
+
+
 NATIVE_EVTX_READER_STRATEGY = "mmap-bounded-record-scan"
 NATIVE_EVTX_PARSE_SCOPE = "record-header-binxml-template-scalar-recovery-triage"
 NATIVE_EVTX_BINXML_STATUS = "not-decoded"
@@ -2079,10 +2099,12 @@ def collect_json_like_events(
     """
     stats = stats if stats is not None else {}
     source_hashes = file_hashes(path)
-    for index, (line_number, row) in enumerate(iter_json_rows(path, stats)):
+    for index, (line_number, parsed) in enumerate(iter_json_rows(path, stats)):
+        # "\ud800"-style escapes decode to surrogates UTF-8 output cannot hold: keep the escape text.
+        row, escaped = escape_lone_surrogates(parsed)
         details = details_from_mapping(
-            row,
-            parser=guess_parser_name(row, path),
+            row,  # type: ignore[arg-type]
+            parser=guess_parser_name(row, path),  # type: ignore[arg-type]
             source_format=path.suffix.lower().lstrip("."),
             source_path=path,
             source_index=index,
@@ -2091,6 +2113,9 @@ def collect_json_like_events(
         )
         if line_number is not None:
             details["source_line_number"] = line_number
+        if escaped:
+            details["export_lone_surrogate_escapes"] = escaped
+            details["caution_labels"] = [*(details.get("caution_labels") or []), LONE_SURROGATE_ESCAPE_CAUTION_LABEL]
         artifact_type = "eventlog-detection" if is_detection_row(details) else "eventlog-event"
         stats["rows_emitted"] = int(stats.get("rows_emitted") or 0) + 1
         yield event_record(path, artifact_type, details)
@@ -2820,6 +2845,10 @@ def build_native_evtx_event_record(
     if timestamp_status != "ok":
         details["timestamp_raw_iso"] = timestamp_iso
         details["caution_labels"] = [*details["caution_labels"], f"timestamp-{timestamp_status}"]
+    lone_surrogates = int(decoded.get("lone_surrogate_references") or 0) if decoded is not None else 0
+    if lone_surrogates:
+        details["evtx_lone_surrogate_references"] = lone_surrogates
+        details["caution_labels"] = [*details["caution_labels"], LONE_SURROGATE_CAUTION_LABEL]
     details["parser_confidence"] = native_evtx_confidence(details)
     details["evtx_report_grade_assessment"] = native_evtx_report_grade_assessment(details)
     counters["event_count"] = counters.get("event_count", 0) + 1
@@ -5867,11 +5896,11 @@ def parse_binxml_misc_token(blob: bytes, offset: int, *, current_path: str) -> d
             next_offset = len(blob)
         else:
             code_point = read_u16(blob, offset + 1)
-            try:
+            if is_lone_surrogate(code_point):
+                text = lone_surrogate_reference_text(code_point)
+                warnings.append(f"{LONE_SURROGATE_CAUTION_LABEL}:{offset}")
+            else:
                 text = chr(code_point)
-            except ValueError:
-                text = f"&#x{code_point:x};"
-                warnings.append(f"invalid-character-reference:{offset}")
             next_offset = offset + 3
         field.update(
             {
@@ -6464,7 +6493,15 @@ def _evtx_real_text(value: float) -> str:
 class EvtxChunkDecoder:
     """Decode BinXML records of one 64 KiB chunk (all offsets chunk-relative)."""
 
-    __slots__ = ("_names", "_templates", "_tokens", "chunk", "template_parse_count")
+    __slots__ = (
+        "_lone_surrogates",
+        "_names",
+        "_template_lone_surrogates",
+        "_templates",
+        "_tokens",
+        "chunk",
+        "template_parse_count",
+    )
 
     def __init__(self, chunk: bytes) -> None:
         self.chunk = chunk
@@ -6472,6 +6509,9 @@ class EvtxChunkDecoder:
         self._templates: dict[int, tuple[list[object], int]] = {}
         self.template_parse_count = 0
         self._tokens = 0
+        # Lone-surrogate character references in the current record (and per cached template body).
+        self._lone_surrogates = 0
+        self._template_lone_surrogates: dict[int, int] = {}
 
     # -- primitives -------------------------------------------------------
     def _u16(self, offset: int) -> int:
@@ -6692,7 +6732,12 @@ class EvtxChunkDecoder:
                 continue
             if kind == 0x08:
                 code_point = self._u16(pos + 1)
-                target.append(EvtxValue(chr(code_point), code_point, 0x01))
+                if is_lone_surrogate(code_point):
+                    # Not a character (UTF-8 cannot encode it): kept as its reference text.
+                    target.append(EvtxValue(lone_surrogate_reference_text(code_point), code_point, 0x01))
+                    self._lone_surrogates += 1
+                else:
+                    target.append(EvtxValue(chr(code_point), code_point, 0x01))
                 pos += 3
                 continue
             if kind == 0x09:
@@ -6734,14 +6779,19 @@ class EvtxChunkDecoder:
     def _template(self, template_offset: int, depth: int) -> tuple[list[object], int]:
         cached = self._templates.get(template_offset)
         if cached is not None:
+            # The cached body's lone-surrogate references are part of this instance too.
+            self._lone_surrogates += self._template_lone_surrogates.get(template_offset, 0)
             return cached
         data_length = self._u32(template_offset + 20)
         body = template_offset + 24
         if data_length <= 0 or body + data_length > len(self.chunk):
             raise EvtxDecodeError(f"template out of bounds @{template_offset}")
+        before = self._lone_surrogates
         nodes, _ = self._parse(body, body + data_length, depth=depth, stop_after_instance=False)
         result = (nodes, data_length)
         self._templates[template_offset] = result
+        if self._lone_surrogates != before:
+            self._template_lone_surrogates[template_offset] = self._lone_surrogates - before
         self.template_parse_count += 1
         return result
 
@@ -6810,6 +6860,7 @@ class EvtxChunkDecoder:
     # -- records ----------------------------------------------------------
     def decode_record(self, record_offset: int, record_size: int) -> dict[str, object]:
         self._tokens = 0
+        self._lone_surrogates = 0
         body_start = record_offset + EVTX_RECORD_HEADER_SIZE
         body_end = record_offset + record_size - 4
         nodes, _ = self._parse(body_start, body_end, depth=0, stop_after_instance=True)
@@ -6822,6 +6873,8 @@ class EvtxChunkDecoder:
         decoded["template_offsets"] = template_offsets
         decoded["substitution_count"] = substitution_count
         decoded["root"] = roots[0]
+        if self._lone_surrogates:
+            decoded["lone_surrogate_references"] = self._lone_surrogates
         return decoded
 
 
