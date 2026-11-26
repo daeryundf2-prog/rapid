@@ -806,7 +806,7 @@ class TimelineBuilder:
                         {
                             "artifact_type": incoming_details.get("artifact_type"),
                             "label": incoming_label,
-                            **{k: v for k, v in incoming_record.items() if k in ("output", "row_index")},
+                            **{k: v for k, v in incoming_record.items() if k in ("output", "row_index", "input_file")},
                         }
                     )
                 self.stats.cross_record_merges += 1
@@ -1233,7 +1233,9 @@ def extract_artifact_events(
             for field_name in TIMELINE_BUILD_STAMP_FIELDS.get(artifact_type, ()):
                 if details.get(field_name) not in (None, "", 0):
                     stats.build_stamp_fields[f"{artifact_type}.{field_name}"] += 1
-        source_record = {"output": f"artifacts_{kind}" if kind else "", "row_index": row_index}
+        # ``output`` + ``row_index`` name the run output row; ``input_file`` tells
+        # apart two inputs of one kind (the same row index in different exports).
+        source_record = {"output": f"artifacts_{kind}" if kind else "", "row_index": row_index, "input_file": str(input_path)}
         for detail_event in iter_artifact_detail_events(artifact_type, details, stats=stats):
             event_type = str(detail_event["event_type"])
             normalized = normalize_event_time(

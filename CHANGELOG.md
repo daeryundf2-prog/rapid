@@ -16,6 +16,14 @@
   `timeline_events` item that declares no zone and repeats the text of a mapped
   field verbatim takes that field's zone instead of the UTC default, so it
   still joins that event (`tests/test_d27_timeline.py::TimeBasisMergeTests`).
+- Timeline key-row citations did not name their input file. Two registry
+  exports passed to one `timeline` run whose rows share a key LastWrite each
+  contributed row 0, and both `details.key_rows` entries read
+  `(artifacts_windows-registry, 0)`, so neither value could be traced back to
+  its file. Every artifact event's `details.source_record`, each
+  `details.key_rows` entry and each `details.also_in` entry now also carry
+  `input_file`, the timeline input the row was read from
+  (`tests/test_d27_timeline.py::KeyRowCitationTests`).
 - On Windows an analysis could vanish from the analysis list for one read. The
   state reader treated the sharing error raised while another thread
   `os.replace`d `analysis.json` (a heartbeat or progress write) as "no state".

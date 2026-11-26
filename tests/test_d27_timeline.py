@@ -1,4 +1,5 @@
-"""D27 timeline findings: time basis in same-instant merges (#1)."""
+"""D27 timeline findings: time basis in same-instant merges (#1), key-row
+citations across input files (#8)."""
 
 from __future__ import annotations
 
@@ -44,6 +45,14 @@ def builder_event(timestamp: str, timezone: str, label: str) -> dict[str, object
         "summary": label,
         "details": {"source_record": {"output": "artifacts_windows-registry", "row_index": 0}},
         "record_key": f"{PROFILE}|row=0|",
+    }
+
+
+def feature_usage(application: str) -> dict[str, object]:
+    return {
+        "artifact_type": "execution-feature-usage",
+        "path": PROFILE,
+        "details": {"application": application, "key_path": "sample", "key_last_written_at": STAMP + "Z"},
     }
 
 
@@ -119,6 +128,38 @@ class TimeBasisMergeTests(unittest.TestCase):
                     for event in payload["events"]
                 ]
                 self.assertEqual(sorted(events, key=lambda item: item[1]), expected)
+
+
+class KeyRowCitationTests(unittest.TestCase):
+    """#8: each key-row citation resolves to its own input file and value."""
+
+    def test_key_rows_from_two_files_resolve_to_their_own_rows(self) -> None:
+        for reverse in (False, True):
+            with self.subTest(reverse=reverse), tempfile.TemporaryDirectory() as directory:
+                folder = Path(directory)
+                root = folder / "root"
+                root.mkdir()
+                inputs = []
+                for application in ("alpha", "beta"):
+                    target = folder / f"{application}.json"
+                    target.write_text(
+                        json.dumps({"command": "artifacts", "kind": "windows-registry", "artifacts": [feature_usage(application)]})
+                    )
+                    inputs.append(target)
+                if reverse:
+                    inputs.reverse()
+                payload = run_timeline(root=root, artifacts_inputs=inputs)
+                self.assertEqual(len(payload["events"]), 1)
+                details = payload["events"][0]["details"]
+                self.assertEqual(details["key_row_count"], 2)
+                rows = details["key_rows"]
+                self.assertEqual(len({(row["input_file"], row["output"], row["row_index"]) for row in rows}), 2)
+                self.assertEqual(details["source_record"]["input_file"], rows[0]["input_file"])
+                for row in rows:
+                    cited = json.loads(Path(row["input_file"]).read_text())["artifacts"][row["row_index"]]
+                    self.assertEqual(cited["details"]["application"], row["value"])
+                    self.assertEqual(Path(row["input_file"]).stem, row["value"])
+                self.assertEqual([row["value"] for row in rows], [Path(path).stem for path in inputs])
 
 
 if __name__ == "__main__":
