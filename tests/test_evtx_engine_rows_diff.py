@@ -355,6 +355,15 @@ def run_builder(rows: list[dict[str, object]], native: object) -> tuple[object, 
     return shape(builder.profiles), out
 
 
+def without_file_rows(jsonl: bytes) -> list[bytes]:
+    """JSONL lines except eventlog-file rows (where the Rust engine records itself)."""
+    return [line for line in jsonl.splitlines() if json.loads(line).get("artifact_type") != "eventlog-file"]
+
+
+def without_file_profile(hoisted: dict[str, object]) -> dict[str, object]:
+    return {key: value for key, value in hoisted.items() if key != "eventlog-file"}
+
+
 class CompactionKernelTests(unittest.TestCase):
     def setUp(self) -> None:
         if NATIVE is None:
@@ -440,29 +449,41 @@ class CompactionKernelTests(unittest.TestCase):
             logs = root / "Windows" / "System32" / "winevt" / "Logs"
             logs.mkdir(parents=True)
             for name, blob in build_edge_corpus().items():
-                # Its lone-surrogate rows cannot be written as UTF-8: the whole
-                # collection is failed-isolated with either engine.
-                if name != "python-fallback-chunks.evtx":
-                    (logs / name).write_bytes(blob)
+                (logs / name).write_bytes(blob)
             for detail in ("full", "triage"):
                 outputs = {}
-                for label, native in (("python", None), ("rust", NATIVE)):
+                # Python vs Rust row kernels on the same (Python-engine) rows, then the whole
+                # Rust engine (decoder + kernels); the corpus includes the lone-surrogate chunks.
+                for label, native, engine in (
+                    ("python", None, "python"),
+                    ("rust", NATIVE, "python"),
+                    ("rust-engine", NATIVE, "rust"),
+                ):
                     records = Path(tmp) / f"{label}-{detail}.jsonl"
                     with unittest.mock.patch.object(artifacts, "_native_row_kernels", return_value=native):
                         payload = artifacts.run_artifact_collection(
                             root,
                             kind="eventlog",
                             records_path=records,
-                            collector_options={"record_detail": detail, "evtx_engine": "python"},
+                            collector_options={"record_detail": detail, "evtx_engine": engine},
                         )
                     outputs[label] = (payload, records.read_bytes())
                 (python_payload, python_bytes), (rust_payload, rust_bytes) = outputs["python"], outputs["rust"]
+                engine_payload, engine_bytes = outputs["rust-engine"]
                 with self.subTest(detail=detail):
+                    for payload in (python_payload, rust_payload, engine_payload):
+                        self.assertEqual(payload["summary"]["collection_status"], "completed", payload["parser_errors"])
                     self.assertGreater(python_payload["record_count"], 2000)
                     self.assertEqual(rust_bytes, python_bytes)
                     self.assertEqual(
                         shape(rust_payload[profiles.PROFILES_PAYLOAD_KEY]),
                         shape(python_payload[profiles.PROFILES_PAYLOAD_KEY]),
+                    )
+                    # The Rust engine adds its provenance to eventlog-file rows only.
+                    self.assertEqual(without_file_rows(engine_bytes), without_file_rows(python_bytes))
+                    self.assertEqual(
+                        shape(without_file_profile(engine_payload[profiles.PROFILES_PAYLOAD_KEY])),
+                        shape(without_file_profile(python_payload[profiles.PROFILES_PAYLOAD_KEY])),
                     )
                     hoisted = python_payload[profiles.PROFILES_PAYLOAD_KEY]
                     for line in python_bytes.splitlines():
@@ -779,8 +800,8 @@ class TriageProjectionKernelTests(unittest.TestCase):
         rows = self.full_event_details()
         native = sum(self.assert_same_projection(details) for details in rows)
         self.assertGreater(len(rows), 1000)
-        # Rows with lone surrogates (python-fallback-chunks.evtx) are the only declines.
-        self.assertGreater(native, len(rows) * 0.8)
+        # Lone-surrogate references are now plain text, so no corpus row needs the Python projection.
+        self.assertEqual(native, len(rows))
 
     def test_mutated_details(self) -> None:
         rng = random.Random(8655)
