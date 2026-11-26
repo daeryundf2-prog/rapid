@@ -169,7 +169,14 @@ describe('viewer reuses stored OCR (image.ocr_sidecar.source === "analysis")', (
         ocr_sidecar: { text: "계약서 제3조 위약금", source: "analysis", analysis_id: "o1" },
       },
     } as unknown as SourcePreview;
-    render(<ImageView runId={RUN} preview={preview} onOpenPath={() => undefined} />);
+    render(
+      <ImageView
+        runId={RUN}
+        preview={preview}
+        onOpenPath={() => undefined}
+        onOpenOriginal={() => undefined}
+      />,
+    );
     expect(screen.getByText("계약서 제3조 위약금")).toBeTruthy();
     expect(screen.getByTestId("ocr-from-analysis").textContent).toContain("다시 OCR하지 않음");
     await waitFor(() => expect(calls.some((c) => c.url.includes("/source-image-gallery"))).toBe(true));

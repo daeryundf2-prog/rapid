@@ -499,51 +499,6 @@ export async function fetchSourceThumbnailBlob(
   return response.blob();
 }
 
-/** Read at most `maxBytes` of the original as UTF-8 (stream is cancelled after the cap). */
-export async function fetchSourceTextPrefix(
-  runId: string,
-  path: string,
-  maxBytes: number,
-  signal?: AbortSignal,
-): Promise<{ text: string; bytesRead: number; complete: boolean }> {
-  const response = await apiResponse(sourceFileUrl(runId, path), { signal });
-  const body = response.body;
-  if (!body) {
-    const buffer = new Uint8Array(await response.arrayBuffer());
-    const slice = buffer.slice(0, maxBytes);
-    return {
-      text: new TextDecoder("utf-8").decode(slice),
-      bytesRead: slice.length,
-      complete: buffer.length <= maxBytes,
-    };
-  }
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  let complete = true;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    const room = maxBytes - total;
-    if (value.length > room) {
-      chunks.push(value.slice(0, room));
-      total += room;
-      complete = false;
-      await reader.cancel().catch(() => undefined);
-      break;
-    }
-    chunks.push(value);
-    total += value.length;
-  }
-  const merged = new Uint8Array(total);
-  let cursor = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, cursor);
-    cursor += chunk.length;
-  }
-  return { text: new TextDecoder("utf-8").decode(merged), bytesRead: total, complete };
-}
-
 // ---------------------------------------------------------------------------
 // Review marks
 // ---------------------------------------------------------------------------

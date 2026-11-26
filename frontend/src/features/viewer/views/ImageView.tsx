@@ -3,42 +3,29 @@ import {
   fetchImageGallery,
   fetchOcrQueue,
   fetchOcrTranslation,
-  fetchSourceBlob,
   type OcrQueue,
   type SourcePreview,
+  THUMBNAIL_DEFAULT_SIZE,
 } from "../../../api/viewer";
 import "../../review/review.css";
 import { useViewPrefs } from "../../review/viewPrefs";
-import { errorText, useAsync, useBlobUrl } from "../useAsync";
+import { errorText, useAsync } from "../useAsync";
+import { EvidenceImage } from "./EvidenceImage";
 import { latestOcrFailure } from "./ocrFailure";
+import { Unavailable } from "./Unavailable";
 
 export const GALLERY_PAGE = 12;
-
-function AuthImage({
-  runId,
-  path,
-  alt,
-  className,
-}: {
-  runId: string;
-  path: string;
-  alt: string;
-  className?: string;
-}) {
-  const image = useBlobUrl(`${runId}|${path}`, (signal) => fetchSourceBlob(runId, path, signal));
-  if (image.status === "error")
-    return <span className="viewer-error">이미지를 불러오지 못했습니다: {image.error}</span>;
-  if (!image.url) return <span className="viewer-note">이미지 불러오는 중…</span>;
-  return <img src={image.url} alt={alt} className={className} />;
-}
+/** Largest JPEG the server renders (thumbnail.THUMBNAIL_MAX_SIZE). */
+const RENDITION_SIZE = 512;
 
 interface ImageViewProps {
   runId: string;
   preview: SourcePreview;
   onOpenPath: (path: string) => void;
+  onOpenOriginal: () => void;
 }
 
-export function ImageView({ runId, preview, onOpenPath }: ImageViewProps) {
+export function ImageView({ runId, preview, onOpenPath, onOpenOriginal }: ImageViewProps) {
   const image = preview.image || {};
   const [galleryOffset, setGalleryOffset] = useState(0);
   const gallery = useAsync(`${preview.path}|${galleryOffset}`, (signal) =>
@@ -78,12 +65,24 @@ export function ImageView({ runId, preview, onOpenPath }: ImageViewProps) {
     <div className="image-view" data-media-blur={blur ? "on" : undefined}>
       <div className="image-main">
         <figure className="image-figure">
-          <AuthImage
+          <EvidenceImage
             runId={runId}
             path={preview.path}
             alt={preview.name}
             className="image-original viewer-media-blurrable"
-          />
+            renditionSize={RENDITION_SIZE}
+            renditionNote={
+              <p className="viewer-note">
+                브라우저가 이 형식을 직접 표시하지 못해 서버가 만든 {RENDITION_SIZE}px 이하 미리보기를 보여
+                줍니다. 원본 화질은 원본 열기로 확인하세요.
+              </p>
+            }
+          >
+            <Unavailable onOpenOriginal={onOpenOriginal}>
+              브라우저와 서버 모두 이 이미지를 표시하지 못했습니다. 헥스 탭에서 바이트를 확인하거나 원본
+              열기로 내려받으세요.
+            </Unavailable>
+          </EvidenceImage>
           <figcaption className="viewer-note">
             {image.width && image.height ? `${image.width}×${image.height}` : "크기 알 수 없음"}
             {image.decoded === false ? " · 디코딩 실패(메타데이터만)" : ""}
@@ -177,11 +176,12 @@ export function ImageView({ runId, preview, onOpenPath }: ImageViewProps) {
                       if (!item.is_anchor) onOpenPath(item.path);
                     }}
                   >
-                    <AuthImage
+                    <EvidenceImage
                       runId={runId}
                       path={item.path}
                       alt=""
                       className="image-thumb-img viewer-media-blurrable"
+                      renditionSize={THUMBNAIL_DEFAULT_SIZE}
                     />
                     <span>{item.name}</span>
                   </button>

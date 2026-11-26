@@ -1,6 +1,9 @@
 import { useMemo, useState } from "react";
-import { fetchSourceTextPrefix, isArchiveEntryPath, type SourcePreview } from "../../../api/viewer";
-import { errorText } from "../useAsync";
+import { fetchSourceTextPrefix } from "../../../api/sourceText";
+import { isArchiveEntryPath, type SourcePreview } from "../../../api/viewer";
+import { bytesLabel } from "../fieldFormat";
+import { isTextPrefixPreview } from "../modes";
+import { errorText, useAsync } from "../useAsync";
 import { countHits, highlight, keywordPattern } from "./Highlight";
 
 export const FULL_TEXT_MAX_BYTES = 2 * 1024 * 1024;
@@ -66,7 +69,12 @@ export function SourceView({ runId, preview, terms }: SourceViewProps) {
     error: null,
   });
   const archive = isArchiveEntryPath(preview.path) || Boolean(preview.container_path);
-  const text = full?.text ?? preview.text ?? "";
+  // A text file the server answered as bytes (over its size limit): read the capped prefix at once.
+  const prefix = useAsync(isTextPrefixPreview(preview) ? `${runId}|${preview.path}` : null, (signal) =>
+    fetchSourceTextPrefix(runId, preview.path, FULL_TEXT_MAX_BYTES, signal),
+  );
+  const head = prefix.status === "ok" ? prefix.data : null;
+  const text = full?.text ?? head?.text ?? preview.text ?? "";
 
   const loadMore = async () => {
     setLoadState({ busy: true, error: null });
@@ -102,7 +110,16 @@ export function SourceView({ runId, preview, terms }: SourceViewProps) {
           </ul>
         </details>
       ) : null}
-      {text ? (
+      {head && !head.complete ? (
+        <p className="viewer-note" data-testid="source-prefix-note">
+          {bytesLabel(preview.size)} 파일의 처음 2 MB만 읽어 표시합니다. 전체 내용은 원본 열기로 확인하세요.
+        </p>
+      ) : null}
+      {prefix.status === "loading" ? (
+        <p className="viewer-note">텍스트 불러오는 중…</p>
+      ) : prefix.status === "error" ? (
+        <p className="viewer-error">텍스트를 불러오지 못했습니다: {prefix.error}</p>
+      ) : text ? (
         <TextLines text={text} terms={terms} label={`${preview.name} 원본 텍스트`} />
       ) : (
         <p className="viewer-empty">표시할 텍스트가 없습니다.</p>

@@ -498,7 +498,14 @@ describe("media blur covers the viewer gallery strip", () => {
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
     act(() => useViewPrefs.getState().setMediaBlur(true));
     const preview = { path: "C:/e/a.jpg", name: "a.jpg", preview_type: "image", size: 4, image: {} };
-    render(<ImageView runId="r1" preview={preview as never} onOpenPath={() => undefined} />);
+    render(
+      <ImageView
+        runId="r1"
+        preview={preview as never}
+        onOpenPath={() => undefined}
+        onOpenOriginal={() => undefined}
+      />,
+    );
     const strip = screen.getByRole("region", { name: "같은 폴더의 이미지" });
     await waitFor(() => expect(strip.querySelectorAll("img.image-thumb-img")).toHaveLength(2));
     for (const img of strip.querySelectorAll("img.image-thumb-img")) {

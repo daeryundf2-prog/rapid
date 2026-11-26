@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import type { SourcePreview } from "../../api/viewer";
 import type { ViewerMode } from "../../contracts/viewer";
-import { REASONS, resolveModes } from "./modes";
+import { naturalMode, REASONS, resolveModes } from "./modes";
 import { preview, target } from "./testSupport";
 
 function available(result: ReturnType<typeof resolveModes>): ViewerMode[] {
@@ -113,7 +114,7 @@ describe("resolveModes — one case per preview_type", () => {
     expect(result.best).toBe("hex");
   });
 
-  it("pdf whose extraction failed → document disabled with the API message", () => {
+  it("pdf whose extraction failed → document (its pages still render from the bytes)", () => {
     const result = resolveModes({
       target: target(),
       preview: preview({
@@ -122,8 +123,75 @@ describe("resolveModes — one case per preview_type", () => {
         message: "Text extraction failed: bad xref",
       }),
     });
+    expect(result.best).toBe("document");
+    expect(available(result)).toEqual(["hex", "document", "meta"]);
+    expect(reason(result, "source")).toBe(REASONS.documentHere);
+  });
+
+  it("docx whose extraction failed → hex; document disabled with the API message", () => {
+    const result = resolveModes({
+      target: target(),
+      preview: preview({
+        preview_type: "binary",
+        extension: ".docx",
+        message: "Text extraction failed: bad zip",
+      }),
+    });
     expect(result.best).toBe("hex");
-    expect(reason(result, "document")).toBe("Text extraction failed: bad xref");
+    expect(reason(result, "document")).toBe("Text extraction failed: bad zip");
+  });
+
+  it("plain-text kind over the server's size limit → source (read as a capped prefix)", () => {
+    const result = resolveModes({
+      target: target(),
+      preview: preview({
+        preview_type: "binary",
+        extension: ".log",
+        size: 30_000_000,
+        message: "Text extraction failed: log file exceeds text extraction size limit",
+      }),
+    });
+    expect(result.best).toBe("source");
+    expect(available(result)).toEqual(["source", "hex", "meta"]);
+  });
+});
+
+describe("naturalMode — the viewer each file type opens in", () => {
+  const zipEntry = { path: "C:/evidence/a.zip::x.pdf", container_path: "C:/evidence/a.zip" };
+  it.each<[string, ViewerMode, Partial<SourcePreview>]>([
+    ["pdf with extracted text", "document", { preview_type: "text", extension: ".pdf" }],
+    ["pdf with no text layer", "document", { preview_type: "hex", extension: ".pdf" }],
+    [
+      "pdf by MIME type only",
+      "document",
+      { preview_type: "hex", extension: "", mime_type: "application/pdf" },
+    ],
+    ["upper-case .PDF", "document", { preview_type: "hex", extension: ".PDF" }],
+    ["empty pdf", "hex", { preview_type: "hex", extension: ".pdf", size: 0 }],
+    [
+      "pdf in a zip, no text (entry bytes cannot be fetched)",
+      "hex",
+      { preview_type: "hex", extension: ".pdf", ...zipEntry },
+    ],
+    ["pdf in a zip, with text", "document", { preview_type: "text", extension: ".pdf", ...zipEntry }],
+    ["png", "image", { preview_type: "image", extension: ".png" }],
+    ["tiff", "image", { preview_type: "image", extension: ".tiff" }],
+    ["txt", "source", { preview_type: "text", extension: ".txt" }],
+    ["log", "source", { preview_type: "text", extension: ".log" }],
+    ["csv", "source", { preview_type: "text", extension: ".csv" }],
+    ["json", "source", { preview_type: "json", extension: ".json" }],
+    ["csv over the size limit", "source", { preview_type: "binary", extension: ".csv" }],
+    ["json over the size limit", "source", { preview_type: "binary", extension: ".json" }],
+    ["log in a zip over the size limit", "hex", { preview_type: "binary", extension: ".log", ...zipEntry }],
+    ["wav", "media", { preview_type: "media", extension: ".wav" }],
+    ["mp4", "media", { preview_type: "media", extension: ".mp4" }],
+    ["docx with extracted text", "document", { preview_type: "text", extension: ".docx" }],
+    ["xlsx whose extraction failed", "hex", { preview_type: "binary", extension: ".xlsx" }],
+    ["xls with no extractable text", "hex", { preview_type: "hex", extension: ".xls" }],
+    ["unknown binary", "hex", { preview_type: "hex", extension: ".bin" }],
+    ["no extension", "hex", { preview_type: "binary", extension: "" }],
+  ])("%s → %s", (_name, expected, overrides) => {
+    expect(naturalMode(preview(overrides))).toBe(expected);
   });
 });
 
