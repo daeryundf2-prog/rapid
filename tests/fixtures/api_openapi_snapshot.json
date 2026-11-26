@@ -1,6 +1,9 @@
 {
   "openapi": "3.1.0",
   "paths": {
+    "/api/actions": {
+      "get": "action_catalog_api_actions_get"
+    },
     "/api/browse": {
       "get": "browse_filesystem_api_browse_get"
     },
@@ -141,6 +144,12 @@
     "/api/runs/{run_id}": {
       "delete": "delete_run_api_runs__run_id__delete",
       "get": "get_run_api_runs__run_id__get"
+    },
+    "/api/runs/{run_id}/actions/mark": {
+      "post": "mark_rows_api_runs__run_id__actions_mark_post"
+    },
+    "/api/runs/{run_id}/actions/select": {
+      "post": "select_rows_api_runs__run_id__actions_select_post"
     },
     "/api/runs/{run_id}/analyses": {
       "get": "list_analyses_api_runs__run_id__analyses_get",

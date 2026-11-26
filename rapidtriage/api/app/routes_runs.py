@@ -121,7 +121,7 @@ from .runops import (
     build_run_viewer_workflow_validation,
 )
 from .search_index_service import search_index_available
-from .timeline_hist import build_timeline_histogram
+from .timeline_hist import build_timeline_histogram, parse_event_timestamp
 from .tree import build_run_issues, build_run_tree, live_run_block
 from .triage_flags import (
     FlagQuery,
@@ -753,9 +753,22 @@ def build_runs_router(
 
 
     @router.get("/api/runs/{run_id}/timeline-histogram")
-    def get_run_timeline_histogram(run_id: str) -> dict[str, object]:
+    def get_run_timeline_histogram(
+        run_id: str,
+        time_from: str | None = Query(default=None, alias="from"),
+        time_to: str | None = Query(default=None, alias="to"),
+    ) -> dict[str, object]:
+        """Time x source buckets of the whole timeline; ``from``/``to`` (inclusive ISO instants)
+        bucket only that window, so a zoomed range gets its own finer buckets (console 시간 개요)."""
         payload = get_named_output(store, run_id, "timeline")
-        return build_timeline_histogram(payload)
+        window: dict[str, dt.datetime] = {}
+        for key, raw, shift in (("window_start", time_from, dt.timedelta(0)), ("window_end", time_to, dt.timedelta(microseconds=1))):
+            if raw:
+                parsed = parse_event_timestamp(raw)
+                if parsed is None:
+                    raise HTTPException(status_code=422, detail=f"히스토그램 범위 시각을 읽을 수 없습니다: {raw}")
+                window[key] = parsed + shift
+        return build_timeline_histogram(payload, **window)
 
 
     @router.get("/api/runs/{run_id}/indicators")

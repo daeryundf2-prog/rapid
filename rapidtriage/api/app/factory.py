@@ -27,6 +27,7 @@ from .helpers import (
     resolve_case_db_path,
     truthy_env,
 )
+from .routes_actions import build_actions_router
 from .routes_analyses import build_analyses_router, korean_body_errors
 from .routes_case_db import build_case_db_router
 from .routes_cases import CASE_FIELD_LABELS, build_cases_router
@@ -214,7 +215,9 @@ def create_app(
             )
 
     api.include_router(build_meta_router(store))
-    api.include_router(build_case_db_router(store, open_request_case_database, resolve_request_catalog_path))
+    case_db_router = build_case_db_router(store, open_request_case_database, resolve_request_catalog_path)
+    api.include_router(case_db_router)
+    api.include_router(build_actions_router(store, case_db_router))
     api.include_router(build_runs_router(store))
     api.include_router(build_run_plan_router(store))
     api.include_router(build_cases_router(store, case_workspace))
