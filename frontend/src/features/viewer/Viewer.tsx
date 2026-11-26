@@ -47,16 +47,9 @@ import { resolveModes } from "./modes";
 import { POPOUT_COMMAND_ID } from "./popout/host";
 import { recordByteRange } from "./record";
 import { viewerSession } from "./session";
-import { type AsyncState, errorText, useAsync } from "./useAsync";
+import { errorText, useAsync } from "./useAsync";
+import { ViewerBody } from "./ViewerBody";
 import { ViewerToolbar } from "./ViewerToolbar";
-import { DocumentView } from "./views/DocumentView";
-import { EmailView } from "./views/EmailView";
-import { HexView } from "./views/HexView";
-import { ImageView } from "./views/ImageView";
-import { MediaView } from "./views/MediaView";
-import { MetaView } from "./views/MetaView";
-import { SourceView } from "./views/SourceView";
-import { SqliteView } from "./views/SqliteView";
 import "./viewer.css";
 
 /** Files up to this size get their SHA-256 computed automatically after load. */
@@ -240,7 +233,9 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
       if (!target?.sourcePath) return;
       try {
         const blob = await fetchSourceBlob(target.runId, target.sourcePath);
-        const url = URL.createObjectURL(blob);
+        // Bytes only: were the link ever navigated instead of downloaded, an evidence HTML/SVG
+        // would otherwise run as a document in the console's origin (a blob: URL shares it).
+        const url = URL.createObjectURL(blob.slice(0, blob.size, "application/octet-stream"));
         const anchor = document.createElement("a");
         anchor.href = url;
         anchor.download = baseName(
@@ -551,110 +546,10 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
             }}
             onOpenPath={openGalleryPath}
             onCopy={copyAndAnnounce}
+            onOpenOriginal={() => runCommand(byId(VIEWER_COMMAND_IDS.openOriginal))}
           />
         )}
       </div>
     </section>
   );
-}
-
-interface ViewerBodyProps {
-  target: ViewerTarget;
-  mode: ViewerMode;
-  /** Preview still loading and no mode chosen yet (artifact rows resolve to 메타 immediately). */
-  resolving: boolean;
-  highlight: ViewerTarget["highlight"];
-  previewState: AsyncState<SourcePreview>;
-  metadata: SourceMetadata | null;
-  metadataError: string | null;
-  hashBusy: boolean;
-  row: ReturnType<typeof useViewerRowContext>;
-  sessionMarks: string[];
-  terms: string[];
-  onComputeHash: () => void;
-  onOpenPath: (path: string) => void;
-  onCopy: (text: string, sentence: string) => void;
-}
-
-function ViewerBody(props: ViewerBodyProps) {
-  const { target, mode, previewState, metadata, highlight } = props;
-  const hexKey = `${target.sourcePath}|${highlight?.offset ?? ""}`;
-  const preview = previewState.status === "ok" ? previewState.data : null;
-  if (
-    props.resolving ||
-    (mode !== "meta" &&
-      target.sourcePath &&
-      (previewState.status === "loading" || previewState.status === "idle"))
-  ) {
-    return <p className="viewer-note">원본을 불러오는 중…</p>;
-  }
-  if (mode === "meta" || !target.sourcePath) {
-    return (
-      <MetaView
-        target={target}
-        preview={preview}
-        metadata={metadata}
-        metadataError={props.metadataError}
-        hashBusy={props.hashBusy}
-        row={props.row}
-        sessionMarks={props.sessionMarks}
-        onComputeHash={props.onComputeHash}
-      />
-    );
-  }
-  if (mode === "hex" && !preview && previewState.status === "error") {
-    if (!metadata) {
-      // The size comes from source-metadata: when that failed too (a 404 for a deleted
-      // snapshot file), say so — never an endless "확인하는 중".
-      if (props.metadataError) {
-        return (
-          <p className="viewer-error" data-testid="viewer-hex-error">
-            원본을 불러오지 못했습니다: {previewState.error} · 파일 정보: {props.metadataError}
-          </p>
-        );
-      }
-      return <p className="viewer-note">파일 크기를 확인하는 중…</p>;
-    }
-    return (
-      <HexView
-        key={hexKey}
-        runId={target.runId}
-        path={target.sourcePath}
-        size={metadata.size}
-        highlight={highlight}
-      />
-    );
-  }
-  if (previewState.status === "error" || !preview) {
-    return <p className="viewer-error">원본을 불러오지 못했습니다: {previewState.error}</p>;
-  }
-  switch (mode) {
-    case "source":
-      return <SourceView key={preview.path} runId={target.runId} preview={preview} terms={props.terms} />;
-    case "document":
-      return <DocumentView preview={preview} terms={props.terms} />;
-    case "hex":
-      return (
-        <HexView
-          key={hexKey}
-          runId={target.runId}
-          path={target.sourcePath}
-          size={preview.size}
-          highlight={highlight}
-          staticRows={preview.container_path ? preview.hex?.rows : undefined}
-        />
-      );
-    case "sqlite":
-      return <SqliteView key={preview.path} runId={target.runId} preview={preview} highlight={highlight} />;
-    case "image":
-      return (
-        <ImageView key={preview.path} runId={target.runId} preview={preview} onOpenPath={props.onOpenPath} />
-      );
-    case "email":
-      return <EmailView runId={target.runId} preview={preview} terms={props.terms} onCopy={props.onCopy} />;
-    case "media":
-      return <MediaView key={preview.path} runId={target.runId} preview={preview} onCopy={props.onCopy} />;
-    default:
-      return null;
-  }
 }

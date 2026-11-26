@@ -4,6 +4,18 @@
 
 ### Fixed
 
+- "더 보기" in the console's text view decoded the original as UTF-8 only, so
+  a CP949, UTF-16 or UTF-32 file turned into replacement characters once
+  expanded. It now decodes in the order of the server preview
+  (`core/doc_text.decode_text_bytes`): BOM (UTF-8, UTF-32, UTF-16), BOM-less
+  UTF-16, UTF-8, then CP949. A character cut by the 2 MB cap is dropped instead
+  of switching the encoding (`frontend/src/api/sourceText.test.ts`).
+- An SVG shown in the console's image view or thumbnail grid was a `blob:` URL
+  in the console's own origin, so "open image in new tab" ran the evidence's
+  script with access to the console. It is now a `data:` URL, whose origin is
+  opaque. 원본 열기 hands the browser the original as
+  `application/octet-stream` (`frontend/src/features/viewer/views/fallbacks.test.tsx`,
+  `frontend/src/features/viewer/Viewer.test.tsx`).
 - The timeline merged an offset-free local wall clock with a UTC instant
   whose digits matched. A registry row with the local-unknown installation
   time `2024-11-03T01:30:00` and the key LastWrite `2024-11-03T01:30:00Z`
@@ -178,6 +190,21 @@
   (exFAT, tmpfs). **Output change:** manifest entry order.
 
 ### Added
+
+- The console viewer shows a file in a view of its own type instead of a hex
+  dump. A PDF renders as pages in the browser's PDF viewer, from the bytes of
+  `GET /api/runs/{run}/source-file`, whether or not text could be extracted; a
+  toggle switches to the extracted text, which comes first when the search
+  keywords hit it. A file named `.pdf` without the `%PDF-` header is reported as
+  such and not framed; only its first 1 KB is read to tell. The frame always
+  gets the bytes as `application/pdf`, so an HTML polyglot starting with
+  `%PDF-` never runs as a page. The PDF is fetched once per file and kept across
+  the toggle until the viewer closes. An image the browser cannot decode (TIFF,
+  ...) falls back to the server's JPEG preview, and media it cannot play says
+  so. A plain-text file over the server's extraction limit opens as text from
+  its first 2 MB. A type with no viewer keeps the hex grid under a notice with
+  its format, MIME type and size. Each of these states offers 원본 열기. No API
+  change.
 
 - The `macos-unified-log` collector extracts log, activity, signpost and trace
   events from stored tracev3 chunksets in offline evidence. Calibrated events

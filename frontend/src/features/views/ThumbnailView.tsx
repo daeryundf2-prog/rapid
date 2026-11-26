@@ -29,7 +29,7 @@ import {
   useState,
 } from "react";
 import { announce, DisabledReason } from "../../a11y";
-import { fetchSourceBlob, fetchSourceThumbnailBlob, isArchiveEntryPath } from "../../api/viewer";
+import { fetchSourceImage, fetchSourceThumbnailBlob, isArchiveEntryPath } from "../../api/viewer";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
 import { encodeRowRef } from "../../contracts/rowRef";
 import { useAppStore } from "../../state/store";
@@ -75,14 +75,14 @@ export const THUMB_CONCURRENCY = 6;
 export const THUMB_SIZE = 160;
 const thumbSlots = createLimiter(THUMB_CONCURRENCY);
 
-/** Thumbnail first; the original only if the thumbnail call fails (not when aborted). */
-export function loadThumbBlob(runId: string, path: string, signal: AbortSignal): Promise<Blob> {
+/** Thumbnail first; the original only if the thumbnail call fails (not when aborted), an SVG as a data: URL. */
+export function loadThumbBlob(runId: string, path: string, signal: AbortSignal): Promise<Blob | string> {
   return thumbSlots(signal, async () => {
     try {
       return await fetchSourceThumbnailBlob(runId, path, THUMB_SIZE, signal);
     } catch (error) {
       if (signal.aborted) throw error;
-      return fetchSourceBlob(runId, path, signal);
+      return fetchSourceImage(runId, path, signal);
     }
   });
 }

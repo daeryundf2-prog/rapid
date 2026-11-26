@@ -48,25 +48,41 @@ export function useAsync<T>(key: string | null, load: (signal: AbortSignal) => P
   return entry.key === key ? entry.state : LOADING;
 }
 
-/** Object URL for a blob loaded for `key`; revoked on change/unmount. */
-export function useBlobUrl(key: string | null, load: (signal: AbortSignal) => Promise<Blob>) {
+export interface BlobUrlState {
+  url: string | null;
+  status: AsyncState<unknown>["status"];
+  error: string | null;
+}
+
+/**
+ * URL for a blob loaded for `key`: an object URL, revoked on change/unmount. A loader may resolve
+ * to a ready URL string instead (a `data:` URL), used as is.
+ */
+export function useBlobUrl(
+  key: string | null,
+  load: (signal: AbortSignal) => Promise<Blob | string>,
+): BlobUrlState {
   const state = useAsync(key, load);
   const [url, setUrl] = useState<string | null>(null);
-  const blob = state.status === "ok" ? state.data : null;
+  const source = state.status === "ok" ? state.data : null;
   useEffect(() => {
-    if (!blob || typeof URL.createObjectURL !== "function") {
+    if (typeof source === "string") {
+      setUrl(source);
+      return;
+    }
+    if (!source || typeof URL.createObjectURL !== "function") {
       setUrl(null);
       return;
     }
     let next: string;
     try {
-      next = URL.createObjectURL(blob);
+      next = URL.createObjectURL(source);
     } catch {
       setUrl(null);
       return;
     }
     setUrl(next);
     return () => URL.revokeObjectURL(next);
-  }, [blob]);
+  }, [source]);
   return { url, status: state.status, error: state.error };
 }

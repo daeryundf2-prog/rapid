@@ -372,6 +372,31 @@ describe("Viewer — toolbar actions", () => {
     await waitFor(() => expect(clipboard[1]).toBe(SHA));
   });
 
+  it("downloads the original as bytes only, never as a type the browser would render", async () => {
+    const clicked: { href: string; download: string }[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      clicked.push({ href: this.href, download: this.download });
+    });
+    await show(
+      { preview_type: "text", extension: ".txt", text: "hi" },
+      {},
+      {
+        "source-file": () =>
+          new Response("<svg><script>alert(1)</script></svg>", {
+            headers: { "content-type": "image/svg+xml" },
+          }),
+      },
+    );
+    fireEvent.click(tool("viewer.open-original"));
+    await waitFor(() => expect(clicked).toHaveLength(1));
+    const handed = vi.mocked(URL.createObjectURL).mock.calls.map(([object]) => (object as Blob).type);
+    expect(handed).toEqual(["application/octet-stream"]);
+    expect(clicked[0]?.download).toBe("file.bin");
+    click.mockRestore();
+  });
+
   it("copies a one-line citation with path, sha256, locator and run id", async () => {
     const calls = await show({ preview_type: "text", extension: ".txt", text: "hi" });
     fireEvent.click(tool("viewer.cite"));

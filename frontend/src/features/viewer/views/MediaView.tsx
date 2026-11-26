@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { fetchMediaCue, fetchSourceBlob, type SourcePreview } from "../../../api/viewer";
 import { errorText, useBlobUrl } from "../useAsync";
+import { Unavailable } from "./Unavailable";
 
 /** Media is loaded as a blob (auth header); larger files are opened externally. */
 export const MEDIA_INLINE_MAX_BYTES = 512 * 1024 * 1024;
@@ -22,9 +23,10 @@ interface MediaViewProps {
   runId: string;
   preview: SourcePreview;
   onCopy: (text: string, sentence: string) => void;
+  onOpenOriginal: () => void;
 }
 
-export function MediaView({ runId, preview, onCopy }: MediaViewProps) {
+export function MediaView({ runId, preview, onCopy, onOpenOriginal }: MediaViewProps) {
   const media = preview.media || {};
   const mime = media.mime_type || preview.mime_type || "";
   const isVideo = mime.startsWith("video/");
@@ -34,6 +36,8 @@ export function MediaView({ runId, preview, onCopy }: MediaViewProps) {
   );
   const playerRef = useRef<HTMLMediaElement | null>(null);
   const [cueError, setCueError] = useState<string | null>(null);
+  // False once the element reports an error: a codec or container this browser does not play.
+  const [playable, setPlayable] = useState(true);
   const sidecars = media.transcript_sidecars || [];
   const metadata = media.metadata || {};
 
@@ -60,10 +64,15 @@ export function MediaView({ runId, preview, onCopy }: MediaViewProps) {
   return (
     <div className="media-view">
       {!inline ? (
-        <p className="viewer-note">
+        <Unavailable onOpenOriginal={onOpenOriginal}>
           {(preview.size / 1024 / 1024).toFixed(0)} MB 파일은 뷰어에서 재생하지 않습니다. 원본 열기로
           확인하세요.
-        </p>
+        </Unavailable>
+      ) : !playable ? (
+        <Unavailable onOpenOriginal={onOpenOriginal}>
+          브라우저가 재생하지 못하는 형식입니다. 코덱이나 컨테이너를 지원하지 않습니다. 원본 열기로 내려받아
+          재생기로 확인하세요.
+        </Unavailable>
       ) : blob.status === "error" ? (
         <p className="viewer-error">미디어를 불러오지 못했습니다: {blob.error}</p>
       ) : !blob.url ? (
@@ -79,6 +88,7 @@ export function MediaView({ runId, preview, onCopy }: MediaViewProps) {
           controls
           preload="metadata"
           aria-label={`${preview.name} 재생`}
+          onError={() => setPlayable(false)}
         />
       ) : (
         // biome-ignore lint/a11y/useMediaCaption: evidence media has no caption track; transcript cues are listed below
@@ -91,10 +101,12 @@ export function MediaView({ runId, preview, onCopy }: MediaViewProps) {
           controls
           preload="metadata"
           aria-label={`${preview.name} 재생`}
+          onError={() => setPlayable(false)}
         />
       )}
       <p className="viewer-note">
-        {mime || "미디어"} · 길이 {metadata.duration_seconds ?? "알 수 없음"}초
+        {mime || "미디어"} · 길이{" "}
+        {metadata.duration_seconds == null ? "알 수 없음" : `${metadata.duration_seconds}초`}
         {metadata.sample_rate ? ` · 샘플레이트 ${metadata.sample_rate}` : ""}
         {metadata.audio_channels ? ` · 채널 ${metadata.audio_channels}` : ""}
       </p>
@@ -116,8 +128,12 @@ export function MediaView({ runId, preview, onCopy }: MediaViewProps) {
                       type="button"
                       className="media-cue"
                       onClick={() => seek(cue.start)}
-                      disabled={!blob.url}
-                      title={blob.url ? `${cue.start}로 이동` : "미디어를 재생할 수 없어 이동할 수 없습니다."}
+                      disabled={!blob.url || !playable}
+                      title={
+                        blob.url && playable
+                          ? `${cue.start}로 이동`
+                          : "미디어를 재생할 수 없어 이동할 수 없습니다."
+                      }
                     >
                       <span className="mono">
                         {cue.start}–{cue.end}

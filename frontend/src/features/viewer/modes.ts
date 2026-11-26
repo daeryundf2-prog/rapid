@@ -4,7 +4,7 @@
  * Pure functions so the matrix is unit-testable without rendering.
  */
 
-import type { SourcePreview } from "../../api/viewer";
+import { isArchiveEntryPath, type SourcePreview } from "../../api/viewer";
 import type { ViewerMode, ViewerModeState, ViewerTarget } from "../../contracts/viewer";
 
 export const MODE_ORDER: ViewerMode[] = [
@@ -52,6 +52,26 @@ export const DOCUMENT_EXTENSIONS = new Set([
   ".hwpx",
 ]);
 
+/**
+ * Plain-text kinds (core/docs TEXT_EXTS). Past the server's size limit their preview comes back as
+ * bytes; the source view then reads a capped prefix of the original instead of showing hex.
+ */
+export const TEXT_EXTENSIONS = new Set([
+  ".cfg",
+  ".conf",
+  ".csv",
+  ".ini",
+  ".json",
+  ".jsonl",
+  ".log",
+  ".md",
+  ".tsv",
+  ".txt",
+  ".xml",
+  ".yaml",
+  ".yml",
+]);
+
 export const REASONS = {
   noPath: "원본 파일 경로가 없는 행입니다(파생 항목).",
   loading: "원본 정보를 불러오는 중입니다.",
@@ -96,6 +116,27 @@ export function isDocumentPreview(preview: SourcePreview): boolean {
   return DOCUMENT_EXTENSIONS.has((preview.extension || "").toLowerCase());
 }
 
+/** An `archive.zip::entry` preview: file APIs act on the container, so the entry's own bytes cannot be fetched. */
+function isArchiveEntry(preview: SourcePreview): boolean {
+  return Boolean(preview.container_path) || isArchiveEntryPath(preview.path);
+}
+
+/** A PDF whose bytes can be fetched: shown as pages (PdfView), whether or not text was extracted. */
+export function isRenderablePdf(preview: SourcePreview): boolean {
+  const pdf = (preview.extension || "").toLowerCase() === ".pdf" || preview.mime_type === "application/pdf";
+  return pdf && preview.size > 0 && !isArchiveEntry(preview);
+}
+
+/** A plain-text kind the server answered as bytes (over its size limit): readable as a capped prefix. */
+export function isTextPrefixPreview(preview: SourcePreview): boolean {
+  return (
+    preview.preview_type === "binary" &&
+    TEXT_EXTENSIONS.has((preview.extension || "").toLowerCase()) &&
+    preview.size > 0 &&
+    !isArchiveEntry(preview)
+  );
+}
+
 /** Mode the payload naturally belongs to (before availability checks). */
 export function naturalMode(preview: SourcePreview): ViewerMode {
   switch (preview.preview_type) {
@@ -113,7 +154,10 @@ export function naturalMode(preview: SourcePreview): ViewerMode {
     case "text":
       return isDocumentPreview(preview) ? "document" : "source";
     default:
-      return "hex";
+      // No structured preview: a PDF still renders from its bytes, an oversized text file still
+      // reads as text; everything else falls back to hex.
+      if (isRenderablePdf(preview)) return "document";
+      return isTextPrefixPreview(preview) ? "source" : "hex";
   }
 }
 
@@ -163,11 +207,10 @@ export function resolveModes(input: ResolveInput): ResolvedModes {
 
   const natural = naturalMode(preview);
   const type = preview.preview_type;
-  const textual = type === "text" || type === "json" || type === "xml";
   const modes: ViewerModeState[] = MODE_ORDER.map((mode) => {
     switch (mode) {
       case "source":
-        if (textual && natural !== "document") return state("source");
+        if (natural === "source") return state("source");
         if (natural === "document") return state("source", REASONS.documentHere);
         if (type === "email") return state("source", REASONS.emailHere);
         return state("source", REASONS.notText);

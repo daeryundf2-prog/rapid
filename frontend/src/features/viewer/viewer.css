@@ -336,6 +336,15 @@
   color: var(--danger);
 }
 
+/* Korean sentences wrap at spaces, never inside a word (파/일, 열기/로); a string with no space
+   to break at (a path, a hash) still wraps instead of overflowing. */
+.viewer-note,
+.viewer-error,
+.viewer-empty {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
 .viewer-warning {
   margin: 0 0 var(--space-2);
   padding: var(--space-2);
@@ -503,6 +512,62 @@
   font-size: var(--fs-table-aux);
 }
 
+/* Typed views: PDF frame, "cannot show here" notice ------------------------- */
+
+/* PDF ↔ 추출 텍스트: the shared segmented control on a <fieldset> (its default margin reset). */
+.viewer-document > .segmented {
+  margin: 0 0 var(--space-2);
+}
+
+/* The segmented buttons are 22px tall inside the 28px control: each one's hit area also covers
+   the control's padding and border above and below it (3px past the button's own 1px border),
+   so the pointer target is 28px tall. */
+.viewer-document > .segmented > button {
+  position: relative;
+}
+
+.viewer-document > .segmented > button::after {
+  content: "";
+  position: absolute;
+  inset: -4px 0;
+}
+
+/* PDF presentation: the toggle row stays put and the frame takes the rest of the pane, so the
+   browser's PDF viewer inside it is the only scroller (no second scrollbar on the panel). */
+.viewer-document[data-presentation="pdf"] {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 320px;
+}
+
+.viewer-document[data-presentation="pdf"] > .segmented {
+  flex: none;
+  align-self: flex-start;
+}
+
+.pdf-frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+/* A view that cannot show the file here: the reason, then 원본 열기 beside it (under it when narrow). */
+.viewer-unavailable {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.viewer-unavailable > p {
+  flex: 1 1 24em;
+  margin: 0;
+}
+
 /* Hex --------------------------------------------------------------------- */
 
 .hex-view {
@@ -623,6 +688,19 @@
   font-family: var(--font-mono);
   font-size: var(--fs-aux);
   cursor: pointer;
+}
+
+/* No viewer for this type: the notice and the file facts stay on top, the hex grid takes the rest. */
+.viewer-fallback {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  height: 100%;
+}
+
+.viewer-fallback > .hex-view {
+  flex: 1;
+  height: auto;
 }
 
 /* SQLite ------------------------------------------------------------------ */
