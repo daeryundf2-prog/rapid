@@ -15,6 +15,7 @@ from ...core.extraction_failures import ADS_SOURCE_ID, iter_recovered_ads_rows
 from ...core.filetime import filetime_to_iso_7
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
+from ...core.ntfs_native import PYTHON_ONLY_FIELDS, resolve_ntfs_engine
 from ...core.provider_progress import (
     PROVIDER_SCAN_REPORT_EVERY,
     report_provider_progress,
@@ -1228,6 +1229,10 @@ def detect_file_signature(blob: bytes) -> dict[str, object] | None:
 
 def collect_native_ntfs_artifacts(root: Path) -> Iterable[ArtifactRecord]:
     seen: set[Path] = set()
+    # The review profiles and record samples read every Python-only field (hashes,
+    # attribute-list resolution, the USN cursor window), so this collector always
+    # parses with Python; a RAPIDTRIAGE_NTFS_ENGINE=rust request is recorded with why.
+    engine = resolve_ntfs_engine(reads_python_only=PYTHON_ONLY_FIELDS)
     candidate_paths = sorted((path for path in iter_evidence_paths(root, "*") if path.is_file()), key=lambda item: str(item).lower())
     mft_records_by_path: dict[Path, list[dict[str, object]]] = {}
     mft_path_caches_by_volume: dict[Path, dict[int, dict[str, object]]] = {}
@@ -1245,7 +1250,9 @@ def collect_native_ntfs_artifacts(root: Path) -> Iterable[ArtifactRecord]:
             continue
         if is_native_mft_path(path):
             mft_source_hashes = file_hashes(path)
-            yield build_mft_inventory_record(path, source_hashes=mft_source_hashes)
+            inventory = build_mft_inventory_record(path, source_hashes=mft_source_hashes)
+            inventory.details.update(engine.provenance("mft"))
+            yield inventory
             mft_records = mft_records_by_path.get(resolved) or parse_mft_record_headers(read_prefix(path, NATIVE_SCAN_LIMIT))
             bounded_path_cache = mft_path_caches_by_volume.get(resolved.parent) or build_mft_bounded_path_cache(mft_records)
             for index, record in enumerate(mft_records):
@@ -1254,7 +1261,9 @@ def collect_native_ntfs_artifacts(root: Path) -> Iterable[ArtifactRecord]:
         elif is_native_usn_path(path):
             bounded_path_cache = nearest_mft_path_cache(path, mft_path_caches_by_volume)
             usn_source_hashes = file_hashes(path)
-            yield build_usn_journal_inventory_record(path, bounded_path_cache, source_hashes=usn_source_hashes)
+            inventory = build_usn_journal_inventory_record(path, bounded_path_cache, source_hashes=usn_source_hashes)
+            inventory.details.update(engine.provenance("usn"))
+            yield inventory
             for index, record in enumerate(parse_usn_records(read_prefix(path, NATIVE_SCAN_LIMIT))):
                 yield build_native_usn_record(path, record, index, bounded_path_cache, source_hashes=usn_source_hashes)
             seen.add(resolved)
