@@ -4,6 +4,11 @@ export interface Manifest {
 generated_at: string
 root: string
 platform: string
+/**
+ * Assembled after a skipped, cancelled or failed provider task; never reused by --resume
+ */
+inputs_partial?: true
+partial_kinds?: string[]
 keywords: string[]
 providers: {
 name: string
@@ -11,6 +16,10 @@ description: string
 target_platform: string
 supported: boolean
 collection_status?: string
+/**
+ * Run plan: this provider task did not run (core/docs.py planned-out provider row)
+ */
+plan_status?: ("skipped" | "cancelled")
 parser_errors?: {
 [k: string]: unknown | undefined
 }[]

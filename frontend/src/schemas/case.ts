@@ -49,6 +49,12 @@ pointer: string
 root: (string | null)
 stable_key: string
 row_sha256?: string
+/**
+ * Set when the bookmark stands for a case-DB review mark (submission view of the run's review marks)
+ */
+case_db?: {
+[k: string]: unknown | undefined
+}
 }
 snapshot: {
 path: (string | null)
@@ -56,6 +62,10 @@ hash: (string | null)
 timestamp: (string | null)
 artifact_key: (string | null)
 summary: string
+/**
+ * Row record state when the source states one (EVTX: live, slack-recovered, ...)
+ */
+record_state?: string
 }
 }[]
 }

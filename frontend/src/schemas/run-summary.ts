@@ -2,6 +2,24 @@
 
 export interface RunSummary {
 command: "run"
+/**
+ * Run plan snapshot at the end of the run (r4 run plan; same document as rapidtriage-run-plan.json, see docs/rapidtriage-output-schemas.md).
+ */
+plan?: {
+[k: string]: unknown | undefined
+}
+/**
+ * Every step warning (caps/truncations, silent-failure verdicts, skipped providers); same rows as processing.warnings.
+ */
+warnings?: {
+[k: string]: unknown | undefined
+}[]
+/**
+ * Report-facing limits: time origin, timezone, registry context, missing tools, caps, exclusions (parser-quality r1).
+ */
+disclosures?: {
+[k: string]: unknown | undefined
+}
 mode: ("seizure" | "fraud" | "hacking" | "recovery")
 generated_at: string
 root: string
@@ -73,6 +91,14 @@ memory_cap_source: string
 overwrite: boolean
 resume: boolean
 resume_effective?: boolean
+/**
+ * Run-plan groups skipped before the run started (r4 run plan).
+ */
+skip_groups?: string[]
+/**
+ * Run-plan tasks skipped before the run started (r4 run plan).
+ */
+skip_tasks?: string[]
 resume_disabled_reason?: string
 known_good_hash_feeds?: string[]
 hide_known_good?: boolean
@@ -284,8 +310,10 @@ matched_rule_count?: number
 ioc_hit_count?: number
 counts: {
 validation_issues: number
+validation_notices?: number
 validation_issue_breakdown: {
 step_warnings: number
+step_notices?: number
 parser_errors: number
 }
 outputs: number
@@ -295,6 +323,7 @@ files: number
 timeline_events: number
 review_items: number
 indicators: number
+document_candidates?: number
 }
 }
 silent_failure_detection: {
@@ -323,18 +352,24 @@ categories: string[]
 extension: (string | null)
 size: (number | null)
 modified_at: (string | null)
+fs_modified_at?: (string | null)
+modified_at_origin?: (string | null)
 }[]
 large_file_candidates: {
 path: string
 categories: string[]
 size: (number | null)
 modified_at: (string | null)
+fs_modified_at?: (string | null)
+modified_at_origin?: (string | null)
 }[]
 preferred_location_candidates: {
 path: string
 categories: string[]
 size: (number | null)
 modified_at: (string | null)
+fs_modified_at?: (string | null)
+modified_at_origin?: (string | null)
 }[]
 }
 rule_set?: {
