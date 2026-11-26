@@ -369,6 +369,9 @@
     "/api/runs/{run_id}/source-sqlite-wal-preview": {
       "get": "source_sqlite_wal_preview_api_runs__run_id__source_sqlite_wal_preview_get"
     },
+    "/api/runs/{run_id}/source-text": {
+      "get": "source_text_api_runs__run_id__source_text_get"
+    },
     "/api/runs/{run_id}/source-thumbnail": {
       "get": "source_thumbnail_api_runs__run_id__source_thumbnail_get"
     },

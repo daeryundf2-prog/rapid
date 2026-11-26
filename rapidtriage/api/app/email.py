@@ -13,6 +13,7 @@ from urllib.parse import quote
 from fastapi import HTTPException
 
 from ...artifacts.email import attachment_payloads, message_body_parts
+from ...core.docs import redact_document_text
 from ...core.forensic_accuracy import build_accuracy_gate
 from .constants import (
     EMAIL_ATTACHMENT_EXPORT_MAX_BYTES,
@@ -59,7 +60,7 @@ def first_email_attachment_count(source_path: Path) -> int:
     except (OSError, LookupError, UnicodeDecodeError, ValueError):
         return 0
     for index, source in enumerate(sources[:1], start=1):
-        summary = summarize_email_message(source, index)
+        summary = summarize_email_message(source, index, source_path=source_path)
         return int(summary.get("attachment_count") or 0)
     return 0
 
@@ -74,7 +75,9 @@ def build_email_preview(source_path: Path, suffix: str, *, run_id: str | None = 
             "viewer_metadata": structured_viewer_metadata("email", "bounded-email-parse", "parse-failed"),
             "email": {"error": str(exc)},
         }
-    summaries = [summarize_email_message(source, index) for index, source in enumerate(sources, start=1)]
+    summaries = [
+        summarize_email_message(source, index, source_path=source_path) for index, source in enumerate(sources, start=1)
+    ]
     threads = build_email_threads(summaries)
     conversation = build_email_conversation_viewer(summaries, threads)
     attachment_profile = email_attachment_package_profile(
@@ -119,6 +122,7 @@ def build_email_preview(source_path: Path, suffix: str, *, run_id: str | None = 
         ),
         "text": text[:20000],
         "truncated": parse_truncated or len(text) > 20000,
+        "redacted": any(bool(item.get("body_redacted")) for item in summaries),
         "viewer_metadata": structured_viewer_metadata(
             "email",
             "bounded-email-parse",
@@ -553,9 +557,11 @@ def read_email_messages(source_path: Path, suffix: str) -> list[email.message.Em
     return [source.message for source in sources]
 
 
-def summarize_email_message(source: EmailSource, index: int) -> dict[str, object]:
+def summarize_email_message(source: EmailSource, index: int, *, source_path: Path) -> dict[str, object]:
     """Attachments are numbered exactly like the collector row (``attachment_payloads``), so attachment
-    ``index`` k here, in the collector row and in the source-email-attachment export are the same bytes."""
+    ``index`` k here, in the collector row and in the source-email-attachment export are the same bytes.
+    Subject and body are masked as the file's text is (:func:`~rapidtriage.core.docs.redact_document_text`),
+    before the body preview is cut."""
     message = source.message
     attachments = []
     for attachment_index, (part, payload, provenance) in enumerate(
@@ -580,10 +586,13 @@ def summarize_email_message(source: EmailSource, index: int) -> dict[str, object
             body_parts.append(part.get_content())
         except (LookupError, UnicodeDecodeError):
             continue
-    body = "\n".join(str(part) for part in body_parts)
+    raw_body = "\n".join(str(part) for part in body_parts)
+    raw_subject = str(message.get("subject") or "")
+    body = redact_document_text(source_path, raw_body)
+    subject = redact_document_text(source_path, raw_subject)
     return {
         "index": index,
-        "subject": str(message.get("subject") or ""),
+        "subject": subject,
         "from": str(message.get("from") or ""),
         "to": str(message.get("to") or ""),
         "cc": str(message.get("cc") or ""),
@@ -595,6 +604,7 @@ def summarize_email_message(source: EmailSource, index: int) -> dict[str, object
         "attachment_count": len(attachments),
         "body_preview": body[:EMAIL_BODY_PREVIEW_CHARS],
         "body_truncated": len(body) > EMAIL_BODY_PREVIEW_CHARS,
+        "body_redacted": body != raw_body or subject != raw_subject,
     }
 
 

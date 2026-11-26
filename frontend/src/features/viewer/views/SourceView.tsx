@@ -1,11 +1,17 @@
 import { useMemo, useState } from "react";
-import { fetchSourceTextPrefix } from "../../../api/sourceText";
-import { isArchiveEntryPath, type SourcePreview } from "../../../api/viewer";
+import {
+  fetchSourceText,
+  isArchiveEntryPath,
+  type SourcePreview,
+  type SourceText,
+} from "../../../api/viewer";
 import { bytesLabel } from "../fieldFormat";
 import { isTextPrefixPreview } from "../modes";
 import { errorText, useAsync } from "../useAsync";
 import { countHits, highlight, keywordPattern } from "./Highlight";
+import { RedactionNote } from "./RedactionNote";
 
+/** What the text views read past the preview: the server's source-text cap (SOURCE_TEXT_MAX_BYTES). */
 export const FULL_TEXT_MAX_BYTES = 2 * 1024 * 1024;
 export const LINE_WINDOW = 2000;
 
@@ -63,24 +69,26 @@ interface SourceViewProps {
 }
 
 export function SourceView({ runId, preview, terms }: SourceViewProps) {
-  const [full, setFull] = useState<{ text: string; complete: boolean; bytes: number } | null>(null);
+  const [full, setFull] = useState<SourceText | null>(null);
   const [loadState, setLoadState] = useState<{ busy: boolean; error: string | null }>({
     busy: false,
     error: null,
   });
   const archive = isArchiveEntryPath(preview.path) || Boolean(preview.container_path);
   // A text file the server answered as bytes (over its size limit): read the capped prefix at once.
+  // Both reads go through source-text, so the server masks secrets as in its preview.
   const prefix = useAsync(isTextPrefixPreview(preview) ? `${runId}|${preview.path}` : null, (signal) =>
-    fetchSourceTextPrefix(runId, preview.path, FULL_TEXT_MAX_BYTES, signal),
+    fetchSourceText(runId, preview.path, FULL_TEXT_MAX_BYTES, signal),
   );
   const head = prefix.status === "ok" ? prefix.data : null;
   const text = full?.text ?? head?.text ?? preview.text ?? "";
+  // The text shown is the loaded one, else the preview's: each says whether the server masked it.
+  const redacted = (full ?? head ?? preview).redacted === true;
 
   const loadMore = async () => {
     setLoadState({ busy: true, error: null });
     try {
-      const result = await fetchSourceTextPrefix(runId, preview.path, FULL_TEXT_MAX_BYTES);
-      setFull({ text: result.text, complete: result.complete, bytes: result.bytesRead });
+      setFull(await fetchSourceText(runId, preview.path, FULL_TEXT_MAX_BYTES));
       setLoadState({ busy: false, error: null });
     } catch (error) {
       setLoadState({ busy: false, error: errorText(error) });
@@ -115,6 +123,7 @@ export function SourceView({ runId, preview, terms }: SourceViewProps) {
           {bytesLabel(preview.size)} 파일의 처음 2 MB만 읽어 표시합니다. 전체 내용은 원본 열기로 확인하세요.
         </p>
       ) : null}
+      {redacted ? <RedactionNote /> : null}
       {prefix.status === "loading" ? (
         <p className="viewer-note">텍스트 불러오는 중…</p>
       ) : prefix.status === "error" ? (

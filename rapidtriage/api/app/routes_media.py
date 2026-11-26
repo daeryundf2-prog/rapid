@@ -20,6 +20,7 @@ from .constants import (
     IMAGE_GALLERY_DEFAULT_LIMIT,
     IMAGE_GALLERY_MAX_ITEMS,
     SOURCE_OCR_QUEUE_DEFAULT_MAX_ITEMS,
+    SOURCE_TEXT_MAX_BYTES,
     SQLITE_TABLE_PAGE_MAX_ROWS,
 )
 from .email import (
@@ -49,6 +50,7 @@ from .runops import (
     build_directory_preview,
     build_source_metadata,
     build_source_preview,
+    build_source_text,
 )
 from .sqlite import (
     build_sqlite_table_page,
@@ -137,6 +139,18 @@ def build_media_router(
                 # Reuse the OCR-batch analysis result instead of re-running OCR.
                 image["ocr_sidecar"] = stored
         return payload
+
+
+    @router.get("/api/runs/{run_id}/source-text")
+    def source_text(
+        run_id: str,
+        path: str = Query(..., min_length=1),
+        row_ref: AnalysisRowRef = Depends(analysis_row_ref),
+        max_bytes: int = Query(SOURCE_TEXT_MAX_BYTES, ge=1, le=SOURCE_TEXT_MAX_BYTES),
+    ) -> dict[str, object]:
+        """The start of a file as redacted text: the console's text views read this, never source-file."""
+        source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
+        return build_source_text(source_path, max_bytes=max_bytes)
 
 
     @router.get("/api/runs/{run_id}/source-hex-range")

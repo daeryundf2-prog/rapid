@@ -25,7 +25,14 @@ from ...core.case_report import (
     build_case_report_markdown,
     case_report_export_paths,
 )
-from ...core.docs import SUPPORTED_DOC_EXTS, TEXT_EXTS, extract_text
+from ...core.doc_text import decode_text_with, detect_and_decode_text
+from ...core.docs import (
+    SUPPORTED_DOC_EXTS,
+    TEXT_EXTS,
+    extract_redacted_text,
+    extract_text,
+    redact_document_text,
+)
 from ...core.hash_cache import hash_cache_assessment
 from ...core.jobs import (
     RunJobStore,
@@ -60,6 +67,8 @@ from .constants import (
     RUN_VIEWER_WORKFLOW_REQUIRED_ROUTES,
     RUN_VIEWER_WORKFLOW_VALIDATION_VERSION,
     SOURCE_OCR_QUEUE_DEFAULT_MAX_ITEMS,
+    SOURCE_TEXT_MAX_BYTES,
+    SOURCE_TEXT_REDACTION_MARGIN_BYTES,
     SOURCE_VIEWER_VERSION,
     SQLITE_SOURCE_SEARCH_ROW_SCAN_LIMIT,
     STAGE10_CAPABILITY_SPECS,
@@ -989,6 +998,10 @@ def build_archived_source_api_preview(run_id: str, archive_path: Path, entry_nam
     entry_path = Path(displayed_entry)
     suffix = entry_path.suffix.lower()
     mime_type = mimetypes.guess_type(entry_path.name)[0] or "application/octet-stream"
+    # The entry's text is masked as a file of that name would be; zip_entry carries the same text.
+    entry_text = str(preview.get("text") or "")
+    if entry_text:
+        preview["text"] = redact_document_text(entry_path, entry_text)
     quoted_archive_path = quote(str(archive_path))
     quoted_display_path = quote(display_path)
     source_locator = build_source_locator(preview)
@@ -1037,6 +1050,7 @@ def build_archived_source_api_preview(run_id: str, archive_path: Path, entry_nam
         "text": preview.get("text", ""),
         "hex": preview.get("hex", {}),
         "truncated": bool(preview.get("truncated", False)),
+        "redacted": bool(entry_text) and preview["text"] != entry_text,
         "message": preview.get("message", "ZIP entry preview is available."),
         "archive_entry": archive_entry,
         "zip_entry": preview,
@@ -1057,7 +1071,8 @@ def build_archived_source_api_preview(run_id: str, archive_path: Path, entry_nam
         },
     }
     if suffix in {".json", ".jsonl", ".ndjson"} and preview.get("preview_type") == "text":
-        payload.update(build_json_preview_from_text(str(preview.get("text") or ""), suffix))
+        # The entry's own text: the JSON builder masks it (and its parsed strings) and sets `redacted`.
+        payload.update(build_json_preview_from_text(entry_text, suffix, path=entry_path))
         payload["viewer_metadata"].update(
             {
                 "parser": "rapidtriage.source-viewer.zip-entry-json",
@@ -1113,6 +1128,8 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
         "preview_type": "binary",
         "text": "",
         "truncated": False,
+        # Masking (redact_document_text) changed the text this preview shows: the console says so.
+        "redacted": False,
         "message": "No inline preview is available for this file type.",
         "viewer_metadata": {
             "source_format": suffix.lstrip(".") or "unknown",
@@ -1142,9 +1159,10 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
         return payload
 
     text = ""
+    redacted = False
     if suffix in SUPPORTED_DOC_EXTS:
         try:
-            text = extract_text(
+            text, redacted = extract_redacted_text(
                 source_path,
                 suffix.lstrip("."),
                 max_input_bytes=DOCUMENT_PREVIEW_MAX_BYTES,
@@ -1156,16 +1174,19 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
             return payload
     elif stat.st_size <= 2_000_000 and not is_probably_binary(source_path):
         try:
-            text = source_path.read_text(encoding="utf-8", errors="ignore")
+            raw = source_path.read_text(encoding="utf-8", errors="ignore")
         except UnicodeError as exc:
             payload["message"] = f"Text decoding failed: {exc}"
             return payload
+        text = redact_document_text(source_path, raw)
+        redacted = text != raw
 
     if text:
         payload["preview_type"] = "text"
         payload["text"] = text[:max_chars]
         payload["truncated"] = len(text) > max_chars
         payload["message"] = "Text preview is available."
+        payload["redacted"] = redacted
         payload["viewer_metadata"] = {
             "source_format": suffix.lstrip(".") or "text",
             "strategy": "bounded-text",
@@ -1177,6 +1198,52 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
         return payload
     payload.update(build_hex_preview(source_path, run_id=run_id))
     return payload
+
+
+def build_source_text(source_path: Path, *, max_bytes: int = SOURCE_TEXT_MAX_BYTES) -> dict[str, object]:
+    """The first ``max_bytes`` of a file as text for the console, its secrets masked as the text
+    preview masks them (:func:`~rapidtriage.core.docs.redact_document_text`); the raw bytes stay
+    behind ``source-file`` (원본 열기).
+
+    Decoded in the preview's order (:func:`~rapidtriage.core.doc_text.detect_and_decode_text`); a
+    character the cap cuts in two is left out. A secret the cap cuts in two (a recovery password,
+    a saved-password value) is not recognised in the prefix alone, so up to
+    SOURCE_TEXT_REDACTION_MARGIN_BYTES past the cap are read and redacted as well, and the text ends
+    where the two redactions part: before the cut secret, never with part of it.
+    """
+    size = source_path.stat().st_size
+    window_bytes = max_bytes + SOURCE_TEXT_REDACTION_MARGIN_BYTES
+    with source_path.open("rb") as handle:
+        data = handle.read(window_bytes)
+    complete = len(data) <= max_bytes
+    shown, codec = detect_and_decode_text(data[:max_bytes], final=complete)
+    text = redact_document_text(source_path, shown)
+    if not complete:
+        window = decode_text_with(data, codec, final=len(data) < window_bytes)
+        text = text[: _common_prefix_length(text, redact_document_text(source_path, window))]
+    return {
+        "path": str(source_path),
+        "name": source_path.name,
+        "size": size,
+        "max_bytes": max_bytes,
+        "bytes_read": min(len(data), max_bytes),
+        "complete": complete,
+        "text": text,
+        # Masked or cut before a secret: the console says so next to the text.
+        "redacted": text != shown,
+    }
+
+
+def _common_prefix_length(left: str, right: str) -> int:
+    # Binary search on slice equality: a C comparison per step instead of a Python loop per character.
+    low, high = 0, min(len(left), len(right))
+    while low < high:
+        middle = (low + high + 1) // 2
+        if left[:middle] == right[:middle]:
+            low = middle
+        else:
+            high = middle - 1
+    return low
 
 
 def attach_search_result_source_actions(payload: MutableMapping[str, object], run_id: str) -> None:

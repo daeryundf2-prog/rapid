@@ -67,6 +67,14 @@ EMAIL_PREVIEW_MESSAGE_MAX_BYTES = 5 * 1024 * 1024
 DOCUMENT_PREVIEW_MAX_BYTES = 25 * 1024 * 1024
 
 
+# GET source-text: the console's text views read at most this much of a file, as redacted text.
+SOURCE_TEXT_MAX_BYTES = 2 * 1024 * 1024
+
+
+# Read past the source-text cap so a secret the cap cuts in two is still recognised and masked.
+SOURCE_TEXT_REDACTION_MARGIN_BYTES = 64 * 1024
+
+
 IMAGE_GALLERY_MAX_ITEMS = 200
 
 

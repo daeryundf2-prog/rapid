@@ -192,6 +192,8 @@ export interface SourcePreview {
   text?: string;
   truncated?: boolean;
   message?: string;
+  /** Some text in this preview is masked or withheld by the server (redact_document_text). */
+  redacted?: boolean;
   /** Present only for `archive.zip::entry` previews. */
   container_path?: string;
   viewer_limitations?: string[];
@@ -392,6 +394,32 @@ export function fetchHexRange(
   return api<HexRange>(`${runBase(runId)}/source-hex-range?${query({ path, offset, length })}`, { signal });
 }
 
+/** GET /source-text (runops.build_source_text): the start of a file as text, secrets masked. */
+export interface SourceText {
+  text: string;
+  size: number;
+  bytes_read: number;
+  /** False when the file is longer than `bytes_read`. */
+  complete: boolean;
+  /** Some text is masked or withheld (BitLocker recovery key, saved password, private key, secret store). */
+  redacted: boolean;
+}
+
+/**
+ * At most `maxBytes` (server cap 2 MiB, SOURCE_TEXT_MAX_BYTES) of the original as text, decoded
+ * and redacted by the server exactly as its text preview is. The console's text views read this;
+ * only 원본 열기 hands out raw bytes.
+ */
+export function fetchSourceText(
+  runId: string,
+  path: string,
+  maxBytes: number,
+  signal?: AbortSignal,
+): Promise<SourceText> {
+  const params = query({ path: fileApiPath(path), max_bytes: maxBytes });
+  return api<SourceText>(`${runBase(runId)}/source-text?${params}`, { signal });
+}
+
 /** Server caps `limit` at 500 (SQLITE_TABLE_PAGE_MAX_ROWS). */
 export function fetchSqliteTable(
   runId: string,
@@ -480,6 +508,45 @@ export function sourceFileUrl(runId: string, path: string): string {
 export async function fetchSourceBlob(runId: string, path: string, signal?: AbortSignal): Promise<Blob> {
   const response = await apiResponse(sourceFileUrl(runId, path), { signal });
   return response.blob();
+}
+
+/**
+ * The first `maxBytes` of the original. The body is read as a stream and cancelled at the cap, so
+ * a large file is never transferred whole; `complete` is false when bytes were left unread.
+ */
+export async function fetchSourcePrefix(
+  runId: string,
+  path: string,
+  maxBytes: number,
+  signal?: AbortSignal,
+): Promise<{ bytes: Uint8Array<ArrayBuffer>; complete: boolean }> {
+  const response = await apiResponse(sourceFileUrl(runId, path), { signal });
+  // A null body is an empty one (Fetch gives a body to every response that has content).
+  const reader = response.body?.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let complete = true;
+  while (reader) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const room = maxBytes - total;
+    if (value.length > room) {
+      chunks.push(value.subarray(0, room));
+      total += room;
+      complete = false;
+      await reader.cancel().catch(() => undefined);
+      break;
+    }
+    chunks.push(value);
+    total += value.length;
+  }
+  const bytes = new Uint8Array(total);
+  let cursor = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, cursor);
+    cursor += chunk.length;
+  }
+  return { bytes, complete };
 }
 
 /** Largest SVG shown in an `<img>`: it becomes a `data:` URL, a third larger than the file. */

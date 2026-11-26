@@ -1,5 +1,4 @@
-import { fetchSourcePrefix } from "../../../api/sourceText";
-import { fetchSourceBlob, type SourcePreview } from "../../../api/viewer";
+import { fetchSourceBlob, fetchSourcePrefix, type SourcePreview } from "../../../api/viewer";
 import { bytesLabel } from "../fieldFormat";
 import { type BlobUrlState, useBlobUrl } from "../useAsync";
 import { Unavailable } from "./Unavailable";

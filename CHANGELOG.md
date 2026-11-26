@@ -9,7 +9,29 @@
   expanded. It now decodes in the order of the server preview
   (`core/doc_text.decode_text_bytes`): BOM (UTF-8, UTF-32, UTF-16), BOM-less
   UTF-16, UTF-8, then CP949. A character cut by the 2 MB cap is dropped instead
-  of switching the encoding (`frontend/src/api/sourceText.test.ts`).
+  of switching the encoding (`tests/test_source_text_redaction.py::DecodeTextPrefixTests`).
+- The console's text views past the preview, "더 보기" and the first 2 MB of a
+  text file over the extraction limit, read the raw bytes of `source-file`, so
+  a BitLocker recovery password, a saved WinSCP/FileZilla password or a private
+  key that the text preview masks showed in clear. They now read the new
+  `GET /api/runs/{run}/source-text?path=…&max_bytes=…` (at most 2 MB), which
+  decodes and redacts on the server exactly as the preview does
+  (`core/docs.redact_document_text`). A secret the cap cuts in two is not shown
+  in part: the text ends before it. The response's `redacted` flag puts a note
+  over the text saying that secrets are masked. Only 원본 열기 (`source-file`)
+  still hands out raw bytes (`tests/test_source_text_redaction.py`,
+  `frontend/src/features/viewer/views/fallbacks.test.tsx`).
+- `source-preview` masked secrets only in files of the listed text and
+  document kinds. A JSON or XML file, a text file of another extension
+  (`.ps1`, `.reg`, …), an e-mail body or subject and a ZIP entry's text came
+  back with BitLocker recovery passwords, private keys and saved passwords in
+  clear. Every textual preview now goes through `core/docs.redact_document_text`.
+  JSON and XML are masked in the text, then in each parsed string, so `\u`
+  escapes and character references are masked too. E-mail bodies are masked
+  before they are cut to the preview length. The payload carries `redacted`,
+  and the source, document and e-mail views show the same note as the other
+  text views. Secret-store files (`logins.json`, …) come back withheld instead
+  of parsed (`tests/test_source_text_redaction.py::PreviewRedactionTests`).
 - An SVG shown in the console's image view or thumbnail grid was a `blob:` URL
   in the console's own origin, so "open image in new tab" ran the evidence's
   script with access to the console. It is now a `data:` URL, whose origin is

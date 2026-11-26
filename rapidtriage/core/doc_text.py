@@ -25,6 +25,7 @@ and font streams skipped).
 
 from __future__ import annotations
 
+import codecs
 import hashlib
 import re
 import struct
@@ -44,6 +45,8 @@ __all__ = [
     "OleFile",
     "clean_extracted_text",
     "decode_text_bytes",
+    "decode_text_with",
+    "detect_and_decode_text",
     "extract_doc_text",
     "extract_hwp_text",
     "extract_hwpx_text",
@@ -118,6 +121,15 @@ def decode_text_bytes(data: bytes) -> str:
     """Decode a plain-text file: BOM (UTF-8/16/32), BOM-less UTF-16 (NUL in
     every other byte: WER/setup logs), strict UTF-8, strict CP949 (Korean
     ANSI), else UTF-8 with U+FFFD replacements (not counted as binary)."""
+    return detect_and_decode_text(data)[0]
+
+
+def detect_and_decode_text(data: bytes, *, final: bool = True) -> tuple[str, str]:
+    """``(text, codec)``: ``data`` decoded as :func:`decode_text_bytes` does, and the codec chosen.
+
+    ``final`` False: ``data`` is a prefix cut by a byte cap. A character the cut splits is left
+    out instead of failing a strict codec (which would switch the codec) or becoming U+FFFD.
+    """
     for bom, codec in (
         (b"\xef\xbb\xbf", "utf-8-sig"),
         (b"\xff\xfe\x00\x00", "utf-32"),
@@ -126,21 +138,33 @@ def decode_text_bytes(data: bytes) -> str:
         (b"\xfe\xff", "utf-16"),
     ):
         if data.startswith(bom):
-            return data.decode(codec, errors="replace")
+            return decode_text_with(data, codec, final=final), codec
     sample = data[:8192]
     if len(sample) >= 16:
         even_nul = sample[0::2].count(0) / max(1, len(sample[0::2]))
         odd_nul = sample[1::2].count(0) / max(1, len(sample[1::2]))
         if odd_nul > 0.3 and even_nul < 0.05:
-            return data[: len(data) - len(data) % 2].decode("utf-16-le", errors="replace")
+            return decode_text_with(data, "utf-16-le", final=final), "utf-16-le"
         if even_nul > 0.3 and odd_nul < 0.05:
-            return data[: len(data) - len(data) % 2].decode("utf-16-be", errors="replace")
+            return decode_text_with(data, "utf-16-be", final=final), "utf-16-be"
     for codec in ("utf-8", "cp949"):
         try:
-            return data.decode(codec)
+            return codecs.getincrementaldecoder(codec)().decode(data, final), codec
         except UnicodeDecodeError:
             continue
-    return data.decode("utf-8", errors="replace")
+    return decode_text_with(data, "utf-8", final=final), "utf-8"
+
+
+def decode_text_with(data: bytes, codec: str, *, final: bool = True) -> str:
+    """``data`` in ``codec`` (as :func:`detect_and_decode_text` chose it), U+FFFD for bad bytes.
+
+    ``final`` as in :func:`detect_and_decode_text`. Decoding a longer read of the same file with the
+    codec chosen for its prefix keeps the prefix's text as the start of the result.
+    """
+    if codec in {"utf-16-le", "utf-16-be"} and final:
+        # BOM-less UTF-16: an odd last byte is dropped, not replaced.
+        data = data[: len(data) - len(data) % 2]
+    return codecs.getincrementaldecoder(codec)(errors="replace").decode(data, final)
 
 
 MIN_SALVAGED_WORD_CHARS = 64
