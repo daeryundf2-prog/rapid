@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- On Windows an analysis could vanish from the analysis list for one read. The
+  state reader treated the sharing error raised while another thread
+  `os.replace`d `analysis.json` (a heartbeat or progress write) as "no state".
+  `GET …/search/index` then reported the previous build as `ready` instead of
+  `build-failed-swap`. State reads now retry that error the way state writes
+  already do (`tests/test_rapidtriage_analyses.py::StateReadRetryTests`).
 - One EVTX record holding a character reference to a lone UTF-16 surrogate
   (`&#xD800;`, found in damaged logs) or one JSON export row with a `"\ud800"`
   escape made the whole streamed eventlog collection fail (`failed-isolated`,
