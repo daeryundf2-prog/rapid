@@ -37,6 +37,12 @@
   UTC and adds the wall-clock count when there is one. Rows without an offset
   keep their caveat; one without a local label now gets one too
   (`tests/test_d27_timeline.py::ReportTimeBasisTests`).
+- Journald marked an entry with sequence number 0, or with a monotonic time of
+  2^55 or more, as fully `parsed` with no limitation, although systemd's
+  entry check rejects both. **Output change:** such entries are `partial` and
+  carry `invalid-sequence-number` (citing header offset +16) or
+  `monotonic-out-of-range` (+32). The raw values and a valid UTC time are kept
+  (`tests/test_journald.py::JournalTests::test_sequence_and_monotonic_validity_are_checked_separately`).
 - A lastlog row could name a single account for a UID that two accounts share
   when the passwd file exceeded the 4 MiB lookup cap and the second alias lay
   past it; the summary still read `parsed` with `capped=false`. A truncated

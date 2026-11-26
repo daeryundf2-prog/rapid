@@ -210,6 +210,24 @@ class JournalTests(unittest.TestCase):
                 self.assertEqual([issue["reason"] for issue in row["limitations"]],
                                  [] if expected else ["timestamp-out-of-range"])
 
+    def test_sequence_and_monotonic_validity_are_checked_separately(self):
+        # systemd journal-file.c check_object(): seqnum > 0 and VALID_MONOTONIC (< 2^55).
+        data, offsets = make_journal([[b"MESSAGE=x"]])
+        entry = offsets["entries"][0]
+        cases = (((1, 0), []), ((1, 2**55 - 1), []), ((0, 0), [("invalid-sequence-number", 16)]),
+                 ((1, 2**55), [("monotonic-out-of-range", 32)]), ((1, 2**64 - 1), [("monotonic-out-of-range", 32)]),
+                 ((0, 2**55), [("invalid-sequence-number", 16), ("monotonic-out-of-range", 32)]))
+        for (sequence, monotonic), expected in cases:
+            with self.subTest(sequence=sequence, monotonic=monotonic):
+                struct.pack_into("<Q", data, entry + 16, sequence)
+                struct.pack_into("<Q", data, entry + 32, monotonic)
+                row, = self.rows(data)
+                self.assertEqual((row["sequence_number"], row["monotonic_raw"]), (sequence, monotonic))
+                self.assertEqual(row["fields"]["__MONOTONIC_TIMESTAMP"], monotonic)
+                self.assertEqual(row["timestamp"], "1970-01-01T00:00:01.000001+00:00")
+                self.assertEqual([(i["reason"], i["source_offset"] - entry) for i in row["limitations"]], expected)
+                self.assertEqual(row["coverage_status"], "partial" if expected else "parsed")
+
     def test_stored_reserved_clock_field_is_kept_and_flagged(self):
         data, offsets = make_journal([[b"__REALTIME_TIMESTAMP=5", b"MESSAGE=x"]])
         row, = self.rows(data)

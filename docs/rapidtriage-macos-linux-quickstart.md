@@ -102,7 +102,11 @@ regular and compact layouts through object offsets in both hash modes.
 Real time is UTC microseconds since the Unix epoch, kept as `realtime_raw`;
 values outside systemd's valid range (zero, or 2^55 and above) get no UTC
 time and a `timestamp-out-of-range` limitation. Monotonic time
-(`monotonic_raw`) is meaningful with its boot ID. The entry and its field
+(`monotonic_raw`) is meaningful with its boot ID; 2^55 and above adds a
+`monotonic-out-of-range` limitation, and a sequence number of zero adds
+`invalid-sequence-number`, as systemd's own entry check rejects both. The
+raw values and an otherwise valid UTC time are kept, each limitation cites
+its header field, and the entry is `partial`. The entry and its field
 objects have separate offsets, so a damaged or compressed field can be
 located even if its value is unavailable. Each decoded field is checked
 against its stored DATA hash: Jenkins lookup3 for unkeyed files, SipHash-2-4
