@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from collections import Counter
 from pathlib import Path
+from unittest.mock import patch
 
 from rapidtriage.artifacts.windows.registry_depth import EXPLORER
 from rapidtriage.core.artifact_profiles import iter_payload_records
@@ -95,4 +96,28 @@ class TaskbarLoginIntegrationTests(unittest.TestCase):
                 ("linux-utmp", "session-record"): 1, ("linux-wtmp", "session-record"): 2,
                 ("linux-btmp", "failed-logon"): 1, ("linux-lastlog", "last-logon"): 1,
             })
+            # The one key event still names and links every value row it stands for.
+            usage, = (e["details"] for e in events if e["details"]["artifact_type"] == "execution-feature-usage")
+            self.assertEqual(usage["key_row_count"], 2)
+            self.assertEqual(sorted(row["value"] for row in usage["key_rows"]), ["둘", "하나"])
+            self.assertEqual(len({row["row_index"] for row in usage["key_rows"]}), 2)
+            pin, = (e["details"] for e in events if e["details"]["artifact_type"] == "registry-taskband-pin")
+            self.assertEqual(pin["key_row_count"], 4)
+            self.assertEqual(sorted(row["value"] for row in pin["key_rows"]),
+                             ["..\\도구.lnk", "..\\문서.lnk", "C:\\도구.lnk", "C:\\문서.lnk"])
             self.assertFalse(any(e["path"].endswith(".reg") for e in events))
+
+    def test_key_event_row_list_is_capped_but_counts_every_row(self):
+        def event(row_index: int) -> dict:
+            return {
+                "timestamp": "2025-01-01T00:00:00+00:00", "details": {}, "record_key": "hive|key=K|", "_scope": "key",
+                "_key_row": {"artifact_type": "execution-feature-usage", "row_index": row_index, "value": str(row_index)},
+            }
+
+        builder = TimelineBuilder(TimelineStats())
+        with patch.object(TimelineBuilder, "MAX_KEY_ROWS", 2):
+            builder.extend(event(index) for index in range(3))
+        details, = (e["details"] for e in builder.events())
+        self.assertEqual(details["key_row_count"], 3)
+        self.assertEqual([row["row_index"] for row in details["key_rows"]], [0, 1])
+        self.assertTrue(details["key_rows_truncated"])

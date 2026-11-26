@@ -438,6 +438,8 @@ TIMESTAMP_LIKE_KEY_RE = re.compile(r"(_at|_time|^timestamp|_timestamp|_date)$")
 CONTEXT_EXCLUDED_KEY_RE = re.compile(r"(_hash|_sha256|_hashes|_fingerprint)$")
 MAX_CONTEXT_VALUE_LENGTH = 256
 MAX_SUMMARY_LENGTH = 240
+# What names one row under a shared key LastWrite (value, entry path, ...), first present wins.
+KEY_ROW_VALUE_FIELDS: tuple[str, ...] = ("application", "value_name", "name", "path", "raw_preview")
 LABEL_ALIAS_PREFIXES: tuple[str, ...] = ("lnk-",)
 _NON_ISO_FORMATS = ("%m/%d/%Y %H:%M:%S", "%Y:%m:%d %H:%M:%S", "%Y:%m:%d %H:%M:%SZ", "%Y-%m-%d %H:%M:%S")
 FILE_EVENT_FIELDS: tuple[tuple[str, str], ...] = (
@@ -735,6 +737,8 @@ class TimelineBuilder:
     """
 
     MAX_ALSO_IN = 5
+    # Rows one key LastWrite stands for, listed on its event (all are counted).
+    MAX_KEY_ROWS = 1000
 
     def __init__(self, stats: TimelineStats) -> None:
         self.stats = stats
@@ -748,6 +752,7 @@ class TimelineBuilder:
     def add(self, event: dict[str, object]) -> None:
         record_key = event.pop("record_key", None)
         scope = event.pop("_scope", "row")
+        key_row = event.pop("_key_row", None)
         if not record_key:
             self._events.append(event)
             return
@@ -756,8 +761,21 @@ class TimelineBuilder:
         if existing_index is None:
             self._index[key] = len(self._events)
             self._events.append(event)
+            details = event.get("details")
+            if scope == "key" and key_row is not None and isinstance(details, dict):
+                details["key_rows"] = [key_row]
+                details["key_row_count"] = 1
             return
         existing = self._events[existing_index]
+        existing_details = existing.get("details") if isinstance(existing.get("details"), dict) else None
+        if scope == "key" and key_row is not None and existing_details is not None and "key_rows" in existing_details:
+            # Every value row sharing the key time stays reachable from the one key event.
+            existing_details["key_row_count"] = int(existing_details.get("key_row_count") or 0) + 1
+            key_rows = existing_details["key_rows"]
+            if isinstance(key_rows, list) and len(key_rows) < self.MAX_KEY_ROWS:
+                key_rows.append(key_row)
+            else:
+                existing_details["key_rows_truncated"] = True
         if _merge_eventlog_detection(existing, event):
             self.stats.merged_detections += 1
             return
@@ -772,7 +790,6 @@ class TimelineBuilder:
             self.stats.label_merges[event_type] += 1
         elif scope != "key":
             self.stats.duplicates[event_type] += 1
-        existing_details = existing.get("details") if isinstance(existing.get("details"), dict) else None
         incoming_details = event.get("details") if isinstance(event.get("details"), Mapping) else {}
         if existing_details is not None and scope != "key":
             existing_record = existing_details.get("source_record")
@@ -1262,6 +1279,13 @@ def extract_artifact_events(
                 "record_key": f"{artifact_path}|{identity}|{element_identity}",
                 "_scope": detail_event.get("scope") or "row",
             }
+            if detail_event.get("scope") == "key":
+                value = next((details[name] for name in KEY_ROW_VALUE_FIELDS if details.get(name) not in (None, "")), "")
+                event["_key_row"] = {
+                    "artifact_type": artifact_type,
+                    **source_record,
+                    "value": _short(str(value), MAX_CONTEXT_VALUE_LENGTH),
+                }
             extra_labels = [label for label in detail_event.get("extra_labels") or () if label != event["timestamp_kind"]]
             if extra_labels:
                 event["labels"] = [event["timestamp_kind"], *dict.fromkeys(extra_labels)]
