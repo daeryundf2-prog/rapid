@@ -20,7 +20,20 @@ pub trait Media: Sync {
 /// Partition-relative reads as `EwfSectorReader.read` does them; `metadata` reads may be cached.
 pub trait VolRead {
     fn vread(&mut self, offset: i128, len: i128, metadata: bool) -> Res<Vec<u8>>;
+    /// Record that a read was refused (see [`MAX_READ`]) and return `message` as its error.
+    fn refuse(&mut self, message: String) -> String;
 }
+
+/// Largest single stream read this engine serves. dissect reads whatever size corrupt metadata
+/// asks for (a sparse 4 TiB `$STANDARD_INFORMATION`, a 2^44-byte compression unit) and turns the
+/// allocation failure into a `MemoryError` it counts; Rust would abort the process instead. A
+/// larger read is refused and fails the whole run over to the Python engine, so it decides.
+/// File data is copied in 8 MiB reads and never comes near this.
+pub const MAX_READ: i128 = 256 << 20;
+/// Prefix of the error of a refused read.
+pub const REFUSED_READ: &str = "unsupported-input";
+/// Most compression units of one compressed stream (1 TiB at the usual 64 KiB unit).
+const MAX_UNITS: i128 = 1 << 24;
 
 fn clamp_read<M: Media>(media: &M, base: u64, size: u64, offset: i128, len: i128) -> Res<Vec<u8>> {
     if offset < 0 {
@@ -39,11 +52,17 @@ pub struct DirectReader<'a, M: Media> {
     pub media: &'a M,
     pub base: u64,
     pub size: u64,
+    /// The first refused read (the copy must fail over to the Python engine).
+    pub refused: Option<String>,
 }
 
 impl<M: Media> VolRead for DirectReader<'_, M> {
     fn vread(&mut self, offset: i128, len: i128, _metadata: bool) -> Res<Vec<u8>> {
         clamp_read(self.media, self.base, self.size, offset, len)
+    }
+    fn refuse(&mut self, message: String) -> String {
+        self.refused.get_or_insert_with(|| message.clone());
+        message
     }
 }
 
@@ -57,6 +76,7 @@ pub struct Volume<M: Media> {
     size: u64,
     blocks: HashMap<u64, Rc<Vec<u8>>>,
     order: Vec<u64>,
+    refused: Option<String>,
 }
 
 impl<M: Media> Volume<M> {
@@ -67,7 +87,17 @@ impl<M: Media> Volume<M> {
             size,
             blocks: HashMap::new(),
             order: Vec::new(),
+            refused: None,
         }
+    }
+
+    /// The first read refused on this volume (see [`MAX_READ`]).
+    pub fn refused(&self) -> Option<&str> {
+        self.refused.as_deref()
+    }
+
+    pub fn size(&self) -> u64 {
+        self.size
     }
 
     pub fn read(&mut self, offset: i128, len: i128) -> Res<Vec<u8>> {
@@ -83,6 +113,7 @@ impl<M: Media> Volume<M> {
             media: &self.media,
             base: self.base,
             size: self.size,
+            refused: None,
         }
     }
 
@@ -130,6 +161,10 @@ impl<M: Media> VolRead for Volume<M> {
         } else {
             self.read(offset, len)
         }
+    }
+    fn refuse(&mut self, message: String) -> String {
+        self.refused.get_or_insert_with(|| message.clone());
+        message
     }
 }
 
@@ -374,6 +409,12 @@ impl Stream {
         let mut n = n.min(self.size - pos);
         if n <= 0 || self.size <= pos {
             return Ok(Vec::new());
+        }
+        if n > MAX_READ || self.align > MAX_READ {
+            return Err(vol.refuse(format!(
+                "{REFUSED_READ}: a {n}-byte read (alignment {}) exceeds the {MAX_READ}-byte limit",
+                self.align
+            )));
         }
         let align = self.align;
         let mut pos = pos;
@@ -722,6 +763,19 @@ pub fn collection_open<M: Media>(ntfs: &Ntfs<M>, attrs: &[Rc<Attr>]) -> Res<Stre
         if lead.compression_unit > 32 {
             return Err("compression unit out of range".into());
         }
+        // dissect splits every run into compression-unit pieces up front, so corrupt run lengths
+        // hang it and exhaust memory: refuse runs no volume or file of this size holds.
+        let clusters: i128 = runs.iter().map(|(_, count)| (*count).max(0)).sum();
+        let per_cu = 1i128 << lead.compression_unit;
+        let volume_clusters = ntfs.vol.borrow().size() as i128 / ntfs.cluster_size;
+        let file_clusters = lead.file_size.max(0) / ntfs.cluster_size + 1;
+        if clusters > volume_clusters + file_clusters + per_cu || clusters / per_cu > MAX_UNITS {
+            let message = format!(
+                "{REFUSED_READ}: a compressed runlist of {clusters} clusters \
+                 (volume: {volume_clusters} clusters)"
+            );
+            return Err(ntfs.vol.borrow_mut().refuse(message));
+        }
         return Ok(Stream::compressed(
             runs,
             lead.file_size,
@@ -864,6 +918,9 @@ impl<M: Media> Ntfs<M> {
             record_size,
             mft: Stream::resident(Vec::new(), 0),
         };
+        if record_size > MAX_READ {
+            return Err(format!("{REFUSED_READ}: {record_size}-byte MFT records"));
+        }
         let raw = ntfs
             .vol
             .borrow_mut()
@@ -905,6 +962,19 @@ impl<M: Media> Ntfs<M> {
 
     pub fn mft_size(&self) -> i128 {
         self.mft.size
+    }
+
+    /// `Err` once a read was refused (see [`MAX_READ`]): the run must fail over to Python.
+    pub fn check_refused(&self) -> Res<()> {
+        match self
+            .vol
+            .try_borrow()
+            .ok()
+            .and_then(|vol| vol.refused().map(str::to_string))
+        {
+            Some(message) => Err(message),
+            None => Ok(()),
+        }
     }
 
     /// `Mft.get(segment)`.
@@ -1554,5 +1624,15 @@ mod tests {
         assert_eq!(ntpath_dirname("a\\b\\c"), "a\\b");
         assert_eq!(ntpath_join("a\\b", "x"), "a\\b\\x");
         assert_eq!(ntpath_join("a", "C:\\x"), "C:\\x");
+    }
+
+    #[test]
+    fn oversized_reads_are_refused_and_recorded() {
+        let mut vol = volume(vec![0u8; 64]);
+        let sparse = Stream::runlist(vec![(None, 1 << 40)], 1 << 42, 4096);
+        let error = sparse.read(&mut vol, 0, 1 << 42).unwrap_err();
+        assert!(error.starts_with(REFUSED_READ));
+        assert_eq!(vol.refused(), Some(error.as_str()));
+        assert_eq!(sparse.read(&mut vol, 0, 4096).unwrap(), vec![0u8; 4096]);
     }
 }

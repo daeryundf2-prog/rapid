@@ -16,7 +16,8 @@ use crate::ntfs::Res;
 
 const SIGNATURE_V1: &[u8; 8] = b"EVF\x09\x0d\x0a\xff\x00";
 const DESCRIPTOR: u64 = 76;
-const CACHE_CHUNKS: usize = 1024;
+// Decoded chunks kept for small reads: 32 MiB whatever the chunk size (at least 8 chunks).
+const CACHE_BYTES: u64 = 32 << 20;
 const PARALLEL_MIN_CHUNKS: usize = 8;
 
 type ChunkCache = (HashMap<usize, Arc<Vec<u8>>>, VecDeque<usize>);
@@ -188,14 +189,38 @@ impl EwfImage {
                 b"sectors" => data_end = Some(offset + size),
                 b"table" => {
                     let section_end = offset + size;
+                    let chunk_size = geometry
+                        .as_ref()
+                        .map(|g| g.chunk_size)
+                        .ok_or("table section before the volume section")?;
                     let mut head = [0u8; 24];
                     read_exact_at(file, offset + DESCRIPTOR, &mut head)
                         .map_err(|e| e.to_string())?;
+                    if adler32(&head[..20]) != le32(&head, 20) {
+                        return Err("table header checksum mismatch".into());
+                    }
                     let count = le32(&head, 0) as u64;
                     let base = le64(&head, 8);
-                    let mut raw = vec![0u8; (count * 4) as usize];
+                    // EnCase/FTK/linen sets keep the chunks in a `sectors` section and close the
+                    // offset array with its Adler-32; SMART/EWF-S01 store the chunks after the
+                    // array, without one.
+                    let footer = if data_end.is_some() { 4 } else { 0 };
+                    let entries_end = offset + DESCRIPTOR + 24 + count * 4;
+                    if entries_end + footer > section_end.min(length) {
+                        return Err("table entries run past the section".into());
+                    }
+                    let mut raw = vec![0u8; (count * 4 + footer) as usize];
                     read_exact_at(file, offset + DESCRIPTOR + 24, &mut raw)
                         .map_err(|e| e.to_string())?;
+                    let (raw, footer) = raw.split_at((count * 4) as usize);
+                    // A damaged offset array can still point at chunks whose own checksums hold
+                    // (swapped entries, say); libewf then reads the table2 copy, this reader none.
+                    if !footer.is_empty() && adler32(raw) != le32(footer, 0) {
+                        return Err("table entries checksum mismatch".into());
+                    }
+                    // A stored chunk is at most a chunk plus its checksum, or a zlib stream that
+                    // did not shrink it by much; anything larger is damage, not a chunk.
+                    let max_stored = chunk_size + chunk_size / 8 + 1024;
                     let entries: Vec<(u64, bool)> = raw
                         .as_chunks::<4>()
                         .0
@@ -216,6 +241,12 @@ impl EwfImage {
                                 "chunk offsets are not increasing (31-bit overflow or damage)"
                                     .into(),
                             );
+                        }
+                        if stop - start > max_stored {
+                            return Err(format!(
+                                "chunk of {} stored bytes for {chunk_size}-byte chunks",
+                                stop - start
+                            ));
                         }
                         chunks.push(Chunk {
                             segment,
@@ -292,7 +323,7 @@ impl EwfImage {
             let (map, order) = &mut *guard;
             if map.insert(index, data).is_none() {
                 order.push_back(index);
-                while order.len() > CACHE_CHUNKS {
+                while order.len() as u64 > (CACHE_BYTES / self.chunk_size).max(8) {
                     if let Some(old) = order.pop_front() {
                         map.remove(&old);
                     }

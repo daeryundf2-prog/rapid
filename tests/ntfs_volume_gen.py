@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import random
 import struct
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -688,12 +689,41 @@ def junction_attr() -> bytes:
     return resident_attr(0xC0, value, instance=6)
 
 
+def add_name_collisions(b: VolumeBuilder) -> None:
+    """Names that reach the same output file or directory only after ``_safe_component`` or the
+    output file system's folding (case, Unicode normalization), plus Win32 device names."""
+    root = b.makedirs("Collide")
+    trailing_dot = b.add_dir(root, "x.")  # written as directory "x", where the file "x" goes too
+    b.add_file(trailing_dot, "child.txt", b"in directory x.")
+    b.add_file(root, "x", b"file x " * 300, namespace=NS_POSIX)
+    upper = b.add_dir(root, "Foo")
+    b.add_file(upper, "inside.txt", b"inside Foo")
+    b.add_file(root, "foo", b"file foo " * 500, namespace=NS_POSIX)
+    for form, body in (("NFC", b"nfc " * 3000), ("NFD", b"NFD " * 5000)):
+        b.add_file(root, unicodedata.normalize(form, "caf\u00e9.txt"), body, namespace=NS_POSIX)
+    b.add_file(root, "\u03b1\u03c2.txt", b"final sigma " * 2000, namespace=NS_POSIX)
+    b.add_file(root, "\u03b1\u03c3.txt", b"sigma " * 1000, namespace=NS_POSIX)
+    b.add_file(root, "\u212a.txt", b"kelvin " * 900, namespace=NS_POSIX)
+    b.add_file(root, "k.txt", b"ascii k " * 700, namespace=NS_POSIX)
+    for device in ("CON", "aux.txt", "NUL", "com1.log", "LPT9 .txt"):
+        b.add_file(root, device, f"device name {device}".encode() * 20, namespace=NS_POSIX)
+
+
 def build_disk_image(
-    path: Path, *, bulk_files: int = 400, bulk_dirs: int = 8, seed: int = 1, payload: str = "random"
+    path: Path,
+    *,
+    bulk_files: int = 400,
+    bulk_dirs: int = 8,
+    seed: int = 1,
+    payload: str = "random",
+    collisions: bool = False,
+    builder: VolumeBuilder | None = None,
 ) -> dict[str, int]:
     """Write an MBR disk (one 0x07 partition at sector 2048) holding the synthetic volume."""
-    builder = VolumeBuilder(seed)
+    builder = builder or VolumeBuilder(seed)
     info = populate(builder, bulk_files=bulk_files, bulk_dirs=bulk_dirs, seed=seed, payload=payload)
+    if collisions:
+        add_name_collisions(builder)
     volume = builder.build_volume()
     sectors = len(volume) // SECTOR
     mbr = bytearray(PARTITION_SECTOR * SECTOR)
