@@ -511,11 +511,61 @@ pub const FILE_NAME_DOS: u8 = 2;
 const TAG_SYMLINK: u32 = 0xA000_000C;
 const TAG_MOUNT_POINT: u32 = 0xA000_0003;
 
+/// Last access / modification FILETIMEs (100 ns ticks since 1601) of `$STANDARD_INFORMATION` or
+/// `$FILE_NAME`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecordTimes {
+    pub accessed: u64,
+    pub modified: u64,
+}
+
+// FILETIME of 1970-01-01 and of 9999-12-31T23:59:59.999999Z: the range `_RESTORABLE_NS_MAX` of
+// e01_native.py restores.
+const UNIX_EPOCH_TICKS: u64 = 116_444_736_000_000_000;
+const RESTORABLE_TICKS_MAX: u64 = 2_650_467_743_999_999_990;
+
+impl RecordTimes {
+    /// Both times in the restorable range (an unset, pre-1970 or past-datetime time is not).
+    pub fn restorable(&self) -> bool {
+        [self.accessed, self.modified]
+            .iter()
+            .all(|ticks| (UNIX_EPOCH_TICKS..=RESTORABLE_TICKS_MAX).contains(ticks))
+    }
+
+    /// `std::fs::FileTimes` of a [`RecordTimes::restorable`] value (`None` when the platform's
+    /// `SystemTime` cannot hold it).
+    pub fn file_times(&self) -> Option<std::fs::FileTimes> {
+        let at = |ticks: u64| {
+            let since = ticks.checked_sub(UNIX_EPOCH_TICKS)?;
+            let nanos = (since % 10_000_000) as u32 * 100;
+            std::time::UNIX_EPOCH.checked_add(std::time::Duration::new(since / 10_000_000, nanos))
+        };
+        Some(
+            std::fs::FileTimes::new()
+                .set_accessed(at(self.accessed)?)
+                .set_modified(at(self.modified)?),
+        )
+    }
+}
+
 pub struct FileNameInfo {
     pub flags: u8,
     pub name: String,
     pub parent: u64,
     pub parent_sequence: u16,
+    pub times: RecordTimes,
+}
+
+/// `c_ntfs._STANDARD_INFORMATION(data.ljust(0x48))`: the times dissect reads.
+fn parse_standard_information(value: &[u8]) -> RecordTimes {
+    let mut data = value.to_vec();
+    if data.len() < 0x48 {
+        data.resize(0x48, 0);
+    }
+    RecordTimes {
+        accessed: u64_at(&data, 0x18),
+        modified: u64_at(&data, 0x08),
+    }
 }
 
 /// `c_ntfs._FILE_NAME(data.ljust(0x48))`.
@@ -534,6 +584,10 @@ pub fn parse_file_name(value: &[u8]) -> Res<FileNameInfo> {
         name: utf16_strict(&data[0x42..end])?,
         parent: u32_at(&data, 0) as u64 | ((u16_at(&data, 4) as u64) << 32),
         parent_sequence: u16_at(&data, 6),
+        times: RecordTimes {
+            accessed: u64_at(&data, 0x20),
+            modified: u64_at(&data, 0x10),
+        },
     })
 }
 
@@ -604,6 +658,7 @@ fn parse_attribute_list(value: &[u8]) -> Res<Vec<u64>> {
 
 pub enum Parsed {
     Other,
+    StandardInformation(RecordTimes),
     FileName(FileNameInfo),
     Reparse(ReparseInfo),
     AttrList(Vec<u64>),
@@ -1056,6 +1111,7 @@ impl<M: Media> Ntfs<M> {
                     0x20 => Parsed::AttrList(parse_attribute_list(&value)?),
                     0x30 => Parsed::FileName(parse_file_name(&value)?),
                     0xC0 => Parsed::Reparse(parse_reparse(&value)?),
+                    0x10 => Parsed::StandardInformation(parse_standard_information(&value)),
                     _ => Parsed::Other,
                 };
             }
@@ -1095,6 +1151,21 @@ impl<M: Media> Ntfs<M> {
         }
         names.sort_by_key(|(flags, _)| *flags);
         Ok(names.into_iter().next().map(|(_, name)| name))
+    }
+
+    /// `_record_times_ns`: the times of the first `$STANDARD_INFORMATION`, then `$FILE_NAME`
+    /// attribute (in attribute order) that is [`RecordTimes::restorable`].
+    pub fn record_times(&self, record: &Record) -> Option<RecordTimes> {
+        let attrs = self.attributes(record).ok()?;
+        [0x10, 0x30]
+            .iter()
+            .flat_map(|type_code| attrs.get(*type_code))
+            .filter_map(|attr| match &attr.parsed {
+                Parsed::StandardInformation(times) => Some(*times),
+                Parsed::FileName(info) => Some(info.times),
+                _ => None,
+            })
+            .find(RecordTimes::restorable)
     }
 
     pub fn data_size(&self, record: &Record) -> Res<i128> {

@@ -812,6 +812,47 @@ class _OutputNames:
                 entry.path.unlink(missing_ok=True)
 
 
+# Recovered files carry their record's last access / modification times, so a parser that reads a
+# copy's filesystem time reports evidence time, not extraction time (and two runs of one image
+# agree). $STANDARD_INFORMATION is the source, the first $FILE_NAME with a usable pair the fallback.
+# Usable: 1970-01-01 .. 9999-12-31 UTC. A zero (unset) FILETIME and pre-1970 times are not
+# restored (datetime.fromtimestamp rejects negative times on Windows), nor are times past
+# datetime's range. A file whose times cannot be restored keeps its extraction time and is
+# counted in ``time_restore_skips``.
+_TIME_SOURCE_TYPES = (0x10, 0x30)  # $STANDARD_INFORMATION, $FILE_NAME
+_RESTORABLE_NS_MAX = 253_402_300_799_999_999_000  # 9999-12-31T23:59:59.999999Z
+
+
+def _record_times_ns(rec: Any) -> tuple[int, int] | None:
+    """``(atime_ns, mtime_ns)`` of ``rec`` from the first time attribute (see ``_TIME_SOURCE_TYPES``)
+    whose pair is in the restorable range; None when no attribute gives one."""
+    try:
+        attributes = rec.attributes
+        for type_code in _TIME_SOURCE_TYPES:
+            for attribute in attributes[type_code]:
+                parsed = attribute.attribute
+                if parsed is None:
+                    continue  # non-resident without a volume: dissect parsed no value
+                times = (int(parsed.last_access_time_ns), int(parsed.last_modification_time_ns))
+                if all(0 <= ns <= _RESTORABLE_NS_MAX for ns in times):
+                    return times
+    except Exception:  # a broken record: its times are unreadable
+        return None
+    return None
+
+
+def _restore_record_times(rec: Any, path: Path, stats: dict[str, int]) -> None:
+    """Give the written ``path`` the record's times (``_record_times_ns``), else count the skip."""
+    times = _record_times_ns(rec)
+    if times is not None:
+        try:
+            os.utime(path, ns=times)
+            return
+        except (OSError, OverflowError):
+            pass  # the output drive cannot hold the time (FAT/exFAT before 1980, say): counted below
+    stats["time_restore_skips"] = stats.get("time_restore_skips", 0) + 1
+
+
 def _dump_ntfs_record(rec: Any, entry: _OutputEntry, stats: dict[str, int], guard: ExtractSpaceGuard | None = None) -> None:
     try:
         size = int(rec.size())
@@ -851,6 +892,8 @@ def _dump_ntfs_record(rec: Any, entry: _OutputEntry, stats: dict[str, int], guar
         stats["errors"] += 1
         names.discard(entry)
         return
+    assert entry.path is not None
+    _restore_record_times(rec, entry.path, stats)
     stats["files"] += 1
     stats["bytes"] += size - max(remaining, 0)
 
@@ -1102,8 +1145,8 @@ def _sweep_deleted_mft_records(
         _notify_progress(on_progress, stats)
 
 
-def _dump_ntfs_system_record(rec: Any, out_path: Path) -> int:
-    """Dump a raw NTFS record stream (e.g. $MFT) for reference-diff tooling."""
+def _dump_ntfs_system_record(rec: Any, out_path: Path, stats: dict[str, int]) -> int:
+    """Dump a raw NTFS record stream (e.g. $MFT) for reference-diff tooling, with the record's times."""
     size = int(rec.size())
     out_path.parent.mkdir(parents=True, exist_ok=True)
     src = rec.open()
@@ -1115,6 +1158,7 @@ def _dump_ntfs_system_record(rec: Any, out_path: Path) -> int:
                 break
             dst.write(chunk)
             remaining -= len(chunk)
+    _restore_record_times(rec, out_path, stats)
     return size - max(remaining, 0)
 
 
@@ -1168,6 +1212,7 @@ def extract_e01_native(
             "name_collision_renames": 0,
             "name_collisions_unresolved": 0,
             "disk_space_skips": 0,
+            "time_restore_skips": 0,
             "file_limit": native_extract_file_limit(mft_records),
             "file_limit_from_env": int(native_extract_file_limit_override() is not None),
             "mft_record_count": mft_records,
@@ -1214,7 +1259,7 @@ def extract_e01_native(
             try:
                 mft_rec = fs.mft.get(0)
                 mft_path = system_dir / "MFT.bin"
-                _dump_ntfs_system_record(mft_rec, mft_path)
+                _dump_ntfs_system_record(mft_rec, mft_path, stats)
                 system_artifacts["mft"] = str(mft_path)
             except Exception:
                 stats["errors"] += 1

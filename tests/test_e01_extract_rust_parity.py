@@ -50,13 +50,16 @@ def tree_manifest(root: Path) -> dict[str, Any]:
     # (Kelvin sign "\u212a.txt" next to "k.txt"), although NTFS keeps both files.
     found = [Path(top) / name for top, dirnames, filenames in os.walk(root) for name in (*dirnames, *filenames)]
     files: dict[str, tuple[int, str]] = {}
+    mtimes: dict[str, int] = {}
     dirs: list[str] = []
     for rel, path in sorted((path.relative_to(root).as_posix(), path) for path in found):
         if path.is_file():
-            files[rel] = (path.stat().st_size, hashlib.sha256(path.read_bytes()).hexdigest())
+            status = path.stat()  # before the read: the copy carries the record's times
+            files[rel] = (status.st_size, hashlib.sha256(path.read_bytes()).hexdigest())
+            mtimes[rel] = status.st_mtime_ns
         else:
             dirs.append(rel)
-    return {"files": files, "dirs": dirs}
+    return {"files": files, "dirs": dirs, "mtimes": mtimes}
 
 
 class EngineParityBase(unittest.TestCase):
@@ -118,6 +121,7 @@ class EngineParityBase(unittest.TestCase):
         self.assertEqual(sorted(rs_tree["files"]), sorted(py_tree["files"]))
         self.assertEqual(list(rs_tree["files"].items()), list(py_tree["files"].items()))
         self.assertEqual(rs_tree["dirs"], py_tree["dirs"])
+        self.assertEqual(rs_tree["mtimes"], py_tree["mtimes"])
         self.assertEqual(engine_stats(rs_result["stats"]), engine_stats(py_result["stats"]))
         self.assertEqual(list(rs_progress[-1].items()), list(rs_result["stats"].items()))
         self.assertEqual(rs_result["output_name_collisions"], py_result["output_name_collisions"])

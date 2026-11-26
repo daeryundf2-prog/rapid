@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use crate::names::{
     opened_id, path_id, target_id, Collision, FileId, OutputNames, DELETED_DIR, ROOT,
 };
-use crate::ntfs::{DirectReader, Media, Ntfs, Record, Stream, VolRead};
+use crate::ntfs::{DirectReader, Media, Ntfs, Record, RecordTimes, Stream, VolRead};
 
 const CHUNK: i128 = 8 << 20;
 const MAX_DEPTH: u32 = 64;
@@ -43,11 +43,12 @@ pub struct Stats {
     pub alias_skips: i128,
     pub name_collision_renames: i128,
     pub name_collisions_unresolved: i128,
+    pub time_restore_skips: i128,
     pub file_limit: i128,
 }
 
 impl Stats {
-    pub fn pairs(&self) -> [(&'static str, i128); 11] {
+    pub fn pairs(&self) -> [(&'static str, i128); 12] {
         [
             ("files", self.files),
             ("bytes", self.bytes),
@@ -62,6 +63,7 @@ impl Stats {
                 "name_collisions_unresolved",
                 self.name_collisions_unresolved,
             ),
+            ("time_restore_skips", self.time_restore_skips),
             ("file_limit", self.file_limit),
         ]
     }
@@ -111,6 +113,7 @@ struct Job {
     key: JobKey,
     stream: Stream,
     size: i128,
+    times: Option<RecordTimes>,
 }
 
 type JobKey = (PathBuf, u64);
@@ -121,7 +124,8 @@ type Link = (String, u64, u16);
 /// How a deferred copy went; a second planning walk replays these in walk order.
 #[derive(Clone, Copy)]
 enum JobOutcome {
-    Copied(i128),
+    /// Bytes written, and whether the file got the record's times (`_restore_record_times`).
+    Copied(i128, bool),
     ReadFailed,
 }
 
@@ -270,6 +274,7 @@ impl<'a, M: Media> Walker<'a, M> {
                 return Ok(());
             }
         };
+        let times = self.ntfs.record_times(record);
         if self.plan.is_some() {
             let planned =
                 self.names
@@ -281,16 +286,26 @@ impl<'a, M: Media> Walker<'a, M> {
                 return Ok(());
             };
             let key: JobKey = (path, record.segment);
+            // Not run yet: planned as copied, with the times restored when the record has them.
             match self.known.get(&key).copied() {
-                None => self.stats.files += 1,
-                Some(JobOutcome::Copied(bytes)) => {
+                None => {
+                    self.stats.files += 1;
+                    self.stats.time_restore_skips += i128::from(times.is_none());
+                }
+                Some(JobOutcome::Copied(bytes, restored)) => {
                     self.stats.files += 1;
                     self.stats.bytes += bytes;
+                    self.stats.time_restore_skips += i128::from(!restored);
                 }
                 Some(JobOutcome::ReadFailed) => self.stats.errors += 1,
             }
             if let Some(plan) = self.plan.as_mut() {
-                plan.push(Job { key, stream, size });
+                plan.push(Job {
+                    key,
+                    stream,
+                    size,
+                    times,
+                });
             }
             return Ok(());
         }
@@ -300,6 +315,7 @@ impl<'a, M: Media> Walker<'a, M> {
         let copied = match created {
             Ok(Some(mut file)) => {
                 copy_into(&stream, size, &mut file, &mut *self.ntfs.vol.borrow_mut())
+                    .map(|copied| (copied, restore_times(&file, times)))
             }
             Ok(None) => {
                 self.names
@@ -310,7 +326,8 @@ impl<'a, M: Media> Walker<'a, M> {
             Err(error) => Err(error.to_string()),
         };
         match copied {
-            Ok(copied) => {
+            Ok((copied, restored)) => {
+                self.stats.time_restore_skips += i128::from(!restored);
                 self.stats.files += 1;
                 self.stats.bytes += copied;
             }
@@ -587,6 +604,14 @@ fn copy_into<V: VolRead>(
     Ok(size - remaining.max(0))
 }
 
+/// `_restore_record_times` on the written file: false (counted in `time_restore_skips`) when the
+/// record has no restorable times or the output drive refuses them.
+fn restore_times(file: &fs::File, times: Option<RecordTimes>) -> bool {
+    times
+        .and_then(|times| times.file_times())
+        .is_some_and(|times| file.set_times(times).is_ok())
+}
+
 /// Fails the run (the Python engine then redoes the image) for an output path Python would not
 /// write the way Rust does: on Windows without the system-wide long-path opt-in, Python's
 /// `open`/`mkdir` fail from `MAX_PATH` (directories from 248 characters) where Rust's std
@@ -637,16 +662,14 @@ struct Owned {
 /// the target reaches a file or directory another target reached (names the output drive folds
 /// together, which the sequential walk renames), or creating it fails other than on what was in
 /// the output folder before the run.
-#[allow(clippy::too_many_arguments)]
 fn copy_job<V: VolRead>(
-    target: &Path,
-    stream: &Stream,
-    size: i128,
+    job: &Job,
     owned: &mut Vec<Owned>,
     claims: &Mutex<HashMap<FileId, PathBuf>>,
     existing: &HashSet<PathBuf>,
     reader: &mut V,
 ) -> Result<JobOutcome, String> {
+    let target: &Path = &job.key.0;
     let collision = |why: String| format!("output path collision at {}: {why}", target.display());
     if owned.iter().any(|o| !o.ok) {
         if let Ok(id) = path_id(target) {
@@ -696,10 +719,10 @@ fn copy_job<V: VolRead>(
             owned.len() - 1
         }
     };
-    let copied = copy_into(stream, size, &mut file, reader);
+    let copied = copy_into(&job.stream, job.size, &mut file, reader);
     owned[slot].ok = copied.is_ok();
     Ok(match copied {
-        Ok(n) => JobOutcome::Copied(n),
+        Ok(n) => JobOutcome::Copied(n, restore_times(&file, job.times)),
         Err(_) => JobOutcome::ReadFailed,
     })
 }
@@ -796,22 +819,14 @@ fn execute<M: Media>(
                                 break 'units;
                             }
                             let job = &jobs[index];
-                            let outcome = copy_job(
-                                &job.key.0,
-                                &job.stream,
-                                job.size,
-                                &mut owned,
-                                &claims,
-                                existing,
-                                &mut reader,
-                            );
+                            let outcome = copy_job(job, &mut owned, &claims, existing, &mut reader);
                             if let Some(message) = reader.refused.take() {
                                 stop(None, Some(message));
                                 break 'units;
                             }
                             match outcome {
                                 Ok(outcome) => {
-                                    if let JobOutcome::Copied(n) = outcome {
+                                    if let JobOutcome::Copied(n, _) = outcome {
                                         bytes.fetch_add(n as i64, Ordering::Relaxed);
                                         copied_files.fetch_add(1, Ordering::Relaxed);
                                     }
@@ -1057,12 +1072,24 @@ pub fn extract<'a, M: Media>(
             Ok(outcomes) => {
                 if outcomes
                     .iter()
-                    .all(|outcome| matches!(outcome, JobOutcome::Copied(_)))
+                    .all(|outcome| matches!(outcome, JobOutcome::Copied(..)))
                 {
                     planner.stats.bytes = outcomes
                         .iter()
-                        .map(|o| if let JobOutcome::Copied(n) = o { *n } else { 0 })
+                        .map(|o| {
+                            if let JobOutcome::Copied(n, _) = o {
+                                *n
+                            } else {
+                                0
+                            }
+                        })
                         .sum();
+                    // Every planned file was written: the skips are the copies that kept their
+                    // extraction time (the plan only counted records without times).
+                    planner.stats.time_restore_skips = outcomes
+                        .iter()
+                        .filter(|o| matches!(o, JobOutcome::Copied(_, false)))
+                        .count() as i128;
                     planner.plan = None;
                     planner.progress = progress;
                     planner.flush_progress().map_err(fatal_message)?;
