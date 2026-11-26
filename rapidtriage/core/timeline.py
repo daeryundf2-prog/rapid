@@ -695,7 +695,7 @@ def run_timeline(
             "timestamp_kind_counts": dict(kind_counts),
             "earliest_event_at": str(events[0]["timestamp"]) if events else None,
             "latest_event_at": str(events[-1]["timestamp"]) if events else None,
-            "timezone": build_timezone_disclosure(stats.evidence_timezone),
+            "timezone": build_timezone_disclosure(stats.evidence_timezone, events),
             "file_time_origin": file_time_origin or "unknown",
             "time_policy": {
                 "event_sources": "아티팩트 내부 시각(TIMELINE_FIELD_MAP)과 파일시스템 fs_* 시각만 사용",
@@ -1910,17 +1910,72 @@ def detect_evidence_timezone(artifact_type: str, details: Mapping[str, object]) 
     return None
 
 
-def build_timezone_disclosure(evidence_timezone: Mapping[str, object] | None) -> dict[str, object]:
+def build_timezone_disclosure(evidence_timezone: Mapping[str, object] | None, events: Sequence[object] = ()) -> dict[str, object]:
+    """Time-basis disclosure for ``events``: instants with a known offset are
+    stored as UTC, offset-free local wall clocks as their original text."""
+    counts = time_basis_counts(events)
+    utc = int(counts["utc_event_count"])
+    wall = int(counts["local_wall_clock_event_count"])
+    if not wall:
+        storage, display = "UTC", "UTC (ISO 8601 +00:00)"
+    elif utc:
+        storage, display = "UTC+local-wall-clock", "UTC (ISO 8601 +00:00) and offset-free local wall clock (ISO 8601 without offset)"
+    else:
+        storage, display = "local-wall-clock", "offset-free local wall clock (ISO 8601 without offset)"
+    note = "오프셋이 확인된 시각은 UTC ISO 8601(+00:00)로 정규화해 저장합니다."
+    if wall:
+        labels = ", ".join(f"timezone={label} {count}건" for label, count in counts["local_wall_clock_by_timezone"].items())
+        note += (
+            f" 시간대 미확정 현지 벽시계 시각 {wall}건({labels})은 오프셋 없이 원문 그대로 저장하며 UTC 아님: "
+            "원본(EXIF·ZIP DOS 시각 등)이 지역 시각이라 UTC 변환이 검증되지 않았습니다."
+        )
     return {
-        "storage": "UTC",
-        "display": "UTC (ISO 8601 +00:00)",
+        "storage": storage,
+        "display": display,
+        **counts,
         "evidence_timezone": dict(evidence_timezone) if evidence_timezone else None,
         "evidence_timezone_status": "registry-reported" if evidence_timezone else "not-reported",
-        "note": (
-            "모든 이벤트 시각은 UTC로 저장합니다. timezone=local-unknown 이벤트(EXIF·ZIP DOS 시각 등)는 "
-            "원본이 지역 시각이라 UTC 변환이 검증되지 않았습니다."
-        ),
+        "note": note,
     }
+
+
+def time_basis_counts(events: Iterable[object]) -> dict[str, object]:
+    """Events by stored time basis: UTC instants (text with an offset) and
+    offset-free wall clocks per ``timezone`` label."""
+    utc = 0
+    wall: Counter[str] = Counter()
+    for event in events:
+        if not isinstance(event, Mapping):
+            continue
+        if _is_wall_clock(event):
+            wall[str(event.get("timezone") or "")] += 1
+        else:
+            utc += 1
+    return {
+        "utc_event_count": utc,
+        "local_wall_clock_event_count": sum(wall.values()),
+        "local_wall_clock_by_timezone": dict(sorted(wall.items())),
+    }
+
+
+def _is_wall_clock(event: Mapping[str, object]) -> bool:
+    return not _has_explicit_offset(str(event.get("timestamp") or ""))
+
+
+def time_basis_header(events: Sequence[object]) -> str:
+    """The report's storage line, counted from the rows it introduces."""
+    counts = time_basis_counts(events)
+    utc = int(counts["utc_event_count"])
+    wall = int(counts["local_wall_clock_event_count"])
+    if not utc and not wall:
+        return "- 저장 시간대: 이벤트 없음 (오프셋이 확인된 시각은 UTC ISO 8601 +00:00로 정규화)"
+    parts = []
+    if utc:
+        parts.append(f"오프셋이 확인된 시각은 UTC ISO 8601(+00:00) {utc}건")
+    if wall:
+        parts.append(f"시간대 미확정 오프셋 없는 현지 벽시계 시각 {wall}건은 원문 그대로(UTC 아님, 행마다 timezone 표시)")
+    label = "혼합" if utc and wall else ("UTC" if utc else "현지 벽시계")
+    return f"- 저장 시간대: {label} — " + "; ".join(parts)
 
 
 # --- summaries / report ------------------------------------------------------
@@ -2054,7 +2109,7 @@ def build_timeline_report(payload: Mapping[str, object]) -> str:
         "",
         "## 시각 기준 / Time basis",
         "",
-        "- 저장 시간대: UTC (모든 이벤트 시각은 UTC ISO 8601)",
+        time_basis_header(events if isinstance(events, list) else []),
         (
             f"- 증거 시스템 시간대: `{evidence_tz.get('name')}` ("
             + (f"UTC{evidence_tz.get('utc_offset')}, " if evidence_tz.get("utc_offset") else "")
@@ -2217,13 +2272,13 @@ def timeline_report_caveat(event: Mapping[str, object]) -> str:
     if not isinstance(details, Mapping):
         return ""
     bits: list[str] = []
-    if event.get("timezone") and event.get("timezone") != "UTC":
-        timezone_label = str(event.get("timezone"))
-        bits.append(
-            f"timezone={timezone_label} (시간대 미확정: 오프셋 없는 현지 시각 원문)"
-            if timezone_label in LOCAL_TIMEZONE_LABELS
-            else f"timezone={timezone_label}"
-        )
+    timezone_label = str(event.get("timezone") or "")
+    if timezone_label in LOCAL_TIMEZONE_LABELS:
+        bits.append(f"timezone={timezone_label} (시간대 미확정: 오프셋 없는 현지 시각 원문)")
+    elif _is_wall_clock(event):
+        bits.append(f"timezone={timezone_label or '-'} (오프셋 없는 원문 시각: UTC 미확인)")
+    elif timezone_label and timezone_label != "UTC":
+        bits.append(f"timezone={timezone_label}")
     if details.get("validation_required") is True:
         bits.append("validation required")
     reportability = details.get("reportability")

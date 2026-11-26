@@ -24,6 +24,19 @@
   `details.key_rows` entry and each `details.also_in` entry now also carry
   `input_file`, the timeline input the row was read from
   (`tests/test_d27_timeline.py::KeyRowCitationTests`).
+- The timeline Markdown report stated "모든 이벤트 시각은 UTC ISO 8601" and
+  `summary.timezone.note` began "모든 이벤트 시각은 UTC로 저장합니다" even when
+  events were offset-free local wall clocks (`timezone=local-unknown`), so the
+  header and the rows disagreed about which times carry an offset. The storage
+  line is now counted from the report's own rows: UTC instants with `+00:00`,
+  offset-free local wall clocks kept as their original text (not UTC), or both.
+  `summary.timezone` adds `utc_event_count`, `local_wall_clock_event_count`
+  and `local_wall_clock_by_timezone`; its `storage` is `UTC`,
+  `UTC+local-wall-clock` or `local-wall-clock`, and its `display`/`note` say
+  the same. The run report's disclosure section says offset-known times are
+  UTC and adds the wall-clock count when there is one. Rows without an offset
+  keep their caveat; one without a local label now gets one too
+  (`tests/test_d27_timeline.py::ReportTimeBasisTests`).
 - On Windows an analysis could vanish from the analysis list for one read. The
   state reader treated the sharing error raised while another thread
   `os.replace`d `analysis.json` (a heartbeat or progress write) as "no state".

@@ -164,7 +164,12 @@ def build_disclosure_section(disclosures: Mapping[str, object]) -> str:
     lines = ["## 처리 한계·공개 사항 / Disclosures", ""]
     timezone = disclosures.get("timezone") if isinstance(disclosures.get("timezone"), Mapping) else {}
     evidence_tz = timezone.get("evidence_timezone") if isinstance(timezone, Mapping) else None
-    lines.append("- 시각 저장 기준: UTC (ISO 8601, +00:00)")
+    lines.append("- 시각 저장 기준: 오프셋이 확인된 시각은 UTC (ISO 8601, +00:00)")
+    wall_clock_count = timezone.get("local_wall_clock_event_count") if isinstance(timezone, Mapping) else None
+    if isinstance(wall_clock_count, int) and wall_clock_count:
+        lines.append(
+            f"- 시간대 미확정 현지 벽시계 시각 {wall_clock_count}건: 오프셋 없이 원문 그대로 저장 (UTC 아님, 타임라인 행마다 timezone 표시)"
+        )
     if isinstance(evidence_tz, Mapping) and evidence_tz:
         lines.append(
             f"- 증거 시스템 시간대: `{evidence_tz.get('name') or evidence_tz.get('label')}`"

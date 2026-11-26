@@ -1,5 +1,5 @@
 """D27 timeline findings: time basis in same-instant merges (#1), key-row
-citations across input files (#8)."""
+citations across input files (#8), report time-basis statement (#11)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rapidtriage.core.timeline import TimelineBuilder, TimelineStats, run_timeline
+from rapidtriage.core.run.markdown import build_disclosure_section
+from rapidtriage.core.timeline import (
+    TimelineBuilder,
+    TimelineStats,
+    build_timeline_report,
+    run_timeline,
+)
 
 STAMP = "2024-11-03T01:30:00"
 PROFILE = "Users/profile/NTUSER.DAT"
@@ -160,6 +166,44 @@ class KeyRowCitationTests(unittest.TestCase):
                     self.assertEqual(cited["details"]["application"], row["value"])
                     self.assertEqual(Path(row["input_file"]).stem, row["value"])
                 self.assertEqual([row["value"] for row in rows], [Path(path).stem for path in inputs])
+
+
+class ReportTimeBasisTests(unittest.TestCase):
+    """#11: the report header, the disclosure and every row agree about offsets."""
+
+    def test_header_disclosure_and_rows_agree(self) -> None:
+        cases = {
+            "local-only": ([install_state(STAMP, "")], 0, 1, "local-wall-clock"),
+            "utc-only": ([feature_usage("alpha")], 1, 0, "UTC"),
+            "mixed": ([install_state(STAMP, STAMP + "Z")], 1, 1, "UTC+local-wall-clock"),
+        }
+        for name, (rows, utc, local, storage) in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as directory:
+                payload = registry_timeline(Path(directory), rows)
+                report = build_timeline_report(payload)
+                disclosure = payload["summary"]["timezone"]
+                self.assertEqual(
+                    (disclosure["storage"], disclosure["utc_event_count"], disclosure["local_wall_clock_event_count"]),
+                    (storage, utc, local),
+                )
+                self.assertEqual(disclosure["local_wall_clock_by_timezone"], {"local-unknown": local} if local else {})
+                self.assertNotIn("모든 이벤트 시각은 UTC", report)
+                self.assertNotIn("모든 이벤트 시각은 UTC", disclosure["note"])
+                header = next(line for line in report.splitlines() if line.startswith("- 저장 시간대:"))
+                self.assertEqual(f"UTC ISO 8601(+00:00) {utc}건" in header, bool(utc), header)
+                self.assertEqual(f"오프셋 없는 현지 벽시계 시각 {local}건" in header, bool(local), header)
+                self.assertEqual("UTC 아님" in disclosure["note"], bool(local))
+                self.assertIn(f"- 시간대 미확정 이벤트: {local}건", report)
+                timeline = report.split("## Timeline", 1)[1].splitlines()
+                event_lines = [line for line in timeline if line.startswith("- `")]
+                self.assertEqual(len(event_lines), utc + local)
+                for line in event_lines:
+                    offset_free = line.startswith(f"- `{STAMP}`")
+                    self.assertEqual("timezone=local-unknown (시간대 미확정" in line, offset_free, line)
+                    self.assertEqual(line.startswith(f"- `{STAMP}+00:00`"), not offset_free, line)
+                section = build_disclosure_section({"timezone": disclosure})
+                self.assertIn("오프셋이 확인된 시각은 UTC (ISO 8601, +00:00)", section)
+                self.assertEqual(f"현지 벽시계 시각 {local}건" in section, bool(local), section)
 
 
 if __name__ == "__main__":

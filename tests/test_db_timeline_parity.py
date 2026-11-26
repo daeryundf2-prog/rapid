@@ -177,12 +177,14 @@ build_run_case_db(Path(sys.argv[1]), json.loads(sys.argv[2]), root=sys.argv[1])
             write_timeline_result(result, golden_file)
             data = golden_file.read_bytes()
             # D27 #1 changed only summary.time_policy.dedupe_key (the time basis joins the key);
-            # D27 #8 added source_record.input_file (normalized to its name above).
-            self.assertEqual(hashlib.sha256(data).hexdigest(), "f6ffda4dfe5f9639402146e5a958451d616f17abc198d4aa289c473bd72bf5ef")
+            # D27 #8 added source_record.input_file (normalized to its name above);
+            # D27 #11 added the time-basis counts to summary.timezone and reworded its note.
+            self.assertEqual(hashlib.sha256(data).hexdigest(), "9ebd31aba114013974ee4a5817bb0ba61ce83be4ac8162dc43571ac4f91ddff9")
             # The report gained #40's unmapped-row/unconfirmed-timezone lines and
-            # the activity-count section; event rows are unchanged (JSON above).
+            # the activity-count section; D27 #11 replaced the storage line with
+            # counted bases. Event rows are unchanged (JSON above).
             report = build_timeline_report(result).encode("utf-8")
-            self.assertEqual(hashlib.sha256(report).hexdigest(), "f94083e37d3f0ba2c53e1234ab724f6d515cb77348dc764767f6e18c4b1abc33")
+            self.assertEqual(hashlib.sha256(report).hexdigest(), "4d2e18b62504b141b6a29bc25e9690b7a0d2636c01482998ec5ac3b7721604d4")
 
             original = root / "reference.db"
             # The original importer expanded each row twice, independently
