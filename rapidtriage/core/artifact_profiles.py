@@ -40,6 +40,7 @@ from collections.abc import (
 from pathlib import Path
 from typing import Any
 
+from .eventlog_channels import EVENTLOG_KIND
 from .json_safe import json_default
 from .json_stream import iter_array_items, iter_jsonl_items, open_json
 
@@ -452,25 +453,36 @@ def _encode_low_cardinality(group: Sequence[MutableMapping[str, object]]) -> dic
     return codes
 
 
+def _merge_shared(template: object, residue: object = _MISSING) -> object:
+    return _merge(template, residue, copy_template=False)
+
+
 def _merge_profile_level(
     expanded: dict[str, object],
     level: Mapping[str, object],
     *,
     copy_templates: bool,
+    native: Any = None,
 ) -> None:
+    if native is not None and not copy_templates:
+        # Rust merge of plain nodes; any other node is merged by ``_merge_shared``.
+        def merge(template: object, residue: object) -> object:
+            return native.profile_merge(template, residue, _MISSING, _merge_shared)
+
+    else:
+
+        def merge(template: object, residue: object) -> object:
+            return _merge(template, residue, copy_template=copy_templates)
+
     detail_templates = level.get("details")
     if isinstance(detail_templates, Mapping):
         details = dict(expanded.get("details") or {})
         for key, template in detail_templates.items():
-            details[key] = _merge(template, details.get(key, _MISSING), copy_template=copy_templates)
+            details[key] = merge(template, details.get(key, _MISSING))
         expanded["details"] = details
     envelope_template = level.get(ENVELOPE_KEY)
     if envelope_template is not None:
-        expanded[ENVELOPE_KEY] = _merge(
-            envelope_template,
-            expanded.get(ENVELOPE_KEY) or {},
-            copy_template=copy_templates,
-        )
+        expanded[ENVELOPE_KEY] = merge(envelope_template, expanded.get(ENVELOPE_KEY) or {})
 
 
 def expand_profile(
@@ -479,6 +491,7 @@ def expand_profile(
     *,
     copy_templates: bool = True,
     include_type_templates: bool = True,
+    native: Any = None,
 ) -> dict[str, object]:
     """Return ``record`` with its profile templates merged back (inverse of hoisting).
 
@@ -488,6 +501,8 @@ def expand_profile(
     ``include_type_templates=False`` only codes and the per-file context are
     restored: the row keeps everything that varies, without the per-type
     boilerplate (``profile_ref`` is kept so the row can still be expanded).
+    ``native`` (``rapidcore_native``, opt-in EVTX engine) merges shared
+    (``copy_templates=False``) templates in Rust with the same result.
     """
     expanded = dict(record)
     ref = expanded.pop(PROFILE_REF_KEY, None)
@@ -510,11 +525,11 @@ def expand_profile(
         # Contexts are keyed by the row's source file (path).
         context = contexts.get(str(expanded.get("path") or ""))
         if isinstance(context, Mapping):
-            _merge_profile_level(expanded, context, copy_templates=copy_templates)
+            _merge_profile_level(expanded, context, copy_templates=copy_templates, native=native)
     if not include_type_templates:
         expanded[PROFILE_REF_KEY] = ref
         return expanded
-    _merge_profile_level(expanded, profile, copy_templates=copy_templates)
+    _merge_profile_level(expanded, profile, copy_templates=copy_templates, native=native)
     return expanded
 
 
@@ -554,6 +569,21 @@ def resolve_records_path(payload: Mapping[str, object], payload_path: Path | str
     return candidates[0]
 
 
+def payload_row_kernels(payload: Mapping[str, object]) -> Any:
+    """``rapidcore_native`` for an eventlog payload read with the Rust EVTX engine, else ``None``.
+
+    The engine is the payload's ``collector_options.evtx_engine``, else
+    ``RAPIDTRIAGE_EVTX_ENGINE`` (see ``evtx_engine.resolve_evtx_engine``).
+    """
+    if payload.get("kind") != EVENTLOG_KIND:
+        return None
+    from ..artifacts.windows.evtx_engine import native_row_kernels
+
+    options = payload.get("collector_options")
+    option = options.get("evtx_engine") if isinstance(options, Mapping) else None
+    return native_row_kernels(None if option is None else str(option))
+
+
 def iter_payload_records(
     payload: Mapping[str, object],
     *,
@@ -572,6 +602,7 @@ def iter_payload_records(
     """
     profiles = payload.get(PROFILES_PAYLOAD_KEY) if expand else None
     profiles = profiles if isinstance(profiles, Mapping) else None
+    native = payload_row_kernels(payload) if profiles else None
     records_path = resolve_records_path(payload, payload_path)
     if records_path is not None:
         rows: Iterable[object] = iter_jsonl_items(records_path, offset=offset, limit=limit)
@@ -584,7 +615,7 @@ def iter_payload_records(
         if not isinstance(row, dict):
             continue
         if profiles and row.get(PROFILE_REF_KEY):
-            yield expand_profile(row, profiles, copy_templates=False)
+            yield expand_profile(row, profiles, copy_templates=False, native=native)
         else:
             yield row
 
@@ -638,6 +669,7 @@ def iter_artifact_output_rows(
         return
     profiles = head.get(PROFILES_PAYLOAD_KEY) if expand else None
     profiles = profiles if isinstance(profiles, Mapping) else None
+    native = payload_row_kernels(head) if profiles else None
     emitted = 0
     for index, row in enumerate(iter_array_items(path, "artifacts")):
         if index < offset:
@@ -648,7 +680,7 @@ def iter_artifact_output_rows(
             continue
         emitted += 1
         if profiles and row.get(PROFILE_REF_KEY):
-            yield expand_profile(row, profiles, copy_templates=False)
+            yield expand_profile(row, profiles, copy_templates=False, native=native)
         else:
             yield row
 
@@ -756,13 +788,24 @@ def _residue(value: object, template: object, cache: _CanonicalCache | None = No
 
 
 class _TemplateTracker:
-    """Running templates of one row group (a type, or one source file of a type)."""
+    """Running templates of one row group (a type, or one source file of a type).
 
-    __slots__ = ("cache", "count", "envelope", "envelope_ok", "templates")
+    ``native`` (``rapidcore_native``, opt-in EVTX engine) folds plain rows in
+    Rust (``profile_observe_details``/``profile_common``); it declines anything
+    else and this Python fold runs instead, so the templates are identical.
+    """
 
-    def __init__(self, first_details: Mapping[str, object], candidate: Callable[[str, object], bool]) -> None:
+    __slots__ = ("cache", "count", "envelope", "envelope_ok", "native", "templates")
+
+    def __init__(
+        self,
+        first_details: Mapping[str, object],
+        candidate: Callable[[str, object], bool],
+        native: Any = None,
+    ) -> None:
         self.cache: _CanonicalCache = {}
         self.count = 0
+        self.native = native
         self.templates: dict[str, object] = {
             key: _MISSING for key, value in first_details.items() if candidate(str(key), value)
         }
@@ -771,19 +814,21 @@ class _TemplateTracker:
 
     def observe(self, details: Mapping[str, object], envelope: object) -> None:
         self.count += 1
-        for key in list(self.templates):
-            if key not in details:
-                del self.templates[key]
-                continue
-            current = self.templates[key]
-            if current is _MISSING:
-                self.templates[key] = details[key]
-                continue
-            hoisted, template = _common(current, details[key], self.cache)
-            if hoisted:
-                self.templates[key] = template
-            else:
-                del self.templates[key]
+        native = self.native
+        if native is None or not native.profile_observe_details(self.templates, details, _MISSING):
+            for key in list(self.templates):
+                if key not in details:
+                    del self.templates[key]
+                    continue
+                current = self.templates[key]
+                if current is _MISSING:
+                    self.templates[key] = details[key]
+                    continue
+                hoisted, template = _common(current, details[key], self.cache)
+                if hoisted:
+                    self.templates[key] = template
+                else:
+                    del self.templates[key]
         if not self.envelope_ok:
             return
         if not isinstance(envelope, dict):
@@ -792,7 +837,8 @@ class _TemplateTracker:
         elif self.envelope is _MISSING:
             self.envelope = envelope
         else:
-            hoisted, template = _common(self.envelope, envelope, self.cache)
+            folded = native.profile_common(self.envelope, envelope) if native is not None else None
+            hoisted, template = folded if folded is not None else _common(self.envelope, envelope, self.cache)
             if hoisted:
                 self.envelope = template
             else:
@@ -848,6 +894,7 @@ class StreamingProfileBuilder:
         keys: Iterable[str] | Callable[[str], bool] = is_hoistable_detail_key,
         hoist_scalars: bool = True,
         context_min_rows: int = CONTEXT_MIN_ROWS,
+        native: Any = None,
     ) -> None:
         selector = _key_selector(keys)
 
@@ -866,7 +913,13 @@ class StreamingProfileBuilder:
         self._code_index: dict[str, dict[str, dict[str, int]]] = {}
         # Canonical forms of frozen templates (passes 2 and 3).
         self._canonical_cache: _CanonicalCache = {}
+        # rapidcore_native (opt-in EVTX engine): Rust folds/strips, same profiles and rows.
+        self._native = native
         self.profiles: dict[str, dict[str, object]] = {}
+
+    def _strip_level(self, row: dict[str, object], level: Mapping[str, object]) -> None:
+        if self._native is None or not self._native.profile_strip_level(row, level):
+            _strip_level(row, level, self._canonical_cache)
 
     # pass 1 ------------------------------------------------------------
     def observe(self, row: Mapping[str, object]) -> None:
@@ -876,7 +929,7 @@ class StreamingProfileBuilder:
         artifact_type = str(row.get("artifact_type") or "")
         tracker = self._types.get(artifact_type)
         if tracker is None:
-            tracker = _TemplateTracker(details, self._type_candidate)
+            tracker = _TemplateTracker(details, self._type_candidate, self._native)
             self._types[artifact_type] = tracker
         tracker.observe(details, row.get(ENVELOPE_KEY))
         path_key = (artifact_type, str(row.get("path") or ""))
@@ -894,7 +947,7 @@ class StreamingProfileBuilder:
             return
         profile = self.profiles.get(str(row.get("artifact_type") or ""))
         if profile:
-            _strip_level(row, profile, self._canonical_cache)
+            self._strip_level(row, profile)
 
     def observe_context(self, row: Mapping[str, object]) -> None:
         details = row.get("details")
@@ -906,7 +959,7 @@ class StreamingProfileBuilder:
         if path and self._path_counts.get(key, 0) >= self._context_min_rows:
             tracker = self._contexts.get(key)
             if tracker is None:
-                tracker = _TemplateTracker(details, _any_key)
+                tracker = _TemplateTracker(details, _any_key, self._native)
                 self._contexts[key] = tracker
             tracker.observe(details, row.get(ENVELOPE_KEY))
         type_tracker = self._types.get(artifact_type)
@@ -964,7 +1017,7 @@ class StreamingProfileBuilder:
         if isinstance(contexts, Mapping):
             context = contexts.get(str(row.get("path") or ""))
             if isinstance(context, Mapping):
-                _strip_level(row, context, self._canonical_cache)
+                self._strip_level(row, context)
                 row[CONTEXT_REF_KEY] = True
         code_index = self._code_index.get(artifact_type)
         if code_index:
@@ -992,6 +1045,7 @@ def iter_artifact_output_row_views(
     head = read_artifact_output_head(path)
     profiles = head.get(PROFILES_PAYLOAD_KEY)
     profiles = profiles if isinstance(profiles, Mapping) else None
+    native = payload_row_kernels(head) if profiles else None
     if head.get("records_path") or head.get("records_file"):
         rows: Iterable[object] = iter_payload_records(head, payload_path=path, expand=False)
     else:
@@ -1003,11 +1057,11 @@ def iter_artifact_output_row_views(
             # Decode codes and restore per-file context once for both views.
             # _merge_profile_level copies the detail dict before applying the
             # type template, so the varying view retains its compact contents.
-            varying = expand_profile(row, profiles, copy_templates=False, include_type_templates=False)
+            varying = expand_profile(row, profiles, copy_templates=False, include_type_templates=False, native=native)
             full = varying.copy()
             ref = full.pop(PROFILE_REF_KEY, None)
             if ref is not None:
-                _merge_profile_level(full, profiles[str(ref)], copy_templates=False)
+                _merge_profile_level(full, profiles[str(ref)], copy_templates=False, native=native)
             yield index, full, varying
         else:
             yield index, row, row

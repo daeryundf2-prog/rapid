@@ -48,6 +48,7 @@ from ..artifact_profiles import (
     PROFILE_REF_KEY,
     PROFILES_PAYLOAD_KEY,
     expand_profile,
+    payload_row_kernels,
     read_artifact_output_head,
     resolve_records_path,
 )
@@ -900,6 +901,7 @@ def iter_kind_output(path: Path) -> Iterator[tuple[int, dict[str, object] | None
     head = read_artifact_output_head(path)
     profiles = head.get(PROFILES_PAYLOAD_KEY)
     profiles = profiles if isinstance(profiles, Mapping) else None
+    native = payload_row_kernels(head) if profiles else None
     large = large_types(head)
     if head.get("records_path") or head.get("records_file"):
         records = resolve_records_path(head, path)
@@ -913,7 +915,7 @@ def iter_kind_output(path: Path) -> Iterator[tuple[int, dict[str, object] | None
             yield index, None, None
             continue
         if profiles and row.get(PROFILE_REF_KEY):
-            expanded = expand_profile(row, profiles, copy_templates=False)
+            expanded = expand_profile(row, profiles, copy_templates=False, native=native)
             if str(row.get("artifact_type") or "") in large:
                 yield index, expanded, _varying_details(row, profiles)
                 continue

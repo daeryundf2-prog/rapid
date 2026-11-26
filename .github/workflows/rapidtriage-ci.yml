@@ -254,7 +254,7 @@ jobs:
       - name: Python/Rust EVTX row differential
         env:
           RAPIDTRIAGE_REQUIRE_NATIVE_EVTX: "1"
-        run: python -m unittest -v tests.test_evtx_engine_diff tests.test_rapidtriage_native_accel
+        run: python -m unittest -v tests.test_evtx_engine_diff tests.test_evtx_engine_rows_diff tests.test_rapidtriage_native_accel
 
       - name: EVTX engine benchmark smoke
         run: python scripts/evtx-engine-bench.py --records 20000

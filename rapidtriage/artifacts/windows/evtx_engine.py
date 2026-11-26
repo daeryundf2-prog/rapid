@@ -31,6 +31,17 @@ _NATIVE_DECODED = 0
 _NATIVE_DECODE_ERROR = 1
 _NATIVE_INDEX_ERROR = 2
 
+# Row kernels the Rust engine also runs; a build missing any of them is stale.
+NATIVE_ENGINE_FUNCTIONS = (
+    "redact_recovery_passwords_in",
+    "profile_observe_details",
+    "profile_common",
+    "profile_strip_level",
+    "profile_merge",
+    "dump_json_row",
+    "EventlogTriageProjector",
+)
+
 
 def validate_evtx_engine(value: str) -> str:
     engine = str(value).strip().lower()
@@ -53,8 +64,9 @@ def load_native_evtx_decoder() -> tuple[Any, str]:
     module = native_accel.extension()
     if module is None:
         return None, "rapidcore_native 확장 모듈이 빌드되지 않았습니다(scripts/build-native-accel.py)"
-    if not hasattr(module, "EvtxChunkDecoder") or not hasattr(module, "evtx_decoder_version"):
-        return None, "rapidcore_native 확장 모듈에 EVTX 디코더가 없습니다(이전 빌드)"
+    required = ("EvtxChunkDecoder", "evtx_decoder_version", *NATIVE_ENGINE_FUNCTIONS)
+    if not all(hasattr(module, name) for name in required):
+        return None, "rapidcore_native 확장 모듈에 EVTX 엔진 함수가 없습니다(이전 빌드)"
     native_version = str(module.evtx_decoder_version())
     if native_version != EVTX_NATIVE_DECODER_VERSION:
         return None, (
@@ -106,6 +118,15 @@ def resolve_evtx_engine(option: str | None) -> EvtxEngineSelection:
             notice_ko=f"Rust EVTX 디코더를 쓸 수 없어 Python 디코더로 처리했습니다: {reason}.",
         )
     return EvtxEngineSelection(requested, EVTX_ENGINE_RUST, native_module=module)
+
+
+def native_row_kernels(option: str | None) -> Any:
+    """``rapidcore_native`` when the Rust engine is active for ``option``, else ``None``.
+
+    Row writers outside the provider (compaction, JSON rows, profile expansion)
+    use it to pick the same engine the eventlog collector resolves.
+    """
+    return resolve_evtx_engine(option).native_module
 
 
 class NativeEvtxChunkDecoder:

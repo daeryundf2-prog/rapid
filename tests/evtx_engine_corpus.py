@@ -695,6 +695,8 @@ def kitchen_sink_values() -> list[tuple[str | None, Value]]:
         ("Space Name(UTC)", wstr("punctuated")),
         ("한글이름", wstr("non-ASCII key")),
         ("Markup", wstr('<tag attr="x">&amp; \'q\'</tag>')),
+        # Checksum-valid BitLocker recovery password (synthetic): masked by redaction.
+        ("RecoveryCommand", wstr("manage-bde -protectors -add C: -rp 123453-000011-720885-654324-100001-111111-222222-333333")),
         ("LoneSurrogate", (0x01, b"A\x00\x00\xd8B\x00")),
         ("TrailingNuls", wstr("padded\x00\x00\x00")),
         ("OddBytes", (0x01, utf16("odd") + b"\x41")),

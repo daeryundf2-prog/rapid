@@ -26,7 +26,7 @@ from ...core.json_safe import escape_lone_surrogates, json_default
 from ...core.models import ArtifactRecord
 from ...core.safe_xml import UnsafeXmlError, safe_xml_fromstring, safe_xml_parse
 from .._walk import iter_evidence_paths
-from .antiforensics import redact_recovery_passwords_in
+from .antiforensics import redact_recovery_passwords, redact_recovery_passwords_in
 from .evtx_engine import (
     NativeEvtxChunkDecoder,
     requested_evtx_engine,
@@ -231,6 +231,8 @@ EVENTLOG_TRIAGE_OMITTED_BLOCKS = (
     "evtx_file_header / evtx_chunk_context (per-file and per-chunk context; see eventlog-file row)",
     "source_hashes (per-file; see eventlog-file row)",
 )
+# ``parser`` of rows decoded from EVTX BinXML by ``collect_native_evtx_events``.
+EVTX_NATIVE_PARSER = "windows-eventlog-evtx-native"
 EVTX_FILE_SIGNATURE = b"ElfFile\x00"
 EVTX_CHUNK_SIGNATURE = b"ElfChnk\x00"
 EVTX_FILE_HEADER_SIZE = 4096
@@ -1867,16 +1869,17 @@ class WindowsEventLogProvider:
         seen: set[Path] = set()
         message_catalog = self.message_catalog_for_root(root)
         engine = resolve_evtx_engine(self.evtx_engine)
+        triage_projector = native_triage_projector(engine.native_module) if triage else None
         with tempfile.TemporaryFile("w+", encoding="utf-8") as detection_spool:
 
             def emit(record: ArtifactRecord) -> ArtifactRecord:
                 if record.artifact_type in {"eventlog-event", "eventlog-detection"}:
                     # 4688/4104/Sysmon command lines and script blocks: a BitLocker recovery
                     # password typed on a command line is masked before any row is written.
-                    record = redact_record_secrets(record)
+                    record = redact_record_secrets(record, native=engine.native_module)
                 if record.artifact_type == "eventlog-event" and isinstance(record.details, Mapping):
                     for detection in build_builtin_detection_records([record]):
-                        detection = redact_record_secrets(detection)
+                        detection = redact_record_secrets(detection, native=engine.native_module)
                         if triage:
                             detection = triage_eventlog_record(detection)
                         detection_spool.write(json.dumps(dataclasses.asdict(detection), ensure_ascii=False, default=json_default))
@@ -1884,7 +1887,7 @@ class WindowsEventLogProvider:
                     if is_logon_session_event(record.details):
                         logon_inputs.append(logon_session_input_record(record))
                     if triage:
-                        record = triage_eventlog_record(record)
+                        record = triage_eventlog_record(record, projector=triage_projector)
                         count_triage_truncation(truncation_by_file[str(record.path)], record.details)
                 elif triage and record.artifact_type == "eventlog-detection":
                     record = triage_eventlog_record(record)
@@ -8804,7 +8807,7 @@ def triage_eventlog_details(details: Mapping[str, object]) -> dict[str, object]:
             if isinstance(item, Mapping)
         ]
         cap_list_field(slim, "event_data_items", EVENTLOG_TRIAGE_EVENT_DATA_MAX_ITEMS)
-    is_native = details.get("parser") == "windows-eventlog-evtx-native"
+    is_native = details.get("parser") == EVTX_NATIVE_PARSER
     event_data: Mapping[str, object] = {}
     if is_native:
         named = details.get("binxml_event_data_fields")
@@ -8850,14 +8853,18 @@ def triage_eventlog_details(details: Mapping[str, object]) -> dict[str, object]:
         slim["evtx_report_grade_status"] = str(report_grade.get("status") or "unknown")
         if chunk_offset is not None and chunk_offset >= EVTX_FILE_HEADER_SIZE:
             slim["evtx_chunk_index"] = (chunk_offset - EVTX_FILE_HEADER_SIZE) // EVTX_CHUNK_SIZE
-    slim["record_projection"] = {
+    slim["record_projection"] = _triage_record_projection()
+    return slim
+
+
+def _triage_record_projection() -> dict[str, object]:
+    return {
         "profile_version": EVENTLOG_TRIAGE_PROJECTION_VERSION,
         "record_detail": EVENTLOG_RECORD_DETAIL_TRIAGE,
         "omitted_blocks": list(EVENTLOG_TRIAGE_OMITTED_BLOCKS),
         "full_detail_option": "collector option record_detail=full",
         "per_file_context_row": "eventlog-file",
     }
-    return slim
 
 
 def count_triage_truncation(counter: Counter[str], details: Mapping[str, object]) -> None:
@@ -8900,18 +8907,55 @@ def triage_eventlog_detection_details(details: Mapping[str, object]) -> dict[str
     return {key: value for key, value in details.items() if value != ""}
 
 
-def redact_record_secrets(record: ArtifactRecord) -> ArtifactRecord:
-    """``record`` with checksum-valid BitLocker recovery passwords masked in every string field."""
-    details = redact_recovery_passwords_in(record.details)
+def redact_record_secrets(record: ArtifactRecord, *, native: object = None) -> ArtifactRecord:
+    """``record`` with checksum-valid BitLocker recovery passwords masked in every string field.
+
+    ``native`` (``rapidcore_native``, opt-in EVTX engine) walks the row in Rust; every
+    string that could hold a recovery password still goes through the Python
+    ``redact_recovery_passwords``, so the result is identical.
+    """
+    if native is not None:
+        details = native.redact_recovery_passwords_in(record.details, redact_recovery_passwords, redact_recovery_passwords_in)
+    else:
+        details = redact_recovery_passwords_in(record.details)
     if details is record.details:
         return record
     return dataclasses.replace(record, details=details)
 
 
-def triage_eventlog_record(record: ArtifactRecord) -> ArtifactRecord:
+def native_triage_projector(native: object) -> object:
+    """``rapidcore_native.EventlogTriageProjector`` for ``triage_eventlog_details`` (Rust EVTX engine).
+
+    ``project(details)`` returns the same dict, or ``None`` when the Python
+    function must run. ``None`` without the native module.
+    """
+    if native is None:
+        return None
+    return native.EventlogTriageProjector(  # type: ignore[attr-defined]
+        identity_keys=EVENTLOG_TRIAGE_IDENTITY_KEYS,
+        pivot_keys=EVENTLOG_TRIAGE_PIVOT_KEYS,
+        payload_pivot_keys=EVENTLOG_PAYLOAD_PIVOT_KEYS,
+        payload_event_data_keys=EVENTLOG_PAYLOAD_EVENT_DATA_KEYS,
+        text_max_chars=EVENTLOG_TRIAGE_TEXT_MAX_CHARS,
+        payload_max_chars=EVENTLOG_TRIAGE_PAYLOAD_MAX_CHARS,
+        event_data_max_items=EVENTLOG_TRIAGE_EVENT_DATA_MAX_ITEMS,
+        string_max_items=EVENTLOG_TRIAGE_STRING_MAX_ITEMS,
+        string_max_chars=EVENTLOG_TRIAGE_STRING_MAX_CHARS,
+        file_header_size=EVTX_FILE_HEADER_SIZE,
+        chunk_size=EVTX_CHUNK_SIZE,
+        native_parser=EVTX_NATIVE_PARSER,
+        record_projection=_triage_record_projection(),
+        int_text=int_text,
+    )
+
+
+def triage_eventlog_record(record: ArtifactRecord, *, projector: object = None) -> ArtifactRecord:
+    """Triage form of an event/detection row; ``projector`` from ``native_triage_projector``."""
     details = record.details if isinstance(record.details, Mapping) else {}
     if record.artifact_type == "eventlog-event":
-        slim = triage_eventlog_details(details)
+        slim = projector.project(details) if projector is not None else None  # type: ignore[attr-defined]
+        if slim is None:
+            slim = triage_eventlog_details(details)
     elif record.artifact_type == "eventlog-detection":
         slim = triage_eventlog_detection_details(details)
     else:

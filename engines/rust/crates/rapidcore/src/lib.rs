@@ -6,6 +6,12 @@ pub mod evtx;
 pub mod evtx_binxml;
 #[cfg(feature = "python")]
 pub mod py;
+#[cfg(feature = "python")]
+mod py_json;
+#[cfg(feature = "python")]
+mod py_rows;
+#[cfg(feature = "python")]
+mod py_triage;
 
 pub const ARTIFACT_SCHEMA_VERSION: &str = "ArtifactRecordV1";
 

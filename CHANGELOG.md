@@ -47,3 +47,32 @@
   records why in `native_mft_engine*` / `native_usn_engine*` run metadata.
   Build with `python scripts/build-rapid-ntfs.py`. See
   `docs/architecture/rapid-ntfs.md`.
+- With the Rust EVTX engine selected, event and detection rows are walked for
+  BitLocker recovery passwords in Rust
+  (`rapidcore_native.redact_recovery_passwords_in`). Any string that could hold
+  one still goes through the Python `redact_recovery_passwords`, so the output
+  is identical (`tests/test_evtx_engine_rows_diff.py`). About 10× faster per
+  full-detail row: 580–670 µs down to 50–65 µs.
+- With the Rust EVTX engine selected, the eventlog stage folds and strips
+  per-type/per-file constant blocks (`artifact_type_profiles`) in Rust
+  (`rapidcore_native.profile_observe_details`, `profile_common`,
+  `profile_strip_level`), and readers of that eventlog output expand rows with
+  `profile_merge`. Equality stays type-strict (`True` ≠ `1` ≠ `1.0`, `-0.0` ≠
+  `0.0`), key order and object identity are kept, and anything other than plain
+  JSON values goes to the Python code, so profiles and JSONL bytes are identical
+  (`tests/test_evtx_engine_rows_diff.py`). On 50,000 events, compaction CPU
+  went from 6.4 s to 1.6 s.
+- With the Rust EVTX engine selected, the eventlog stage writes its JSONL rows
+  with `rapidcore_native.dump_json_row`: the text of
+  `json.dumps(ensure_ascii=False, separators=(",", ":"), default=json_default)`,
+  including Python float `repr`, `NaN`/`Infinity`, big ints and `default=`
+  conversions. Subclasses of str/int/float/list/tuple/dict, non-str keys, lone
+  surrogates, deep nesting and errors go to `json.dumps`
+  (`tests/test_evtx_engine_rows_diff.py`). About 2.8× faster per row.
+- With the Rust EVTX engine selected, triage-detail event rows are projected in
+  Rust (`rapidcore_native.EventlogTriageProjector`, the port of
+  `triage_eventlog_details`): same keys, order, values and types; values it
+  cannot reproduce exactly (subclasses, custom objects, lone surrogates in
+  bounded text) go to the Python function
+  (`tests/test_evtx_engine_rows_diff.py`). About 2× faster per row (18–23 µs
+  down to 9–10 µs).
