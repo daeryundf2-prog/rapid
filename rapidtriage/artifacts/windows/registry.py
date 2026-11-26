@@ -4,6 +4,7 @@ import datetime as dt
 import hashlib
 import json
 import re
+from bisect import bisect_left
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from itertools import chain
@@ -449,11 +450,12 @@ def collect_registry_hive(
             yield strings_record
         for candidate in free_candidates:
             yield build_registry_deleted_cell_record(path, candidate, metadata, source_hashes)
+        recovery_index = _RegistryRecoveryIndex(recovery_candidates)
         yield from build_registry_key_recovery_records(
-            path, recovery_candidates, metadata, source_hashes, mount=row_context.mount
+            path, recovery_candidates, metadata, source_hashes, mount=row_context.mount, index=recovery_index
         )
         yield from build_registry_value_recovery_records(
-            path, hive._data, recovery_candidates, metadata, source_hashes, mount=row_context.mount
+            path, hive._data, recovery_candidates, metadata, source_hashes, mount=row_context.mount, index=recovery_index
         )
         metadata["native_walk"] = {
             "reader": "native-regf-tree-walk",
@@ -837,6 +839,7 @@ def build_registry_key_recovery_records(
     source_hashes: Mapping[str, str],
     *,
     mount: str | None = None,
+    index: _RegistryRecoveryIndex,
 ) -> Iterable[ArtifactRecord]:
     path_prefix = mount or hive_hint_from_path(path)
     transaction_log_evidence = (
@@ -844,15 +847,10 @@ def build_registry_key_recovery_records(
         if isinstance(metadata.get("transaction_log_evidence"), Mapping)
         else {}
     )
-    key_by_offset = {
-        int(candidate.get("cell_offset") or 0): candidate
-        for candidate in candidates
-        if candidate.get("cell_kind") == "key-node"
-    }
     for candidate in candidates:
         if candidate.get("cell_kind") != "key-node" or candidate.get("allocation_status") != "free-or-deleted-candidate":
             continue
-        key_path, path_confidence = registry_key_path_for_node(candidate, key_by_offset)
+        key_path, path_confidence = registry_key_path_for_node(candidate, index.key_by_offset)
         recovered_key_path = f"{path_prefix}\\{key_path}" if key_path else path_prefix
         risk_flags = registry_cell_risk_flags(candidate)
         validation_matrix = registry_key_tree_validation_matrix(
@@ -874,7 +872,7 @@ def build_registry_key_recovery_records(
             "deleted-or-free-key-cell",
             path_confidence=path_confidence,
             recovered_path=recovered_key_path,
-            allocator_neighbor_context=registry_allocator_neighbor_context(candidate, candidates),
+            allocator_neighbor_context=registry_allocator_neighbor_context(candidate, index),
         )
         recovery_identity_profile = registry_recovery_identity_profile(
             candidate,
@@ -1064,6 +1062,7 @@ def build_registry_value_recovery_records(
     source_hashes: Mapping[str, str],
     *,
     mount: str | None = None,
+    index: _RegistryRecoveryIndex,
 ) -> Iterable[ArtifactRecord]:
     path_prefix = mount or hive_hint_from_path(path)
     transaction_log_evidence = (
@@ -1071,11 +1070,7 @@ def build_registry_value_recovery_records(
         if isinstance(metadata.get("transaction_log_evidence"), Mapping)
         else {}
     )
-    key_by_offset = {
-        int(candidate.get("cell_offset") or 0): candidate
-        for candidate in candidates
-        if candidate.get("cell_kind") == "key-node"
-    }
+    key_by_offset = index.key_by_offset
     value_parent_by_offset = registry_value_parent_map(blob, key_by_offset)
     for candidate in candidates:
         if candidate.get("cell_kind") != "value" or candidate.get("allocation_status") != "free-or-deleted-candidate":
@@ -1083,7 +1078,7 @@ def build_registry_value_recovery_records(
         parent = value_parent_by_offset.get(int(candidate.get("cell_offset") or 0))
         parent_confidence = "key-value-list" if parent is not None else "unknown"
         if parent is None:
-            parent = nearest_preceding_key(candidate, key_by_offset)
+            parent = nearest_preceding_key(candidate, index)
             parent_confidence = "nearest-preceding-key" if parent is not None else "unknown"
         parent_path = ""
         if parent is not None:
@@ -1114,7 +1109,7 @@ def build_registry_value_recovery_records(
             parent_confidence=parent_confidence,
             parent_path=parent_path,
             decoded_data_present=bool(decoded_data),
-            allocator_neighbor_context=registry_allocator_neighbor_context(candidate, candidates),
+            allocator_neighbor_context=registry_allocator_neighbor_context(candidate, index),
         )
         recovery_identity_profile = registry_recovery_identity_profile(
             candidate,
@@ -1460,21 +1455,36 @@ def registry_recovery_identity_profile(
     }
 
 
+class _RegistryRecoveryIndex:
+    """Offset lookups shared by the key and value recovery passes over one hive."""
+
+    def __init__(self, candidates: Sequence[Mapping[str, object]]) -> None:
+        # Explicit value-list links resolve in input key order, with the last key at a duplicate offset.
+        self.key_by_offset = {
+            int(cell.get("cell_offset") or 0): cell for cell in candidates if cell.get("cell_kind") == "key-node"
+        }
+        self.key_offsets: list[int] = []
+        self.ordered: list[Mapping[str, object]] = []
+        self.first_index: dict[int, int] = {}
+        for cell in sorted(candidates, key=lambda cell: int(cell.get("cell_offset") or 0)):
+            offset = int(cell.get("cell_offset") or 0)
+            if cell.get("cell_kind") == "key-node":
+                self.key_offsets.append(offset)
+            if offset > 0:
+                # Neighbours are relative to the first equal offset in the stable sort.
+                self.first_index.setdefault(offset, len(self.ordered))
+                self.ordered.append(cell)
+
+
 def registry_allocator_neighbor_context(
     candidate: Mapping[str, object],
-    candidates: Sequence[Mapping[str, object]],
+    index: _RegistryRecoveryIndex,
 ) -> dict[str, object]:
     candidate_offset = int(candidate.get("cell_offset") or 0)
-    ordered = sorted(
-        (item for item in candidates if int(item.get("cell_offset") or 0) > 0),
-        key=lambda item: int(item.get("cell_offset") or 0),
-    )
-    index = next(
-        (idx for idx, item in enumerate(ordered) if int(item.get("cell_offset") or 0) == candidate_offset),
-        -1,
-    )
-    previous_cell = ordered[index - 1] if index > 0 else None
-    next_cell = ordered[index + 1] if index >= 0 and index + 1 < len(ordered) else None
+    position = index.first_index.get(candidate_offset, -1)
+    ordered = index.ordered
+    previous_cell = ordered[position - 1] if position > 0 else None
+    next_cell = ordered[position + 1] if position >= 0 and position + 1 < len(ordered) else None
     current_end = candidate_offset + int(candidate.get("cell_size") or 0)
     next_offset = int(next_cell.get("cell_offset") or 0) if next_cell is not None else 0
     gap_to_next = next_offset - current_end if next_offset else 0
@@ -1483,7 +1493,7 @@ def registry_allocator_neighbor_context(
         "profile_version": "registry-allocator-neighbor-context-v1",
         "candidate_cell_offset": candidate_offset,
         "candidate_hbin_offset": int(candidate.get("hbin_offset") or 0),
-        "ordered_cell_index": index,
+        "ordered_cell_index": position,
         "previous_cell": registry_neighbor_cell_summary(previous_cell),
         "next_cell": registry_neighbor_cell_summary(next_cell),
         "same_hbin_previous": bool(
@@ -3682,16 +3692,17 @@ def registry_key_path_for_node(
 
 def nearest_preceding_key(
     value_cell: Mapping[str, object],
-    key_by_offset: Mapping[int, Mapping[str, object]],
+    index: _RegistryRecoveryIndex,
 ) -> Mapping[str, object] | None:
     value_offset = int(value_cell.get("cell_offset") or 0)
-    preceding = [offset for offset in key_by_offset if offset < value_offset]
-    if not preceding:
+    sorted_offsets = index.key_offsets
+    position = bisect_left(sorted_offsets, value_offset)
+    if position == 0:
         return None
-    nearest_offset = max(preceding)
+    nearest_offset = sorted_offsets[position - 1]
     if value_offset - nearest_offset > 1024 * 1024:
         return None
-    return key_by_offset[nearest_offset]
+    return index.key_by_offset[nearest_offset]
 
 
 def registry_transaction_log_evidence(
