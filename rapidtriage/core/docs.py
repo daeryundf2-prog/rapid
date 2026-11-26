@@ -892,11 +892,16 @@ def extract_document_text(
     file that is an OLE container is an encrypted Office document.
     """
     result = _extract_document_text(path, kind, max_input_bytes=max_input_bytes)
-    # BitLocker recovery passwords are masked by content (checksum-validated), whatever the
-    # file name, before the text reaches the docs output, the docs index or the case DB.
-    # R5 L2: wallet/credential stores and private keys are withheld, saved-password lines masked.
-    redacted = redact_secret_store_text(path, redact_recovery_key_text(path.name, result.text))
+    redacted = redact_document_text(path, result.text)
     return result if redacted == result.text else replace(result, text=redacted)
+
+
+def redact_document_text(path: Path, text: str) -> str:
+    """``text`` read from ``path`` with its secrets masked, as every document text is before it is
+    shown or stored: BitLocker recovery passwords by content (checksum-validated), whatever the
+    file name, before the text reaches the docs output, the docs index, the case DB or the console;
+    R5 L2: wallet/credential stores and private keys withheld, saved-password lines masked."""
+    return redact_secret_store_text(path, redact_recovery_key_text(path.name, text))
 
 
 def _extract_document_text(path: Path, kind: str, *, max_input_bytes: int) -> DocumentText:
@@ -945,7 +950,7 @@ def extract_text(
         max_archive_member_count=max_archive_member_count,
         max_pdf_stream_decompressed_bytes=max_pdf_stream_decompressed_bytes,
     )
-    return redact_secret_store_text(path, redact_recovery_key_text(path.name, text))
+    return redact_document_text(path, text)
 
 
 def _extract_text(
