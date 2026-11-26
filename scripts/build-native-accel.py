@@ -58,8 +58,9 @@ def main() -> int:
         return 1
 
     # CARGO_TARGET_DIR moves the build output (needed when the checkout path is not ASCII:
-    # the MinGW linker cannot write to such a path).
-    target_dir = Path(os.environ["CARGO_TARGET_DIR"]) if os.environ.get("CARGO_TARGET_DIR") else RUST_ROOT / "target"
+    # the MinGW linker cannot write to such a path). cargo resolves a relative value against its
+    # cwd (RUST_ROOT); joining onto RUST_ROOT does the same and leaves absolute values unchanged.
+    target_dir = RUST_ROOT / (os.environ.get("CARGO_TARGET_DIR") or "target")
     produced = target_dir / "release" / src_name
     if not produced.exists():
         result = {"ok": False, "stage": "locate", "expected": str(produced)}
