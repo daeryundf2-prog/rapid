@@ -610,6 +610,7 @@ function summaryColumn(
     minWidth: 120,
     presets: ["analysis", "compact", "axiom"],
     filterKind: "text",
+    stacked: true,
     ...(options.time ? { zoneInHeader: true } : {}),
     value: (row) => pick(row)?.value ?? null,
     format: (row) => {

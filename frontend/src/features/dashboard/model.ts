@@ -76,12 +76,6 @@ export function formatDuration(value: number | null | undefined): string {
   return `${Math.floor(m / 60)}시간 ${m % 60}분`;
 }
 
-export function formatTime(value: string | null | undefined): string {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString("ko-KR");
-}
-
 // --- artifact categories ----------------------------------------------------
 
 export interface CategoryBar {

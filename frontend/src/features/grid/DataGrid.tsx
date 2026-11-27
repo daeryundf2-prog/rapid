@@ -77,7 +77,13 @@ import {
   serverPathFilter,
 } from "./gridUtils";
 import { RowMenu } from "./RowMenu";
-import { type CellValue, type ColumnSpec, DENSITY_ROW_HEIGHT, type GridPreset } from "./types";
+import {
+  type CellValue,
+  type ColumnSpec,
+  DENSITY_ROW_HEIGHT,
+  type GridPreset,
+  STACKED_ROW_HEIGHT,
+} from "./types";
 import {
   artifactTypesOfTree,
   categoryScopeText,
@@ -390,12 +396,6 @@ export function DataGrid(props: DataGridProps = {}) {
   const toast = useToast();
 
   const [preset, setPreset] = useState<GridPreset>(() => readPreset(props.initialPreset ?? "analysis"));
-  // AXIOM's two-line titles need at least the roomy 32px row; that is a property of the preset,
-  // not a change of the global density preference (review nit).
-  const rowHeight = Math.max(
-    DENSITY_ROW_HEIGHT[density],
-    preset === "axiom" ? DENSITY_ROW_HEIGHT.comfortable : 0,
-  );
   const [visibility, setVisibility] = useState<VisibilityState>(() => visibilityFor(baseColumns, preset));
   const [sorting, setSorting] = useState<SortingState>([]);
   const columnFilters = useFilterStore((s) => s.filters.columns);
@@ -560,6 +560,15 @@ export function DataGrid(props: DataGridProps = {}) {
     for (const id of autoHidden.keys()) next[id] = false;
     return next;
   }, [visibility, autoHidden]);
+  // AXIOM's two-line titles need at least the roomy 32px row, and a shown label-over-value column
+  // the stacked row; both are properties of the columns on screen, not a change of the global
+  // density preference (review nit).
+  const stackedShown = orderedColumns.some((c) => c.stacked && tableVisibility[c.id] !== false);
+  const rowHeight = Math.max(
+    DENSITY_ROW_HEIGHT[density],
+    preset === "axiom" ? DENSITY_ROW_HEIGHT.comfortable : 0,
+    stackedShown ? STACKED_ROW_HEIGHT : 0,
+  );
   const toggleColumn = useCallback((id: string, visible: boolean) => {
     // Showing a column is explicit: it stays on screen however narrow the grid gets.
     setPinnedColumns((prev) => {

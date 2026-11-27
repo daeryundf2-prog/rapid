@@ -20,6 +20,8 @@ import { StatusBadge } from "../../components/Badge";
 import { ToneChip } from "../../components/ToneChip";
 import type { ReviewStatus } from "../../contracts/collection";
 import { Icon } from "../../icons";
+import { useTimezone } from "../../state/hooks";
+import { formatTimestamp } from "../../utils/time";
 import { stepNameLabel } from "../stages/stepLabels";
 import { formatBytes, partitionLabel } from "../tree/model";
 import { CardEmpty } from "./Card";
@@ -29,7 +31,6 @@ import {
   evidenceItemCount,
   exportTypeLabel,
   formatDuration,
-  formatTime,
   type KeywordRow,
   type ReviewSummaryRow,
   type StageRow,
@@ -41,6 +42,7 @@ const n = (value: number) => value.toLocaleString("ko-KR");
 // --- 케이스 요약 노트 ---------------------------------------------------------
 
 export function CaseNotesCard({ runId, notes }: { runId: string; notes: CaseNotes | undefined }) {
+  const { timezone } = useTimezone();
   const client = useQueryClient();
   const [examiner, setExaminer] = useState("");
   const [summary, setSummary] = useState("");
@@ -115,7 +117,7 @@ export function CaseNotesCard({ runId, notes }: { runId: string; notes: CaseNote
           {dirty
             ? "저장하지 않은 변경이 있습니다"
             : notes?.updated_at
-              ? `저장됨 · ${formatTime(notes.updated_at)}`
+              ? `저장됨 · ${formatTimestamp(notes.updated_at, timezone)}`
               : "아직 저장된 노트가 없습니다"}
         </span>
       </div>
@@ -152,6 +154,7 @@ export function ProcessingCard({
   issues: ItemRow[] | undefined;
   onOpenOutputs: () => void;
 }) {
+  const { timezone } = useTimezone();
   const progress = run.progress ?? null;
   const providers = Object.entries(progress?.providers ?? {}).sort(([a], [b]) => a.localeCompare(b)) as Array<
     [string, ProviderProgress]
@@ -171,9 +174,9 @@ export function ProcessingCard({
         <dt>증거 경로</dt>
         <dd className="mono break-all">{run.request?.root || "—"}</dd>
         <dt>시작</dt>
-        <dd>{formatTime(progress?.started_at ?? run.created_at)}</dd>
+        <dd>{formatTimestamp(progress?.started_at ?? run.created_at, timezone)}</dd>
         <dt>완료</dt>
-        <dd>{completed ? formatTime(progress?.completed_at ?? run.updated_at) : "—"}</dd>
+        <dd>{completed ? formatTimestamp(progress?.completed_at ?? run.updated_at, timezone) : "—"}</dd>
       </dl>
       {run.error ? <p className="error-banner">{run.error}</p> : null}
       {progress?.error ? (
@@ -552,6 +555,7 @@ export function KeywordCard({
 // --- 내보내기 / 보고서 이력 --------------------------------------------------------
 
 export function ExportsCard({ entries }: { entries: ExportEntry[] }) {
+  const { timezone } = useTimezone();
   if (entries.length === 0) {
     return (
       <CardEmpty title="아직 내보낸 보고서나 추출 파일이 없습니다">
@@ -580,7 +584,7 @@ export function ExportsCard({ entries }: { entries: ExportEntry[] }) {
               {entry.name}
             </td>
             <td>{exportTypeLabel(entry)}</td>
-            <td>{formatTime(entry.created_at)}</td>
+            <td>{formatTimestamp(entry.created_at, timezone)}</td>
             <td>
               {entry.status}
               {typeof entry.item_count === "number" ? ` · ${n(entry.item_count)}건` : ""}

@@ -19,6 +19,9 @@ export type Density = "compact" | "default" | "comfortable";
 /** Row height in px per density token (plan 4.5: 24/28/32). */
 export const DENSITY_ROW_HEIGHT: Record<Density, number> = { compact: 24, default: 28, comfortable: 32 };
 
+/** Row height while a `stacked` column is shown: two 13px lines (label over value) with air. */
+export const STACKED_ROW_HEIGHT = 40;
+
 export const DENSITY_LABELS: Record<Density, string> = {
   compact: "촘촘하게",
   default: "기본",
@@ -60,6 +63,8 @@ export interface ColumnSpec {
    * `render` cell hides it itself (`cellTime`).
    */
   zoneInHeader?: boolean;
+  /** The cell renders a label over its value (two lines): the grid rows grow to STACKED_ROW_HEIGHT. */
+  stacked?: boolean;
   /** Rich cell content (chips, icons); falls back to the display text when absent. */
   render?: (row: GridRow) => ReactNode;
   /**

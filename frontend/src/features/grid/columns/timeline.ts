@@ -207,6 +207,17 @@ export function tsLabelsOf(row: { fields: Record<string, unknown> }): string[] {
   return kind ? [kind] : [];
 }
 
+/** The timeline builder's English lead-in of an artifact event ("Artifact event: browser-history "). */
+const ARTIFACT_EVENT_LEAD = /^Artifact event: \S+\s+/;
+
+/**
+ * 요약 as shown: without the builder's English lead-in, which repeats the 이벤트 column and at 390
+ * was all the cell had room for. The raw summary stays the value, tooltip and CSV text.
+ */
+export function timelineSummaryText(summary: string): string {
+  return summary.replace(ARTIFACT_EVENT_LEAD, "") || summary;
+}
+
 export const TIMELINE_PRIORITY = [
   "timestamp",
   "title",
@@ -313,7 +324,13 @@ export const timelineCollection: CollectionDef = {
       tooltip: (r) => r.artifactType ?? "",
     }),
     // 390: 시각 (144) and 요약 share the pane without cutting the time.
-    { ...col.title("요약", 380), minWidth: 100 },
+    {
+      ...col.title("요약", 380),
+      minWidth: 100,
+      format: (r) => timelineSummaryText(r.title),
+      tooltip: (r) => r.title,
+      exportFormat: (r) => r.title,
+    },
     col.review(),
     // The event's own file: whole path, the leading folders ellipsize and the file name stays.
     col.path(420, ["analysis", "source"], { whole: true }),

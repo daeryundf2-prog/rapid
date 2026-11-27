@@ -108,7 +108,7 @@ export function RunOptionsFields({
             onChange={(e) => onChange("partitionSector", e.target.value)}
           />
           {errors.partitionSector && <p className="case-error">{errors.partitionSector}</p>}
-          <label htmlFor={id("feeds")}>known-good 해시 목록 경로 (한 줄에 하나)</label>
+          <label htmlFor={id("feeds")}>알려진 정상(known-good) 해시 목록 경로 (한 줄에 하나)</label>
           <textarea
             id={id("feeds")}
             rows={2}
@@ -122,7 +122,7 @@ export function RunOptionsFields({
               checked={form.hideKnownGood}
               onChange={(e) => onChange("hideKnownGood", e.target.checked)}
             />{" "}
-            known-good 항목 숨기기
+            알려진 정상 항목 숨기기
           </label>
           {errors.hideKnownGood && <p className="case-error">{errors.hideKnownGood}</p>}
           <label htmlFor={id("dry-run")}>

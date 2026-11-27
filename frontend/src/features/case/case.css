@@ -282,16 +282,20 @@
   outline-offset: -2px;
 }
 
+/* Name first, whole; the meta wraps under it when the row is narrow (390) instead of
+   squeezing the name to one letter. */
 .landing-case-line {
   grid-column: 1;
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: var(--space-2);
+  gap: 0 var(--space-2);
   min-width: 0;
 }
 
 .landing-case-name {
   flex: 0 1 auto;
+  max-width: 100%;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -301,6 +305,7 @@
 .landing-case-meta {
   flex: 0 1 auto;
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   color: var(--text-muted);
   font-size: var(--fs-aux);
