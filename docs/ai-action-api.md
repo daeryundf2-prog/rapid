@@ -63,7 +63,8 @@ curl -s -H "X-RapidTriage-Token: $TOKEN" -H "Content-Type: application/json" \
 - `dry_run`은 기본 `true`다. 미리보기 응답은 분석 응답과 같은 건수·분포를 준다. 사람이 확인한 뒤 `false`로 다시 보내 적용한다.
 - `mark`에는 `status`(`relevant` 관련 있음, `needs-review` 재검토, `excluded` 제외(보고서에서도 빠짐), `unreviewed` 미검토), `add_tags`(태그 이름 추가), `tag_ids`(케이스 태그 id), `include_in_report`, `note` 중 필요한 것을 넣는다. `tag_ids`는 다른 표시와 함께 보낼 수 없다(검토 일괄 표시와 같은 규칙).
 - 적용은 런의 케이스 DB(`POST /api/case-db/review-batch`)를 그대로 쓴다. 케이스 DB가 아직 없으면 콘솔의 첫 표시처럼 만든다.
-- `actor.kind = "agent"`이면 검토 이력의 작성자가 `agent:<name>`으로 남는다. 사람(`human`)은 `name` 또는 서버의 `RAPIDTRIAGE_REVIEWER`.
+- `actor.kind = "agent"`이면 검토 이력의 작성자가 `agent:<name>`으로 남는다(이름이 비면 `agent:unnamed`). 사람(`human`)은 `name`, 없으면 서버의 `RAPIDTRIAGE_REVIEWER`, 그것도 없으면 `local-user`로 남는다. `actor`를 생략하면 이름 없는 사람이다. 행의 이전 작성자를 물려받지 않는다.
+- 사람(`human`)의 `name`은 `agent:`로 시작할 수 없다(422). 사람의 표시가 에이전트 표시로 기록되지 않게 막는다.
 
 적용 응답에는 `updated_count`와 `case_id`가 더해진다. 표시 이력은 `GET /api/runs/{run_id}/review-history?collection=timeline&locator=/events/12`로 본다.
 

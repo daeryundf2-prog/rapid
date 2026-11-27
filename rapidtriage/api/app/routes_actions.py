@@ -26,7 +26,7 @@ from .actions import (
     profile,
     resolve_selection,
 )
-from .helpers import get_named_output, get_output_path
+from .helpers import get_named_output, get_output_path, resolve_request_reviewer
 from .json_rows import LazyRows, large_output_index
 from .models import CaseDbReviewBatchRequest, RunCaseDbEnsureRequest
 
@@ -34,6 +34,29 @@ from .models import CaseDbReviewBatchRequest, RunCaseDbEnsureRequest
 class ActionActor(BaseModel):
     kind: Literal["human", "agent"] = "human"
     name: str | None = Field(default=None, max_length=120)
+
+
+AGENT_PREFIX = "agent:"
+# The author every other review-tool write records when nobody is named (routes_review_tools).
+UNNAMED_HUMAN = "local-user"
+
+
+def actor_reviewer(actor: ActionActor) -> str:
+    """The history author of a mark: ``agent:<name>``, else the person's name, never empty.
+
+    An unnamed person is ``RAPIDTRIAGE_REVIEWER`` or ``local-user`` (as the tag-id path
+    records), never the row's previous reviewer. One token serves people and agents, so a
+    ``human`` cannot use an ``agent:`` name: that would pass a person's mark off as an AI's.
+    """
+    name = (actor.name or "").strip()
+    if actor.kind == "agent":
+        return f"{AGENT_PREFIX}{name or 'unnamed'}"
+    if name.casefold().startswith(AGENT_PREFIX):
+        raise HTTPException(
+            status_code=422,
+            detail="사람(actor.kind=human)의 이름은 'agent:'로 시작할 수 없습니다. 에이전트는 actor.kind를 'agent'로 보내세요.",
+        )
+    return resolve_request_reviewer(name) or UNNAMED_HUMAN
 
 
 # The console's review statuses (frontend reviewActions); "excluded" also leaves the report.
@@ -128,17 +151,16 @@ def build_actions_router(store: RunJobStore, case_db_router: APIRouter) -> APIRo
             mark.setdefault("include_in_report", False)
         if not mark:
             raise HTTPException(status_code=422, detail="mark에 적용할 표시(status, tag_ids, add_tags, include_in_report, note)가 없습니다.")
+        reviewer = actor_reviewer(request.actor)
         resolved = resolve_selection(request.selection, load_events(run_id))
         summary = profile(resolved, sample=0)
-        actor = request.actor
-        reviewer = f"agent:{(actor.name or 'unnamed').strip()}" if actor.kind == "agent" else actor.name
         payload: dict[str, object] = {
             "command": "actions.mark",
             "version": API_VERSION,
             "run_id": run_id,
             "dry_run": request.dry_run,
             "mark": mark,
-            "actor": {"kind": actor.kind, "reviewer": reviewer},
+            "actor": {"kind": request.actor.kind, "reviewer": reviewer},
             **summary,
         }
         if not resolved.targets:

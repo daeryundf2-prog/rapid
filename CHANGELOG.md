@@ -12,7 +12,10 @@
   window/text filter, or the timeline rows related to an anchor (same time
   window, same path, same file name). Marks go through the run's case DB
   review batch; `actor.kind = "agent"` records the reviewer as
-  `agent:<name>`. Above 10,000 rows nothing is applied (Korean 422)
+  `agent:<name>`, an unnamed person as `RAPIDTRIAGE_REVIEWER` or `local-user`
+  (never the row's previous reviewer), and a `human` name cannot start with
+  `agent:` (422). Row ordinals in locators are ASCII digits (at most 12).
+  Above 10,000 rows nothing is applied (Korean 422)
   (`tests/test_console_actions_api.py`).
 - `GET /api/runs/{run}/timeline-histogram` takes `from`/`to` and buckets only
   that window, with finer buckets.

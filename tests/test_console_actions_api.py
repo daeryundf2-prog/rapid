@@ -9,6 +9,7 @@ The timeline histogram's ``from``/``to`` window (the console's zoomed time overv
 from __future__ import annotations
 
 import datetime as dt
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -159,6 +160,40 @@ class ActionApiTests(unittest.TestCase):
         self.assertEqual(applied.json()["updated_count"], 1)
         entries = self.client.get(history_url).json()["entries"]
         self.assertEqual([entry["author"] for entry in entries], ["agent:triage-bot"])
+
+    def test_unnamed_actor_is_recorded_never_the_previous_reviewer(self) -> None:
+        index, _ = self.timed[-2]
+        selection = {"rows": [{"collection": "timeline", "locator": f"/events/{index}"}]}
+        history_url = f"/api/runs/{self.run_id}/review-history?collection=timeline&locator=/events/{index}"
+        steps = [
+            ({"kind": "agent", "name": "bot"}, "relevant", {}, "agent:bot"),
+            # No actor after an agent's mark: the author was the agent's ("agent:bot") before.
+            (None, "excluded", {}, "local-user"),
+            ({"kind": "human", "name": "김분석"}, "needs-review", {}, "김분석"),
+            ({"kind": "human"}, "relevant", {"RAPIDTRIAGE_REVIEWER": "서버 검토자"}, "서버 검토자"),
+            ({"kind": "agent", "name": "   "}, "unreviewed", {}, "agent:unnamed"),
+        ]
+        for actor, status, env, author in steps:
+            with self.subTest(actor=actor, status=status), mock.patch.dict(os.environ, env):
+                if not env:
+                    os.environ.pop("RAPIDTRIAGE_REVIEWER", None)
+                body = {"actor": actor} if actor is not None else {}
+                applied = self._mark(selection, {"status": status}, dry_run=False, **body)
+                self.assertEqual(applied.status_code, 200, applied.text)
+                self.assertEqual(applied.json()["actor"]["reviewer"], author)
+                self.assertEqual(self.client.get(history_url).json()["entries"][0]["author"], author)
+
+    def test_a_human_cannot_claim_an_agent_name(self) -> None:
+        index, _ = self.timed[-3]
+        selection = {"rows": [{"collection": "timeline", "locator": f"/events/{index}"}]}
+        history_url = f"/api/runs/{self.run_id}/review-history?collection=timeline&locator=/events/{index}"
+        for name in ("agent:bot", "  Agent:bot", "AGENT:"):
+            for dry_run in (True, False):
+                with self.subTest(name=name, dry_run=dry_run):
+                    spoof = self._mark(selection, {"status": "relevant"}, dry_run=dry_run, actor={"kind": "human", "name": name})
+                    self.assertEqual(spoof.status_code, 422, spoof.text)
+                    self.assertIn("agent:", spoof.json()["detail"])
+        self.assertEqual(self.client.get(history_url).json().get("entries", []), [])
 
     def test_histogram_window_counts_only_its_range(self) -> None:
         _, at = self.timed[0]
