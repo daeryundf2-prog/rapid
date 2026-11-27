@@ -12,6 +12,7 @@ import platform
 import shutil
 import sys
 import time
+import uuid
 from collections import Counter
 from collections.abc import (
     Callable,
@@ -30,6 +31,7 @@ from pathlib import Path
 
 from ... import __version__
 from ...artifacts import all_providers, clear_collect_cache
+from .. import telemetry
 from ..archive_image import (
     ArchiveImageExtractionError,
     ArchiveImageExtractionResult,
@@ -160,6 +162,7 @@ from .plan import (
     PlanTargetError,
     RunControlWatcher,
     build_run_plan,
+    iter_tasks,
     utc_now,
 )
 from .planned_out import (
@@ -454,6 +457,7 @@ def run_triage_mode(
     control_since: str | None = None,
     source_image: Mapping[str, object] | None = None,
     replay_of: Mapping[str, object] | None = None,
+    run_id: str | None = None,
 ) -> dict[str, object]:
     """Run every triage stage for ``root`` into ``output_dir``.
 
@@ -479,6 +483,9 @@ def run_triage_mode(
     selected folder was extracted from; ``replay_of`` the audit a
     ``--replay-audit`` run reproduces. Both go into the run audit, so a
     colleague's replay links back to the original image and run.
+
+    ``run_id`` (the web job id) keys this run's local telemetry events; a CLI
+    run uses the id the web store gives the imported output folder.
     """
     control_since = control_since or utc_now()
     normalized_mode = mode.lower()
@@ -551,13 +558,28 @@ def run_triage_mode(
     clear_collect_cache()
     effective_memory_cap = resolve_memory_cap_bytes(memory_cap_bytes)
     memory_cap_stage_checks: list[dict[str, object]] = []
-    progress = RunProgress(output_dir)
+    progress = RunProgress(
+        output_dir,
+        run_id=run_id or uuid.uuid5(uuid.NAMESPACE_URL, str(output_dir / "rapidtriage-run-summary.json")).hex[:12],
+    )
     # The watcher notes the control requests of earlier runs in this output
     # directory before the progress file announces this run, so a request
     # written after that is never mistaken for an old one.
     control_watcher = RunControlWatcher(output_dir, progress.apply_control, since=control_since)
     progress.start(stage="prepare")
     progress.set_plan(plan)
+    telemetry.record(
+        "run_started",
+        {
+            "profile": normalized_mode,
+            "input_kind": input_kind or "auto",
+            "resume": resume,
+            "memory_cap_source": memory_cap_source(memory_cap_bytes),
+            "provider_count": sum(1 for task in iter_tasks(plan) if task.get("type") == "provider"),
+            "actor": actor,
+        },
+        run_id=progress.run_id,
+    )
     control_watcher.start()
     progress.control_watcher = control_watcher
 

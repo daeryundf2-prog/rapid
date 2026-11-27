@@ -20,6 +20,7 @@ thread, never on the event loop.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import email.parser
 import email.policy
 import json
@@ -33,6 +34,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
+from ...core import telemetry
 from ...core.jobs import RunJobStore
 from ...core.search_index.build import read_index_meta, stale_reasons
 from ...core.search_index.engine import (
@@ -56,9 +58,10 @@ from ...core.search_index.hashsets import (
     read_hash_set,
     read_hash_values,
 )
-from ...core.search_index.query import QueryError
+from ...core.search_index.query import QueryError, parse_query
 from ...core.search_index.schema import INDEX_FILE_NAME
 from ...core.search_index.textutil import normalize_hash
+from ...core.telemetry.derive import query_shape
 from .analyses import ANALYSIS_RUNNER, public_state
 from .search_index_service import (
     CORRUPT_INDEX,
@@ -256,6 +259,25 @@ def _parse_multipart(body: bytes, content_type: str) -> dict[str, tuple[bytes, s
     return fields
 
 
+def record_search_telemetry(run_id: str, q: str, result: dict[str, object]) -> None:
+    """``search_submitted`` + ``search_results_returned`` of a first result page."""
+    telemetry.record("search_submitted", query_shape(parse_query(q)), run_id=run_id)
+    page = result["page"] if isinstance(result.get("page"), dict) else {}
+    total = page.get("total")
+    hits = total if isinstance(total, int) else None
+    telemetry.record(
+        "search_results_returned",
+        {
+            "hit_count_bucket": telemetry.count_bucket(hits),
+            "latency_ms": result.get("elapsed_ms"),
+            "zero_result": hits == 0 if hits is not None else not result.get("rows"),
+            "backend": "fts",
+            "truncated": bool(result.get("truncated")),
+        },
+        run_id=run_id,
+    )
+
+
 def build_search_index_router(store: RunJobStore, *, owner: object | None = None) -> APIRouter:
     router = APIRouter()
 
@@ -317,6 +339,9 @@ def build_search_index_router(store: RunJobStore, *, owner: object | None = None
             return query_error(exc)
         page = result["page"] if isinstance(result.get("page"), dict) else {}
         if not body.page.cursor:
+            # Telemetry keeps the query's shape only; written off the event loop in this request's context.
+            context = contextvars.copy_context()
+            SEARCH_HISTORY.submit(lambda: context.run(record_search_telemetry, run_id, body.q, result))
             # One history entry per search (not per page), written off the event loop.
             SEARCH_HISTORY.record(
                 output_dir,

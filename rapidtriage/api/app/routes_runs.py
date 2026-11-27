@@ -7,6 +7,7 @@ import functools
 import json
 import logging
 import re
+import time
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -18,6 +19,7 @@ from fastapi.responses import (
     PlainTextResponse,
 )
 
+from ...core import telemetry
 from ...core.artifact_profiles import payload_record_count
 from ...core.case_db.search import case_search_hit_type
 from ...core.columnar_store import query_columnar_artifact_records
@@ -301,6 +303,18 @@ def _attach_artifact_flags(response: dict[str, object], join: FlagsJoin) -> None
 # its artifact_type (``eventlog-detection``) is asked for (D26 #5).
 EVENT_RECORD_FIELDS = frozenset({"event_id", "record_id", "evtx_record_state", "logon_type", "provider_name", "user_name"})
 EVENT_RECORD_TYPES = frozenset({"eventlog-event"})
+
+
+def record_timeline_entered(run_id: str, page: Mapping[str, object], latency_ms: int) -> None:
+    """``timeline_entered`` of a first timeline page: event count bucket and server time only."""
+    pagination = page.get("pagination") if isinstance(page.get("pagination"), Mapping) else {}
+    count = pagination.get("matched", pagination.get("total"))
+    if not isinstance(count, int):
+        events = page.get("events")
+        count = len(events) if isinstance(events, list) else None
+    telemetry.record(
+        "timeline_entered", {"event_count_bucket": telemetry.count_bucket(count), "latency_ms": latency_ms}, run_id=run_id
+    )
 
 
 def run_request_from_body(request: RunCreateRequest, *, root: str | None = None, output_dir: str | None = None) -> RunRequest:
@@ -592,6 +606,14 @@ def build_runs_router(
         An undeclared query parameter is a Korean 422 listing the supported ones (never
         ignored); every page echoes the filters it applied as ``applied_filters``.
         """
+        started = time.perf_counter()
+
+        def respond(page: dict[str, object]) -> dict[str, object]:
+            # The first page of a timeline view = the analyst entered the timeline.
+            if offset == 0 and not cursor:
+                record_timeline_entered(run_id, page, int((time.perf_counter() - started) * 1000))
+            return with_applied_filters(project_page(page, "events") if list_view else page, applied_filters)
+
         list_view = parse_view(view)
         reject_geo(geo)
         conditions = row_conditions_or_422(
@@ -610,7 +632,7 @@ def build_runs_router(
             page = indexed[0] if indexed is not None else None
             if page is None:
                 page = paginate_payload(get_named_output(store, run_id, "timeline"), "events", offset=offset, limit=limit, cursor=cursor)
-            return with_applied_filters(project_page(page, "events") if list_view else page, applied_filters)
+            return respond(page)
         if limit <= 0:
             raise HTTPException(status_code=400, detail=FILTER_LIMIT_MESSAGE)
         timeline_path = get_output_path(store, run_id, "timeline")
@@ -638,7 +660,7 @@ def build_runs_router(
             scope = ("timeline", run_id, stamp) if output_stamp(timeline_path) == stamp else None
             events = head.get("events") if isinstance(head.get("events"), list) else []
             page = _timeline_rows_page(head, events, scope, conditions, sort_order, offset=offset, limit=limit, locate=locate)
-        return with_applied_filters(project_page(page, "events") if list_view else page, applied_filters)
+        return respond(page)
 
 
     def _timeline_rows_page(

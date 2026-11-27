@@ -14,6 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from ...core import telemetry
 from ...core.case_db import open_case_database
 from ...core.crash import write_crash_report
 from ...core.jobs import RunJobStore, default_job_store
@@ -42,6 +43,7 @@ from .routes_run_plan import build_run_plan_router
 from .routes_runs import build_runs_router
 from .routes_search import build_search_router
 from .routes_search_index import build_search_index_router
+from .routes_telemetry import build_telemetry_router
 from .search_index_service import (
     auto_build_on_completion,
     auto_incremental_after_analysis,
@@ -174,6 +176,8 @@ def create_app(
 
     @api.middleware("http")
     async def require_auth_token(request: Request, call_next):
+        # Console session of this request: the telemetry events it records carry it (F2 funnel).
+        telemetry.SESSION_ID.set(request.headers.get("X-RapidTriage-Session"))
         try:
             if request.url.path.startswith("/api"):
                 host = request_host(request.headers.get("host"))
@@ -227,6 +231,7 @@ def create_app(
     api.include_router(build_search_router(store))
     api.include_router(build_search_index_router(store, owner=analysis_owner))
     api.include_router(build_reports_router(store))
+    api.include_router(build_telemetry_router(store))
     api.include_router(
         build_review_tools_router(
             store,

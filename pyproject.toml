@@ -86,8 +86,8 @@ dashcam-gui = "dashcam_tools.gui:main"
 dashcam-rename = "dashcam_tools.rename:cli"
 dashcam-ingest = "dashcam_tools.ingest:cli"
 dashcam-stt = "dashcam_tools.stt:cli"
-rapidtriage = "rapidtriage.cli:main"
-rapidtriage-web = "rapidtriage.cli:web_main"
+rapidtriage = "rapidtriage.cli:app_main"
+rapidtriage-web = "rapidtriage.cli:web_app_main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["dashcam_tools", "rapidtriage"]

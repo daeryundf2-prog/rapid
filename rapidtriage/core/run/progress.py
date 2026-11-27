@@ -25,6 +25,7 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 
+from .. import telemetry
 from ..json_safe import json_default
 from .plan import (
     HEARTBEAT_INTERVAL_SECONDS,
@@ -97,8 +98,19 @@ class RunProgress:
     before its output directory exists leaves no progress file behind.
     """
 
-    def __init__(self, output_dir: Path, *, heartbeat_interval: float = HEARTBEAT_INTERVAL_SECONDS) -> None:
+    def __init__(
+        self,
+        output_dir: Path,
+        *,
+        heartbeat_interval: float = HEARTBEAT_INTERVAL_SECONDS,
+        run_id: str | None = None,
+    ) -> None:
         self.output_dir = Path(output_dir)
+        # Web job / derived run id: hashed into the telemetry events of this run.
+        self.run_id = run_id
+        self._run_clock = time.perf_counter()
+        self._stage_clock = self._run_clock
+        self._parser_error_total = 0
         self.path = self.output_dir / RUN_PROGRESS_FILE_NAME
         self._lock = threading.Lock()
         self._active = False
@@ -155,6 +167,7 @@ class RunProgress:
             self._payload["started_at"] = now
             self._payload["heartbeat_at"] = now
             self._payload["_owner"] = owner_record()
+            self._run_clock = time.perf_counter()
             self._set_stage_locked(stage, now)
             self._write_locked()
         with _ACTIVE_LOCK:
@@ -196,10 +209,18 @@ class RunProgress:
             if details:
                 entry.update({key: value for key, value in details.items() if key not in entry})
             self._completed_stages.append(entry)
-            failed = str((details or {}).get("status") or "") == "failed"
+            status = str((details or {}).get("status") or "completed")
             for task_id in STAGE_TASKS.get(stage, ()):
-                self._task_finished_locked(task_id, status="failed" if failed else "completed")
+                self._task_finished_locked(task_id, status="failed" if status == "failed" else "completed")
             self._write_locked()
+            rows = next(
+                (value for key in ("flagged_rows", "table_rows") if isinstance(value := entry.get(key), int)),
+                self._artifact_total_locked() if stage == "artifacts" else None,
+            )
+            props: dict[str, object] = {"stage": stage, "duration_ms": self._elapsed_ms(self._stage_clock), "status": status}
+        if rows is not None:
+            props["rows_bucket"] = telemetry.count_bucket(rows)
+        telemetry.record("run_stage_completed", props, run_id=self.run_id)
 
     def finish(self, *, status: str | None = None) -> None:
         """End the run and write ``rapidtriage-run-plan.json``.
@@ -226,7 +247,18 @@ class RunProgress:
             self._write_locked()
             if not self._plan_finalized:
                 self._write_plan_file_locked()
+            partial_tasks = (
+                sum(1 for task in iter_tasks(self._plan) if task.get("status") == "partial") if self._plan is not None else 0
+            )
+            props = {
+                "status": status,
+                "duration_ms": self._elapsed_ms(self._run_clock),
+                "partial_task_count": partial_tasks,
+                "parser_error_total": self._parser_error_total,
+                "artifact_total_bucket": telemetry.count_bucket(self._artifact_total_locked()),
+            }
         self._deactivate()
+        telemetry.record("run_finished", props, run_id=self.run_id)
 
     def fail(self, exc: BaseException) -> None:
         self._stop_heartbeat()
@@ -257,7 +289,13 @@ class RunProgress:
                 self._plan["outcome"] = "failed"
             self._write_locked()
             self._write_plan_file_locked()
+            props = {
+                "stage": str(error["stage"] or ""),
+                "error_class": error["error_type"],
+                "duration_ms": self._elapsed_ms(self._run_clock),
+            }
         self._deactivate()
+        telemetry.record("run_failed", props, run_id=self.run_id)
 
     # -- plan ------------------------------------------------------------
 
@@ -533,6 +571,15 @@ class RunProgress:
             )
             self._refresh_counts_locked()
             self._write_locked()
+            self._parser_error_total += int(parser_error_count)
+            props = {
+                "provider_kind": str(kind),
+                "status": "failed" if status == "error" else status,
+                "artifact_count_bucket": telemetry.count_bucket(int(artifact_count)),
+                "parser_error_count": int(parser_error_count),
+                "duration_ms": entry["duration_ms"],
+            }
+        telemetry.record("provider_finished", props, run_id=self.run_id)
 
     def provider_reused(self, kind: str, *, artifact_count: int, output: Mapping[str, object] | None = None) -> None:
         with self._lock:
@@ -610,6 +657,14 @@ class RunProgress:
     def _set_stage_locked(self, stage: str, now: str) -> None:
         self._payload["stage"] = stage
         self._payload["stage_started_at"] = now
+        self._stage_clock = time.perf_counter()
+
+    @staticmethod
+    def _elapsed_ms(since: float) -> int:
+        return max(0, int((time.perf_counter() - since) * 1000))
+
+    def _artifact_total_locked(self) -> int:
+        return sum(int(entry.get("artifact_count") or 0) for entry in self._providers.values())
 
     def _refresh_counts_locked(self) -> None:
         providers = self._providers

@@ -8,8 +8,19 @@ import sys
 from pathlib import Path
 
 from ..artifacts.windows.registry_engine import REGISTRY_ENGINE_ENV
+from ..core import telemetry as _telemetry
 from ..core.rules import RuleConfigError, load_rule_set
-from . import analyze, benchmark, case, collect, kakao, readiness, runops, scan
+from . import (
+    analyze,
+    benchmark,
+    case,
+    collect,
+    kakao,
+    readiness,
+    runops,
+    scan,
+    telemetry,
+)
 from . import validation as _validation
 from .helpers import (
     add_rules_argument,
@@ -41,6 +52,7 @@ HANDLERS = {
     **readiness.HANDLERS,
     **runops.HANDLERS,
     **scan.HANDLERS,
+    **telemetry.HANDLERS,
     **_validation.HANDLERS,
 }
 
@@ -69,6 +81,18 @@ def main(argv=None) -> int:
     parser.error(f"unknown command: {args.command}")
     return 2
 
+
+def app_main(argv=None) -> int:
+    """``rapidtriage`` console script: the app itself, so local telemetry records (unless turned off)."""
+    _telemetry.activate_for_process()
+    return main(argv)
+
+
+def web_app_main(argv=None) -> int:
+    """``rapidtriage-web`` console script (see :func:`app_main`)."""
+    _telemetry.activate_for_process()
+    return web_main(argv)
+
 __all__ = [
     "DOCS_EPILOG",
     "EXTRACT_EPILOG",
@@ -79,6 +103,7 @@ __all__ = [
     "TOP_LEVEL_EPILOG",
     "add_rules_argument",
     "add_web_arguments",
+    "app_main",
     "build_parser",
     "build_source_read_review_note",
     "build_web_parser",
@@ -88,6 +113,7 @@ __all__ = [
     "main",
     "parse_named_cli_values",
     "run_web_server",
+    "web_app_main",
     "web_main",
     "write_kakaotalk_message_residue_csv",
 ]

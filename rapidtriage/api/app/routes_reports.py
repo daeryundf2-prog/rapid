@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import (
     FileResponse,
 )
 
+from ...core import telemetry
 from ...core.audit import audit_path_for, write_audit_record
 from ...core.bundle import BundleError, build_submission_bundle
 from ...core.case import (
@@ -118,16 +120,30 @@ def build_reports_router(
 
 
     @router.post("/api/runs/{run_id}/case-report")
-    def create_case_report(run_id: str, request: CaseReportCreateRequest) -> dict[str, object]:
-        report_path = default_case_report_path(store, run_id)
-        markdown = build_run_case_report(store, run_id, request)
-        exports = write_case_report_exports(markdown, report_path)
-        write_case_report_audit(store, run_id, report_path, request)
+    def create_case_report(
+        run_id: str, request: CaseReportCreateRequest, http_request: Request
+    ) -> dict[str, object]:
+        started = time.perf_counter()
+        snapshot = (
+            http_request.app.state.case_workspace.intake.get_snapshot(run_id) if telemetry.is_recording() else None
+        )
+        case_id = str(snapshot["case_id"]) if snapshot is not None else None
+        # One generation writes md, html, docx and pdf together: recorded once as ``md``.
+        props: dict[str, object] = {"format": "md", "status": "error"}
+        try:
+            report_path = default_case_report_path(store, run_id)
+            draft = build_run_case_report(store, run_id, request)
+            exports = write_case_report_exports(draft.markdown, report_path)
+            write_case_report_audit(store, run_id, report_path, request)
+            props.update(status="ok", tagged_row_count=draft.tagged_rows)
+        finally:
+            props["duration_ms"] = int((time.perf_counter() - started) * 1000)
+            telemetry.record("case_report_created", props, run_id=run_id, case_id=case_id)
         return {
             "report_path": str(report_path),
             "exports": exports,
             "audit": str(audit_path_for(report_path)),
-            "markdown": markdown,
+            "markdown": draft.markdown,
         }
 
 
@@ -136,8 +152,7 @@ def build_reports_router(
         report_path = default_case_report_path(store, run_id)
         if not report_path.is_file():
             request = CaseReportCreateRequest()
-            markdown = build_run_case_report(store, run_id, request)
-            write_case_report_exports(markdown, report_path)
+            write_case_report_exports(build_run_case_report(store, run_id, request).markdown, report_path)
             write_case_report_audit(store, run_id, report_path, request)
         return FileResponse(report_path, filename=report_path.name, media_type="text/markdown")
 
@@ -150,8 +165,7 @@ def build_reports_router(
         report_path = default_case_report_path(store, run_id)
         if not report_path.is_file():
             request = CaseReportCreateRequest()
-            markdown = build_run_case_report(store, run_id, request)
-            write_case_report_exports(markdown, report_path)
+            write_case_report_exports(build_run_case_report(store, run_id, request).markdown, report_path)
             write_case_report_audit(store, run_id, report_path, request)
         path = case_report_export_paths(report_path)[normalized]
         if not path.is_file():
