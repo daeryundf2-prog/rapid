@@ -183,7 +183,9 @@ export function ViewerToolbar({
     const undo = unmarkActionOf(action);
     if (!target || !undo) return;
     try {
-      const result = await applyReviewAction(target.runId, [targetAsGridRow(target)], undo);
+      const result = await applyReviewAction(target.runId, [targetAsGridRow(target)], undo, {
+        surface: "viewer",
+      });
       setApplied((prev) => {
         const base = prev.key === key ? prev : { actions: [], cleared: [] };
         const clears = undo === "clear-review" ? EXCLUSIVE : [action];

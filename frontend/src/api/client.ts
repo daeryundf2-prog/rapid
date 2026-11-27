@@ -10,6 +10,19 @@
 
 const TOKEN_KEY = "rapidtriage.authToken";
 
+/**
+ * Random id of this page load, sent as `X-RapidTriage-Session` with every request: the server's
+ * local telemetry groups one console session's events by it (no user or machine identity in it).
+ */
+export const SESSION_ID: string =
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `s-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
+
+function baseHeaders(token: string): Record<string, string> {
+  return { "X-RapidTriage-Session": SESSION_ID, ...(token ? { "X-RapidTriage-Token": token } : {}) };
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly detail: unknown;
@@ -85,7 +98,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { "X-RapidTriage-Token": token } : {}),
+      ...baseHeaders(token),
       ...(options.headers || {}),
     },
   });
@@ -105,7 +118,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
 export async function apiResponse(path: string, init: { signal?: AbortSignal } = {}): Promise<Response> {
   const token = authToken();
   const response = await fetch(path, {
-    headers: token ? { "X-RapidTriage-Token": token } : {},
+    headers: baseHeaders(token),
     signal: init.signal,
   });
   if (!response.ok) {

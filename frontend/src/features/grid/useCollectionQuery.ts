@@ -11,6 +11,7 @@ import {
   type ServerSortState,
 } from "../../contracts/collection";
 import { useTimezone } from "../../state/hooks";
+import { emit, gridLoaded, surfaceOf } from "../../telemetry/telemetry";
 import { applyColumnFilters } from "../filters/columnFilters";
 import {
   applyClientFilters,
@@ -213,6 +214,9 @@ const REVIEW_OVERLAY_COLLECTIONS: ReadonlySet<string> = new Set([
   "analysis",
 ]);
 
+/** Query keys whose first page was reported to local telemetry (once per key and page load). */
+const reportedLoads = new Set<string>();
+
 /** Pages auto-loaded while client-side filters are active (they only see loaded rows). */
 export const FILTER_AUTOLOAD_PAGES = 8;
 
@@ -286,8 +290,29 @@ export function useCollectionQuery(
   const results = useQueries({
     queries: firstPass.map((p) => ({
       queryKey: [...baseKey, "page", p] as const,
-      queryFn: ({ signal }: { signal: AbortSignal }) =>
-        def.fetch(runId as string, { ...query, offset: p * pageSize, limit: pageSize }, signal),
+      queryFn: async ({ signal }: { signal: AbortSignal }) => {
+        const started = performance.now();
+        const page = await def.fetch(
+          runId as string,
+          { ...query, offset: p * pageSize, limit: pageSize },
+          signal,
+        );
+        if (p === 0 && !passive && runId && !reportedLoads.has(keyString)) {
+          reportedLoads.add(keyString);
+          emit(
+            gridLoaded({
+              runId,
+              surface: surfaceOf(query.ref.id),
+              artifactType: query.ref.kind ?? query.ref.id,
+              total: page.total,
+              latencyMs: performance.now() - started,
+              serverMs: Number.isFinite(page.elapsedMs) ? page.elapsedMs : null,
+              truncated: page.truncated,
+            }),
+          );
+        }
+        return page;
+      },
       enabled:
         runId !== null &&
         (p === 0 ||
