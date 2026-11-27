@@ -103,6 +103,13 @@ kbd {
   outline-offset: -2px;
 }
 
+/* The left panel has no inner scroller: a tree taller than the window scrolls the panel itself
+   (docked and in the narrow drawer alike). */
+.pane-frame[data-testid="tree-region"] {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 /* Viewer pane (탐색·검토, wide): the viewer, or the 36px rail while collapsed. */
 .viewer-slot {
   flex: 1;
