@@ -734,7 +734,8 @@ button.chip:hover {
 
 .mid-path {
   display: inline-flex;
-  gap: var(--space-1);
+  /* No gap: the head ends with the separator, and a gap reads as a space in the path
+     ("Default\ History"). The head's muted colour sets the file name apart. */
   min-width: 0;
   max-width: 100%;
   font-family: var(--font-mono);

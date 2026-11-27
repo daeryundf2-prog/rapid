@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { GridRow } from "../../../contracts/collection";
 import { timestampKindLabel } from "../../../utils/timeKinds";
 import { artifactTypeLabel } from "../../filters/typeLabels";
-import { EVENTLOG_CATEGORY_LABELS, eventTypeLabel, timelineEventLabel } from "./timeline";
+import {
+  EVENTLOG_CATEGORY_LABELS,
+  eventTypeLabel,
+  timelineEventLabel,
+  timelineSummaryText,
+} from "./timeline";
 
 describe("타임라인 이벤트 column reads event types in Korean (#77 남은 것)", () => {
   it("names a files event by its time kind", () => {
@@ -37,6 +42,14 @@ describe("타임라인 이벤트 column reads event types in Korean (#77 남은 
       fields: { sourceArtifactType: "srum-app-usage" },
     } as unknown as GridRow;
     expect(timelineEventLabel(row)).toBe(`SRUM 앱 사용량 · ${timestampKindLabel("recorded")}`);
+  });
+
+  it("요약 drops the builder's English artifact lead-in, other summaries stay", () => {
+    expect(timelineSummaryText("Artifact event: browser-history https://bank.example.test/")).toBe(
+      "https://bank.example.test/",
+    );
+    expect(timelineSummaryText("Artifact event: browser-history ")).toBe("Artifact event: browser-history ");
+    expect(timelineSummaryText("AI usage: ChatGPT")).toBe("AI usage: ChatGPT");
   });
 
   it("keeps an unknown id and an empty one as they are", () => {

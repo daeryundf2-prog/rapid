@@ -58,12 +58,12 @@ const FIELDS: Record<string, { label: string; format: (value: unknown) => string
     format: (v) => (v === null || v === undefined || v === "" ? "자동" : n(Number(v))),
   },
   known_good_hash_feeds: {
-    label: "known-good 해시 목록",
+    label: "알려진 정상 해시 목록",
     format: (v) => (Array.isArray(v) && v.length ? v.join(", ") : "없음"),
   },
-  hide_known_good: { label: "known-good 항목 숨기기", format: yesNo },
+  hide_known_good: { label: "알려진 정상 항목 숨기기", format: yesNo },
   known_good_max_hash_bytes: {
-    label: "known-good 해시 상한",
+    label: "알려진 정상 해시 상한",
     format: (v) => (Number(v) ? `${n(Math.round(Number(v) / (1024 * 1024)))} MB` : "제한 없음"),
   },
   rules: { label: "규칙 파일", format: (v) => (v ? String(v) : "기본") },

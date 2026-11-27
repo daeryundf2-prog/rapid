@@ -1116,6 +1116,12 @@ body:has(.case-modal-backdrop) .drawer-handle {
   word-break: break-all;
 }
 
+/* A long value in a table cell (an output folder) wraps inside the cell instead of pushing the
+   table past its card: the cell's nowrap + ellipsis would otherwise beat .break-all. */
+.data-table td.break-all {
+  white-space: normal;
+}
+
 .vtable {
   flex: 1;
   display: flex;

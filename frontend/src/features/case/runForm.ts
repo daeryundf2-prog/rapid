@@ -72,7 +72,7 @@ export function validateRunForm(form: RunForm): RunFormErrors {
     errors.partitionSector = "파티션 시작 섹터는 0 이상의 정수여야 합니다.";
   }
   if (form.hideKnownGood && !form.knownGoodFeeds.trim()) {
-    errors.hideKnownGood = "known-good 해시 목록을 지정해야 숨길 수 있습니다.";
+    errors.hideKnownGood = "알려진 정상 해시 목록을 지정해야 숨길 수 있습니다.";
   }
   if (form.dryRun && form.extract) {
     errors.extract = "모의 실행에서는 추출할 수 없습니다.";

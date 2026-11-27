@@ -61,7 +61,7 @@ describe("run form", () => {
       "파티션 시작 섹터는 0 이상의 정수여야 합니다.",
     );
     expect(validateRunForm({ ...DEFAULT_RUN_FORM, root: "D:/e", hideKnownGood: true }).hideKnownGood).toBe(
-      "known-good 해시 목록을 지정해야 숨길 수 있습니다.",
+      "알려진 정상 해시 목록을 지정해야 숨길 수 있습니다.",
     );
     expect(Object.keys(validateRunForm({ ...DEFAULT_RUN_FORM, root: "D:/e" }))).toEqual([]);
   });

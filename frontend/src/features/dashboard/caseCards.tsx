@@ -26,6 +26,8 @@ import { CommandButton } from "../../commands/CommandButton";
 import { StatusBadge } from "../../components/Badge";
 import { ToneChip } from "../../components/ToneChip";
 import { serializeRoute } from "../../router";
+import { useTimezone } from "../../state/hooks";
+import { formatTimestamp } from "../../utils/time";
 import { LEVEL_LABEL } from "../case/CaseDialogs";
 import { useCaseDialogs } from "../case/dialogs";
 import { ReasonButton } from "../case/ReasonButton";
@@ -33,7 +35,6 @@ import { summarizeRunRequest } from "../case/runSummary";
 import { EVIDENCE_TYPE_LABEL } from "../case/wizardModel";
 import { formatBytes } from "../tree/model";
 import { CardEmpty } from "./Card";
-import { formatTime } from "./model";
 
 const n = (value: number) => value.toLocaleString("ko-KR");
 export const PROBLEM_PREVIEW = 20;
@@ -112,6 +113,7 @@ export function NoCaseLink() {
 }
 
 export function CaseInfoCard({ detail }: { detail: CaseDetail }) {
+  const { timezone } = useTimezone();
   const rows: Array<[string, string]> = [
     ["사건 번호", detail.case_number],
     ["사건명", detail.name],
@@ -123,7 +125,7 @@ export function CaseInfoCard({ detail }: { detail: CaseDetail }) {
     ["설명", detail.description],
     ["케이스 폴더", detail.case_root],
     ["인용 ID 접두", detail.citation_prefix],
-    ["만든 시각", formatTime(detail.created_at)],
+    ["만든 시각", formatTimestamp(detail.created_at, timezone)],
   ];
   return (
     <div className="dash-case-info" data-testid="case-info">
@@ -285,6 +287,7 @@ const ORIGIN_NOTE: Record<string, string> = {
 };
 
 export function SnapshotCard({ snapshot }: { snapshot: ProcessingSnapshot }) {
+  const { timezone } = useTimezone();
   const body = snapshot.snapshot;
   const rows = summarizeRunRequest(body.request ?? null);
   const keywords = body.profile?.keywords ?? [];
@@ -294,7 +297,7 @@ export function SnapshotCard({ snapshot }: { snapshot: ProcessingSnapshot }) {
       <p className="dash-note">{ORIGIN_NOTE[String(body.origin)] ?? ORIGIN_NOTE["run-request"]}</p>
       <dl className="detail-grid">
         <dt>고정 시각</dt>
-        <dd>{formatTime(snapshot.captured_at)}</dd>
+        <dd>{formatTimestamp(snapshot.captured_at, timezone)}</dd>
         {body.evidence?.evidence_number ? (
           <>
             <dt>증거</dt>
@@ -401,6 +404,7 @@ export function CaseMemoCard({
   examiner: string;
   notes: CaseNotes;
 }) {
+  const { timezone } = useTimezone();
   const client = useQueryClient();
   const textId = useId();
   const authorId = useId();
@@ -447,13 +451,13 @@ export function CaseMemoCard({
             <li key={note.id} className="dash-memo-item">
               <p className="dash-memo-meta">
                 <strong>{note.author || "작성자 미지정"}</strong> ·{" "}
-                <time dateTime={note.created_at}>{formatTime(note.created_at)}</time>
+                <time dateTime={note.created_at}>{formatTimestamp(note.created_at, timezone)}</time>
               </p>
               <p className="dash-memo-text">{note.text}</p>
               <button
                 type="button"
                 className="button ghost"
-                aria-label={`${note.author || "작성자 미지정"} 메모 삭제 (${formatTime(note.created_at)})`}
+                aria-label={`${note.author || "작성자 미지정"} 메모 삭제 (${formatTimestamp(note.created_at, timezone)})`}
                 onClick={() => remove.mutate(note.id)}
               >
                 삭제
@@ -509,8 +513,8 @@ export function CaseMemoCard({
         <ol className="dash-memo-history" aria-label="메모 이력">
           {notes.history.map((entry) => (
             <li key={entry.id}>
-              <time dateTime={entry.at}>{formatTime(entry.at)}</time> · {entry.actor || "작성자 미지정"} ·{" "}
-              {entry.action === "deleted" ? "삭제" : "작성"} —{" "}
+              <time dateTime={entry.at}>{formatTimestamp(entry.at, timezone)}</time> ·{" "}
+              {entry.actor || "작성자 미지정"} · {entry.action === "deleted" ? "삭제" : "작성"} —{" "}
               <span className="dash-memo-text">{entry.text}</span>
             </li>
           ))}

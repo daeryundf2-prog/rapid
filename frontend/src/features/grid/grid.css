@@ -883,13 +883,14 @@
   --row-bg: color-mix(in srgb, var(--status-bookmark) 12%, var(--bg));
 }
 
-/* U-F8 mixed-family grid: label above value inside one cell (fits the 28px row). */
+/* U-F8 mixed-family grid: label above value inside one cell; the column is `stacked`, so the
+   rows are STACKED_ROW_HEIGHT (40px) and the two 13px lines keep apart. */
 .sum-cell {
   display: flex;
   flex-direction: column;
   justify-content: center;
   min-width: 0;
-  line-height: 1.1;
+  line-height: 1.3;
 }
 
 .sum-label {
