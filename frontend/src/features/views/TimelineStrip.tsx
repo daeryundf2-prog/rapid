@@ -61,7 +61,7 @@ export function TimelineStrip({ runId }: { runId: string }) {
 
   if (histogram.isPending)
     return (
-      <div className="tl-strip tl-strip-loading" role="status">
+      <div className="tl-strip tl-strip-loading" aria-busy="true">
         <span className="visually-hidden">시간 개요를 불러오는 중</span>
       </div>
     );
@@ -94,7 +94,7 @@ export function TimelineStrip({ runId }: { runId: string }) {
   return (
     <section className="tl-strip" aria-label="시간 개요" data-testid="timeline-strip">
       <div className="tl-strip-bar">
-        <span className="tl-strip-range" aria-live="polite">
+        <span className="tl-strip-range">
           {range ? `${fmt(range.fromMs)} ~ ${fmt(range.toMs)}` : "전체 기간"} ·{" "}
           {total.toLocaleString("ko-KR")}건
         </span>

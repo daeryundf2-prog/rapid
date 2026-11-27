@@ -19,7 +19,13 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 
 from ...core.jobs import RunJobStore
-from .actions import API_VERSION, MAX_TARGETS, ActionSelection, profile, resolve_selection
+from .actions import (
+    API_VERSION,
+    MAX_TARGETS,
+    ActionSelection,
+    profile,
+    resolve_selection,
+)
 from .helpers import get_named_output, get_output_path
 from .json_rows import LazyRows, large_output_index
 from .models import CaseDbReviewBatchRequest, RunCaseDbEnsureRequest
