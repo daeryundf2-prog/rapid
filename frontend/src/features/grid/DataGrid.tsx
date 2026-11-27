@@ -28,9 +28,12 @@ import { DOCS_MATCHED } from "../../api/collections";
 import type { RunExtractResult } from "../../api/extract";
 import { getRunTree } from "../../api/runs";
 import { WaitPanel } from "../../components/WaitPanel";
+import { ZoneTime } from "../../components/ZoneTime";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
 import type { CommandContext } from "../../contracts/command";
 import { Icon } from "../../icons";
+import { useTimezone } from "../../state/hooks";
+import { headerZone } from "../../utils/time";
 import { runCommandId } from "../analysis/commands";
 import { setColumnFilter } from "../filters/columnFilters";
 import type { FilterBarVariant } from "../filters/FilterBar";
@@ -158,9 +161,11 @@ interface RowViewProps {
   onToggle: (index: number, checked: boolean) => void;
   /** aria-rowindex of data row 0 (2, or 3 under the column filter row). */
   ariaRowOffset: number;
+  /** Display-zone name the time headers carry ("KST"): `zoneInHeader` cells leave it out. */
+  headerZone: string;
 }
 
-/** Review mark shown as the row stripe (U-F8): the review status, else a 북마크 tag. */
+/** Review mark shown as the row's tint (U-F8): the review status, else a 북마크 tag. */
 export function rowMark(row: GridRow): { id: string; label: string } | null {
   if (row.reviewStatus) return { id: row.reviewStatus, label: REVIEW_LABELS[row.reviewStatus] };
   if (row.tags.some((tag) => tag === "북마크" || tag === "bookmark"))
@@ -169,7 +174,7 @@ export function rowMark(row: GridRow): { id: string; label: string } | null {
 }
 
 const RowView = memo(function RowView(props: RowViewProps) {
-  const { row, index, top, height, selected, focused, specs, widths, lefts } = props;
+  const { row, index, top, height, selected, focused, specs, widths, lefts, headerZone: zone } = props;
   const style = { transform: `translateY(${top}px)`, height };
   if (!row) {
     return (
@@ -209,8 +214,6 @@ const RowView = memo(function RowView(props: RowViewProps) {
       style={style}
     >
       <div role="gridcell" className="grid-cell grid-cell-select" style={{ width: SELECT_COL_WIDTH }}>
-        {/* U-F8: 6px review stripe on the sticky select cell (visible while scrolling sideways). */}
-        {mark ? <span className="grid-row-stripe" data-mark={mark.id} aria-hidden="true" /> : null}
         <input
           type="checkbox"
           tabIndex={-1}
@@ -249,7 +252,10 @@ const RowView = memo(function RowView(props: RowViewProps) {
             {spec.render ? (
               spec.render(row)
             ) : text ? (
-              <span className="grid-cell-text">{text}</span>
+              <span className="grid-cell-text">
+                {/* A time column's header names the zone: the eye skips it, copy keeps it. */}
+                {spec.zoneInHeader ? <ZoneTime text={text} zone={zone} /> : text}
+              </span>
             ) : (
               // Empty value: a muted dash, never a blank cell (visual-polish B2 #2).
               <span className="grid-cell-empty" aria-hidden="true">
@@ -266,6 +272,9 @@ const RowView = memo(function RowView(props: RowViewProps) {
 export function DataGrid(props: DataGridProps = {}) {
   const route = useRoute();
   const runId = props.runId !== undefined ? props.runId : route.runId;
+  // Time headers name the display zone once ("시각 (KST)"); a zone change renames them.
+  const { timezone } = useTimezone();
+  const timeHeaderZone = headerZone(timezone);
   const ref = props.collection ?? route.collection;
   const def = collectionDef(ref.id);
   // A 유형 filter of one artifact-type family (다운로드 · USB · SAM …) picks that family's columns.
@@ -596,13 +605,26 @@ export function DataGrid(props: DataGridProps = {}) {
   const visibleColumns = table.getVisibleLeafColumns();
   const specById = useMemo(() => new Map(columns.map((c) => [c.id, c])), [columns]);
   const specs = visibleColumns.map((c) => specById.get(c.id)).filter((c): c is ColumnSpec => !!c);
-  // 항목 flexes into the pane width; nothing shrinks (a narrow grid hides default columns by
-  // priority instead, see autoHidden). Widths the user dragged stay as dragged.
+  // 항목 flexes into the pane width. Too wide (분석 기본 preset): default-width columns give back
+  // width down to their minimum, lowest priority first, before anything is cut at the pane edge;
+  // a narrower grid hides default columns by priority (see autoHidden). Widths the user dragged
+  // stay as dragged.
+  const shrink = widthPriority
+    ? [...widthPriority]
+        .reverse()
+        .map((id) => ({ index: visibleColumns.findIndex((c) => c.id === id), spec: specById.get(id) }))
+        .filter(
+          ({ index, spec }) =>
+            index >= 0 && spec?.minWidth !== undefined && columnSizing[spec.id] === undefined,
+        )
+        .map(({ index, spec }) => ({ index, min: spec?.minWidth ?? 0 }))
+    : [];
   const widths = fitColumnWidths(
     visibleColumns.map((c) => c.getSize()),
     {
       grow: columnSizing.title === undefined ? specs.findIndex((s) => s.id === "title") : -1,
       available: paneWidth - SELECT_COL_WIDTH - HEAD_TOOLS_WIDTH,
+      shrink,
     },
   );
   // Publish the shown column ids (the meta tab's "기본 열에 이미 표시됩니다" checks them).
@@ -1429,6 +1451,8 @@ export function DataGrid(props: DataGridProps = {}) {
                   if (!spec) return null;
                   const sort = sortOf(spec);
                   const reason = sortReason(spec);
+                  // A time column names the display zone once here; its cells leave it out.
+                  const header = spec.zoneInHeader ? `${spec.header} (${timeHeaderZone})` : spec.header;
                   const hint = hintsActive ? spec.emptyHint : undefined;
                   const hintId = `${hintPrefix}-empty-${spec.id}`;
                   const describedBy =
@@ -1440,7 +1464,7 @@ export function DataGrid(props: DataGridProps = {}) {
                       key={column.id}
                       role="columnheader"
                       aria-sort={sort}
-                      aria-label={hint ? spec.header : undefined}
+                      aria-label={hint ? header : undefined}
                       data-col={column.id}
                       className={`grid-cell grid-hcell${lefts[i] !== undefined ? " grid-cell-first" : ""}`}
                       style={{ width: widths[i], left: lefts[i] }}
@@ -1451,10 +1475,10 @@ export function DataGrid(props: DataGridProps = {}) {
                           className="grid-sort"
                           aria-describedby={describedBy}
                           // The full header is always the tooltip (a narrow column truncates it, U-F8).
-                          title={reason ? undefined : (spec.sortHint ?? hint?.text ?? spec.header)}
+                          title={reason ? undefined : (spec.sortHint ?? hint?.text ?? header)}
                           onClick={() => cycleSort(spec)}
                         >
-                          {spec.header}
+                          {header}
                           <span aria-hidden="true" className="grid-sort-mark">
                             {sort === "ascending" ? (
                               <Icon name="chevron-up" />
@@ -1540,6 +1564,7 @@ export function DataGrid(props: DataGridProps = {}) {
                     menuId={menuId}
                     onToggle={onToggleCheckbox}
                     ariaRowOffset={headRows + 1}
+                    headerZone={timeHeaderZone}
                   />
                 );
               })}

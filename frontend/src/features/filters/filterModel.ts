@@ -34,7 +34,13 @@ import {
   recordFieldsKey,
 } from "../../contracts/collection";
 import type { Route } from "../../router";
-import { parseInstant } from "../../utils/time";
+import {
+  formatTimeRange,
+  minuteBound,
+  parseInstant,
+  startOfDayMs,
+  type TimezoneChoice,
+} from "../../utils/time";
 import { CARVE_KINDS } from "../analysis/analysisForm";
 import { type Grade, isGrade } from "../flags/catalog";
 import { rowMatchesFlagFilter, ruleLabel } from "../flags/flags";
@@ -189,32 +195,26 @@ export const TIME_PRESET_LABELS: Record<TimePreset, string> = {
 
 const PRESET_DAYS: Record<Exclude<TimePreset, "today">, number> = { "1d": 1, "7d": 7, "30d": 30 };
 
-/** Local `YYYY-MM-DDTHH:mm` (the value format of `<input type="datetime-local">`). */
-export function toLocalInput(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-/** Value for `<input type="datetime-local">` from any ISO bound (S10 clock buttons pass ISO with Z). */
-export function toInputValue(value: string | undefined): string {
-  if (!value) return "";
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return value;
-  const ms = Date.parse(value);
-  return Number.isNaN(ms) ? "" : toLocalInput(new Date(ms));
-}
-
-export function presetRange(preset: TimePreset, now: Date = new Date()): { from: string; to: string } {
-  const start = new Date(now);
-  if (preset === "today") start.setHours(0, 0, 0, 0);
-  else start.setTime(now.getTime() - PRESET_DAYS[preset] * 86_400_000);
-  return { from: toLocalInput(start), to: toLocalInput(now) };
+/** 오늘 = from the display zone's midnight; 최근 n일 = the last n×24 h; both minute bounds ending now. */
+export function presetRange(
+  preset: TimePreset,
+  tz: TimezoneChoice,
+  now: Date = new Date(),
+): { from: string; to: string } {
+  const start =
+    preset === "today" ? startOfDayMs(now.getTime(), tz) : now.getTime() - PRESET_DAYS[preset] * 86_400_000;
+  return { from: minuteBound(start), to: minuteBound(now.getTime()) };
 }
 
 /** Which preset (if any) the current range equals, with a minute of slack. */
-export function activePreset(filters: FilterState, now: Date = new Date()): TimePreset | null {
+export function activePreset(
+  filters: FilterState,
+  tz: TimezoneChoice,
+  now: Date = new Date(),
+): TimePreset | null {
   if (!filters.from || !filters.to) return null;
   for (const preset of ["today", "1d", "7d", "30d"] as const) {
-    const range = presetRange(preset, now);
+    const range = presetRange(preset, tz, now);
     if (
       Math.abs(Date.parse(range.from) - Date.parse(filters.from)) <= 60_000 &&
       Math.abs(Date.parse(range.to) - Date.parse(filters.to)) <= 60_000
@@ -608,6 +608,26 @@ export const HIDDEN_FILTER_COLUMNS: readonly string[] = [
 export interface ChipLabelOptions {
   /** Channel group id → Korean label (`/tree` `channel_groups[].label`); CHANNEL_GROUP_LABELS otherwise. */
   channelGroupLabels?: Readonly<Record<string, string>>;
+  /** Display zone of the 시간 chip (the grid's zone); browser local when unset. */
+  timezone?: TimezoneChoice;
+}
+
+/**
+ * "2026-10-22 13:45 ~ 14:59 KST": a time range read in the display zone, like the grid, the
+ * 시간 개요 띠 and the palette. A bound is read as the server reads it (`Date.parse`: ISO as
+ * written, `YYYY-MM-DDTHH:mm` as browser local); an unreadable one is shown as written.
+ */
+export function timeRangeText(
+  from: string | undefined,
+  to: string | undefined,
+  tz: TimezoneChoice = "local",
+): string {
+  const range = orderedRange(from, to);
+  const fromMs = range.from ? Date.parse(range.from) : null;
+  const toMs = range.to ? Date.parse(range.to) : null;
+  if (Number.isNaN(fromMs) || Number.isNaN(toMs))
+    return `${range.from?.replace("T", " ") ?? "…"} ~ ${range.to?.replace("T", " ") ?? "…"}`;
+  return formatTimeRange(fromMs, toMs, tz);
 }
 
 function listText(names: string[], unit: string): string {
@@ -661,12 +681,8 @@ export function activeChips(
   options: ChipLabelOptions = {},
 ): FilterChip[] {
   const chips: FilterChip[] = [];
-  if (filters.from || filters.to) {
-    chips.push({
-      key: "range",
-      label: `시간 ${filters.from ? filters.from.replace("T", " ") : "…"} ~ ${filters.to ? filters.to.replace("T", " ") : "…"}`,
-    });
-  }
+  if (filters.from || filters.to)
+    chips.push({ key: "range", label: `시간 ${timeRangeText(filters.from, filters.to, options.timezone)}` });
   for (const s of filters.statuses) chips.push({ key: "status", value: s, label: `상태 ${statusLabel(s)}` });
   for (const t of filters.types) chips.push({ key: "type", value: t, label: `유형 ${t}` });
   for (const t of filters.tags) chips.push({ key: "tag", value: t, label: `태그 ${t}` });

@@ -567,6 +567,11 @@
   white-space: nowrap;
 }
 
+/* Folding is a phone-width control (below): the strip is always open when wider. */
+.tl-strip-fold {
+  display: none;
+}
+
 .tl-strip-actions {
   display: flex;
   align-items: center;
@@ -643,24 +648,60 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Phone width (fe-audit A1 follow-up): the strip opens folded to its one-line summary (range ·
+   count) so the list starts high on the screen; open, the actions and the time field share one
+   row and the bars stay 36px. */
 @media (max-width: 599.98px) {
-  .tl-strip-actions {
+  .tl-strip-bar {
+    flex-wrap: nowrap;
+    align-items: flex-start;
+  }
+
+  .tl-strip-range {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding-top: 10px;
+    white-space: normal;
+    word-break: keep-all;
+  }
+
+  .tl-strip-fold {
+    display: inline-flex;
+    flex: none;
+    width: 40px;
+    height: 40px;
+    justify-content: center;
+  }
+
+  .tl-strip:not([data-folded]) .tl-strip-bar {
     flex-wrap: wrap;
+  }
+
+  .tl-strip-actions {
+    order: 1;
     width: 100%;
+  }
+
+  .tl-strip-actions > .grid-btn {
+    flex: none;
+    height: 40px;
+  }
+
+  .tl-strip[data-folded] .tl-strip-actions,
+  .tl-strip[data-folded] .tl-strip-body {
+    display: none;
   }
 
   .tl-strip-jump {
     margin-left: 0;
-    flex: 1 1 100%;
+    flex: 1 1 0;
+    min-width: 0;
   }
 
   .tl-strip-jump input {
     flex: 1;
+    min-width: 0;
     width: auto;
-    height: 44px;
-  }
-
-  .tl-strip-bars {
-    height: 44px;
+    height: 40px;
   }
 }

@@ -8,20 +8,23 @@
  */
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { type KeyboardEvent, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, useId, useMemo, useRef, useState } from "react";
 import { announce } from "../../a11y";
 import { runCommand } from "../../commands/registry";
 import { KEY_MAP } from "../../contracts/command";
 import { Icon } from "../../icons";
 import { keyLabel } from "../../shortcuts";
+import { useTimezone } from "../../state/hooks";
+import { formatShortMinute, formatTimeRange, zoneShort } from "../../utils/time";
 import { setTimeRange, useFilterStore } from "../filters/filterStore";
 import { fetchTimelineHistogram } from "./HistogramView";
 import { rangeOf } from "./histogram";
 import { TimelineJump } from "./TimelineJump";
-import { applyRange, fmt, type StripState, useTimelineCommands } from "./timelineCommands";
+import { applyRange, rangeText, type StripState, useTimelineCommands } from "./timelineCommands";
 import { extentOf, rangeFromBounds, stripBars, toIsoBounds } from "./timelineRange";
 
 export function TimelineStrip({ runId }: { runId: string }) {
+  const { timezone: tz } = useTimezone();
   const histogram = useQuery({
     queryKey: ["timeline-histogram", runId] as const,
     queryFn: ({ signal }) => fetchTimelineHistogram(runId, signal),
@@ -46,16 +49,19 @@ export function TimelineStrip({ runId }: { runId: string }) {
   });
   const source = range ? (zoom.data ?? histogram.data) : histogram.data;
   const { buckets } = useMemo(
-    () => (source ? stripBars(source, range, extent) : { granularity: "day" as const, buckets: [] }),
-    [source, range, extent],
+    () => (source ? stripBars(source, range, extent, tz) : { granularity: "day" as const, buckets: [] }),
+    [source, range, extent, tz],
   );
   const max = Math.max(1, ...buckets.map((b) => b.count));
   const total = buckets.reduce((sum, b) => sum + b.count, 0);
   const [drag, setDrag] = useState<{ anchor: number; focus: number } | null>(null);
   const [active, setActive] = useState(0);
+  // Phone width: the strip starts folded to its one-line summary (CSS ignores this when wider).
+  const [folded, setFolded] = useState(true);
+  const bodyId = useId();
   const barsRef = useRef<HTMLDivElement>(null);
-  const live = useRef<StripState>({ range, extent });
-  live.current = { range, extent };
+  const live = useRef<StripState>({ range, extent, tz });
+  live.current = { range, extent, tz };
 
   useTimelineCommands(live);
 
@@ -91,13 +97,31 @@ export function TimelineStrip({ runId }: { runId: string }) {
   const hi = drag ? Math.max(drag.anchor, drag.focus) : -1;
   const first = buckets[0];
   const last = buckets.at(-1);
+  // The axis spans what the header names: the range itself once zoomed, else the bars.
+  const axisFrom = range?.fromMs ?? first?.startMs;
+  const axisTo = range?.toMs ?? (last ? last.endMs - 1 : undefined);
   return (
-    <section className="tl-strip" aria-label="시간 개요" data-testid="timeline-strip">
+    <section
+      className="tl-strip"
+      aria-label="시간 개요"
+      data-testid="timeline-strip"
+      data-folded={folded ? "" : undefined}
+    >
       <div className="tl-strip-bar">
         <span className="tl-strip-range">
-          {range ? `${fmt(range.fromMs)} ~ ${fmt(range.toMs)}` : "전체 기간"} ·{" "}
-          {total.toLocaleString("ko-KR")}건
+          {range ? rangeText(range, tz) : "전체 기간"} · {total.toLocaleString("ko-KR")}건
         </span>
+        <button
+          type="button"
+          className="grid-btn icon-btn tl-strip-fold"
+          aria-expanded={!folded}
+          aria-controls={bodyId}
+          aria-label={folded ? "시간 개요 펼치기" : "시간 개요 접기"}
+          title={folded ? "시간 개요 펼치기" : "시간 개요 접기"}
+          onClick={() => setFolded((value) => !value)}
+        >
+          <Icon name={folded ? "chevron-down" : "chevron-up"} />
+        </button>
         <span className="tl-strip-actions">
           <button
             type="button"
@@ -136,53 +160,64 @@ export function TimelineStrip({ runId }: { runId: string }) {
           >
             전체
           </button>
-          <TimelineJump />
+          <TimelineJump tz={tz} />
         </span>
       </div>
-      {/* biome-ignore lint/a11y/useSemanticElements: a group of bar buttons, not a form fieldset */}
-      <div ref={barsRef} className="tl-strip-bars" role="group" aria-label={`시간 막대 ${buckets.length}개`}>
-        {buckets.length === 0 ? (
-          <p className="tl-strip-empty">이 범위에는 시각이 있는 이벤트가 없습니다.</p>
-        ) : null}
-        {buckets.map((bucket, index) => {
-          const label = `${fmt(bucket.startMs)} ~ ${fmt(bucket.endMs - 1)}, ${bucket.count.toLocaleString("ko-KR")}건`;
-          return (
-            <button
-              key={bucket.startMs}
-              type="button"
-              className="tl-strip-col"
-              data-bar-index={index}
-              data-selected={index >= lo && index <= hi ? "" : undefined}
-              aria-label={`${label} — 눌러서 이 구간 보기`}
-              title={label}
-              tabIndex={index === active ? 0 : -1}
-              onFocus={() => setActive(index)}
-              onKeyDown={(event) => onBarKey(event, index)}
-              onMouseDown={(event) => {
-                if (event.button === 0) setDrag({ anchor: index, focus: index });
-              }}
-              onMouseEnter={() => setDrag((d) => (d ? { ...d, focus: index } : d))}
-              onMouseUp={() => {
-                const anchor = drag?.anchor ?? index;
-                setDrag(null);
-                zoomTo(anchor, index);
-              }}
-              onClick={(event) => {
-                // Keyboard activation (mouse clicks are handled on mouseup).
-                if (event.detail === 0) zoomTo(index, index);
-              }}
-            >
-              <span
-                className="tl-strip-fill"
-                style={{ height: `${bucket.count ? Math.max(8, (bucket.count / max) * 100) : 0}%` }}
-              />
-            </button>
-          );
-        })}
-      </div>
-      <div className="tl-strip-axis" aria-hidden="true">
-        <span>{first ? fmt(first.startMs) : ""}</span>
-        <span>{last ? fmt(last.endMs - 1) : ""}</span>
+      <div id={bodyId} className="tl-strip-body">
+        {/* biome-ignore lint/a11y/useSemanticElements: a group of bar buttons, not a form fieldset */}
+        <div
+          ref={barsRef}
+          className="tl-strip-bars"
+          role="group"
+          aria-label={`시간 막대 ${buckets.length}개`}
+        >
+          {buckets.length === 0 ? (
+            <p className="tl-strip-empty">이 범위에는 시각이 있는 이벤트가 없습니다.</p>
+          ) : null}
+          {buckets.map((bucket, index) => {
+            const label = `${formatTimeRange(bucket.startMs, bucket.endMs - 1, tz)}, ${bucket.count.toLocaleString("ko-KR")}건`;
+            return (
+              <button
+                key={bucket.startMs}
+                type="button"
+                className="tl-strip-col"
+                data-bar-index={index}
+                data-selected={index >= lo && index <= hi ? "" : undefined}
+                aria-label={`${label} — 눌러서 이 구간 보기`}
+                title={label}
+                tabIndex={index === active ? 0 : -1}
+                onFocus={() => setActive(index)}
+                onKeyDown={(event) => onBarKey(event, index)}
+                onMouseDown={(event) => {
+                  if (event.button === 0) setDrag({ anchor: index, focus: index });
+                }}
+                onMouseEnter={() => setDrag((d) => (d ? { ...d, focus: index } : d))}
+                onMouseUp={() => {
+                  const anchor = drag?.anchor ?? index;
+                  setDrag(null);
+                  zoomTo(anchor, index);
+                }}
+                onClick={(event) => {
+                  // Keyboard activation (mouse clicks are handled on mouseup).
+                  if (event.detail === 0) zoomTo(index, index);
+                }}
+              >
+                <span
+                  className="tl-strip-fill"
+                  style={{ height: `${bucket.count ? Math.max(8, (bucket.count / max) * 100) : 0}%` }}
+                />
+              </button>
+            );
+          })}
+        </div>
+        <div className="tl-strip-axis" aria-hidden="true">
+          <span>{axisFrom === undefined ? "" : formatShortMinute(axisFrom, tz)}</span>
+          <span>
+            {axisTo === undefined
+              ? ""
+              : `${formatShortMinute(axisTo, tz)} ${zoneShort(tz, new Date(axisTo))}`}
+          </span>
+        </div>
       </div>
     </section>
   );

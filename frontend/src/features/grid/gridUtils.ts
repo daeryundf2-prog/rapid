@@ -102,19 +102,31 @@ export function serverPathFilter(text: string | undefined): string | undefined {
 
 /**
  * Fit column widths to the visible grid width: slack goes to the flexing column (항목/이름).
- * Columns are never shrunk here — a narrow pane hides low-priority default columns instead
+ * When the columns are wider than the grid, the `shrink` columns (lowest priority first, default
+ * widths only) give back width down to their minimum, so a narrow pane keeps whole columns on
+ * screen (요약 beside 시각 at 390, the file name of 경로 at 1440) instead of cutting the last one
+ * at the pane edge; a narrow pane also hides low-priority default columns
  * (`priorityHiddenColumns`), and whatever is still too wide scrolls sideways. `grow` < 0 (the
- * user resized 항목) or `available` ≤ 0 (not measured yet) leaves the widths unchanged.
+ * user resized 항목) or `available` ≤ 0 (not measured yet) leaves the slack unused.
  */
 export function fitColumnWidths(
   widths: readonly number[],
-  options: { grow: number; available: number },
+  options: { grow: number; available: number; shrink?: readonly { index: number; min: number }[] },
 ): number[] {
   const out = [...widths];
-  const { grow, available } = options;
+  const { grow, available, shrink = [] } = options;
   if (!(available > 0) || out.length === 0) return out;
   const total = out.reduce((sum, w) => sum + w, 0);
   if (total < available && grow >= 0 && grow < out.length) out[grow] = (out[grow] ?? 0) + (available - total);
+  let over = total - available;
+  for (const { index, min } of shrink) {
+    if (over <= 0) break;
+    const width = out[index];
+    if (width === undefined || width <= min) continue;
+    const give = Math.min(over, width - min);
+    out[index] = width - give;
+    over -= give;
+  }
   return out;
 }
 

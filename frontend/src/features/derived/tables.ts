@@ -120,6 +120,9 @@ export interface DerivedColumn {
   text: (row: DerivedRow, tz: string) => string;
   mono?: boolean;
   numeric?: boolean;
+  /** Time column: the header names the display zone once, the cells leave it out (the cell
+   *  tooltip, row name and citation keep it), like the grid's `zoneInHeader`. */
+  zoneInHeader?: boolean;
 }
 
 const count = (row: DerivedRow) => row.count.toLocaleString("ko-KR");
@@ -132,8 +135,20 @@ const time = (value: string | null, tz: string) => (value ? formatGridTime(value
 const COMMON_TAIL: DerivedColumn[] = [
   { id: "count", header: "건수", width: "84px", numeric: true, text: count },
   { id: "families", header: "출처 계열", width: "minmax(180px, 1.4fr)", text: sources },
-  { id: "first", header: "처음 본 시각", width: "160px", text: (row, tz) => time(row.first_seen, tz) },
-  { id: "last", header: "마지막 본 시각", width: "160px", text: (row, tz) => time(row.last_seen, tz) },
+  {
+    id: "first",
+    header: "처음 본 시각",
+    width: "160px",
+    zoneInHeader: true,
+    text: (row, tz) => time(row.first_seen, tz),
+  },
+  {
+    id: "last",
+    header: "마지막 본 시각",
+    width: "160px",
+    zoneInHeader: true,
+    text: (row, tz) => time(row.last_seen, tz),
+  },
 ];
 
 export const DERIVED_COLUMNS: Record<DerivedTableId, DerivedColumn[]> = {

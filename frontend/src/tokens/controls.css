@@ -37,6 +37,12 @@ body {
   scrollbar-color: color-mix(in srgb, var(--text-subtle) 45%, transparent) transparent;
 }
 
+/* --- form controls take the console font (the UA default is Arial at 13.33px) ---- */
+
+:where(button, input, select, textarea, optgroup) {
+  font: inherit;
+}
+
 /* --- text inputs, textarea, select ---------------------------------------- */
 
 :where(
@@ -66,6 +72,8 @@ body {
   color: var(--text);
   font: inherit;
   font-size: var(--fs-body);
+  /* A field narrower than its hint ends it with "…", not half a glyph ("전체 검ㅅ"). */
+  text-overflow: ellipsis;
   transition:
     border-color var(--motion) var(--ease),
     background-color var(--motion) var(--ease);
@@ -722,7 +730,7 @@ button.chip:hover {
   }
 }
 
-/* --- path (review #9): parent folder, middle ellipsis, mono --------------------- */
+/* --- path (review #9): last segment kept, leading folders cut from the front, mono ------- */
 
 .mid-path {
   display: inline-flex;
@@ -739,6 +747,10 @@ button.chip:hover {
   min-width: 1.5em; /* room for the "…" itself */
   overflow: hidden;
   text-overflow: ellipsis;
+  /* Overflow at the start: "…\User Data\Default\" keeps the folders nearest the file
+     (the <bdo dir="ltr"> inside keeps the path's own order). */
+  direction: rtl;
+  text-align: left;
   color: var(--text-subtle);
 }
 
@@ -822,7 +834,7 @@ button.chip:hover {
   margin: 0 -4px 0 0;
 }
 
-/* --- popover surface + motion (U-V8: fade + 2px, 120ms ease-out) -------------- */
+/* --- popover surface + motion (U-V8: fade + 2px, --motion ease-out) ------------ */
 
 .popover {
   border: 1px solid var(--line-subtle);

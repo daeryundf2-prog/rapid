@@ -6,7 +6,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { resetAppStore } from "../../state/store";
-import { assumedUtcCandidates, evidenceTimeTooltip, exactEvidenceTime } from "../../utils/time";
+import { assumedUtcCandidates, evidenceTimeTooltip, exactEvidenceTime, zoneShort } from "../../utils/time";
 import { col, makeRef, makeRow } from "../grid/columns/common";
 import { timelineCollection } from "../grid/columns/timeline";
 import { buildSelectionCsv } from "./csv";
@@ -77,6 +77,9 @@ describe("D14 #11: 100 ns ticks in the CSV and the FILETIME tooltip", () => {
       expect(first?.[at("시각")]).not.toBe(second?.[at("시각")]);
       expect(first?.[at("시각")]).toContain(".0000007");
       expect(second?.[at("시각")]).toContain(".0000001");
+      // The grid header names the zone and its cells hide it; the CSV header stays 시각 (`at`)
+      // and every time keeps its zone.
+      expect(first?.[at("시각")]).toContain(zoneShort(zone, new Date(stamps[0] ?? "")));
       expect([first?.[at("시각 UTC 원문")], second?.[at("시각 UTC 원문")]]).toEqual(stamps);
       expect([first?.[at("FILETIME")], second?.[at("FILETIME")]]).toEqual([
         "133485408000000007",

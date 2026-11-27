@@ -22,7 +22,7 @@
   box-sizing: border-box;
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--line-subtle);
-  background: var(--bg);
+  background: var(--row-bg, var(--bg));
   cursor: default;
 }
 
@@ -40,17 +40,18 @@
   outline-offset: calc(-1 * var(--focus-width));
 }
 
-/* Review stripe on the left edge (like the grid rows, U-F8). */
+/* Review status as a light tint of the status colour (like the grid rows and thumbnails, U-F8);
+   a selected or current card's accent tint wins. */
 .card-item[data-review="relevant"] {
-  box-shadow: inset 4px 0 0 var(--status-relevant);
+  --row-bg: color-mix(in srgb, var(--status-relevant) 12%, var(--bg));
 }
 
 .card-item[data-review="needs-review"] {
-  box-shadow: inset 4px 0 0 var(--status-needs-review);
+  --row-bg: color-mix(in srgb, var(--status-needs-review) 12%, var(--bg));
 }
 
 .card-item[data-review="excluded"] {
-  box-shadow: inset 4px 0 0 var(--status-excluded);
+  --row-bg: color-mix(in srgb, var(--status-excluded) 12%, var(--bg));
 }
 
 .card-main {

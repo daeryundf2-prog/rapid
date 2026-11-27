@@ -34,25 +34,133 @@ const DOCUMENT_EVENT_LABELS: Readonly<Record<string, string>> = {
 };
 
 /**
- * 이벤트 column text: the event type's own Korean name (eventlog-event …); a files event
- * (`file-<kind>`) as 파일 · kind; else the Korean name of the artifact row it came from plus the
- * time kind its id carries (`artifact-<type>-<kind>`, core/timeline.py:
- * `artifact-jumplist-automatic-target-accessed` → "자동 Jump List 파일 · 대상 접근"); else the id.
+ * Korean names of event-log categories (`eventlog-<category>` events; rapidtriage
+ * artifacts/windows/eventlog.py EVENT_CATEGORY_TABLE).
+ */
+export const EVENTLOG_CATEGORY_LABELS: Readonly<Record<string, string>> = {
+  "account-locked": "계정 잠김",
+  "audit-log-cleared": "감사 로그 지움",
+  "audit-policy-changed": "감사 정책 변경",
+  "computer-created": "컴퓨터 계정 생성",
+  "credential-validation": "자격 증명 확인",
+  "defender-config-changed": "Defender 설정 변경",
+  "defender-malware-detected": "Defender 악성코드 탐지",
+  "defender-realtime-protection-disabled": "Defender 실시간 보호 끔",
+  "defender-remediation-action": "Defender 조치",
+  "domain-policy-changed": "도메인 정책 변경",
+  "eventlog-service-shutdown": "이벤트 로그 서비스 종료",
+  "explicit-credential-logon": "명시적 자격 증명 로그온",
+  "external-device-recognized": "외부 장치 인식",
+  "firewall-bind-allowed": "방화벽 바인드 허용",
+  "firewall-connection-allowed": "방화벽 연결 허용",
+  "firewall-rule-added": "방화벽 규칙 추가",
+  "firewall-rule-deleted": "방화벽 규칙 삭제",
+  "firewall-rule-modified": "방화벽 규칙 변경",
+  "group-member-added": "전역 그룹 구성원 추가",
+  "kerberos-preauth-failure": "Kerberos 사전 인증 실패",
+  "kerberos-service-ticket": "Kerberos 서비스 티켓 요청",
+  "kerberos-tgt-request": "Kerberos TGT 요청",
+  "local-group-member-added": "로컬 그룹 구성원 추가",
+  logoff: "로그오프",
+  "logon-failure": "로그온 실패",
+  "logon-success": "로그온 성공",
+  "network-share-accessed": "네트워크 공유 접근",
+  "network-share-detailed-access": "네트워크 공유 세부 접근 확인",
+  "password-reset": "암호 재설정 시도",
+  "powershell-module": "PowerShell 모듈 로그",
+  "powershell-script-block": "PowerShell 스크립트 블록",
+  "privileged-logon": "특수 권한 로그온",
+  "process-created": "프로세스 생성",
+  "rdp-authentication-succeeded": "원격 데스크톱 인증 성공",
+  "rdp-session-disconnected": "원격 데스크톱 세션 연결 끊김",
+  "rdp-session-logoff": "원격 데스크톱 세션 로그오프",
+  "rdp-session-logon": "원격 데스크톱 세션 로그온",
+  "rdp-session-reconnected": "원격 데스크톱 세션 재연결",
+  "rdp-shell-start": "원격 데스크톱 셸 시작",
+  "scheduled-task-completed": "예약 작업 완료",
+  "scheduled-task-created": "예약 작업 생성",
+  "scheduled-task-deleted": "예약 작업 삭제",
+  "scheduled-task-disabled": "예약 작업 사용 안 함",
+  "scheduled-task-enabled": "예약 작업 사용",
+  "scheduled-task-registered": "예약 작업 등록",
+  "scheduled-task-started": "예약 작업 시작",
+  "scheduled-task-updated": "예약 작업 변경",
+  "security-log-full": "보안 로그 가득 참",
+  "service-crashed": "서비스 비정상 종료",
+  "service-installed": "서비스 설치",
+  "service-start-type-changed": "서비스 시작 유형 변경",
+  "service-state-changed": "서비스 상태 변경",
+  "session-disconnected": "세션 연결 끊김",
+  "session-reconnected": "세션 재연결",
+  "sysmon-dns-query": "Sysmon DNS 조회",
+  "sysmon-file-created": "Sysmon 파일 생성",
+  "sysmon-image-loaded": "Sysmon 이미지 로드",
+  "sysmon-network-connection": "Sysmon 네트워크 연결",
+  "sysmon-process-created": "Sysmon 프로세스 생성",
+  "sysmon-registry-value-set": "Sysmon 레지스트리 값 설정",
+  "system-log-cleared": "이벤트 로그 지움",
+  "system-time-changed": "시스템 시각 변경",
+  "universal-group-member-added": "유니버설 그룹 구성원 추가",
+  "user-changed": "사용자 계정 변경",
+  "user-created": "사용자 계정 생성",
+  "user-deleted": "사용자 계정 삭제",
+  "user-disabled": "사용자 계정 사용 안 함",
+  "user-enabled": "사용자 계정 사용",
+  "user-initiated-logoff": "사용자 로그오프",
+  "wmi-activity": "WMI 공급자 시작",
+  "wmi-activity-error": "WMI 활동 오류",
+  "wmi-permanent-event": "WMI 영구 이벤트 소비자 활동",
+  "workstation-locked": "워크스테이션 잠금",
+  "workstation-unlocked": "워크스테이션 잠금 해제",
+  "recovery-candidate": "복구 후보",
+};
+
+const EVENTLOG_PREFIX = "eventlog-";
+const ARTIFACT_PREFIX = "artifact-";
+
+/** "EVTX 이벤트 · 로그온 성공" for `eventlog-<category>`; null for another id or an unnamed category. */
+function eventlogLabel(eventType: string): string | null {
+  if (!eventType.startsWith(EVENTLOG_PREFIX)) return null;
+  const category = EVENTLOG_CATEGORY_LABELS[eventType.slice(EVENTLOG_PREFIX.length)];
+  return category ? `${artifactTypeLabel("eventlog-event") ?? "이벤트 로그"} · ${category}` : null;
+}
+
+/**
+ * Korean reading of a timeline event type: its own Korean name (eventlog-event …); a files event
+ * (`file-<kind>`) as 파일 · kind; an event-log event as EVTX 이벤트 · category; else the Korean
+ * name of the artifact row it came from plus the time kind its id carries
+ * (`artifact-<type>-<kind>`, core/timeline.py: `artifact-jumplist-automatic-target-accessed` →
+ * "자동 Jump List 파일 · 대상 접근"). `sourceType` is the row's `details.artifact_type`; without
+ * it (action dialogs list bare ids) the longest named type the id starts with is used. Else the id.
  * The kind stays in the text: 시각 종류 is not a 분석 기본 column, and two events of one record
  * (생성 / 수정) must not read the same.
  */
-export function timelineEventLabel(row: GridRow): string {
-  const eventType = row.artifactType ?? "";
-  const own = eventType ? (artifactTypeLabel(eventType) ?? DOCUMENT_EVENT_LABELS[eventType]) : null;
+export function eventTypeLabel(eventType: string, sourceType?: string | null): string {
+  if (!eventType) return "";
+  const own = artifactTypeLabel(eventType) ?? DOCUMENT_EVENT_LABELS[eventType];
   if (own) return own;
-  if (row.provider === "files" && eventType.startsWith("file-"))
-    return `파일 · ${timestampKindLabel(eventType.slice("file-".length))}`;
-  const sourceType = str(row.fields.sourceArtifactType);
+  if (eventType.startsWith("file-")) return `파일 · ${timestampKindLabel(eventType.slice("file-".length))}`;
+  const eventlog = eventlogLabel(eventType);
+  if (eventlog) return eventlog;
   const sourceLabel = sourceType ? artifactTypeLabel(sourceType) : null;
-  if (!sourceLabel) return eventType;
-  const prefix = `artifact-${sourceType}-`;
-  const kind = eventType.startsWith(prefix) ? eventType.slice(prefix.length) : "";
-  return kind ? `${sourceLabel} · ${timestampKindLabel(kind)}` : sourceLabel;
+  if (sourceType && sourceLabel) {
+    const prefix = `${ARTIFACT_PREFIX}${sourceType}-`;
+    const kind = eventType.startsWith(prefix) ? eventType.slice(prefix.length) : "";
+    return kind ? `${sourceLabel} · ${timestampKindLabel(kind)}` : sourceLabel;
+  }
+  if (eventType.startsWith(ARTIFACT_PREFIX)) {
+    const parts = eventType.slice(ARTIFACT_PREFIX.length).split("-");
+    for (let cut = parts.length - 1; cut >= 1; cut -= 1) {
+      const label = artifactTypeLabel(parts.slice(0, cut).join("-"));
+      if (label) return `${label} · ${timestampKindLabel(parts.slice(cut).join("-"))}`;
+    }
+  }
+  return eventType;
+}
+
+/** 이벤트 column text of a timeline row (`eventTypeLabel` with the row's source artifact type). */
+export function timelineEventLabel(row: GridRow): string {
+  return eventTypeLabel(row.artifactType ?? "", str(row.fields.sourceArtifactType) || null);
 }
 
 export function timestampKindOf(raw: Record<string, unknown>): string {
@@ -156,9 +264,11 @@ export const timelineCollection: CollectionDef = {
   },
   columns: [
     {
-      ...col.timestamp(190, ["analysis", "compact", "source"]),
-      // The narrowest the KST time reads whole; a narrow pane keeps 요약 beside it (fe-audit A5).
-      minWidth: 150,
+      // Default ≈ minimum: the width a time no longer needs goes to 요약 (it flexes).
+      ...col.timestamp(146, ["analysis", "compact", "source"]),
+      // The narrowest "2026-10-18 08:02:48" reads whole at 13px (126px text + padding; the
+      // header names the zone); a narrow pane keeps 요약 beside it (fe-audit A5).
+      minWidth: 144,
       // Server sort of the whole (filtered) timeline (`GET /timeline?sort=timestamp`).
       sortKey: "timestamp",
       // 시각 tooltip: the formatted time plus what it means ("수정", "실행 3회차", …) and its zone note.
@@ -202,9 +312,11 @@ export const timelineCollection: CollectionDef = {
       format: timelineEventLabel,
       tooltip: (r) => r.artifactType ?? "",
     }),
-    col.title("요약", 380),
+    // 390: 시각 (144) and 요약 share the pane without cutting the time.
+    { ...col.title("요약", 380), minWidth: 100 },
     col.review(),
-    col.path(420),
+    // The event's own file: whole path, the leading folders ellipsize and the file name stays.
+    col.path(420, ["analysis", "source"], { whole: true }),
   ],
   // A narrow pane keeps what happened next to when (fe-audit A5): 시각 > 요약 > 이벤트 > 시각 종류 > 출처 > 선별 > 경로.
   widthPriority: () => TIMELINE_PRIORITY,

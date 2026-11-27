@@ -53,6 +53,13 @@ export interface ColumnSpec {
   exportFormat?: (row: GridRow) => string;
   /** Extra selection-CSV columns written right after this one (exact UTC, zone status, …). */
   exportExtras?: readonly { header: string; value: (row: GridRow) => string }[];
+  /**
+   * Time column: the header names the display zone once ("시각 (KST)") and the visible cells
+   * hide it (`ZoneTime`: kept for a text selection, copy and screen readers), so a narrow pane
+   * keeps room for the next column. `format` (filter, tooltip) and the CSV keep the zone. A
+   * `render` cell hides it itself (`cellTime`).
+   */
+  zoneInHeader?: boolean;
   /** Rich cell content (chips, icons); falls back to the display text when absent. */
   render?: (row: GridRow) => ReactNode;
   /**

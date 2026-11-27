@@ -12,7 +12,7 @@ import type { GridRow } from "../../contracts/collection";
 import type { ViewerTarget } from "../../contracts/viewer";
 import { parseHash, serializeRoute } from "../../router";
 import { useAppStore } from "../../state/store";
-import { formatGridTime } from "../../utils/time";
+import { formatGridTime, headerZone } from "../../utils/time";
 import { FALLBACK_CATALOG, familyById, setCatalog } from "../flags/catalog";
 import { catalogColumn } from "../grid/columns/families";
 import { installFetch, jsonResponse, renderWithClient } from "../grid/testSupport";
@@ -634,7 +634,16 @@ describe("DerivedPane (Q-X5 / Q-X12)", () => {
       within(grid)
         .getAllByRole("columnheader")
         .map((h) => h.textContent),
-    ).toEqual(["가린 값", "길이", "SHA-256", "건수", "출처 계열", "처음 본 시각", "마지막 본 시각"]);
+    ).toEqual([
+      "가린 값",
+      "길이",
+      "SHA-256",
+      "건수",
+      "출처 계열",
+      // Time headers name the display zone once; the cells leave it out.
+      `처음 본 시각 (${headerZone("local")})`,
+      `마지막 본 시각 (${headerZone("local")})`,
+    ]);
   });
 });
 

@@ -1,23 +1,31 @@
-/** 시각으로 이동 field of the 시간 개요 띠: a date opens that day, a date-time the 30 minutes around it. */
+/**
+ * 시각으로 이동 field of the 시간 개요 띠: a date opens that day, a date-time the 30 minutes
+ * around it, both read in the console's display zone (the zone the grid shows).
+ */
 
 import { useId, useState } from "react";
 import { Icon } from "../../icons";
-import { applyRange, fmt } from "./timelineCommands";
+import { type TimezoneChoice, zoneShort } from "../../utils/time";
+import { applyRange, rangeText } from "./timelineCommands";
 import { jumpRange, parseJumpTime } from "./timelineRange";
 
-export function TimelineJump() {
+/** The input's format hint: a format, never a date that reads like an entered value. */
+const JUMP_PLACEHOLDER = "YYYY-MM-DD HH:mm";
+
+export function TimelineJump({ tz }: { tz: TimezoneChoice }) {
   const [jumpText, setJumpText] = useState("");
   const [jumpError, setJumpError] = useState("");
   const errorId = useId();
+  const zone = zoneShort(tz, new Date());
   const submitJump = () => {
-    const jump = parseJumpTime(jumpText);
+    const jump = parseJumpTime(jumpText, tz);
     if (!jump) {
-      setJumpError("예: 2026-04-18 14:30 또는 2026-04-18");
+      setJumpError(`날짜 또는 날짜 시:분 (${zone}) — 예: 2026-04-18 14:30`);
       return;
     }
     setJumpError("");
     const next = jumpRange(jump);
-    applyRange(next, `${fmt(next.fromMs)} ~ ${fmt(next.toMs)} 구간을 봅니다`);
+    applyRange(next, `${rangeText(next, tz)} 구간을 봅니다`);
   };
 
   return (
@@ -32,10 +40,11 @@ export function TimelineJump() {
       <input
         type="text"
         inputMode="numeric"
-        aria-label="시각으로 이동 (날짜 또는 날짜 시:분)"
+        aria-label={`시각으로 이동 (날짜 또는 날짜 시:분, ${zone})`}
+        title={`날짜(그날 하루) 또는 날짜 시:분(전후 30분), ${zone} 기준`}
         aria-invalid={jumpError ? true : undefined}
         aria-describedby={jumpError ? errorId : undefined}
-        placeholder="2026-04-18 14:30"
+        placeholder={JUMP_PLACEHOLDER}
         value={jumpText}
         onChange={(event) => setJumpText(event.target.value)}
       />

@@ -4,9 +4,11 @@
  * steps, a window around an instant, and the time a user types to jump to.
  *
  * Ranges are inclusive `[fromMs, toMs]` like the filter bar's `from`/`to` (histogram
- * `rangeOf`: `to` = last bar end − 1 ms). Typed times are browser-local, like the range inputs.
+ * `rangeOf`: `to` = last bar end − 1 ms). Day bars and typed times follow the console's display
+ * zone (`tz`), like the grid's 시각 column.
  */
 
+import { startOfDayMs, type TimezoneChoice, wallClockToMs } from "../../utils/time";
 import {
   DAY_SPAN_LIMIT,
   type Granularity,
@@ -55,31 +57,29 @@ export function rangeFromBounds(
   return fromMs === undefined || toMs === undefined || toMs < fromMs ? null : { fromMs, toMs };
 }
 
+/** Most bars a zoomed range is padded to (an absurdly fine server unit keeps its own buckets). */
+const MAX_RANGE_BARS = 2000;
+
 /**
  * Bars of the strip. Without a range: the whole timeline (`payload` = the run's histogram) in
- * hour bars up to 3 days when the server buckets are ≤ 1 h, else day bars on local midnights
- * (the grid shows local time), empty bars kept so the axis stays linear; spans past ~13 months
+ * hour bars up to 3 days when the server buckets are ≤ 1 h, else day bars on display-zone
+ * midnights (the grid's zone), empty bars kept so the axis stays linear; spans past ~13 months
  * keep the server buckets. With a range, `payload` is the histogram of that window
- * (`GET …/timeline-histogram?from=&to=`, finer server buckets) and its buckets are the bars.
+ * (`GET …/timeline-histogram?from=&to=`, finer server buckets): its unit, laid over the whole
+ * range (the server stops at the last event's bucket), so the axis spans what the header names.
  */
 export function stripBars(
   payload: TimelineHistogramPayload,
   range: MsRange | null,
   extent: MsRange | null,
+  tz: TimezoneChoice,
 ): { granularity: Granularity; buckets: TimeBucket[] } {
-  if (range) {
-    const buckets = rebucket(payload, "native").buckets.filter(
-      (bucket) => bucket.endMs > range.fromMs && bucket.startMs <= range.toMs,
-    );
-    return { granularity: "native", buckets };
-  }
+  if (range) return { granularity: "native", buckets: rangeBars(payload, range) };
   if (!extent) return { granularity: "day", buckets: [] };
   if (extent.toMs - extent.fromMs > DAY_SPAN_LIMIT) return rebucket(payload, "native");
   const serverMs = (payload.bucket_seconds ?? 0) * 1000;
   const size = extent.toMs - extent.fromMs < HOUR_BARS_UP_TO && serverMs <= HOUR ? HOUR : DAY;
-  const start = new Date(extent.fromMs);
-  if (size === DAY) start.setHours(0, 0, 0, 0);
-  const first = size === DAY ? start.getTime() : Math.floor(extent.fromMs / HOUR) * HOUR;
+  const first = size === DAY ? startOfDayMs(extent.fromMs, tz) : Math.floor(extent.fromMs / HOUR) * HOUR;
   const buckets: TimeBucket[] = [];
   for (let at = first; at <= extent.toMs; at += size)
     buckets.push({ startMs: at, endMs: at + size, count: 0 });
@@ -90,6 +90,25 @@ export function stripBars(
     if (slot) slot.count += bucket.count;
   }
   return { granularity: size === HOUR ? "hour" : "day", buckets };
+}
+
+/** The window histogram's buckets, with empty bars of the same unit from `fromMs` through `toMs`. */
+function rangeBars(payload: TimelineHistogramPayload, range: MsRange): TimeBucket[] {
+  const native = rebucket(payload, "native").buckets;
+  const inRange = native.filter((bucket) => bucket.endMs > range.fromMs && bucket.startMs <= range.toMs);
+  const anchor = inRange[0];
+  const size = anchor ? anchor.endMs - anchor.startMs : (payload.bucket_seconds ?? 0) * 1000;
+  if (!(size > 0) || (range.toMs - range.fromMs) / size > MAX_RANGE_BARS) return inRange;
+  const origin = anchor ? anchor.startMs : range.fromMs;
+  const first = origin - Math.ceil((origin - range.fromMs) / size) * size;
+  const buckets: TimeBucket[] = [];
+  for (let at = first; at <= range.toMs; at += size)
+    buckets.push({ startMs: at, endMs: at + size, count: 0 });
+  for (const bucket of inRange) {
+    const slot = buckets[Math.round((bucket.startMs - first) / size)];
+    if (slot) slot.count += bucket.count;
+  }
+  return buckets;
 }
 
 /** The same-width range before (−1) or after (+1), kept inside the extent. */
@@ -118,31 +137,26 @@ export function toIsoBounds(range: MsRange): { from: string; to: string } {
 
 export interface JumpTime {
   ms: number;
-  /** A date alone means the whole (local) day; a clock time means "around this instant". */
+  /** A date alone means the whole day (display zone); a clock time means "around this instant". */
   precision: "day" | "minute";
 }
 
 const JUMP_PATTERN = /^(\d{4})[-./](\d{1,2})[-./](\d{1,2})(?:[ T](\d{1,2})(?::(\d{2}))?(?::(\d{2}))?)?$/;
 
-/** `2026-04-18`, `2026-04-18 14`, `2026.4.18 14:30`, `2026-04-18T14:30:05` (browser-local); else null. */
-export function parseJumpTime(text: string): JumpTime | null {
+/**
+ * `2026-04-18`, `2026-04-18 14`, `2026.4.18 14:30`, `2026-04-18T14:30:05` read in the display
+ * zone (the zone the grid shows); else null (2월 30일, 25시, a time the zone skips).
+ */
+export function parseJumpTime(text: string, tz: TimezoneChoice): JumpTime | null {
   const match = JUMP_PATTERN.exec(text.trim());
   if (!match) return null;
   const [, y, mo, d, h, mi, s] = match.map((part) => (part === undefined ? undefined : Number(part)));
   if (y === undefined || mo === undefined || d === undefined) return null;
-  const date = new Date(y, mo - 1, d, h ?? 0, mi ?? 0, s ?? 0);
-  const valid =
-    date.getFullYear() === y &&
-    date.getMonth() === mo - 1 &&
-    date.getDate() === d &&
-    (h === undefined || date.getHours() === h) &&
-    (mi === undefined || mi < 60) &&
-    (s === undefined || s < 60);
-  if (!valid) return null;
-  return { ms: date.getTime(), precision: h === undefined ? "day" : "minute" };
+  const ms = wallClockToMs(tz, y, mo, d, h ?? 0, mi ?? 0, s ?? 0);
+  return ms === null ? null : { ms, precision: h === undefined ? "day" : "minute" };
 }
 
-/** The range a typed time opens: its local day, or ±30 min around the instant. */
+/** The range a typed time opens: its day, or ±30 min around the instant. */
 export function jumpRange(jump: JumpTime): MsRange {
   return jump.precision === "day" ? { fromMs: jump.ms, toMs: jump.ms + DAY - 1 } : windowAround(jump.ms);
 }

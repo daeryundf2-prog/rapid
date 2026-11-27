@@ -24,9 +24,10 @@ import {
 import { announce } from "../../a11y";
 import { ApiError } from "../../api/client";
 import { CommandButton } from "../../commands/CommandButton";
+import { ZoneTime } from "../../components/ZoneTime";
 import type { Route } from "../../router";
 import { useRoute, useTimezone } from "../../state/hooks";
-import { formatGridTime } from "../../utils/time";
+import { formatGridTime, headerZone } from "../../utils/time";
 import {
   DERIVED_TABLE_IDS,
   type DerivedRow,
@@ -392,7 +393,7 @@ function DerivedTablePane() {
             <div role="row" aria-rowindex={1} className="derived-row derived-row-head">
               {columns.map((column) => (
                 <div key={column.id} role="columnheader" className="derived-cell derived-head-cell">
-                  {column.header}
+                  {column.zoneInHeader ? `${column.header} (${headerZone(timezone)})` : column.header}
                 </div>
               ))}
             </div>
@@ -419,7 +420,15 @@ function DerivedTablePane() {
                       className={`derived-cell${column.mono ? " derived-mono" : ""}${column.numeric ? " derived-num" : ""}`}
                       title={text}
                     >
-                      {text || <span className="grid-cell-empty">—</span>}
+                      {text ? (
+                        column.zoneInHeader ? (
+                          <ZoneTime text={text} zone={headerZone(timezone)} />
+                        ) : (
+                          text
+                        )
+                      ) : (
+                        <span className="grid-cell-empty">—</span>
+                      )}
                     </div>
                   );
                 })}

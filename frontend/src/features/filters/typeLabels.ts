@@ -29,6 +29,36 @@ export const ANALYSIS_TYPE_LABELS: Readonly<Record<string, string>> = {
 };
 
 /**
+ * Artifact types no tree node names alone (core/timeline.py TIMELINE_FIELD_MAP keys of helper and
+ * grouped rows): without a name here their timeline events read as raw ids
+ * ("artifact-amcache-entry-last-written") in the 이벤트 column.
+ */
+export const UNLISTED_TYPE_LABELS: Readonly<Record<string, string>> = {
+  "amcache-entry": "Amcache 항목",
+  "shimcache-entry": "ShimCache 항목",
+  "bam-entry": "BAM 실행 기록",
+  "srum-app-usage": "SRUM 앱 사용량",
+  "srum-network-usage": "SRUM 네트워크 사용량",
+  "shellbag-native-candidate": "ShellBags 후보",
+  "windows-account-lifecycle": "Windows 계정 수명 주기",
+  "memory-minidump": "메모리 미니덤프",
+  "windows-search-index-entry": "Windows 검색 색인 항목",
+  "windows-filesystem-usn": "USN 저널 레코드",
+  "usn-journal-inventory": "USN 저널 목록",
+  "browser-history-visit": "브라우저 방문 기록",
+  "macos-quarantine-event": "macOS 격리(다운로드) 기록",
+  "cloud-export-archive": "클라우드 내보내기 아카이브",
+  "cloud-message": "클라우드 메시지",
+  "kakaotalk-memory-message-residue": "카카오톡 메모리 메시지 잔존",
+  "kakaotalk-memory-dump": "카카오톡 메모리 덤프",
+  "kakaotalk-memory-dump-skipped": "카카오톡 메모리 덤프(건너뜀)",
+  "kakaotalk-memory-key-residue": "카카오톡 메모리 키 잔존",
+  "kakaotalk-memory-sqlite-carve": "카카오톡 메모리 SQLite 카빙",
+  "kakaotalk-memory-residue-source": "카카오톡 메모리 잔존 출처",
+  "sticky-note": "스티커 메모",
+};
+
+/**
  * Names that win over the tree's node labels: a type listed by two nodes (registry row + file
  * row) needs a neutral name, and P2P node labels ("전송 기록", "읽기 오류") read ambiguously
  * out of their tree group in the 유형 list.
@@ -65,6 +95,7 @@ function labels(): Map<string, string> {
     }
   }
   for (const [type, label] of Object.entries(ANALYSIS_TYPE_LABELS)) if (!out.has(type)) out.set(type, label);
+  for (const [type, label] of Object.entries(UNLISTED_TYPE_LABELS)) if (!out.has(type)) out.set(type, label);
   cache = out;
   return out;
 }

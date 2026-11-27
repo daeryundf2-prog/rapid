@@ -19,7 +19,8 @@ import { announce, useRovingTabindex } from "../../a11y";
 import { api } from "../../api/client";
 import { getRunTree } from "../../api/runs";
 import type { GridRow } from "../../contracts/collection";
-import { useRoute as useAppRoute } from "../../state/hooks";
+import { useRoute as useAppRoute, useTimezone } from "../../state/hooks";
+import { timeRangeText } from "../filters/filterModel";
 import { useFilterStore } from "../filters/filterStore";
 import { hasClock } from "../filters/rowConditions";
 import { useRoute } from "../grid/adapter";
@@ -90,6 +91,7 @@ function TimelineHistogram({ runId }: { runId: string }) {
   selectionRef.current = selection;
   const barsRef = useRef<HTMLDivElement | null>(null);
   const filters = useFilterStore((s) => s.filters);
+  const { timezone } = useTimezone();
   const filterFrom = filters.from ? Date.parse(filters.from) : null;
   const filterTo = filters.to ? Date.parse(filters.to) : null;
   const hasFilter = filterFrom !== null || filterTo !== null;
@@ -299,7 +301,7 @@ function TimelineHistogram({ runId }: { runId: string }) {
         ) : null}
         {hasFilter ? (
           <span className="hist-filter">
-            시간 범위 필터 적용 중: {filters.from ?? "처음"} ~ {filters.to ?? "끝"}
+            시간 범위 필터 적용 중: {timeRangeText(filters.from, filters.to, timezone)}
             <ShowInColumns />
             <button type="button" className="view-link" onClick={() => emitTimeRangeFilter(null, null)}>
               범위 해제

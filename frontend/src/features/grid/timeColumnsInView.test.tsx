@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetArtifactCountsCache } from "../../api/collections";
+import { useAppStore } from "../../state/store";
 import { useGridLocalStore } from "./adapter";
 import { DataGrid } from "./DataGrid";
 import {
@@ -127,5 +128,37 @@ describe("date/time columns in view by default (P1)", () => {
     fireEvent.click(within(menu).getByRole("checkbox", { name: "날짜 및 시각" }));
     await waitFor(() => expect(headerIds()).not.toContain("sum:time"));
     expect(headerIds()[0]).toBe("type");
+  });
+});
+
+describe("time columns name the display zone in the header, once (#79 follow-up)", () => {
+  /** What the eye reads in a cell: its text without the visually hidden zone part. */
+  const visibleText = (cell: Element | null | undefined) => {
+    const copy = cell?.cloneNode(true) as Element | undefined;
+    for (const hidden of copy?.querySelectorAll(".zone-time-hidden") ?? []) hidden.remove();
+    return copy?.textContent ?? "";
+  };
+  const header = (id: string) => headerCells().find((h) => h.dataset.col === id)?.textContent;
+
+  afterEach(() => useAppStore.setState({ timezone: null }));
+
+  it("the header carries the zone and follows a zone change; cells show the time without it", async () => {
+    restoreWidth = mockGridWidth(WIDTHS["1440 rail"]);
+    useAppStore.setState({ timezone: "Asia/Seoul" });
+    installFetch({ "/files": flaggedFilesHandler });
+    renderWithClient(<DataGrid />);
+    await waitFor(() => expect(rows().length).toBeGreaterThan(0));
+    expect(header("timestamp")).toBe("수정 (KST)");
+    const cell = rows()[0]?.querySelector('[data-col="timestamp"]');
+    expect(visibleText(cell)).toBe("2026-01-01 09:00:00");
+    // A text selection, copy and screen readers still get the zone; so does the tooltip.
+    expect(cell?.textContent).toBe("2026-01-01 09:00:00 KST");
+    expect(cell?.getAttribute("title")).toContain("2026-01-01 09:00:00 KST");
+
+    useAppStore.setState({ timezone: "utc" });
+    await waitFor(() => expect(header("timestamp")).toBe("수정 (UTC)"));
+    const utcCell = rows()[0]?.querySelector('[data-col="timestamp"]');
+    expect(visibleText(utcCell)).toBe("2026-01-01 00:00:00");
+    expect(utcCell?.textContent).toBe("2026-01-01 00:00:00 UTC");
   });
 });

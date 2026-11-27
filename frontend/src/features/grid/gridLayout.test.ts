@@ -3,7 +3,7 @@ import { ARTIFACT_PRIORITY } from "./columns/artifacts";
 import { FILES_PRIORITY } from "./columns/files";
 import { fitColumnWidths, priorityHiddenColumns } from "./gridUtils";
 
-describe("fitColumnWidths (항목 flexes; nothing shrinks)", () => {
+describe("fitColumnWidths (항목 flexes; shrink columns give back width)", () => {
   const base = [140, 130, 220, 200, 88]; // 시각 · 유형 · 항목 · 경로 · 선별
 
   it("gives the slack to the flexing column", () => {
@@ -12,8 +12,31 @@ describe("fitColumnWidths (항목 flexes; nothing shrinks)", () => {
     expect(out.reduce((a, b) => a + b, 0)).toBe(1000);
   });
 
-  it("never shrinks a column when the pane is narrower (the grid scrolls instead)", () => {
+  it("never shrinks a column it was not given when the pane is narrower (the grid scrolls instead)", () => {
     expect(fitColumnWidths(base, { grow: 2, available: 500 })).toEqual(base);
+  });
+
+  it("takes the excess from the shrink columns in order, each down to its minimum", () => {
+    // 경로 (lowest priority) first down to 150, then 유형 down to 100: 778 − 50 − 28 = 700.
+    const shrink = [
+      { index: 3, min: 150 },
+      { index: 1, min: 100 },
+    ];
+    expect(fitColumnWidths(base, { grow: 2, available: 700, shrink })).toEqual([140, 102, 220, 150, 88]);
+    // Past every minimum the rest still overflows (scrolls); nothing goes below its minimum.
+    expect(fitColumnWidths(base, { grow: 2, available: 500, shrink })).toEqual([140, 100, 220, 150, 88]);
+    // A column already at or below its minimum, or an unknown index, is skipped.
+    expect(
+      fitColumnWidths(base, {
+        grow: 2,
+        available: 770,
+        shrink: [
+          { index: 4, min: 88 },
+          { index: 9, min: 0 },
+          { index: 0, min: 100 },
+        ],
+      }),
+    ).toEqual([132, 130, 220, 200, 88]);
   });
 
   it("leaves widths alone before the pane is measured or when 항목 was resized", () => {

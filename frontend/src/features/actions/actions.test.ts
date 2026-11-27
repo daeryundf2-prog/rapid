@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GridRow } from "../../contracts/collection";
 import { relatedSelection, relationReason, rowsSelection, type SelectionProfile } from "./actionApi";
-import { summarize } from "./summary";
+import { spanText, summarize } from "./summary";
 
 function row(partial: Partial<GridRow> & Pick<GridRow, "ref">): GridRow {
   return {
@@ -71,7 +71,7 @@ describe("selection summary", () => {
   };
 
   it("lists count, span, sources by count, events, paths and samples in that order", () => {
-    const lines = summarize(profile);
+    const lines = summarize(profile, "Asia/Seoul");
     expect(lines.map((line) => line.label)).toEqual([
       "건수",
       "기간",
@@ -82,19 +82,33 @@ describe("selection summary", () => {
     ]);
     expect(lines[0]?.value).toBe("18건");
     expect(lines[2]?.value).toBe("아티팩트 14 · 파일 4");
+    // 기간 in the display zone, seconds kept, the shared date once; 이벤트 in Korean, not the raw id.
+    expect(lines[1]?.value).toBe("2026-04-18 14:01:07 ~ 14:57:58 KST");
+    expect(lines[3]?.value).toBe("파일 · 생성 4");
+  });
+
+  it("reads a selection span in the display zone, the end's date only when it differs", () => {
+    expect(spanText("2026-04-18T05:01:07Z", "2026-04-18T05:01:07Z", "utc")).toBe("2026-04-18 05:01:07 UTC");
+    expect(spanText("2026-04-18T14:00:00Z", "2026-04-18T16:00:00Z", "Asia/Seoul")).toBe(
+      "2026-04-18 23:00:00 ~ 2026-04-19 01:00:00 KST",
+    );
+    expect(spanText("garbage", "2026-04-18T16:00:00Z", "utc")).toBe("garbage ~ 2026-04-18T16:00:00Z");
   });
 
   it("names each collection when the selection spans several", () => {
-    const mixed = summarize({
-      ...profile,
-      total: 3,
-      by_collection: { timeline: 1, files: 2 },
-      time_range: null,
-      by_source: {},
-      by_event_type: {},
-      top_paths: [],
-      sample: [],
-    });
+    const mixed = summarize(
+      {
+        ...profile,
+        total: 3,
+        by_collection: { timeline: 1, files: 2 },
+        time_range: null,
+        by_source: {},
+        by_event_type: {},
+        top_paths: [],
+        sample: [],
+      },
+      "utc",
+    );
     expect(mixed).toEqual([{ label: "건수", value: "3건 (파일 2 · 타임라인 1)" }]);
   });
 });

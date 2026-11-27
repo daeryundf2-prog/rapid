@@ -5,6 +5,7 @@ import { fuzzyMatchIndexes } from "../commands/fuzzy";
 import { disabledReasonOf, useCommandContext, useCommands } from "../commands/registry";
 import { Icon, isIconName } from "../icons";
 import { keyLabel } from "../shortcuts";
+import { useTimezone } from "../state/hooks";
 import { useAppStore } from "../state/store";
 import { buildPaletteGroups, type PaletteItem } from "./paletteGroups";
 import { timeJumpItems } from "./paletteTimeJump";
@@ -48,6 +49,7 @@ function PaletteDialog() {
   const openCollection = useAppStore((s) => s.openCollection);
   const commands = useCommands();
   const ctx = useCommandContext();
+  const { timezone } = useTimezone();
   const [query, setQuery] = useState("");
   /** -1 = automatic: the first runnable option (a disabled match never captures Enter over a search). */
   const [active, setActive] = useState(-1);
@@ -84,9 +86,9 @@ function PaletteDialog() {
       trimmed,
       (c) => disabledReasonOf(c, ctx),
       extra,
-      timeJumpItems(trimmed, ctx.runId),
+      timeJumpItems(trimmed, ctx.runId, timezone),
     );
-  }, [commands, ctx, query, openCollection]);
+  }, [commands, ctx, query, openCollection, timezone]);
 
   const flat = useMemo(() => groups.flatMap((g) => g.items), [groups]);
   const firstRunnable = Math.max(

@@ -13,6 +13,8 @@
   gap: var(--space-2);
   min-width: 0;
   color: var(--text-muted);
+  /* "기준 행" stays one label at 390 (it broke into 기준 / 행). */
+  white-space: nowrap;
 }
 
 .action-anchor strong {
@@ -90,6 +92,25 @@
   overflow-wrap: anywhere;
   white-space: pre-line;
   font-variant-numeric: tabular-nums;
+}
+
+.action-paths {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.action-path {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.action-path-count {
+  flex: none;
+  color: var(--text-muted);
 }
 
 .action-mark {

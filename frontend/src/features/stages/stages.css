@@ -360,7 +360,7 @@
 
 .stage-page h3 {
   margin: 0 0 var(--space-1);
-  font-size: 0.9rem;
+  font-size: var(--fs-panel-title);
 }
 
 .stage-section {

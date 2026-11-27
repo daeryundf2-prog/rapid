@@ -1,11 +1,15 @@
 import type { ReactNode } from "react";
 import { ToneChip } from "../../../components/ToneChip";
 import type { GridRow } from "../../../contracts/collection";
+import { cellTime } from "./common";
 
 /** Title of a modified cell whose time is the acquisition copy's host mtime (parser-quality r1). */
 export const COPY_TIME_TITLE = "취득 사본의 시각 — 원본 시각 아님";
 
-/** 수정 cell: the chosen time; an acquisition-copy time renders muted with COPY_TIME_TITLE. */
+/**
+ * 수정 cell: the chosen time (the header names its zone, `cellTime`); an acquisition-copy time
+ * renders muted with COPY_TIME_TITLE.
+ */
 export function modifiedCell(row: GridRow, text: string): ReactNode {
   if (!text) {
     return (
@@ -17,12 +21,12 @@ export function modifiedCell(row: GridRow, text: string): ReactNode {
   if (row.fields.modifiedOrigin === "acquisition-copy") {
     return (
       <span className="grid-cell-text grid-cell-copytime" data-testid="files-copy-time">
-        {text}
+        {cellTime(text)}
         <span className="sr-only"> ({COPY_TIME_TITLE})</span>
       </span>
     );
   }
-  return <span className="grid-cell-text">{text}</span>;
+  return <span className="grid-cell-text">{cellTime(text)}</span>;
 }
 
 /** Title of an "unknown" 삭제 value: the scan could not tell allocated from deleted. */

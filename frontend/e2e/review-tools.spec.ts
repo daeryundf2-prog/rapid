@@ -330,14 +330,22 @@ test("E3 fixes: propagation from the viewer acts on the viewer row; a tag key to
   const imageTab = viewer.getByRole("tab", { name: /이미지/ });
   if (await imageTab.count()) await imageTab.first().click();
   const strip = page.locator(".image-strip");
-  await expect(strip.locator("img.image-thumb-img").first()).toBeVisible({ timeout: 15_000 });
+  // Count the strip only once it has finished loading: each tile shows "이미지 불러오는 중…"
+  // until its image blob arrives, so counting right after the first thumbnail appears saw
+  // one image on a slow run.
+  const thumbs = strip.locator("img.image-thumb-img");
+  await expect(thumbs.first()).toBeVisible({ timeout: 15_000 });
+  await expect(strip.getByText("이미지 불러오는 중…")).toHaveCount(0, { timeout: 15_000 });
+  await expect
+    .poll(() => thumbs.evaluateAll((imgs) => imgs.every((img) => (img as HTMLImageElement).complete)), {
+      timeout: 15_000,
+    })
+    .toBe(true);
+  await expect.poll(() => thumbs.count()).toBeGreaterThan(1);
   await page.locator("body").focus();
   await page.keyboard.press("Shift+KeyB");
   await expect(page.locator(".image-view")).toHaveAttribute("data-media-blur", "on");
-  const filters = await strip
-    .locator("img.image-thumb-img")
-    .evaluateAll((imgs) => imgs.map((img) => getComputedStyle(img).filter));
-  expect(filters.length).toBeGreaterThan(1);
+  const filters = await thumbs.evaluateAll((imgs) => imgs.map((img) => getComputedStyle(img).filter));
   for (const filter of filters) expect(filter).toContain("blur");
   const tile = strip.locator("button.image-thumb:not(.is-current)").first();
   await tile.focus();
