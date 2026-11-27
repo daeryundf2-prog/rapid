@@ -99,6 +99,13 @@ def review_tool_http_error(exc: CaseDatabaseError) -> HTTPException:
 TAG_BATCH_EXCLUSIVE_FIELDS = ("status", "verification_status", "tags", "add_tags", "note", "include_in_report")
 
 
+def check_tag_batch_fields(present: Callable[[str], object]) -> None:
+    """A ``tag_ids`` batch carrying a status / tag-name batch field (``present(name)`` not None) is a 422."""
+    mixed = [name for name in TAG_BATCH_EXCLUSIVE_FIELDS if present(name) is not None]
+    if mixed:
+        raise HTTPException(status_code=422, detail=f"tag_ids는 다른 표시({', '.join(mixed)})와 함께 보낼 수 없습니다")
+
+
 def apply_review_tag_batch(database: CaseDatabase, request: Any, targets: list[dict[str, str]]) -> dict[str, object]:
     """``POST /api/case-db/review-batch`` with ``tag_ids`` / ``remove_tag_ids`` / ``propagate_by_hash``.
 
@@ -107,9 +114,7 @@ def apply_review_tag_batch(database: CaseDatabase, request: Any, targets: list[d
     ``run_id`` is given) whose hash equals a target's. Above 10,000 rows nothing is
     applied and the refusal says why (422).
     """
-    mixed = [name for name in TAG_BATCH_EXCLUSIVE_FIELDS if getattr(request, name, None) is not None]
-    if mixed:
-        raise HTTPException(status_code=422, detail=f"tag_ids는 다른 표시({', '.join(mixed)})와 함께 보낼 수 없습니다")
+    check_tag_batch_fields(lambda name: getattr(request, name, None))
     add_ids = [int(item) for item in request.tag_ids or []]
     remove_ids = [int(item) for item in request.remove_tag_ids or []]
     if request.propagate_by_hash and not add_ids:

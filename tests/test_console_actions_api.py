@@ -132,14 +132,17 @@ class ActionApiTests(unittest.TestCase):
         for tail in ("²", "٣", "9" * 13, "9" * 5000):
             row = {"collection": "timeline", "locator": f"/events/{tail}"}
             calls = {
-                "select rows": lambda: self._select({"rows": [row]}),
-                "select anchor": lambda: self._select({"related": {"relation": "same_path", "anchor": row}}),
-                "mark preview": lambda: self._mark({"rows": [row]}, {"status": "relevant"}),
-                "mark apply": lambda: self._mark({"rows": [row]}, {"status": "relevant"}, dry_run=False),
+                "select rows": ("select", {"rows": [row]}, {}),
+                "select anchor": ("select", {"related": {"relation": "same_path", "anchor": row}}, {}),
+                "mark preview": ("mark", {"rows": [row]}, {}),
+                "mark apply": ("mark", {"rows": [row]}, {"dry_run": False}),
             }
-            for name, call in calls.items():
+            for name, (action, selection, body) in calls.items():
                 with self.subTest(tail=tail[:20], call=name):
-                    response = call()
+                    if action == "select":
+                        response = self._select(selection)
+                    else:
+                        response = self._mark(selection, {"status": "relevant"}, **body)
                     self.assertIn(response.status_code, (400, 422), response.text)
         applied = self._mark({"rows": [{"collection": "files", "locator": "/candidates/²"}]}, {"status": "relevant"}, dry_run=False)
         self.assertEqual(applied.status_code, 400, applied.text)
@@ -195,6 +198,53 @@ class ActionApiTests(unittest.TestCase):
                     self.assertIn("agent:", spoof.json()["detail"])
         self.assertEqual(self.client.get(history_url).json().get("entries", []), [])
 
+    def test_preview_refuses_exactly_what_apply_refuses(self) -> None:
+        index, _ = self.timed[-4]
+        good = {"collection": "timeline", "locator": f"/events/{index}"}
+        history_url = f"/api/runs/{self.run_id}/review-history?collection=timeline&locator=/events/{index}"
+        cases = [
+            ("unknown timeline row", [good, {"collection": "timeline", "locator": "/events/999999"}], {"status": "relevant"}, 400, "로케이터"),
+            ("unknown file row", [good, {"collection": "files", "locator": "/candidates/999999"}], {"status": "relevant"}, 400, "로케이터"),
+            ("non-ascii file row", [good, {"collection": "files", "locator": "/candidates/²"}], {"status": "relevant"}, 400, "로케이터"),
+            ("unknown collection", [good, {"collection": "nowhere", "locator": "/rows/0"}], {"status": "relevant"}, 400, "로케이터"),
+            ("tag_ids with a status", [good], {"status": "relevant", "tag_ids": [1]}, 422, "tag_ids는 다른 표시"),
+            ("tag_ids with excluded", [good], {"status": "excluded", "tag_ids": [1]}, 422, "tag_ids는 다른 표시"),
+            ("empty tag_ids", [good], {"tag_ids": []}, 422, "mark에 적용할 표시"),
+            ("empty add_tags", [good], {"add_tags": []}, 422, "mark에 적용할 표시"),
+            ("unknown tag id", [good], {"tag_ids": [999999]}, 404, "태그를 찾을 수 없습니다"),
+        ]
+        for name, rows, mark, status, needle in cases:
+            with self.subTest(name):
+                preview = self._mark({"rows": rows}, mark)
+                applied = self._mark({"rows": rows}, mark, dry_run=False)
+                self.assertEqual((preview.status_code, applied.status_code), (status, status), (preview.text, applied.text))
+                self.assertEqual(preview.json()["detail"], applied.json()["detail"])
+                self.assertIn(needle, preview.json()["detail"])
+        self.assertEqual(self.client.get(history_url).json().get("entries", []), [], "a refused mark writes nothing")
+
+        case_id = self.client.get(f"/api/runs/{self.run_id}/review-map").json()["case_id"]
+        tags = self.client.get(f"/api/cases/{case_id}/tags", params={"run_id": self.run_id}).json()["tags"]
+        mark = {"tag_ids": [tags[0]["id"]]}
+        preview = self._mark({"rows": [good]}, mark)
+        self.assertEqual(preview.status_code, 200, preview.text)
+        applied = self._mark({"rows": [good]}, mark, dry_run=False)
+        self.assertEqual(applied.status_code, 200, applied.text)
+        self.assertEqual(applied.json()["updated_count"], 1)
+
+    def test_dry_run_takes_only_a_json_boolean(self) -> None:
+        index, _ = self.timed[-5]
+        selection = {"rows": [{"collection": "timeline", "locator": f"/events/{index}"}]}
+        history_url = f"/api/runs/{self.run_id}/review-history?collection=timeline&locator=/events/{index}"
+        # Lax coercion read "false", "0", "no", "off" and 0 as false: they applied.
+        for value in ("false", "False", "0", "no", "off", 0, "true", 1, None):
+            with self.subTest(dry_run=value):
+                response = self._mark(selection, {"status": "relevant"}, dry_run=value)
+                self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(self.client.get(history_url).json().get("entries", []), [])
+        preview = self._mark(selection, {"status": "relevant"}, dry_run=True)
+        self.assertEqual(preview.status_code, 200, preview.text)
+        self.assertTrue(preview.json()["dry_run"])
+
     def test_histogram_window_counts_only_its_range(self) -> None:
         _, at = self.timed[0]
         half = dt.timedelta(minutes=30)
@@ -222,6 +272,86 @@ class ActionApiTests(unittest.TestCase):
             over = self._mark(selection, {"status": "relevant"}, dry_run=False)
         self.assertEqual(over.status_code, 422)
         self.assertIn("범위를 좁히세요", over.json()["detail"])
+
+
+@unittest.skipUnless(HAS_FASTAPI, "fastapi is required for RapidTriage API tests")
+class ActionPreviewWithoutCaseDbTests(unittest.TestCase):
+    """A run without its case DB (``--no-case-db``, a failed persist): a preview must not build it."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.temp = tempfile.TemporaryDirectory()
+        base = Path(cls.temp.name)
+        root = base / "case-root"
+        root.mkdir()
+        build_run_fixture(root)
+        cls.client = api_test_client(RunJobStore(), case_db_roots=[cls.temp.name])
+        output_dir = base / "run-out"
+        response = cls.client.post(
+            "/api/runs",
+            json={"root": str(root), "mode": "fraud", "output_dir": str(output_dir), "read_only": True, "wait": True},
+        )
+        assert response.status_code == 202, response.text
+        cls.run_id = response.json()["run_id"]
+        cls.database = output_dir / "rapidtriage-case.db"
+        for path in output_dir.glob("rapidtriage-case.db*"):
+            path.unlink()
+        run = cls.client.get(f"/api/runs/{cls.run_id}").json()
+        cls.outputs = (run.get("summary") or run)["outputs"]
+        cls.events = cls.client.get(f"/api/runs/{cls.run_id}/timeline?limit=1000").json()["events"]
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.client.close()
+        cls.temp.cleanup()
+
+    def _mark(self, rows: list[dict], mark: dict, **body):
+        return self.client.post(f"/api/runs/{self.run_id}/actions/mark", json={"selection": {"rows": rows}, "mark": mark, **body})
+
+    def test_preview_checks_rows_like_the_case_db_without_building_it(self) -> None:
+        kind = "browser"  # the fixture's browser history output has rows
+        self.assertIn(f"artifacts_{kind}", self.outputs)
+        rows = [
+            {"collection": collection, "kind": row_kind, "locator": locator}
+            for collection, row_kind, locator in (
+                ("timeline", "", "/events/0"),
+                ("timeline", "", f"/events/{len(self.events) - 1}"),
+                ("timeline", "", f"/events/{len(self.events)}"),
+                ("files", "", "/candidates/0"),
+                ("files", "", "/candidates/999999"),
+                ("files", "", "/inventory/0"),
+                ("files", "", "/inventory/999999"),
+                ("docs", "", "/candidates/0"),
+                ("docs", "", "/results/0"),
+                ("docs", "", "/candidates/999999"),
+                ("indicators", "", "/indicators/0"),
+                ("indicators", "", "/indicators/999999"),
+                ("artifacts", kind, "/artifacts/0"),
+                ("artifacts", kind, "/artifacts/999999"),
+                ("artifacts", "", "/artifacts/0"),
+                ("nowhere", "", "/rows/0"),
+            )
+        ]
+        without_db = {row["collection"] + row["kind"] + row["locator"]: self._mark([row], {"status": "relevant"}).status_code for row in rows}
+        self.assertFalse(self.database.exists(), "a preview built the case DB")
+        self.assertEqual(set(without_db.values()), {200, 400}, without_db)
+
+        refused = [
+            (rows[:3], {"status": "relevant"}, 400),
+            (rows[:1], {"tag_ids": [1]}, 404),  # a new case has no tags until the tags API creates them
+        ]
+        for selected, mark, status in refused:
+            with self.subTest(mark=mark):
+                applied = self._mark(selected, mark, dry_run=False)
+                self.assertEqual(applied.status_code, status, applied.text)
+                self.assertEqual(self._mark(selected, mark).status_code, status)
+        self.assertFalse(self.database.exists(), "a refused apply built the case DB")
+
+        applied = self._mark(rows[:1], {"status": "relevant"}, dry_run=False)
+        self.assertEqual(applied.status_code, 200, applied.text)
+        self.assertTrue(self.database.exists())
+        with_db = {row["collection"] + row["kind"] + row["locator"]: self._mark([row], {"status": "relevant"}).status_code for row in rows}
+        self.assertEqual(without_db, with_db)
 
 
 if __name__ == "__main__":

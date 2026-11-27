@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
@@ -65,6 +65,30 @@ def _summary_output_dir(summary: dict[str, object]) -> Path | None:
         return run_output_dir(summary)
     except RuntimeError:
         return None
+
+
+def resolve_run_locator_targets(
+    located: Iterable[Mapping[str, str]],
+    resolve: Callable[[str, str, str], tuple[str, str] | None],
+) -> list[dict[str, str]]:
+    """``{collection, kind?, locator}`` targets -> ``{target_type, target_id}`` by ``resolve``
+    (``RunLocatorIndex.resolve``); any unresolved one is a 400 naming the first ten."""
+    resolved: list[dict[str, str]] = []
+    unresolved: list[str] = []
+    for target in located:
+        collection = target.get("collection") or target.get("source") or ""
+        locator = target.get("locator") or target.get("pointer") or ""
+        hit = resolve(collection, locator, target.get("kind") or "")
+        if hit is None:
+            unresolved.append(f"{collection}:{target.get('kind') or ''}:{locator}")
+        else:
+            resolved.append({"target_type": hit[0], "target_id": hit[1]})
+    if unresolved:
+        raise HTTPException(
+            status_code=400,
+            detail=f"케이스 DB에 이 런 로케이터에 해당하는 행이 없습니다: {', '.join(unresolved[:10])}",
+        )
+    return resolved
 
 
 def build_case_db_router(
@@ -271,8 +295,6 @@ def build_case_db_router(
         if job.summary is None:
             raise HTTPException(status_code=409, detail=run_not_finished_message(job))
         outputs = job.summary.get("outputs")
-        resolved: list[dict[str, str]] = []
-        unresolved: list[str] = []
         with database.connect() as connection:
             index = RunLocatorIndex(
                 connection,
@@ -280,20 +302,7 @@ def build_case_db_router(
                 outputs if isinstance(outputs, dict) else {},
                 output_dir=_summary_output_dir(job.summary),
             )
-            for target in located:
-                collection = target.get("collection") or target.get("source") or ""
-                locator = target.get("locator") or target.get("pointer") or ""
-                hit = index.resolve(collection, locator, target.get("kind") or "")
-                if hit is None:
-                    unresolved.append(f"{collection}:{target.get('kind') or ''}:{locator}")
-                else:
-                    resolved.append({"target_type": hit[0], "target_id": hit[1]})
-        if unresolved:
-            raise HTTPException(
-                status_code=400,
-                detail=f"케이스 DB에 이 런 로케이터에 해당하는 행이 없습니다: {', '.join(unresolved[:10])}",
-            )
-        return resolved
+            return resolve_run_locator_targets(located, index.resolve)
 
 
     @router.get("/api/runs/{run_id}/review-map")

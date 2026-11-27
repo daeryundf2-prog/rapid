@@ -8,7 +8,9 @@
   `POST /api/runs/{run}/actions/select` (analyse a selection: count, time span,
   sources, event types, top paths, samples; read-only) and
   `POST /api/runs/{run}/actions/mark` (check or tag every row of a selection;
-  `dry_run` defaults to true). A selection is explicit row locators, a timeline
+  `dry_run` defaults to true and takes only a JSON boolean; a preview refuses
+  what an apply would refuse -- mixed `tag_ids`, unknown rows or tag ids, an
+  empty tag list -- and never builds the case DB). A selection is explicit row locators, a timeline
   window/text filter, or the timeline rows related to an anchor (same time
   window, same path, same file name). Marks go through the run's case DB
   review batch; `actor.kind = "agent"` records the reviewer as

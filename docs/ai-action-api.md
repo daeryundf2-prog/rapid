@@ -60,7 +60,8 @@ curl -s -H "X-RapidTriage-Token: $TOKEN" -H "Content-Type: application/json" \
 }
 ```
 
-- `dry_run`은 기본 `true`다. 미리보기 응답은 분석 응답과 같은 건수·분포를 준다. 사람이 확인한 뒤 `false`로 다시 보내 적용한다.
+- `dry_run`은 기본 `true`다. JSON 불리언만 받는다(`"false"`, `0` 같은 값은 422로 거절하고 아무것도 적용하지 않는다). 미리보기 응답은 분석 응답과 같은 건수·분포를 준다. 사람이 확인한 뒤 `false`로 다시 보내 적용한다.
+- 미리보기도 적용과 같은 검사를 거친다. 적용 때 거절될 요청(`tag_ids`와 다른 표시를 섞은 경우, 런에 없는 행 로케이터, 케이스에 없는 태그 id, 빈 `tag_ids`/`add_tags`만 있는 표시)은 미리보기에서도 같은 상태 코드와 문구로 거절된다. 미리보기는 케이스 DB를 만들지 않는다. 케이스 DB가 아직 없으면 런 출력 행으로 로케이터를 확인한다.
 - `mark`에는 `status`(`relevant` 관련 있음, `needs-review` 재검토, `excluded` 제외(보고서에서도 빠짐), `unreviewed` 미검토), `add_tags`(태그 이름 추가), `tag_ids`(케이스 태그 id), `include_in_report`, `note` 중 필요한 것을 넣는다. `tag_ids`는 다른 표시와 함께 보낼 수 없다(검토 일괄 표시와 같은 규칙).
 - 적용은 런의 케이스 DB(`POST /api/case-db/review-batch`)를 그대로 쓴다. 케이스 DB가 아직 없으면 콘솔의 첫 표시처럼 만든다.
 - `actor.kind = "agent"`이면 검토 이력의 작성자가 `agent:<name>`으로 남는다(이름이 비면 `agent:unnamed`). 사람(`human`)은 `name`, 없으면 서버의 `RAPIDTRIAGE_REVIEWER`, 그것도 없으면 `local-user`로 남는다. `actor`를 생략하면 이름 없는 사람이다. 행의 이전 작성자를 물려받지 않는다.
