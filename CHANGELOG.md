@@ -36,7 +36,11 @@
   shows its placeholder, 보고 › 내보내기 buttons share one width, and a dialog
   hides the floating 뷰어 열기 handle. Selected rows, the current stage, case,
   analysis card and review-marked thumbnails or messages are a tonal wash (with
-  a check for the current case) instead of a coloured side stripe.
+  a check for the current case) instead of a coloured side stripe. The 조건
+  row wraps onto a second line in a narrow pane (viewer open at 1440 px, a
+  zoomed time range, phones) instead of clipping 조건 지우기, the count and 열
+  설정; the 조건 button ellipsises its applied summary
+  (`frontend/src/features/filters/filterRowLayout.test.ts`).
 
 ### Fixed
 

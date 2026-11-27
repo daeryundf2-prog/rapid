@@ -1,10 +1,13 @@
-/* 조건 줄 (viewer-families U-F1): one 32 px line — view switch · search · 조건 popover · applied
-   chips · result count · overflow (열 선택 · 열 필터). Chips scroll sideways, never wrap. */
+/* 조건 줄 (viewer-families U-F1): view switch · search · 조건 popover · applied chips · result
+   count · overflow (열 선택 · 열 필터) on one 32 px line when the pane is wide enough. A narrow
+   pane (viewer open at 1440, a zoomed timeline's long time chip, a phone) wraps the row onto a
+   second line instead: the pane frame clips overflow, so a one-line row hid 조건 지우기, the count
+   and 열 설정. The 조건 button ellipsises its applied summary first; chips scroll sideways. */
 .filter-bar {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  height: 32px;
+  min-height: 32px;
   padding: 1px var(--space-3) 2px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--line-subtle);
@@ -14,10 +17,24 @@
 .filter-row {
   display: flex;
   align-items: center;
-  flex-wrap: nowrap;
-  gap: var(--space-2);
-  height: 28px;
+  flex-wrap: wrap;
+  gap: 2px var(--space-2);
+  min-height: 28px;
   min-width: 0;
+}
+
+/* The 조건 button may shrink to its icon and count (``.grid-btn`` is ``flex: none``); its small
+   basis keeps it on the search line when the row wraps, growing up to its full label. */
+.filter-row > .popover-anchor {
+  flex: 1 1 140px;
+  min-width: 0;
+  max-width: max-content;
+}
+
+.filter-row .filter-trigger {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .filter-row-end {
@@ -82,7 +99,8 @@
 
 .filter-search {
   position: relative;
-  flex: 1 1 200px;
+  /* A small basis: where the row wraps, search, 조건 and the chips share the first line. */
+  flex: 1 1 120px;
   max-width: 320px;
 }
 
@@ -183,7 +201,8 @@
   align-items: center;
   gap: var(--space-1);
   min-width: 0;
-  flex: 0 1 auto;
+  flex: 1 1 120px;
+  max-width: max-content;
   overflow-x: auto;
   scrollbar-width: none;
   margin: 0;
@@ -230,7 +249,11 @@
   background: var(--bg-panel);
 }
 
-.filter-reset {
+/* 조건 저장 · 조건 지우기 · count stay one group at the line end: only the first of them takes
+   the free space (``.grid-btn-quiet`` and ``.filter-row-end`` each have ``margin-left: auto``,
+   which spread them apart once the row wraps). */
+.filter-row > .grid-btn-quiet + .grid-btn-quiet,
+.filter-row > .grid-btn-quiet + .filter-row-end {
   margin-left: 0;
 }
 
@@ -357,6 +380,7 @@
 
 /* U-F8: the applied condition replaces the 조건 label (bold, ellipsised). */
 .filter-trigger-applied {
+  min-width: 0;
   max-width: 260px;
   overflow: hidden;
   font-weight: 600;
