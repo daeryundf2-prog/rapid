@@ -36,7 +36,9 @@ describe("조건 줄 layout", () => {
   it("keeps the row end (count, 열 설정) whole and 조건 저장 · 조건 지우기 · count together", () => {
     expect(rule(".filter-row-end")).toMatch(/flex:\s*none/);
     // Each has margin-left: auto (.grid-btn-quiet, .filter-row-end): on a wrapped line they spread apart.
-    const grouped = rule(".filter-row > .grid-btn-quiet + .grid-btn-quiet,\n.filter-row > .grid-btn-quiet + .filter-row-end");
+    const grouped = rule(
+      ".filter-row > .grid-btn-quiet + .grid-btn-quiet,\n.filter-row > .grid-btn-quiet + .filter-row-end",
+    );
     expect(grouped).toMatch(/margin-left:\s*0/);
   });
 });
