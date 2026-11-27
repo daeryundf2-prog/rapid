@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 
 // viewer-families (docs/plans/viewer-families-2026-10-15.md §4): 조건 줄 + panel keyboard (Q-F1/Q-F2),
 // the viewer window (Q-F3/Q-F4), catalogue family columns (Q-F5), 특이사항 filter (Q-F9) and the
@@ -250,20 +250,76 @@ test("Q-F13: every artifact = summary columns with label-above-value cells; one 
   await expect(page.getByRole("columnheader", { name: /주요 세부 정보/ })).toHaveCount(0);
 });
 
-test("Q-F14/Q-F15: R/X/B marks give one stripe each; the meta tail lists seven facts", async ({ page }) => {
+/**
+ * The review tint a grid row paints (U-F8: a marked row's background is its status colour, no side
+ * stripe): the row's `--row-bg` resolved to a colour, transparent when the row carries none. Read
+ * through a probe inside the row because a selected row shows the accent tint over it.
+ */
+function rowTint(row: Locator): Promise<string> {
+  return row.evaluate((el) => {
+    const probe = document.createElement("span");
+    probe.style.background = "var(--row-bg, transparent)";
+    el.appendChild(probe);
+    const colour = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return colour;
+  });
+}
+
+/** The tint a status token should give a row: 12% of the status colour over the page. */
+function statusTint(page: Page, token: string): Promise<string> {
+  return page.evaluate((name) => {
+    const probe = document.createElement("span");
+    probe.style.background = `color-mix(in srgb, var(${name}) 12%, var(--bg))`;
+    document.body.appendChild(probe);
+    const colour = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return colour;
+  }, token);
+}
+
+test("Q-F14/Q-F15: R/X/B marks give one status tint each; the meta tail lists seven facts", async ({
+  page,
+}) => {
   await open(page, `#/case/${runId}/explore/files`);
   const row = page.locator('[role="grid"] [role="row"][aria-rowindex="2"]').first();
+  const tints = {
+    relevant: await statusTint(page, "--status-relevant"),
+    excluded: await statusTint(page, "--status-excluded"),
+    bookmark: await statusTint(page, "--status-bookmark"),
+  };
+  // Three different tints, none of them the bare page.
+  expect(new Set(Object.values(tints)).size).toBe(3);
+  expect(Object.values(tints)).not.toContain("rgba(0, 0, 0, 0)");
+  // B on an unmarked row (other specs mark rows of this run, and a review status wins over the
+  // 북마크 tag): a 북마크 tint and its accessible name. Pinned by its key: once marked it no
+  // longer matches :not([data-mark]).
+  const unmarked = page
+    .locator(
+      '[role="grid"] [role="row"][aria-rowindex]:not([aria-rowindex="1"]):not([aria-rowindex="2"]):not([data-mark])',
+    )
+    .first();
+  await expect(unmarked).toBeVisible();
+  const otherKey = await unmarked.getAttribute("data-row-key");
+  const other = page.locator(`[role="grid"] [role="row"][data-row-key="${otherKey}"]`);
+  await other.click();
+  await other.focus();
+  await page.keyboard.press("b");
+  await expect(other).toHaveAttribute("data-mark", "bookmark");
+  await expect(other).toHaveAttribute("aria-description", "검토 표시: 북마크");
+  await expect.poll(() => rowTint(other)).toBe(tints.bookmark);
+  // R then X on one row: one mark at a time, its tint follows the mark; no side stripe.
   await row.click();
   await row.focus();
   await page.keyboard.press("r");
   await expect(row).toHaveAttribute("data-mark", "relevant");
-  await expect(row.locator(".grid-row-stripe")).toHaveAttribute("data-mark", "relevant");
   await expect(row).toHaveAttribute("aria-description", "검토 표시: 관련 있음");
-  const box = await row.locator(".grid-row-stripe").boundingBox();
-  expect(Math.round(box?.width ?? 0)).toBe(6);
+  await expect.poll(() => rowTint(row)).toBe(tints.relevant);
   await page.keyboard.press("x");
   await expect(row).toHaveAttribute("data-mark", "excluded");
-  await expect(row.locator(".grid-row-stripe")).toHaveCount(1);
+  await expect(row).toHaveAttribute("aria-description", "검토 표시: 제외");
+  await expect.poll(() => rowTint(row)).toBe(tints.excluded);
+  await expect(row.locator(".grid-row-stripe")).toHaveCount(0);
   // Meta tail.
   await page.keyboard.press("Enter");
   const viewer = page.getByRole("region", { name: "원본 뷰어" });
