@@ -405,6 +405,12 @@
     "/api/sample-case/run": {
       "post": "run_sample_case_api_sample_case_run_post"
     },
+    "/api/telemetry/events": {
+      "post": "post_event_api_telemetry_events_post"
+    },
+    "/api/telemetry/metrics": {
+      "get": "get_metrics_api_telemetry_metrics_get"
+    },
     "/api/workbench/large-result-evidence": {
       "get": "workbench_large_result_evidence_api_workbench_large_result_evidence_get"
     },
