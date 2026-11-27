@@ -19,9 +19,11 @@
   --font-mono:
     "JetBrains Mono Variable", "D2Coding", "Cascadia Mono", Consolas, "RapidForensic UI", monospace;
 
-  /* 6 font sizes */
-  --fs-aux: 0.6875rem; /* 11px — 보조 텍스트 */
-  --fs-table-aux: 0.75rem; /* 12px — 표 보조 */
+  /* 4 font sizes. Nothing under 13px on screen (design-blend): the 보조 / 표 보조 roles read
+     at the body size and stay apart by colour and weight; dense grids keep their density with
+     row height and column priority, not smaller type. */
+  --fs-aux: 0.8125rem; /* 13px — 보조 텍스트 */
+  --fs-table-aux: 0.8125rem; /* 13px — 표 보조 */
   --fs-body: 0.8125rem; /* 13px — 기본 */
   --fs-panel-title: 0.875rem; /* 14px — 패널 제목 */
   --fs-screen-title: 1rem; /* 16px — 화면 제목 */
@@ -54,7 +56,7 @@
   /* Focus + motion (U-V8). */
   --focus-width: 2px;
   --focus-offset: 1px;
-  --motion: 120ms;
+  --motion: 160ms;
   --ease: ease-out;
 }
 
@@ -110,7 +112,7 @@
   --status-bookmark-on: #0b1117;
   --status-excluded: #eb8c45;
   --status-excluded-on: #0b1117;
-  --status-needs-review: #5aa2ff;
+  --status-needs-review: #3cc4d6; /* cyan: apart from the selection accent (#5aa2ff) */
   --status-needs-review-on: #0b1117;
   --status-report: #a98ff2;
   --status-report-on: #0b1117;
@@ -162,7 +164,7 @@
   --status-bookmark-on: #ffffff;
   --status-excluded: #a5520c;
   --status-excluded-on: #ffffff;
-  --status-needs-review: #1a63c2;
+  --status-needs-review: #0b7285; /* cyan: apart from the selection accent (#1a63c2) */
   --status-needs-review-on: #ffffff;
   --status-report: #6c4bbf;
   --status-report-on: #ffffff;
@@ -211,7 +213,7 @@
     --status-bookmark-on: #ffffff;
     --status-excluded: #a5520c;
     --status-excluded-on: #ffffff;
-    --status-needs-review: #1a63c2;
+    --status-needs-review: #0b7285;
     --status-needs-review-on: #ffffff;
     --status-report: #6c4bbf;
     --status-report-on: #ffffff;

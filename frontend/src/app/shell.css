@@ -25,7 +25,7 @@ code,
 kbd,
 .mono {
   font-family: var(--font-mono);
-  font-size: 0.92em;
+  font-size: inherit; /* the surrounding size: a 0.92em mono drops below 13px */
 }
 
 kbd {
@@ -550,6 +550,17 @@ kbd {
 
   .topbar-search {
     flex: 1 1 auto;
+  }
+
+  /* The case list spans the screen under the top bar (anchored at the trigger it ran 10px
+     past a 390 screen). */
+  .case-picker-popover {
+    position: fixed;
+    top: calc(48px + var(--space-1));
+    left: var(--space-2);
+    right: var(--space-2);
+    width: auto;
+    max-width: none;
   }
 }
 

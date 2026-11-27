@@ -46,6 +46,9 @@ export function outputDisplayName(name: string): string {
   return OUTPUT_NAMES[name] ?? name;
 }
 
+/** 내보내기 결과 column priority (narrow panes): 이름, 종류, 상태, 크기, 경로. */
+const OUTPUTS_PRIORITY = ["title", "kind", "exists", "size", "path"] as const;
+
 export const outputsCollection: CollectionDef = {
   id: "outputs",
   label: "산출물",
@@ -86,4 +89,7 @@ export const outputsCollection: CollectionDef = {
     }),
     col.path(520, ["analysis", "source"]),
   ],
+  // A narrow pane keeps whole columns: 경로 gives back width first (it ran past the pane edge at
+  // 1440), and at 390 경로 · 크기 · 상태 hide before 종류 is cut.
+  widthPriority: () => OUTPUTS_PRIORITY,
 };

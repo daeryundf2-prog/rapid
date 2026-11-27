@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GridRow } from "../../contracts/collection";
 import { parseHash } from "../../router";
 import { useAppStore } from "../../state/store";
+import { minuteBound } from "../../utils/time";
 import {
   RECENT_RANGES_KEY,
   recentRanges,
@@ -181,7 +182,8 @@ describe("condition line (U-F8)", () => {
     ]);
     bar();
     fireEvent.click(screen.getByTestId("filter-popover-button"));
-    fireEvent.click(screen.getByRole("button", { name: /^최근 시간 범위 적용: 2026-04-01 00:00 ~ …$/ }));
+    // The stored local bound reads in the display zone (browser local here), the zone named.
+    fireEvent.click(screen.getByRole("button", { name: /^최근 시간 범위 적용: 2026-04-01 00:00 ~ … \S+$/ }));
     expect(useFilterStore.getState().filters.from).toBe("2026-04-01T00:00");
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("quota");
@@ -250,7 +252,8 @@ describe("adversarial review round 1", () => {
     fireEvent.change(screen.getByLabelText("시작 시각"), { target: { value: "2026-01-02T03:04" } });
     expect(recentRanges()).toEqual([]);
     fireEvent.keyDown(screen.getByRole("dialog", { name: "조건" }), { key: "Escape" });
-    expect(recentRanges()).toEqual([{ from: "2026-01-02T03:04" }]);
+    // The typed display-zone time is stored as its UTC minute.
+    expect(recentRanges()).toEqual([{ from: minuteBound(new Date(2026, 0, 2, 3, 4).getTime()) }]);
   });
 
   it("#15 열 구성 / 밀도 are display settings: no count or bold label, their own chip list", () => {

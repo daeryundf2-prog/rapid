@@ -13,6 +13,7 @@ import { normalizeFilters, saveCondition, savedConditions } from "./conditionMem
 import { pathExtension, rowContentTypes } from "./contentTypes";
 import {
   activeChips,
+  activePreset,
   applyFiltersToQuery,
   clientOnlyFilters,
   EMPTY_FILTERS,
@@ -25,6 +26,7 @@ import {
   removeChip,
   rowMatchesFilters,
   TIME_PRESET_LABELS,
+  timeRangeText,
 } from "./filterModel";
 import { useFilterStore } from "./filterStore";
 import {
@@ -132,18 +134,41 @@ describe("URL round-trip", () => {
 describe("relative ranges", () => {
   it("offers 최근 1 / 7 / 30일 and incident ± n hours", () => {
     expect(TIME_PRESET_LABELS["1d"]).toBe("최근 1일");
-    const now = new Date(2026, 9, 18, 12, 0);
-    const day = presetRange("1d", now);
+    const now = new Date(Date.UTC(2026, 9, 18, 3, 0));
+    const day = presetRange("1d", "Asia/Seoul", now);
     expect(Date.parse(day.to) - Date.parse(day.from)).toBe(86_400_000);
-    expect(incidentRange("2025-05-30T12:00", 6)).toEqual({
-      from: "2025-05-30T06:00",
-      to: "2025-05-30T18:00",
+    // 오늘 starts at the display zone's midnight (12:00 KST → 00:00 KST = 15:00Z the day before).
+    expect(presetRange("today", "Asia/Seoul", now)).toEqual({
+      from: "2026-10-17T15:00Z",
+      to: "2026-10-18T03:00Z",
     });
-    expect(incidentRange("2025-05-30T12:00", 1, "2025-05-30T14:00")).toEqual({
-      from: "2025-05-30T11:00",
-      to: "2025-05-30T15:00",
+    expect(presetRange("today", "utc", now).from).toBe("2026-10-18T00:00Z");
+    expect(activePreset({ ...EMPTY_FILTERS, ...presetRange("7d", "utc", now) }, "utc", now)).toBe("7d");
+    // Bounds are UTC minutes, the zone written, so the server and the panel read them alike.
+    expect(incidentRange("2025-05-30T12:00Z", 6)).toEqual({
+      from: "2025-05-30T06:00Z",
+      to: "2025-05-30T18:00Z",
+    });
+    expect(incidentRange("2025-05-30T12:00Z", 1, "2025-05-30T14:00Z")).toEqual({
+      from: "2025-05-30T11:00Z",
+      to: "2025-05-30T15:00Z",
     });
     expect(incidentRange("not a time", 1)).toBeNull();
+    // The 시간 chip reads its bounds in the display zone like the grid, the zone named once.
+    expect(timeRangeText("2026-10-22T04:45Z", "2026-10-22T05:59Z", "Asia/Seoul")).toBe(
+      "2026-10-22 13:45 ~ 14:59 KST",
+    );
+    expect(timeRangeText("2026-10-22T04:45Z", undefined, "utc")).toBe("2026-10-22 04:45 ~ … UTC");
+    expect(timeRangeText("2026-10-22T05:59Z", "2026-10-22T04:45Z", "utc")).toBe(
+      "2026-10-22 04:45 ~ 05:59 UTC",
+    );
+    expect(timeRangeText("someday", undefined, "utc")).toBe("someday ~ …");
+    const chips = activeChips(
+      { ...EMPTY_FILTERS, from: "2026-10-22T15:00Z", to: "2026-10-23T14:59Z" },
+      (s) => s,
+      { timezone: "Asia/Seoul" },
+    );
+    expect(chips[0]?.label).toBe("시간 2026-10-23 00:00 ~ 23:59 KST");
     const incident = incidentFromAnalyses([
       {
         kind: "triage-flags",

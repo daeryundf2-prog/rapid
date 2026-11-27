@@ -7,7 +7,7 @@
  */
 
 import type { GridRow } from "../../contracts/collection";
-import { parseInstant, zoneName } from "../../utils/time";
+import { minuteBound, parseInstant, zoneName } from "../../utils/time";
 import { rowCoordinates } from "../views/geo";
 import { inGeoBox, parseGeo, parseHours, WEEKDAY_IDS } from "./conditionValues";
 import { rowContentTypes } from "./contentTypes";
@@ -342,26 +342,22 @@ export function isWeekdayId(value: string): boolean {
 
 // --- relative ranges --------------------------------------------------------------------------
 
-/** Local `YYYY-MM-DDTHH:mm` of a Date (datetime-local value). */
-function localInput(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-/** 사건 시각 ± n시간 (an incident window, or a single incident time). */
+/**
+ * 사건 시각 ± n시간 (an incident window, or a single incident time) as minute bounds. `start` /
+ * `end` are bounds as the filter stores them (ISO; the panel converts its display-zone input).
+ */
 export function incidentRange(
   start: string,
   hours: number,
   end?: string,
 ): { from: string; to: string } | null {
-  // `YYYY-MM-DDTHH:mm` (datetime-local) is browser-local time like the range inputs; ISO with a zone as given.
   const a = Date.parse(start);
   if (Number.isNaN(a)) return null;
   const parsedEnd = end ? Date.parse(end) : Number.NaN;
   const b = Number.isNaN(parsedEnd) ? a : parsedEnd;
   const lo = Math.min(a, b) - hours * 3_600_000;
   const hi = Math.max(a, b) + hours * 3_600_000;
-  return { from: localInput(new Date(lo)), to: localInput(new Date(hi)) };
+  return { from: minuteBound(lo), to: minuteBound(hi) };
 }
 
 export interface Incident {

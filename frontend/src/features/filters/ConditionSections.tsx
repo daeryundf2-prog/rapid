@@ -9,11 +9,10 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { useTimezone } from "../../state/hooks";
 import { useAppStore } from "../../state/store";
-import { zoneLabel } from "../../utils/time";
+import { toZonedInput, zonedInputToBound, zoneLabel } from "../../utils/time";
 import { useAnalysisStore } from "../analysis/store";
 import { WEEKDAY_IDS } from "./conditionValues";
 import { CONTENT_TYPE_IDS, CONTENT_TYPES } from "./contentTypes";
-import { toLocalInput } from "./filterModel";
 import { useFilterStore } from "./filterStore";
 import {
   DEFAULT_OFFHOURS,
@@ -35,6 +34,7 @@ function toggle(list: readonly string[], value: string): string[] {
 export function IncidentRange() {
   const runId = useAppStore((s) => s.route.runId);
   const patch = useFilterStore((s) => s.patchFilters);
+  const { timezone } = useTimezone();
   // The analysis jobs the shell already polls (status-bar chip / tree): no request of our own.
   const analyses = useAnalysisStore((s) => (s.runId === runId ? s.analyses : null));
   const incident = useMemo(() => incidentFromAnalyses(analyses ?? []), [analyses]);
@@ -43,17 +43,21 @@ export function IncidentRange() {
   const [span, setSpan] = useState(6);
   const atId = useId();
   const spanId = useId();
-  // Prefill from the run's incident time once it is known (the examiner can still edit it).
+  // Prefill from the run's incident time once it is known (the examiner can still edit it); the
+  // field reads and shows the display zone, like the range inputs and the grid.
   useEffect(() => {
     if (!incident) return;
     setAt((current) => {
       if (current) return current;
       setFromIncident(true);
-      return toLocalInput(incident.start);
+      return toZonedInput(incident.start.toISOString(), timezone);
     });
-  }, [incident]);
+  }, [incident, timezone]);
   // An unedited prefill keeps the analysis' whole incident window (start … end) ± n hours.
-  const range = at ? incidentRange(at, span, fromIncident ? (incident?.end ?? undefined) : undefined) : null;
+  const atBound = at ? zonedInputToBound(at, timezone) : undefined;
+  const range = atBound
+    ? incidentRange(atBound, span, fromIncident ? (incident?.end ?? undefined) : undefined)
+    : null;
   return (
     <div className="filter-incident" role="group" aria-label="사건 시각 기준 범위">
       <span className="filter-range-label">사건 시각 ±</span>

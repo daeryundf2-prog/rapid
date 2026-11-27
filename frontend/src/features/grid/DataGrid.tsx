@@ -160,7 +160,7 @@ interface RowViewProps {
   ariaRowOffset: number;
 }
 
-/** Review mark shown as the row stripe (U-F8): the review status, else a 북마크 tag. */
+/** Review mark shown as the row's tint (U-F8): the review status, else a 북마크 tag. */
 export function rowMark(row: GridRow): { id: string; label: string } | null {
   if (row.reviewStatus) return { id: row.reviewStatus, label: REVIEW_LABELS[row.reviewStatus] };
   if (row.tags.some((tag) => tag === "북마크" || tag === "bookmark"))
@@ -209,8 +209,6 @@ const RowView = memo(function RowView(props: RowViewProps) {
       style={style}
     >
       <div role="gridcell" className="grid-cell grid-cell-select" style={{ width: SELECT_COL_WIDTH }}>
-        {/* U-F8: 6px review stripe on the sticky select cell (visible while scrolling sideways). */}
-        {mark ? <span className="grid-row-stripe" data-mark={mark.id} aria-hidden="true" /> : null}
         <input
           type="checkbox"
           tabIndex={-1}
@@ -596,13 +594,26 @@ export function DataGrid(props: DataGridProps = {}) {
   const visibleColumns = table.getVisibleLeafColumns();
   const specById = useMemo(() => new Map(columns.map((c) => [c.id, c])), [columns]);
   const specs = visibleColumns.map((c) => specById.get(c.id)).filter((c): c is ColumnSpec => !!c);
-  // 항목 flexes into the pane width; nothing shrinks (a narrow grid hides default columns by
-  // priority instead, see autoHidden). Widths the user dragged stay as dragged.
+  // 항목 flexes into the pane width. Too wide (분석 기본 preset): default-width columns give back
+  // width down to their minimum, lowest priority first, before anything is cut at the pane edge;
+  // a narrower grid hides default columns by priority (see autoHidden). Widths the user dragged
+  // stay as dragged.
+  const shrink = widthPriority
+    ? [...widthPriority]
+        .reverse()
+        .map((id) => ({ index: visibleColumns.findIndex((c) => c.id === id), spec: specById.get(id) }))
+        .filter(
+          ({ index, spec }) =>
+            index >= 0 && spec?.minWidth !== undefined && columnSizing[spec.id] === undefined,
+        )
+        .map(({ index, spec }) => ({ index, min: spec?.minWidth ?? 0 }))
+    : [];
   const widths = fitColumnWidths(
     visibleColumns.map((c) => c.getSize()),
     {
       grow: columnSizing.title === undefined ? specs.findIndex((s) => s.id === "title") : -1,
       available: paneWidth - SELECT_COL_WIDTH - HEAD_TOOLS_WIDTH,
+      shrink,
     },
   );
   // Publish the shown column ids (the meta tab's "기본 열에 이미 표시됩니다" checks them).

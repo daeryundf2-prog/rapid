@@ -457,6 +457,12 @@ export function assumedUtcCandidates(
     .map(({ utc }) => `${utc.toISOString().slice(0, 19)}${fraction}Z`);
 }
 
+/** Short name of the display zone at `date`: "KST" · "UTC" · "UTC+05:30" (no known abbreviation). */
+export function zoneShort(tz: TimezoneChoice, date: Date): string {
+  const zone = zoneLabel(tz, date);
+  return zone.startsWith("UTC") ? zone : zone.replace(/[+-]\d{2}:\d{2}$/, "") || zone;
+}
+
 /** Grid cells: "2025-05-29 23:25:26 KST" — seconds, the zone named (the tooltip has the rest).
  * A wall clock of undetermined zone is shown as written, marked, never shifted into `tz`. */
 export function formatGridTime(
@@ -468,9 +474,99 @@ export function formatGridTime(
   if (wallClock) return `${wallClock.slice(0, 19)} 현지(미확정)`;
   const date = parseInstant(value);
   if (!date) return value === null || value === undefined || value === "" ? "" : String(value);
-  const zone = zoneLabel(tz, date);
-  const short = zone === "UTC" ? "UTC" : zone.replace(/[+-]\d{2}:\d{2}$/, "") || zone;
-  return `${formatTimestamp(date, tz)} ${short}`;
+  return `${formatTimestamp(date, tz)} ${zoneShort(tz, date)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Ranges and typed times (filter chips, 시간 개요 띠, palette, action dialogs): the same
+// `YYYY-MM-DD HH:mm` reading in the console's display zone as the grid, the zone named once.
+// ---------------------------------------------------------------------------
+
+/** "2026-10-22 13:45 KST" (`zone: false` drops the zone name). */
+export function formatMinute(ms: number, tz: TimezoneChoice, options: { zone?: boolean } = {}): string {
+  const date = new Date(ms);
+  const text = formatTimestamp(date, tz, { precision: "minute" });
+  return options.zone === false ? text : `${text} ${zoneShort(tz, date)}`;
+}
+
+/** "10-22 13:45": month-day and clock in the display zone (a strip axis next to a full range). */
+export function formatShortMinute(ms: number, tz: TimezoneChoice): string {
+  return formatTimestamp(new Date(ms), tz, { precision: "minute" }).slice(5);
+}
+
+/**
+ * "2026-10-22 13:45 ~ 14:59 KST" — the end's date only when it differs from the start's
+ * ("2026-10-22 00:00 ~ 2026-10-23 23:59 KST"); an open end reads "…".
+ */
+export function formatTimeRange(fromMs: number | null, toMs: number | null, tz: TimezoneChoice): string {
+  if (fromMs === null && toMs === null) return "";
+  const zoneAt = new Date(toMs ?? fromMs ?? 0);
+  const from = fromMs === null ? "…" : formatMinute(fromMs, tz, { zone: false });
+  let to = toMs === null ? "…" : formatMinute(toMs, tz, { zone: false });
+  if (fromMs !== null && toMs !== null && from.slice(0, 10) === to.slice(0, 10)) to = to.slice(11);
+  return `${from} ~ ${to} ${zoneShort(tz, zoneAt)}`;
+}
+
+/**
+ * The instant of a wall-clock time in the display zone, or null when that time does not exist
+ * there (a daylight-saving gap) or the parts are out of range (2월 30일, 25시).
+ */
+export function wallClockToMs(
+  tz: TimezoneChoice,
+  year: number,
+  month: number,
+  day: number,
+  hour = 0,
+  minute = 0,
+  second = 0,
+): number | null {
+  const asUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+  if (Number.isNaN(asUtc)) return null;
+  // Two passes: the offset at the first guess, then at the corrected instant (a DST edge).
+  let ms = asUtc - tzOffsetMinutes(tz, new Date(asUtc)) * 60_000;
+  ms = asUtc - tzOffsetMinutes(tz, new Date(ms)) * 60_000;
+  const w = wallClock(new Date(ms), tz);
+  const same =
+    w.year === year &&
+    w.month === month &&
+    w.day === day &&
+    w.hour === hour &&
+    w.minute === minute &&
+    w.second === second;
+  return same ? ms : null;
+}
+
+/** Midnight of `ms`'s day in the display zone. */
+export function startOfDayMs(ms: number, tz: TimezoneChoice): number {
+  const w = wallClock(new Date(ms), tz);
+  return (
+    wallClockToMs(tz, w.year ?? 1970, w.month ?? 1, w.day ?? 1) ??
+    ms - ((w.hour ?? 0) * 3600 + (w.minute ?? 0) * 60 + (w.second ?? 0)) * 1000 - (ms % 1000)
+  );
+}
+
+/** `YYYY-MM-DDTHH:mm` of a bound in the display zone (the value of `<input type="datetime-local">`). */
+export function toZonedInput(value: string | undefined, tz: TimezoneChoice): string {
+  if (!value) return "";
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? "" : formatTimestamp(new Date(ms), tz, { precision: "minute" }).replace(" ", "T");
+}
+
+/**
+ * A filter bound at minute precision: a UTC instant written to the minute (`…T05:00Z`), so a
+ * `to` bound still covers that whole minute (rowConditions `boundUnitMs`).
+ */
+export function minuteBound(ms: number): string {
+  return `${new Date(ms).toISOString().slice(0, 16)}Z`;
+}
+
+/** A filter bound from a `datetime-local` value read in the display zone; unreadable → undefined. */
+export function zonedInputToBound(value: string, tz: TimezoneChoice): string | undefined {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value);
+  if (!match) return undefined;
+  const [y, mo, d, h, mi] = match.slice(1).map(Number) as [number, number, number, number, number];
+  const ms = wallClockToMs(tz, y, mo, d, h, mi);
+  return ms === null ? undefined : minuteBound(ms);
 }
 
 /** Tooltip of an evidence time: the reading, the source text, the exact UTC and the FILETIME

@@ -9,6 +9,7 @@ import { announce } from "../../a11y";
 import { registerCommands } from "../../commands/registry";
 import { KEY_MAP } from "../../contracts/command";
 import { useAppStore } from "../../state/store";
+import { formatTimeRange, type TimezoneChoice } from "../../utils/time";
 import { setTimeRange } from "../filters/filterStore";
 import { type MsRange, panRange, toIsoBounds, zoomOutRange } from "./timelineRange";
 
@@ -18,6 +19,8 @@ const NO_RANGE = "먼저 시간 범위를 고르세요 (막대를 누르거나 �
 export interface StripState {
   range: MsRange | null;
   extent: MsRange | null;
+  /** Display zone the strip reads its times in (announcements name ranges the same way). */
+  tz: TimezoneChoice;
 }
 
 export function applyRange(range: MsRange | null, message: string): void {
@@ -30,14 +33,9 @@ export function applyRange(range: MsRange | null, message: string): void {
   announce(message);
 }
 
-/** Local month/day hour:minute, the strip's time label. */
-export const fmt = (ms: number) =>
-  new Date(ms).toLocaleString("ko-KR", {
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+/** "2026-10-22 13:45 ~ 14:59 KST": a range in the display zone, like the grid and filter chip. */
+export const rangeText = (range: MsRange, tz: TimezoneChoice) =>
+  formatTimeRange(range.fromMs, range.toMs, tz);
 
 export function useTimelineCommands(live: RefObject<StripState>): void {
   useEffect(() => {
@@ -46,10 +44,10 @@ export function useTimelineCommands(live: RefObject<StripState>): void {
       return live.current.range && live.current.extent ? undefined : NO_RANGE;
     };
     const pan = (direction: -1 | 1) => {
-      const { range: r, extent: e } = live.current;
+      const { range: r, extent: e, tz } = live.current;
       if (r && e) {
         const next = panRange(r, direction, e);
-        applyRange(next, `${direction < 0 ? "이전" : "다음"} 구간: ${fmt(next.fromMs)} ~ ${fmt(next.toMs)}`);
+        applyRange(next, `${direction < 0 ? "이전" : "다음"} 구간: ${rangeText(next, tz)}`);
       }
     };
     return registerCommands([
@@ -79,13 +77,10 @@ export function useTimelineCommands(live: RefObject<StripState>): void {
         shortcut: KEY_MAP.timelineZoomOut,
         disabledReason: reason,
         run: () => {
-          const { range: r, extent: e } = live.current;
+          const { range: r, extent: e, tz } = live.current;
           if (!r || !e) return;
           const next = zoomOutRange(r, e);
-          applyRange(
-            next,
-            next ? `범위를 넓혔습니다: ${fmt(next.fromMs)} ~ ${fmt(next.toMs)}` : "전체 기간을 봅니다",
-          );
+          applyRange(next, next ? `범위를 넓혔습니다: ${rangeText(next, tz)}` : "전체 기간을 봅니다");
         },
       },
     ]);

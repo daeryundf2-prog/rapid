@@ -3,18 +3,22 @@
 import { focusGridWhenReady } from "../commands/builtin";
 import { jumpRange, parseJumpTime, toIsoBounds } from "../features/views/timelineRange";
 import { useAppStore } from "../state/store";
+import { formatMinute, type TimezoneChoice, zoneShort } from "../utils/time";
 import type { PaletteItem } from "./paletteGroups";
 
-/** "2026-04-18 14:30" → 타임라인 ±30분; "2026-04-18" → 그날 하루 (browser-local, like the range inputs). */
-export function timeJumpItems(query: string, runId: string | null): PaletteItem[] {
-  const jump = parseJumpTime(query);
+/**
+ * "2026-04-18 14:30" → 타임라인 ±30분; "2026-04-18" → 그날 하루, read and named in the display
+ * zone like the grid ("타임라인: 2026-04-18 14:30 KST 전후 30분 보기").
+ */
+export function timeJumpItems(query: string, runId: string | null, tz: TimezoneChoice): PaletteItem[] {
+  const jump = parseJumpTime(query, tz);
   if (!jump) return [];
   const range = jumpRange(jump);
   const { from, to } = toIsoBounds(range);
-  const when = new Date(jump.ms).toLocaleString(
-    "ko-KR",
-    jump.precision === "day" ? { dateStyle: "medium" } : { dateStyle: "medium", timeStyle: "short" },
-  );
+  const when =
+    jump.precision === "day"
+      ? `${formatMinute(jump.ms, tz, { zone: false }).slice(0, 10)} (${zoneShort(tz, new Date(jump.ms))})`
+      : formatMinute(jump.ms, tz);
   return [
     {
       key: "timeline.jump",

@@ -41,13 +41,32 @@ describe("timeline strip bars", () => {
     const data = payload();
     const extent = extentOf(data);
     expect(extent).toEqual({ fromMs: T0, toMs: T0 + 5 * DAY + HOUR - 1 });
-    const whole = stripBars(data, null, extent);
+    const whole = stripBars(data, null, extent, "utc");
     expect(whole.granularity).toBe("day");
     expect(whole.buckets.reduce((sum, b) => sum + b.count, 0)).toBe(18);
     // A range draws the server buckets of that window (here the hour buckets), clipped to it.
-    const zoomed = stripBars(data, { fromMs: T0, toMs: T0 + 2 * HOUR - 1 }, extent);
+    const zoomed = stripBars(data, { fromMs: T0, toMs: T0 + 2 * HOUR - 1 }, extent, "utc");
     expect(zoomed.granularity).toBe("native");
     expect(zoomed.buckets.map((b) => b.count)).toEqual([10, 5]);
+  });
+
+  it("lay a zoomed window's unit over the whole range, so the axis spans what the header names", () => {
+    const data = payload();
+    const extent = extentOf(data);
+    // The server stops at the last event's bucket; the strip pads empty bars before and after.
+    const zoomed = stripBars(data, { fromMs: T0 - 2 * HOUR, toMs: T0 + 4 * HOUR - 1 }, extent, "utc");
+    expect(zoomed.buckets.map((b) => b.count)).toEqual([0, 0, 10, 5, 0, 0]);
+    expect(zoomed.buckets[0]?.startMs).toBe(T0 - 2 * HOUR);
+    expect(zoomed.buckets.at(-1)?.endMs).toBe(T0 + 4 * HOUR);
+  });
+
+  it("put day bars on the display zone's midnights", () => {
+    const data = payload();
+    const extent = extentOf(data);
+    const seoul = stripBars(data, null, extent, "Asia/Seoul");
+    // T0 is 09:00 KST, so the first bar starts at 00:00 KST = 15:00Z the day before.
+    expect(seoul.buckets[0]?.startMs).toBe(T0 - 9 * HOUR);
+    expect(seoul.buckets.reduce((sum, b) => sum + b.count, 0)).toBe(18);
   });
 
   it("an open bound of the route takes the extent's edge; a reversed range is none", () => {
@@ -85,22 +104,27 @@ describe("range steps", () => {
 });
 
 describe("typed jump times", () => {
-  it("read a date as its local day and a clock time as ±30 minutes", () => {
-    const day = parseJumpTime("2026-04-18");
+  it("read a date as its day in the display zone and a clock time as ±30 minutes", () => {
+    const day = parseJumpTime("2026-04-18", "local");
     expect(day).toEqual({ ms: new Date(2026, 3, 18).getTime(), precision: "day" });
     expect(day && jumpRange(day)).toEqual({
       fromMs: new Date(2026, 3, 18).getTime(),
       toMs: new Date(2026, 3, 19).getTime() - 1,
     });
-    const minute = parseJumpTime(" 2026.4.18 14:30 ");
+    const minute = parseJumpTime(" 2026.4.18 14:30 ", "local");
     expect(minute).toEqual({ ms: new Date(2026, 3, 18, 14, 30).getTime(), precision: "minute" });
     expect(minute && jumpRange(minute).toMs - jumpRange(minute).fromMs).toBe(60 * 60_000 - 1);
-    expect(parseJumpTime("2026-04-18T09:05:07")?.ms).toBe(new Date(2026, 3, 18, 9, 5, 7).getTime());
+    expect(parseJumpTime("2026-04-18T09:05:07", "local")?.ms).toBe(new Date(2026, 3, 18, 9, 5, 7).getTime());
+    // The same text is a different instant in another display zone.
+    expect(parseJumpTime("2026-04-18 09:00", "utc")?.ms).toBe(Date.UTC(2026, 3, 18, 9));
+    expect(parseJumpTime("2026-04-18 09:00", "Asia/Seoul")?.ms).toBe(Date.UTC(2026, 3, 18, 0));
   });
 
   it("refuse anything that is not a real calendar time", () => {
     for (const text of ["", "invoice", "2026-02-30", "2026-04-18 25:00", "2026-04-18 10:61", "18-04-2026"]) {
-      expect(parseJumpTime(text)).toBeNull();
+      expect(parseJumpTime(text, "utc")).toBeNull();
     }
+    // 02:30 does not exist on the spring-forward day in New York.
+    expect(parseJumpTime("2026-03-08 02:30", "America/New_York")).toBeNull();
   });
 });

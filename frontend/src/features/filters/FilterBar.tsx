@@ -11,6 +11,8 @@ import { announce } from "../../a11y";
 import { Popover } from "../../components/Popover";
 import type { ReviewStatus } from "../../contracts/collection";
 import { Icon } from "../../icons";
+import { useTimezone } from "../../state/hooks";
+import { toZonedInput, zonedInputToBound, zoneShort } from "../../utils/time";
 import { type Grade, useCatalog } from "../flags/catalog";
 import { REVIEW_LABELS } from "../grid/columns/common";
 import { DEFAULT_PRESET, DENSITY_LABELS, type Density, type GridPreset, PRESET_LABELS } from "../grid/types";
@@ -34,7 +36,7 @@ import {
   removeChip,
   TIME_PRESET_LABELS,
   type TimePreset,
-  toInputValue,
+  timeRangeText,
 } from "./filterModel";
 import { type FilterReport, useFilterStore } from "./filterStore";
 import { orderedRange } from "./rowConditions";
@@ -143,13 +145,15 @@ function FilterPopoverBody({ tagListId }: { tagListId: string }) {
   const patch = useFilterStore((s) => s.patchFilters);
   const typeCounts = useFilterStore((s) => s.typeCounts);
   const [typeQuery, setTypeQuery] = useState("");
-  const preset = activePreset(filters);
+  const { timezone } = useTimezone();
+  const preset = activePreset(filters, timezone);
   const types = [...new Set([...typeOptions, ...filters.types])].sort((a, b) => a.localeCompare(b, "ko"));
   const shownTypes = typeOptionsFor(types, typeCounts, typeQuery);
   return (
     <>
       <fieldset className="popover-section" aria-label="시간 범위">
-        <legend className="popover-title">시간 범위</legend>
+        {/* The inputs read and show the display zone, like the grid's 시각 column. */}
+        <legend className="popover-title">시간 범위 ({zoneShort(timezone, new Date())})</legend>
         <div className="segmented filter-segment">
           {(Object.keys(TIME_PRESET_LABELS) as TimePreset[]).map((id) => (
             <button
@@ -157,7 +161,7 @@ function FilterPopoverBody({ tagListId }: { tagListId: string }) {
               type="button"
               aria-pressed={preset === id}
               onClick={() =>
-                preset === id ? patch({ from: undefined, to: undefined }) : patch(presetRange(id))
+                preset === id ? patch({ from: undefined, to: undefined }) : patch(presetRange(id, timezone))
               }
             >
               {TIME_PRESET_LABELS[id]}
@@ -173,9 +177,9 @@ function FilterPopoverBody({ tagListId }: { tagListId: string }) {
             <input
               type="datetime-local"
               aria-label="시작 시각"
-              value={toInputValue(filters.from)}
-              max={toInputValue(filters.to) || undefined}
-              onChange={(event) => patch({ from: event.target.value || undefined })}
+              value={toZonedInput(filters.from, timezone)}
+              max={toZonedInput(filters.to, timezone) || undefined}
+              onChange={(event) => patch({ from: zonedInputToBound(event.target.value, timezone) })}
             />
           </label>
           <label className="filter-field is-stacked">
@@ -183,9 +187,9 @@ function FilterPopoverBody({ tagListId }: { tagListId: string }) {
             <input
               type="datetime-local"
               aria-label="종료 시각"
-              value={toInputValue(filters.to)}
-              min={toInputValue(filters.from) || undefined}
-              onChange={(event) => patch({ to: event.target.value || undefined })}
+              value={toZonedInput(filters.to, timezone)}
+              min={toZonedInput(filters.from, timezone) || undefined}
+              onChange={(event) => patch({ to: zonedInputToBound(event.target.value, timezone) })}
             />
           </label>
         </div>
@@ -383,30 +387,28 @@ function FlagConditions() {
   );
 }
 
-/** "YYYY-MM-DD HH:mm" of a stored range bound ("…" when open). */
-function rangeText(range: TimeRange): string {
-  const short = (value?: string) => (value ? value.replace("T", " ").slice(0, 16) : "…");
-  return `${short(range.from)} ~ ${short(range.to)}`;
-}
-
 /** The three most recent time ranges (U-F8): one click re-applies one. */
 function RecentRanges({ onPick }: { onPick: (range: TimeRange) => void }) {
   const [ranges] = useState(recentRanges);
+  const { timezone } = useTimezone();
   if (!ranges.length) return null;
   return (
     <div className="filter-recent">
       <span className="filter-range-label">최근</span>
-      {ranges.map((range) => (
-        <button
-          key={`${range.from ?? ""}|${range.to ?? ""}`}
-          type="button"
-          className="grid-btn grid-btn-quiet"
-          aria-label={`최근 시간 범위 적용: ${rangeText(range)}`}
-          onClick={() => onPick(range)}
-        >
-          {rangeText(range)}
-        </button>
-      ))}
+      {ranges.map((range) => {
+        const text = timeRangeText(range.from, range.to, timezone);
+        return (
+          <button
+            key={`${range.from ?? ""}|${range.to ?? ""}`}
+            type="button"
+            className="grid-btn grid-btn-quiet"
+            aria-label={`최근 시간 범위 적용: ${text}`}
+            onClick={() => onPick(range)}
+          >
+            {text}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -497,6 +499,7 @@ export function FilterBar(props: FilterBarProps) {
   const clear = useFilterStore((s) => s.clearFilters);
   const popoverOpen = useConditionPanel((s) => s.open);
   const setPopoverOpen = useConditionPanel((s) => s.setOpen);
+  const { timezone } = useTimezone();
 
   const [text, setText] = useState(query);
   const lastCommitted = useRef(query);
@@ -545,6 +548,7 @@ export function FilterBar(props: FilterBarProps) {
     variant === "report" && chip.key === "type" ? `종류 ${chip.value ?? ""}` : chip.label;
   const chips: RowChip[] = activeChips(filters, (s) => REVIEW_LABELS[s], {
     channelGroupLabels: props.channelGroupLabels,
+    timezone,
   }).map((chip) => ({
     id: `${chip.key}:${chip.value ?? ""}`,
     label: chipLabel(chip),

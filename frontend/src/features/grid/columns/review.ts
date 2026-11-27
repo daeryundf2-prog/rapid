@@ -109,6 +109,9 @@ function mapBookmark(raw: RawRow, index: number) {
   );
 }
 
+/** 리뷰보드 column priority (narrow panes): 요약 first, then its 선별, 시각, 태그, 보고서, 메모. */
+const REVIEW_PRIORITY = ["title", "review", "timestamp", "tags", "report", "note"] as const;
+
 export const reviewCollection: CollectionDef = {
   id: "review",
   label: "리뷰보드",
@@ -123,9 +126,12 @@ export const reviewCollection: CollectionDef = {
     col.field("report", "보고서", 80, ["analysis", "compact"], (r) =>
       r.fields.includeInReport ? "포함" : "",
     ),
-    // 시각 never narrower than its 15 characters + padding (review #9: no clipped seconds).
-    { ...col.timestamp(170, ["analysis", "source"]), minWidth: 150 },
+    // 시각 never narrower than "2026-10-18 08:02:48 KST" at 13px (review #9: no clipped seconds).
+    { ...col.timestamp(180, ["analysis", "source"]), minWidth: 172 },
     col.path(420, ["source"]),
     col.field("pointer", "위치", 160, ["source"], (r) => fieldStr(r, "pointer"), { mono: true }),
   ],
+  // A narrow pane keeps 요약 and its 선별 whole: 요약 gives back width before 시각 is cut at the
+  // pane edge (1440 with the side panel), and 메모 · 보고서 · 태그 · 시각 hide first at 390.
+  widthPriority: () => REVIEW_PRIORITY,
 };

@@ -177,7 +177,12 @@ export const col = {
       value: (r) => r.title,
     };
   },
-  path(width = 360, presets: ColumnSpec["presets"] = ["analysis", "source"]): ColumnSpec {
+  /** `whole`: the whole path, file name kept (a listing whose title is not the file name). */
+  path(
+    width = 360,
+    presets: ColumnSpec["presets"] = ["analysis", "source"],
+    options: { whole?: boolean } = {},
+  ): ColumnSpec {
     return {
       id: "path",
       header: "경로",
@@ -186,7 +191,7 @@ export const col = {
       minWidth: 200,
       presets,
       value: (r) => r.sourcePath,
-      render: (r) => pathCell(r.sourcePath),
+      render: (r) => pathCell(r.sourcePath, options.whole),
     };
   },
   timestamp(width = 170, presets: ColumnSpec["presets"] = ["analysis", "compact"]): ColumnSpec {

@@ -167,9 +167,25 @@
   }
 }
 
-/* The primary keeps its accent edge (no status stripe); the ghost marks keep theirs. */
-.grid-batch .button.primary[data-status-button] {
-  border-left: 1px solid var(--accent);
+/* Phone width: the one line ran past the pane and cut 보고서 포함 · 북마크 · 선택 해제; the
+   marks wrap under the count instead, every label whole. */
+@container grid-frame (max-width: 600px) {
+  .grid-batch {
+    width: calc(100% - var(--space-4));
+  }
+
+  .grid-batch-row {
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
+  }
+
+  .grid-batch-group {
+    flex-wrap: wrap;
+  }
+
+  .grid-batch-divider {
+    display: none;
+  }
 }
 
 .grid-filter input,
@@ -311,7 +327,8 @@
   align-items: stretch;
   width: 100%;
   border-bottom: 1px solid var(--line-subtle);
-  background: var(--bg);
+  /* --row-bg: the review-status tint of a marked row (below), else the page. */
+  background: var(--row-bg, var(--bg));
 }
 
 .grid-body .grid-row {
@@ -341,7 +358,7 @@
 /* Cells inherit the row background; the tint is painted on the row and the sticky cells
    repeat it over an opaque base so scrolled cells never show through. */
 .grid-body .grid-row:hover:not(.is-selected) {
-  background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg);
+  background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--row-bg, var(--bg));
 }
 
 .grid-row:focus-visible {
@@ -839,37 +856,31 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   color: var(--text-muted);
-  font-size: 10px;
-  line-height: 14px;
+  font-size: var(--fs-aux);
+  line-height: 18px;
   white-space: nowrap;
 }
 
-/* U-F8: review-mark stripe, 6px on the row's left edge (sticky with the select cell). */
-.grid-row-stripe {
-  position: absolute;
-  inset-block: 0;
-  left: 0;
-  width: 6px;
+/* U-F8: a reviewed row is tinted with its status colour (the 선별 chip names it); a selected row's
+   accent tint wins, and hover adds its 4% over either. No stripe on the row edge. */
+.grid-row[data-mark="relevant"] {
+  --row-bg: color-mix(in srgb, var(--status-relevant) 12%, var(--bg));
 }
 
-.grid-row-stripe[data-mark="relevant"] {
-  background: var(--status-relevant);
+.grid-row[data-mark="excluded"] {
+  --row-bg: color-mix(in srgb, var(--status-excluded) 12%, var(--bg));
 }
 
-.grid-row-stripe[data-mark="excluded"] {
-  background: var(--status-excluded);
+.grid-row[data-mark="needs-review"] {
+  --row-bg: color-mix(in srgb, var(--status-needs-review) 12%, var(--bg));
 }
 
-.grid-row-stripe[data-mark="needs-review"] {
-  background: var(--status-needs-review);
+.grid-row[data-mark="include-in-report"] {
+  --row-bg: color-mix(in srgb, var(--status-report) 12%, var(--bg));
 }
 
-.grid-row-stripe[data-mark="include-in-report"] {
-  background: var(--status-report);
-}
-
-.grid-row-stripe[data-mark="bookmark"] {
-  background: var(--status-bookmark);
+.grid-row[data-mark="bookmark"] {
+  --row-bg: color-mix(in srgb, var(--status-bookmark) 12%, var(--bg));
 }
 
 /* U-F8 mixed-family grid: label above value inside one cell (fits the 28px row). */
@@ -884,7 +895,7 @@
 .sum-label {
   overflow: hidden;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--fs-aux);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

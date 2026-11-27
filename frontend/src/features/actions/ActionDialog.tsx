@@ -8,8 +8,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { announce } from "../../a11y";
+import { MiddlePath } from "../../components/MiddlePath";
 import { pushToast } from "../../components/toastStore";
 import type { GridRow } from "../../contracts/collection";
+import { useTimezone } from "../../state/hooks";
 import { useAppStore } from "../../state/store";
 import { Modal } from "../case/Modal";
 import { notifyReviewApplied } from "../grid/reviewActions";
@@ -225,13 +227,26 @@ export function ActionDialog({ target, onClose }: { target: ActionDialogTarget; 
 }
 
 function ProfileView({ profile }: { profile: SelectionProfile }) {
-  const lines = summarize(profile);
+  const { timezone } = useTimezone();
+  const lines = summarize(profile, timezone);
   return (
     <dl className="action-facts">
       {lines.map((line) => (
         <div key={line.label}>
           <dt>{line.label}</dt>
-          <dd>{line.value}</dd>
+          {line.paths ? (
+            // One path a line: the leading folders shorten, the file name and its count stay.
+            <dd className="action-paths">
+              {line.paths.map((entry) => (
+                <span key={entry.path} className="action-path">
+                  <MiddlePath path={entry.path} whole />
+                  <span className="action-path-count">({entry.count.toLocaleString("ko-KR")})</span>
+                </span>
+              ))}
+            </dd>
+          ) : (
+            <dd>{line.value}</dd>
+          )}
         </div>
       ))}
     </dl>
