@@ -14,6 +14,14 @@ from urllib.parse import quote
 
 from fastapi import HTTPException
 
+from ...core.archive_entry import (
+    ArchiveEntry,
+    SourceFile,
+    entry_image_size,
+    open_source,
+    resolve_archive_entry,
+    source_size,
+)
 from ...core.audit import audit_path_for, write_audit_record
 from ...core.case import (
     CaseBookmarkError,
@@ -1070,6 +1078,13 @@ def build_archived_source_api_preview(run_id: str, archive_path: Path, entry_nam
             "source_preview_url": f"/api/runs/{run_id}/source-preview?path={quoted_display_path}",
         },
     }
+    if preview.get("preview_type") != "text" and mime_type.startswith(("image/", "audio/", "video/")):
+        # The member's bytes are served by source-file, so it opens in the image/media views like a file.
+        kind = "image" if mime_type.startswith("image/") else "media"
+        payload["preview_type"] = kind
+        payload[kind] = {"mime_type": mime_type}
+        if kind == "image":
+            payload["image"].update(entry_image_size(resolve_archive_entry(archive_path, displayed_entry)))
     if suffix in {".json", ".jsonl", ".ndjson"} and preview.get("preview_type") == "text":
         # The entry's own text: the JSON builder masks it (and its parsed strings) and sets `redacted`.
         payload.update(build_json_preview_from_text(entry_text, suffix, path=entry_path))
@@ -1200,7 +1215,7 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
     return payload
 
 
-def build_source_text(source_path: Path, *, max_bytes: int = SOURCE_TEXT_MAX_BYTES) -> dict[str, object]:
+def build_source_text(source_path: SourceFile, *, max_bytes: int = SOURCE_TEXT_MAX_BYTES) -> dict[str, object]:
     """The first ``max_bytes`` of a file as text for the console, its secrets masked as the text
     preview masks them (:func:`~rapidtriage.core.docs.redact_document_text`); the raw bytes stay
     behind ``source-file`` (원본 열기).
@@ -1211,16 +1226,18 @@ def build_source_text(source_path: Path, *, max_bytes: int = SOURCE_TEXT_MAX_BYT
     SOURCE_TEXT_REDACTION_MARGIN_BYTES past the cap are read and redacted as well, and the text ends
     where the two redactions part: before the cut secret, never with part of it.
     """
-    size = source_path.stat().st_size
+    size = source_size(source_path)
     window_bytes = max_bytes + SOURCE_TEXT_REDACTION_MARGIN_BYTES
-    with source_path.open("rb") as handle:
+    with open_source(source_path) as handle:
         data = handle.read(window_bytes)
     complete = len(data) <= max_bytes
     shown, codec = detect_and_decode_text(data[:max_bytes], final=complete)
-    text = redact_document_text(source_path, shown)
+    # A member is masked as a file of that name would be.
+    redaction_path = source_path.entry_path if isinstance(source_path, ArchiveEntry) else source_path
+    text = redact_document_text(redaction_path, shown)
     if not complete:
         window = decode_text_with(data, codec, final=len(data) < window_bytes)
-        text = text[: _common_prefix_length(text, redact_document_text(source_path, window))]
+        text = text[: _common_prefix_length(text, redact_document_text(redaction_path, window))]
     return {
         "path": str(source_path),
         "name": source_path.name,

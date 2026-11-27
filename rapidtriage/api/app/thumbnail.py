@@ -16,6 +16,8 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
+from ...core.archive_entry import ArchiveEntry, SourceFile, open_source, source_size
+
 THUMBNAIL_DEFAULT_SIZE = 160
 THUMBNAIL_MAX_SIZE = 512
 THUMBNAIL_MAX_SOURCE_BYTES = 64 * 1024 * 1024
@@ -37,27 +39,32 @@ def _cache_is_fresh(cache_path: Path, source_path: Path) -> bool:
         return False
 
 
-def render_thumbnail_jpeg(source_path: Path, size: int) -> bytes:
-    """Decode ``source_path`` with Pillow and return a JPEG no larger than ``size`` px on either side."""
+def render_thumbnail_jpeg(source_path: SourceFile, size: int) -> bytes:
+    """Decode ``source_path`` (a file, or a ZIP member read into memory) with Pillow and return a JPEG no larger than ``size`` px on either side."""
     try:
         from PIL import Image, ImageOps, UnidentifiedImageError
     except ModuleNotFoundError as exc:  # Pillow is optional for the server
         raise HTTPException(status_code=503, detail="thumbnail support requires Pillow") from exc
 
     try:
-        source_bytes = source_path.stat().st_size
+        source_bytes = source_size(source_path)
     except OSError as exc:
         raise HTTPException(status_code=404, detail="source file is not readable") from exc
     if source_bytes > THUMBNAIL_MAX_SOURCE_BYTES:
         raise HTTPException(status_code=413, detail="source image is too large for a thumbnail")
 
+    if isinstance(source_path, ArchiveEntry):
+        with open_source(source_path) as handle:
+            image_input: Path | io.BytesIO = io.BytesIO(handle.read())
+    else:
+        image_input = source_path
     limit = THUMBNAIL_MAX_PIXELS
     if Image.MAX_IMAGE_PIXELS:
         limit = min(limit, int(Image.MAX_IMAGE_PIXELS))
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
-            with Image.open(source_path) as image:
+            with Image.open(image_input) as image:
                 width, height = image.size
                 if width * height > limit:
                     raise HTTPException(status_code=413, detail="source image has too many pixels for a thumbnail")

@@ -339,7 +339,7 @@ export interface MediaCuePackage {
 
 const ARCHIVE_SEPARATOR = "::";
 
-/** `archive.zip::entry/x.json` → file APIs (metadata, hash, download, hex range) act on the container. */
+/** `archive.zip::entry/x.json` → source-metadata (size, hash) describes the container. */
 export function fileApiPath(path: string): string {
   const index = path.indexOf(ARCHIVE_SEPARATOR);
   return index > 0 ? path.slice(0, index) : path;
@@ -416,8 +416,45 @@ export function fetchSourceText(
   maxBytes: number,
   signal?: AbortSignal,
 ): Promise<SourceText> {
-  const params = query({ path: fileApiPath(path), max_bytes: maxBytes });
+  const params = query({ path, max_bytes: maxBytes });
   return api<SourceText>(`${runBase(runId)}/source-text?${params}`, { signal });
+}
+
+/** One member of `GET /source-archive-entries` (core/archive_entry.list_archive_entries). */
+export interface ArchiveEntryRow {
+  name: string;
+  /** `archive.zip::name`: opens the member in the viewer. */
+  path: string;
+  is_directory: boolean;
+  size: number;
+  compressed_size: number;
+  modified_at: string;
+  encrypted: boolean;
+  nested_archive: boolean;
+  openable: boolean;
+  /** Why the member is not served (encrypted, zip bomb, too large, unsafe name, folder). */
+  refusal_reason: string;
+}
+
+export interface ArchiveEntryPage {
+  total: number;
+  offset: number;
+  returned: number;
+  has_next: boolean;
+  entries: ArchiveEntryRow[];
+}
+
+/** A page of a ZIP's members read from its central directory (server caps `limit` at 1000). */
+export function fetchArchiveEntries(
+  runId: string,
+  path: string,
+  offset: number,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<ArchiveEntryPage> {
+  return api<ArchiveEntryPage>(`${runBase(runId)}/source-archive-entries?${query({ path, offset, limit })}`, {
+    signal,
+  });
 }
 
 /** Server caps `limit` at 500 (SQLITE_TABLE_PAGE_MAX_ROWS). */
@@ -497,8 +534,9 @@ export function fetchMediaCue(
   );
 }
 
+/** The original's bytes; an `archive.zip::entry` path streams that member, never the container. */
 export function sourceFileUrl(runId: string, path: string): string {
-  return `${runBase(runId)}/source-file?${query({ path: fileApiPath(path) })}`;
+  return `${runBase(runId)}/source-file?${query({ path })}`;
 }
 
 /**
@@ -585,7 +623,7 @@ export async function fetchSourceImage(
 export const THUMBNAIL_DEFAULT_SIZE = 160;
 
 export function sourceThumbnailUrl(runId: string, path: string, size = THUMBNAIL_DEFAULT_SIZE): string {
-  return `${runBase(runId)}/source-thumbnail?${query({ path: fileApiPath(path), size })}`;
+  return `${runBase(runId)}/source-thumbnail?${query({ path, size })}`;
 }
 
 export async function fetchSourceThumbnailBlob(

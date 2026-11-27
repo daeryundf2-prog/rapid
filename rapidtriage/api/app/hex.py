@@ -7,6 +7,13 @@ from urllib.parse import quote
 
 from fastapi import HTTPException
 
+from ...core.archive_entry import (
+    ArchiveEntry,
+    SourceFile,
+    hash_source,
+    open_source,
+    source_size,
+)
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.submission import compute_hashes
 from .constants import (
@@ -324,25 +331,27 @@ def build_hex_preview_manifest(
 def build_hex_range_citation_package(
     *,
     run_id: str,
-    source_path: Path,
+    source_path: SourceFile,
     offset: int,
     length: int,
     include_source_hashes: bool,
 ) -> dict[str, object]:
-    stat = source_path.stat()
-    if offset >= stat.st_size:
+    size = source_size(source_path)
+    if offset >= size:
         raise HTTPException(status_code=416, detail="offset is outside the source file")
-    read_length = min(length, HEX_RANGE_EXPORT_MAX_BYTES, max(stat.st_size - offset, 0))
-    with source_path.open("rb") as handle:
+    read_length = min(length, HEX_RANGE_EXPORT_MAX_BYTES, max(size - offset, 0))
+    with open_source(source_path) as handle:
         handle.seek(offset)
         data = handle.read(read_length)
     range_hashes = compute_hashes_for_bytes(data)
     rows = build_hex_rows(data, base_offset=offset)
     end_exclusive = offset + len(data)
     citation_id = hashlib.sha256(
-        f"{run_id}|{source_path}|{stat.st_size}|{offset}|{end_exclusive}|{range_hashes['sha256']}".encode()
+        f"{run_id}|{source_path}|{size}|{offset}|{end_exclusive}|{range_hashes['sha256']}".encode()
     ).hexdigest()[:16]
-    source_hashes = compute_hashes(source_path) if include_source_hashes else {}
+    source_hashes: dict[str, str] = {}
+    if include_source_hashes:
+        source_hashes = hash_source(source_path) if isinstance(source_path, ArchiveEntry) else compute_hashes(source_path)
     proof_manifest = build_hex_range_proof_manifest(
         source_path=source_path,
         offset=offset,
@@ -380,7 +389,7 @@ def build_hex_range_citation_package(
         "citation_id": citation_id,
         "path": str(source_path),
         "name": source_path.name,
-        "size": stat.st_size,
+        "size": size,
         "offset": offset,
         "offset_hex": f"0x{offset:08x}",
         "end_offset_exclusive": end_exclusive,

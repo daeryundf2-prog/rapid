@@ -9,13 +9,12 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useReducer,
   useRef,
   useState,
 } from "react";
 import { announce, useRovingTabindex } from "../../../a11y";
-import { fetchHexRange, type HexRow } from "../../../api/viewer";
+import { fetchHexRange } from "../../../api/viewer";
 import {
   BYTES_PER_ROW,
   byteAscii,
@@ -48,13 +47,10 @@ export interface HexViewProps {
   /** File size in bytes (preview/metadata). */
   size: number;
   highlight?: { offset?: number; length?: number };
-  /** Archive entries: no range API, render the preview's bounded rows only. */
-  staticRows?: HexRow[];
 }
 
-export function HexView({ runId, path, size: declaredSize, highlight, staticRows }: HexViewProps) {
-  const staticBytes = useMemo(() => (staticRows ? bytesFromHexRows(staticRows) : null), [staticRows]);
-  const size = staticBytes ? staticBytes.length : Math.max(0, declaredSize);
+export function HexView({ runId, path, size: declaredSize, highlight }: HexViewProps) {
+  const size = Math.max(0, declaredSize);
   const totalRows = rowCountForSize(size);
   const chunks = useRef(new Map<number, Chunk>());
   const [, bump] = useReducer((value: number) => value + 1, 0);
@@ -83,10 +79,6 @@ export function HexView({ runId, path, size: declaredSize, highlight, staticRows
       alive.current = false;
     };
   }, []);
-
-  if (staticBytes && !chunks.current.has(0)) {
-    chunks.current.set(0, { status: "ok", bytes: staticBytes, hits: scanSignatures(staticBytes, 0) });
-  }
 
   // Measure the scroll viewport (jsdom reports 0 → fallback height).
   useLayoutEffect(() => {
@@ -155,7 +147,7 @@ export function HexView({ runId, path, size: declaredSize, highlight, staticRows
   const renderStart = Math.max(0, firstRow - OVERSCAN_ROWS);
   const renderEnd = Math.min(totalRows, firstRow + visibleRows + OVERSCAN_ROWS);
   useEffect(() => {
-    if (staticBytes || size === 0) return;
+    if (size === 0) return;
     const firstChunk = Math.floor(renderStart / ROWS_PER_CHUNK);
     const lastChunk = Math.floor(Math.max(renderStart, renderEnd - 1) / ROWS_PER_CHUNK);
     for (let index = firstChunk; index <= lastChunk; index++) {
@@ -178,7 +170,7 @@ export function HexView({ runId, path, size: declaredSize, highlight, staticRows
         },
       );
     }
-  }, [renderStart, renderEnd, runId, path, size, staticBytes]);
+  }, [renderStart, renderEnd, runId, path, size]);
 
   const byteAt = (offset: number): number | null | "error" => {
     const chunk = chunks.current.get(Math.floor(offset / CHUNK_BYTES));
@@ -314,7 +306,7 @@ export function HexView({ runId, path, size: declaredSize, highlight, staticRows
         <span className="hex-status">
           커서 {formatOffset(cursor, size)} ({cursor.toLocaleString("ko-KR")}) · 값{" "}
           {typeof cursorValue === "number" ? `0x${byteHex(cursorValue)}` : "—"} · 크기{" "}
-          {size.toLocaleString("ko-KR")}바이트{staticBytes ? " (미리보기 범위만)" : ""}
+          {size.toLocaleString("ko-KR")}바이트
         </span>
       </form>
       {gotoError ? (

@@ -1,10 +1,5 @@
 import { useMemo, useState } from "react";
-import {
-  fetchSourceText,
-  isArchiveEntryPath,
-  type SourcePreview,
-  type SourceText,
-} from "../../../api/viewer";
+import { fetchSourceText, type SourcePreview, type SourceText } from "../../../api/viewer";
 import { bytesLabel } from "../fieldFormat";
 import { isTextPrefixPreview } from "../modes";
 import { errorText, useAsync } from "../useAsync";
@@ -74,7 +69,6 @@ export function SourceView({ runId, preview, terms }: SourceViewProps) {
     busy: false,
     error: null,
   });
-  const archive = isArchiveEntryPath(preview.path) || Boolean(preview.container_path);
   // A text file the server answered as bytes (over its size limit): read the capped prefix at once.
   // Both reads go through source-text, so the server masks secrets as in its preview.
   const prefix = useAsync(isTextPrefixPreview(preview) ? `${runId}|${preview.path}` : null, (signal) =>
@@ -138,15 +132,9 @@ export function SourceView({ runId, preview, terms }: SourceViewProps) {
           <p className="viewer-note">
             미리보기는 처음 {(preview.text ?? "").length.toLocaleString("ko-KR")}자만 표시합니다.
           </p>
-          {archive ? (
-            <p className="viewer-note">
-              ZIP 내부 항목은 전체 텍스트를 불러올 수 없습니다. 원본 열기로 확인하세요.
-            </p>
-          ) : (
-            <button type="button" className="viewer-button" onClick={loadMore} disabled={loadState.busy}>
-              {loadState.busy ? "불러오는 중…" : "더 보기 (최대 2 MB)"}
-            </button>
-          )}
+          <button type="button" className="viewer-button" onClick={loadMore} disabled={loadState.busy}>
+            {loadState.busy ? "불러오는 중…" : "더 보기 (최대 2 MB)"}
+          </button>
         </div>
       ) : null}
       {full && !full.complete ? (

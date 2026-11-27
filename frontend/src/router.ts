@@ -293,6 +293,7 @@ const VIEWER_MODES: readonly ViewerMode[] = [
   "document",
   "email",
   "media",
+  "archive",
   "meta",
 ];
 

@@ -7,7 +7,7 @@ import json
 import sqlite3
 import zipfile
 from collections.abc import Mapping, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .docs import SUPPORTED_DOC_EXTS, extract_text
 from .search import SearchError, load_run_summary
@@ -546,7 +546,8 @@ def parse_archived_source_request(raw_path: str) -> dict[str, str] | None:
     entry_name = entry_name.strip().replace("\\", "/")
     if not archive_path or not entry_name:
         raise SourceReadError("archived source path must be formatted as archive.zip::entry/path.json")
-    if Path(entry_name).is_absolute() or ".." in Path(entry_name).parts:
+    # ZIP names are POSIX paths whatever the host: "/etc/x" is absolute on Windows too.
+    if PurePosixPath(entry_name).is_absolute() or ".." in PurePosixPath(entry_name).parts:
         raise SourceReadError("archive entry path must be relative and must not contain parent traversal")
     if Path(archive_path).suffix.lower() != ".zip":
         raise SourceReadError("archived source-read currently supports .zip containers only")
@@ -594,24 +595,29 @@ def build_archived_source_preview(
             info = find_zip_entry(archive, entry_name)
             if info.is_dir():
                 raise SourceReadError(f"archive entry is a directory: {entry_name}")
-            if info.file_size > MAX_ARCHIVED_SOURCE_ENTRY_BYTES:
-                raise SourceReadError(
-                    f"archive entry is too large for source-read ({info.file_size} bytes > "
-                    f"{MAX_ARCHIVED_SOURCE_ENTRY_BYTES} bytes): {entry_name}"
-                )
-            blob = archive.read(info)
+            whole = info.file_size <= MAX_ARCHIVED_SOURCE_ENTRY_BYTES
+            # Past the cap only the head is read: enough for the hex preview, never the whole member.
+            with archive.open(info) as handle:
+                blob = handle.read(info.file_size if whole else hex_bytes)
     except zipfile.BadZipFile as exc:
         raise SourceReadError(f"invalid zip archive: {archive_path}") from exc
     except KeyError as exc:
         raise SourceReadError(f"archive entry not found: {entry_name}") from exc
+    except RuntimeError as exc:
+        # zipfile's answer to an encrypted member opened without a password.
+        raise SourceReadError(f"archive entry is encrypted and cannot be read: {entry_name}") from exc
     except OSError as exc:
         raise SourceReadError(f"failed to read archive entry {entry_name}: {exc}") from exc
 
-    entry_hashes = {
-        "sha256": hashlib.sha256(blob).hexdigest(),
-        "md5": hashlib.md5(blob).hexdigest(),
-        "sha1": hashlib.sha1(blob).hexdigest(),
-    }
+    entry_hashes = (
+        {
+            "sha256": hashlib.sha256(blob).hexdigest(),
+            "md5": hashlib.md5(blob).hexdigest(),
+            "sha1": hashlib.sha1(blob).hexdigest(),
+        }
+        if whole
+        else {}
+    )
     entry_metadata = {
         "container_type": "zip",
         "archive_path": str(archive_path),
@@ -630,11 +636,11 @@ def build_archived_source_preview(
         },
     }
 
-    if len(blob) <= max_chars and not is_probably_binary_bytes(blob):
+    if whole and len(blob) <= max_chars and not is_probably_binary_bytes(blob):
         text = blob.decode("utf-8", errors="replace")
         preview = text_preview_payload(text, max_chars=max_chars, strategy="bounded-zip-entry-text")
     else:
-        preview = hex_preview_payload_from_bytes(blob, hex_bytes=hex_bytes, total_size=len(blob))
+        preview = hex_preview_payload_from_bytes(blob, hex_bytes=hex_bytes, total_size=info.file_size)
     preview.update(entry_metadata)
     preview["core_accuracy_gates"] = {
         "component": "source-read-zip-entry-locator",

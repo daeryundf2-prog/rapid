@@ -4,7 +4,7 @@
  * Pure functions so the matrix is unit-testable without rendering.
  */
 
-import { isArchiveEntryPath, type SourcePreview } from "../../api/viewer";
+import type { SourcePreview } from "../../api/viewer";
 import type { ViewerMode, ViewerModeState, ViewerTarget } from "../../contracts/viewer";
 
 export const MODE_ORDER: ViewerMode[] = [
@@ -15,6 +15,7 @@ export const MODE_ORDER: ViewerMode[] = [
   "document",
   "email",
   "media",
+  "archive",
   "meta",
 ];
 
@@ -26,6 +27,7 @@ export const MODE_LABELS: Record<ViewerMode, string> = {
   document: "문서",
   email: "이메일",
   media: "미디어",
+  archive: "압축",
   meta: "메타",
 };
 
@@ -84,7 +86,8 @@ export const REASONS = {
   notDocument: "PDF·DOCX 등 문서 텍스트 추출 대상이 아닙니다.",
   notEmail: "EML/MBOX 메일 파일이 아닙니다.",
   notMedia: "오디오·비디오 파일이 아닙니다.",
-  archiveHex: "ZIP 내부 항목은 헥스 미리보기를 제공하지 않습니다.",
+  notArchive: "ZIP 압축 파일이 아닙니다.",
+  nestedArchive: "압축 파일 안의 압축 파일은 목록을 열지 않습니다. 헥스 탭에서 바이트를 확인하세요.",
   directory: "디렉터리는 미리보기가 없습니다. 디렉터리 안의 파일을 선택하세요.",
 } as const;
 
@@ -116,15 +119,15 @@ export function isDocumentPreview(preview: SourcePreview): boolean {
   return DOCUMENT_EXTENSIONS.has((preview.extension || "").toLowerCase());
 }
 
-/** An `archive.zip::entry` preview: file APIs act on the container, so the entry's own bytes cannot be fetched. */
-function isArchiveEntry(preview: SourcePreview): boolean {
-  return Boolean(preview.container_path) || isArchiveEntryPath(preview.path);
+/** A ZIP whose members can be listed: a run file, not a ZIP inside another (nesting stops at one level). */
+export function isArchiveContainer(preview: SourcePreview): boolean {
+  return (preview.extension || "").toLowerCase() === ".zip" && !preview.container_path;
 }
 
 /** A PDF whose bytes can be fetched: shown as pages (PdfView), whether or not text was extracted. */
 export function isRenderablePdf(preview: SourcePreview): boolean {
   const pdf = (preview.extension || "").toLowerCase() === ".pdf" || preview.mime_type === "application/pdf";
-  return pdf && preview.size > 0 && !isArchiveEntry(preview);
+  return pdf && preview.size > 0;
 }
 
 /** A plain-text kind the server answered as bytes (over its size limit): readable as a capped prefix. */
@@ -132,13 +135,13 @@ export function isTextPrefixPreview(preview: SourcePreview): boolean {
   return (
     preview.preview_type === "binary" &&
     TEXT_EXTENSIONS.has((preview.extension || "").toLowerCase()) &&
-    preview.size > 0 &&
-    !isArchiveEntry(preview)
+    preview.size > 0
   );
 }
 
 /** Mode the payload naturally belongs to (before availability checks). */
 export function naturalMode(preview: SourcePreview): ViewerMode {
+  if (isArchiveContainer(preview)) return "archive";
   switch (preview.preview_type) {
     case "image":
       return "image";
@@ -164,8 +167,6 @@ export function naturalMode(preview: SourcePreview): ViewerMode {
 function hexState(preview: SourcePreview | null, target: ViewerTarget): ViewerModeState {
   if (!target.sourcePath) return state("hex", REASONS.noPath);
   if (preview && preview.size === 0) return state("hex", REASONS.emptyFile);
-  const archive = Boolean(preview?.container_path);
-  if (archive && !preview?.hex?.rows?.length) return state("hex", REASONS.archiveHex);
   return state("hex");
 }
 
@@ -231,6 +232,11 @@ export function resolveModes(input: ResolveInput): ResolvedModes {
         return type === "email" ? state("email") : state("email", REASONS.notEmail);
       case "media":
         return type === "media" ? state("media") : state("media", REASONS.notMedia);
+      case "archive":
+        if (natural === "archive") return state("archive");
+        return (preview.extension || "").toLowerCase() === ".zip"
+          ? state("archive", REASONS.nestedArchive)
+          : state("archive", REASONS.notArchive);
       default:
         return state("meta");
     }

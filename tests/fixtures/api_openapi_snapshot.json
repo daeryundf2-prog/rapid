@@ -342,6 +342,9 @@
       "get": "get_saved_search_api_runs__run_id__search_saved__saved_id__get",
       "put": "update_saved_search_api_runs__run_id__search_saved__saved_id__put"
     },
+    "/api/runs/{run_id}/source-archive-entries": {
+      "get": "source_archive_entries_api_runs__run_id__source_archive_entries_get"
+    },
     "/api/runs/{run_id}/source-email-attachment": {
       "get": "source_email_attachment_api_runs__run_id__source_email_attachment_get"
     },

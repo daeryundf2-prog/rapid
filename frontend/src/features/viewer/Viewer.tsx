@@ -238,9 +238,8 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
         const url = URL.createObjectURL(blob.slice(0, blob.size, "application/octet-stream"));
         const anchor = document.createElement("a");
         anchor.href = url;
-        anchor.download = baseName(
-          preview?.container_path ?? target.sourcePath.split("::")[0] ?? target.sourcePath,
-        );
+        // An archive member downloads as itself (source-file streams the member's bytes).
+        anchor.download = baseName(target.sourcePath);
         document.body.appendChild(anchor);
         anchor.click();
         anchor.remove();
