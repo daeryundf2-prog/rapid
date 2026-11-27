@@ -1086,6 +1086,75 @@ dd:focus-within .meta-colbtn,
   outline-offset: 1px;
 }
 
+/* ZIP entry list (압축 목록) ---------------------------------------------------- */
+
+.archive-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  font-size: var(--fs-table-aux);
+  color: var(--text-muted);
+}
+
+/* Fill the pane: the name column wraps so sizes and times stay in view. */
+.viewer-table.archive-table {
+  width: 100%;
+}
+
+.archive-table .archive-name {
+  min-width: 9em;
+  overflow-wrap: break-word;
+}
+
+.archive-table .archive-num,
+.archive-table .archive-time {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.archive-table .archive-num {
+  text-align: right;
+}
+
+.archive-open {
+  min-height: 24px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.archive-open:hover {
+  text-decoration-thickness: 2px;
+}
+
+.archive-open:active {
+  color: var(--text);
+}
+
+.archive-open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.archive-closed {
+  color: var(--text-muted);
+}
+
+.archive-state {
+  display: block;
+  color: var(--text-muted);
+  word-break: keep-all;
+}
+
 /* Record view, evidence first (viewer redesign) -------------------------------- */
 
 /* Warnings above everything: tone by left rule + tinted panel (text stays --text). */

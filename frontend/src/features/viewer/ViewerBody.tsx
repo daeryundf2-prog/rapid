@@ -3,6 +3,7 @@ import type { ViewerMode, ViewerTarget } from "../../contracts/viewer";
 import type { useViewerRowContext } from "./adapter";
 import { naturalMode } from "./modes";
 import type { AsyncState } from "./useAsync";
+import { ArchiveView } from "./views/ArchiveView";
 import { DocumentView } from "./views/DocumentView";
 import { EmailView } from "./views/EmailView";
 import { FallbackView } from "./views/FallbackView";
@@ -107,7 +108,6 @@ export function ViewerBody(props: ViewerBodyProps) {
           path={target.sourcePath}
           size={preview.size}
           highlight={highlight}
-          staticRows={preview.container_path ? preview.hex?.rows : undefined}
         />
       );
       // Hex as the last resort (no viewer for this type, and no record range to look at): say so.
@@ -141,6 +141,15 @@ export function ViewerBody(props: ViewerBodyProps) {
           preview={preview}
           onCopy={props.onCopy}
           onOpenOriginal={props.onOpenOriginal}
+        />
+      );
+    case "archive":
+      return (
+        <ArchiveView
+          key={preview.path}
+          runId={target.runId}
+          preview={preview}
+          onOpenPath={props.onOpenPath}
         />
       );
     default:

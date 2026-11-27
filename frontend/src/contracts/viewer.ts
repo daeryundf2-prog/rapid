@@ -9,7 +9,16 @@
 
 import type { RowRef } from "./rowRef";
 
-export type ViewerMode = "source" | "hex" | "sqlite" | "image" | "document" | "email" | "media" | "meta";
+export type ViewerMode =
+  | "source"
+  | "hex"
+  | "sqlite"
+  | "image"
+  | "document"
+  | "email"
+  | "media"
+  | "archive"
+  | "meta";
 
 export interface ViewerTarget {
   ref: RowRef;

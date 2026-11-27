@@ -169,8 +169,8 @@ describe("naturalMode — the viewer each file type opens in", () => {
     ["upper-case .PDF", "document", { preview_type: "hex", extension: ".PDF" }],
     ["empty pdf", "hex", { preview_type: "hex", extension: ".pdf", size: 0 }],
     [
-      "pdf in a zip, no text (entry bytes cannot be fetched)",
-      "hex",
+      "pdf in a zip, no text (pages from the entry's bytes)",
+      "document",
       { preview_type: "hex", extension: ".pdf", ...zipEntry },
     ],
     ["pdf in a zip, with text", "document", { preview_type: "text", extension: ".pdf", ...zipEntry }],
@@ -182,7 +182,15 @@ describe("naturalMode — the viewer each file type opens in", () => {
     ["json", "source", { preview_type: "json", extension: ".json" }],
     ["csv over the size limit", "source", { preview_type: "binary", extension: ".csv" }],
     ["json over the size limit", "source", { preview_type: "binary", extension: ".json" }],
-    ["log in a zip over the size limit", "hex", { preview_type: "binary", extension: ".log", ...zipEntry }],
+    [
+      "log in a zip over the size limit",
+      "source",
+      { preview_type: "binary", extension: ".log", ...zipEntry },
+    ],
+    ["png in a zip", "image", { preview_type: "image", extension: ".png", ...zipEntry }],
+    ["zip archive", "archive", { preview_type: "hex", extension: ".zip" }],
+    ["upper-case .ZIP", "archive", { preview_type: "hex", extension: ".ZIP" }],
+    ["zip inside a zip (not listed)", "hex", { preview_type: "hex", extension: ".zip", ...zipEntry }],
     ["wav", "media", { preview_type: "media", extension: ".wav" }],
     ["mp4", "media", { preview_type: "media", extension: ".mp4" }],
     ["docx with extracted text", "document", { preview_type: "text", extension: ".docx" }],
@@ -235,11 +243,38 @@ describe("resolveModes — edge cases", () => {
     expect(reason(result, "image")).toContain("403");
   });
 
-  it("zip entry without preview rows disables hex", () => {
+  it("zip entry keeps hex: its bytes come from the entry range API", () => {
     const result = resolveModes({
       target: target({ sourcePath: "C:/a.zip::x.json" }),
       preview: preview({ preview_type: "json", container_path: "C:/a.zip" }),
     });
-    expect(reason(result, "hex")).toBe(REASONS.archiveHex);
+    expect(available(result)).toEqual(["source", "hex", "meta"]);
+  });
+
+  it("zip container → entry list first, hex still available", () => {
+    const result = resolveModes({
+      target: target({ sourcePath: "C:/a.zip" }),
+      preview: preview({ path: "C:/a.zip", preview_type: "hex", extension: ".zip" }),
+    });
+    expect(result.best).toBe("archive");
+    expect(available(result)).toEqual(["hex", "archive", "meta"]);
+    expect(reason(result, "source")).toBe(REASONS.notText);
+  });
+
+  it("zip inside a zip: no entry list, says why", () => {
+    const result = resolveModes({
+      target: target({ sourcePath: "C:/a.zip::b.zip" }),
+      preview: preview({
+        path: "C:/a.zip::b.zip",
+        preview_type: "hex",
+        extension: ".zip",
+        container_path: "C:/a.zip",
+      }),
+    });
+    expect(result.best).toBe("hex");
+    expect(reason(result, "archive")).toBe(REASONS.nestedArchive);
+    expect(reason(resolveModes({ target: target(), preview: preview({}) }), "archive")).toBe(
+      REASONS.notArchive,
+    );
   });
 });

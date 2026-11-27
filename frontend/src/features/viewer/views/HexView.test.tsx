@@ -87,18 +87,13 @@ describe("HexView", () => {
     expect(container.querySelectorAll(".hex-byte.is-sig")).toHaveLength(2);
   });
 
-  it("renders static preview rows for zip entries without calling the range API", () => {
-    const calls = installFetch({});
-    render(
-      <HexView
-        runId="r1"
-        path="C:/a.zip::x.bin"
-        size={0}
-        staticRows={[{ offset: 0, offset_hex: "0x00000000", hex: "50 4b 03 04", ascii: "PK.." }]}
-      />,
-    );
-    expect(rowFor("0x00000000")?.getAttribute("aria-label")).toBe("0x00000000 50 4b 03 04 PK..");
-    expect(calls).toHaveLength(0);
+  it("reads a zip entry's bytes through the range API with the entry path", async () => {
+    const calls = installFetch({
+      "source-hex-range": hexRangeHandler(32, (i) => [0x50, 0x4b, 3, 4][i] ?? 0),
+    });
+    render(<HexView runId="r1" path="C:/a.zip::x.bin" size={32} />);
+    await waitFor(() => expect(rowFor("0x00000000")?.getAttribute("aria-label")).toContain("50 4b 03 04"));
+    expect(calls.map((c) => c.url.searchParams.get("path"))).toEqual(["C:/a.zip::x.bin"]);
   });
 
   it("gives the hex rows a roving tabindex: one tab stop that follows the cursor and keeps focus", async () => {

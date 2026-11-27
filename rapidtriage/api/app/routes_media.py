@@ -6,15 +6,17 @@ import mimetypes
 import sqlite3
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import (
     FileResponse,
     Response,
 )
 
+from ...core.archive_entry import ArchiveEntry, ArchiveEntryError, list_archive_entries
 from ...core.jobs import RunJobStore
 from ...core.sqlite_wal import SqliteWalPreviewError, build_sqlite_wal_preview
 from .analyses import AnalysisRowRef, analysis_row_ref
+from .archive_entries import archive_entry_response, resolve_allowed_source_target
 from .constants import (
     HEX_RANGE_EXPORT_MAX_BYTES,
     IMAGE_GALLERY_DEFAULT_LIMIT,
@@ -30,7 +32,6 @@ from .helpers import (
     get_job,
     is_image_preview_candidate,
     is_sqlite_candidate,
-    parse_source_preview_archive_request,
     resolve_allowed_source_file,
 )
 from .hex import (
@@ -55,7 +56,12 @@ from .runops import (
 from .sqlite import (
     build_sqlite_table_page,
 )
-from .thumbnail import THUMBNAIL_DEFAULT_SIZE, THUMBNAIL_MAX_SIZE, cached_thumbnail
+from .thumbnail import (
+    THUMBNAIL_DEFAULT_SIZE,
+    THUMBNAIL_MAX_SIZE,
+    cached_thumbnail,
+    render_thumbnail_jpeg,
+)
 
 THUMBNAIL_CACHE_CONTROL = "private, max-age=86400"
 
@@ -93,9 +99,13 @@ def build_media_router(
         run_id: str,
         path: str = Query(..., min_length=1),
         row_ref: AnalysisRowRef = Depends(analysis_row_ref),
-    ) -> FileResponse:
-        source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
-        return FileResponse(source_path, filename=source_path.name)
+        range_header: str | None = Header(default=None, alias="Range"),
+    ) -> Response:
+        """The original's bytes; an `archive.zip::entry` path streams that member, ranges included."""
+        source = resolve_allowed_source_target(store, run_id, path, **row_ref)
+        if isinstance(source, ArchiveEntry):
+            return archive_entry_response(source, range_header)
+        return FileResponse(source, filename=source.name)
 
 
     @router.get("/api/runs/{run_id}/source-thumbnail")
@@ -105,14 +115,17 @@ def build_media_router(
         row_ref: AnalysisRowRef = Depends(analysis_row_ref),
         size: int = Query(THUMBNAIL_DEFAULT_SIZE, ge=16, le=THUMBNAIL_MAX_SIZE),
     ) -> Response:
-        source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
-        if not is_image_preview_candidate(source_path):
+        source_path = resolve_allowed_source_target(store, run_id, path, **row_ref)
+        if not is_image_preview_candidate(Path(source_path.name)):
             raise HTTPException(status_code=415, detail="source file is not a supported image")
+        headers = {"Cache-Control": THUMBNAIL_CACHE_CONTROL}
+        if isinstance(source_path, ArchiveEntry):
+            # Rendered from the member's bytes each time: nothing derived from it is written to disk.
+            return Response(content=render_thumbnail_jpeg(source_path, size), media_type="image/jpeg", headers=headers)
         summary = get_job(store, run_id).summary or {}
         output_value = summary.get("output_dir")
         output_dir = Path(output_value) if isinstance(output_value, str) and output_value else None
         cache_path, data = cached_thumbnail(source_path, size, output_dir)
-        headers = {"Cache-Control": THUMBNAIL_CACHE_CONTROL}
         if cache_path is not None:
             return FileResponse(cache_path, media_type="image/jpeg", headers=headers)
         return Response(content=data or b"", media_type="image/jpeg", headers=headers)
@@ -124,10 +137,10 @@ def build_media_router(
         path: str = Query(..., min_length=1),
         row_ref: AnalysisRowRef = Depends(analysis_row_ref),
     ) -> dict[str, object]:
-        archive_request = parse_source_preview_archive_request(path)
-        if archive_request:
-            source_path = resolve_allowed_source_file(store, run_id, archive_request["archive_path"], **row_ref)
-            return build_archived_source_api_preview(run_id, source_path, archive_request["entry_name"])
+        if "::" in path:
+            entry = resolve_allowed_source_target(store, run_id, path, **row_ref)
+            if isinstance(entry, ArchiveEntry):
+                return build_archived_source_api_preview(run_id, entry.archive_path, entry.entry_name)
         source_path = resolve_allowed_source_file(store, run_id, path, allow_directory=True, **row_ref)
         if source_path.is_dir():
             return build_directory_preview(run_id, source_path)
@@ -149,7 +162,7 @@ def build_media_router(
         max_bytes: int = Query(SOURCE_TEXT_MAX_BYTES, ge=1, le=SOURCE_TEXT_MAX_BYTES),
     ) -> dict[str, object]:
         """The start of a file as redacted text: the console's text views read this, never source-file."""
-        source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
+        source_path = resolve_allowed_source_target(store, run_id, path, **row_ref)
         return build_source_text(source_path, max_bytes=max_bytes)
 
 
@@ -162,7 +175,7 @@ def build_media_router(
         length: int = Query(256, ge=1, le=HEX_RANGE_EXPORT_MAX_BYTES),
         include_hashes: bool = False,
     ) -> dict[str, object]:
-        source_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
+        source_path = resolve_allowed_source_target(store, run_id, path, **row_ref)
         return build_hex_range_citation_package(
             run_id=run_id,
             source_path=source_path,
@@ -170,6 +183,24 @@ def build_media_router(
             length=length,
             include_source_hashes=include_hashes,
         )
+
+
+    @router.get("/api/runs/{run_id}/source-archive-entries")
+    def source_archive_entries(
+        run_id: str,
+        path: str = Query(..., min_length=1),
+        row_ref: AnalysisRowRef = Depends(analysis_row_ref),
+        offset: int = Query(0, ge=0),
+        limit: int = Query(200, ge=1, le=1000),
+    ) -> dict[str, object]:
+        """A page of a ZIP's members (name, sizes, time, encryption) read from its central directory."""
+        if "::" in path:
+            raise HTTPException(status_code=422, detail="압축 파일 안의 압축 파일은 목록을 열지 않습니다(한 단계까지만 엽니다)")
+        archive_path = resolve_allowed_source_file(store, run_id, path, **row_ref)
+        try:
+            return list_archive_entries(archive_path, offset=offset, limit=limit)
+        except ArchiveEntryError as exc:
+            raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
 
 
     @router.get("/api/runs/{run_id}/source-sqlite-table")
