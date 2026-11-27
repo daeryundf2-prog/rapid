@@ -165,7 +165,7 @@ export function kindColumn(def: KindColumnDef): ColumnSpec {
     presets: def.presets ?? ["analysis", "axiom"],
     ...(def.mono ? { mono: true } : {}),
     ...(def.time
-      ? { filterKind: "time" as const }
+      ? { filterKind: "time" as const, ...(def.display ? {} : { zoneInHeader: true }) }
       : def.number || def.bytes
         ? { filterKind: "number" as const }
         : {}),

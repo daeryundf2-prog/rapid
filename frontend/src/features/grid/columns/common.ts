@@ -1,3 +1,5 @@
+import { createElement, type ReactNode } from "react";
+import { ZoneTime } from "../../../components/ZoneTime";
 import type { CollectionId, GridRow, ReviewStatus } from "../../../contracts/collection";
 import type { RowRef } from "../../../contracts/rowRef";
 import { runEvidenceTimezone } from "../../../state/hooks";
@@ -11,6 +13,7 @@ import {
   evidenceTimeTooltip,
   exactEvidenceTime,
   formatGridTime,
+  headerZone,
   zoneStatusLabel,
 } from "../../../utils/time";
 import type { CellValue, ColumnSpec } from "../types";
@@ -21,6 +24,14 @@ import { reviewStatusCell } from "./StatusCells";
 export function currentTimezone(): string {
   const s = useAppStore.getState();
   return s.route.tz ?? s.timezone ?? runEvidenceTimezone(currentRun(s)) ?? "local";
+}
+
+/**
+ * A `render` time cell under a `zoneInHeader` header: `text` with the header's zone name hidden
+ * from the eye (kept for copy and screen readers, `ZoneTime`).
+ */
+export function cellTime(text: string): ReactNode {
+  return createElement(ZoneTime, { text, zone: headerZone(currentTimezone()) });
 }
 
 /** Source zone label of a row's time (timeline `timezone`, else `details.timestamp_timezone`). */
@@ -202,6 +213,7 @@ export const col = {
       presets,
       value: (r) => r.timestamp,
       format: (r) => (r.timestamp ? formatGridTime(r.timestamp, currentTimezone(), rowTimeZone(r)) : ""),
+      zoneInHeader: true,
       // Integer 100 ns ticks, never the text (".000001" would sort before ".0000007").
       ...evidenceTimeColumnParts(
         (r) =>

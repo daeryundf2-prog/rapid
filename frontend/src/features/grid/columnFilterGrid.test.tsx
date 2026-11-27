@@ -6,6 +6,7 @@ import { resetArtifactCountsCache } from "../../api/collections";
 import { resetCommandRegistry } from "../../commands/registry";
 import { EMPTY_ROUTE, parseHash } from "../../router";
 import { useAppStore } from "../../state/store";
+import { headerZone } from "../../utils/time";
 import { registerAnalysisCommands } from "../analysis/commands";
 import { useAnalysisStore } from "../analysis/store";
 import { useGridLocalStore } from "./adapter";
@@ -108,9 +109,11 @@ describe("files NTFS columns (plan analysis-workbench-p1 U-P1-3)", () => {
     await waitFor(() => expect(dataRows()).toHaveLength(3));
     openConditions();
     fireEvent.change(screen.getByRole("combobox", { name: "열 구성" }), { target: { value: "source" } });
+    // Time headers name the display zone once (the cells leave it out).
+    const zone = headerZone("local");
     for (const [col, name] of [
-      ["ntfsCreated", "NTFS 생성"],
-      ["ntfsAccessed", "NTFS 접근"],
+      ["ntfsCreated", `NTFS 생성 (${zone})`],
+      ["ntfsAccessed", `NTFS 접근 (${zone})`],
       ["ntfsEntry", "MFT 엔트리"],
       ["filesystem", "파일 시스템"],
       ["sourceImage", "소스 이미지 경로"],

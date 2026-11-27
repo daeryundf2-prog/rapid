@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatGridTime,
   formatMinute,
   formatShortMinute,
   formatTimeRange,
   formatTimestamp,
+  headerZone,
+  headerZoneParts,
   isValidTimezone,
   minuteBound,
   shiftIso,
@@ -93,5 +96,41 @@ describe("range and typed-time readings in the display zone", () => {
     expect(toZonedInput("nope", "utc")).toBe("");
     expect(zonedInputToBound("2026-10-22T13:45", "Asia/Seoul")).toBe("2026-10-22T04:45Z");
     expect(zonedInputToBound("2026-10-2", "utc")).toBeUndefined();
+  });
+});
+
+describe("time cells under a header that names the zone", () => {
+  const hidden = (text: string, zone: string) =>
+    headerZoneParts(text, zone)
+      .map((part) => (part.zone ? `[${part.text}]` : part.text))
+      .join("");
+
+  it("names the display zone of the header now", () => {
+    expect(headerZone("Asia/Seoul")).toBe("KST");
+    expect(headerZone("utc")).toBe("UTC");
+    expect(headerZone("America/New_York", new Date(Date.UTC(2026, 0, 1)))).toBe("EST");
+  });
+
+  it("splits off the header's zone after each time; the parts join back to the full reading", () => {
+    const one = formatGridTime("2026-10-18T00:02:48Z", "Asia/Seoul");
+    expect(hidden(one, "KST")).toBe("2026-10-18 09:02:48[ KST]");
+    expect(
+      headerZoneParts(one, "KST")
+        .map((part) => part.text)
+        .join(""),
+    ).toBe(one);
+    // A list of times (Prefetch run times) hides each; a fraction stays with its time.
+    expect(hidden("2026-10-18 09:02:48 KST, 2026-10-19 10:00:00.1234567 KST", "KST")).toBe(
+      "2026-10-18 09:02:48[ KST], 2026-10-19 10:00:00.1234567[ KST]",
+    );
+    expect(hidden("2026-10-18 09:02 UTC+05:30", "UTC+05:30")).toBe("2026-10-18 09:02[ UTC+05:30]");
+  });
+
+  it("keeps a zone that is not the header's, an undetermined wall clock and other text whole", () => {
+    // Summer half of a daylight-saving zone under a winter header.
+    expect(hidden("2026-07-01 08:00:00 EDT", "EST")).toBe("2026-07-01 08:00:00 EDT");
+    expect(hidden("2026-07-01 08:00:00 현지(미확정)", "KST")).toBe("2026-07-01 08:00:00 현지(미확정)");
+    expect(hidden("KST office", "KST")).toBe("KST office");
+    expect(hidden("", "KST")).toBe("");
   });
 });

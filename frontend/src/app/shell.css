@@ -53,6 +53,13 @@ kbd {
   border: 0;
 }
 
+/* The zone name of a time cell whose column header already names it (ZoneTime): no width on
+   screen, but still inline text, so a selection copies "08:02:48 KST" with its space (an
+   absolutely positioned .visually-hidden box would drop the space). */
+.zone-time-hidden {
+  font-size: 0;
+}
+
 .icon {
   flex: none;
   display: inline-block;

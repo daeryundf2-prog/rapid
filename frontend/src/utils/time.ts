@@ -477,6 +477,38 @@ export function formatGridTime(
   return `${formatTimestamp(date, tz)} ${zoneShort(tz, date)}`;
 }
 
+/** Zone name a time column header carries ("시각 (KST)"): the display zone's short name now. */
+export function headerZone(tz: TimezoneChoice, now: Date = new Date()): string {
+  return zoneShort(tz, now);
+}
+
+const headerZonePatterns = new Map<string, RegExp>();
+
+/**
+ * A grid cell under a header that names the zone: `text` (a `formatGridTime` reading, or a ", "
+ * list of them) split where the header's zone name follows a time ("2025-05-29 23:25:26 KST" →
+ * "2025-05-29 23:25:26" + " KST"). The cell shows the time parts and keeps each zone part for
+ * copy and screen readers only. Another name is a time part — the other half of a daylight-saving
+ * zone ("EDT" under "EST") — and so is 현지(미확정).
+ */
+export function headerZoneParts(text: string, zone: string): { text: string; zone: boolean }[] {
+  if (!text || !zone) return [{ text, zone: false }];
+  let pattern = headerZonePatterns.get(zone);
+  if (!pattern) {
+    const name = zone.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    pattern = new RegExp(`(?<=\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d+)?)?) ${name}(?=$|[,;)])`, "g");
+    headerZonePatterns.set(zone, pattern);
+  }
+  const parts: { text: string; zone: boolean }[] = [];
+  let at = 0;
+  for (const match of text.matchAll(pattern)) {
+    parts.push({ text: text.slice(at, match.index), zone: false }, { text: match[0], zone: true });
+    at = match.index + match[0].length;
+  }
+  if (at < text.length || parts.length === 0) parts.push({ text: text.slice(at), zone: false });
+  return parts;
+}
+
 // ---------------------------------------------------------------------------
 // Ranges and typed times (filter chips, 시간 개요 띠, palette, action dialogs): the same
 // `YYYY-MM-DD HH:mm` reading in the console's display zone as the grid, the zone named once.

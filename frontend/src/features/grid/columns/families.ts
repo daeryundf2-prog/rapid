@@ -28,6 +28,7 @@ import { eventLevelLabel, logonTypeLabel, severityLabel } from "../../viewer/fie
 import { EVENT_DATA_KEYS } from "../../viewer/fieldSheets";
 import type { ColumnSpec } from "../types";
 import {
+  cellTime,
   currentTimezone,
   type EvidenceTimeCell,
   evidenceTimeColumnParts,
@@ -415,7 +416,7 @@ export function catalogColumn(def: CatalogColumn, aux = false): ColumnSpec {
     presets: aux ? [] : ["analysis", "axiom"],
     ...(MONO_FORMATS.has(def.format ?? "") ? { mono: true } : {}),
     ...(numeric ? { align: "right" as const, filterKind: "number" as const } : {}),
-    ...(def.format === "time" ? { filterKind: "time" as const } : {}),
+    ...(def.format === "time" ? { filterKind: "time" as const, zoneInHeader: true } : {}),
     ...(sortable ? { sortKey: `details.${def.key}` } : {}),
     ...(sortable && def.aliases?.length ? { sortHint: `${def.label} 정렬 (${def.key} 기준)` } : {}),
     fieldKeys: [def.key, ...(def.aliases ?? [])].filter((key) => !key.includes(".")),
@@ -457,7 +458,7 @@ export function catalogColumn(def: CatalogColumn, aux = false): ColumnSpec {
                 { className: "ts-kind-chip", title: `${tsKindLabel(rowKind)} (${rowKind})` },
                 tsKindLabel(rowKind),
               ),
-              createElement("span", { className: "grid-cell-text" }, displayValue(def, hit.value)),
+              createElement("span", { className: "grid-cell-text" }, cellTime(displayValue(def, hit.value))),
             );
           },
         }
@@ -584,13 +585,14 @@ function factsOf(row: GridRow): ReturnType<typeof rowFacts> {
   return facts;
 }
 
-function twoLine(entry: SummaryEntry | null | undefined) {
+/** Label over value; a time value hides the zone its header names (`cellTime`). */
+function twoLine(entry: SummaryEntry | null | undefined, time = false) {
   if (!entry) return createElement("span", { className: "grid-cell-empty", "aria-hidden": true }, "—");
   return createElement(
     "span",
     { className: "sum-cell" },
     createElement("span", { className: "sum-label" }, entry.label),
-    createElement("span", { className: "sum-value" }, entry.value),
+    createElement("span", { className: "sum-value" }, time ? cellTime(entry.value) : entry.value),
   );
 }
 
@@ -599,6 +601,7 @@ function summaryColumn(
   header: string,
   pick: (row: GridRow) => SummaryEntry | null | undefined,
   width: number,
+  options: { time?: boolean } = {},
 ): ColumnSpec {
   return {
     id,
@@ -607,6 +610,7 @@ function summaryColumn(
     minWidth: 120,
     presets: ["analysis", "compact", "axiom"],
     filterKind: "text",
+    ...(options.time ? { zoneInHeader: true } : {}),
     value: (row) => pick(row)?.value ?? null,
     format: (row) => {
       const entry = pick(row);
@@ -616,7 +620,10 @@ function summaryColumn(
       const entry = pick(row);
       return entry ? `${entry.label}: ${entry.value}` : "";
     },
-    render: (row) => twoLine(pick(row)),
+    render: (row) => {
+      const entry = pick(row);
+      return twoLine(entry, options.time);
+    },
   };
 }
 
@@ -627,7 +634,7 @@ function summaryColumn(
  */
 export function mixedSummaryColumns(): ColumnSpec[] {
   return [
-    summaryColumn("sum:time", "날짜 및 시각", (row) => factsOf(row).time, 170),
+    summaryColumn("sum:time", "날짜 및 시각", (row) => factsOf(row).time, 170, { time: true }),
     summaryColumn("sum:main", "주요 세부 정보", (row) => factsOf(row).facts[0], 220),
     summaryColumn("sum:support", "지원 세부 정보", (row) => factsOf(row).facts[1], 180),
     summaryColumn("sum:extra", "추가 세부 정보", (row) => factsOf(row).facts[2], 180),

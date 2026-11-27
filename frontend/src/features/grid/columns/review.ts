@@ -126,8 +126,9 @@ export const reviewCollection: CollectionDef = {
     col.field("report", "보고서", 80, ["analysis", "compact"], (r) =>
       r.fields.includeInReport ? "포함" : "",
     ),
-    // 시각 never narrower than "2026-10-18 08:02:48 KST" at 13px (review #9: no clipped seconds).
-    { ...col.timestamp(180, ["analysis", "source"]), minWidth: 172 },
+    // 시각 never narrower than "2026-10-18 08:02:48" at 13px (review #9: no clipped seconds; the
+    // header names the zone).
+    { ...col.timestamp(160, ["analysis", "source"]), minWidth: 144 },
     col.path(420, ["source"]),
     col.field("pointer", "위치", 160, ["source"], (r) => fieldStr(r, "pointer"), { mono: true }),
   ],

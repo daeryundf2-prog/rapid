@@ -264,10 +264,11 @@ export const timelineCollection: CollectionDef = {
   },
   columns: [
     {
-      ...col.timestamp(190, ["analysis", "compact", "source"]),
-      // The narrowest "2026-10-18 08:02:48 KST" reads whole at 13px (153px text + padding); a
-      // narrow pane keeps 요약 beside it (fe-audit A5).
-      minWidth: 172,
+      // Default ≈ minimum: the width a time no longer needs goes to 요약 (it flexes).
+      ...col.timestamp(146, ["analysis", "compact", "source"]),
+      // The narrowest "2026-10-18 08:02:48" reads whole at 13px (126px text + padding; the
+      // header names the zone); a narrow pane keeps 요약 beside it (fe-audit A5).
+      minWidth: 144,
       // Server sort of the whole (filtered) timeline (`GET /timeline?sort=timestamp`).
       sortKey: "timestamp",
       // 시각 tooltip: the formatted time plus what it means ("수정", "실행 3회차", …) and its zone note.
@@ -311,7 +312,7 @@ export const timelineCollection: CollectionDef = {
       format: timelineEventLabel,
       tooltip: (r) => r.artifactType ?? "",
     }),
-    // 390: 시각 (172) and 요약 share the pane without cutting the time's zone name.
+    // 390: 시각 (144) and 요약 share the pane without cutting the time.
     { ...col.title("요약", 380), minWidth: 100 },
     col.review(),
     // The event's own file: whole path, the leading folders ellipsize and the file name stays.

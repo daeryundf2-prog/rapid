@@ -91,6 +91,7 @@ function ntfsTime(id: string, header: string, key: string): ColumnSpec {
         : "";
     },
     filterKind: "time",
+    zoneInHeader: true,
     emptyHint: ntfsHint,
   });
 }
@@ -366,6 +367,7 @@ export const filesCollection: CollectionDef = {
       minWidth: 150,
       presets: ["analysis", "compact"],
       filterKind: "time",
+      zoneInHeader: true,
       value: (r) => strOrNull(r.fields.modifiedAt),
       format: (r) => {
         const value = strOrNull(r.fields.modifiedAt);
