@@ -12,6 +12,7 @@ import type { Command } from "../../contracts/command";
 import type { IconName } from "../../icons";
 import { type Route, STAGES, type Stage, stageOf } from "../../router";
 import { useAppStore } from "../../state/store";
+import { emit, stageEntered } from "../../telemetry/telemetry";
 
 export interface StageDef {
   id: Stage;
@@ -101,6 +102,8 @@ export function openStage(stage: Stage): void {
   const next = stageRoute(stage, store.route);
   if (!next) return;
   store.navigate(next);
+  // Entering a stage where rows are reviewed (local telemetry: time from run end to first review).
+  if (next.runId && (stage === "explore" || stage === "review")) emit(stageEntered(next.runId, stage));
   // Focus the new stage's panel heading (tabindex=-1 h1) and say the stage name once.
   announce(`단계: ${STAGE_DEFS[stage].label}`, { hold: true });
   // Narrow layout with the panel drawer closed: the heading is hidden, so the page takes focus.

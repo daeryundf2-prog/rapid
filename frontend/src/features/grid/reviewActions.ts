@@ -13,6 +13,7 @@ import { extractRows, type RunExtractResult } from "../../api/extract";
 import type { GridRow, ReviewStatus } from "../../contracts/collection";
 import type { MarkAction } from "../../contracts/viewer";
 import { useAppStore } from "../../state/store";
+import { emit, type TagAction, type TagSurface, tagApplied } from "../../telemetry/telemetry";
 import { currentReviewer } from "../review/author";
 import { baseName, str } from "./columns/common";
 
@@ -273,7 +274,7 @@ export async function applyReviewAction(
   runId: string,
   rows: GridRow[],
   action: BatchAction,
-  options: { tag?: string } = {},
+  options: { tag?: string; surface?: TagSurface } = {},
 ): Promise<ApplyResult> {
   if (action === "extract") {
     const seen = new Set<string>();
@@ -288,7 +289,53 @@ export async function applyReviewAction(
     const extract = await extractRows(runId, { rows: items });
     return { applied: extract.summary.extracted_count, extract };
   }
-  return applyBody(runId, rows, markBody(action, options.tag), caseDbMark(action, options.tag));
+  const result = await applyBody(runId, rows, markBody(action, options.tag), caseDbMark(action, options.tag));
+  emit(
+    tagApplied({
+      runId,
+      action: tagActionOf(action),
+      rowCount: rows.length,
+      surface: options.surface ?? tagSurfaceOf(rows),
+      artifactType: uniformKind(rows),
+      ...(action === "tag" && options.tag ? { tag: options.tag } : {}),
+    }),
+  );
+  return result;
+}
+
+/** Telemetry action of a review mark (the approved enum: tag | untag | bookmark | relevant | irrelevant). */
+export function tagActionOf(action: Exclude<BatchAction, "extract">): TagAction {
+  switch (action) {
+    case "tag":
+      return "tag";
+    case "relevant":
+      return "relevant";
+    case "excluded":
+      return "irrelevant";
+    case "bookmark":
+    case "include-in-report":
+      return "bookmark";
+    case "clear-review":
+    case "remove-from-report":
+      return "untag";
+    case "needs-review":
+      return "other";
+    default: {
+      const unreachable: never = action;
+      return unreachable;
+    }
+  }
+}
+
+function tagSurfaceOf(rows: readonly GridRow[]): TagSurface {
+  const collection = rows[0]?.ref.collection;
+  return collection === "search" || collection === "timeline" ? collection : "grid";
+}
+
+/** The rows' artifact kind (collection id for kind-less rows); "mixed" when they differ. */
+function uniformKind(rows: readonly GridRow[]): string {
+  const kinds = new Set(rows.map((row) => row.ref.kind ?? row.ref.collection));
+  return kinds.size === 1 ? ([...kinds][0] ?? "other") : "mixed";
 }
 
 /** Save one free-text note (X5) on every row; same store routing as review marks. */

@@ -2220,6 +2220,7 @@ def execute_run_request(
             skip_tasks=request.skip_tasks,
             actor=actor,
             control_since=control_since,
+            run_id=run_id,
         )
     except (FileNotFoundError, OSError, RuleConfigError, RunModeError, ValueError):
         raise

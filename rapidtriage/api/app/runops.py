@@ -9,6 +9,7 @@ import mimetypes
 import re
 import sqlite3
 from collections.abc import Mapping, MutableMapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
@@ -665,11 +666,19 @@ def build_run_submission_manifest(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@dataclass(frozen=True, slots=True)
+class CaseReportDraft:
+    """Case report markdown and how many marked review items it carries."""
+
+    markdown: str
+    tagged_rows: int
+
+
 def build_run_case_report(
     store: RunJobStore,
     run_id: str,
     request: CaseReportCreateRequest,
-) -> str:
+) -> CaseReportDraft:
     """Case report markdown of the run's review payload.
 
     Refuses (409, Korean list of the items and reasons) while any report
@@ -700,12 +709,14 @@ def build_run_case_report(
         raise HTTPException(status_code=409, detail=missing)
     # 접수 dashboard case notes fill an empty 분석자 / 범위 (explicit request fields win).
     metadata = apply_case_notes_to_report_metadata(dict(model_to_dict(request)), case_path.parent)
-    return build_case_report_markdown(
+    markdown = build_case_report_markdown(
         run_summary=job.summary,
         case_payload=case_payload,
         submission_manifest=manifest,
         metadata=metadata,
     )
+    bookmarks = case_payload.get("bookmarks")
+    return CaseReportDraft(markdown, len(bookmarks) if isinstance(bookmarks, list) else 0)
 
 
 def build_run_validation_package(store: RunJobStore, run_id: str) -> dict[str, object]:

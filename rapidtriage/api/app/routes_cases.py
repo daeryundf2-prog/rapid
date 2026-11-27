@@ -19,10 +19,12 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
+from ...core import telemetry
 from ...core.case_db.base import CaseDatabaseError
 from ...core.case_db.intake import CaseConflictError, CaseNotFoundError
 from ...core.jobs import RunJobStore, RunOutputDirBusy
 from ...core.run.profiles import RUN_PROFILES
+from ...core.telemetry.derive import evidence_input_kind
 from .case_workspace import (
     SNAPSHOT_FILE_NAME,
     CaseWorkspace,
@@ -181,7 +183,13 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
             _raise(exc)
         except sqlite3.IntegrityError as exc:
             raise _integrity_conflict(exc) from exc
-        return {"command": "case.create", "case": case_detail(case)}
+        detail = case_detail(case)
+        telemetry.record(
+            "case_created",
+            {"evidence_slots": len(detail["evidence"]), "source": "wizard"},
+            case_id=str(case["case_id"]),
+        )
+        return {"command": "case.create", "case": detail}
 
     @router.get("/api/cases")
     def list_cases() -> dict[str, Any]:
@@ -262,6 +270,17 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
             workspace.start_hash(
                 case_id=case_id, citation_id=str(evidence["citation_id"]), path=path,
                 expected=request.expected_hash,
+            )
+        if telemetry.is_recording():
+            # run_readiness reads the evidence header: only worth it when the event is written.
+            telemetry.record(
+                "evidence_added",
+                {
+                    "input_kind": evidence_input_kind(request.source_type, path),
+                    "size_bucket": telemetry.size_bucket(size),
+                    "format_supported": run_readiness(path)[0],
+                },
+                case_id=case_id,
             )
         return {"command": "case.evidence.add", "evidence": {**workspace.present_evidence(evidence), "runs": []}}
 
@@ -363,6 +382,7 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
                 job = store.run_sync(run_request)
             except RunOutputDirBusy as exc:
                 raise HTTPException(status_code=409, detail=str(exc))
+        telemetry.link_run_case(job.run_id, case_id)
         snapshot = build_processing_snapshot(run_request=run_request, case=case, evidence=evidence, origin="case-run")
         # Written into the run's own output folder: with wait=false (the default) this happens right
         # after the run is queued, before its first step, so the file is part of the run output from
@@ -461,6 +481,7 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
             raise _integrity_conflict(exc) from exc
         except OSError as exc:
             raise HTTPException(status_code=422, detail=f"증거 경로를 읽을 수 없습니다: {exc}") from exc
+        telemetry.link_run_case(job.run_id, case_id)
         return {"command": "case.run.link", "case_id": case_id, "snapshot": saved,
                 "snapshot_file": file_path, "snapshot_file_error": file_error}
 

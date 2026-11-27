@@ -7,6 +7,7 @@ import { PopoutApp } from "./features/viewer/popout/PopoutApp";
 import { isPopoutWindow } from "./features/viewer/popout/protocol";
 import { canonicalizeHash, captureLaunchToken } from "./router";
 import { initPrefs } from "./state/slices/prefs";
+import { emit, sessionStarted } from "./telemetry/telemetry";
 // Bundled fonts (U-V2, no CDN): Pretendard Variable subset + JetBrains Mono Variable,
 // built from the npm packages by src/assets/fonts/build_fonts.py.
 import "./assets/fonts/fonts.css";
@@ -24,7 +25,10 @@ if (!popout) {
   canonicalizeHash();
 }
 initPrefs();
-if (!popout) registerAppSlots();
+if (!popout) {
+  registerAppSlots();
+  emit(sessionStarted(window.innerWidth, navigator.language));
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {

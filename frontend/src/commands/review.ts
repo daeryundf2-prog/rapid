@@ -61,7 +61,10 @@ export async function applyToContextRow(
   if (!target) throw new Error(NO_ROW_REASON);
   // Prefer the grid's own row (exact pointer/case-db fields); otherwise derive it from the target.
   const row = useAppStore.getState().viewerRow ?? targetAsGridRow(target);
-  const result = await applyReviewAction(target.runId, [row], action, tag ? { tag } : {});
+  const result = await applyReviewAction(target.runId, [row], action, {
+    ...(tag ? { tag } : {}),
+    surface: "shortcut",
+  });
   const text = `${label}: 1건 처리했습니다${storeNotice(result)}`;
   announce(text);
   useAppStore.getState().showNotice(text);

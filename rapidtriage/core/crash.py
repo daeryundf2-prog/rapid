@@ -12,7 +12,10 @@ import zipfile
 from collections.abc import Mapping
 from pathlib import Path
 
+from .. import __version__
+from . import telemetry
 from .forensic_accuracy import build_accuracy_gate
+from .telemetry.derive import crash_component
 
 DEFAULT_CRASH_DIR = Path.home() / ".rapidtriage" / "crash-reports"
 CRASH_REPORTING_GAP_ID = "#105"
@@ -266,6 +269,14 @@ def write_crash_report(
         report_grade_validation_plan=validation_plan,
     )
     report_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    telemetry.record(
+        "crash_reported",
+        {
+            "error_class": type(exc).__name__,
+            "component": crash_component((context or {}).get("component")),
+            "app_version": __version__,
+        },
+    )
     return {"crash_id": crash_id, "path": str(report_path), "payload": payload}
 
 

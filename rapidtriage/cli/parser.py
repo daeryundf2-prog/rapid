@@ -1040,6 +1040,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     enterprise_policy.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
+    telemetry = sub.add_parser(
+        "telemetry",
+        help="Local product telemetry: status, metrics, enable/disable, export bundle",
+        description=(
+            "Local-only telemetry log (docs/telemetry.md). Nothing is uploaded; 'export' writes a bundle "
+            "you review and hand over yourself."
+        ),
+    )
+    telemetry.add_argument("action", choices=["status", "metrics", "enable", "disable", "export"])
+    telemetry.add_argument("--out", help="export: empty folder for events.jsonl + manifest.json")
+
     rearchitecture_status = sub.add_parser(
         "rearchitecture-status",
         help="Evaluate Python/Rust commercial re-architecture progress",

@@ -31,6 +31,7 @@ import { WaitPanel } from "../../components/WaitPanel";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
 import type { CommandContext } from "../../contracts/command";
 import { Icon } from "../../icons";
+import { emit, gridSorted, surfaceOf } from "../../telemetry/telemetry";
 import { runCommandId } from "../analysis/commands";
 import { setColumnFilter } from "../filters/columnFilters";
 import type { FilterBarVariant } from "../filters/FilterBar";
@@ -1095,10 +1096,28 @@ export function DataGrid(props: DataGridProps = {}) {
     if (!artifactKind && !isTimeline) return isAnalysis ? SORT_ANALYSIS_REASON : SORT_KIND_REASON;
     return spec.sortKey ? null : (spec.unsortableReason ?? SORT_COLUMN_REASON);
   };
+  const reportSort = (spec: ColumnSpec, direction: "asc" | "desc") => {
+    if (!runId) return;
+    emit(
+      gridSorted({
+        runId,
+        surface: surfaceOf(ref.id),
+        columnKind:
+          spec.compare || /time|date/i.test(spec.id) ? "time" : spec.align === "right" ? "number" : "text",
+        direction,
+        scope: serverSorted ? "server" : "loaded",
+        loadedRows: cq.loadedCount,
+        totalRows: cq.total,
+      }),
+    );
+  };
   const cycleSort = (spec: ColumnSpec) => {
     const current = sortOf(spec);
+    if (serverSorted && (sortReason(spec) || !spec.sortKey)) return;
+    // The third click clears the sort: only an applied order is reported.
+    if (current !== "descending") reportSort(spec, current === "none" ? "asc" : "desc");
     if (serverSorted) {
-      if (sortReason(spec) || !spec.sortKey) return;
+      if (!spec.sortKey) return;
       setSortNotice(null);
       setSort(
         current === "none"

@@ -210,7 +210,7 @@ export function targetAsGridRow(target: ViewerTarget): GridRow {
 export async function applyMark(target: ViewerTarget, action: MarkAction): Promise<ApplyResult> {
   const reason = markDisabledReason(target, action);
   if (reason) throw new Error(reason);
-  return applyReviewAction(target.runId, [targetAsGridRow(target)], action);
+  return applyReviewAction(target.runId, [targetAsGridRow(target)], action, { surface: "viewer" });
 }
 
 /** Tests: forget the per-run case-db handles cached by the shared review implementation. */
