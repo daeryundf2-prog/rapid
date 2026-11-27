@@ -19,6 +19,7 @@ from typing import Literal
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from ...core.case_db.run_locator import parse_ordinal
 from .routes_runs import row_conditions_or_422
 
 API_VERSION = "1"
@@ -67,8 +68,7 @@ def event_index(target: RowTarget) -> int | None:
     """``/events/<n>`` of a timeline target; ``None`` for any other row."""
     if target.collection != "timeline" or not target.locator.startswith(EVENTS_PREFIX):
         return None
-    tail = target.locator[len(EVENTS_PREFIX) :]
-    return int(tail) if tail.isdigit() else None
+    return parse_ordinal(target.locator[len(EVENTS_PREFIX) :])
 
 
 def _norm_path(value: object) -> str:
@@ -152,7 +152,16 @@ def resolve_selection(selection: ActionSelection, load_events: Callable[[], Sequ
         raise HTTPException(status_code=422, detail="selection에는 rows, timeline, related 중 하나만 보내세요.")
     if selection.rows is not None:
         targets = [row.model_dump() for row in selection.rows]
-        indexes = [index for row in selection.rows if (index := event_index(row)) is not None]
+        indexes: list[int] = []
+        for row in selection.rows:
+            index = event_index(row)
+            if index is not None:
+                indexes.append(index)
+            elif row.collection == "timeline":
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"타임라인 행 로케이터는 /events/<번호>(ASCII 숫자) 형식이어야 합니다: {row.locator[:80]}",
+                )
         if not indexes:
             return Resolved(targets, [])
         events = load_events()

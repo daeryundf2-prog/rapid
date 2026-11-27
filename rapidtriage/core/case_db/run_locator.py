@@ -57,6 +57,8 @@ ACTIVE_MARK_SQL = (
 )
 SCANNER_COVERAGE = "local-rule-ioc-scanner"
 LOCATOR_COLLECTIONS = ("files", "docs", "timeline", "indicators", "artifacts")
+# Longest row ordinal a locator may carry (``/events/<n>``): far above any run's row count.
+MAX_ORDINAL_DIGITS = 12
 # Search-hit sources -> grid collection.
 SOURCE_ALIASES = {
     "documents": "docs",
@@ -123,11 +125,22 @@ def normalize_collection(collection: str, kind: str = "") -> tuple[str, str]:
     return SOURCE_ALIASES.get(value, value), kind
 
 
+def parse_ordinal(text: str) -> int | None:
+    """A row ordinal: ASCII decimal digits only, at most :data:`MAX_ORDINAL_DIGITS` of them.
+
+    ``str.isdigit`` also accepts ``'²'`` (``int`` then raises) and ``'٣'`` (``int`` reads 3);
+    an unbounded digit string can exceed ``int``'s conversion limit. Both are a malformed
+    locator (``None``), never an exception.
+    """
+    if 0 < len(text) <= MAX_ORDINAL_DIGITS and text.isascii() and text.isdecimal():
+        return int(text)
+    return None
+
+
 def _ordinal(locator: str, prefix: str) -> int | None:
     if not locator.startswith(prefix):
         return None
-    tail = locator[len(prefix) :]
-    return int(tail) if tail.isdigit() else None
+    return parse_ordinal(locator[len(prefix) :])
 
 
 def _stream_rows(path: Path | None, member: str) -> Iterator[Mapping[str, object]]:

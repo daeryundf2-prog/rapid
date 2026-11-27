@@ -18,6 +18,7 @@ try:
     from fastapi.testclient import TestClient  # noqa: F401
 
     from rapidtriage.api.app import routes_actions
+    from rapidtriage.core.case_db.run_locator import parse_ordinal
     from rapidtriage.core.jobs import RunJobStore
     from tests.test_rapidtriage_api import api_test_client
     from tests.test_rapidtriage_run import build_run_fixture
@@ -117,6 +118,30 @@ class ActionApiTests(unittest.TestCase):
                     self.assertIn(needle, response.json()["detail"])
         missing = self._select({"related": {"relation": "same_path", "anchor": {"collection": "timeline", "locator": "/events/999999"}}})
         self.assertEqual(missing.status_code, 404)
+
+    def test_row_numbers_are_ascii_decimal_and_bounded(self) -> None:
+        self.assertEqual(parse_ordinal("007"), 7)
+        self.assertEqual(parse_ordinal("9" * 12), int("9" * 12))
+        for text in ("", "²", "٣", "1²", "-1", "+1", " 1", "9" * 13):
+            with self.subTest(text=text):
+                self.assertIsNone(parse_ordinal(text))
+
+    def test_non_ascii_or_huge_row_numbers_are_refused_not_crashes(self) -> None:
+        # isdigit() accepted these: '²' and 5000 digits made int() raise (a 500), '٣' read as row 3.
+        for tail in ("²", "٣", "9" * 13, "9" * 5000):
+            row = {"collection": "timeline", "locator": f"/events/{tail}"}
+            calls = {
+                "select rows": lambda: self._select({"rows": [row]}),
+                "select anchor": lambda: self._select({"related": {"relation": "same_path", "anchor": row}}),
+                "mark preview": lambda: self._mark({"rows": [row]}, {"status": "relevant"}),
+                "mark apply": lambda: self._mark({"rows": [row]}, {"status": "relevant"}, dry_run=False),
+            }
+            for name, call in calls.items():
+                with self.subTest(tail=tail[:20], call=name):
+                    response = call()
+                    self.assertIn(response.status_code, (400, 422), response.text)
+        applied = self._mark({"rows": [{"collection": "files", "locator": "/candidates/²"}]}, {"status": "relevant"}, dry_run=False)
+        self.assertEqual(applied.status_code, 400, applied.text)
 
     def test_mark_previews_then_applies_as_the_agent(self) -> None:
         index, _ = self.timed[-1]
