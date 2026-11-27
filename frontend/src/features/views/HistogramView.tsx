@@ -41,11 +41,14 @@ import {
 import { useAutoLoad, useViewRows } from "./useViewRows";
 import { EmptyState, ErrorState, LoadingCard } from "./ViewState";
 
+/** The run's timeline histogram; `window` (inclusive ISO bounds) buckets only that range, finer. */
 export function fetchTimelineHistogram(
   runId: string,
   signal?: AbortSignal,
+  window?: { from: string; to: string },
 ): Promise<TimelineHistogramPayload> {
-  return api<TimelineHistogramPayload>(`/api/runs/${encodeURIComponent(runId)}/timeline-histogram`, {
+  const query = window ? `?${new URLSearchParams(window).toString()}` : "";
+  return api<TimelineHistogramPayload>(`/api/runs/${encodeURIComponent(runId)}/timeline-histogram${query}`, {
     signal,
   });
 }

@@ -99,6 +99,16 @@ export function tsLabelsOf(row: { fields: Record<string, unknown> }): string[] {
   return kind ? [kind] : [];
 }
 
+export const TIMELINE_PRIORITY = [
+  "timestamp",
+  "title",
+  "eventType",
+  "tsKind",
+  "source",
+  "review",
+  "path",
+] as const;
+
 export const timelineCollection: CollectionDef = {
   id: "timeline",
   label: "타임라인",
@@ -147,6 +157,8 @@ export const timelineCollection: CollectionDef = {
   columns: [
     {
       ...col.timestamp(190, ["analysis", "compact", "source"]),
+      // The narrowest the KST time reads whole; a narrow pane keeps 요약 beside it (fe-audit A5).
+      minWidth: 150,
       // Server sort of the whole (filtered) timeline (`GET /timeline?sort=timestamp`).
       sortKey: "timestamp",
       // 시각 tooltip: the formatted time plus what it means ("수정", "실행 3회차", …) and its zone note.
@@ -194,4 +206,6 @@ export const timelineCollection: CollectionDef = {
     col.review(),
     col.path(420),
   ],
+  // A narrow pane keeps what happened next to when (fe-audit A5): 시각 > 요약 > 이벤트 > 시각 종류 > 출처 > 선별 > 경로.
+  widthPriority: () => TIMELINE_PRIORITY,
 };

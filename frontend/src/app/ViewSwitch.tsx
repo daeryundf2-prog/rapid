@@ -16,6 +16,7 @@ import { registerViewCommands, switchView } from "../features/views/commands";
 import { HistogramView } from "../features/views/HistogramView";
 import { MapView } from "../features/views/MapView";
 import { ThumbnailView } from "../features/views/ThumbnailView";
+import { TimelineStrip } from "../features/views/TimelineStrip";
 import { ToolbarLeadContext } from "../features/views/toolbarSlot";
 import { Icon, type IconName } from "../icons";
 import type { ExplorerView } from "../router";
@@ -84,8 +85,12 @@ export function ViewSwitch({ children }: { children: ReactNode }) {
         ) : active === "map" ? (
           <MapView />
         ) : (
-          // The column view: the switch sits on the grid's filter-bar line.
-          <ToolbarLeadContext.Provider value={bar}>{children}</ToolbarLeadContext.Provider>
+          // The column view: the switch sits on the grid's filter-bar line; the timeline keeps
+          // its time overview strip above the rows (fe-audit A1).
+          <ToolbarLeadContext.Provider value={bar}>
+            {route.collection === "timeline" && route.runId ? <TimelineStrip runId={route.runId} /> : null}
+            {children}
+          </ToolbarLeadContext.Provider>
         )}
       </div>
     </div>

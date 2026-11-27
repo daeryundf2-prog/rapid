@@ -10,7 +10,7 @@
 .stage-rail ul {
   list-style: none;
   margin: 0;
-  padding: var(--space-1) 0;
+  padding: var(--space-1);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -29,7 +29,7 @@
   padding: var(--space-2) 0;
   background: transparent;
   border: 0;
-  border-left: 3px solid transparent;
+  border-radius: var(--radius);
   color: var(--text-muted);
   font: inherit;
   font-size: var(--fs-table-aux);
@@ -41,11 +41,15 @@
   background: var(--bg-raised);
 }
 
+/* The current stage is a tonal wash with the icon in the accent ink (no side stripe). */
 .stage-rail-item.is-current {
   color: var(--text);
-  border-left-color: var(--accent);
-  background: var(--bg-raised);
+  background: var(--bg-selected);
   font-weight: 600;
+}
+
+.stage-rail-item.is-current .icon {
+  color: var(--accent);
 }
 
 .stage-rail-item:focus-visible {
@@ -102,6 +106,32 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+/* Command lists in a stage panel (보고 › 내보내기): one column of equal-width buttons (fe-audit C2). */
+.stage-panel ul > li > .button,
+.stage-panel ul > li > .disabled-reason,
+.stage-panel ul > li > .command-with-reason,
+.stage-panel ul > li > .command-with-reason > .button,
+.stage-panel ul > li > .disabled-reason > .button {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+/* Phones: a 48px rail leaves the page its width (fe-audit C3). */
+@media (max-width: 599.98px) {
+  .stage-rail {
+    width: 48px;
+  }
+
+  .stage-rail ul {
+    padding: 2px;
+  }
+
+  .stage-rail-item {
+    padding: 6px 0;
+    font-size: var(--fs-aux);
+  }
 }
 
 .stage-link {
@@ -198,7 +228,7 @@
 
 .process-card.is-current {
   border-color: var(--accent);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--bg-selected);
 }
 
 .process-card-link {

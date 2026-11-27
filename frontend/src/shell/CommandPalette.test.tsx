@@ -100,6 +100,26 @@ describe("CommandPalette", () => {
     expect(window.location.hash).toBe("#/case/r1/explore/search?q=powershell");
   });
 
+  it("puts a typed date-time first and opens the timeline around it", () => {
+    useAppStore.getState().navigate({ runId: "r1", collection: "files" });
+    setup();
+    fireEvent.change(input(), { target: { value: "2026-04-18 14:30" } });
+    expect(activeOption()?.textContent).toContain("전후 30분 보기");
+    fireEvent.keyDown(input(), { key: "Enter" });
+    const route = useAppStore.getState().route;
+    expect(route.collection).toBe("timeline");
+    expect(route.from).toBe(new Date(2026, 3, 18, 14, 0).toISOString());
+    expect(route.to).toBe(new Date(new Date(2026, 3, 18, 15, 0).getTime() - 1).toISOString());
+  });
+
+  it("lists runnable commands of a group before the disabled ones", () => {
+    setup();
+    registerCommand({ id: "case.open.a", label: "하 케이스 열기", group: "case", run: vi.fn() });
+    fireEvent.change(input(), { target: { value: " " } });
+    const caseOptions = options().filter((o) => /케이스 열기|런 취소/.test(o.textContent ?? ""));
+    expect(caseOptions.map((o) => o.getAttribute("aria-disabled"))).toEqual([null, "true"]);
+  });
+
   it("closes on Escape and restores focus", () => {
     const { opener } = setup();
     fireEvent.keyDown(input(), { key: "Escape" });

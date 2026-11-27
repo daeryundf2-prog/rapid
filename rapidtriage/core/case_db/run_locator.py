@@ -33,9 +33,10 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 
+from ..artifact_profiles import iter_artifact_output_row_views
 from ..json_stream import JsonStreamError, iter_array_items
 from ..run.persist import CASE_DB_FILE_NAME, legacy_run_case_ids, run_case_id
 from .helpers import normalize_path_for_db
@@ -57,6 +58,8 @@ ACTIVE_MARK_SQL = (
 )
 SCANNER_COVERAGE = "local-rule-ioc-scanner"
 LOCATOR_COLLECTIONS = ("files", "docs", "timeline", "indicators", "artifacts")
+# Longest row ordinal a locator may carry (``/events/<n>``): far above any run's row count.
+MAX_ORDINAL_DIGITS = 12
 # Search-hit sources -> grid collection.
 SOURCE_ALIASES = {
     "documents": "docs",
@@ -123,11 +126,22 @@ def normalize_collection(collection: str, kind: str = "") -> tuple[str, str]:
     return SOURCE_ALIASES.get(value, value), kind
 
 
+def parse_ordinal(text: str) -> int | None:
+    """A row ordinal: ASCII decimal digits only, at most :data:`MAX_ORDINAL_DIGITS` of them.
+
+    ``str.isdigit`` also accepts ``'²'`` (``int`` then raises) and ``'٣'`` (``int`` reads 3);
+    an unbounded digit string can exceed ``int``'s conversion limit. Both are a malformed
+    locator (``None``), never an exception.
+    """
+    if 0 < len(text) <= MAX_ORDINAL_DIGITS and text.isascii() and text.isdecimal():
+        return int(text)
+    return None
+
+
 def _ordinal(locator: str, prefix: str) -> int | None:
     if not locator.startswith(prefix):
         return None
-    tail = locator[len(prefix) :]
-    return int(tail) if tail.isdigit() else None
+    return parse_ordinal(locator[len(prefix) :])
 
 
 def _stream_rows(path: Path | None, member: str) -> Iterator[Mapping[str, object]]:
@@ -139,6 +153,133 @@ def _stream_rows(path: Path | None, member: str) -> Iterator[Mapping[str, object
                 yield row
     except (JsonStreamError, OSError):
         return
+
+
+def _analysis_row_exists(output_dir: Path | None, analysis_id: str, record_index: int) -> bool:
+    """The analysis exists under the run output dir and has that row (unchecked without output_dir)."""
+    if not ANALYSIS_ID_RE.fullmatch(analysis_id) or record_index < 0:
+        return False
+    if output_dir is None:
+        return False  # cannot prove the analysis belongs to this run
+    state_path = output_dir / "analyses" / analysis_id / "analysis.json"
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(state, Mapping) and record_index < int(state.get("row_count") or 0)
+
+
+def _artifact_row_flags(path: Path | None) -> Iterator[bool]:
+    """Per ``/artifacts/<n>`` position of a per-kind artifacts output: whether the import keeps it."""
+    if path is None:
+        return
+    position = 0
+    try:
+        for row_index, _row, _varying in iter_artifact_output_row_views(path):
+            while position < row_index:
+                yield False
+                position += 1
+            yield True
+            position += 1
+    except (OSError, ValueError):
+        return
+
+
+class RunOutputRows:
+    """Whether run-output locators name rows the case-DB import keeps -- without a case DB.
+
+    The read-only counterpart of :meth:`RunLocatorIndex.resolve` for a run whose case DB is
+    not built yet (a mark preview must not build it): the same locator forms, checked against
+    the run output rows the import inserts (object rows; timeline rows with a timestamp).
+    Each output list is read once per instance, however many locators are checked.
+    """
+
+    def __init__(self, outputs: Mapping[str, object], *, output_dir: Path | None = None) -> None:
+        self.outputs = outputs
+        self.output_dir = output_dir
+        self._counts: dict[str, int] = {}
+        self._flags: dict[str, bytearray] = {}
+        self._docs: tuple[list[str], set[str]] | None = None
+
+    def _path(self, name: str) -> Path | None:
+        raw = self.outputs.get(name)
+        return Path(str(raw)).expanduser() if raw else None
+
+    def _items(self, name: str, member: str) -> Iterator[object]:
+        path = self._path(name)
+        if path is None or not path.is_file():
+            return
+        try:
+            yield from iter_array_items(path, member)
+        except (JsonStreamError, OSError):
+            return
+
+    def _count(self, key: str, rows: Callable[[], Iterable[object]]) -> int:
+        if key not in self._counts:
+            self._counts[key] = sum(1 for _ in rows())
+        return self._counts[key]
+
+    def _flag(self, key: str, flags: Callable[[], Iterable[bool]], index: int) -> bool:
+        if key not in self._flags:
+            self._flags[key] = bytearray(1 if flag else 0 for flag in flags())
+        found = self._flags[key]
+        return index < len(found) and found[index] == 1
+
+    def exists(self, collection: str, locator: str, kind: str = "") -> bool:
+        if collection.strip() == "analysis":
+            record_index = _ordinal(locator, "/rows/")
+            return record_index is not None and _analysis_row_exists(self.output_dir, kind, record_index)
+        collection, kind = normalize_collection(collection, kind)
+        if collection == "files":
+            index = _ordinal(locator, "/inventory/")
+            if index is not None:
+                # Inventory positions count object rows (RunLocatorIndex._inventory_path); one with a path is kept.
+                return self._flag(
+                    "files/inventory",
+                    lambda: (bool(row.get("path")) for row in _stream_rows(self._path("files"), "inventory")),
+                    index,
+                )
+            ordinal = _ordinal(locator, "/candidates/")
+            return ordinal is not None and ordinal < self._count(
+                "files/candidates", lambda: _stream_rows(self._path("files"), "candidates")
+            )
+        if collection == "timeline":
+            ordinal = _ordinal(locator, "/events/")
+            return ordinal is not None and ordinal < self._count(
+                "timeline/events",
+                lambda: (row for row in _stream_rows(self._path("timeline"), "events") if row.get("timestamp")),
+            )
+        if collection == "docs":
+            if self._docs is None:
+                results = [str(row.get("path") or "") for row in _stream_rows(self._path("docs"), "results")]
+                candidates = [str(row.get("path") or "") for row in _stream_rows(self._path("docs"), "candidates")]
+                self._counts["docs/candidates"] = len(candidates)
+                self._docs = (results, set(candidates))
+            results, candidate_paths = self._docs
+            ordinal = _ordinal(locator, "/candidates/")
+            if ordinal is not None:
+                return ordinal < self._counts["docs/candidates"]
+            index = _ordinal(locator, "/results/")
+            path = results[index] if index is not None and index < len(results) else ""
+            return bool(path) and path in candidate_paths
+        if collection == "indicators":
+            for member in ("indicators", "ioc_scanner_hits"):
+                index = _ordinal(locator, f"/{member}/")
+                if index is not None:
+                    # ``source_index`` counts every list item; the import keeps the objects.
+                    return self._flag(
+                        f"indicators/{member}",
+                        lambda: (isinstance(item, Mapping) for item in self._items("indicators", member)),  # noqa: B023
+                        index,
+                    )
+            return False
+        if collection == "artifacts":
+            row_index = _ordinal(locator, "/artifacts/")
+            if row_index is None or not kind:
+                return False
+            name = f"artifacts_{kind}"
+            return self._flag(name, lambda: _artifact_row_flags(self._path(name)), row_index)
+        return False
 
 
 class RunLocatorIndex:
@@ -287,17 +428,7 @@ class RunLocatorIndex:
         return int(row[0]) if row is not None else None
 
     def _analysis_row(self, analysis_id: str, record_index: int) -> bool:
-        """The analysis exists under the run output dir and has that row (unchecked without output_dir)."""
-        if not ANALYSIS_ID_RE.fullmatch(analysis_id) or record_index < 0:
-            return False
-        if self.output_dir is None:
-            return False  # cannot prove the analysis belongs to this run
-        state_path = self.output_dir / "analyses" / analysis_id / "analysis.json"
-        try:
-            state = json.loads(state_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return False
-        return isinstance(state, Mapping) and record_index < int(state.get("row_count") or 0)
+        return _analysis_row_exists(self.output_dir, analysis_id, record_index)
 
     # -- public -------------------------------------------------------------
 

@@ -179,6 +179,9 @@ export const KEY_DESCRIPTIONS: Record<keyof typeof KEY_MAP, string> = {
   tagShortcuts: "태그 단축키 1–9 (태그 관리에서 지정, 기본 1–5 = 우선순위 1–5)",
   classicSplit: "클래식 분할 보기 (격자 위·세부 아래) 켜기/끄기",
   mediaBlur: "미디어 흐리게 켜기/끄기",
+  timelinePrev: "타임라인: 같은 폭의 이전 구간",
+  timelineNext: "타임라인: 같은 폭의 다음 구간",
+  timelineZoomOut: "타임라인: 범위 넓히기 (3배)",
 };
 
 /** Apple platform (review #14): only there does Ctrl+K read as the ⌘ glyph. */
