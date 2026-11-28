@@ -13,6 +13,7 @@ The /api/* token middleware still applies when auth is configured.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from .evidence import ADAPTERS
@@ -34,6 +35,32 @@ _EXTRA_EWF_FAMILY = frozenset({".e02", ".e03", ".e04", ".e05", ".ex02", ".ex03",
 
 class BrowseError(ValueError):
     """Raised when a browse path cannot be listed."""
+
+
+_WINDOWS_ABSOLUTE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
+
+
+def foreign_path_message(raw: str) -> str | None:
+    """Message when ``raw`` is written for another operating system than this server.
+
+    The console is used remotely: a Windows analyst pastes ``D:\\evidence`` into a
+    picker whose paths belong to the (POSIX) API host, where that text is just a
+    relative name and the resulting "경로가 없습니다" points at a nonsense path.
+    """
+    text = str(raw).strip()
+    if not text:
+        return None
+    if os.sep == "/" and _WINDOWS_ABSOLUTE.match(text):
+        return (
+            f"윈도우 경로입니다: {text}. 경로는 분석 서버(현재 macOS·Linux) 기준으로 "
+            "입력하세요. 예: /Users/<사용자>/evidence"
+        )
+    if os.sep == "\\" and text.startswith("/"):
+        return (
+            f"POSIX 경로입니다: {text}. 경로는 분석 서버(현재 Windows) 기준으로 "
+            "입력하세요. 예: D:\\evidence"
+        )
+    return None
 
 
 def list_roots() -> list[str]:
@@ -75,6 +102,9 @@ def browse_directory(
     Only names, kinds, sizes and evidence-suffix flags are returned; file
     contents are never read. ``limit`` bounds entries per directory.
     """
+    foreign = foreign_path_message(path) if isinstance(path, str) else None
+    if foreign:
+        raise BrowseError(foreign)
     resolved = Path(path).expanduser() if path else Path.home()
     try:
         resolved = resolved.resolve()
