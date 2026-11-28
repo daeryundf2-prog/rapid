@@ -105,6 +105,7 @@
 }
 
 .seal-summary,
+.seal-checked,
 .seal-message {
   margin: 0;
   color: var(--text-muted);

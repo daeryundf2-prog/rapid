@@ -138,6 +138,17 @@ HASH_STATUS_LABELS = {
     "interrupted": "해시 계산 중단됨 (서버 재시작)",
 }
 
+#: Evidence rows with ``hash_checked_at``: the audit time of the last finished hash (the console's
+#: integrity seal shows a match as a result of that time, not as a present-tense claim).
+_EVIDENCE_SELECT = """
+    SELECT e.*, (
+        SELECT MAX(a.timestamp) FROM audit_event a
+        WHERE a.action = 'evidence.hash' AND a.target_type = 'evidence_source' AND a.target_id = e.citation_id
+          AND json_extract(a.params_json, '$.status') IN ('matched', 'computed', 'mismatched', 'failed')
+    ) AS hash_checked_at
+    FROM evidence_source e
+"""
+
 CASE_FIELDS = ("case_number", "name", "case_type", "examiner", "requester", "organization", "description", "status")
 
 
@@ -441,6 +452,7 @@ class CaseIntake:
                 for key in ("md5", "sha1", "sha256")
                 if data.get(f"hash_{key}")
             },
+            "hash_checked_at": data.get("hash_checked_at"),
             "added_at": data.get("added_at"),
         }
 
@@ -503,14 +515,14 @@ class CaseIntake:
                                      "hash_verify": hash_verify},
             )
             return self._evidence_payload(
-                connection.execute("SELECT * FROM evidence_source WHERE citation_id = ?", (citation_id,)).fetchone()
+                connection.execute(f"{_EVIDENCE_SELECT} WHERE e.citation_id = ?", (citation_id,)).fetchone()
             )
 
     def list_evidence(self, case_id: str) -> list[dict[str, object]]:
         with self.connect() as connection:
             self._case_row(connection, case_id)
             rows = connection.execute(
-                "SELECT * FROM evidence_source WHERE case_id = ? ORDER BY id", (case_id,)
+                f"{_EVIDENCE_SELECT} WHERE e.case_id = ? ORDER BY e.id", (case_id,)
             ).fetchall()
             return [self._evidence_payload(row) for row in rows]
 
@@ -518,7 +530,7 @@ class CaseIntake:
         with self.connect() as connection:
             self._case_row(connection, case_id)
             row = connection.execute(
-                "SELECT * FROM evidence_source WHERE case_id = ? AND citation_id = ?", (case_id, citation_id)
+                f"{_EVIDENCE_SELECT} WHERE e.case_id = ? AND e.citation_id = ?", (case_id, citation_id)
             ).fetchone()
             if row is None:
                 raise CaseNotFoundError("증거를 찾을 수 없습니다")
@@ -526,7 +538,7 @@ class CaseIntake:
 
     def find_evidence_by_path(self, case_id: str, path: str) -> dict[str, object] | None:
         with self.connect() as connection:
-            for row in connection.execute("SELECT * FROM evidence_source WHERE case_id = ? ORDER BY id", (case_id,)):
+            for row in connection.execute(f"{_EVIDENCE_SELECT} WHERE e.case_id = ? ORDER BY e.id", (case_id,)):
                 if row["original_path"] and same_local_path(str(row["original_path"]), path):
                     return self._evidence_payload(row)
             return None
@@ -601,7 +613,7 @@ class CaseIntake:
                 actor=actor, params={"previous_status": row["hash_status"]},
             )
             return self._evidence_payload(
-                connection.execute("SELECT * FROM evidence_source WHERE citation_id = ?", (citation_id,)).fetchone()
+                connection.execute(f"{_EVIDENCE_SELECT} WHERE e.citation_id = ?", (citation_id,)).fetchone()
             )
 
     # --- processing snapshots -----------------------------------------------

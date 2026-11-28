@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { CaseEvidence } from "../../api/cases";
-import { canRehash, itemSeal, itemSealWord, SEAL_META, sealSentence, sealState } from "./integrity";
+import {
+  canRehash,
+  itemSeal,
+  itemSealWord,
+  runEvidence,
+  SEAL_META,
+  sealSentence,
+  sealState,
+  unhashableSentence,
+} from "./integrity";
 
 function evidence(overrides: Partial<CaseEvidence> = {}): CaseEvidence {
   return {
@@ -36,9 +45,13 @@ describe("sealState (F8)", () => {
       expect(seal.pending.map((item) => item.citation_id)).toEqual(["b"]);
       expect(seal.stamp).toBeUndefined();
     }
-    // A mismatch cannot be fixed by hashing again; a failure can.
-    expect(canRehash(evidence({ hash_status: "mismatched" }))).toBe(false);
+    // Every file state but a running hash can be checked again (review #101 P2-1, P3-2).
+    expect(canRehash(evidence({ hash_status: "mismatched" }))).toBe(true);
     expect(canRehash(evidence({ hash_status: "failed" }))).toBe(true);
+    expect(canRehash(evidence({ hash_status: "matched" }))).toBe(true);
+    expect(canRehash(evidence({ hash_status: "computed" }))).toBe(true);
+    expect(canRehash(evidence({ hash_status: "hashing" }))).toBe(false);
+    expect(canRehash(evidence({ size_bytes: null }))).toBe(false);
   });
 
   it("is 미검증 for not-requested and interrupted items (both re-hashable)", () => {
@@ -57,7 +70,7 @@ describe("sealState (F8)", () => {
     ]);
     expect(seal.kind).toBe("hashing");
     expect(seal.pending).toEqual([]);
-    expect(seal.rehashable).toEqual([]);
+    expect(seal.rehashable.map((item) => item.citation_id)).toEqual(["b"]);
   });
 
   it("is 대조 일치 only when every item matched, stamped with the SHA-256 prefix", () => {
@@ -82,15 +95,50 @@ describe("sealState (F8)", () => {
     expect(SEAL_META.computed.label).toContain("대조 없음");
   });
 
-  it("is 해당 없음 with no hashable evidence (folders, not-applicable, empty case)", () => {
+  it("is 해당 없음 only with no evidence at all", () => {
     expect(sealState([]).kind).toBe("na");
-    const folder = evidence({ source_type: "folder", size_bytes: null, hash_status: "not-requested" });
-    expect(sealState([folder]).kind).toBe("na");
+    expect(sealSentence(sealState([]))).toBe("증거 무결성: 증거 없음");
+  });
+
+  it("never claims 대조 일치 over evidence that was never hashed, folders included (review #101 P1-1)", () => {
+    const folder = evidence({ citation_id: "d", source_type: "folder", size_bytes: null });
     expect(itemSeal(folder)).toBe("na");
     expect(itemSealWord(folder)).toBe("해당 없음 (폴더)");
-    expect(sealState([evidence({ hash_status: "not-applicable" })]).kind).toBe("na");
-    // A folder next to a matched file does not affect the seal.
-    expect(sealState([folder, evidence({ citation_id: "f", hash_status: "matched" })]).kind).toBe("matched");
+    const only = sealState([folder]);
+    expect(only.kind).toBe("unverified");
+    expect(only.unhashable).toEqual([folder]);
+    expect(only.rehashable).toEqual([]);
+    expect(unhashableSentence(only)).toContain("폴더 증거 1건은 해시가 없습니다");
+    // A folder next to a matched file keeps the seal at 미검증, with no stamp.
+    const mixed = sealState([
+      folder,
+      evidence({ citation_id: "f", hash_status: "matched", hashes: { sha256: SHA } }),
+    ]);
+    expect(mixed.kind).toBe("unverified");
+    expect(mixed.stamp).toBeUndefined();
+    expect(sealSentence(mixed)).toContain("폴더 증거 1건 해시 없음");
+    expect(sealState([evidence({ hash_status: "not-applicable" })]).kind).toBe("unverified");
+  });
+
+  it("speaks for the run's own evidence when the snapshot names it", () => {
+    const folder = evidence({ citation_id: "d", size_bytes: null });
+    const file = evidence({ citation_id: "f", hash_status: "matched", hashes: { sha256: SHA } });
+    expect(sealState(runEvidence([folder, file], "d")).kind).toBe("unverified");
+    expect(sealState(runEvidence([folder, file], "f")).kind).toBe("matched");
+    // No (or an unknown) citation: the whole case, still never matched over the folder.
+    expect(runEvidence([folder, file], null)).toHaveLength(2);
+    expect(runEvidence([folder, file], "gone")).toHaveLength(2);
+  });
+
+  it("dates a match by its oldest check and words it as a past result (review #101 P2-1)", () => {
+    const seal = sealState([
+      evidence({ citation_id: "a", hash_status: "matched", hash_checked_at: "2026-11-02T01:00:00Z" }),
+      evidence({ citation_id: "b", hash_status: "matched", hash_checked_at: "2026-11-01T01:00:00Z" }),
+    ]);
+    expect(seal.checkedAt).toBe("2026-11-01T01:00:00Z");
+    expect(sealState([evidence({ hash_status: "matched" })]).checkedAt).toBeUndefined();
+    expect(SEAL_META.matched.description).toContain("마지막 검증 때");
+    expect(SEAL_META.matched.description).not.toContain("일치합니다");
   });
 
   it("never reads an unknown server status as verified", () => {

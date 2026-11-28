@@ -1,9 +1,9 @@
 /**
- * Evidence integrity seal (design overhaul F8): the top-bar state of the open case's evidence
- * hashes — a shape and a word, never colour alone — plus the per-evidence details with the
- * existing hash action ([검증 실행], POST …/evidence/{eid}/hash). State comes from
- * `sealState` (./integrity) over the shared `["case", id]` query, so the dashboard and the seal
- * read one response. Runs without a case DB and cases without hashable evidence render nothing.
+ * Evidence integrity seal (design overhaul F8): the top-bar state of the open run's evidence
+ * hashes — a shape and a word, never colour alone — plus the per-evidence details with the time of
+ * each last check and the existing hash action ([검증 실행] / [다시 검증], POST …/evidence/{eid}/hash).
+ * State comes from `sealState` (./integrity) over the shared `["case", id]` query, so the dashboard
+ * and the seal read one response. Runs without a case DB render nothing.
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -12,7 +12,9 @@ import { announce } from "../../a11y";
 import { type CaseEvidence, rehashEvidence } from "../../api/cases";
 import { Popover } from "../../components/Popover";
 import { Icon, type IconName } from "../../icons";
+import { useTimezone } from "../../state/hooks";
 import { useAppStore } from "../../state/store";
+import { formatGridTime } from "../../utils/time";
 import { copyText } from "../grid/gridCommands";
 import { useRunCaseLink } from "./caseLink";
 import {
@@ -20,12 +22,14 @@ import {
   caseQueryKey,
   itemSeal,
   itemSealWord,
+  runEvidence,
   SEAL_META,
   type Seal,
   type SealKind,
   sealSentence,
   sealStamp,
   sealState,
+  unhashableSentence,
   useCaseDetail,
 } from "./integrity";
 import { ReasonButton } from "./ReasonButton";
@@ -63,8 +67,8 @@ export function useRehash(caseId: string) {
 }
 
 /**
- * "해시 계산" / "해시 다시 계산" (or the caller's `label`, e.g. 검증 실행) for a file evidence item.
- * Folder evidence, a running hash, a match and a mismatch have no button.
+ * "해시 계산" / "해시 다시 계산" (or the caller's `label`, e.g. 다시 검증) for a file evidence item.
+ * Folder evidence and a running hash have no button; a match or a mismatch can be checked again.
  */
 export function EvidenceHashButton({
   caseId,
@@ -129,15 +133,27 @@ const DIGESTS: ReadonlyArray<["sha256" | "sha1" | "md5", string]> = [
   ["md5", "MD5"],
 ];
 
-/** Per-evidence hash details: state, expected value, computed digests (copyable), hash action. */
+/** Per-evidence hash details: state, check time, expected value, computed digests (copyable), hash action. */
 export function SealDetails({ caseId, seal }: { caseId: string; seal: Seal }) {
   const rehash = useRehash(caseId);
+  const { timezone } = useTimezone();
   if (seal.kind === "na") return null;
+  const folders = unhashableSentence(seal);
   return (
     <div className="seal-details">
       <p className="seal-summary">{SEAL_META[seal.kind].description}</p>
+      {folders ? (
+        <p className="seal-summary" data-testid="seal-unhashable">
+          {folders}
+        </p>
+      ) : null}
+      {seal.checkedAt ? (
+        <p className="seal-checked" data-testid="seal-checked">
+          마지막 검증 {formatGridTime(seal.checkedAt, timezone)}
+        </p>
+      ) : null}
       <ul className="seal-list" aria-label="증거별 해시">
-        {seal.items.map((item) => (
+        {[...seal.items, ...seal.unhashable].map((item) => (
           <li key={item.citation_id} className="seal-entry">
             <div className="seal-entry-head">
               <span className="seal-entry-name">
@@ -147,6 +163,12 @@ export function SealDetails({ caseId, seal }: { caseId: string; seal: Seal }) {
               <ItemSealChip item={item} />
             </div>
             <dl className="seal-digests">
+              {item.hash_checked_at ? (
+                <div>
+                  <dt>검증 시각</dt>
+                  <dd>{formatGridTime(item.hash_checked_at, timezone)}</dd>
+                </div>
+              ) : null}
               {item.hash_expected ? (
                 <div>
                   <dt>기대값</dt>
@@ -167,7 +189,12 @@ export function SealDetails({ caseId, seal }: { caseId: string; seal: Seal }) {
               ))}
             </dl>
             {item.hash_message ? <p className="seal-message">{item.hash_message}</p> : null}
-            <EvidenceHashButton caseId={caseId} item={item} label="검증 실행" className="button" />
+            <EvidenceHashButton
+              caseId={caseId}
+              item={item}
+              label={item.hash_checked_at ? "다시 검증" : "검증 실행"}
+              className="button"
+            />
           </li>
         ))}
       </ul>
@@ -177,20 +204,23 @@ export function SealDetails({ caseId, seal }: { caseId: string; seal: Seal }) {
           reason={rehash.isPending ? "요청 중입니다" : undefined}
           onClick={() => rehash.mutate(seal.rehashable)}
         >
-          {`검증 실행 (증거 ${seal.rehashable.length}건)`}
+          {`다시 검증 (증거 ${seal.rehashable.length}건)`}
         </ReasonButton>
       ) : null}
     </div>
   );
 }
 
-/** The seal of the open run's case; `null` while unknown or when nothing is hashable. */
+/** The seal of the open run's evidence (the case's when the snapshot names none); `null` while unknown. */
 export function useRunSeal(runId: string | null): { caseId: string; seal: Seal } | null {
   const snapshot = useRunCaseLink(runId);
   const caseId = snapshot.data?.source === "case-db" ? snapshot.data.case_id : null;
   const detail = useCaseDetail(caseId);
   if (!caseId || !detail.data) return null;
-  return { caseId, seal: sealState(detail.data.evidence) };
+  return {
+    caseId,
+    seal: sealState(runEvidence(detail.data.evidence, snapshot.data?.evidence_citation_id)),
+  };
 }
 
 /** Top-bar seal (after the case picker): shape + word (+ SHA-256 prefix when matched). */
@@ -201,6 +231,10 @@ export function IntegritySeal() {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverId = useId();
   const kind = state?.seal.kind ?? "na";
+  const { timezone } = useTimezone();
+  const checked = state?.seal.checkedAt
+    ? `마지막 검증 ${formatGridTime(state.seal.checkedAt, timezone)}`
+    : "";
 
   // A state change after the first reading is announced; a broken seal interrupts.
   const previous = useRef<SealKind | null>(null);
@@ -227,7 +261,8 @@ export function IntegritySeal() {
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? popoverId : undefined}
-        aria-label={`${sealSentence(state.seal)} — 증거별 해시 보기`}
+        aria-label={`${sealSentence(state.seal)}${checked ? `, ${checked}` : ""} — 증거별 해시 보기`}
+        title={checked || undefined}
         onClick={() => setOpen((value) => !value)}
       >
         <Icon name={SEAL_ICON[kind]} size={14} className="seal-glyph" />

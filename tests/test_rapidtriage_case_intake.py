@@ -710,6 +710,28 @@ class CaseIntakeApiTests(unittest.TestCase):
         self.assertEqual(added.status_code, 201, added.text)
         self.assertEqual(added.json()["evidence"]["hash_status"], "computed")
 
+    def test_evidence_carries_the_time_of_its_last_finished_hash(self) -> None:
+        """review #101 P2-1: a match is a result of its time; the payload names that time."""
+        case = self.create_case()
+        export = self.temp / "export.bin"
+        export.write_bytes(b"bytes to hash")
+        added = self.client.post(f"/api/cases/{case['case_id']}/evidence", json={
+            "evidence_number": "E-01", "source_type": "export", "path": str(export), "verify_hash": False})
+        self.assertEqual(added.status_code, 201, added.text)
+        self.assertIsNone(added.json()["evidence"]["hash_checked_at"])
+        with self.finish_hash_before_response():
+            hashed = self.client.post(
+                f"/api/cases/{case['case_id']}/evidence/{added.json()['evidence']['citation_id']}/hash")
+        self.assertEqual(hashed.status_code, 202, hashed.text)
+        workspace = self.client.app.state.case_workspace
+        with closing(sqlite3.connect(workspace.path())) as connection:
+            audited = connection.execute(
+                "SELECT MAX(timestamp) FROM audit_event WHERE action = 'evidence.hash'").fetchone()[0]
+        listed = self.client.get(f"/api/cases/{case['case_id']}/evidence").json()["evidence"][0]
+        self.assertEqual(listed["hash_status"], "computed")
+        self.assertEqual(listed["hash_checked_at"], audited)
+        self.assertEqual(hashed.json()["evidence"]["hash_checked_at"], audited)
+
     def test_worker_of_this_server_that_recorded_nothing_reads_interrupted(self) -> None:
         case = self.create_case()
         export = self.temp / "export.bin"
