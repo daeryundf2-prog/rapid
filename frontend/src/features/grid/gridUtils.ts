@@ -131,12 +131,13 @@ export function fitColumnWidths(
 }
 
 /** Why a default column is off screen although its preset shows it. */
-export type AutoHideReason = "width" | "empty";
+export type AutoHideReason = "width" | "empty" | "uniform";
 
 /** 열 menu hint per reason ("폭 부족으로 숨김 — 표시"). */
 export const AUTO_HIDE_LABEL: Record<AutoHideReason, string> = {
   width: "폭 부족으로 숨김",
   empty: "값이 없어 숨김",
+  uniform: "모든 행이 같은 값이라 숨김",
 };
 
 /**
@@ -176,8 +177,8 @@ function isEmptyValue(value: unknown): boolean {
 /**
  * Default columns with no value in any loaded row (review #9; generalises "시각 goes when no
  * row has a time"): ids among `candidates` whose every loaded row is empty — never the ones in
- * `keep` (shown by the user), never a column with an empty-state hint (its header explains the
- * blank, e.g. NTFS 생성 → 실행), and nothing at all before a row has loaded.
+ * `keep` (shown by the user), and nothing at all before a row has loaded. A column with an
+ * empty-state hint (NTFS 생성 → 실행) goes too: the grid's column note carries its hint (F27).
  */
 export function emptyColumnIds(
   columns: readonly ColumnSpec[],
@@ -187,7 +188,83 @@ export function emptyColumnIds(
   if (rows.length === 0) return [];
   const wanted = new Set(options.candidates);
   return columns
-    .filter((c) => wanted.has(c.id) && !options.keep?.has(c.id) && !c.emptyHint)
+    .filter((c) => wanted.has(c.id) && !options.keep?.has(c.id))
     .filter((c) => rows.every((row) => isEmptyValue(c.value(row)) && displayText(c, row).trim() === ""))
     .map((c) => c.id);
+}
+
+/** Fewest loaded rows before a column whose rows all read alike counts as uniform. */
+export const UNIFORM_MIN_ROWS = 3;
+
+/**
+ * Columns that never hide as uniform: the row's name, its verdict (F2: always on screen) and its
+ * 특이사항 (findings stay beside the row). Time columns stay too (a run of identical times is
+ * itself a finding; the axis stays sortable).
+ */
+const NEVER_UNIFORM: Readonly<Record<string, true>> = {
+  title: true,
+  review: true,
+  tagstatus: true,
+  flags: true,
+};
+
+/**
+ * Default columns whose every loaded row shows the same non-empty text (X7: "일치" = invoice on
+ * all 110 search rows, 상태 = 있음 on every output): id → that shared text. The grid hides them
+ * and names the value once above the table, so the information stays and the width comes back.
+ * Decided on the loaded rows only (a paged collection says so in its note); never for fewer than
+ * UNIFORM_MIN_ROWS rows, never for `keep` (shown by the user), NEVER_UNIFORM ids or time columns.
+ */
+export function uniformColumns(
+  columns: readonly ColumnSpec[],
+  rows: readonly GridRow[],
+  options: { candidates: readonly string[]; keep?: ReadonlySet<string> },
+): Map<string, string> {
+  const out = new Map<string, string>();
+  const [head] = rows;
+  if (!head || rows.length < UNIFORM_MIN_ROWS) return out;
+  const wanted = new Set(options.candidates);
+  for (const c of columns) {
+    if (!wanted.has(c.id) || options.keep?.has(c.id) || NEVER_UNIFORM[c.id]) continue;
+    if (c.zoneInHeader || c.filterKind === "time") continue;
+    // Compared as shown, untrimmed (review P3-4): " invoice" and "invoice" are different evidence.
+    const first = displayText(c, head);
+    if (first.trim() && rows.every((row) => displayText(c, row) === first)) out.set(c.id, first);
+  }
+  return out;
+}
+
+/**
+ * Columns the auto-hide must leave on screen (review P2-2): the ones the user showed, plus any
+ * with an active column filter or sort — hiding those would take the filter input away mid-typing
+ * because of the very rows the filter left.
+ */
+export function autoHideKeep(
+  pinned: ReadonlySet<string>,
+  filters: readonly { col: string }[] | undefined,
+  sortIds: readonly string[],
+): ReadonlySet<string> {
+  if (!filters?.length && !sortIds.length) return pinned;
+  const out = new Set(pinned);
+  for (const filter of filters ?? []) out.add(filter.col);
+  for (const id of sortIds) out.add(id);
+  return out;
+}
+
+/**
+ * Columns a selection CSV writes (review P2-1): the ones on screen plus those auto-hidden only
+ * because every loaded row reads the same or nothing — the grid hid them for width, the export
+ * must not lose their values. Width-hidden and user-hidden columns stay out. `all` is the
+ * grid's column order, `shown` the ids on screen.
+ */
+export function exportColumnSpecs(
+  all: readonly ColumnSpec[],
+  shown: ReadonlySet<string>,
+  autoHidden: ReadonlyMap<string, AutoHideReason>,
+): ColumnSpec[] {
+  return all.filter((c) => {
+    if (shown.has(c.id)) return true;
+    const reason = autoHidden.get(c.id);
+    return reason === "uniform" || reason === "empty";
+  });
 }

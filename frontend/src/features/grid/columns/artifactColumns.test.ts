@@ -214,7 +214,7 @@ describe("kind default columns (§4.3) and sort keys", () => {
     );
     // Browser: the visit columns (viewer redesign §7) — URL · 제목 · 방문 수 · 전환.
     expect(headers("browser")).toEqual(expect.arrayContaining(["URL", "제목", "방문 수", "전환", "시각"]));
-    // Kinds without a layout use the generic one (visual-polish S4): 시각 · 유형 · 항목 · 경로 · 선별 first.
+    // Kinds without a layout use the generic one (visual-polish S4): 시각 · 유형 · 항목 · 경로 · 판정 first.
     const generic = artifactColumnsForKind("android-apk");
     expect(generic.map((c) => c.header)).toEqual([
       "시각",
@@ -222,7 +222,7 @@ describe("kind default columns (§4.3) and sort keys", () => {
       "항목",
       "특이사항",
       "경로",
-      "선별",
+      "판정",
       "내용",
       "파서",
       "탐지 규칙",
@@ -236,7 +236,7 @@ describe("kind default columns (§4.3) and sort keys", () => {
       "항목",
       "특이사항",
       "경로",
-      "선별",
+      "판정",
     ]);
   });
 

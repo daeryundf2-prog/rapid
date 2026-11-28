@@ -8,20 +8,23 @@
  */
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { type KeyboardEvent, useId, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, useCallback, useId, useMemo, useRef, useState } from "react";
 import { announce } from "../../a11y";
 import { runCommand } from "../../commands/registry";
 import { KEY_MAP } from "../../contracts/command";
 import { Icon } from "../../icons";
 import { keyLabel } from "../../shortcuts";
 import { useTimezone } from "../../state/hooks";
-import { formatShortMinute, formatTimeRange, zoneShort } from "../../utils/time";
+import { formatTimeRange } from "../../utils/time";
 import { setTimeRange, useFilterStore } from "../filters/filterStore";
 import { fetchTimelineHistogram } from "./HistogramView";
-import { rangeOf } from "./histogram";
+import { axisTicks, rangeOf } from "./histogram";
 import { TimelineJump } from "./TimelineJump";
 import { applyRange, rangeText, type StripState, useTimelineCommands } from "./timelineCommands";
 import { extentOf, rangeFromBounds, stripBars, toIsoBounds } from "./timelineRange";
+
+/** Room one axis label needs ("10-18", "06시" plus spacing). */
+const AXIS_LABEL_PX = 64;
 
 export function TimelineStrip({ runId }: { runId: string }) {
   const { timezone: tz } = useTimezone();
@@ -60,6 +63,29 @@ export function TimelineStrip({ runId }: { runId: string }) {
   const [folded, setFolded] = useState(true);
   const bodyId = useId();
   const barsRef = useRef<HTMLDivElement>(null);
+  // Axis width → how many day / hour labels fit (one per AXIS_LABEL_PX).
+  const [axisWidth, setAxisWidth] = useState(960);
+  const axisObserver = useRef<ResizeObserver | null>(null);
+  const axisRef = useCallback((element: HTMLDivElement | null) => {
+    axisObserver.current?.disconnect();
+    axisObserver.current = null;
+    if (!element) return;
+    const measure = () => {
+      if (element.clientWidth > 0) setAxisWidth(element.clientWidth);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    axisObserver.current = new ResizeObserver(measure);
+    axisObserver.current.observe(element);
+  }, []);
+  // A label too close to the right edge would be cut: it stays off (the header names the end).
+  const ticks = useMemo(
+    () =>
+      axisTicks(buckets, tz, Math.max(2, Math.floor(axisWidth / AXIS_LABEL_PX))).filter(
+        (tick) => (tick.index / buckets.length) * axisWidth + AXIS_LABEL_PX * 0.75 <= axisWidth,
+      ),
+    [buckets, tz, axisWidth],
+  );
   const live = useRef<StripState>({ range, extent, tz });
   live.current = { range, extent, tz };
 
@@ -97,9 +123,10 @@ export function TimelineStrip({ runId }: { runId: string }) {
   const hi = drag ? Math.max(drag.anchor, drag.focus) : -1;
   const first = buckets[0];
   const last = buckets.at(-1);
-  // The axis spans what the header names: the range itself once zoomed, else the bars.
-  const axisFrom = range?.fromMs ?? first?.startMs;
-  const axisTo = range?.toMs ?? (last ? last.endMs - 1 : undefined);
+  // The header names what the bars span: the range itself once zoomed, else the bars — in the
+  // display zone, the zone named ("2026-10-18 00:00 ~ 10-26 23:59 KST").
+  const spanFrom = range?.fromMs ?? first?.startMs ?? null;
+  const spanTo = range?.toMs ?? (last ? last.endMs - 1 : null);
   return (
     <section
       className="tl-strip"
@@ -109,7 +136,10 @@ export function TimelineStrip({ runId }: { runId: string }) {
     >
       <div className="tl-strip-bar">
         <span className="tl-strip-range">
-          {range ? rangeText(range, tz) : "전체 기간"} · {total.toLocaleString("ko-KR")}건
+          <span className="tl-strip-span">
+            {range ? rangeText(range, tz) : `전체 기간 ${formatTimeRange(spanFrom, spanTo, tz)}`}
+          </span>
+          <span className="tl-strip-count">{total.toLocaleString("ko-KR")}건</span>
         </span>
         <button
           type="button"
@@ -210,13 +240,17 @@ export function TimelineStrip({ runId }: { runId: string }) {
             );
           })}
         </div>
-        <div className="tl-strip-axis" aria-hidden="true">
-          <span>{axisFrom === undefined ? "" : formatShortMinute(axisFrom, tz)}</span>
-          <span>
-            {axisTo === undefined
-              ? ""
-              : `${formatShortMinute(axisTo, tz)} ${zoneShort(tz, new Date(axisTo))}`}
-          </span>
+        {/* Day (or clock-aligned hour) labels under the bars, as many as fit, display zone. */}
+        <div ref={axisRef} className="tl-strip-axis" aria-hidden="true">
+          {ticks.map((tick) => (
+            <span
+              key={tick.index}
+              className="tl-strip-tick"
+              style={{ left: `${(tick.index / buckets.length) * 100}%` }}
+            >
+              {tick.label}
+            </span>
+          ))}
         </div>
       </div>
     </section>

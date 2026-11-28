@@ -89,10 +89,15 @@ export interface ColumnSpec {
    */
   filterKind?: "text" | "time" | "number" | "none";
   /**
-   * The column is filled by an analysis job that has not run yet (e.g. files NTFS columns):
-   * the header says so and links to the job's run command.
+   * The column is filled by an analysis job that has not run yet (e.g. files NTFS columns): the
+   * header tooltip says so and the column note above the table offers the job's run command.
    */
   emptyHint?: { text: string; command: string; commandLabel: string };
+  /**
+   * Header addition read from the loaded rows (F27: "사본 시각 포함" once some 수정 cells are
+   * acquisition-copy times), shown after the zone: "수정 (KST, 사본 시각 포함)". null = nothing.
+   */
+  headerNote?: (rows: readonly GridRow[]) => string | null;
 }
 
 export interface MapContext {

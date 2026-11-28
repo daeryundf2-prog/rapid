@@ -58,24 +58,25 @@ describe("auto-hide empty default columns (review #9)", () => {
   ];
   const candidates = ["timestamp", "review", "tags", "ntfs"];
 
-  it("hides a candidate whose every loaded row is empty (null, blank, empty list)", () => {
+  it("hides a candidate whose every loaded row is empty (null, blank, empty list), hinted ones too (F27)", () => {
     const rows = [row({ timestamp: " " }, 0), row({}, 1)];
-    expect(emptyColumnIds(columns, rows, { candidates })).toEqual(["timestamp", "review", "tags"]);
+    expect(emptyColumnIds(columns, rows, { candidates })).toEqual(["timestamp", "review", "tags", "ntfs"]);
   });
 
   it("keeps a column as soon as one row has a value", () => {
     const rows = [row({ reviewStatus: "relevant", timestamp: "2026-01-01T00:00:00Z" }, 0), row({}, 1)];
-    expect(emptyColumnIds(columns, rows, { candidates })).toEqual(["tags"]);
+    expect(emptyColumnIds(columns, rows, { candidates })).toEqual(["tags", "ntfs"]);
   });
 
-  it("never hides before rows load, a column the user showed, a hinted column or a non-candidate", () => {
+  it("never hides before rows load, a column the user showed or a non-candidate", () => {
     expect(emptyColumnIds(columns, [], { candidates })).toEqual([]);
     const rows = [row({}, 0)];
     expect(emptyColumnIds(columns, rows, { candidates, keep: keys("review") })).toEqual([
       "timestamp",
       "tags",
+      "ntfs",
     ]);
-    expect(emptyColumnIds(columns, rows, { candidates: ["title", "ntfs"] })).toEqual([]);
+    expect(emptyColumnIds(columns, rows, { candidates: ["title"] })).toEqual([]);
   });
 });
 

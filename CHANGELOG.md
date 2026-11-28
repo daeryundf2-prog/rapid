@@ -87,6 +87,28 @@
 
 ### Changed
 
+- Console tables read without opening rows: the timeline's 요약 column is now
+  대상 (file name, URL host and path, executable or key from the event's
+  fields, no "Artifact event: <family>" prefix; the original summary is the
+  tooltip). Search shows the match context with the hit marked (never the
+  record's JSON), which field matched (본문/이름/경로/메타), Korean source and
+  type labels. In the default column set, a column whose loaded rows are all
+  empty or all the same value is hidden and named once above the table
+  ("모든 행 같은 값: 일치 = invoice", "불러온 n행 기준" on paged lists); a
+  click shows it again. Files mark acquisition-copy times with "사본" and the
+  수정 header says so; the NTFS run link moved from the header to that note.
+  Paths keep the last two folders and the file name and elide the middle,
+  without a gap. 선별 column headers read 판정. The timeline overview strip
+  labels each day (or clock-aligned hour), names its whole span in the
+  display zone, and the histogram view bins days and labels bars in the
+  display zone instead of UTC; server buckets that straddle a display-zone
+  midnight (coarse UTC day buckets) stay as the server's own bars so a bar's
+  count equals its click filter. The 대상 value (copy, filter, sort, CSV)
+  stays the whole URL with its query, the full executable path and the full
+  registry key with its hive; only the cell shortens it. Hidden same-value
+  and empty columns still go to the selection CSV, and a column with an
+  active filter or sort is never auto-hidden.
+
 - Console layout: toolbar buttons no longer wrap their label ("조건" split
   into two lines at 390 px), a narrow timeline keeps 요약 next to 시각, the
   stage rail is 48 px on phones, 실행 is icon-only there so the global search

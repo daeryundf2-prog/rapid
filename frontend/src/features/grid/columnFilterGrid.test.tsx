@@ -97,7 +97,7 @@ function filesPage(total: number, ntfsJoin: unknown, withNtfs = false) {
 }
 
 describe("files NTFS columns (plan analysis-workbench-p1 U-P1-3)", () => {
-  it("before an NTFS-meta analysis the 출처 headers link to its run dialog; names stay clean", async () => {
+  it("before an NTFS-meta analysis the 출처 headers say so; the column note runs it (F27); names stay clean", async () => {
     setRoute(`#/case/${RUN}/explore/files`);
     gridOn({ id: "files" });
     installFetch({
@@ -119,16 +119,18 @@ describe("files NTFS columns (plan analysis-workbench-p1 U-P1-3)", () => {
       ["sourceImage", "소스 이미지 경로"],
     ] as const) {
       const cell = headerCell(col);
-      expect(cell.getAttribute("aria-label")).toBe(name);
       const sort = within(cell).getByRole("button", { name });
       expect(sort.getAttribute("title")).toBe(NTFS_EMPTY_HINT);
-      const link = within(cell).getByRole("button", { name: "NTFS 메타 분석 실행…" });
-      const described = (link.getAttribute("aria-describedby") ?? "")
+      const described = (sort.getAttribute("aria-describedby") ?? "")
         .split(" ")
         .map((id) => document.getElementById(id)?.textContent);
       expect(described).toContain(NTFS_EMPTY_HINT);
+      // No "→ 실행" link inside the header any more.
+      expect(within(cell).queryByRole("button", { name: "NTFS 메타 분석 실행…" })).toBeNull();
     }
-    fireEvent.click(within(headerCell("ntfsEntry")).getByRole("button", { name: "NTFS 메타 분석 실행…" }));
+    const note = screen.getByTestId("grid-column-note");
+    expect(note.textContent).toContain(NTFS_EMPTY_HINT);
+    fireEvent.click(within(note).getByRole("button", { name: "NTFS 메타 분석 실행…" }));
     await waitFor(() => expect(useAnalysisStore.getState().dialog?.kind).toBe("ntfs-meta"));
     expect(screen.queryByTestId("grid-ntfs-status")).toBeNull();
   });

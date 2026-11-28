@@ -6,9 +6,12 @@ import { cellTime } from "./common";
 /** Title of a modified cell whose time is the acquisition copy's host mtime (parser-quality r1). */
 export const COPY_TIME_TITLE = "취득 사본의 시각 — 원본 시각 아님";
 
+/** Short marker after an acquisition-copy time (F27: said in words, not by italics alone). */
+export const COPY_TIME_MARK = "사본";
+
 /**
  * 수정 cell: the chosen time (the header names its zone, `cellTime`); an acquisition-copy time
- * renders muted with COPY_TIME_TITLE.
+ * carries a muted "사본" word after it, COPY_TIME_TITLE as its tooltip and screen-reader text.
  */
 export function modifiedCell(row: GridRow, text: string): ReactNode {
   if (!text) {
@@ -20,8 +23,15 @@ export function modifiedCell(row: GridRow, text: string): ReactNode {
   }
   if (row.fields.modifiedOrigin === "acquisition-copy") {
     return (
-      <span className="grid-cell-text grid-cell-copytime" data-testid="files-copy-time">
+      <span
+        className="grid-cell-text grid-cell-copytime"
+        data-testid="files-copy-time"
+        title={COPY_TIME_TITLE}
+      >
         {cellTime(text)}
+        <span className="grid-copy-mark" aria-hidden="true">
+          {COPY_TIME_MARK}
+        </span>
         <span className="sr-only"> ({COPY_TIME_TITLE})</span>
       </span>
     );

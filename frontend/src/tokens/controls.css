@@ -730,11 +730,13 @@ button.chip:hover {
   }
 }
 
-/* --- path (review #9): last segment kept, leading folders cut from the front, mono ------- */
+/* --- path (F28): the end kept (two folders + file name), the middle elided, mono ------------
+   No gap between the parts: the path reads as written ("alice/Documents/a.docx"). The head
+   gives way first (ellipsis at its end = the middle of the path), then the folders from their
+   start; the file name is cut last. */
 
 .mid-path {
   display: inline-flex;
-  gap: var(--space-1);
   min-width: 0;
   max-width: 100%;
   font-family: var(--font-mono);
@@ -744,14 +746,30 @@ button.chip:hover {
 
 .mid-path-head {
   flex: 0 1 auto;
-  min-width: 1.5em; /* room for the "…" itself */
+  min-width: 0; /* gives way first, down to nothing */
   overflow: hidden;
   text-overflow: ellipsis;
-  /* Overflow at the start: "…\User Data\Default\" keeps the folders nearest the file
+  color: var(--text-subtle);
+}
+
+/* The kept end (two folders + file name): its own width until it alone overflows the cell. */
+.mid-path-end {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mid-path-dirs {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Overflow at the start: "…ice/Documents/" keeps the folder nearest the file
      (the <bdo dir="ltr"> inside keeps the path's own order). */
   direction: rtl;
   text-align: left;
-  color: var(--text-subtle);
+  color: var(--text-muted);
 }
 
 .mid-path-tail {
@@ -759,7 +777,7 @@ button.chip:hover {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--text-muted);
+  color: var(--text);
 }
 
 /* --- toast (U-V7: one kind, bottom-right) ------------------------------------- */

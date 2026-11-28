@@ -424,10 +424,16 @@
   text-overflow: ellipsis;
 }
 
-/* Acquisition-copy host time (files 수정): shown, but not as an evidence time. */
+/* Acquisition-copy host time (files 수정): shown, but not as an evidence time — said with the
+   word "사본" after the time (F27), not by italics alone. */
 .grid-cell-copytime {
   color: var(--text-muted);
-  font-style: italic;
+}
+
+.grid-copy-mark {
+  margin-left: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
 }
 
 .grid-header .grid-cell-select,
@@ -679,6 +685,104 @@
   border-bottom: 1px solid var(--line-subtle);
 }
 
+/* Column note (X7 / F27): the values of auto-hidden uniform columns, the empty ones and how to
+   fill them, one wrapping line above the table. Each column name re-shows its column. */
+.grid-colnote {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--fs-table-aux);
+  color: var(--text-muted);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.grid-colnote-part {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  min-width: 0;
+}
+
+.grid-colnote-item {
+  max-width: 100%;
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color 160ms ease-out;
+}
+
+.grid-colnote-item:hover {
+  background: var(--bg-hover);
+}
+
+.grid-colnote-item:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.grid-colnote-hint {
+  color: var(--text-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grid-colnote-item {
+    transition: none;
+  }
+}
+
+/* Search 일치 문맥 (F11): the hit inside plain context text. Weight + the selection wash, so it
+   reads without colour alone; text stays --text over --bg-selected (checked by check:contrast). */
+.search-hit {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: var(--bg-selected);
+  color: var(--text);
+  font-weight: 600;
+  /* Still marked on a selected row (same wash). */
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+  flex: none;
+}
+
+.search-context {
+  display: flex;
+  min-width: 0;
+}
+
+.search-before {
+  flex: 0 3 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+  /* Trimmed from its start (the <bdo> keeps reading order): the hit stays visible. */
+  direction: rtl;
+  text-align: left;
+}
+
+.search-after {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
 .grid-fieldpicker {
   flex-basis: 100%;
   display: flex;
@@ -754,7 +858,7 @@
   outline-offset: 1px;
 }
 
-/* "→ 실행" link in the header of a column an analysis job fills. */
+/* Run button of an analysis job that fills empty columns (column note, viewer meta tab). */
 .grid-hint-link {
   flex: none;
   margin-left: var(--space-1);

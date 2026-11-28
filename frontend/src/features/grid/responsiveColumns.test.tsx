@@ -35,7 +35,13 @@ function mockGridWidth(width: number): () => void {
   };
 }
 
-const headers = () => screen.getAllByRole("columnheader").map((h) => h.textContent ?? "");
+// Data column headers only: the sticky select column (its screen-reader name may mention 판정)
+// is not a data column and never takes part in the width-priority hiding.
+const headers = () =>
+  screen
+    .getAllByRole("columnheader")
+    .filter((h) => !h.classList.contains("grid-cell-select"))
+    .map((h) => h.textContent ?? "");
 const hasHeader = (name: string) => headers().some((text) => text.includes(name));
 
 async function renderFiles(handler = filesHandler(20)) {
@@ -64,14 +70,14 @@ afterEach(() => {
 
 describe("responsive default columns (files, 분석 기본)", () => {
   it("hides the lowest-priority columns on a narrow grid and lists them in the 열 menu", async () => {
-    // 600 − select 56 − tools 40 = 504px: NTFS 생성, 경로 and 선별 go; 이름 · 수정 · 크기 stay.
+    // A 600px grid minus the select and tool columns: NTFS 생성, 경로 and 판정 go; 이름 · 수정 · 크기 stay.
     restoreWidth = mockGridWidth(600);
     await renderFiles();
     await waitFor(() => expect(hasHeader("경로")).toBe(false));
     expect(hasHeader("이름")).toBe(true);
     expect(hasHeader("수정")).toBe(true);
     expect(hasHeader("크기")).toBe(true);
-    expect(hasHeader("선별")).toBe(false);
+    expect(hasHeader("판정")).toBe(false);
     expect(hasHeader("NTFS 생성")).toBe(false);
 
     const menu = openColumnMenu();
@@ -91,15 +97,18 @@ describe("responsive default columns (files, 분석 기본)", () => {
   it("shows every default column with values when the grid is wide enough", async () => {
     restoreWidth = mockGridWidth(1200);
     await renderFiles();
-    for (const name of ["이름", "경로", "크기", "수정", "NTFS 생성"]) expect(hasHeader(name)).toBe(true);
-    // No loaded row carries a review mark: 선별 is held back like an empty 시각 (review #9).
-    expect(hasHeader("선별")).toBe(false);
+    for (const name of ["이름", "경로", "크기", "수정"]) expect(hasHeader(name)).toBe(true);
+    // No loaded row carries a review mark or an NTFS time: 판정 and NTFS 생성 are held back like an
+    // empty 시각 (review #9, F27) and named in the column note.
+    expect(hasHeader("판정")).toBe(false);
+    expect(hasHeader("NTFS 생성")).toBe(false);
+    expect(screen.getByTestId("grid-column-note").textContent).toContain("NTFS 생성");
     const menu = openColumnMenu();
     expect(within(menu).queryByText(/폭 부족으로 숨김/)).toBeNull();
     const review = within(menu).getByTestId("grid-autohidden-review");
     expect(review.textContent).toContain("값이 없어 숨김 — 표시");
-    fireEvent.click(within(review).getByRole("button", { name: "선별 표시 (값이 없어 숨김)" }));
-    await waitFor(() => expect(hasHeader("선별")).toBe(true));
+    fireEvent.click(within(review).getByRole("button", { name: "판정 표시 (값이 없어 숨김)" }));
+    await waitFor(() => expect(hasHeader("판정")).toBe(true));
   });
 
   it("hides 수정 when no loaded row has a time, with the same 열 menu hint", async () => {

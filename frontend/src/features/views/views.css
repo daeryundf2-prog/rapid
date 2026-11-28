@@ -562,9 +562,18 @@
 }
 
 .tl-strip-range {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-3);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.tl-strip-count {
+  font-weight: 400;
+  color: var(--text-muted);
 }
 
 /* Folding is a phone-width control (below): the strip is always open when wider. */
@@ -640,12 +649,23 @@
   border-radius: 1px 1px 0 0;
 }
 
+/* Day / hour labels, each at the start of its bar (left = index / bars), tick line above. */
 .tl-strip-axis {
-  display: flex;
-  justify-content: space-between;
+  position: relative;
+  height: calc(var(--fs-aux) * 1.5);
+  overflow: hidden;
   font-size: var(--fs-aux);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+}
+
+.tl-strip-tick {
+  position: absolute;
+  top: 0;
+  padding-left: var(--space-1);
+  border-left: 1px solid var(--line);
+  line-height: 1.5;
+  white-space: nowrap;
 }
 
 /* Phone width (fe-audit A1 follow-up): the strip opens folded to its one-line summary (range ·
