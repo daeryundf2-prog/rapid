@@ -33,6 +33,10 @@ RapidTriage is local-first by default. Deploy it as a workstation tool unless a 
 - Keep the web UI bound to `127.0.0.1` for single-user workstation review.
 - If remote access is unavoidable, bind only on an approved internal interface, require `--auth-token`, and record the operator, host, port, token owner, and expiry.
 - Do not expose RapidTriage directly to the internet.
+- Raise the open-file limit before starting a LAN server (`ulimit -n 4096` in the terminal, or `LimitNOFILE=4096` for a systemd service). `rapidtriage web` raises the soft limit toward the hard limit itself (at most 8192) and prints the limit in effect; at 256, the macOS terminal default, about 245 idle connections from any LAN device stalled the server.
+- `rapidtriage web` caps concurrent connections at `RAPIDTRIAGE_LIMIT_CONCURRENCY` (default 1000, at most half the open-file limit; further requests get 503), closes idle keep-alive connections after 5 seconds, and gives in-flight requests 10 seconds on SIGTERM/Ctrl-C (waiting `wait: true` run requests answer at once; queued runs are marked `interrupted`).
+- Request bodies are capped at 8 MiB (`RAPIDTRIAGE_MAX_BODY_BYTES`; hash-set uploads 50 MB). For office use put a reverse proxy (Caddy, nginx) in front with TLS, the same body limit (nginx `client_max_body_size 51m` for hash-set uploads), header/body read timeouts (nginx `client_header_timeout 10s`, `client_body_timeout 30s`), and an allow list of examiner IPs in the firewall: uvicorn itself does not close a connection that never sends a complete request.
+- With API auth on, the API schema and docs pages (`/openapi.json`, `/docs`, `/redoc`) also need the token.
 - Treat browser sessions as evidence-adjacent because source previews, reviewer notes, and report drafts may be visible.
 
 ## Backup, Restore, And Logging

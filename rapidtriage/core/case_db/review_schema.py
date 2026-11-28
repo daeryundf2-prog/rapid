@@ -221,22 +221,40 @@ def _insert_tag(
     return int(cursor.lastrowid or 0)
 
 
+def _missing_system_tags(connection: sqlite3.Connection, case_id: str) -> list[str]:
+    live = {str(row["name"]).casefold() for row in live_tag_rows(connection, case_id)}
+    return [name for name in SYSTEM_TAGS if name.casefold() not in live]
+
+
 def ensure_system_tags(connection: sqlite3.Connection, case_id: str) -> None:
     """Create the missing system tags (북마크, 우선순위 1-5) of a case.
 
-    Write-safe under concurrency: each insert runs in a savepoint, and a unique-index hit
-    (another request created the same tag first) is skipped instead of failing the request.
+    Without a caller transaction the tags are re-read and created under ``BEGIN IMMEDIATE``:
+    a deferred read-then-insert failed at once with ``database is locked`` when another
+    connection was writing (SQLite does not wait for a lock once a read is open; PR #90
+    review). Inside a caller's transaction each insert runs in a savepoint, and a
+    unique-index hit (another request created the same tag first) is skipped.
     """
-    live = {str(row["name"]).casefold() for row in live_tag_rows(connection, case_id)}
-    timestamp = now_iso()
-    for name in SYSTEM_TAGS:
-        if name.casefold() not in live:
+    if not _missing_system_tags(connection, case_id):
+        return
+    own_transaction = not connection.in_transaction
+    if own_transaction:
+        connection.execute("BEGIN IMMEDIATE")
+    try:
+        timestamp = now_iso()
+        for name in _missing_system_tags(connection, case_id):
             connection.execute("SAVEPOINT ensure_system_tag")
             try:
                 _insert_tag(connection, case_id, name, actor="system", timestamp=timestamp)
             except sqlite3.IntegrityError:
                 connection.execute("ROLLBACK TO SAVEPOINT ensure_system_tag")
             connection.execute("RELEASE SAVEPOINT ensure_system_tag")
+    except BaseException:
+        if own_transaction:
+            connection.rollback()
+        raise
+    if own_transaction:
+        connection.commit()
 
 
 def resolve_tag_names(

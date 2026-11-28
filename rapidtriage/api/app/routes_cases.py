@@ -22,7 +22,7 @@ from starlette.concurrency import run_in_threadpool
 
 from ...core.case_db.base import CaseDatabaseError
 from ...core.case_db.intake import CaseConflictError, CaseNotFoundError
-from ...core.jobs import RunJobStore, RunOutputDirBusy
+from ...core.jobs import ACTIVE_JOB_STATUSES, RunJobStore, RunOutputDirBusy
 from ...core.run.profiles import RUN_PROFILES
 from .case_workspace import (
     SNAPSHOT_FILE_NAME,
@@ -56,7 +56,7 @@ from .models import (
 )
 from .routes_runs import run_request_from_body
 from .run_problems import PROBLEM_MAX_LIMIT, PROBLEM_PREVIEW_LIMIT, build_run_problems
-from .run_wait import wait_for_run
+from .run_wait import RunWaits
 
 #: Korean field names for 422 bodies on these routes (factory exception handler).
 CASE_FIELD_LABELS = {
@@ -131,7 +131,7 @@ def _write_snapshot_file(output_dir: Path | None, snapshot: dict[str, object]) -
         return None, f"스냅숏 파일을 쓰지 못했습니다: {exc}"
 
 
-def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRouter:
+def build_cases_router(store: RunJobStore, workspace: CaseWorkspace, run_waits: RunWaits) -> APIRouter:
     router = APIRouter()
     # The output-folder check and the submit are one step (two case runs cannot both pass the check).
     submit_lock = threading.Lock()
@@ -380,10 +380,12 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
     @router.post("/api/cases/{case_id}/runs", status_code=202)
     async def create_case_run(case_id: str, request: CaseRunCreateRequest) -> dict[str, Any]:
         run_id, snapshot_fields = await run_in_threadpool(queue_case_run, case_id, request)
-        ended = await wait_for_run(store, run_id) if request.wait else False
-        run = await run_in_threadpool(lambda: store.get(run_id).to_dict(include_summary=ended))
         if request.wait:
-            run["wait_timed_out"] = not ended
+            await run_waits.wait(store, run_id)
+        # Read after the wait: a run that ended right after the cap is reported as ended (PR #89 review P3).
+        run = await run_in_threadpool(lambda: store.get(run_id).to_dict(include_summary=request.wait))
+        if request.wait:
+            run["wait_timed_out"] = run["status"] in ACTIVE_JOB_STATUSES
         return {"command": "case.run.create", "case_id": case_id, "run": run, **snapshot_fields}
 
     @router.post("/api/cases/{case_id}/runs/link", status_code=201)
