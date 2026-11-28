@@ -551,8 +551,19 @@ kbd {
     white-space: nowrap;
   }
 
+  /* The seal shares this row: the case name keeps a few letters ("fold…") instead of vanishing
+     behind the seal and 실행, and the search gives way down to its placeholder width. */
   .topbar-case {
-    max-width: 40%;
+    max-width: 50%;
+  }
+
+  .case-picker-name {
+    min-width: 3em;
+  }
+
+  .topbar-search,
+  .global-search {
+    min-width: 72px;
   }
 
   .topbar-search {
