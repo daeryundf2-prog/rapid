@@ -416,7 +416,7 @@ def build_runs_router(
     def cancel_run(run_id: str) -> dict[str, Any]:
         """"모두 취소" (= ``plan/control`` ``cancel_all``); the response adds the current ``plan``."""
         try:
-            payload = store.cancel(run_id, actor=server_actor() or "web").to_dict(include_summary=True)
+            payload = store.cancel(run_id, by=server_actor()).to_dict(include_summary=True)
         except KeyError:
             raise HTTPException(status_code=404, detail="런을 찾을 수 없습니다")
         except RunControlConflict as exc:

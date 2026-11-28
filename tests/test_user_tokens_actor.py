@@ -23,6 +23,8 @@ from unittest import mock
 from rapidtriage.cli import run_web_server
 from rapidtriage.core.case_db import CaseDatabase
 from rapidtriage.core.jobs import RunJobStore
+from rapidtriage.core.run.plan import CONTROL_FILE_NAME, build_run_plan
+from rapidtriage.core.run.progress import RunProgress
 from rapidtriage.core.user_tokens import (
     TOKENS_FILE_ENV,
     UserTokenFileError,
@@ -219,6 +221,24 @@ class PerUserTokenApiTests(unittest.TestCase):
         with contextlib.closing(sqlite3.connect(self.database)) as connection:
             created_by = connection.execute("SELECT created_by FROM saved_search WHERE name = 's1'").fetchone()[0]
         self.assertEqual(created_by, "kim")
+
+    def test_running_cancel_names_the_token_owner_in_the_control_file_and_plan(self) -> None:
+        # PR #92 review P2: the control file kept only web/cli, so lee's cancel read as the CLI's.
+        output_dir = self.root / "out"
+        created = self.client("kim").post("/api/runs", json={"root": str(self.evidence), "mode": "hacking", "output_dir": str(output_dir)})
+        self.assertEqual(created.status_code, 202, created.text)
+        self.store.get(created.json()["run_id"]).status = "running"  # a live run: the cancel goes to its control file
+        self.assertEqual(self.client("lee").post(f"/api/runs/{created.json()['run_id']}/cancel").status_code, 200)
+        requests = json.loads((output_dir / CONTROL_FILE_NAME).read_text(encoding="utf-8"))["requests"]
+        self.assertEqual([(item["action"], item["actor"], item["by"]) for item in requests], [("cancel_all", "web", "lee")])
+
+        # The run process applies it: the plan and report name lee, and that it came from the web.
+        progress = RunProgress(output_dir, heartbeat_interval=0)
+        progress.start(stage="artifacts")
+        progress.set_plan(build_run_plan(mode="hacking"))
+        progress.apply_control(requests[0])
+        requested_by = progress.task_record("email")["requested_by"]
+        self.assertEqual((requested_by["actor"], requested_by["source"]), ("lee", "web"))
 
     def test_runs_record_owner_canceller_and_remover(self) -> None:
         # R12: anyone may cancel or remove a run; the server now records who did.

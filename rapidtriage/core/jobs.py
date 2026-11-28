@@ -750,9 +750,10 @@ class RunJobStore:
         with self._lock:
             return [dict(record) for record in self._removed]
 
-    def cancel(self, run_id: str, *, actor: str = "web") -> RunJob:
+    def cancel(self, run_id: str, *, by: str | None = None) -> RunJob:
         """"모두 취소": a queued run never starts; a running one gets ``cancel_all`` (control file).
 
+        ``by``: the server-authenticated person or agent (``None``: recorded as ``web``).
         Raises :class:`RunControlConflict` (409) once the running run's report
         stage started: its outcome is settled and nothing is written.
         """
@@ -771,7 +772,7 @@ class RunJobStore:
             future = self._futures.get(run_id)
             job.cancellation_requested = True
             append_job_transition(
-                job, event_type="cancel-requested", status=job.status, message="Cancellation requested", details={"actor": actor}
+                job, event_type="cancel-requested", status=job.status, message="Cancellation requested", details={"actor": by or "web"}
             )
             if job.status == "queued":
                 if future is not None:
@@ -800,7 +801,7 @@ class RunJobStore:
         if control_dir is not None:
             control_dir.mkdir(parents=True, exist_ok=True)
             try:
-                append_control_request(control_dir, "cancel_all", (), actor=actor)
+                append_control_request(control_dir, "cancel_all", (), actor="web", by=by)
             except ControlFileError as exc:
                 raise RunControlConflict(str(exc)) from exc
             poke_run_control(control_dir)
@@ -812,7 +813,7 @@ class RunJobStore:
         action: str,
         targets: Sequence[Mapping[str, object]] = (),
         *,
-        actor: str = "web",
+        by: str | None = None,
     ) -> dict[str, object]:
         """Run-plan control (plan P2 §3.4): ``cancel``/``skip`` targets, ``cancel_all``, ``finish``.
 
@@ -836,7 +837,7 @@ class RunJobStore:
                 if rejected:
                     # The report stage started: the run ends as it is (no cancel_all written).
                     return {"accepted": [], "rejected": rejected, "plan": self.plan_view(run_id)}
-            self.cancel(run_id, actor=actor)
+            self.cancel(run_id, by=by)
             return {"accepted": [], "rejected": [], "plan": self.plan_view(run_id)}
         if job.status == "queued":
             # Its output directory may still hold an earlier run's plan (resume): never judge against that.
@@ -849,7 +850,7 @@ class RunJobStore:
         accepted, rejected, _effects = evaluate_control(plan, action, targets)
         if (action == "finish" and not rejected) or (action != "finish" and accepted):
             try:
-                append_control_request(output_dir, action, accepted if action != "finish" else (), actor=actor)
+                append_control_request(output_dir, action, accepted if action != "finish" else (), actor="web", by=by)
             except ControlFileError as exc:
                 raise RunControlConflict(str(exc)) from exc
             poke_run_control(output_dir)
@@ -860,7 +861,7 @@ class RunJobStore:
                     status=job.status,
                     step="triage",
                     message=f"{action} {accepted}",
-                    details={"actor": actor},
+                    details={"actor": by or "web"},
                 )
                 job.updated_at = now_iso()
                 self._write_state_locked()

@@ -38,6 +38,7 @@ from .plan import (
     REASON_RUNNING_CANCEL,
     STAGE_TASKS,
     TERMINAL_TASK_STATUSES,
+    control_requester,
     evaluate_control,
     find_task,
     interrupted_plan_view,
@@ -380,7 +381,8 @@ class RunProgress:
         """Apply one control request to the plan; returns ``(accepted, rejected)``."""
         action = str(request.get("action") or "")
         targets = [dict(item) for item in request.get("targets") or [] if isinstance(item, Mapping)]
-        actor = str(request.get("actor") or "cli")
+        # Who asked (the server-authenticated name, else web/cli) and, with a name, from where.
+        requester = control_requester(request)
         at = str(request.get("at") or _utc_now())
         with self._lock:
             if self._plan is None:
@@ -394,7 +396,7 @@ class RunProgress:
                     "seq": request.get("seq"),
                     "action": action,
                     "targets": targets,
-                    "actor": actor,
+                    **requester,
                     "at": at,
                     "accepted": accepted,
                     "rejected": rejected,
@@ -408,7 +410,7 @@ class RunProgress:
                 control["finish_at"] = control.get("finish_at") or at
                 self.finish_requested.set()
             reason = {"cancel_all": REASON_CANCEL_ALL, "finish": REASON_FINISH}.get(action, REASON_EXAMINER)
-            requested_by = {"actor": actor, "at": at}
+            requested_by = {**requester, "at": at}
             now = _utc_now()
             for task_id, effect in effects.items():
                 task = find_task(self._plan, task_id)

@@ -142,7 +142,7 @@ def build_run_plan_router(store: RunJobStore) -> APIRouter:
         if any(not target for target in targets):
             raise HTTPException(status_code=400, detail="대상은 group 또는 task여야 합니다")
         try:
-            result = store.control(run_id, body.action, targets, actor=server_actor() or "web")
+            result = store.control(run_id, body.action, targets, by=server_actor())
         except KeyError:
             raise HTTPException(status_code=404, detail="런을 찾을 수 없습니다")
         except RunControlConflict as exc:

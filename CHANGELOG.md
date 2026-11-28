@@ -127,10 +127,11 @@
   marks, tags, notes, baselines and case audit entries; client `reviewer` /
   `actor` / `author` names are display values then. Without the file
   `RAPIDTRIAGE_REVIEWER` is the server's author for web writes. Runs record
-  `owner` (create, import, retry), cancel and plan control log their actor,
-  run notes record `updated_by`, and removing a run leaves a `removed_runs`
-  record in `runs.json`. The action API's `actor` follows the token (an
-  `agent:` token is always that agent; a person's agent is
+  `owner` (create, import, retry), cancel and plan control log their actor
+  (the control file keeps `actor: web` and adds `by`; the run plan and report
+  name that person), run notes record `updated_by`, and removing a run
+  leaves a `removed_runs` record in `runs.json`. The action API's `actor`
+  follows the token (an `agent:` token is always that agent; a person's agent is
   `agent:<name>@<person>`). The tokens file cannot be combined with a single
   token or disabled auth, is never printed, and tokens are compared as
   SHA-256 digests in constant time (`tests/test_user_tokens_actor.py`).
