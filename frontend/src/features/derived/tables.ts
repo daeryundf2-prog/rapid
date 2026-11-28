@@ -66,6 +66,7 @@ const KIND_LABELS: Record<string, string> = {
   "gemini-cli": "Gemini CLI 사용 기록",
   "editor-chat": "Cursor·VS Code 대화 기록",
   "agent-mcp": "코딩 에이전트 MCP 서버 설정",
+  "orca-bots": "Orca 봇·작업 기록",
   browser: "브라우저",
   p2p: "P2P·토렌트",
   email: "이메일",

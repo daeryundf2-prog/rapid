@@ -110,6 +110,19 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     "agent-tool-call": (F("timestamp_utc", "tool-call"),),
     "agent-tool-result": (F("timestamp_utc", "tool-result"),),
     "macos-unified-log-event": (F("timestamp", "logged"),),
+    # Orca Bots records (artifacts/ai_agent_orca.py).
+    "agent-bot": (F("timestamp_utc", "created"), F("updated_utc", "last-updated")),
+    "agent-bot-work": (F("timestamp_utc", "started"), F("closed_utc", "ended")),
+    "agent-bot-item": (F("timestamp_utc", "created"), F("updated_utc", "last-updated"), F("closed_utc", "completed")),
+    "agent-bot-item-event": (F("timestamp_utc", "event"),),
+    "agent-bot-request": (F("timestamp_utc", "sent"), F("outcome_utc", "completed")),
+    "agent-bot-dispatch": (F("timestamp_utc", "started"), F("updated_utc", "last-updated")),
+    "agent-bot-memory-change": (F("timestamp_utc", "modified"),),
+    "agent-bot-run": (F("timestamp_utc", "started"), F("ended_utc", "ended")),
+    "agent-bot-suggestion": (F("timestamp_utc", "created"),),
+    "agent-cloud-profile": (F("timestamp_utc", "created"), F("last_opened_utc", "last-opened"),
+                            F("linked_utc", "linked")),
+    "agent-secret-file": (F("saved_utc", "session-saved"),),
     # --- execution -------------------------------------------------------
     "prefetch-file": (
         F("last_run_times[*]", "run"),

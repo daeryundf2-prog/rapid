@@ -27,6 +27,20 @@
   date or date-time and lists runnable commands before disabled ones;
   "선택 항목 분석…" and "관련 항목 표시…" open one dialog over the action API that
   also shows the request an agent would send.
+- `orca-bots` collector for Orca Bots (github.com/stablyai/orca): bot records
+  from the profile state (`profiles/<id>/profile-state.db`, legacy
+  `orca-data.json`) and the bot homes in `.orca/bots` (name, agent and model,
+  permission mode, the Slack, Linear and GitHub channels it takes requests
+  from, its chat session; members counted only), `SOUL.md`, `MEMORY.md` and
+  `memory/*.md` text (usual redaction and length limit), the `MEMORY.md`
+  change history with who made each change, work items with their status,
+  links (pull requests, URLs, files, dispatches) and history from
+  `bot-items.sqlite`, conversation-to-task links from `bot-work.sqlite`, bot
+  requests with their outcome and worker dispatches with their worktree from
+  `orchestration.db`, background look-around and tidy-up runs and suggestions,
+  and Orca Cloud traces: linked accounts from `orca-profile-index.json` and the
+  session, connector key and Linear token files by name and seal format only.
+  See `docs/ai-agent-artifacts.md` (`tests/test_ai_agent_orca.py`).
 
 ### Changed
 

@@ -780,6 +780,7 @@ export const DOMAINS: readonly DomainDef[] = [
       { id: "exec-gemini-cli", label: "Gemini CLI 사용 기록", target: a("gemini-cli") },
       { id: "exec-editor-chat", label: "Cursor·VS Code 대화 기록", target: a("editor-chat") },
       { id: "exec-agent-mcp", label: "코딩 에이전트 MCP 서버 설정", target: a("agent-mcp") },
+      { id: "exec-orca-bots", label: "Orca 봇·작업 기록", target: a("orca-bots") },
       { id: "exec-search-index", label: "Windows 검색 색인", target: a("windows-search-index") },
       {
         id: "exec-powershell",
