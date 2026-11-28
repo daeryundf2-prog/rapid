@@ -55,7 +55,7 @@ class CatalyHubTests(AgentFixture):
         db.executescript(SCHEMA)
         record = {"key": "fix-login", "title": "로그인 고치기", "brief": "BRIEF-NEVER-EXPORTED", "cwd": "/w/repo",
                   "model": "anthropic/claude-opus", "worktrees": ["/w/repo-fix"], "session_id": "s-lane",
-                  "session_file": "/state/sessions/lanes/s-lane.jsonl", "origin": "discord:1/2", "spend": [12000, 0.42],
+                  "session_file": "/state/sessions/lanes/s-lane.jsonl", "origin": "discord:1/2", "spend": [12000.0, 0.42],
                   "run_id": "r1", "checks": [{"argv": ["gh", "pr", "list"]}]}
         db.execute("INSERT INTO lanes VALUES ('fix-login','closed','completed','t9',?,?,3,?)",
                    (OPENED, CLOSED, json.dumps(record, ensure_ascii=False)))
@@ -103,16 +103,17 @@ class CatalyHubTests(AgentFixture):
         self.assertEqual((lane["source_table"], lane["source_rowid"]), ("lanes", 1))
         self.assertTrue(lane["snapshot_id"])
         self.assertEqual((history["text"], history["seq"]), ("started", "1"))
-        self.assertEqual((request["source_message"], request["next_step"], request["result"]),
-                         ("discord:1/55", "PR 확인", "merged"))
+        # The request title is the first line of the owner's message; it and the lead's free text are not read.
+        self.assertEqual((request["request_id"], request["source_message"], request["thread"], request["state"]),
+                         ("7", "discord:1/55", "t9", "closed"))
+        self.assertEqual((request["text"], request["closed_utc"]), ("", "2026-09-21T14:23:20+00:00"))
         self.assertEqual((question["options"], question["answer"], question["request_id"]),
                          (["예", "아니요"], "owner: 예", "7"))
-        self.assertNotIn(TOKEN, stream["command_line"])
-        self.assertTrue(stream["command_line"].startswith("tail -f x.log --token="))
+        self.assertEqual(stream["command_line"], "tail")
         self.assertEqual((event["event_kind"], event["text"], event["lane_key"], event["urgent"]),
                          ("lane.closed", "레인 닫힘", "fix-login", "false"))
         text = exported(rows)
-        for hidden in ("BRIEF-NEVER-EXPORTED", "BODY-NEVER-EXPORTED", "gh pr list"):
+        for hidden in ("BRIEF-NEVER-EXPORTED", "BODY-NEVER-EXPORTED", "gh pr list", "로그인 버그", "PR 확인", "merged"):
             self.assertNotIn(hidden, text)
 
         payload = run_artifact_collection(self.root, kind="cataly-hub", records_path=self.root.parent / "rows.jsonl",
@@ -178,6 +179,8 @@ owner = "100000000000000002"
 token_file = "/Users/o/.config/saessak/cataly/secrets/discord-token"
 [telegram]
 owner = 100000001
+[voice]
+key_file = "/Users/o/.config/saessak/cataly/secrets/voice-key"
 [fallback.chains]
 default = ["a/one", "b/two"]
 [jobs.mail]
@@ -228,10 +231,11 @@ destinations = ["owner-dm", "log"]
                          ("anthropic/claude-opus", "openai/gpt-5", "default=a/one, b/two"))
         self.assertEqual((settings["discord_owner"], settings["telegram_owner"], settings["slack_owner"]),
                          ("100000000000000002", "100000001", ""))
-        self.assertEqual(settings["token_files"], ["/Users/o/.config/saessak/cataly/secrets/discord-token"])
+        self.assertEqual(settings["token_files"], ["/Users/o/.config/saessak/cataly/secrets/discord-token",
+                                                   "/Users/o/.config/saessak/cataly/secrets/voice-key"])
         self.assertEqual(settings["env_names"], ["ANTHROPIC_API_KEY"])
         self.assertEqual((job["job_name"], job["job_kind"], job["destinations"]), ("mail", "items", ["owner-dm", "log"]))
-        self.assertNotIn(TOKEN, job["command_line"])
+        self.assertEqual(job["command_line"], "/bin/new-mail")
         [record] = by_file["0.2.6.json"]
         self.assertEqual((record["install_version"], record["binary_sha256"], record["app_version"]),
                          ("0.2.6", "ab" * 32, "0.2.6"))
@@ -239,17 +243,124 @@ destinations = ["owner-dm", "log"]
         self.assertEqual((binary["file_name"], binary["install_version"]), ("cataly", "0.2.6"))
         [agent] = by_file["dev.cataly.saessak.plist"]
         self.assertEqual(agent["service_label"], "dev.cataly.saessak")
-        self.assertTrue(agent["command_line"].endswith("/Users/o/.local/bin/cataly"))
+        self.assertEqual((agent["command_line"], agent["environment_file"]),
+                         ("/Users/o/.local/bin/cataly", "/Users/o/.config/saessak/cataly/secrets/service.env"))
         self.assertEqual(agent["env_names"], ["PATH", "XDG_STATE_HOME"])
         [unit] = by_file["cataly.service"]
         self.assertEqual((unit["command_line"], unit["environment_file"], unit["env_names"]),
-                         ("/home/o/.local/bin/cataly hub", "/home/o/.config/cataly/secrets/service.env", ["PATH"]))
+                         ("/home/o/.local/bin/cataly", "/home/o/.config/cataly/secrets/service.env", ["PATH"]))
         text = exported(rows)
         for hidden in ("BODY-NEVER-EXPORTED", "KV-NEVER-EXPORTED", "TOKEN-NEVER-READ", "ELF-NEVER-READ", TOKEN,
                        "/Users/o/.local/state/saessak"):
             self.assertNotIn(hidden, text)
+        payload = run_artifact_collection(self.root, kind="cataly-hub", records_path=self.root.parent / "rows.jsonl",
+                                          preview_limit=1)
+        events = extract_artifact_events(payload, self.root.parent / "artifacts-cataly-hub.json")
+        # hub.log lines keep their own kind: "agent-logged" would canonicalize to journald's "logged".
+        self.assertEqual([(e["timestamp_kind"], e["event_type"]) for e in events
+                          if e["details"]["artifact_type"] == "agent-log"],
+                         [("written", "artifact-agent-log-written")])
         # Cataly modes never reach the MCP collector.
         self.assertEqual(self.rows("agent-mcp"), [])
+
+    def test_reviewer_leak_fixture_exports_no_bot_tokens_or_owner_message_text(self):
+        """The PR #85 review fixture: bot tokens and unlabelled secrets in job, stream job, launchd and systemd
+        argv, in session stderr and hub.log, and the owner's message as request titles in live and backup stores."""
+        def tokens(hub):
+            return {"telegram": f"7{len(hub)}23456789:AAH" + "TgMarker" + hub.upper() + "x" * (24 - len(hub)),
+                    "discord": "MTA" + "DcMarker" + hub.upper() + "a" * 15 + ".GxYz12." + "b" * 38,
+                    "plain": f"plainSecret{hub}Value9876"}
+        hubs = {"hub": ("Users/o/.local/state/cataly", "Users/o/.config/cataly"),
+                "saessak": ("Users/o/.local/state/saessak/cataly", "Users/o/.config/saessak/cataly")}
+        for hub, (state, config) in hubs.items():
+            t = tokens(hub)
+            _, db = self.store(f"{state}/cataly.db")
+            db.executescript(SCHEMA)
+            db.execute("INSERT INTO requests (id,title,source,thread,next,result,created_ms,updated_ms) VALUES "
+                       "(7,?,'discord:1/55','t9',?,NULL,?,?)",
+                       (f"OWNERMSG-FIRSTLINE-{hub} please deploy", f"OWNERMSG-NEXT-{hub}", OPENED, OPENED))
+            db.execute("INSERT INTO stream_jobs VALUES ('watch',?,?)", (json.dumps({"name": "watch", "argv": [
+                "curl", "-s", f"https://api.telegram.org/bot{t['telegram']}/getUpdates", "--discord", t["discord"],
+                "-H", f"X-Api: {t['plain']}"], "filter": "ERROR", "restarts": 3}), OPENED))
+            db.commit()
+            _, backup = self.store(f"{state}/backup/cataly-v9.db")
+            backup.executescript(SCHEMA.partition("CREATE TABLE questions")[0])
+            backup.execute("INSERT INTO requests (id,title,source,created_ms,updated_ms,closed_ms) VALUES "
+                           "(1,?,'telegram:5/6',?,?,?)", (f"OWNERMSG-BACKUP-{hub}", OPENED, OPENED, CLOSED))
+            backup.commit()
+            self.write(f"{state}/logs/omp-probe.err", (
+                f"probe {hub}\nreqwest error for url (https://api.telegram.org/bot{t['telegram']}/getUpdates)\n"
+                f"Authorization: Bot {t['discord']}\nstarting with {t['discord']} and {t['telegram']}\n").encode())
+            self.lines(f"{state}/logs/hub.log", {"t": "2026-11-28T01:02:03Z", "level": "warn",
+                                                 "msg": f"relay error url=https://api.telegram.org/bot{t['telegram']}/x"})
+            self.write(f"{config}/config.toml", f"""
+[discord]
+owner = "100000000000000002"
+token_file = "/Users/o/.config/{hub}/cataly/secrets/discord-token"
+[voice]
+key_file = "/Users/o/.config/{hub}/cataly/secrets/voice-key"
+[jobs.mail]
+argv = ["/bin/new-mail", "--password", "{t['plain']}", "https://api.telegram.org/bot{t['telegram']}/sendMessage",
+        "{t['discord']}", "{t['plain']}"]
+""".encode())
+            self.write(f"Users/o/Library/LaunchAgents/dev.cataly.{hub}.plist", plistlib.dumps({
+                "Label": f"dev.cataly.{hub}", "ProgramArguments": [
+                    "/bin/sh", "-c", 'set -a; . "$0"; set +a; exec "$1" hub',
+                    f"/Users/o/.config/{hub}/cataly/secrets/service.env", "/Users/o/.local/bin/cataly",
+                    f"--telegram-token={t['telegram']}", t["plain"]]}))
+        t = tokens("lx")
+        self.write("home/o/.config/systemd/user/cataly.service", (
+            "[Unit]\nDescription=Cataly hub\n\n[Service]\nEnvironmentFile=-/home/o/.config/cataly/secrets/service.env\n"
+            f"ExecStart=/home/o/.local/bin/cataly hub --telegram-token-file /x {t['telegram']} {t['plain']}\n").encode())
+
+        rows = self.rows("cataly-hub")
+        payload = run_artifact_collection(self.root, kind="cataly-hub", records_path=self.root.parent / "rows.jsonl",
+                                          preview_limit=1)
+        validate(payload, load_schema("artifacts.schema.json"))
+        events = extract_artifact_events(payload, self.root.parent / "artifacts-cataly-hub.json")
+        output = "\n".join((exported(rows), json.dumps(payload, ensure_ascii=False),
+                            json.dumps(events, ensure_ascii=False),
+                            (self.root.parent / "rows.jsonl").read_text(encoding="utf-8")))
+        markers = ("TgMarker", "DcMarker", "plainSecret", "OWNERMSG") + tuple(
+            value for hub in ("hub", "saessak", "lx") for value in tokens(hub).values())
+        self.assertEqual({marker: output.count(marker) for marker in markers}, dict.fromkeys(markers, 0))
+
+        by_type = {}
+        for row in rows:
+            by_type.setdefault(row.artifact_type, []).append(row.details)
+        self.assertEqual({d["command_line"] for d in by_type["agent-hub-job"]}, {"/bin/new-mail"})
+        self.assertEqual({d["command_line"] for d in by_type["agent-stream-job"]}, {"curl"})
+        services = {d["service_label"]: (d["command_line"], d["environment_file"]) for d in by_type["agent-service"]}
+        self.assertEqual(services, {
+            "dev.cataly.hub": ("/Users/o/.local/bin/cataly", "/Users/o/.config/hub/cataly/secrets/service.env"),
+            "dev.cataly.saessak": ("/Users/o/.local/bin/cataly", "/Users/o/.config/saessak/cataly/secrets/service.env"),
+            "Cataly hub": ("/home/o/.local/bin/cataly", "/home/o/.config/cataly/secrets/service.env")})
+        # Every request row, live and backup, keeps its references, times and state but no owner text.
+        self.assertEqual(sorted((d["request_id"], d["source_message"], d["state"], d["text"])
+                                for d in by_type["agent-request"]),
+                         [("1", "telegram:5/6", "closed", "")] * 2 + [("7", "discord:1/55", "open", "")] * 2)
+        # The stderr lines and hub.log line survive with the token masked.
+        probe = [d["text"] for d in by_type["agent-log"] if d["text"].startswith("reqwest")]
+        self.assertEqual(probe, ["reqwest error for url (https://api.telegram.org/bot[가림]/getUpdates)"] * 2)
+        # Owner IDs are exported on purpose (they name the controlling account); key files are listed by path.
+        settings = by_type["agent-settings"]
+        self.assertEqual({d["discord_owner"] for d in settings}, {"100000000000000002"})
+        self.assertIn("/Users/o/.config/saessak/cataly/secrets/voice-key", [p for d in settings for p in d["token_files"]])
+
+    def test_a_broken_launchd_plist_leaves_a_note_and_the_other_records(self):
+        self.write("Users/o/Library/LaunchAgents/dev.cataly.x.plist",
+                   b'<?xml version="1.0" encoding="bogus"?><plist version="1.0"><dict/></plist>')
+        self.write("Users/o/Library/LaunchAgents/dev.cataly.y.plist",
+                   b'<?xml version="1.0"?><plist version="1.0"><key>a</key></plist>')
+        self.lines(f"{STATE}/logs/hub.log", {"t": "2026-11-28T01:02:03Z", "level": "info", "msg": "started"})
+        payload = run_artifact_collection(self.root, kind="cataly-hub", records_path=self.root.parent / "rows.jsonl",
+                                          preview_limit=10)
+        self.assertEqual((payload["summary"]["collection_status"], payload["summary"]["artifact_count"]),
+                         ("completed", 3))
+        rows = self.rows("cataly-hub")
+        self.assertEqual(sorted((r.artifact_type, r.details.get("reason", r.details["text"])) for r in rows),
+                         [("agent-log", "started"), ("agent-parse-note", "invalid-document"),
+                          ("agent-parse-note", "invalid-document")])
 
     def test_unrelated_files_in_a_cataly_folder_are_not_claimed(self):
         self.write("Users/o/.config/cataly/config.toml", b"[tool]\nname = 'other'\n")

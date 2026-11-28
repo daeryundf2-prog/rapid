@@ -128,7 +128,8 @@ export const TIMESTAMP_KIND_LABELS: Readonly<Record<string, string>> = {
   // AI coding-agent transcripts (artifacts/ai_agents.py).
   "tool-call": "도구 호출",
   "tool-result": "도구 결과",
-  "agent-logged": "에이전트 로그",
+  // agent-log rows (timeline.py maps them to "written", not journald's "logged").
+  written: "에이전트 로그",
   // KakaoTalk shared picture: the time is read from the file name (local time, zone unknown).
   saved: "저장(파일 이름)",
   // Cloud sync (cloud_sync.py: f"cloud-{operation}" over OPERATION_LABELS, plus item times).

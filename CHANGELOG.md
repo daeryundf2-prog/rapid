@@ -68,14 +68,19 @@
   the store `cataly.db` (and `backup/cataly-v*.db`) read from a private
   snapshot with its WAL -- lanes with state, outcome, thread, open and close
   times, worktrees, model, OMP session and Cataly's spend estimate, lane
-  history, requests, questions and answers, stream jobs (redacted command),
-  hosted OMP sessions and events -- plus `logs/events.jsonl`, `logs/hub.log`,
-  session stderr `logs/**/*.err`, `config.toml` (models, owner IDs, token file
-  paths, jobs), the OMP overlay, launchd/systemd service definitions, install
-  records and the presence of token files (never read). Lanes and requests
-  open and close in the timeline, events and hub log lines too. Any XDG base
-  is recognized, so several hubs on one account are found. See
-  `docs/ai-agent-artifacts.md` (`tests/test_ai_agent_cataly.py`).
+  history, requests (IDs, message references, times and open/closed state;
+  the owner's message text is not read), questions and answers, stream jobs
+  (program only), hosted OMP sessions and events -- plus `logs/events.jsonl`,
+  `logs/hub.log`, session stderr `logs/**/*.err`, `config.toml` (models, owner
+  IDs as personal identifiers, token and voice key file paths, job programs),
+  the OMP overlay, launchd/systemd service definitions (program and env file
+  path, no arguments), install records and the presence of token files (never
+  read). Lanes and requests open and close in the timeline, events and hub log
+  lines too. Any XDG base is recognized, so several hubs on one account are
+  found. A document that does not parse leaves a note instead of stopping the
+  collector. See `docs/ai-agent-artifacts.md` (`tests/test_ai_agent_cataly.py`).
+- AI-agent row redaction also masks Telegram bot tokens (including inside a
+  Bot API `/bot<token>/` URL) and Discord bot tokens.
 
 ### Changed
 

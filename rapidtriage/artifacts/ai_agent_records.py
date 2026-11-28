@@ -28,6 +28,10 @@ _SECRET = re.compile(
 _TOKEN = re.compile(
     r"\b(?:sk-[\w-]{12,}|gh[pousr]_[\w]{12,}|github_pat_[\w]+|xox[baprs]-[\w-]+|AIza[\w-]{20,}|glpat-[\w-]{20,}"
     r"|hf_[A-Za-z0-9]{30,}|npm_[A-Za-z0-9]{36}|(?:AKIA|ASIA)[0-9A-Z]{16}|eyJ[\w-]{8,}\.eyJ[\w-]{8,}\.[\w-]*)"
+    # Telegram bot tokens (bot ID, colon, secret), also inside a Bot API URL path ``/bot<token>/``.
+    r"|(?:(?<![A-Za-z0-9_-])|(?<=bot))\d{6,12}:[A-Za-z0-9_-]{30,}"
+    # Discord bot tokens: base64 user ID, timestamp and HMAC joined by dots.
+    r"|(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{6,7}\.[A-Za-z0-9_-]{27,}"
 )
 _PRIVATE_KEY = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.DOTALL)
 # RFC 3339 date-time only: no week dates, basic format, space separator or local wall time.

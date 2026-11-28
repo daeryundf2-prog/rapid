@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import plistlib
-import shlex
 import sys
 from contextlib import closing
 from dataclasses import replace
@@ -25,18 +24,19 @@ from .ai_agent_records import TEXT_LIMIT, clean, items, mapping, utc
 DOCUMENT_BYTES = 8 << 20
 LIST_LIMIT = 64
 # Sections of ``config.toml`` (docs/config.md); a ``cataly/config.toml`` with none of them is not Cataly's.
-CONFIG_SECTIONS = frozenset({"hub", "omp", "sessions", "lead", "fallback", "discord", "telegram", "slack", "lanes",
-                             "jobs", "destinations", "coord", "workers", "update", "ops"})
+CONFIG_SECTIONS = frozenset({"hub", "omp", "sessions", "lead", "fallback", "discord", "telegram", "slack", "voice",
+                             "lanes", "jobs", "destinations", "coord", "workers", "update", "ops"})
 RELAYS = ("discord", "telegram", "slack")
 # Columns read from each store table: ``int`` as stored, ``text`` cut just past the row text limit (so the row is
 # flagged), ``json`` whole up to the per-value cap and empty beyond it. A column an older schema lacks reads NULL.
-# Message bodies (``events.body``), lane briefs (inside ``lanes.record``), relay intake and delivery text are not read.
+# Message bodies (``events.body``), the owner's request text (``requests.title``, the first line of the owner's
+# message), lane briefs (inside ``lanes.record``), relay intake and delivery text are not read.
 TABLES = (
     ("lanes", (("key", "text"), ("state", "text"), ("outcome", "text"), ("thread", "text"), ("opened_ms", "int"),
                ("closed_ms", "int"), ("revision", "int"), ("record", "json"))),
     ("lane_history", (("key", "text"), ("seq", "int"), ("at_ms", "int"), ("state", "text"), ("note", "text"))),
-    ("requests", (("id", "int"), ("title", "text"), ("source", "text"), ("thread", "text"), ("next", "text"),
-                  ("result", "text"), ("created_ms", "int"), ("updated_ms", "int"), ("closed_ms", "int"))),
+    ("requests", (("id", "int"), ("source", "text"), ("thread", "text"), ("created_ms", "int"), ("updated_ms", "int"),
+                  ("closed_ms", "int"))),
     ("questions", (("id", "text"), ("text", "text"), ("source", "text"), ("thread", "text"), ("options", "json"),
                    ("recommended", "int"), ("request", "int"), ("state", "text"), ("outcome", "text"),
                    ("created_ms", "int"), ("settled_ms", "int"))),
@@ -93,6 +93,9 @@ def ms(value):
 
 
 def number(value) -> str:
+    if type(value) is float and value.is_integer():
+        # Cataly writes counts as JSON floats (``spend`` is ``(f64, f64)``): ``12000.0`` reads as ``12000``.
+        value = int(value)
     return str(value) if type(value) in (int, float) and not isinstance(value, bool) else ""
 
 
@@ -113,8 +116,11 @@ def stamped(row, **times):
     return row
 
 
-def command(argv) -> str:
-    return shlex.join([v for v in items(argv) if isinstance(v, str)])
+def executable(argv) -> str:
+    """The program only, as ``agent-mcp`` does: arguments can hold unlabelled credentials (bot tokens in URLs,
+    positional keys)."""
+    values = items(argv)
+    return values[0] if values and isinstance(values[0], str) else ""
 
 
 def cataly(src, path: Path, mode: str, line_records):
@@ -144,7 +150,8 @@ def cataly(src, path: Path, mode: str, line_records):
                 doc = tomllib.loads(raw.decode("utf-8-sig"))
             else:
                 doc = json.loads(raw.decode("utf-8-sig"))
-        except (ValueError, RecursionError, ExpatError):
+        except (ValueError, LookupError, RecursionError, ExpatError):
+            # plistlib raises LookupError for an unknown XML encoding and IndexError for an unbalanced key.
             yield src.note("invalid-document")
             return
         yield from {"service": service, "hub-config": hub_config, "overlay": overlay,
@@ -152,8 +159,10 @@ def cataly(src, path: Path, mode: str, line_records):
 
 
 def hub_config(src, doc):
-    """Model names, owner IDs, token file paths and job definitions. Token values live in separate files that are
-    never read; ``[sessions] credentials`` and ``service.env`` hold environment variable names, exported as names."""
+    """Model names, owner IDs, token and key file paths and job definitions. The relay owner IDs are personal
+    identifiers, exported on purpose: they name the account that controls the hub. Token values live in separate
+    files that are never read; ``[sessions] credentials`` and ``service.env`` hold environment variable names,
+    exported as names. A job's ``argv`` gives its program only."""
     if not isinstance(doc, dict) or not CONFIG_SECTIONS & set(doc):
         yield src.note("unrecognized-hub-config")
         return
@@ -166,13 +175,14 @@ def hub_config(src, doc):
         **{f"{name}_owner": number(relay.get("owner")) or relay.get("owner") for name, relay in relays.items()},
     )
     listed(row, "env_names", mapping(doc.get("sessions")).get("credentials"))
-    yield listed(row, "token_files", [relay.get("token_file") for relay in relays.values()])
+    voice = mapping(doc.get("voice"))
+    yield listed(row, "token_files", [relay.get("token_file") for relay in relays.values()] + [voice.get("key_file")])
     for name, job in mapping(doc.get("jobs")).items():
         if not isinstance(job, dict):
             yield src.note("invalid-job-config", job_name=name)
             continue
         row = src.row("hub-job", job_name=name, job_kind=job.get("kind"), every=job.get("every"),
-                      command_line=command(job.get("argv")), cwd_configured=job.get("cwd"))
+                      command_line=executable(job.get("argv")), cwd_configured=job.get("cwd"))
         yield listed(row, "destinations", job.get("destinations"))
 
 
@@ -204,11 +214,18 @@ def install_record(src, doc):
 
 
 def service(src, doc):
-    """A launchd agent (``ProgramArguments``) or a systemd user unit (``ExecStart``). Environment values are not
-    exported; the environment file holding provider keys is named, not read."""
+    """A launchd agent (``ProgramArguments``) or a systemd user unit (``ExecStart``): the program only, as for hub
+    jobs. Cataly's launchd agent runs ``/bin/sh -c <script> <env file> <program>`` (``src/sys/service.rs``), so the
+    program is its fifth argument and the environment file, the agent's only link to its hub's config folder, is
+    exported as ``environment_file``. Environment values are not exported; the environment file holding provider
+    keys is named, not read."""
     if isinstance(doc, dict):
         argv = items(doc.get("ProgramArguments"))
-        yield listed(src.row("service", service_label=doc.get("Label"), command_line=command(argv),
+        shell = argv[0].rsplit("/", 1)[-1] if argv and isinstance(argv[0], str) else ""
+        wrapped = len(argv) >= 5 and shell in ("sh", "bash", "zsh", "dash") and argv[1] == "-c"
+        yield listed(src.row("service", service_label=doc.get("Label"),
+                             command_line=argv[4] if wrapped else executable(argv),
+                             environment_file=argv[3] if wrapped else "",
                              run_at_load=str(doc.get("RunAtLoad", "")).lower()),
                      "env_names", list(mapping(doc.get("EnvironmentVariables"))))
         return
@@ -225,7 +242,8 @@ def service(src, doc):
             env.append(value.strip('"').partition("=")[0])
         elif key in ("Description", "ExecStart", "EnvironmentFile"):
             fields.setdefault(key, value)
-    yield listed(src.row("service", service_label=fields.get("Description"), command_line=fields.get("ExecStart"),
+    yield listed(src.row("service", service_label=fields.get("Description"),
+                         command_line=executable(fields.get("ExecStart", "").split()),
                          environment_file=fields.get("EnvironmentFile", "").lstrip("-")), "env_names", env)
 
 
@@ -347,9 +365,12 @@ def lane_history(src, row):
 
 
 def request(src, row):
-    """``requests``: one owner request, opened on admission; ``source`` is the originating message reference."""
-    out = src.row("request", timestamp=row["created_ms"], unit="ms", text=row["title"], request_id=number(row["id"]),
-                  source_message=row["source"], thread=row["thread"], next_step=row["next"], result=row["result"])
+    """``requests``: one owner request, opened on admission; ``source`` is the originating message reference. The
+    title is the first line of the owner's message (``src/store/lead.rs``) and the next step and result are free text,
+    so none is read: only the ID, message references, times and whether the request is still open."""
+    out = src.row("request", timestamp=row["created_ms"], unit="ms", request_id=number(row["id"]),
+                  source_message=row["source"], thread=row["thread"],
+                  state="closed" if row["closed_ms"] is not None else "open")
     yield stamped(out, updated_utc=ms(row["updated_ms"]), closed_utc=ms(row["closed_ms"]))
 
 
@@ -371,7 +392,8 @@ def stream_job(src, row):
         yield note
     spec = mapping(spec)
     yield src.row("stream-job", timestamp=row["created_ms"], unit="ms", job_name=row["name"],
-                  command_line=command(spec.get("argv")), filter=spec.get("filter"), restarts=number(spec.get("restarts")))
+                  command_line=executable(spec.get("argv")), filter=spec.get("filter"),
+                  restarts=number(spec.get("restarts")))
 
 
 def hosted_session(src, row):
