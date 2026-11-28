@@ -34,6 +34,7 @@ from .analyses import (
     confine_path,
     extra_analysis_roots,
     lexical_absolute_path,
+    under_configured_roots,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -74,6 +75,42 @@ def checked_local_path(
     except HTTPException as exc:
         raise as_422(exc) from exc
     return lexical
+
+
+def output_inside_evidence_roots(path: str | Path) -> bool:
+    """With both server root lists set: whether ``path`` lies under an evidence root (never an output target)."""
+    return bool(extra_analysis_roots(ANALYSIS_OUTPUT_ROOTS_ENV)) and under_configured_roots(path, ANALYSIS_ROOTS_ENV)
+
+
+def checked_output_path(raw: str, *, label: str) -> str:
+    """An output folder: ``checked_local_path`` under the output roots, and never under an evidence root (422).
+
+    An output root may be a parent of an evidence root (``OUTPUT_ROOTS=D:\\``,
+    ``ANALYSIS_ROOTS=D:\\Evidence``): the evidence part is still refused.
+    """
+    lexical = checked_local_path(raw, label=label, confine_to_output_roots=True)
+    if output_inside_evidence_roots(lexical):
+        raise HTTPException(
+            status_code=422,
+            detail=f"{label} 경로를 허용하지 않습니다: 증거 루트({ANALYSIS_ROOTS_ENV}) 안에는 출력을 쓸 수 없습니다",
+        )
+    return lexical
+
+
+def run_output_write_problem(output_dir: str | Path) -> str | None:
+    """Why a run's existing output folder must not be written while the output roots are set, else ``None``.
+
+    A run registered before the roots were set (``runs.json``) or created with the
+    old default (inside the evidence folder) keeps writing there through
+    extract, notes, reports, bookmarks and analyses otherwise.
+    """
+    if not extra_analysis_roots(ANALYSIS_OUTPUT_ROOTS_ENV):
+        return None
+    if not under_configured_roots(output_dir, ANALYSIS_OUTPUT_ROOTS_ENV):
+        return f"런 출력 폴더가 출력 루트({ANALYSIS_OUTPUT_ROOTS_ENV}) 밖에 있어 쓸 수 없습니다: {output_dir}"
+    if output_inside_evidence_roots(output_dir):
+        return f"런 출력 폴더가 증거 루트({ANALYSIS_ROOTS_ENV}) 안에 있어 쓸 수 없습니다: {output_dir}"
+    return None
 
 
 def same_path(left: str, right: str) -> bool:

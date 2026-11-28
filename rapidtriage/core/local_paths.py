@@ -1,8 +1,9 @@
-"""Lexical local-path rules and the operator's server root lists.
+"""Local-path rules and the operator's server root lists.
 
 Shared by the API path gates (``api/app/analyses.py``) and ``rapidtriage web``
 (which must check the root lists before the app module is imported: importing
-it creates the app and reads the auth token from the environment).
+it creates the app and reads the auth token from the environment). Everything
+here is lexical except ``overlapping_roots``, which also compares resolved forms.
 """
 
 from __future__ import annotations
@@ -58,3 +59,36 @@ def configured_root_entries(env: str) -> list[str]:
             continue
         entries.append(item)
     return entries
+
+
+def _root_keys(entry: str) -> set[str]:
+    keys = {os.path.normcase(os.path.abspath(entry))}
+    try:
+        keys.add(os.path.normcase(os.path.realpath(entry)))
+    except (OSError, ValueError):
+        pass
+    return keys
+
+
+def _contains(parent: str, child: str) -> bool:
+    try:
+        return os.path.commonpath([parent, child]) == parent
+    except ValueError:  # different drives
+        return False
+
+
+def overlapping_roots(inputs: list[str], outputs: list[str]) -> list[tuple[str, str]]:
+    """``(input root, output root)`` pairs where one folder is, or contains, the other.
+
+    Compared case-normalized in lexical and resolved form, so an output root that
+    is a parent of (or a link into) an evidence root counts: run output would land
+    inside the evidence.
+    """
+    pairs: list[tuple[str, str]] = []
+    for evidence in inputs:
+        evidence_keys = _root_keys(evidence)
+        for output in outputs:
+            output_keys = _root_keys(output)
+            if any(_contains(a, b) or _contains(b, a) for a in evidence_keys for b in output_keys):
+                pairs.append((evidence, output))
+    return pairs

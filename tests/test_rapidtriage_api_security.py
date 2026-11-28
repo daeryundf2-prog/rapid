@@ -153,8 +153,14 @@ class RapidTriageWebServerSecurityTests(unittest.TestCase):
         )
         stderr = io.StringIO()
         previous = os.environ.pop("RAPIDTRIAGE_DISABLE_AUTH", None)
+        # A non-loopback bind always needs the server roots (no auth or not).
+        base = Path(tempfile.gettempdir())
+        roots = {
+            "RAPIDTRIAGE_ANALYSIS_ROOTS": str(base / "rt-evidence"),
+            "RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS": str(base / "rt-out"),
+        }
         try:
-            with patch.dict(sys.modules, {"uvicorn": fake_uvicorn}):
+            with patch.dict(sys.modules, {"uvicorn": fake_uvicorn}), patch.dict(os.environ, roots):
                 with contextlib.redirect_stderr(stderr):
                     result = run_web_server("0.0.0.0", 8877, allow_remote_without_auth=True)
         finally:

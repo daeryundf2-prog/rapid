@@ -6,10 +6,13 @@ RapidTriage is safest as a local-only forensic workstation tool. The default web
 
 ## Remote Access
 
-If you bind to `0.0.0.0` or another non-localhost interface, configure an auth token:
+Any non-localhost bind (`--remote`, `--host 0.0.0.0 --auth-token`, even `--allow-remote-without-auth`) refuses to start unless the server roots are set: `RAPIDTRIAGE_ANALYSIS_ROOTS` (evidence inputs) and `RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS` (run outputs), absolute local folders separated by the platform path separator. No output root may be, contain, or lie inside an evidence root. Use `--remote`, which also requires a token:
 
 ```bash
-rapidtriage web --host 0.0.0.0 --auth-token "replace-me"
+RAPIDTRIAGE_ANALYSIS_ROOTS=/srv/evidence \
+RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS=/srv/rapidtriage-out \
+RAPIDTRIAGE_TOKEN="replace-me" \
+rapidtriage web --remote --host 0.0.0.0
 ```
 
 Authentication tokens are header-only. Clients must send `X-RapidTriage-Token`; URL query-string tokens are rejected to avoid token leakage through logs, browser history, or referrers.

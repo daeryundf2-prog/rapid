@@ -18,8 +18,10 @@ that a naive ``rglob`` never terminates. ``iter_files_no_links``:
 * calls ``check_cancel`` every ``every`` walked directory entries, files or
   not, so even a huge or adversarial tree stays cancellable.
 
-CLI paths keep their historical (link-following) walkers; this module is
-opt-in.
+CLI paths keep their historical walkers (``rglob``/``os.walk``, which follow
+file links); the run's evidence walks (``files.iter_evidence_paths``,
+``docs.scan_document_candidates``) filter them with ``RootLinkGuard`` so a link
+never takes them outside the run root. ``iter_files_no_links`` is opt-in.
 """
 
 from __future__ import annotations
@@ -74,7 +76,11 @@ def entry_is_file_link(entry: os.DirEntry[str]) -> bool:
 
 def lstat_is_link(path: str | os.PathLike[str]) -> bool:
     """``os.lstat``-based link test for one path (symlink, junction, name-surrogate reparse point)."""
-    info = os.lstat(path)
+    return info_is_link(os.lstat(path))
+
+
+def info_is_link(info: os.stat_result) -> bool:
+    """Whether an ``lstat`` result is a link (symlink, junction, name-surrogate reparse point)."""
     if stat.S_ISLNK(info.st_mode):
         return True
     attributes = int(getattr(info, "st_file_attributes", 0) or 0)
@@ -82,6 +88,61 @@ def lstat_is_link(path: str | os.PathLike[str]) -> bool:
         return False
     tag = int(getattr(info, "st_reparse_tag", 0) or 0)
     return tag == 0 or bool(tag & REPARSE_TAG_NAME_SURROGATE) or stat.S_ISDIR(info.st_mode)
+
+
+class RootLinkGuard:
+    """Keeps an evidence walk inside its root when the walk itself follows links.
+
+    ``allows(path)`` is false when ``path``, or a directory between it and
+    ``root``, is a symlink/junction whose target resolves outside ``root``: an
+    absolute link in evidence collected elsewhere would otherwise feed the
+    analysis server's own files into the run outputs. Links that stay inside
+    ``root`` are kept. Directory answers are memoized, so a walk pays one
+    ``lstat`` per checked path plus one per directory; ``on_lstat(path, info)``
+    receives each ``lstat`` result (stat caches can reuse it).
+    """
+
+    def __init__(
+        self,
+        root: str | os.PathLike[str],
+        *,
+        on_lstat: Callable[[str, os.stat_result], None] | None = None,
+    ) -> None:
+        self._root = os.path.abspath(root)
+        self._root_prefix = self._root.rstrip(os.sep) + os.sep
+        real = os.path.normcase(os.path.realpath(root))
+        self._real_root = real
+        self._real_prefix = real.rstrip(os.sep) + os.sep
+        self._on_lstat = on_lstat
+        self._directories: dict[str, bool] = {}
+
+    def allows(self, path: str | os.PathLike[str]) -> bool:
+        text = os.path.abspath(path)
+        return self._directory_allowed(os.path.dirname(text)) and self._entry_allowed(text, os.fspath(path))
+
+    def _directory_allowed(self, directory: str) -> bool:
+        if directory == self._root or not directory.startswith(self._root_prefix):
+            return True
+        allowed = self._directories.get(directory)
+        if allowed is None:
+            allowed = self._directory_allowed(os.path.dirname(directory)) and self._entry_allowed(directory, None)
+            self._directories[directory] = allowed
+        return allowed
+
+    def _entry_allowed(self, text: str, reported_as: str | None) -> bool:
+        try:
+            info = os.lstat(text)
+        except (OSError, ValueError):
+            return True  # gone or unreadable: the caller's own stat/open fails as before
+        if self._on_lstat is not None and reported_as is not None:
+            self._on_lstat(reported_as, info)
+        if not info_is_link(info):
+            return True
+        try:
+            real = os.path.normcase(os.path.realpath(text))
+        except (OSError, ValueError):
+            return False
+        return real == self._real_root or real.startswith(self._real_prefix)
 
 
 def iter_files_no_links(

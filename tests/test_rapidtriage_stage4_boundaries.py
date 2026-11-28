@@ -141,7 +141,13 @@ class Stage4AuthConflictTests(unittest.TestCase):
     def test_allow_remote_without_auth_still_runs_when_explicitly_requested(self) -> None:
         captured: dict[str, object] = {}
         fake_uvicorn = types.SimpleNamespace(run=lambda *_a, **k: captured.update(kwargs=k))
-        with _clean_token_env():
+        # A non-loopback bind always needs the server roots (no auth or not).
+        base = Path(tempfile.gettempdir())
+        roots = {
+            "RAPIDTRIAGE_ANALYSIS_ROOTS": str(base / "rt-evidence"),
+            "RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS": str(base / "rt-out"),
+        }
+        with _clean_token_env(), patch.dict(os.environ, roots):
             with patch.dict(sys.modules, {"uvicorn": fake_uvicorn}):
                 with contextlib.redirect_stderr(io.StringIO()):
                     result = run_web_server("0.0.0.0", 8899, allow_remote_without_auth=True)

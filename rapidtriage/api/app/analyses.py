@@ -265,6 +265,12 @@ def _under_any(path: Path, roots: Iterable[Path]) -> bool:
     return any(path == root or is_relative_to(path, root) for root in roots)
 
 
+def under_configured_roots(path: str | Path, env: str = ANALYSIS_ROOTS_ENV) -> bool:
+    """Whether ``path`` (lexical or resolved form) lies under a root listed in ``env``; false when unset."""
+    roots = extra_analysis_roots(env)
+    return bool(roots) and any(_under_any(form, roots) for form in _root_forms([str(path)]))
+
+
 def confine_run_roots(input_roots: Iterable[Path], output_roots: Iterable[Path]) -> tuple[list[Path], list[Path]]:
     """A run's own roots that stay inside the operator's configured server roots.
 

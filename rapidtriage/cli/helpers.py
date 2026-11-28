@@ -149,7 +149,14 @@ def resolve_reviewer_identity(explicit: str | None) -> str | None:
 
 
 def add_web_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--host", default="127.0.0.1", help="Host interface for the local web server")
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help=(
+            "Host interface for the local web server; a non-loopback host requires RAPIDTRIAGE_ANALYSIS_ROOTS and "
+            "RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS (no output root may overlap an evidence root)"
+        ),
+    )
     parser.add_argument("--port", type=int, default=8765, help="Port for the local web server")
     parser.add_argument(
         "--auth-token",

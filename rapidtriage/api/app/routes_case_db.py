@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
@@ -31,14 +32,17 @@ from ...core.keyword_packs import (
     KeywordPackError,
     resolve_keyword_packs,
 )
+from ...core.local_paths import ANALYSIS_OUTPUT_ROOTS_ENV, configured_root_entries
 from ...core.run import RunModeError
 from ...core.sample_case import (
+    DEFAULT_SAMPLE_DIR,
     SampleCaseError,
     run_sample_workflow,
 )
 from ...core.search import (
     SearchError,
 )
+from .case_workspace import checked_output_path
 from .helpers import (
     get_job,
     resolve_request_reviewer,
@@ -101,8 +105,17 @@ def build_case_db_router(
 
     @router.post("/api/sample-case/run", status_code=201)
     def run_sample_case(request: SampleCaseRunRequest) -> dict[str, object]:
+        # The sample folder is output: under the output roots, never in evidence
+        # (422). With the output roots set the default is the first one's sample
+        # folder. ``overwrite`` only ever replaces an earlier sample folder.
+        output_roots = configured_root_entries(ANALYSIS_OUTPUT_ROOTS_ENV)
+        if request.output_dir:
+            output_dir = Path(checked_output_path(request.output_dir, label="샘플 출력 폴더"))
+        elif output_roots:
+            output_dir = Path(checked_output_path(os.path.join(output_roots[0], DEFAULT_SAMPLE_DIR), label="샘플 출력 폴더"))
+        else:
+            output_dir = Path.home() / ".rapidtriage" / "sample-case"
         try:
-            output_dir = Path(request.output_dir).expanduser() if request.output_dir else Path.home() / ".rapidtriage" / "sample-case"
             sample_payload = run_sample_workflow(
                 output_dir,
                 mode=request.mode,

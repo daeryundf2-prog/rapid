@@ -99,19 +99,34 @@
   설정; the 조건 button ellipsises its applied summary
   (`frontend/src/features/filters/filterRowLayout.test.ts`).
 - Remote use, path confinement (remote review R1, R2, R10): `rapidtriage web
-  --remote` refuses to start without `RAPIDTRIAGE_ANALYSIS_ROOTS` and
-  `RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS`. With them set, `POST /api/runs`
+  --remote` -- and any other non-loopback bind, `--host 0.0.0.0
+  --auth-token` and `--allow-remote-without-auth` included -- refuses to
+  start without `RAPIDTRIAGE_ANALYSIS_ROOTS` and
+  `RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS`, or when an output root is, contains or
+  lies inside an evidence root. With them set, `POST /api/runs`
   (`root`, `rules`, `known_good_hash_feeds`, `output_dir` -- also the default
-  output folder next to the evidence), retry, `/api/runs/import`,
-  `/api/evidence/identify`, `/api/collect/plan` and
-  `/api/commercial-readiness` paths outside the roots are 422; runs
-  registered earlier or imported reach only their roots inside the lists
-  (`source-file` 403); `GET /api/browse` without `scope` lists only the roots
-  (no home folder, no drive list). These routes now also refuse `~`,
-  relative and UNC paths (422) as the case routes already did. The console
-  picker shows such a listing as a root list
+  output folder next to the evidence), retry, `/api/evidence/identify`,
+  `/api/collect/plan`, `/api/commercial-readiness` and the ti-enrichment
+  `ti_feed` paths outside the roots are 422; output folders (runs,
+  `/api/runs/import`, `/api/sample-case/run`) must be under an output root
+  and outside every evidence root (422); runs registered earlier or imported
+  reach only their roots inside the lists (`source-file` 403), and writes
+  into a run output folder outside the output roots or inside an evidence
+  root (extract, notes, reports, bookmarks, analyses, search) are 403;
+  `GET /api/browse` without `scope` lists only the roots (no home folder, no
+  drive list). These routes now also refuse `~`, relative and UNC paths
+  (422) as the case routes already did. The console picker shows such a
+  listing as a root list
   (`tests/test_rapidtriage_remote_path_confinement.py`,
   `frontend/src/features/case/BrowsePanel.test.tsx`).
+- Sample case overwrite (`POST /api/sample-case/run`, `rapidtriage sample
+  --overwrite`) deletes only an earlier sample folder (marker
+  `.rapidtriage-sample-case` or `rapidtriage-sample-expected.json`); any
+  other non-empty folder is refused instead of deleted recursively. With the
+  output roots set the API default is `<first output root>/rapidtriage-sample`.
+- Run evidence walks skip a symlink or junction that resolves outside the
+  run root, so the analysis server's own files are no longer indexed (docs
+  index, case DB) through a link inside collected evidence.
 
 ### Fixed
 

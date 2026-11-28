@@ -54,7 +54,7 @@ from .artifact_filter import (
     parse_field_filters,
 )
 from .artifact_sort import SORT_ORDERS, paginate_sorted_artifact_output
-from .case_workspace import checked_local_path
+from .case_workspace import checked_local_path, checked_output_path
 from .dashboard import (
     build_run_dashboard,
     notes_output_dir,
@@ -311,18 +311,19 @@ EVENT_RECORD_TYPES = frozenset({"eventlog-event"})
 
 
 def checked_run_output_dir(output_dir: str | None, *, root: str, mode: str, read_only: bool) -> str | None:
-    """A run output folder inside ``RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS`` (422 otherwise; R1·R10).
+    """A run output folder inside ``RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS`` and outside the evidence roots (422 otherwise; R1·R10).
 
     ``None``/blank = the default folder next to (or inside) the evidence: with
-    the list set, that default must lie inside it too, so the examiner is told to
-    pick an output folder instead of the run writing beside the evidence.
+    the list set, that default must lie inside it too (and not in an evidence
+    root), so the examiner is told to pick an output folder instead of the run
+    writing beside the evidence.
     """
     if output_dir and output_dir.strip():
-        return checked_local_path(output_dir, label="출력 폴더", confine_to_output_roots=True)
+        return checked_output_path(output_dir, label="출력 폴더")
     if extra_analysis_roots(ANALYSIS_OUTPUT_ROOTS_ENV):
         default = default_run_output_dir(Path(root).resolve(), mode, read_only=read_only)
         try:
-            checked_local_path(str(default), label="기본 출력 폴더", confine_to_output_roots=True)
+            checked_output_path(str(default), label="기본 출력 폴더")
         except HTTPException as exc:
             raise HTTPException(
                 status_code=422,
@@ -429,9 +430,9 @@ def build_runs_router(
 
     @router.post("/api/runs/import", status_code=201)
     def import_run(request: RunImportRequest) -> dict[str, Any]:
-        output_dir = checked_local_path(
-            request.output_dir, label="가져올 런 출력 폴더", confine_to_analysis_roots=True, confine_to_output_roots=True
-        )
+        # Output roots only: an imported run's folder is written to (extract,
+        # notes, reports, analyses), so it may never be an evidence folder.
+        output_dir = checked_output_path(request.output_dir, label="가져올 런 출력 폴더")
         try:
             job = store.import_completed_run(output_dir, owner=server_actor())
         except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError) as exc:
@@ -874,7 +875,10 @@ def build_runs_router(
         try:
             return build_indicator_ti_enrichment_package(
                 payload,
-                ti_feeds=[Path(path).expanduser().resolve() for path in ti_feed],
+                ti_feeds=[
+                    Path(checked_local_path(path, label="TI 피드", confine_to_analysis_roots=True)).resolve()
+                    for path in ti_feed
+                ],
                 include_unmatched=include_unmatched,
                 limit=limit,
             )
