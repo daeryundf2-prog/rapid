@@ -361,10 +361,11 @@ describe("검토 / 보고 stages (Q-IA-5)", () => {
     // F12: a 판정 nobody made is not offered (재검토 0); 보고서 포함 counts include_in_report.
     expect(within(statuses).queryByRole("link", { name: /재검토/ })).toBeNull();
     expect(within(statuses).getByRole("link", { name: /보고서 포함/ }).textContent).toContain("1");
-    // 판정자 filter: the people present (no name → 이름 없음), as a cf= column filter.
+    // 판정자 filter: the people who set a verdict (no name → 이름 없음), as a cf= column filter;
+    // the two bookmark-only marks have no verdict to attribute (P2-1).
     const reviewers = await screen.findByRole("list", { name: "판정자" });
     const unnamed = within(reviewers).getByRole("link", { name: /이름 없음/ });
-    expect(unnamed.textContent).toContain("3");
+    expect(unnamed.textContent).toContain("1");
     expect(unnamed.getAttribute("href")).toContain("cf=reviewer");
     // 관련 있음 not in the report: a link to exactly those rows.
     expect(within(statuses).getByRole("link", { name: /관련 있음 중 보고서 미포함/ }).textContent).toContain(
@@ -423,7 +424,10 @@ describe("검토 / 보고 stages (Q-IA-5)", () => {
               tags: [],
               note: "송금 직전",
               include_in_report: true,
-              reviewer: "김검사",
+              // 김검사 set the verdict; 박검사 wrote last (the note / report flag).
+              reviewer: "박검사",
+              status_by: "김검사",
+              status_at: "2026-11-27T03:20:00+00:00",
               updated_at: "2026-11-27T03:28:46+00:00",
               title: "Artifact event: browser-history https://bank.example.test/account",
               path: "C:/Users/a/History",
@@ -440,6 +444,8 @@ describe("검토 / 보고 stages (Q-IA-5)", () => {
               note: "",
               include_in_report: false,
               reviewer: "web-ui",
+              status_by: "web-ui",
+              status_at: "2026-11-27T03:28:47+00:00",
               updated_at: "2026-11-27T03:28:47+00:00",
               collection: "timeline",
               kind: "",
@@ -459,7 +465,10 @@ describe("검토 / 보고 stages (Q-IA-5)", () => {
     const preview = screen.getByRole("table", { name: "보고서에 들어갈 항목" });
     expect(preview.textContent).toContain("browser-history https://bank.example.test/account");
     expect(preview.textContent).not.toContain("Artifact event:");
-    expect(preview.textContent).toContain("김검사");
+    // P3-5: the preview carries what the report carries: the stored verdict, no 판정자 column.
+    expect(within(preview).queryByRole("columnheader", { name: "판정자" })).toBeNull();
+    expect(preview.textContent).not.toContain("김검사");
+    expect(preview.textContent).toContain("관련 있음");
     expect(preview.textContent).toContain("송금 직전");
     // ONE primary export; the other formats say who they are for.
     expect(screen.getAllByRole("button", { name: /^보고서 내보내기/ })).toHaveLength(1);

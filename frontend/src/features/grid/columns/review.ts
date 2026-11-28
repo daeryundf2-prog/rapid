@@ -75,7 +75,10 @@ function boardSource(collection: string, targetType: string, targetKind: string 
  * A case-DB review mark (GET /review-map). The ref carries the case-db id and
  * `fields.targetType`, so re-marking on the board posts the row id directly;
  * `pointer`/`sourceCommand` keep the run-output locator for "같은 출처" jumps. The mark's own
- * facts (판정자, 판정 시각, its version for the conflict check) ride in `fields` (F12/F13/F14).
+ * facts ride in `fields` (F12/F13/F14): 판정자 / 판정 시각 are who set the current verdict and when
+ * (`status_by` / `status_at`, P2-1; empty when the mark has no verdict), apart from whoever last
+ * changed a note, tag or the report flag (`lastBy` / `markUpdatedAt`); `markVersion` is what a
+ * write from the board expects.
  */
 function mapCaseDbMark(raw: RawRow, index: number) {
   const targetType = str(raw.target_type);
@@ -91,6 +94,9 @@ function mapCaseDbMark(raw: RawRow, index: number) {
   const fileTime = targetType === "file_record" ? strOrNull(raw.file_modified_at) : null;
   const timeKind: BoardTimeKind = eventTime ? "event" : fileTime ? "file-mtime" : "none";
   const targetKind = strOrNull(raw.target_kind);
+  const reviewStatus = toReviewStatus(raw.status, raw.include_in_report);
+  // A verdict to attribute (see hasVerdict): a note / tag / report-only mark has none.
+  const decided = reviewStatus !== null && reviewStatus !== "include-in-report";
   return makeRow(
     ref,
     {
@@ -104,7 +110,7 @@ function mapCaseDbMark(raw: RawRow, index: number) {
       // 사건 시각 only: the decision time has its own column (no `?? updated_at` mix-up, F12).
       timestamp: eventTime ?? fileTime,
       artifactType: targetKind ?? (COLLECTION_LABELS[collection] || null),
-      reviewStatus: toReviewStatus(raw.status, raw.include_in_report),
+      reviewStatus,
       tags: Array.isArray(raw.tags) ? raw.tags.map(str).filter(Boolean) : [],
     },
     {
@@ -116,10 +122,13 @@ function mapCaseDbMark(raw: RawRow, index: number) {
       store: "case-db",
       citationId: str(raw.citation_id),
       timeKind,
-      reviewer: str(raw.reviewer),
+      reviewer: decided ? str(raw.status_by) : "",
+      decidedAt: decided ? str(raw.status_at) : "",
+      lastBy: str(raw.reviewer),
       markUpdatedAt: str(raw.updated_at),
       markCreatedAt: str(raw.created_at),
       changeCount: typeof raw.change_count === "number" ? raw.change_count : 0,
+      ...(typeof raw.version === "number" ? { markVersion: raw.version } : {}),
       source: boardSource(collection, targetType, targetKind),
     },
   );
@@ -151,7 +160,10 @@ function mapBookmark(raw: RawRow, index: number) {
       includeInReport: review.include_in_report === true,
       store: "bookmarks",
       timeKind: eventTime ? "event" : "none",
+      // case.json keeps one reviewer and one time per bookmark: they stand for the verdict too.
       reviewer: str(review.reviewer),
+      decidedAt: str(raw.updated_at),
+      lastBy: str(review.reviewer),
       markUpdatedAt: str(raw.updated_at),
       source: COLLECTION_LABELS[command.split(":")[0] ?? ""] ?? "",
     },
@@ -163,17 +175,38 @@ function boardTimeText(row: GridRow): string {
   return row.timestamp ? formatGridTime(row.timestamp, currentTimezone(), rowTimeZone(row)) : "";
 }
 
-/** 판정 시각: "2026-11-27 12:28 KST" (minutes; the header names the zone). */
-function decidedAtText(row: GridRow): string {
-  const ms = Date.parse(fieldStr(row, "markUpdatedAt"));
+/** "2026-11-27 12:28 KST" of an ISO field (minutes; the header names the zone); "" when unset. */
+function minuteText(row: GridRow, field: string): string {
+  const ms = Date.parse(fieldStr(row, field));
   return Number.isNaN(ms) ? "" : formatMinute(ms, currentTimezone());
 }
 
-/** "판정자 김철수, 처음 판정 2026-11-27 12:28 KST, 바뀐 횟수 3" — the mark's history at a glance. */
+/** 판정 시각: when the current verdict was set (not when a note or tag changed; P2-1). */
+function decidedAtText(row: GridRow): string {
+  return minuteText(row, "decidedAt");
+}
+
+/** The row carries a verdict (관련 있음 · 재검토 · 제외), not only a note, tags or the report flag. */
+export function hasVerdict(row: GridRow): boolean {
+  return row.reviewStatus !== null && row.reviewStatus !== "include-in-report";
+}
+
+/** 판정자 cell text: who set the verdict ("이름 없음" when nobody is named); "" for a mark without one. */
+export function decidedByText(row: GridRow): string {
+  return hasVerdict(row) ? reviewerLabel(fieldStr(row, "reviewer")) : "";
+}
+
+/**
+ * "판정자 김철수, 마지막 변경 이영희 2026-11-27 13:02 KST, 처음 기록 2026-11-27 12:28 KST, 바뀐 횟수 3" —
+ * the mark's history at a glance; the last change is named apart from the verdict (P2-1).
+ */
 export function reviewerTooltip(row: GridRow): string {
-  const parts = [`판정자 ${reviewerLabel(fieldStr(row, "reviewer"))}`];
-  const created = Date.parse(fieldStr(row, "markCreatedAt"));
-  if (!Number.isNaN(created)) parts.push(`처음 판정 ${formatMinute(created, currentTimezone())}`);
+  const by = decidedByText(row);
+  const parts = [by ? `판정자 ${by}` : "판정 없음"];
+  const last = minuteText(row, "markUpdatedAt");
+  if (last) parts.push(`마지막 변경 ${reviewerLabel(fieldStr(row, "lastBy"))} ${last}`);
+  const created = minuteText(row, "markCreatedAt");
+  if (created) parts.push(`처음 기록 ${created}`);
   const count = typeof row.fields.changeCount === "number" ? row.fields.changeCount : 0;
   if (count > 0) parts.push(`바뀐 횟수 ${count}`);
   return parts.join(", ");
@@ -211,7 +244,8 @@ export const reviewCollection: CollectionDef = {
       72,
       ["analysis", "compact"],
       (r) => (r.fields.includeInReport === true ? "포함" : "미포함"),
-      { render: boardReportCell },
+      // Two words, one inside the other: "포함" must not find "미포함" (review P3-6).
+      { render: boardReportCell, filterExact: true },
     ),
     { ...col.title("대상", 300), minWidth: 160 },
     // 사건 시각 never narrower than "2026-10-18 08:02:48" at 13px; a file shows its copy's mtime, said so.
@@ -230,17 +264,13 @@ export const reviewCollection: CollectionDef = {
       "판정 시각",
       136,
       ["analysis", "compact", "source"],
-      (r) => fieldStr(r, "markUpdatedAt"),
+      (r) => fieldStr(r, "decidedAt"),
       { minWidth: 128, zoneInHeader: true, filterKind: "time", format: decidedAtText },
     ),
-    col.field(
-      "reviewer",
-      "판정자",
-      104,
-      ["analysis", "compact", "source"],
-      (r) => reviewerLabel(fieldStr(r, "reviewer")),
-      { render: (r) => boardReviewerCell(reviewerLabel(fieldStr(r, "reviewer"))), tooltip: reviewerTooltip },
-    ),
+    col.field("reviewer", "판정자", 104, ["analysis", "compact", "source"], decidedByText, {
+      render: (r) => boardReviewerCell(decidedByText(r)),
+      tooltip: reviewerTooltip,
+    }),
     col.field("source", "출처", 112, ["analysis", "source"], (r) => fieldStr(r, "source")),
     col.path(240, ["analysis", "source"]),
     col.field("note", "메모", 200, ["analysis"], (r) => noteFirstLine(fieldStr(r, "note")), {

@@ -1,23 +1,86 @@
 /**
  * The review-conflict prompt (design review F14): another examiner changed a mark after this
- * console read it, so nothing was saved. It says who, when and to what ("김철수가 14:05 KST에
- * ‘재검토’로 바꿈") and offers [내 판정으로 바꾸기] / [그대로 두기]. An alertdialog: the sentence
- * is its description, focus starts on the safe choice (그대로 두기), Tab stays inside, Esc keeps.
+ * console read it, so nothing was saved. It says who changed what and when ("김철수가 14:05 KST에
+ * ‘재검토’로 바꿈", "이영희가 14:05 KST에 메모를 바꿈"), shows the mark as stored now (판정 and
+ * who set it, 태그, 메모 — beside the examiner's own unsaved note for a note write; review P3-4),
+ * and offers [내 판정으로 바꾸기] / [그대로 두기]. An alertdialog: the sentence is its description,
+ * focus starts on the safe choice (그대로 두기), Tab stays inside, Esc keeps.
  */
 
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import type { ReviewConflict } from "../../api/caseDb";
 import { useTimezone } from "../../state/hooks";
+import type { TimezoneChoice } from "../../utils/time";
+import { reviewerLabel } from "./author";
 import {
   type ConflictChoice,
   type ConflictPrompt,
   conflictSentence,
+  conflictStatusLabel,
+  conflictTime,
   useReviewConflict,
 } from "./reviewConflict";
 import "../case/case.css";
 import "./review.css";
 
 const FOCUSABLE = "button:not([disabled])";
+
+/** The one conflicting mark as stored now, and the examiner's own note beside the stored one. */
+function CurrentMark({
+  conflict,
+  mine,
+  timezone,
+}: {
+  conflict: ReviewConflict;
+  mine: ConflictPrompt["mine"];
+  timezone: TimezoneChoice;
+}) {
+  const { current } = conflict;
+  const decidedAt = conflictTime(current.status_at, timezone);
+  const decidedBy = current.status_by
+    ? ` · ${reviewerLabel(current.status_by)}${decidedAt ? ` ${decidedAt}` : ""}`
+    : "";
+  const myNote = mine?.note;
+  return (
+    <>
+      <dl
+        className="review-conflict-current"
+        aria-label="지금 저장된 표시"
+        data-testid="review-conflict-current"
+      >
+        <div>
+          <dt>판정</dt>
+          <dd>
+            {conflictStatusLabel(current)}
+            {decidedBy}
+          </dd>
+        </div>
+        <div>
+          <dt>태그</dt>
+          <dd>{current.tags.length ? current.tags.join(", ") : "없음"}</dd>
+        </div>
+        {myNote === undefined ? (
+          <div>
+            <dt>메모</dt>
+            <dd className="review-conflict-note-text">{current.note || "없음"}</dd>
+          </div>
+        ) : null}
+      </dl>
+      {myNote !== undefined ? (
+        <div className="review-conflict-notes" data-testid="review-conflict-notes">
+          <section aria-label="지금 저장된 메모">
+            <h3>지금 저장된 메모</h3>
+            <p className="review-conflict-note-text">{current.note || "메모 없음"}</p>
+          </section>
+          <section aria-label="내 메모 (저장 안 됨)">
+            <h3>내 메모 (저장 안 됨)</h3>
+            <p className="review-conflict-note-text">{myNote}</p>
+          </section>
+        </div>
+      ) : null}
+    </>
+  );
+}
 
 export function ReviewConflictDialog({ prompt }: { prompt: ConflictPrompt }) {
   const { timezone } = useTimezone();
@@ -95,6 +158,11 @@ export function ReviewConflictDialog({ prompt }: { prompt: ConflictPrompt }) {
                 : `${count}건의 판정이 이 화면을 연 뒤에 바뀌었습니다.`}
             </p>
             <p>내 판정({prompt.action})은 저장하지 않았습니다.</p>
+            {prompt.mine?.note !== undefined ? (
+              <p className="review-conflict-note">
+                ‘그대로 두기’를 고르면 내 메모는 입력 창에 그대로 남습니다.
+              </p>
+            ) : null}
             {prompt.others > 0 ? (
               <p className="review-conflict-note">
                 함께 고른 나머지 {prompt.others}건도 아직 저장하지 않았습니다. ‘그대로 두기’를 고르면 그
@@ -102,6 +170,13 @@ export function ReviewConflictDialog({ prompt }: { prompt: ConflictPrompt }) {
               </p>
             ) : null}
           </div>
+          {count === 1 ? (
+            <CurrentMark
+              conflict={prompt.conflicts[0] as ReviewConflict}
+              mine={prompt.mine}
+              timezone={timezone}
+            />
+          ) : null}
           {count > 1 ? (
             <ul className="review-conflict-list" aria-label="바뀐 판정">
               {prompt.conflicts.map((conflict, index) => (

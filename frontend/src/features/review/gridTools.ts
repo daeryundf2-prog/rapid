@@ -17,7 +17,7 @@ import type { GridRow } from "../../contracts/collection";
 import type { Command } from "../../contracts/command";
 import { useAppStore } from "../../state/store";
 import type { GridCommandHost } from "../grid/gridCommands";
-import { notifyReviewApplied, reviewTargetOf } from "../grid/reviewActions";
+import { notifyReviewApplied, rememberWrite, reviewTargetOf } from "../grid/reviewActions";
 import { targetAsGridRow } from "../viewer/citation";
 import { currentReviewer } from "./author";
 import { buildSelectionCsv, CSV_MAX_ROWS, downloadCsv } from "./csv";
@@ -118,6 +118,7 @@ export async function propagateTagsByHash(
     propagate_by_hash: true,
     reviewer: currentReviewer(),
   });
+  rememberWrite(runId, { marks: result.marks });
   notifyReviewApplied(runId);
   currentRowSource()?.refetch?.();
   const label = chosen.map((tag) => `'${tag.name}'`).join(", ");

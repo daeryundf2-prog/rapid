@@ -14,7 +14,13 @@ import { formatTimestamp } from "../../utils/time";
 import { ErrorText } from "../case/ErrorText";
 import { Modal } from "../case/Modal";
 import { ReasonButton } from "../case/ReasonButton";
-import { applyNote, reviewLocatorTarget, storeNotice } from "../grid/reviewActions";
+import {
+  applyNote,
+  pinExpected,
+  ReviewConflictError,
+  reviewLocatorTarget,
+  storeNotice,
+} from "../grid/reviewActions";
 import { noteKey, setSessionNote } from "../grid/sessionNotes";
 import { currentReviewer, DEFAULT_REVIEWER, setReviewer } from "./author";
 import type { NotePanelTarget } from "./uiStore";
@@ -101,6 +107,9 @@ export function NotePanel({ target, onClose }: { target: NotePanelTarget; onClos
   const lastNote = entries.find((entry) => entry.changed_fields.includes("note"));
   const current = typeof row.fields.note === "string" ? row.fields.note : (lastNote?.note_after ?? "");
   const [text, setText] = useState(current);
+  // The mark version this panel shows, pinned when it opened (P1-1): a background review-map reload
+  // must not make another examiner's newer note the one this save expects.
+  const [pin] = useState(() => pinExpected(runId, [row]));
   const [author, setAuthor] = useState(() =>
     currentReviewer() === DEFAULT_REVIEWER ? "" : currentReviewer(),
   );
@@ -113,12 +122,21 @@ export function NotePanel({ target, onClose }: { target: NotePanelTarget; onClos
     setBusy(true);
     setError(null);
     setReviewer(author);
-    try {
-      const result = await applyNote(runId, [row], text);
+    const saved = async (notice: string) => {
       setSessionNote(noteKey(runId, row.ref), text.trim());
-      announce(`메모를 저장했습니다 (작성자 ${currentReviewer()}).${storeNotice(result)}`);
+      announce(`메모를 저장했습니다 (작성자 ${currentReviewer()}).${notice}`);
       await queryClient.invalidateQueries({ queryKey: ["review-history", runId, row.rowKey] });
+    };
+    try {
+      await saved(storeNotice(await applyNote(runId, [row], text, { expected: pin })));
     } catch (failure) {
+      if (failure instanceof ReviewConflictError) {
+        // The conflict prompt decides: "내 판정으로" saved this note; "그대로 두기" keeps the text
+        // here (P3-4) and the history below shows the other examiner's note.
+        if ((await failure.choice) === "mine") await saved("");
+        else await queryClient.invalidateQueries({ queryKey: ["review-history", runId, row.rowKey] });
+        return;
+      }
       setError(failure instanceof Error ? failure.message : String(failure));
     } finally {
       setBusy(false);

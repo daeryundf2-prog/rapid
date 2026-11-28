@@ -1049,12 +1049,13 @@ export interface ReviewMarkBody {
 }
 
 /** A case-db row, or a run-output locator the server resolves against `run_id`. Either may carry
- * `expected_updated_at`: the mark's version as last read ("" = no mark); a newer stored mark is a 409 (F14). */
+ * `expected_version`: the version of the mark the examiner saw (0 = no mark); a changed mark is a 409 (F14). */
 export type ReviewBatchTarget =
-  | { target_type: string; target_id: string; expected_updated_at?: string }
-  | { collection: string; kind?: string; locator: string; expected_updated_at?: string };
+  | { target_type: string; target_id: string; expected_version?: number }
+  | { collection: string; kind?: string; locator: string; expected_version?: number };
 
-/** `POST /api/case-db/review-batch` answer: with `run_id`, `targets[i]` (resolved, locator kept) stored `marks[i]`. */
+/** `POST /api/case-db/review-batch` answer: with `run_id`, `targets[i]` (resolved, locator kept) stored `marks[i]`;
+ * each mark carries its new `version` and the `previous_version` it replaced. */
 export interface ReviewBatchAnswer {
   updated_count?: number;
   targets?: Array<Record<string, unknown>>;

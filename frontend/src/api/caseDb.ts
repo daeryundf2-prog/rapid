@@ -70,13 +70,18 @@ export interface ReviewMapMark {
   tags: string[];
   note: string;
   include_in_report: boolean;
-  /** The mark's version token: send it back as `expected_updated_at` (F14). */
+  /** When anyone last changed any field of the mark. */
   updated_at: string;
-  /** Who stored the mark (server value; "" / "web-ui" / "local-user" = 이름 없음) and when it was made (F13). */
+  /** Who last changed any field (server value; "" / "web-ui" / "local-user" = 이름 없음) and when it was made (F13). */
   reviewer?: string;
   created_at?: string;
+  /** Who set the current verdict (status) and when; "" when the mark has none (P2-1). */
+  status_by?: string;
+  status_at?: string;
   /** Times the mark changed (its history versions). */
   change_count?: number;
+  /** The mark's version token: a write sends it back as `expected_version` (F14). */
+  version?: number;
   /** File targets: the copy's modification time (a file has no event time). */
   file_modified_at?: string;
   /** Grid collection + artifact kind + locator; empty when the row has no run-output locator. */
@@ -106,6 +111,15 @@ export function getReviewMap(runId: string, signal?: AbortSignal): Promise<Revie
   return api<ReviewMapPayload>(`/api/runs/${encodeURIComponent(runId)}/review-map`, { signal });
 }
 
+/** One write to a mark after the version the console sent: who, when, which fields (review P3-4). */
+export interface ConflictChange {
+  version: number;
+  actor: string;
+  changed_at: string;
+  /** `status` · `note` · `tags` · `include_in_report` … (never `reviewer`). */
+  fields: string[];
+}
+
 /** The stored mark a 409 `review-conflict` reports (F14). */
 export interface ConflictMark {
   /** false: no mark (never made, or cleared). */
@@ -114,18 +128,24 @@ export interface ConflictMark {
   include_in_report: boolean;
   note: string;
   tags: string[];
+  /** Who last changed any field, and when (also set for a cleared mark). */
   reviewer: string;
-  /** When it last changed (also set for a cleared mark). */
   updated_at: string;
-  /** What to send as `expected_updated_at` to overwrite it ("" for no mark). */
-  expected_updated_at: string;
+  /** Who set the current verdict and when ("" when none). */
+  status_by: string;
+  status_at: string;
+  /** Its version token: send it as `expected_version` to overwrite it (0 for no mark). */
+  version: number;
+  /** The writes since the version the console sent, newest first. */
+  changes: ConflictChange[];
 }
 
 /** One target of a refused write: its mark changed after the console read it; nothing was written. */
 export interface ReviewConflict {
   target_type: string;
   target_id: string;
-  expected_updated_at: string;
+  /** The version the refused write expected (absent when it sent none). */
+  expected_version?: number;
   /** Run-output locator of a located target (echoed back so the console finds its row). */
   collection?: string;
   kind?: string;
@@ -142,12 +162,14 @@ export function reviewConflictsOf(detail: unknown): ReviewConflict[] | null {
   if (!isRecordLike(detail) || detail.code !== "review-conflict" || !Array.isArray(detail.conflicts))
     return null;
   const text = (value: unknown) => (typeof value === "string" ? value : "");
+  const count = (value: unknown) => (typeof value === "number" && Number.isInteger(value) ? value : 0);
   return detail.conflicts.filter(isRecordLike).map((raw) => {
     const current = isRecordLike(raw.current) ? raw.current : {};
+    const changes = Array.isArray(current.changes) ? current.changes.filter(isRecordLike) : [];
     return {
       target_type: text(raw.target_type),
       target_id: text(raw.target_id),
-      expected_updated_at: text(raw.expected_updated_at),
+      ...(typeof raw.expected_version === "number" ? { expected_version: raw.expected_version } : {}),
       ...(typeof raw.collection === "string" ? { collection: raw.collection } : {}),
       ...(typeof raw.kind === "string" ? { kind: raw.kind } : {}),
       ...(typeof raw.locator === "string" ? { locator: raw.locator } : {}),
@@ -159,7 +181,15 @@ export function reviewConflictsOf(detail: unknown): ReviewConflict[] | null {
         tags: Array.isArray(current.tags) ? current.tags.map(String) : [],
         reviewer: text(current.reviewer),
         updated_at: text(current.updated_at),
-        expected_updated_at: text(current.expected_updated_at),
+        status_by: text(current.status_by),
+        status_at: text(current.status_at),
+        version: count(current.version),
+        changes: changes.map((change) => ({
+          version: count(change.version),
+          actor: text(change.actor),
+          changed_at: text(change.changed_at),
+          fields: Array.isArray(change.fields) ? change.fields.map(String) : [],
+        })),
       },
     };
   });

@@ -28,10 +28,10 @@ import { useCaseLinks } from "../case/caseLink";
 import { EXPORT_ACTIONS, useExportHistory } from "../case/exports";
 import { ReasonButton } from "../case/ReasonButton";
 import { REVIEW_LABELS, rowTimeZone } from "../grid/columns/common";
+import { hasVerdict } from "../grid/columns/review";
 import { DataGrid } from "../grid/DataGrid";
 import { applyReviewAction } from "../grid/reviewActions";
 import { useReviewMap } from "../grid/reviewMap";
-import { reviewerLabel } from "../review/author";
 import {
   hashCheck,
   NOT_IN_REPORT_FILTER,
@@ -479,7 +479,7 @@ export function ReportPage() {
                 <>
                   <span className="report-check-help">
                     {check.unnamedIncluded > 0 ? `보고서 포함 항목 중 ${n(check.unnamedIncluded)}건. ` : ""}
-                    누가 판정했는지 보고서에 남지 않습니다.
+                    누가 판정했는지 기록에 이름이 없습니다(보고서 본문에는 판정자가 들어가지 않습니다).
                   </span>
                   <a
                     className="report-check-link"
@@ -518,7 +518,6 @@ export function ReportPage() {
                   <th scope="col">판정</th>
                   <th scope="col">대상</th>
                   <th scope="col">사건 시각</th>
-                  <th scope="col">판정자</th>
                   <th scope="col">메모</th>
                   <th scope="col">출처 경로</th>
                 </tr>
@@ -527,13 +526,13 @@ export function ReportPage() {
                 {check.included.slice(0, PREVIEW_LIMIT).map((row) => (
                   <tr key={row.rowKey}>
                     <td data-label="판정">
-                      {row.reviewStatus ? REVIEW_LABELS[row.reviewStatus] : "판정 없음"}
+                      {/* The stored verdict, as the report's 검토 상태 says it (every row here is 보고서 포함). */}
+                      {row.reviewStatus && hasVerdict(row) ? REVIEW_LABELS[row.reviewStatus] : "판정 없음"}
                     </td>
                     <td data-label="대상" className="report-preview-target">
                       {row.title}
                     </td>
                     <td data-label="사건 시각">{eventTimeText(row, timezone)}</td>
-                    <td data-label="판정자">{reviewerLabel(String(row.fields.reviewer ?? ""))}</td>
                     <td data-label="메모">{String(row.fields.note ?? "") || "메모 없음"}</td>
                     <td data-label="출처 경로" className="report-preview-path">
                       {row.sourcePath ?? "경로 없음"}

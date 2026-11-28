@@ -17,6 +17,23 @@
   `local-user`). The 보고 page is a checklist, a preview of the included items
   and one primary export; the run's output files fold into a closed section
   (`tests/test_review_mark_conflict.py`).
+  Review follow-ups: the version token is the mark's history version
+  (`version` in the review map and in every write answer, with
+  `previous_version`; requests send `expected_version`, 0 = no mark), not the
+  `updated_at` clock text, so two writes in one clock tick no longer share a
+  token (`expected_updated_at` is still honoured for older clients). The
+  console pins the version when an edit begins (note form, 메모·이력 panel, the
+  row drawn in the viewer or grid), so a review-map reload while typing gives a
+  409 instead of a silent overwrite; its own tag writes and answered conflicts
+  do not conflict with themselves. `review_mark` gains `status_by` /
+  `status_at` (who set the verdict and when; migrated from
+  `review_mark_history`), which the 판정자 / 판정 시각 columns, the 판정자 filter
+  and the conflict prompt use instead of the last writer of a note, tag or
+  report flag. A 409 lists what changed since (`current.changes`: actor, time,
+  fields) and the prompt shows the stored verdict, tags and note beside the
+  examiner's unsaved note. The 보고서 column filter matches 포함 / 미포함
+  exactly; the report preview drops the 판정자 column the exported report does
+  not carry.
 - `omp-pi` collector for oh-my-pi (omp), pi, senpi and OmO: session JSONL
   under `<home>/agent/sessions` (subagent transcripts included, linked by
   `parent_session`), sessions in other folders recognized by their `session`

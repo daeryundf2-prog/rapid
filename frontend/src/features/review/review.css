@@ -367,3 +367,46 @@
   margin: 0;
   color: var(--danger);
 }
+
+/* The conflicting mark as stored now (P3-4): 판정 and who set it, 태그, 메모. */
+.review-conflict-current {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-2);
+}
+
+.review-conflict-current > div {
+  display: grid;
+  grid-template-columns: 4em minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.review-conflict-current dt {
+  color: var(--text-muted);
+}
+
+.review-conflict-current dd {
+  margin: 0;
+}
+
+.review-conflict-note-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+/* A note conflict: the stored note beside the examiner's own unsaved one. */
+.review-conflict-notes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12em, 1fr));
+  gap: var(--space-3);
+  margin: 0 0 var(--space-2);
+}
+
+.review-conflict-notes h3 {
+  margin: 0 0 var(--space-1);
+  font-size: var(--fs-body);
+  color: var(--text-muted);
+}

@@ -1,7 +1,8 @@
 /**
  * A review write the server refused (409 `review-conflict`, design review F14): another examiner
  * changed the mark after this console read it, and nothing was written. The prompt says who
- * changed it, when and to what, and lets the examiner overwrite it with their own decision or
+ * changed what and when (the verdict by its own setter, P2-1; a note or tags by their writer,
+ * P3-4), shows the current mark, and lets the examiner overwrite it with their own decision or
  * leave it. One prompt at a time (ReviewToolsHost renders it).
  */
 
@@ -21,6 +22,11 @@ function finalConsonant(word: string): { has: boolean; rieul: boolean } {
 /** "김철수가" / "이름 없음이": the subject particle that fits the word's last syllable. */
 export function withSubject(word: string): string {
   return `${word}${finalConsonant(word).has ? "이" : "가"}`;
+}
+
+/** "메모를" / "보고서 포함을": the object particle that fits the word's last syllable. */
+export function withObject(word: string): string {
+  return `${word}${finalConsonant(word).has ? "을" : "를"}`;
 }
 
 /** "‘재검토’로" / "‘관련 있음’으로": the direction particle after a quoted word (ㄹ takes 로). */
@@ -49,11 +55,50 @@ export function conflictTime(value: string, tz: TimezoneChoice, now: Date = new 
   return text.startsWith(today) ? text.slice(11) : text;
 }
 
-/** "김철수가 14:05 KST에 ‘재검토’로 바꿈" — who changed the mark, when, and to what. */
+/** Korean words of the mark fields a conflict reports, in the order the prompt names them. */
+const FIELD_WORDS: ReadonlyArray<readonly [string, string]> = [
+  ["status", "판정"],
+  ["note", "메모"],
+  ["tags", "태그"],
+  ["include_in_report", "보고서 포함"],
+  ["verification_status", "검증"],
+  ["assignee", "담당자"],
+  ["priority", "우선순위"],
+  ["due_at", "기한"],
+  ["source_citation_package", "인용 패키지"],
+];
+
+/** The fields changed since the version the console sent (every reported write), as words. */
+export function changedFields(conflict: ReviewConflict): string[] {
+  const changed = new Set(conflict.current.changes.flatMap((change) => change.fields));
+  return FIELD_WORDS.filter(([field]) => changed.has(field)).map(([, word]) => word);
+}
+
+/**
+ * "김철수가 14:05 KST에 ‘재검토’로 바꿈" when the verdict moved (its setter and time, not whoever
+ * wrote last; P2-1), "이영희가 14:05 KST에 메모를 바꿈" when only other fields did (P3-4).
+ */
 export function conflictSentence(conflict: ReviewConflict, tz: TimezoneChoice, now?: Date): string {
-  const who = withSubject(reviewerLabel(conflict.current.reviewer));
-  const when = conflictTime(conflict.current.updated_at, tz, now);
-  return `${who} ${when ? `${when}에 ` : ""}${quotedTo(conflictStatusLabel(conflict.current))} 바꿈`;
+  const { current } = conflict;
+  const latest = current.changes[0];
+  const at = (value: string) => {
+    const when = conflictTime(value, tz, now);
+    return when ? `${when}에 ` : "";
+  };
+  const words = changedFields(conflict);
+  if (!current.exists) {
+    const who = withSubject(reviewerLabel(latest?.actor ?? current.reviewer));
+    return `${who} ${at(latest?.changed_at ?? current.updated_at)}표시를 지움`;
+  }
+  if (words.length === 0 || words[0] === "판정") {
+    const who = withSubject(reviewerLabel(current.status_by || current.reviewer));
+    const sentence = `${who} ${at(current.status_at || current.updated_at)}${quotedTo(conflictStatusLabel(current))} 바꿈`;
+    const others = words.slice(1);
+    return others.length ? `${sentence} (${others.join("·")}도 바뀜)` : sentence;
+  }
+  const actors = [...new Set(current.changes.map((change) => reviewerLabel(change.actor)))];
+  const who = withSubject(actors.length > 1 ? `${actors[0]} 외 ${actors.length - 1}명` : (actors[0] ?? ""));
+  return `${who} ${at(latest?.changed_at ?? current.updated_at)}${withObject(words.join("·"))} 바꿈`;
 }
 
 export type ConflictChoice = "mine" | "keep";
@@ -67,7 +112,11 @@ export interface ConflictPrompt {
   others: number;
   /** What the examiner tried to set ("관련 있음", "메모" …). */
   action: string;
+  /** The examiner's own unsaved input, shown beside the current one (a note write). */
+  mine?: { note?: string };
   resolve: (choice: ConflictChoice) => Promise<void>;
+  /** Another conflict replaced this prompt before the examiner chose: nothing was changed. */
+  abandon?: () => void;
 }
 
 interface ConflictState {
@@ -78,9 +127,12 @@ interface ConflictState {
   close: () => void;
 }
 
-export const useReviewConflict = create<ConflictState>((set) => ({
+export const useReviewConflict = create<ConflictState>((set, get) => ({
   prompt: null,
   seq: 0,
-  open: (prompt) => set((state) => ({ prompt, seq: state.seq + 1 })),
+  open: (prompt) => {
+    get().prompt?.abandon?.();
+    set((state) => ({ prompt, seq: state.seq + 1 }));
+  },
   close: () => set({ prompt: null }),
 }));

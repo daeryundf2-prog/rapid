@@ -284,7 +284,7 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
     mark: async (action: MarkAction) => {
       if (!target) return;
       try {
-        const result = await applyMark(target, action);
+        const result = await applyMark(target, action, row);
         const markKey = targetKey(target);
         setMarks((current) => ({
           ...current,

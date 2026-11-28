@@ -9,7 +9,7 @@ import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-quer
 import { useEffect } from "react";
 import { getReviewMap, type ReviewMapMark } from "../../api/caseDb";
 import type { GridRow } from "../../contracts/collection";
-import { rememberReviewMarks, reviewKey } from "../review/markVersions";
+import { markWriteSeq, rememberReviewMarks, reviewKey } from "../review/markVersions";
 import { toReviewStatus } from "./columns/common";
 import { onReviewApplied, reviewLocatorTarget } from "./reviewActions";
 
@@ -17,11 +17,15 @@ export type ReviewMap = ReadonlyMap<string, ReviewMapMark>;
 
 export const reviewMapKey = (runId: string | null) => ["review-map", runId] as const;
 
-export function buildReviewMap(marks: readonly ReviewMapMark[]): ReviewMap {
+/** Maps that list every mark of the run (not truncated): a row without one there has no mark. */
+const completeMaps = new WeakSet<ReviewMap>();
+
+export function buildReviewMap(marks: readonly ReviewMapMark[], complete = false): ReviewMap {
   const map = new Map<string, ReviewMapMark>();
   for (const mark of marks) {
     if (mark.collection && mark.locator) map.set(reviewKey(mark.collection, mark.kind, mark.locator), mark);
   }
+  if (complete) completeMaps.add(map);
   return map;
 }
 
@@ -32,12 +36,20 @@ export function rowReviewKey(row: GridRow): string | null {
   return target ? reviewKey(target.collection, target.kind, target.locator) : null;
 }
 
-/** Row with the stored status/tags/note; rows without a mark are returned as-is. */
+/**
+ * Row with the stored status/tags/note and the mark's version (`fields.markVersion`, what a write
+ * from this row expects; F14). A row without a mark in a complete map gets version 0 ("no mark");
+ * otherwise rows without a mark are returned as-is.
+ */
 export function overlayReview(row: GridRow, map: ReviewMap | undefined): GridRow {
-  if (!map || map.size === 0) return row;
+  if (!map) return row;
   const key = rowReviewKey(row);
   const mark = key ? map.get(key) : undefined;
-  if (!mark) return row;
+  if (!mark) {
+    return key && completeMaps.has(map) && row.fields.markVersion !== 0
+      ? { ...row, fields: { ...row.fields, markVersion: 0 } }
+      : row;
+  }
   return {
     ...row,
     // An explicit `unreviewed` mark (a cleared toggle) clears the row's status too.
@@ -50,6 +62,7 @@ export function overlayReview(row: GridRow, map: ReviewMap | undefined): GridRow
       ...row.fields,
       ...(mark.note ? { note: mark.note } : {}),
       includeInReport: mark.include_in_report,
+      ...(typeof mark.version === "number" ? { markVersion: mark.version } : {}),
     },
   };
 }
@@ -60,10 +73,12 @@ export function useReviewMap(runId: string | null, enabled = true): ReviewMap | 
   const query = useQuery({
     queryKey: reviewMapKey(runId),
     queryFn: async ({ signal }) => {
+      const since = markWriteSeq();
       const payload = await getReviewMap(runId as string, signal);
       const marks = payload.marks ?? [];
-      rememberReviewMarks(runId as string, marks, payload.truncated === true);
-      return buildReviewMap(marks);
+      const complete = payload.truncated !== true;
+      rememberReviewMarks(runId as string, marks, !complete, since);
+      return buildReviewMap(marks, complete);
     },
     enabled: enabled && runId !== null,
     staleTime: 30_000,
