@@ -5,7 +5,7 @@ import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AnalysisState } from "../../api/analyses";
 import type { RunWithProgress } from "../../api/runsProgress";
-import { resetCommandRegistry } from "../../commands/registry";
+import { resetCommandRegistry, runCommand } from "../../commands/registry";
 import {
   canonicalizeHash,
   EMPTY_ROUTE,
@@ -172,12 +172,12 @@ describe("stage rail (Q-IA-1)", () => {
     expect(window.location.hash).toBe(`#/case/${RUN}/review/board`);
   });
 
-  it("without a case the rail says why", () => {
+  it("without a case the rail is not drawn; the stage commands still say why (F24)", async () => {
     off.push(registerStageCommands());
     render(<StageRail />);
-    const button = screen.getByRole("button", { name: "처리" });
-    expect(button.getAttribute("aria-disabled")).toBe("true");
-    expect(button.getAttribute("data-disabled-reason")).toBe("케이스를 먼저 선택하세요");
+    expect(screen.queryByTestId("stage-rail")).toBeNull();
+    expect(screen.queryByRole("button", { name: "처리" })).toBeNull();
+    expect(await runCommand("stage.process")).toEqual({ ok: false, reason: "케이스를 먼저 선택하세요" });
   });
 });
 

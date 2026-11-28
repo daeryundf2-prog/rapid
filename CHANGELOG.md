@@ -87,6 +87,21 @@
 
 ### Changed
 
+- Console frame and small screens (design overhaul ②, F23/F24/F29): no stage
+  rail before a case is open; on timeline, search and the review board the
+  stage panel starts folded to a 36 px strip that names the current location
+  (펼치기/접기 buttons and Alt+0 on wide windows too; the choice is pinned per
+  collection kind, file views keep it open); 0-row families such as 이벤트 로그
+  fold into "결과 없는 계열 n개", and a domain no longer reads 0 over a child
+  with rows. Panes scroll instead of clipping (the tree at 768 px hid its last
+  domains and the 결과 없는 계열 toggle). On phones a row tap opens the detail
+  as a full-width screen with 목록으로 (focus returns to the row), 뷰어 열기 is
+  a bar under the list instead of a button over the rows, and a focused global
+  search takes the whole top bar. The landing is no longer a card: one primary
+  케이스 만들기, the other starts grouped, and each recent case leads with its
+  case number and full name, then last activity, then the evidence path
+  (`frontend/src/shell/treeDrawer.test.tsx`, `features/case/Landing.test.tsx`,
+  `features/tree/domainMapping.test.ts`).
 - Console layout: toolbar buttons no longer wrap their label ("조건" split
   into two lines at 390 px), a narrow timeline keeps 요약 next to 시각, the
   stage rail is 48 px on phones, 실행 is icon-only there so the global search

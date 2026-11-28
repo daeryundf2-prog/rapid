@@ -640,13 +640,18 @@ export function domainNodeCount(target: DomainTarget, input: TreeModelInput): Do
       if (!group) return known(0, true, zero);
       return typeof group.count === "number" ? known(group.count, true, zero) : { count: UNKNOWN_COUNT };
     }
+    // A subset of an empty kind is empty too (F24): without this, a field / count-field node of a
+    // kind with no rows read "건수 미상" and kept its 0-row domain (이벤트 로그) listed.
+    const emptyKind = kindNode.count === 0;
     if (recordFieldsKey(target.fields)) {
       const count = fieldCount(kindNode, target);
-      return count === undefined ? { count: UNKNOWN_COUNT } : known(count, true, zero);
+      if (count !== undefined) return known(count, true, zero);
+      return emptyKind ? known(0, true, zero) : { count: UNKNOWN_COUNT };
     }
     if (target.countField) {
       const value = (kindNode as unknown as Record<string, unknown>)[target.countField];
-      return typeof value === "number" ? known(value, true, zero) : { count: UNKNOWN_COUNT };
+      if (typeof value === "number") return known(value, true, zero);
+      return emptyKind ? known(0, true, zero) : { count: UNKNOWN_COUNT };
     }
     if (!target.types?.length) {
       const state = known(kindNode.count, true, zero);
@@ -953,6 +958,20 @@ export function flagCountsText(counts: Partial<Record<Grade, number>>): string {
     .join(" · ")}`;
 }
 
+/**
+ * A domain's count badge. The total leaves out catch-all and filtered views (they span domains),
+ * so a domain holding only those read "0" over a child with rows (메신저·메일 0 › 문서/메일 색인
+ * 6). Then the largest child count is shown — a lower bound, exact for one child — so a 0 always
+ * means nothing to open.
+ */
+export function domainBadgeCount(total: number, children: readonly Pick<TreeModelNode, "count">[]): number {
+  if (total > 0) return total;
+  let largest = 0;
+  for (const child of children)
+    if (typeof child.count === "number" && child.count > largest) largest = child.count;
+  return largest;
+}
+
 function domainNodes(input: TreeModelInput): TreeModelNode[] {
   return DOMAINS.map<TreeModelNode>((domain) => {
     const flat: Array<{ def: DomainNodeDef; count: number | string | undefined }> = [];
@@ -1018,7 +1037,7 @@ function domainNodes(input: TreeModelInput): TreeModelNode[] {
       id: `domain:${domain.id}`,
       label: domain.label,
       icon: domain.icon,
-      count: anyKnown ? (total as number) : undefined,
+      count: anyKnown ? domainBadgeCount(total as number, children) : undefined,
       strongCount: true,
       route: children[0]?.route ?? { collection: "artifacts" },
       noSelect: true,

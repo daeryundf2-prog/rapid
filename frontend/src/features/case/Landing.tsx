@@ -1,13 +1,15 @@
 /**
- * First screen (visual-polish S10 / U-V6): a centred card with the brand mark, the three ways
- * to start (케이스 만들기 · 케이스 열기 · 케이스 없이 빠른 런 · 샘플), the recent cases and the key hints. Without an API
- * token the same card asks for the token instead (the token gate lives inside the card).
+ * First screen (visual-polish S10 / U-V6, F29): the brand, one primary start (케이스 만들기) with
+ * the other ways to start grouped beside it as quieter buttons, then the recent cases — each row
+ * leads with the case number and name (never cut), the last activity under it and the evidence
+ * path last. Without an API token the same panel asks for the token instead.
  */
 
 import { useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
-import { listCases } from "../../api/cases";
+import { type CaseDetail, listCases } from "../../api/cases";
 import { setAuthToken } from "../../api/client";
+import type { RunWithProgress } from "../../api/runsProgress";
 import { RUN_MODE_LABEL, runDisplayName } from "../../app/collections";
 import { CommandButton } from "../../commands/CommandButton";
 import { StatusBadge } from "../../components/Badge";
@@ -19,8 +21,11 @@ import { useRuns, useTimezone } from "../../state/hooks";
 import { formatTimestamp } from "../../utils/time";
 import "./case.css";
 
-/** Recent cases listed on the card (newest first). */
+/** Recent cases listed on the landing (latest activity first). */
 export const LANDING_RECENT_COUNT = 6;
+
+/** Text of the run without a case (quick runs, samples). */
+export const NO_CASE_LABEL = "케이스 없음";
 
 function TokenForm({ onSaved }: { onSaved: () => void }) {
   const [value, setValue] = useState("");
@@ -58,20 +63,68 @@ function TokenForm({ onSaved }: { onSaved: () => void }) {
   );
 }
 
+type CaseRunLink = { caseNumber: string; caseName: string; evidenceNumber: string };
+
+/** Case number, name and evidence number of every run started for a case (AXIOM adoption E1). */
+export function caseIndex(
+  cases: readonly Pick<CaseDetail, "case_number" | "name" | "evidence">[] | undefined,
+): Map<string, CaseRunLink> {
+  const index = new Map<string, CaseRunLink>();
+  for (const item of cases ?? []) {
+    for (const evidence of item.evidence ?? []) {
+      for (const run of evidence.runs ?? []) {
+        index.set(run.run_id, {
+          caseNumber: item.case_number,
+          caseName: item.name,
+          evidenceNumber: evidence.evidence_number,
+        });
+      }
+    }
+  }
+  return index;
+}
+
+export interface RecentCaseRow {
+  /** Case number (사건 번호), or "케이스 없음" for a quick run; "" while the case list loads. */
+  number: string;
+  /** What the analyst recognises: the case name, else the evidence folder name. Never cut. */
+  name: string;
+  /** Evidence number (E-001) of a case run. */
+  evidence: string;
+  /** Last activity: the run's last update, else its start (ISO). */
+  activeAt: string;
+  mode: string;
+}
+
+/**
+ * One recent-case row (F29): the case number and name first, the run's mode and last activity
+ * second, the evidence path last. A case named like its number shows the evidence folder as the
+ * name, so the line never repeats itself.
+ */
+export function recentCaseRow(
+  run: Pick<RunWithProgress, "run_id" | "created_at" | "updated_at" | "request">,
+  cases: ReadonlyMap<string, CaseRunLink> | null,
+): RecentCaseRow {
+  const link = cases?.get(run.run_id);
+  const folder = runDisplayName(run);
+  const caseName = link?.caseName?.trim() ?? "";
+  return {
+    number: cases ? (link?.caseNumber ?? NO_CASE_LABEL) : "",
+    name: caseName && caseName !== link?.caseNumber ? caseName : folder,
+    evidence: link?.evidenceNumber ?? "",
+    activeAt: String(run.updated_at || run.created_at || ""),
+    mode: RUN_MODE_LABEL[String(run.request?.mode ?? "")] ?? String(run.request?.mode ?? ""),
+  };
+}
+
 function RecentCases() {
   const { runs } = useRuns();
   const { timezone } = useTimezone();
-  // 사건 번호 › 증거 번호 of runs started for a case (AXIOM adoption E1); others read "케이스 없음".
   const cases = useQuery({ queryKey: ["cases"], queryFn: listCases, retry: false });
-  const caseOfRun = new Map<string, string>();
-  for (const item of cases.data ?? []) {
-    for (const evidence of item.evidence) {
-      for (const run of evidence.runs)
-        caseOfRun.set(run.run_id, `${item.case_number} › ${evidence.evidence_number}`);
-    }
-  }
+  const index = cases.data ? caseIndex(cases.data) : null;
   const recent = [...runs]
-    .sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")))
+    .map((run) => ({ run, row: recentCaseRow(run, index) }))
+    .sort((a, b) => b.row.activeAt.localeCompare(a.row.activeAt))
     .slice(0, LANDING_RECENT_COUNT);
   return (
     <section className="landing-recent" aria-labelledby="landing-recent-title">
@@ -84,11 +137,8 @@ function RecentCases() {
         </p>
       ) : (
         <ul className="landing-cases">
-          {recent.map((run) => {
-            const mode = RUN_MODE_LABEL[String(run.request?.mode ?? "")] ?? run.request?.mode ?? "";
-            const when = run.created_at
-              ? formatTimestamp(run.created_at, timezone, { precision: "minute" })
-              : "";
+          {recent.map(({ run, row }) => {
+            const when = row.activeAt ? formatTimestamp(row.activeAt, timezone, { precision: "minute" }) : "";
             return (
               <li key={run.run_id}>
                 <a
@@ -96,23 +146,22 @@ function RecentCases() {
                   href={serializeRoute({ runId: run.run_id, collection: "intake" })}
                   title={run.request?.root ?? run.run_id}
                 >
-                  <span className="landing-case-line">
-                    <span className="landing-case-name">{runDisplayName(run)}</span>
-                    <span className="landing-case-meta">
-                      {[
-                        cases.data ? (caseOfRun.get(run.run_id) ?? "케이스 없음") : "",
-                        mode,
-                        when,
-                        run.run_id.slice(0, 8),
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </span>
+                  <span className="landing-case-title">
+                    {row.number ? <span className="landing-case-number">{row.number}</span> : null}
+                    <span className="landing-case-name">{row.name}</span>
                   </span>
                   <StatusBadge status={String(run.status)} />
-                  {/* The evidence path on the second line (review #21). */}
+                  <span className="landing-case-meta">
+                    {when ? <span>마지막 활동 {when}</span> : null}
+                    {row.mode ? <span>{row.mode}</span> : null}
+                    <span className="mono">런 {run.run_id.slice(0, 8)}</span>
+                  </span>
+                  {/* The evidence (number + root) last, the path cut in the middle (review #21). */}
                   {run.request?.root ? (
-                    <MiddlePath path={run.request.root} whole className="landing-case-path" />
+                    <span className="landing-case-evidence">
+                      {row.evidence ? <span className="landing-case-evidence-no">{row.evidence}</span> : null}
+                      <MiddlePath path={run.request.root} whole className="landing-case-path" />
+                    </span>
                   ) : null}
                 </a>
               </li>
@@ -133,7 +182,7 @@ export function Landing({
 }) {
   return (
     <div className="landing" data-testid="landing">
-      <section className="landing-card" aria-labelledby="landing-title">
+      <section className="landing-panel" aria-labelledby="landing-title">
         <div className="landing-head">
           <BrandMark size={40} />
           <div>
@@ -147,6 +196,7 @@ export function Landing({
           <TokenForm onSaved={() => onTokenSaved?.()} />
         ) : (
           <>
+            {/* One primary start; the other ways to start are grouped, quieter (F29). */}
             <div className="landing-actions">
               <CommandButton
                 command="case.create"
@@ -155,28 +205,42 @@ export function Landing({
                 className="roomy"
                 testId="landing-create"
               />
-              <CommandButton
-                command="case.switch"
-                label="케이스 열기"
-                className="roomy"
-                testId="landing-open"
-              />
-              <CommandButton
-                command="case.run"
-                label="케이스 없이 빠른 런"
-                className="roomy"
-                testId="landing-run"
-              />
-              <CommandButton command="case.sample" label="샘플" className="roomy" testId="landing-sample" />
+              <fieldset className="landing-secondary" aria-label="다른 시작 방법">
+                <CommandButton
+                  command="case.switch"
+                  label="케이스 열기"
+                  variant="ghost"
+                  className="roomy"
+                  testId="landing-open"
+                />
+                <CommandButton
+                  command="case.run"
+                  label="케이스 없이 빠른 런"
+                  variant="ghost"
+                  className="roomy"
+                  testId="landing-run"
+                />
+                <CommandButton
+                  command="case.sample"
+                  label="샘플"
+                  variant="ghost"
+                  className="roomy"
+                  testId="landing-sample"
+                />
+              </fieldset>
             </div>
             <RecentCases />
           </>
         )}
-        {/* Key hints only once the console is usable (not on the token card, review #21). */}
+        {/* Key hints only once the console is usable (not on the token panel, review #21). */}
         {tokenRequired ? null : (
           <p className="landing-keys">
-            <kbd>{keyLabel("Ctrl+K")}</kbd> 명령 팔레트 <span aria-hidden="true">·</span> <kbd>?</kbd> 단축키
-            도움말
+            <span>
+              <kbd>{keyLabel("Ctrl+K")}</kbd> 명령 팔레트
+            </span>
+            <span>
+              <kbd>?</kbd> 단축키 도움말
+            </span>
           </p>
         )}
       </section>

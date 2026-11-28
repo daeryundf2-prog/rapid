@@ -72,16 +72,6 @@
   background: var(--bg-raised);
 }
 
-/* Landing (no case): the whole rail recedes until a case is open (review #14). */
-.stage-rail[data-disabled] .stage-rail-item {
-  opacity: 0.4;
-}
-
-.stage-rail[data-disabled] .stage-rail-item:hover {
-  background: transparent;
-  color: var(--text-muted);
-}
-
 .stage-panel {
   display: flex;
   flex-direction: column;

@@ -13,6 +13,7 @@ import {
   artifactKindNodes,
   buildTreeModel,
   docsCount,
+  domainBadgeCount,
   domainNodeCount,
   domainTotal,
   inventoryTotal,
@@ -894,5 +895,38 @@ describe("R5 L1 communication and media nodes", () => {
     ]) {
       expect(artifactTypeLabel(type), type).toMatch(/[가-힣]/);
     }
+  });
+});
+
+describe("0-row families fold into 결과 없는 계열 (F24)", () => {
+  const emptyEventlog: RunTree = {
+    run_id: "r1",
+    root: {},
+    nodes: [
+      {
+        id: "artifacts",
+        label: "아티팩트",
+        count: 0,
+        children: [kindNode("artifacts:eventlog", "eventlog", 0)],
+      },
+    ],
+  };
+
+  it("a field / count-field view of an empty kind is 0 (not 건수 미상), so its domain hides", () => {
+    const stale = domainNodeCount(
+      { collection: "artifacts", kind: "eventlog", countField: "stale_below_first_record_count" },
+      { tree: emptyEventlog },
+    );
+    expect(stale.count).toBe(0);
+    const eventlog = buildTreeModel({ tree: emptyEventlog }).find((n) => n.id === "domain:eventlog");
+    expect(eventlog?.count).toBe(0);
+    expect(eventlog?.hiddenReason).toBeTruthy();
+    expect(eventlog?.children?.every((child) => child.hiddenReason)).toBe(true);
+  });
+
+  it("a domain whose total leaves out catch-all views shows its largest child, never 0 over rows", () => {
+    expect(domainBadgeCount(0, [{ count: 6 }, { count: 0 }, { count: "—" }])).toBe(6);
+    expect(domainBadgeCount(0, [{ count: 0 }, { count: undefined }])).toBe(0);
+    expect(domainBadgeCount(4, [{ count: 39 }])).toBe(4);
   });
 });

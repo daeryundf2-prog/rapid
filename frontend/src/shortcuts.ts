@@ -171,7 +171,7 @@ export const KEY_DESCRIPTIONS: Record<keyof typeof KEY_MAP, string> = {
   stageExplore: "단계: 탐색",
   stageReview: "단계: 검토",
   stageReport: "단계: 보고",
-  treePanel: "좁은 창에서 단계 패널(탐색 트리) 열기/닫기",
+  treePanel: "단계 패널(탐색 트리) 펼치기/접기 (좁은 창: 서랍 열기/닫기)",
   conditions: "조건 패널 열기/닫기",
   treeEmpty: "탐색 트리: 결과 없는 계열 표시/숨김",
   viewerPopout: "뷰어를 새 창으로",

@@ -204,16 +204,13 @@
   padding: var(--space-6) var(--space-4);
 }
 
-.landing-card {
+/* The landing is the page itself, not a card (F29: the recent list inside a bordered card was a
+   card in a card). The recent-case list is the one framed surface. */
+.landing-panel {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
-  width: min(560px, 100%);
-  padding: var(--space-6);
-  background: var(--bg-panel);
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 16px 48px color-mix(in srgb, var(--scrim) 25%, transparent);
+  width: min(640px, 100%);
 }
 
 .landing-head {
@@ -224,7 +221,7 @@
 
 .landing-title {
   margin: 0;
-  font-size: var(--fs-screen-title);
+  font-size: var(--fs-case);
   font-weight: 700;
   letter-spacing: -0.01em;
 }
@@ -232,21 +229,32 @@
 .landing-sub {
   margin: 2px 0 0;
   color: var(--text-muted);
-  font-size: var(--fs-table-aux);
+  font-size: var(--fs-body);
 }
 
+/* One primary start, then the other ways to start as one quieter group. */
 .landing-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+}
+
+.landing-secondary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
 .landing-section-title {
   margin: 0 0 var(--space-2);
   color: var(--text-muted);
-  font-size: var(--fs-aux);
+  font-size: var(--fs-panel-title);
   font-weight: 600;
-  letter-spacing: 0.02em;
 }
 
 .landing-cases {
@@ -257,6 +265,7 @@
   list-style: none;
   border: 1px solid var(--line-subtle);
   border-radius: var(--radius);
+  background: var(--bg-panel);
   overflow: hidden;
 }
 
@@ -264,60 +273,83 @@
   border-top: 1px solid var(--line-subtle);
 }
 
+/* Row: [사건 번호 + 이름 (wraps, never cut)] [상태] / 마지막 활동 · 방식 · 런 / 증거 경로. */
 .landing-case {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
   column-gap: var(--space-3);
+  row-gap: 2px;
   padding: var(--space-2) var(--space-3);
   color: var(--text);
   text-decoration: none;
 }
 
 .landing-case:hover {
-  background: var(--bg-raised);
+  background: var(--bg-hover);
 }
 
 .landing-case:focus-visible {
   outline-offset: -2px;
 }
 
-.landing-case-line {
+.landing-case-title {
   grid-column: 1;
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: var(--space-2);
+  column-gap: var(--space-2);
   min-width: 0;
+}
+
+.landing-case-number {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .landing-case-name {
-  flex: 0 1 auto;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.landing-case-meta {
-  flex: 0 1 auto;
   min-width: 0;
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: var(--fs-aux);
-  font-variant-numeric: tabular-nums;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: var(--fs-panel-title);
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .landing-case > .status-chip {
   grid-column: 2;
-  grid-row: 1 / span 2;
-  align-self: center;
+  grid-row: 1;
+  align-self: start;
+}
+
+.landing-case-meta {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+  font-variant-numeric: tabular-nums;
+}
+
+.landing-case-meta .mono {
+  font-size: inherit;
+}
+
+.landing-case-evidence {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+}
+
+.landing-case-evidence-no {
+  flex: none;
 }
 
 .landing-case-path {
-  grid-column: 1;
-  margin-top: 2px;
+  min-width: 0;
 }
 
 .landing-note {
@@ -345,6 +377,9 @@
 }
 
 .landing-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
   margin: 0;
   color: var(--text-muted);
   font-size: var(--fs-aux);

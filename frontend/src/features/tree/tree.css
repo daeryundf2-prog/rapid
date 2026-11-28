@@ -34,9 +34,10 @@
   background: var(--bg-hover);
 }
 
+/* Selected: the tonal wash, the accent icon (below) and a heavier label; no side stripe. */
 .case-tree-item.selected {
   background: var(--bg-selected);
-  box-shadow: inset 2px 0 0 var(--accent);
+  font-weight: 600;
 }
 
 /* Top-level nodes (증거 소스 · 전체 보기 · the domains) read as section headers (review #7). */

@@ -5,7 +5,7 @@ import type { RunWithProgress } from "../../api/runsProgress";
 import { TokenGate } from "../../app/TokenGate";
 import { useAppStore } from "../../state/store";
 import { registerCaseCommands } from "./commands";
-import { LANDING_RECENT_COUNT, Landing } from "./Landing";
+import { caseIndex, LANDING_RECENT_COUNT, Landing, NO_CASE_LABEL, recentCaseRow } from "./Landing";
 import { mockFetch, renderWithQuery } from "./testUtils";
 
 afterEach(() => {
@@ -57,14 +57,14 @@ describe("landing card (visual-polish S10)", () => {
     unregister();
   });
 
-  it("recent runs show 사건 › 증거 for case runs and 케이스 없음 for the others (Q-X2)", async () => {
+  it("each recent row leads with the case number and name, then activity, then the evidence (F29)", async () => {
     mockFetch({
       "GET /api/cases": {
         cases: [
           {
             case_id: "c1",
             case_number: "2026-1",
-            name: "x",
+            name: "회계 부정 내부 감사 — 재무팀 공용 PC 두 대와 메일함 사본",
             evidence: [{ citation_id: "e1", evidence_number: "E-01", runs: [{ run_id: "run-linked01" }] }],
           },
         ],
@@ -76,7 +76,7 @@ describe("landing card (visual-polish S10)", () => {
           run_id: "run-linked01",
           status: "completed",
           created_at: "2026-10-02T00:00:00Z",
-          request: { root: "C:/a" },
+          request: { root: "C:/a", mode: "fraud" },
         },
         {
           run_id: "run-loose001",
@@ -87,8 +87,64 @@ describe("landing card (visual-polish S10)", () => {
       ] as unknown as RunWithProgress[],
     });
     renderWithQuery(<Landing />);
-    await waitFor(() => expect(screen.getAllByRole("link")[0]?.textContent).toContain("2026-1 › E-01"));
-    expect(screen.getAllByRole("link")[1]?.textContent).toContain("케이스 없음");
+    await waitFor(() =>
+      expect(screen.getAllByRole("link")[0]?.querySelector(".landing-case-number")?.textContent).toBe(
+        "2026-1",
+      ),
+    );
+    const first = screen.getAllByRole("link")[0] as HTMLElement;
+    const title = first.querySelector(".landing-case-title") as HTMLElement;
+    // The title is the row's first child: number, then the whole name (wraps, no ellipsis).
+    expect(first.firstElementChild).toBe(title);
+    expect(title.textContent).toBe("2026-1회계 부정 내부 감사 — 재무팀 공용 PC 두 대와 메일함 사본");
+    expect(first.querySelector(".landing-case-meta")?.textContent).toContain("마지막 활동");
+    expect(first.querySelector(".landing-case-meta")?.textContent).toContain("문서·부정 조사");
+    expect(first.querySelector(".landing-case-evidence")?.textContent).toContain("E-01");
+    expect(screen.getAllByRole("link")[1]?.querySelector(".landing-case-title")?.textContent).toBe(
+      "케이스 없음b",
+    );
+  });
+
+  it("recentCaseRow: a case named like its number shows the evidence folder; the last update orders", () => {
+    const index = caseIndex([
+      {
+        case_number: "2026-7",
+        name: "2026-7",
+        evidence: [{ evidence_number: "E-02", runs: [{ run_id: "r1" }] }],
+      },
+    ] as never);
+    const row = recentCaseRow(
+      {
+        run_id: "r1",
+        created_at: "2026-10-01T00:00:00Z",
+        updated_at: "2026-10-03T00:00:00Z",
+        request: { root: "/ev/disk-a/" },
+      },
+      index,
+    );
+    expect(row).toEqual({
+      number: "2026-7",
+      name: "disk-a",
+      evidence: "E-02",
+      activeAt: "2026-10-03T00:00:00Z",
+      mode: "",
+    });
+    // Case list still loading: no number yet rather than a wrong "케이스 없음".
+    expect(recentCaseRow({ run_id: "r9", request: { root: "/x/y" } }, null).number).toBe("");
+    expect(recentCaseRow({ run_id: "r9", request: { root: "/x/y" } }, index).number).toBe(NO_CASE_LABEL);
+  });
+
+  it("one primary start; 열기 · 빠른 런 · 샘플 are one quieter group", () => {
+    const unregister = registerCaseCommands({ reportCandidates: undefined });
+    renderWithQuery(<Landing />);
+    expect(screen.getByTestId("landing-create").className).toContain("primary");
+    const group = screen.getByRole("group", { name: "다른 시작 방법" });
+    for (const id of ["landing-open", "landing-run", "landing-sample"]) {
+      const button = screen.getByTestId(id);
+      expect(group.contains(button)).toBe(true);
+      expect(button.className).not.toContain("primary");
+    }
+    unregister();
   });
 
   it("with no cases says how to start", () => {

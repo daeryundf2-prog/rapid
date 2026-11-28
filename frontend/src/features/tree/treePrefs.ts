@@ -17,12 +17,15 @@ interface TreePrefsState {
   showEmpty: boolean;
   /** Mounted trees (the command's disabled reason otherwise). */
   mounted: number;
+  /** Label of the node the route selects (the folded panel strip names where the analyst is). */
+  location: string;
   setShowEmpty: (show: boolean) => void;
 }
 
 export const useTreePrefs = create<TreePrefsState>((set) => ({
   showEmpty: readStored(SHOW_EMPTY_KEY) === "1",
   mounted: 0,
+  location: "",
   setShowEmpty: (show) => {
     writeStored(SHOW_EMPTY_KEY, show ? "1" : null);
     set({ showEmpty: show });
@@ -31,7 +34,7 @@ export const useTreePrefs = create<TreePrefsState>((set) => ({
 
 /** Tests: re-read the stored preference. */
 export function resetTreePrefs(): void {
-  useTreePrefs.setState({ showEmpty: readStored(SHOW_EMPTY_KEY) === "1", mounted: 0 });
+  useTreePrefs.setState({ showEmpty: readStored(SHOW_EMPTY_KEY) === "1", mounted: 0, location: "" });
 }
 
 export function treeEmptyCommand(): Command {
