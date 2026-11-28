@@ -21,6 +21,12 @@ export interface RowFocusRequest {
   domFocus: boolean;
 }
 
+/**
+ * What a RowFocusRequest did: moved, or stopped at the real end of the list, or stopped at rows
+ * the list has not loaded yet (the announcement must not claim "none left" then).
+ */
+export type RowFocusResult = "moved" | "end" | "unloaded";
+
 export interface RowSource {
   getSelectedRows: () => GridRow[];
   /** The list's focused (cursor) row: the verdict scope when the viewer has no target yet. */
@@ -28,9 +34,13 @@ export interface RowSource {
   /** Optimistic row patch on the list's own cache; returns the rollback. */
   patchRows?: (keys: string[], patch: (row: GridRow) => GridRow) => () => void;
   refetch?: () => void;
-  /** Move the focused row; false when there is no such row (end of the list, none unreviewed). */
-  moveFocus?: (request: RowFocusRequest) => boolean;
+  /** Move the focused row (by key: a judged row leaving a filtered list does not shift the target). */
+  moveFocus?: (request: RowFocusRequest) => RowFocusResult;
   clearSelection?: () => void;
+  /** Replace the selection (a failed verdict puts the judged selection back). */
+  setSelection?: (keys: string[]) => void;
+  /** The row is on screen under the current filters (selected rows may be filtered out). */
+  isShown?: (key: string) => boolean;
 }
 
 const sources: RowSource[] = [];

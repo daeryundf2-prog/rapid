@@ -32,6 +32,7 @@ import {
   focusInViewer,
   NO_ROW_REASON,
   runVerdict,
+  UNLOADED_END,
   undoDisabledReason,
   undoLastVerdict,
   useVerdictPrefs,
@@ -76,7 +77,8 @@ function rowStepCommand(step: 1 | -1): Command {
     run: () => {
       // From the viewer the viewer keeps focus (it follows the new row); elsewhere focus lands on the row.
       const moved = currentRowSource()?.moveFocus?.({ step, domFocus: !focusInViewer() });
-      if (moved === false) announce(step === 1 ? "마지막 행입니다" : "첫 행입니다");
+      if (moved === "end") announce(step === 1 ? "마지막 행입니다" : "첫 행입니다");
+      if (moved === "unloaded") announce(UNLOADED_END);
     },
   };
 }

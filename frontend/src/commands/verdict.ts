@@ -2,10 +2,11 @@
  * The verdict key flow (design-viewer-keys F17): which rows R / I / X / B act on, what happens
  * after a verdict, and Z.
  *
- * One function, `reviewScope()`, answers "which rows": two or more selected rows → every selected
- * row ("선택 n건"); otherwise the viewer's row, which follows the grid's focused row
- * ("08:02:48 행"). The status-bar hint, the announcement and the write all read it, so a key never
- * marks rows other than the ones the screen named.
+ * One function, `reviewScope()`, answers "which rows": two or more selected rows → the selected
+ * rows the list shows now ("선택 n건"; selected rows the filters hide are left out and named, "숨은
+ * 선택 m건 제외"); otherwise the viewer's row, which follows the grid's focused row ("08:02:48 행").
+ * The status-bar hint, the announcement and the write all read it, so a key never marks rows other
+ * than the ones the screen named.
  *
  * After a verdict the list moves on (setting: 다음 행 (default) · 다음 미판정 행 · 그대로,
  * persisted), the result is announced politely ("관련 있음 3건 · Z 되돌리기"), and Z puts the
@@ -29,7 +30,7 @@ import {
   reviewTargetOf,
   storeNotice,
 } from "../features/grid/reviewActions";
-import { currentRowSource } from "../features/review/rowSource";
+import { currentRowSource, type RowFocusResult } from "../features/review/rowSource";
 import { targetAsGridRow } from "../features/viewer/citation";
 import { readStored, writeStored } from "../state/storage";
 import { useAppStore } from "../state/store";
@@ -49,6 +50,8 @@ export interface ReviewScope {
   rows: GridRow[];
   /** "선택 3건" · "08:02:48 행" · "'History' 행"; "" when there is no row. */
   label: string;
+  /** Selected rows left out because the list does not show them (filtered out, not loaded). */
+  hidden: number;
   runId: string | null;
   /**
    * The rows' previous review state is known (grid rows): Z can restore it. A viewer target
@@ -57,7 +60,19 @@ export interface ReviewScope {
   restorable: boolean;
 }
 
-const NO_SCOPE: ReviewScope = { kind: "none", rows: [], label: "", runId: null, restorable: false };
+const NO_SCOPE: ReviewScope = {
+  kind: "none",
+  rows: [],
+  label: "",
+  hidden: 0,
+  runId: null,
+  restorable: false,
+};
+
+/** "숨은 선택 2건 제외": what a selection verdict left out. */
+export function hiddenSelectionText(hidden: number): string {
+  return hidden > 0 ? `숨은 선택 ${hidden.toLocaleString("ko-KR")}건 제외` : "";
+}
 
 /** "08:02:48 행" from the row time in the display zone, else the row's short name. */
 export function rowScopeLabel(row: GridRow, tz: string = currentTimezone()): string {
@@ -77,12 +92,18 @@ export function reviewScope(ctx?: Pick<CommandContext, "selectedRowKeys" | "runI
   const selectedKeys = ctx?.selectedRowKeys ?? state.selectedRowKeys;
   const runId = ctx?.runId ?? state.route.runId;
   if (selectedKeys.length >= SELECTION_SCOPE_MIN) {
-    const rows = currentRowSource()?.getSelectedRows() ?? [];
-    if (rows.length >= SELECTION_SCOPE_MIN) {
+    // Selection survives filter changes: only the selected rows on screen are judged (review P2-1).
+    const source = currentRowSource();
+    const loaded = source?.getSelectedRows() ?? [];
+    const rows = source?.isShown ? loaded.filter((row) => source.isShown?.(row.rowKey)) : loaded;
+    const hidden = Math.max(0, selectedKeys.length - rows.length);
+    if (rows.length >= SELECTION_SCOPE_MIN || (rows.length > 0 && hidden > 0)) {
+      const count = `선택 ${rows.length.toLocaleString("ko-KR")}건`;
       return {
         kind: "selection",
         rows,
-        label: `선택 ${rows.length.toLocaleString("ko-KR")}건`,
+        label: hidden > 0 ? `${count} · ${hiddenSelectionText(hidden)}` : count,
+        hidden,
         runId,
         restorable: true,
       };
@@ -93,11 +114,25 @@ export function reviewScope(ctx?: Pick<CommandContext, "selectedRowKeys" | "runI
     // No viewer target yet (the shell has not mirrored the grid's focus): the list's own cursor row.
     const focused = currentRowSource()?.getFocusedRow?.();
     if (!focused || !runId) return NO_SCOPE;
-    return { kind: "row", rows: [focused], label: rowScopeLabel(focused), runId, restorable: true };
+    return {
+      kind: "row",
+      rows: [focused],
+      label: rowScopeLabel(focused),
+      hidden: 0,
+      runId,
+      restorable: true,
+    };
   }
   const known = state.viewerRow;
   const row = known ?? targetAsGridRow(target);
-  return { kind: "row", rows: [row], label: rowScopeLabel(row), runId: target.runId, restorable: !!known };
+  return {
+    kind: "row",
+    rows: [row],
+    label: rowScopeLabel(row),
+    hidden: 0,
+    runId: target.runId,
+    restorable: !!known,
+  };
 }
 
 export const NO_LOCATION_REASON = "출처 위치를 알 수 없는 행은 표시할 수 없습니다";
@@ -152,18 +187,46 @@ export function focusInViewer(): boolean {
   return active instanceof Element && active.closest(".viewer, #viewer") !== null;
 }
 
-/** Move the list after a verdict on `scope`; returns false when there was nowhere to go. */
-function advanceAfter(scope: ReviewScope, mode: AdvanceMode): boolean {
-  if (mode === "stay") return true;
+/**
+ * Move the list after a verdict on `scope`. Runs BEFORE the optimistic patch: the next row is
+ * picked by key from the list as it was, so judged rows leaving a filtered list cannot shift the
+ * cursor past a row (review P1-2; the grid then follows that key).
+ */
+function advanceAfter(
+  scope: ReviewScope,
+  mode: AdvanceMode,
+  selectedKeys: readonly string[],
+): RowFocusResult {
+  if (mode === "stay") return "moved";
   const source = currentRowSource();
-  if (!source?.moveFocus) return true;
+  if (!source?.moveFocus) return "moved";
   // A judged selection is done: the next key acts on the next row, not the same batch again.
-  if (scope.kind === "selection") source.clearSelection?.();
+  // Selected rows the filters hid stay selected (they were not judged).
+  if (scope.kind === "selection") {
+    const judged = new Set(scope.rows.map((row) => row.rowKey));
+    const rest = selectedKeys.filter((key) => !judged.has(key));
+    if (rest.length && source.setSelection) source.setSelection(rest);
+    else source.clearSelection?.();
+  }
   return source.moveFocus({
     after: scope.rows.map((row) => row.rowKey),
     unreviewed: mode === "next-unreviewed",
     domFocus: !focusInViewer(),
   });
+}
+
+/** Said when the list stopped at its loaded end (more rows exist below). */
+export const UNLOADED_END = "불러온 마지막 행 — 아래로 스크롤해 더 불러오기";
+
+/** Why the list did not move after a verdict ("" when it moved). */
+export function advanceStopText(result: RowFocusResult, mode: AdvanceMode): string {
+  if (result === "moved") return "";
+  if (mode === "next-unreviewed") {
+    return result === "unloaded"
+      ? "불러온 행 중 미판정 없음 — 아래로 스크롤해 더 불러오기"
+      : "다음 미판정 행 없음";
+  }
+  return result === "unloaded" ? UNLOADED_END : "마지막 행";
 }
 
 // --- verdict labels ----------------------------------------------------------
@@ -293,16 +356,25 @@ export async function runVerdict(
       ? (scope.rows[0]?.rowKey ?? null)
       : (source?.getFocusedRow?.()?.rowKey ?? useAppStore.getState().focusedRowKey);
   const keys = scope.rows.map((row) => row.rowKey);
+  const selectedKeys = [...(options.ctx?.selectedRowKeys ?? useAppStore.getState().selectedRowKeys)];
+  const mode = useVerdictPrefs.getState().advance;
+  const moves = options.advance !== false && ADVANCING.has(action);
+  // Pick the next row by key before the patch can take judged rows out of the list (P1-2).
+  const moved: RowFocusResult = moves ? advanceAfter(scope, mode, selectedKeys) : "moved";
   const rollback = scope.restorable
     ? (source?.patchRows?.(keys, optimisticPatch(action, options.tag)) ?? (() => {}))
     : () => {};
-  const moves = options.advance !== false && ADVANCING.has(action);
-  const moved = moves ? advanceAfter(scope, useVerdictPrefs.getState().advance) : true;
   let result: ApplyResult;
   try {
     result = await applyReviewAction(runId, scope.rows, action, options.tag ? { tag: options.tag } : {});
   } catch (error) {
     rollback();
+    // The write failed: the selection and the cursor go back too, so the analyst retries the same
+    // rows (review P3-3).
+    if (moves && mode !== "stay") {
+      if (scope.kind === "selection") source?.setSelection?.(selectedKeys);
+      if (focusKey) source?.moveFocus?.({ key: focusKey, domFocus: !focusInViewer() });
+    }
     throw error;
   }
   if (scope.restorable) {
@@ -313,11 +385,8 @@ export async function runVerdict(
   const count = scope.rows.length.toLocaleString("ko-KR");
   const tail = [
     scope.restorable ? "Z 되돌리기" : "이전 상태를 몰라 되돌릴 수 없음",
-    moved
-      ? ""
-      : useVerdictPrefs.getState().advance === "next-unreviewed"
-        ? "다음 미판정 행 없음"
-        : "마지막 행",
+    hiddenSelectionText(scope.hidden),
+    advanceStopText(moved, mode),
   ].filter(Boolean);
   const text = `${verdictLabel(action, options.tag)} ${count}건 · ${tail.join(" · ")}${storeNotice(result)}`;
   tell(text);

@@ -64,6 +64,7 @@ import { GridEmpty, type GridEmptyState } from "./GridEmpty";
 import { ColumnMenu, DocsMatchedToggle, GridFooter, GridToolbar } from "./GridToolbar";
 import {
   buildViewerTarget,
+  followFocusKey,
   type GridCommandHost,
   rowFocusTarget,
   runBatch,
@@ -663,7 +664,21 @@ export function DataGrid(props: DataGridProps = {}) {
     [compactMode, displayRows, cq.getRow],
   );
 
-  const clampedFocus = displayCount === 0 ? -1 : Math.min(focusIdx, displayCount - 1);
+  // A verdict advance moves the cursor to a row by key; when the judged rows then leave the
+  // filtered / status-sorted list the rows shift up, and the cursor follows its row (review P1-2)
+  // until the analyst moves it.
+  const followRef = useRef<{ key: string; index: number } | null>(null);
+  if (followRef.current && followRef.current.index !== focusIdx) followRef.current = null;
+  const rawFocus = displayCount === 0 ? -1 : Math.min(focusIdx, displayCount - 1);
+  const clampedFocus = followRef.current
+    ? followFocusKey(followRef.current.key, rawFocus, displayCount, getDisplayRow)
+    : rawFocus;
+  useEffect(() => {
+    const follow = followRef.current;
+    if (!follow || clampedFocus < 0 || clampedFocus === focusIdx) return;
+    follow.index = clampedFocus;
+    setFocusIdx(clampedFocus);
+  }, [clampedFocus, focusIdx]);
   const focusIdxRef = useRef(clampedFocus);
   focusIdxRef.current = clampedFocus;
 
@@ -1075,13 +1090,19 @@ export function DataGrid(props: DataGridProps = {}) {
     getSelectedCount: () => selectedKeys.size,
     moveFocus: (request) => {
       const target = rowFocusTarget(request, clampedFocus, displayCount, getDisplayRow);
-      if (target === null) return false;
+      // The loaded end of a compact list with more pages is not the end of the list.
+      if (target === "end") return compactMode && cq.canLoadMore ? "unloaded" : "end";
+      if (target === "unloaded") return target;
+      const key = getDisplayRow(target)?.rowKey;
       moveFocus(target, false);
+      followRef.current = key ? { key, index: target } : null;
       // From the viewer (J / K, a verdict there): the row follows, DOM focus stays put.
       if (!request.domFocus) wantDomFocus.current = false;
-      return true;
+      return "moved";
     },
     clearSelection: () => setSelectionKeys([]),
+    setSelection: (keys) => setSelectionKeys(keys),
+    isShown: (key) => (displayKeys ? displayKeys.has(key) : rowsByKey.has(key)),
   };
   useGridCommands(host);
 

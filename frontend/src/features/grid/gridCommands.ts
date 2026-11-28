@@ -10,7 +10,7 @@ import { caseRoute, otherCaseIds } from "../analysis/crossCase";
 import { useAnalysisStore } from "../analysis/store";
 import { caseCitationParts, citationDisabledReason, resolveCaseLink } from "../case/caseLink";
 import { buildReviewToolGridCommands } from "../review/gridTools";
-import { type RowFocusRequest, registerRowSource } from "../review/rowSource";
+import { type RowFocusRequest, type RowFocusResult, registerRowSource } from "../review/rowSource";
 import { recordCitationParts } from "../viewer/citation";
 import { PIVOT_LABELS, PIVOT_ORDER, PIVOT_SHORTCUTS, type PivotId, recordPivots } from "../viewer/pivots";
 import { cachedSourceRow } from "../viewer/sourceRecord";
@@ -50,8 +50,10 @@ export interface GridCommandHost {
   /** Selected keys, loaded or not (getSelectedRows only returns loaded rows). */
   getSelectedCount?: () => number;
   /** Move the focused row (verdict advance, J / K from the viewer, Z back to the judged row). */
-  moveFocus?: (request: RowFocusRequest) => boolean;
+  moveFocus?: (request: RowFocusRequest) => RowFocusResult;
   clearSelection?: () => void;
+  setSelection?: (keys: string[]) => void;
+  isShown?: (key: string) => boolean;
 }
 
 export function buildViewerTarget(runId: string, row: GridRow, mode?: ViewerMode): ViewerTarget {
@@ -77,20 +79,20 @@ export function buildViewerTarget(runId: string, row: GridRow, mode?: ViewerMode
 }
 
 /**
- * Display index a RowFocusRequest lands on, or null when there is none (end of the list, no
- * unjudged row among the loaded ones, the key is not loaded). `rowAt` returns undefined for rows
- * not loaded yet; the 미판정 search stops there instead of guessing.
+ * Display index a RowFocusRequest lands on, else why not: "end" (no such row: end of the list,
+ * none unjudged, the key is not in the list) or "unloaded" (the 미판정 search reached rows not
+ * loaded yet; `rowAt` returns undefined for those — it stops there instead of guessing).
  */
 export function rowFocusTarget(
   request: RowFocusRequest,
   focus: number,
   count: number,
   rowAt: (index: number) => GridRow | undefined,
-): number | null {
-  if (count === 0) return null;
+): number | "end" | "unloaded" {
+  if (count === 0) return "end";
   if (request.key !== undefined) {
     for (let i = 0; i < count; i += 1) if (rowAt(i)?.rowKey === request.key) return i;
-    return null;
+    return "end";
   }
   let from = Math.max(focus, 0);
   const after = request.after?.length ? new Set(request.after) : null;
@@ -107,13 +109,37 @@ export function rowFocusTarget(
   if (request.unreviewed) {
     for (let i = from + 1; i < count; i += 1) {
       const row = rowAt(i);
-      if (!row) return null;
+      if (!row) return "unloaded";
       if (!row.reviewStatus && !after?.has(row.rowKey)) return i;
     }
-    return null;
+    return "end";
   }
   const next = from + (request.step ?? 1);
-  return next < 0 || next >= count ? null : next;
+  return next < 0 || next >= count ? "end" : next;
+}
+
+/** How far a followed row may have shifted (rows judged out of a filtered list in one batch). */
+const FOLLOW_WINDOW = 512;
+
+/**
+ * The display index of the row the list moved to by key (verdict advance, review P1-2): when
+ * judged rows leave a filtered / status-sorted list the rows below shift up, so the position the
+ * cursor was given now holds another row. Finds `key` near `focus` (nearest first); `focus` when
+ * the row is still there or gone.
+ */
+export function followFocusKey(
+  key: string,
+  focus: number,
+  count: number,
+  rowAt: (index: number) => GridRow | undefined,
+): number {
+  if (focus < 0 || rowAt(focus)?.rowKey === key) return focus;
+  for (let d = 1; d <= FOLLOW_WINDOW; d += 1) {
+    if (focus - d >= 0 && rowAt(focus - d)?.rowKey === key) return focus - d;
+    if (focus + d < count && rowAt(focus + d)?.rowKey === key) return focus + d;
+    if (focus - d < 0 && focus + d >= count) break;
+  }
+  return focus;
 }
 
 /**
@@ -568,8 +594,10 @@ export function useGridCommands(host: GridCommandHost): void {
         getFocusedRow: () => hostRef.current.getFocusedRow(),
         patchRows: (keys, patch) => hostRef.current.patchRows(keys, patch),
         refetch: () => hostRef.current.refetch(),
-        moveFocus: (request) => hostRef.current.moveFocus?.(request) ?? false,
+        moveFocus: (request) => hostRef.current.moveFocus?.(request) ?? "end",
         clearSelection: () => hostRef.current.clearSelection?.(),
+        setSelection: (keys) => hostRef.current.setSelection?.(keys),
+        isShown: (key) => hostRef.current.isShown?.(key) ?? true,
       }),
     ];
     return () => {
