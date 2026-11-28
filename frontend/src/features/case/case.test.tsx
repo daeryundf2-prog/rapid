@@ -287,7 +287,9 @@ describe("ReportDialog / export commands", () => {
     const withZero = buildCaseCommands({ reportCandidates: 0 });
     const reason = (id: string, over = {}) =>
       withZero.find((c) => c.id === id)?.disabledReason?.({ ...ctx, ...over });
+    // The three gated exports share one reason, and that reason names the key that lifts it.
     expect(reason("export.case-report")).toBe(NO_CANDIDATES_REASON);
+    expect(reason("export.case-report")).toContain("Shift R");
     expect(reason("export.reviewer-bundle")).toBe(NO_CANDIDATES_REASON);
     expect(reason("export.submission-manifest")).toBe(NO_CANDIDATES_REASON);
     expect(reason("export.validation-package")).toBeUndefined();

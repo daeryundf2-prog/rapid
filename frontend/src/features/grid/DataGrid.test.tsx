@@ -253,8 +253,8 @@ describe("DataGrid keyboard", () => {
       "재검토 표시": "I",
       "제외 표시": "X",
       북마크: "B",
+      "보고서 포함 표시": "Shift R",
     });
-    expect(keys["보고서 포함 표시"]).toBeUndefined();
     const ocr = items.find((i) => i.dataset.command === "grid.ocrSelected");
     expect(ocr?.querySelector(".menu-item-reason")?.textContent).toBe(
       ocr?.getAttribute("data-disabled-reason"),
