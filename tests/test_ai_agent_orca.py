@@ -109,11 +109,18 @@ class OrcaBotsTests(AgentFixture):
               created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));
             PRAGMA user_version = 49;""",
             ("INSERT INTO bot_requests VALUES ('m1','root','bot-2','bot-1','handoff',1,?,'2026-09-21 14:13:20',NULL)",
-             (json.dumps({"fromBotName": "Reviewer", "toBotName": "Rapid helper", "request": "이 PR 봐줘"}),)),
+             (json.dumps({"fromBotName": "Reviewer", "toBotName": "Rapid helper",
+                          "request": f"이 PR 봐줘 GITHUB_TOKEN={TOKEN}"}),)),
             ("INSERT INTO bot_request_outcomes VALUES ('m1','answered','2026-09-21 14:23:20')", ()),
-            ("INSERT INTO worker_dispatches (dispatch_id, state, stage, worktree_id, created_at, updated_at)"
-             " VALUES ('disp-1','succeeded','done','repo-1::/w/rapid-fix','2026-09-21 14:13:20','2026-09-21 14:23:20')",
-             ()))
+            # The worker's launch options hold its argv and environment: unlabelled secrets that clean() cannot
+            # see, so they are never exported (only state, stage, worktree and the redacted last error).
+            ("INSERT INTO worker_dispatches (dispatch_id, state, stage, worktree_id, agent_terminal_handle, effects,"
+             " start_options, last_error, created_at, updated_at) VALUES ('disp-1','succeeded','done',"
+             "'repo-1::/w/rapid-fix','pty-UNLABELLED-HANDLE',?,?,?,'2026-09-21 14:13:20','2026-09-21 14:23:20')",
+             (json.dumps([{"kind": "env-file", "path": "/w/.env"}]),
+              json.dumps({"argv": ["claude", "--api-key", "POSITIONAL-SECRET-NEVER-EXPORTED", "-pHUNTER2-NEVER"],
+                          "env": {"STRIPE": "STRIPE-LIVE-NEVER-EXPORTED"}}),
+              f"auth failed token={TOKEN}")))
 
         rows, events = self.collect()
         found = by_type(rows)
@@ -141,15 +148,20 @@ class OrcaBotsTests(AgentFixture):
                          ("working", "done", "merged", "owner"))
         self.assertEqual((comment["text"], comment["actor_bot"], comment["session_id"]), ("PR 올림", "bot-1", "chat-1"))
         (request,) = found["agent-bot-request"]
-        self.assertEqual((request["text"], request["from_bot_name"], request["purpose"], request["outcome"]),
-                         ("이 PR 봐줘", "Reviewer", "handoff", "answered"))
+        self.assertEqual((request["from_bot_name"], request["purpose"], request["outcome"]),
+                         ("Reviewer", "handoff", "answered"))
+        self.assertTrue(request["text"].startswith("이 PR 봐줘 GITHUB_TOKEN="))
         self.assertEqual((request["timestamp_raw"], request["timestamp_utc"], request["outcome_utc"]),
                          ("2026-09-21 14:13:20", CREATED_UTC, CLOSED_UTC))
         (dispatch,) = found["agent-bot-dispatch"]
         self.assertEqual((dispatch["state"], dispatch["worktree_id"], dispatch["worktree_path"]),
                          ("succeeded", "repo-1::/w/rapid-fix", "/w/rapid-fix"))
-        self.assertNotIn("SETTINGS-NEVER-READ", json.dumps([r.details for r in rows]))
-        self.assertNotIn("MEMBER-NAME-NEVER-EXPORTED", json.dumps([r.details for r in rows]))
+        self.assertTrue(dispatch["text"].startswith("auth failed token="))
+        self.assertEqual(dispatch["command_line"], "")
+        exported = json.dumps([r.details for r in rows])
+        for hidden in (TOKEN, "SETTINGS-NEVER-READ", "MEMBER-NAME-NEVER-EXPORTED", "POSITIONAL-SECRET-NEVER-EXPORTED",
+                       "HUNTER2-NEVER", "STRIPE-LIVE-NEVER-EXPORTED", "UNLABELLED-HANDLE", "/w/.env"):
+            self.assertNotIn(hidden, exported)
         self.assertNotIn("agent-parse-note", found)
         self.assertEqual(events, [
             ("agent-bot", "created"), ("agent-bot", "last-updated"), ("agent-bot-dispatch", "last-updated"),

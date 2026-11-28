@@ -9,7 +9,9 @@ and ``src/main/bots/bot-home.ts`` (the bot record and its home in ``~/.orca/bots
 ``src/main/orca-profiles/cloud-session/profile-cloud-session-store.ts`` (``account-session.json.enc``).
 
 Credentials are never exported: the Orca Cloud session file gives only its seal format and save time, and token or
-key files only their names."""
+key files only their names. No argv or command line is exported either: a worker's launch options (argv,
+environment, env files), effects and terminal handle can hold unlabelled secrets that redaction cannot see. Every
+exported text passes ``clean()``."""
 from __future__ import annotations
 
 import json
