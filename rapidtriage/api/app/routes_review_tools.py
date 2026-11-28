@@ -123,8 +123,8 @@ def apply_review_tag_batch(database: CaseDatabase, request: Any, targets: list[d
         raise HTTPException(status_code=422, detail="적용할 태그(tag_ids 또는 remove_tag_ids)가 없습니다")
     case_id = request.case_id
     try:
-        with database.connect() as connection:
-            apply_schema(connection)
+        # Write lock before the first read: concurrent tag batches on one row keep every tag (R4).
+        with database.write_transaction() as connection:
             if connection.execute("SELECT 1 FROM case_record WHERE case_id = ?", (case_id,)).fetchone() is None:
                 raise HTTPException(status_code=404, detail=f"케이스를 찾을 수 없습니다: {case_id}")
             evidence_source_id = None

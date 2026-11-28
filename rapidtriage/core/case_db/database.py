@@ -125,6 +125,7 @@ from .schema import (
     insert_document_trigram_row,
     list_tables,
     register_case_db_functions,
+    register_schema_extension,
 )
 from .search import (
     CASE_SEARCH_HIT_TYPE_LABELS,
@@ -238,6 +239,10 @@ class CitationAllocator:
         self._flushed = self._last + 1
 
 
+# Seconds a connection waits for another writer's lock before "database is
+# locked": concurrent console users serialise on the write lock (R4).
+CASE_DB_BUSY_TIMEOUT_SECONDS = 30.0
+
 # Key added to imported artifact rows: which run output row they came from.
 ARTIFACT_SOURCE_LOCATOR_KEY = "source_locator"
 
@@ -278,7 +283,7 @@ class CaseDatabase:
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(self.path)
+        connection = sqlite3.connect(self.path, timeout=CASE_DB_BUSY_TIMEOUT_SECONDS)
         connection.row_factory = sqlite3.Row
         # SQL functions of the compressed artifact layout (view/triggers).
         register_case_db_functions(connection)
@@ -305,6 +310,21 @@ class CaseDatabase:
             raise
         finally:
             connection.close()
+
+    @contextmanager
+    def write_transaction(self) -> Iterator[sqlite3.Connection]:
+        """``connect()`` with the schema applied, then ``BEGIN IMMEDIATE``.
+
+        For read-modify-write of review state: the write lock is taken before
+        the first read, so concurrent writers serialise instead of acting on a
+        stale read (lost tags, duplicate marks).
+        """
+        with self.connect() as connection:
+            apply_schema(connection)
+            # apply_schema may have written (migrations); end that transaction first.
+            connection.commit()
+            connection.execute("BEGIN IMMEDIATE")
+            yield connection
 
     def initialize(self) -> dict[str, object]:
         assert_supported_existing_schema_version(self.path)
@@ -999,6 +1019,7 @@ class CaseDatabase:
         status: str | None = None,
         verification_status: str | None = None,
         tags: Iterable[str] | None = None,
+        add_tags: Iterable[str] | None = None,
         note: str | None = None,
         include_in_report: bool | None = None,
         reviewer: str | None = None,
@@ -1007,10 +1028,15 @@ class CaseDatabase:
         due_at: str | None = None,
         source_citation_package: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
+        """Create or update the case's one mark on a target (``tags`` replaces, ``add_tags`` merges).
+
+        The read of the current mark and the write run in one ``BEGIN IMMEDIATE``
+        transaction, so concurrent marks on the same target neither lose tags nor
+        insert a second mark.
+        """
         normalized_case_id = normalize_identifier(case_id, fallback="case")
         timestamp = now_iso()
-        with self.connect() as connection:
-            apply_schema(connection)
+        with self.write_transaction() as connection:
             if connection.execute("SELECT 1 FROM case_record WHERE case_id = ?", (normalized_case_id,)).fetchone() is None:
                 raise CaseDatabaseError(f"case not found: {normalized_case_id}")
             target_missing = connection.execute(
@@ -1038,7 +1064,7 @@ class CaseDatabase:
                 else previous_review.get("verification_status", "unverified")
             )
             effective_tags = normalize_tags(
-                tags if tags is not None else previous_review.get("tags", [])
+                [*(tags if tags is not None else previous_review.get("tags", [])), *(add_tags or [])]
             )
             effective_note = str(note if note is not None else previous_review.get("note", ""))
             effective_include = bool(
@@ -2294,6 +2320,142 @@ def review_changed_fields(previous_review: Mapping[str, object], current_review:
         for field in tracked
         if previous_review.get(field) != current_review.get(field)
     ]
+
+
+REVIEW_MARK_TARGET_INDEX = "idx_review_mark_case_target"
+REVIEW_MARK_MERGE_ACTOR = "rapidtriage-migration"
+
+
+def _review_mark_target_index_is_unique(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        "SELECT \"unique\" FROM pragma_index_list('review_mark') WHERE name = ?", (REVIEW_MARK_TARGET_INDEX,)
+    ).fetchone()
+    return row is not None and bool(row[0])
+
+
+def ensure_unique_review_mark_targets(connection: sqlite3.Connection) -> None:
+    """One review mark per (case, target): merge legacy duplicates, then make the index UNIQUE (R4).
+
+    Schema extension, a no-op once the index is unique. Without an open caller
+    transaction it runs under its own ``BEGIN IMMEDIATE``, so two connections
+    opening an old DB at once do not merge the same duplicates twice.
+    """
+    if _review_mark_target_index_is_unique(connection):
+        return
+    own_transaction = not connection.in_transaction
+    if own_transaction:
+        connection.execute("BEGIN IMMEDIATE")
+    try:
+        if not _review_mark_target_index_is_unique(connection):
+            merge_duplicate_review_marks(connection)
+            connection.execute(f"DROP INDEX IF EXISTS {REVIEW_MARK_TARGET_INDEX}")
+            connection.execute(
+                f"CREATE UNIQUE INDEX {REVIEW_MARK_TARGET_INDEX} ON review_mark(case_id, target_type, target_id)"
+            )
+    except BaseException:
+        if own_transaction:
+            connection.rollback()
+        raise
+    if own_transaction:
+        connection.commit()
+
+
+def merge_duplicate_review_marks(connection: sqlite3.Connection) -> int:
+    """Merge every target's extra review marks into its first one; returns the removed row count.
+
+    The first mark (lowest id) keeps its citation id; status, note, reviewer and
+    the other fields come from the most recently updated mark; tags are the
+    union in mark order. The removed marks' history stays in the append-only
+    ``review_mark_history``; a ``review.duplicates-merged`` audit event per
+    target names the removed citation ids.
+    """
+    groups = connection.execute(
+        "SELECT case_id, target_type, target_id FROM review_mark "
+        "GROUP BY case_id, target_type, target_id HAVING COUNT(*) > 1"
+    ).fetchall()
+    timestamp = now_iso()
+    removed_count = 0
+    for case_id, target_type, target_id in groups:
+        rows = connection.execute(
+            "SELECT * FROM review_mark WHERE case_id = ? AND target_type = ? AND target_id = ? ORDER BY id",
+            (case_id, target_type, target_id),
+        ).fetchall()
+        kept, extra = rows[0], rows[1:]
+        newest = max(rows, key=lambda row: (str(row["updated_at"]), int(row["id"])))
+        tags = normalize_tags(tag for row in rows for tag in review_mark_to_dict(row)["tags"])
+        connection.execute(
+            """
+            UPDATE review_mark
+            SET status = ?, verification_status = ?, note = ?, include_in_report = ?, reviewer = ?,
+                assignee = ?, priority = ?, due_at = ?, source_citation_package_json = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                newest["status"],
+                newest["verification_status"],
+                newest["note"],
+                newest["include_in_report"],
+                newest["reviewer"],
+                newest["assignee"],
+                newest["priority"],
+                newest["due_at"],
+                newest["source_citation_package_json"],
+                newest["updated_at"],
+                int(kept["id"]),
+            ),
+        )
+        connection.executemany("DELETE FROM review_mark WHERE id = ?", [(int(row["id"]),) for row in extra])
+        citation_id = str(kept["citation_id"])
+        removed = [str(row["citation_id"]) for row in extra]
+        tag_ids = sync_review_mark_tag_ids(connection, case_id, citation_id, tags, actor=REVIEW_MARK_MERGE_ACTOR)
+        merged = connection.execute("SELECT * FROM review_mark WHERE id = ?", (int(kept["id"]),)).fetchone()
+        insert_review_history(
+            connection,
+            case_id=case_id,
+            review_citation_id=citation_id,
+            target_type=target_type,
+            target_id=target_id,
+            previous_review=review_mark_to_dict(kept),
+            current_review=review_mark_to_dict(merged),
+            actor=REVIEW_MARK_MERGE_ACTOR,
+            changed_at=timestamp,
+        )
+        connection.execute(
+            """
+            INSERT INTO audit_event (
+                citation_id, case_id, actor, action, target_type, target_id,
+                timestamp, tool_name, tool_version, params_json, result, error
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                next_citation_id_for_connection(connection, case_id, "audit"),
+                case_id,
+                REVIEW_MARK_MERGE_ACTOR,
+                "review.duplicates-merged",
+                target_type,
+                target_id,
+                timestamp,
+                "rapidtriage",
+                "",
+                json.dumps(
+                    {
+                        "kept_citation_id": citation_id,
+                        "removed_citation_ids": removed,
+                        "tags": tag_names_for_ids(connection, tag_ids),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                "ok",
+                "",
+            ),
+        )
+        removed_count += len(extra)
+    return removed_count
+
+
+register_schema_extension(ensure_unique_review_mark_targets)
 
 
 _FILE_TIME_ORIGINS_WITH_EVIDENCE_TIMES = {"filesystem", "listing"}

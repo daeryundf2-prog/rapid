@@ -355,20 +355,14 @@ def build_case_db_router(
         request: CaseDbReviewBatchRequest,
         targets: list[dict[str, str]],
     ) -> dict[str, object]:
-        """Console marks: omitted ``tags`` keep the row's tags; ``add_tags`` merges."""
+        """Console marks: omitted ``tags`` keep the row's tags; ``add_tags`` merges.
+
+        The merge happens inside ``mark_review``'s write transaction, so concurrent
+        ``add_tags`` on one row keep every tag (R4).
+        """
         reviewer = resolve_request_reviewer(request.reviewer)
         marks: list[dict[str, object]] = []
         for target in targets:
-            tags: list[str] | None = list(request.tags) if request.tags is not None else None
-            if request.add_tags:
-                try:
-                    existing = database.get_review_mark(
-                        request.case_id, target_type=target["target_type"], target_id=target["target_id"]
-                    ).get("tags", [])
-                except CaseDatabaseError:
-                    existing = []
-                merged = [str(tag) for tag in (tags if tags is not None else existing or [])]
-                tags = merged + [tag for tag in request.add_tags if tag not in merged]
             marks.append(
                 database.mark_review(
                     case_id=request.case_id,
@@ -376,7 +370,8 @@ def build_case_db_router(
                     target_id=target["target_id"],
                     status=request.status,
                     verification_status=request.verification_status,
-                    tags=tags,
+                    tags=list(request.tags) if request.tags is not None else None,
+                    add_tags=request.add_tags,
                     note=request.note,
                     reviewer=reviewer,
                     assignee=request.assignee,
