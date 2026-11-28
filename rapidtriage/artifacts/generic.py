@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import datetime as dt
 import hashlib
+import json
 import mmap
 import re
 import sqlite3
@@ -37,7 +38,11 @@ LOCAL_LLM_PATH_TERMS = {
     "lm studio": "LM Studio",
     "lmstudio": "LM Studio",
     "gpt4all": "GPT4All",
-    "/jan/data/": "Jan",
+    # Jan's data folder only (Windows, macOS, Linux) and the Jan Agent home: a
+    # bare "/jan/data/" also matches a user named Jan or a "2024/Jan/data" folder.
+    "appdata/roaming/jan/data/": "Jan",
+    "application support/jan/data/": "Jan",
+    ".local/share/jan/data/": "Jan",
     "/.jan/": "Jan",
     "anythingllm": "AnythingLLM",
     "/msty/": "Msty",
@@ -2295,8 +2300,9 @@ def collect_local_llm_prompt_candidates(
     if not data:
         return
     text = data.decode("utf-8", errors="replace")
+    fragments = local_llm_jsonl_prompt_fragments(text) if suffix == ".jsonl" else local_llm_text_prompt_fragments(text)
     emitted = 0
-    for offset, fragment in local_llm_text_prompt_fragments(text):
+    for offset, fragment in fragments:
         if emitted >= LOCAL_LLM_PROMPT_ROW_LIMIT:
             break
         emitted += 1
@@ -2829,6 +2835,50 @@ def local_llm_text_prompt_fragments(text: str) -> list[tuple[int, str]]:
         if len(fragments) >= LOCAL_LLM_PROMPT_ROW_LIMIT:
             break
     return fragments
+
+
+def local_llm_jsonl_prompt_fragments(text: str) -> list[tuple[int, str]]:
+    """One chat message per JSON line, as Jan's ``threads/<id>/messages.jsonl``.
+
+    A line with ``role`` and ``content`` becomes ``"<role>: <text>"`` at the byte
+    offset where the line starts, so direction reads as for plain-text logs. A
+    file without such lines falls back to the plain-text scan.
+    """
+    fragments: list[tuple[int, str]] = []
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        message = jsonl_role_message(line)
+        if message:
+            fragments.append((offset, message[:2000]))
+            if len(fragments) >= LOCAL_LLM_PROMPT_ROW_LIMIT:
+                break
+        offset += len(line.encode("utf-8", errors="replace"))
+    return fragments or local_llm_text_prompt_fragments(text)
+
+
+def jsonl_role_message(line: str) -> str:
+    try:
+        item = json.loads(line)
+    except ValueError:
+        return ""
+    if not isinstance(item, dict):
+        return ""
+    role = item.get("role")
+    content = item.get("content")
+    if not isinstance(role, str) or not role.strip() or content is None:
+        return ""
+    # Jan ThreadMessage content: [{"type": "text", "text": {"value": "..."}}];
+    # OpenAI-style lines use a plain string or [{"type": "text", "text": "..."}].
+    texts = []
+    for part in content if isinstance(content, list) else [content]:
+        value = part.get("text") if isinstance(part, dict) else part
+        if isinstance(value, dict):
+            value = value.get("value")
+        if isinstance(value, str) and value.strip():
+            texts.append(" ".join(value.split()))
+    if not texts:
+        return ""
+    return f"{role.strip()}: {' '.join(texts)}"
 
 
 def local_llm_prompt_direction(value: str) -> str:

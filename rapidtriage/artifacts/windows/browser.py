@@ -182,6 +182,19 @@ AI_SERVICE_DOMAINS: tuple[tuple[str, str], ...] = (
     ("x.ai", "Grok"),
     ("notion.so", "Notion AI"),
 )
+# Storage paths and blobs carry hosts inside longer strings
+# (``https_www.kimi.com_0``, ``_https://chatgpt.com``), so a host matches only
+# where no host character touches either end: ``copilot.com`` must not match
+# inside ``api.githubcopilot.com``, nor ``x.ai`` inside ``box.ai``.
+AI_SERVICE_DOMAIN_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (re.compile(rf"(?<![a-z0-9-]){re.escape(domain)}(?![a-z0-9-])"), service)
+    for domain, service in AI_SERVICE_DOMAINS
+)
+# Microsoft 365 Copilot Chat is also served at m365.cloud.microsoft/chat, but
+# that host carries Word, Outlook and the rest of Office on the web, so only the
+# /chat path counts and only in browser history (it has the full URL).
+M365_COPILOT_CHAT_HOST = "m365.cloud.microsoft"
+M365_COPILOT_CHAT_PATH = "/chat"
 QUERY_HINT_KEYS = ("q", "query", "prompt", "text", "message", "ask", "p")
 SEARCH_HOST_HINTS = ("google.", "bing.com", "duckduckgo.com", "naver.com", "daum.net", "yahoo.")
 EMAIL_HOST_HINTS = ("mail.google.com", "outlook.live.com", "outlook.office.com", "mail.naver.com", "mail.daum.net")
@@ -4183,7 +4196,7 @@ def ai_transcript_functional_profile(
         "batch_id": FUNCTIONAL_SOURCE_BATCH_ID,
         "status": "complete" if not failed_checks else "partial",
         "implemented_controls": {
-            "supported_ai_services": [label for _, label in AI_SERVICE_DOMAINS],
+            "supported_ai_services": list(dict.fromkeys(label for _, label in AI_SERVICE_DOMAINS)),
             "detected_service_counts": dict(service_counts),
             "conversation_candidate_count": len(conversation_rows),
             "question_count": question_count,
@@ -6561,15 +6574,15 @@ def decode_storage_blob(data: bytes) -> str:
 
 def likely_ai_storage_text(text: str) -> bool:
     lowered = text.lower()
-    if any(domain in lowered for domain, _service in AI_SERVICE_DOMAINS):
+    if any(pattern.search(lowered) for pattern, _service in AI_SERVICE_DOMAIN_PATTERNS):
         return True
     return any(token in lowered for token in ("chatgpt", "claude", "gemini", "perplexity", "assistant", '"role"', '"content"'))
 
 
 def infer_ai_service_from_path(path: Path) -> str:
     lowered = str(path).lower()
-    for domain, service in AI_SERVICE_DOMAINS:
-        if domain in lowered:
+    for pattern, service in AI_SERVICE_DOMAIN_PATTERNS:
+        if pattern.search(lowered):
             return service
     if "chatgpt" in lowered:
         return "ChatGPT"
@@ -6749,6 +6762,10 @@ def detect_ai_service(url: str, title: str = "") -> str:
     parsed = safe_parse_url(url)
     host = normalize_host(parsed.netloc)
     lowered = f"{url} {title}".lower()
+    if host_matches(host, M365_COPILOT_CHAT_HOST):
+        path = parsed.path.lower().rstrip("/")
+        if path == M365_COPILOT_CHAT_PATH or path.startswith(M365_COPILOT_CHAT_PATH + "/"):
+            return "Microsoft 365 Copilot"
     for domain, service in AI_SERVICE_DOMAINS:
         if not host_matches(host, domain):
             continue

@@ -17,6 +17,7 @@ AI_CHAT_SERVICE_DOMAINS: tuple[tuple[str, str], ...] = (
     ("gemini.google.com", "Gemini"),
     ("bard.google.com", "Gemini"),
     ("aistudio.google.com", "Google AI Studio"),
+    ("notebooklm.google.com", "NotebookLM"),
     ("notebooklm.google", "NotebookLM"),
     ("perplexity.ai", "Perplexity"),
     ("copilot.microsoft.com", "Microsoft Copilot"),
