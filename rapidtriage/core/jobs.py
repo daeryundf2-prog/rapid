@@ -49,6 +49,8 @@ SUPERSEDED_MESSAGE = "이 런의 출력 폴더는 이어서 실행한 런({})이
 #: Runs executed at once by the served store; more runs wait ``queued`` (``wait: true`` included).
 RUN_WORKERS_ENV = "RAPIDTRIAGE_RUN_WORKERS"
 DEFAULT_RUN_WORKERS = 2
+#: Append-only removal records beside ``runs.json`` (one JSON object per line).
+REMOVED_RUNS_LOG_NAME = "runs-removed.jsonl"
 
 
 def run_workers_from_env() -> int:
@@ -454,7 +456,9 @@ class RunJobStore:
     def __init__(self, *, max_workers: int = 2, state_path: Path | None = None) -> None:
         self._jobs: dict[str, RunJob] = {}
         self._futures: dict[str, Future[dict[str, object]]] = {}
-        # Runs removed from the list: who removed what (persisted as ``removed_runs``).
+        # Runs removed from the list: who removed what. A persisted store appends each record to
+        # ``runs-removed.jsonl`` beside ``runs.json`` (``runs.json`` stays bounded); an in-memory
+        # store keeps them here.
         self._removed: list[dict[str, object]] = []
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="rapidtriage-run")
         self._lock = threading.Lock()
@@ -467,6 +471,11 @@ class RunJobStore:
     def state_path(self) -> Path | None:
         """The ``runs.json`` this store persists to (``None`` = in-memory store)."""
         return self._state_path
+
+    @property
+    def removed_runs_log_path(self) -> Path | None:
+        """Append-only removal log beside ``runs.json`` (``None`` = in-memory store)."""
+        return self._state_path.with_name(REMOVED_RUNS_LOG_NAME) if self._state_path is not None else None
 
     def set_completion_hook(self, name: str, hook: Callable[[RunJobStore, RunJob], None] | None) -> None:
         """Register (or with ``None`` remove) a named hook run after each completed run."""
@@ -724,31 +733,62 @@ class RunJobStore:
         return job
 
     def remove(self, run_id: str, *, actor: str | None = None) -> None:
-        """Drop the run from the list (its folder stays) and keep a removal record (``removed_runs``)."""
+        """Drop the run from the list (its folder stays) and keep a removal record (:meth:`removed_runs`)."""
         with self._lock:
             if run_id not in self._jobs:
                 raise KeyError(run_id)
             job = self._jobs.pop(run_id)
             self._futures.pop(run_id, None)
             output_dir = job.output_dir()
-            self._removed.append(
-                {
-                    "run_id": run_id,
-                    "status": job.status,
-                    "owner": job.owner,
-                    "root": job.request.root,
-                    "output_dir": str(output_dir) if output_dir is not None else None,
-                    "removed_at": now_iso(),
-                    "removed_by": actor,
-                }
-            )
+            record = {
+                "run_id": run_id,
+                "status": job.status,
+                "owner": job.owner,
+                "root": job.request.root,
+                "output_dir": str(output_dir) if output_dir is not None else None,
+                "removed_at": now_iso(),
+                "removed_by": actor,
+            }
+            # The record is on disk before the run leaves runs.json.
+            self._append_removed_locked([record])
             self._write_state_locked()
         _invalidate_summary_outputs(job.summary)
 
     def removed_runs(self) -> builtins.list[dict[str, object]]:
         """Removal records, oldest first: run id, status, owner, root, output folder, when and by whom."""
+        log_path = self.removed_runs_log_path
         with self._lock:
-            return [dict(record) for record in self._removed]
+            if log_path is None:
+                return [dict(record) for record in self._removed]
+            try:
+                lines = log_path.read_text(encoding="utf-8").splitlines()
+            except FileNotFoundError:
+                return []
+        records: builtins.list[dict[str, object]] = []
+        for line in lines:
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue  # a torn last line (crash mid-append) is skipped, the rest stays readable
+            if isinstance(record, dict):
+                records.append(record)
+        return records
+
+    def _append_removed_locked(self, records: builtins.list[dict[str, object]]) -> None:
+        log_path = self.removed_runs_log_path
+        if log_path is None:
+            self._removed.extend(records)
+            return
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records).encode("utf-8")
+        with log_path.open("a+b") as handle:
+            if handle.seek(0, os.SEEK_END) > 0:
+                handle.seek(-1, os.SEEK_END)
+                if handle.read(1) != b"\n":
+                    payload = b"\n" + payload  # end a torn line so the new record stays whole
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
 
     def cancel(self, run_id: str, *, by: str | None = None) -> RunJob:
         """"모두 취소": a queued run never starts; a running one gets ``cancel_all`` (control file).
@@ -1003,13 +1043,15 @@ class RunJobStore:
         if not isinstance(payload, Mapping):
             return
         removed = payload.get("removed_runs")
-        if isinstance(removed, list):
-            self._removed = [dict(record) for record in removed if isinstance(record, Mapping)]
+        legacy_removed = [dict(record) for record in removed if isinstance(record, Mapping)] if isinstance(removed, list) else []
+        # runs.json written before the removal log: move its records to the log (once; the
+        # rewrite below drops them from runs.json).
+        changed = bool(legacy_removed)
+        if legacy_removed:
+            with self._lock:
+                self._append_removed_locked(legacy_removed)
         records = payload.get("runs")
-        if not isinstance(records, list):
-            return
-        changed = False
-        for record in records:
+        for record in records if isinstance(records, list) else []:
             if not isinstance(record, Mapping):
                 continue
             job = RunJob.from_record(record)
@@ -1035,7 +1077,6 @@ class RunJobStore:
             "version": 1,
             "updated_at": now_iso(),
             "runs": [job.to_record() for job in self.list_locked()],
-            "removed_runs": self._removed,
         }
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path = self._state_path.with_name(f"{self._state_path.name}.tmp")

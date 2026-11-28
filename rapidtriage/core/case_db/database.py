@@ -543,6 +543,7 @@ class CaseDatabase:
         document_texts: Iterable[tuple[str, str, str | None]] | None = None,
         hash_files: bool = True,
         on_progress: ImportProgress | None = None,
+        actor: str = "local-user",
     ) -> dict[str, object]:
         """Import a run's outputs (files, docs, artifacts, indicators, timeline).
 
@@ -556,7 +557,8 @@ class CaseDatabase:
         again. ``hash_files=False`` skips re-hashing the evidence source and
         every file candidate (hashes the run already recorded are kept); the
         run pipeline's persist step uses it so a 100+ GB image is not read
-        again just to build the search index.
+        again just to build the search index. ``actor`` is recorded on the
+        ``run.imported`` audit event (the web server passes its actor).
         """
         summary = load_run_summary(run_summary)
         outputs = summary.get("outputs")
@@ -598,6 +600,7 @@ class CaseDatabase:
             action="run.imported",
             target_type="run-summary",
             target_id=str(summary.get("outputs", {}).get("summary") or ""),
+            actor=actor,
             params_json=json.dumps({"counts": counts}, ensure_ascii=False, sort_keys=True),
         )
         return {
@@ -968,18 +971,19 @@ class CaseDatabase:
                     ),
                 )
             else:
+                # Same name again replaces the query; the original author stays and the
+                # change is an audit event naming who made it (no updated_by column).
                 citation_id = str(row["citation_id"])
                 connection.execute(
                     """
                     UPDATE saved_search
-                    SET keywords_json = ?, filters_json = ?, created_by = ?,
+                    SET keywords_json = ?, filters_json = ?,
                         updated_at = ?, last_run_at = ?
                     WHERE id = ?
                     """,
                     (
                         json.dumps(normalized_keywords, ensure_ascii=False),
                         json.dumps(filters, ensure_ascii=False, sort_keys=True),
-                        created_by,
                         timestamp,
                         timestamp,
                         row["id"],
@@ -988,6 +992,15 @@ class CaseDatabase:
             connection.execute(
                 "UPDATE case_record SET updated_at = ? WHERE case_id = ?",
                 (timestamp, normalized_case_id),
+            )
+        if row is not None:
+            self.add_audit_event(
+                case_id=normalized_case_id,
+                action="search.saved.update",
+                target_type="saved_search",
+                target_id=citation_id,
+                actor=created_by or "local-user",
+                params_json=json.dumps({"name": normalized_name, "filters": filters}, ensure_ascii=False, sort_keys=True),
             )
         return self.get_saved_search(normalized_case_id, name=normalized_name)
 

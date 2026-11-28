@@ -5,6 +5,8 @@ that the search engine ATTACHes read-only for ``hashset:<id>`` /
 ``-hashset:<id>`` and ``options.hide_hashsets``. Text lists (one hash per
 line, ``#`` comments) and CSV/NSRL RDS files are parsed with
 ``core.files.parse_known_good_hash_feed`` (the files stage's known-good parser).
+A set records who uploaded it (``uploaded_by``); a deletion appends a record to
+``hash-sets-deleted.jsonl`` (what was removed, when, by whom).
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from .textutil import normalize_hash
 DATA_DIR_ENV = "RAPIDTRIAGE_DATA_DIR"
 HASH_SET_DIR = "hash-sets"
 HASH_SET_ID_RE = re.compile(r"^hs-[0-9a-f]{12}$")
+DELETION_LOG = "hash-sets-deleted.jsonl"
 LABELS = ("known-good", "known-bad", "custom")
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_REJECTED = 100
@@ -116,8 +119,8 @@ def _looks_csv(text_head: str, filename: str) -> bool:
     return first.count(",") >= 2 and not HASH_TOKEN_RE.search(first)
 
 
-def create_hash_set(*, name: str, label: str, data: bytes, filename: str = "") -> dict[str, object]:
-    """Parse ``data`` (text or CSV/NSRL), store the set and return its summary."""
+def create_hash_set(*, name: str, label: str, data: bytes, filename: str = "", uploaded_by: str = "") -> dict[str, object]:
+    """Parse ``data`` (text or CSV/NSRL), store the set and return its summary (``uploaded_by``: the server's actor)."""
     clean_name = " ".join(str(name or "").split())[:NAME_MAX_CHARS]
     if not clean_name:
         raise HashSetError("해시 세트 이름이 필요합니다")
@@ -154,6 +157,7 @@ def create_hash_set(*, name: str, label: str, data: bytes, filename: str = "") -
         "filename": os.path.basename(filename)[:200] if filename else "",
         "rejected_count": rejected_count,
         "rejected_lines": rejected,
+        "uploaded_by": uploaded_by or None,
     }
     connection = sqlite3.connect(str(temporary))
     try:
@@ -215,8 +219,17 @@ def read_hash_values(hash_set_id: str) -> list[tuple[str, str]]:
         connection.close()
 
 
-def delete_hash_set(hash_set_id: str) -> None:
+def delete_hash_set(hash_set_id: str, *, deleted_by: str = "") -> None:
+    """Delete the set; its summary, the time and ``deleted_by`` go to :data:`DELETION_LOG` first."""
     path = hash_set_path(hash_set_id)
     if path is None:
         raise HashSetError("해시 세트를 찾을 수 없습니다", status=404)
+    try:
+        summary = read_hash_set(hash_set_id)
+    except HashSetError:
+        summary = {"id": hash_set_id}
+    summary.pop("rejected_lines", None)
+    record = {**summary, "deleted_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "deleted_by": deleted_by or None}
+    with (path.parent / DELETION_LOG).open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
     path.unlink()

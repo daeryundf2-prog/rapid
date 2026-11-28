@@ -25,6 +25,14 @@ bookmarks: {
 bookmark_id: string
 created_at: string
 updated_at: string
+/**
+ * Server actor who created the bookmark (web writes; absent for CLI bookmarks)
+ */
+created_by?: string
+/**
+ * Server actor of the last change (web writes)
+ */
+updated_by?: string
 summary: string
 tags: string[]
 note: string
@@ -41,6 +49,10 @@ include_in_report: boolean
 tags: string[]
 note: string
 changed_fields: string[]
+/**
+ * Server actor who made this change (web writes)
+ */
+actor?: string
 }[]
 reference: {
 command: string

@@ -10,6 +10,7 @@
     "root": { "type": ["string", "null"] },
     "generated_at": { "type": "string", "format": "date-time" },
     "output_dir": { "type": "string" },
+    "requested_by": { "type": "string", "description": "Server actor who asked for the export (web API; absent for CLI extracts)" },
     "filters": {
       "type": "object",
       "additionalProperties": false,

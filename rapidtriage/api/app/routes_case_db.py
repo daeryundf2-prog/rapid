@@ -204,7 +204,10 @@ def build_case_db_router(
     def import_run_to_case_db(request: CaseDbImportRunRequest) -> dict[str, object]:
         try:
             database = open_request_case_database(request.database)
-            return database.import_run_output(Path(request.run_output), case_id=request.case_id, case_name=request.name)
+            return database.import_run_output(
+                Path(request.run_output), case_id=request.case_id, case_name=request.name,
+                actor=resolve_request_reviewer(None) or "local-user",
+            )
         except (CaseDatabaseError, SearchError, OSError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
@@ -225,7 +228,9 @@ def build_case_db_router(
             already_imported = bool(storage["exists"]) and int(storage["summary"].get("evidence_source_count") or 0) > 0
             import_result = None
             if not already_imported:
-                import_result = database.import_run_output(output_dir, case_id=case_id, case_name=case_name)
+                import_result = database.import_run_output(
+                    output_dir, case_id=case_id, case_name=case_name, actor=resolve_request_reviewer(None) or "local-user"
+                )
                 storage = database.case_storage_summary(case_id)
             return {
                 "command": "case-db.ensure-run",

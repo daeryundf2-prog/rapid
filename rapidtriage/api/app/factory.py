@@ -19,8 +19,8 @@ from ...core.crash import write_crash_report
 from ...core.jobs import RunJobStore, default_job_store
 from ...core.user_tokens import (
     TOKENS_FILE_ENV,
+    TokenFileWatch,
     configured_tokens_file,
-    load_user_tokens,
 )
 from .analyses import ANALYSIS_RUNNER, COMPLETION_HOOKS
 from .case_workspace import CaseWorkspace, run_output_write_problem
@@ -32,6 +32,7 @@ from .helpers import (
     resolve_case_catalog_path,
     resolve_case_db_path,
     server_actor,
+    token_actor,
     truthy_env,
 )
 from .routes_actions import build_actions_router
@@ -175,8 +176,9 @@ def create_app(
     configured_token = auth_token or os.environ.get("RAPIDTRIAGE_AUTH_TOKEN") or ""
     # Per-user tokens (RAPIDTRIAGE_TOKENS_FILE): the token names the request's actor. A shared
     # token next to them would let anyone act unattributed, and no-auth would ignore them.
+    # The file is re-read when it changes (a bad edit keeps the last good set).
     tokens_path = configured_tokens_file(tokens_file)
-    user_tokens = load_user_tokens(tokens_path) if tokens_path is not None else None
+    user_tokens = TokenFileWatch(tokens_path) if tokens_path is not None else None
     if user_tokens is not None and (auth_disabled or configured_token):
         raise RuntimeError(
             f"conflicting authentication settings: {TOKENS_FILE_ENV} cannot be combined with a single "
@@ -291,6 +293,17 @@ def create_app(
             lambda raw_path: resolve_case_db_path(store, raw_path, configured_case_db_roots),
         )
     )
+
+    @api.get("/api/whoami")
+    def whoami() -> dict[str, object]:
+        """The name this server records for the caller's writes (never the token).
+
+        ``source``: ``token`` (per-user token), ``env`` (``RAPIDTRIAGE_REVIEWER``) or ``None``
+        when the server names nobody (writes then fall back to the request's name or ``local-user``).
+        """
+        actor = server_actor()
+        source = "token" if token_actor() else "env" if actor else None
+        return {"actor": actor, "source": source, "per_user_tokens": user_tokens is not None}
 
     if static_dir.is_dir():
         api.mount("/assets", ConsoleStaticFiles(directory=static_dir), name="rapidtriage-assets")

@@ -60,6 +60,7 @@ from ...core.search_index.query import QueryError
 from ...core.search_index.schema import INDEX_FILE_NAME
 from ...core.search_index.textutil import normalize_hash
 from .analyses import ANALYSIS_RUNNER, public_state
+from .helpers import resolve_request_reviewer
 from .search_index_service import (
     CORRUPT_INDEX,
     NO_INDEX,
@@ -270,7 +271,7 @@ def build_search_index_router(store: RunJobStore, *, owner: object | None = None
         """Queue a ``search-index`` analysis (409 while one runs or the run is not finished)."""
         completed_run(store, run_id)
         options = (body or IndexBuildBody()).model_dump()
-        state = submit_build(store, run_id, options, owner=owner)
+        state = submit_build(store, run_id, options, owner=owner, requested_by=resolve_request_reviewer(None) or "local-user")
         return public_state(state)
 
     @router.post("/api/runs/{run_id}/search/query")
@@ -469,7 +470,7 @@ def build_search_index_router(store: RunJobStore, *, owner: object | None = None
     @router.delete("/api/hash-sets/{hash_set_id}", status_code=204)
     def remove_hash_set(hash_set_id: str) -> None:
         try:
-            delete_hash_set(hash_set_id)
+            delete_hash_set(hash_set_id, deleted_by=resolve_request_reviewer(None) or "local-user")
         except HashSetError as exc:
             raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
 
@@ -522,8 +523,11 @@ def build_search_index_router(store: RunJobStore, *, owner: object | None = None
             label = fields.get("label", (label.encode("utf-8"), ""))[0].decode("utf-8", "replace").strip() or label
         else:
             data = raw
+        uploaded_by = resolve_request_reviewer(None) or "local-user"
         try:
-            return await run_in_threadpool(create_hash_set, name=name or filename or "", label=label, data=data, filename=filename)
+            return await run_in_threadpool(
+                create_hash_set, name=name or filename or "", label=label, data=data, filename=filename, uploaded_by=uploaded_by
+            )
         except HashSetError as exc:
             raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
 

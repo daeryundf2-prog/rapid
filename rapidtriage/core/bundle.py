@@ -9,6 +9,7 @@ import zipfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from .audit import keep_previous_version
 from .case import load_case_payload
 from .case_report import (
     build_case_report_markdown,
@@ -74,13 +75,20 @@ def build_submission_bundle(
     max_items: int = 500,
     title: str | None = None,
     case_payload: Mapping[str, object] | None = None,
+    generated_by: str | None = None,
+    history_dir: Path | None = None,
 ) -> dict[str, object]:
     """Reviewer bundle of the case's report candidates.
 
     ``case_payload`` is the review payload to submit when it is not only the
     case JSON (a run's bookmarks plus its case-DB review marks); ``case_json``
     is read otherwise and recorded either way. A report candidate the
-    manifest cannot carry stops the bundle (:class:`BundleError`)."""
+    manifest cannot carry stops the bundle (:class:`BundleError`).
+
+    ``generated_by`` (the web server's actor) is recorded in the bundle audit and
+    manifests. With ``history_dir`` an existing bundle folder and archive move into
+    ``history_dir/<UTC time>/`` first (the result's ``previous_version``) instead of
+    being overwritten."""
     case_json = case_json.expanduser().resolve()
     output_dir = output_dir.expanduser().resolve()
     if case_payload is None:
@@ -94,6 +102,9 @@ def build_submission_bundle(
     missing = missing_submission_message(manifest)
     if missing:
         raise BundleError(missing)
+    zip_path = output_dir.with_suffix(".zip")
+    previous_version = keep_previous_version([output_dir, zip_path], history_dir, move=True) if history_dir else None
+    attribution = {"generated_by": generated_by} if generated_by else {}
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "rapidtriage-submission-manifest.json"
     selected_path = output_dir / "rapidtriage-selected-evidence.json"
@@ -104,7 +115,6 @@ def build_submission_bundle(
     court_exhibit_path = output_dir / "rapidtriage-court-exhibit-index.json"
     tamper_audit_path = output_dir / "rapidtriage-tamper-evident-audit-bundle.json"
     submission_readiness_path = output_dir / "rapidtriage-submission-readiness.json"
-    zip_path = output_dir.with_suffix(".zip")
 
     write_result(manifest, manifest_path)
     selected = build_selected_evidence_list(manifest)
@@ -115,11 +125,12 @@ def build_submission_bundle(
         submission_manifest=manifest,
         metadata={"title": title or case_payload.get("title") or "RapidTriage submission bundle"},
     )
-    report_exports = write_case_report_exports(report_markdown, report_path)
+    report_exports = write_case_report_exports(report_markdown, report_path, generated_by=generated_by)
     reviewer_path.write_text(render_reviewer_html(manifest, selected, report_markdown), encoding="utf-8")
     audit = {
         "command": "bundle",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        **attribution,
         "case_json": str(case_json),
         "output_dir": str(output_dir),
         "allowed_roots": [str(root.expanduser().resolve()) for root in allowed_roots],
@@ -188,6 +199,7 @@ def build_submission_bundle(
         "manifest_scope": "pre-archive-member-list",
         "archive_hash_policy": "detached-external-manifest-only",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        **attribution,
         "case_id": manifest.get("case_id", ""),
         "output_dir": str(output_dir),
         "archive": str(zip_path),
@@ -280,6 +292,8 @@ def build_submission_bundle(
         "citation_external_verification": submission_readiness["citation_external_verification"],
     }
     write_result(bundle_manifest, bundle_manifest_path)
+    if history_dir is not None:
+        return {**bundle_manifest, "previous_version": str(previous_version) if previous_version else None}
     return bundle_manifest
 
 

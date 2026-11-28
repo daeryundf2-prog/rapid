@@ -287,9 +287,11 @@ class PerUserTokenApiTests(unittest.TestCase):
         self.assertEqual(retried.json()["owner"], "agent:triage-bot")
 
         self.assertEqual(self.client("lee").delete(f"/api/runs/{run_id}").status_code, 204)
-        saved = json.loads((self.root / "runs.json").read_text(encoding="utf-8"))
+        # Removal records go to the append-only log beside runs.json (#92 P3: runs.json stays bounded).
+        self.assertNotIn("removed_runs", json.loads((self.root / "runs.json").read_text(encoding="utf-8")))
+        removed_log = (self.root / "runs-removed.jsonl").read_text(encoding="utf-8")
         self.assertEqual(
-            [(record["run_id"], record["owner"], record["removed_by"]) for record in saved["removed_runs"]],
+            [(record["run_id"], record["owner"], record["removed_by"]) for record in map(json.loads, removed_log.splitlines())],
             [(run_id, "kim", "lee")],
         )
         # The removal record survives a restart; the owner persists with the remaining run.
@@ -298,6 +300,7 @@ class PerUserTokenApiTests(unittest.TestCase):
         self.assertEqual(restarted.get(retried.json()["run_id"]).owner, "agent:triage-bot")
         for token in TOKENS.values():
             self.assertNotIn(token, (self.root / "runs.json").read_text(encoding="utf-8"))
+            self.assertNotIn(token, removed_log)
 
 
 @unittest.skipUnless(HAS_FASTAPI, "fastapi is required for RapidTriage API tests")
