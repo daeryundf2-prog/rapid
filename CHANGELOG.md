@@ -71,14 +71,17 @@
   history, requests (IDs, message references, times and open/closed state;
   the owner's message text is not read), questions and answers, stream jobs
   (program only), hosted OMP sessions and events -- plus `logs/events.jsonl`,
-  `logs/hub.log`, session stderr `logs/**/*.err`, `config.toml` (models, owner
-  IDs as personal identifiers, token and voice key file paths, job programs),
+  `logs/hub.log`, session stderr `logs/**/*.err`, `config.toml` (models,
+  token and voice key file paths, job programs; relay owner IDs are omitted),
   the OMP overlay, launchd/systemd service definitions (program and env file
   path, no arguments), install records and the presence of token files (never
   read). Lanes and requests open and close in the timeline, events and hub log
   lines too. Any XDG base is recognized, so several hubs on one account are
   found. A document that does not parse leaves a note instead of stopping the
-  collector. See `docs/ai-agent-artifacts.md` (`tests/test_ai_agent_cataly.py`).
+  collector. References to a private chat (a Telegram chat whose ID is the
+  user's, a Slack direct message) are left empty in `thread`,
+  `source_message`, `origin` and job `destinations`. See
+  `docs/ai-agent-artifacts.md` (`tests/test_ai_agent_cataly.py`).
 - AI-agent row redaction also masks Telegram bot tokens (including inside a
   Bot API `/bot<token>/` URL) and Discord bot tokens.
 

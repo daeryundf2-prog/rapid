@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import plistlib
+import re
 import sys
 from contextlib import closing
 from dataclasses import replace
@@ -27,6 +28,11 @@ LIST_LIMIT = 64
 CONFIG_SECTIONS = frozenset({"hub", "omp", "sessions", "lead", "fallback", "discord", "telegram", "slack", "voice",
                              "lanes", "jobs", "destinations", "coord", "workers", "update", "ops"})
 RELAYS = ("discord", "telegram", "slack")
+# A relay reference is ``<relay>:<room>`` (a thread) or ``<relay>:<room>/<message>`` (``src/lanes/record.rs``). A
+# Telegram private chat's ID is the user's own ID (``src/relay/telegram.rs`` admits the owner's chat by it) and a Slack
+# ``D`` room is a direct-message conversation, so either names the owner's chat. Groups (negative Telegram IDs),
+# channels and Discord threads stay; a Discord direct-message channel cannot be told apart from a channel by its ID.
+PRIVATE_ROOM = re.compile(r"(?:telegram:[0-9]+|slack:D[0-9A-Z]+)(?:[:/].*)?", re.DOTALL)
 # Columns read from each store table: ``int`` as stored, ``text`` cut just past the row text limit (so the row is
 # flagged), ``json`` whole up to the per-value cap and empty beyond it. A column an older schema lacks reads NULL.
 # Message bodies (``events.body``), the owner's request text (``requests.title``, the first line of the owner's
@@ -108,6 +114,11 @@ def listed(row, key, values):
     return row
 
 
+def reference(value):
+    """A relay thread or message reference, empty when its room is a private chat (``PRIVATE_ROOM``)."""
+    return "" if isinstance(value, str) and PRIVATE_ROOM.fullmatch(value) else value
+
+
 def stamped(row, **times):
     """Extra event times as ISO UTC; an absent time leaves no field."""
     for key, value in times.items():
@@ -159,10 +170,10 @@ def cataly(src, path: Path, mode: str, line_records):
 
 
 def hub_config(src, doc):
-    """Model names, owner IDs, token and key file paths and job definitions. The relay owner IDs are personal
-    identifiers, exported on purpose: they name the account that controls the hub. Token values live in separate
-    files that are never read; ``[sessions] credentials`` and ``service.env`` hold environment variable names,
-    exported as names. A job's ``argv`` gives its program only."""
+    """Model names, token and key file paths and job definitions. The relay owner IDs are personal identifiers and
+    are not exported. Token values live in separate files that are never read; ``[sessions] credentials`` and
+    ``service.env`` hold environment variable names, exported as names. A job's ``argv`` gives its program only, and
+    a destination that is a private chat reference is left out."""
     if not isinstance(doc, dict) or not CONFIG_SECTIONS & set(doc):
         yield src.note("unrecognized-hub-config")
         return
@@ -172,7 +183,6 @@ def hub_config(src, doc):
         "settings", model=mapping(doc.get("lead")).get("model", ""), lanes_model=mapping(doc.get("lanes")).get("model"),
         fallback_chains="; ".join(f"{k}={', '.join(v for v in items(c) if isinstance(v, str))}" for k, c in chains.items()),
         log_level=mapping(doc.get("hub")).get("log_level"), omp_path=mapping(doc.get("omp")).get("path"),
-        **{f"{name}_owner": number(relay.get("owner")) or relay.get("owner") for name, relay in relays.items()},
     )
     listed(row, "env_names", mapping(doc.get("sessions")).get("credentials"))
     voice = mapping(doc.get("voice"))
@@ -183,7 +193,7 @@ def hub_config(src, doc):
             continue
         row = src.row("hub-job", job_name=name, job_kind=job.get("kind"), every=job.get("every"),
                       command_line=executable(job.get("argv")), cwd_configured=job.get("cwd"))
-        yield listed(row, "destinations", job.get("destinations"))
+        yield listed(row, "destinations", [d for d in items(job.get("destinations")) if reference(d)])
 
 
 def overlay(src, doc):
@@ -274,7 +284,7 @@ def event(src, doc):
         return
     yield src.row("hub-event", timestamp=doc["at_ms"], unit="ms", text=doc.get("text"), event_id=number(doc.get("id")),
                   job=doc.get("job"), subject=doc.get("subject"), event_kind=doc["kind"], severity=doc.get("severity"),
-                  lane_key=doc.get("lane"), thread=doc.get("thread"), urgent=str(doc.get("urgent", "")).lower(),
+                  lane_key=doc.get("lane"), thread=reference(doc.get("thread")), urgent=str(doc.get("urgent", "")).lower(),
                   dry=str(doc.get("dry", "")).lower())
 
 
@@ -351,8 +361,9 @@ def lane(src, row):
     spend = items(record.get("spend"))
     src = replace(src, session=record.get("session_id") or "", cwd=record.get("cwd") or "")
     out = src.row("lane", timestamp=row["opened_ms"], unit="ms", text=record.get("title"), model=record.get("model"),
-                  lane_key=row["key"], state=row["state"], outcome=row["outcome"], thread=row["thread"],
-                  origin=record.get("origin"), revision=number(row["revision"]), session_file=record.get("session_file"),
+                  lane_key=row["key"], state=row["state"], outcome=row["outcome"], thread=reference(row["thread"]),
+                  origin=reference(record.get("origin")), revision=number(row["revision"]),
+                  session_file=record.get("session_file"),
                   run_id=record.get("run_id"), worker=record.get("worker"),
                   spend_tokens=number(spend[0]) if len(spend) == 2 else "",
                   spend_usd_estimate=number(spend[1]) if len(spend) == 2 else "")
@@ -369,7 +380,7 @@ def request(src, row):
     title is the first line of the owner's message (``src/store/lead.rs``) and the next step and result are free text,
     so none is read: only the ID, message references, times and whether the request is still open."""
     out = src.row("request", timestamp=row["created_ms"], unit="ms", request_id=number(row["id"]),
-                  source_message=row["source"], thread=row["thread"],
+                  source_message=reference(row["source"]), thread=reference(row["thread"]),
                   state="closed" if row["closed_ms"] is not None else "open")
     yield stamped(out, updated_utc=ms(row["updated_ms"]), closed_utc=ms(row["closed_ms"]))
 
@@ -380,7 +391,8 @@ def question(src, row):
     if note:
         yield note
     out = src.row("question", timestamp=row["created_ms"], unit="ms", text=row["text"], question_id=row["id"],
-                  source_message=row["source"], thread=row["thread"], recommended=number(row["recommended"]),
+                  source_message=reference(row["source"]), thread=reference(row["thread"]),
+                  recommended=number(row["recommended"]),
                   request_id=number(row["request"]), state=row["state"], answer=row["outcome"])
     yield stamped(listed(out, "options", options), settled_utc=ms(row["settled_ms"]))
 

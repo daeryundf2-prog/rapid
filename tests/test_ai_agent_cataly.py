@@ -229,8 +229,7 @@ destinations = ["owner-dm", "log"]
         settings, job = by_file["config.toml"]
         self.assertEqual((settings["model"], settings["lanes_model"], settings["fallback_chains"]),
                          ("anthropic/claude-opus", "openai/gpt-5", "default=a/one, b/two"))
-        self.assertEqual((settings["discord_owner"], settings["telegram_owner"], settings["slack_owner"]),
-                         ("100000000000000002", "100000001", ""))
+        self.assertFalse({"discord_owner", "telegram_owner", "slack_owner"} & set(settings))
         self.assertEqual(settings["token_files"], ["/Users/o/.config/saessak/cataly/secrets/discord-token",
                                                    "/Users/o/.config/saessak/cataly/secrets/voice-key"])
         self.assertEqual(settings["env_names"], ["ANTHROPIC_API_KEY"])
@@ -335,17 +334,77 @@ argv = ["/bin/new-mail", "--password", "{t['plain']}", "https://api.telegram.org
             "dev.cataly.hub": ("/Users/o/.local/bin/cataly", "/Users/o/.config/hub/cataly/secrets/service.env"),
             "dev.cataly.saessak": ("/Users/o/.local/bin/cataly", "/Users/o/.config/saessak/cataly/secrets/service.env"),
             "Cataly hub": ("/home/o/.local/bin/cataly", "/home/o/.config/cataly/secrets/service.env")})
-        # Every request row, live and backup, keeps its references, times and state but no owner text.
+        # Every request row, live and backup, keeps its times and state but no owner text; the backup's source is a
+        # Telegram private chat, whose ID is the owner's, so it is left out.
         self.assertEqual(sorted((d["request_id"], d["source_message"], d["state"], d["text"])
                                 for d in by_type["agent-request"]),
-                         [("1", "telegram:5/6", "closed", "")] * 2 + [("7", "discord:1/55", "open", "")] * 2)
+                         [("1", "", "closed", "")] * 2 + [("7", "discord:1/55", "open", "")] * 2)
         # The stderr lines and hub.log line survive with the token masked.
         probe = [d["text"] for d in by_type["agent-log"] if d["text"].startswith("reqwest")]
         self.assertEqual(probe, ["reqwest error for url (https://api.telegram.org/bot[가림]/getUpdates)"] * 2)
-        # Owner IDs are exported on purpose (they name the controlling account); key files are listed by path.
+        # Owner IDs are not exported; key files are listed by path.
         settings = by_type["agent-settings"]
-        self.assertEqual({d["discord_owner"] for d in settings}, {"100000000000000002"})
+        self.assertFalse({"discord_owner", "telegram_owner", "slack_owner"} & {k for d in settings for k in d})
         self.assertIn("/Users/o/.config/saessak/cataly/secrets/voice-key", [p for d in settings for p in d["token_files"]])
+
+    def test_owner_ids_and_owner_chat_references_are_not_exported(self):
+        """Owner decision on PR #85: owner IDs and references to the owner's private chat appear in no output row;
+        token file paths, group and channel references stay."""
+        telegram, discord, slack, slack_dm = "7770001234", "100000000000000777", "U0OWNER1", "D0OWNERDM"
+        owners = (telegram, discord, slack, slack_dm)
+        _, db = self.store()
+        db.executescript(SCHEMA)
+        db.execute("INSERT INTO lanes VALUES ('fix','running',NULL,?,?,NULL,1,?)", (
+            f"telegram:{telegram}", OPENED, json.dumps({"title": "t", "origin": f"telegram:{telegram}/42"})))
+        db.execute("INSERT INTO lanes VALUES ('grp','running',NULL,'discord:123456789012345678',?,NULL,1,?)",
+                   (OPENED, json.dumps({"origin": "telegram:-100123/7"})))
+        db.execute("INSERT INTO requests (id,title,source,thread,created_ms,updated_ms) VALUES (1,'x',?,?,?,?)",
+                   (f"telegram:{telegram}/43", f"telegram:{telegram}", OPENED, OPENED))
+        db.execute("INSERT INTO requests (id,title,source,thread,created_ms,updated_ms) VALUES (2,'x',?,?,?,?)",
+                   (f"slack:{slack_dm}/1700000000.000100", f"slack:{slack_dm}", OPENED, OPENED))
+        db.execute("INSERT INTO questions (id,text,source,thread,options,state,created_ms) VALUES "
+                   "('q1','ok?',?,?,'[]','open',?)", (f"telegram:{telegram}:9/44", f"slack:{slack_dm}", OPENED))
+        db.execute("INSERT INTO events (id,at_ms,job,subject,kind,severity,text,thread,urgent,dry) VALUES "
+                   "(1,?,'lanes','fix','lane.opened','info','opened',?,0,0)", (OPENED, f"telegram:{telegram}"))
+        db.commit()
+        self.lines(f"{STATE}/logs/events.jsonl", {"id": 2, "at_ms": OPENED, "job": "lanes", "subject": "fix",
+                                                  "kind": "lane.opened", "severity": "info", "text": "opened",
+                                                  "thread": f"telegram:{telegram}"})
+        self.write("Users/o/.config/saessak/cataly/config.toml", f"""
+[discord]
+owner = "{discord}"
+token_file = "/Users/o/.config/saessak/cataly/secrets/discord-token"
+[telegram]
+owner = {telegram}
+token_file = "/Users/o/.config/saessak/cataly/secrets/telegram-token"
+[slack]
+owner = "{slack}"
+[jobs.mail]
+argv = ["/bin/new-mail"]
+destinations = ["telegram:{telegram}", "slack:{slack_dm}", "telegram:-100123", "log"]
+""".encode())
+
+        rows = self.rows("cataly-hub")
+        payload = run_artifact_collection(self.root, kind="cataly-hub", records_path=self.root.parent / "rows.jsonl",
+                                          preview_limit=100)
+        events = extract_artifact_events(payload, self.root.parent / "artifacts-cataly-hub.json")
+        output = "\n".join((exported(rows), json.dumps(payload, ensure_ascii=False),
+                            json.dumps(events, ensure_ascii=False),
+                            (self.root.parent / "rows.jsonl").read_text(encoding="utf-8")))
+        self.assertEqual({owner: output.count(owner) for owner in owners}, dict.fromkeys(owners, 0))
+
+        by_type = {}
+        for row in rows:
+            by_type.setdefault(row.artifact_type, []).append(row.details)
+        self.assertEqual(sorted((d["lane_key"], d["thread"], d["origin"]) for d in by_type["agent-lane"]),
+                         [("fix", "", ""), ("grp", "discord:123456789012345678", "telegram:-100123/7")])
+        self.assertEqual(len(by_type["agent-request"]) + len(by_type["agent-question"]), 3)
+        self.assertEqual(len(by_type["agent-hub-event"]), 2)
+        [settings] = by_type["agent-settings"]
+        self.assertEqual(settings["token_files"], ["/Users/o/.config/saessak/cataly/secrets/discord-token",
+                                                   "/Users/o/.config/saessak/cataly/secrets/telegram-token"])
+        [job] = by_type["agent-hub-job"]
+        self.assertEqual(job["destinations"], ["telegram:-100123", "log"])
 
     def test_a_broken_launchd_plist_leaves_a_note_and_the_other_records(self):
         self.write("Users/o/Library/LaunchAgents/dev.cataly.x.plist",
