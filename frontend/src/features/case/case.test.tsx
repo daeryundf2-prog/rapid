@@ -5,6 +5,7 @@ import { DeleteCaseDialog } from "./CasePicker";
 import { buildCaseCommands } from "./commands";
 import { DoctorDialog } from "./DoctorDialog";
 import { useCaseDialogs } from "./dialogs";
+import { NO_CANDIDATES_REASON } from "./exports";
 import { ImportDialog } from "./ImportDialog";
 import { ReportDialog } from "./ReportDialog";
 import { RunDialog } from "./RunDialog";
@@ -286,9 +287,9 @@ describe("ReportDialog / export commands", () => {
     const withZero = buildCaseCommands({ reportCandidates: 0 });
     const reason = (id: string, over = {}) =>
       withZero.find((c) => c.id === id)?.disabledReason?.({ ...ctx, ...over });
-    expect(reason("export.case-report")).toBe("보고 후보 0건 — 표시된 항목이 없습니다");
-    expect(reason("export.reviewer-bundle")).toBe("보고 후보 0건 — 표시된 항목이 없습니다");
-    expect(reason("export.submission-manifest")).toBe("보고 후보 0건 — 표시된 항목이 없습니다");
+    expect(reason("export.case-report")).toBe(NO_CANDIDATES_REASON);
+    expect(reason("export.reviewer-bundle")).toBe(NO_CANDIDATES_REASON);
+    expect(reason("export.submission-manifest")).toBe(NO_CANDIDATES_REASON);
     expect(reason("export.validation-package")).toBeUndefined();
     expect(reason("export.case-report", { runId: null })).toBe("열린 케이스가 없습니다");
     expect(

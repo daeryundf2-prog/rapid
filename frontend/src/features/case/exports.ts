@@ -10,6 +10,7 @@ import {
   submissionManifestFile,
   validationPackageFile,
 } from "../../api/reports";
+import { KEY_MAP } from "../../contracts/command";
 
 export type ExportKind = "case-report" | "reviewer-bundle" | "submission-manifest" | "validation-package";
 
@@ -51,7 +52,7 @@ export interface ReportMeta {
   investigator: string;
 }
 
-export const NO_CANDIDATES_REASON = "보고 후보 0건 — 표시된 항목이 없습니다";
+export const NO_CANDIDATES_REASON = `보고 후보 0건 — 그리드에서 행을 고르고 ${KEY_MAP.markIncludeInReport}(보고서 포함 표시)로 표시하세요`;
 
 export function exportDisabledReason(
   action: ExportAction,

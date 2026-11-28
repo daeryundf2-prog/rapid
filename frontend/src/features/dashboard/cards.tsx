@@ -448,8 +448,8 @@ export function ReviewCard({
       </table>
       {empty ? (
         <p className="dash-note">
-          아직 표시한 항목이 없습니다. 그리드에서 R(관련 있음)·I(재검토)·X(제외)·B(보고서 포함)로 표시하면
-          여기에 집계됩니다.
+          아직 표시한 항목이 없습니다. 그리드에서 R(관련 있음)·I(재검토)·X(제외)·B(북마크)·Shift+R(보고서
+          포함)로 표시하면 여기에 집계됩니다.
         </p>
       ) : null}
     </div>

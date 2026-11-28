@@ -182,6 +182,7 @@ export const KEY_DESCRIPTIONS: Record<keyof typeof KEY_MAP, string> = {
   timelinePrev: "타임라인: 같은 폭의 이전 구간",
   timelineNext: "타임라인: 같은 폭의 다음 구간",
   timelineZoomOut: "타임라인: 범위 넓히기 (3배)",
+  markIncludeInReport: "보고서 포함 표시 (보고서·리뷰어 번들 내보내기 대상)",
 };
 
 /** Apple platform (review #14): only there does Ctrl+K read as the ⌘ glyph. */
