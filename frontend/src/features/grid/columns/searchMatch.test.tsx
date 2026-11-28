@@ -164,3 +164,18 @@ describe("search collection columns", () => {
     expect(String(row.fields.preview)).not.toContain("{");
   });
 });
+
+describe("review P3-2 / P3-3", () => {
+  it("never splits a surrogate pair at the context edges", () => {
+    const text = `${"😀".repeat(30)}x invoice ${"😀".repeat(30)}`;
+    const context = contextAround(text, keywordFinder(["invoice"], "text"), "body");
+    const all = contextText(context);
+    expect(all).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+  });
+
+  it("matches an NFD (macOS) Korean name with an NFC keyword", () => {
+    const nfd = "/Users/a/보고서.docx".normalize("NFD");
+    const context = contextAround(nfd, keywordFinder(["보고서"], "text"), "path");
+    expect(context?.hit).toBe("보고서");
+  });
+});

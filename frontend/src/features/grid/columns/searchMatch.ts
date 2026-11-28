@@ -48,7 +48,7 @@ type Finder = (text: string) => { index: number; length: number } | null;
  * expression in regex mode (an invalid one falls back to text).
  */
 export function keywordFinder(keywords: readonly string[], mode: string): Finder {
-  const words = keywords.map((word) => word.trim()).filter(Boolean);
+  const words = keywords.map((word) => word.normalize("NFC").trim()).filter(Boolean);
   const patterns: RegExp[] = [];
   for (const word of words) {
     if (mode === "regex") {
@@ -77,6 +77,10 @@ export function looksLikeJson(text: string): boolean {
   return /^\s*[[{]/.test(text);
 }
 
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
 /** `text` around the first hit, ±`radius` characters, whitespace collapsed; null without a hit. */
 export function contextAround(
   text: string,
@@ -84,11 +88,15 @@ export function contextAround(
   field: MatchField,
   radius = CONTEXT_RADIUS,
 ): MatchContext | null {
-  const flat = text.replace(/\s+/g, " ").trim();
+  // NFC like the server's normalize_search_text (review P3-3): a macOS NFD name matches.
+  const flat = text.normalize("NFC").replace(/\s+/g, " ").trim();
   const hit = find(flat);
   if (!hit) return null;
-  const start = Math.max(0, hit.index - radius);
-  const end = Math.min(flat.length, hit.index + hit.length + radius);
+  let start = Math.max(0, hit.index - radius);
+  let end = Math.min(flat.length, hit.index + hit.length + radius);
+  // Never cut a surrogate pair (review P3-2): widen by one unit at either edge.
+  if (start > 0 && isLowSurrogate(flat.charCodeAt(start))) start -= 1;
+  if (end < flat.length && isLowSurrogate(flat.charCodeAt(end))) end += 1;
   return {
     field,
     before: flat.slice(start, hit.index),
