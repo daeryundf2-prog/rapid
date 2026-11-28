@@ -1,4 +1,4 @@
-"""Bounded reads of chat values in a private copy of editor global storage."""
+"""Bounded reads of chat values in a private copy of editor global storage and of omp prompt history."""
 from __future__ import annotations
 
 import json
@@ -78,14 +78,18 @@ def editor_value(src, key, value):
         yield src.note("editor-index-or-unsupported-layout")
 
 
-def editor(src, path: Path):
+def database_bytes(path: Path) -> int:
     size = 0
     for suffix in ("", "-wal", "-shm", "-journal"):
         try:
             size += path.with_name(path.name + suffix).lstat().st_size
         except FileNotFoundError:
             continue
-    if size > DB_BYTES:
+    return size
+
+
+def editor(src, path: Path):
+    if database_bytes(path) > DB_BYTES:
         yield src.note("database-size-limit")
         return
     provenance = {}
@@ -124,3 +128,30 @@ def _editor_rows(src, table, snapshot, rows):
             yield source.note("invalid-editor-json")
             continue
         yield from editor_value(source, key, doc)
+
+
+def prompt_history(src, path: Path):
+    """omp ``history.db`` table ``history(prompt, created_at, cwd, session_id, use_count)``. A resubmitted prompt
+    keeps one row: ``created_at`` (epoch seconds) is its latest submission and ``use_count`` the submissions."""
+    if database_bytes(path) > DB_BYTES:
+        yield src.note("database-size-limit")
+        return
+    provenance = {}
+    with open_sqlite_snapshot(path, provenance=provenance) as db:
+        db.execute("PRAGMA trusted_schema=OFF").close()
+        snapshot = sqlite_snapshot_reference(provenance)
+        with closing(db.execute("PRAGMA main.table_list")) as listing:
+            if not any(name == "history" and kind == "table" for _, name, kind, *_ in listing):
+                yield src.note("history-table-missing")
+                return
+        with closing(db.execute(
+                "SELECT rowid, CASE WHEN length(CAST(prompt AS BLOB)) <= ? THEN prompt END, created_at, cwd, session_id, "
+                "use_count FROM history ORDER BY rowid", (VALUE_BYTES,))) as rows:
+            for rowid, prompt, created, cwd, session, uses in rows:
+                source = replace(src, session=session, cwd=cwd, location={
+                    "source_table": "history", "source_rowid": rowid, "snapshot_id": snapshot["snapshot_id"]})
+                if not isinstance(prompt, str):
+                    yield source.note("empty-or-oversize-history-value")
+                    continue
+                yield source.row("message", role="user", timestamp=created, unit="s", text=prompt,
+                                 use_count=str(uses) if type(uses) is int else "")

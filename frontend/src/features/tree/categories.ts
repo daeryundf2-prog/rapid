@@ -56,6 +56,7 @@ export const KIND_CATEGORY: Readonly<Record<string, KindMeta>> = {
   "claude-code": { category: "application-usage", icon: "app" },
   "codex-cli": { category: "application-usage", icon: "app" },
   "gemini-cli": { category: "application-usage", icon: "app" },
+  "omp-pi": { category: "application-usage", icon: "app" },
   "editor-chat": { category: "application-usage", icon: "app" },
   "agent-mcp": { category: "application-usage", icon: "app" },
   browser: { category: "web", icon: "globe" },

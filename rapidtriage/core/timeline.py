@@ -109,6 +109,7 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     "agent-message": (F("timestamp_utc", "message"),),
     "agent-tool-call": (F("timestamp_utc", "tool-call"),),
     "agent-tool-result": (F("timestamp_utc", "tool-result"),),
+    "agent-log": (F("timestamp_utc", "agent-logged"),),
     "macos-unified-log-event": (F("timestamp", "logged"),),
     # --- execution -------------------------------------------------------
     "prefetch-file": (
@@ -2028,6 +2029,10 @@ def build_artifact_summary(artifact_type: str, artifact_path: str, context: Mapp
             "(시간대 미확정: UTC 오프셋 없음)",
         ]
         return " ".join(bit for bit in bits if bit)
+    if artifact_type == "agent-message" and context.get("attribution"):
+        # omp records who initiated a turn; role ``user`` alone would read an agent-written prompt as typed.
+        return (f"Artifact event: {artifact_type} (role {context.get('role') or '-'}, "
+                f"attribution {context['attribution']}) {Path(artifact_path).name}")
     if "ai_service" in context:
         bits = [
             str(context.get("ai_service") or "AI service"),

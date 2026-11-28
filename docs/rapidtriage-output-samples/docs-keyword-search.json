@@ -211,6 +211,13 @@
         "artifact_count": 0
       },
       {
+        "name": "omp-pi",
+        "description": "omp·pi·senpi·OmO 사용 기록",
+        "target_platform": "any",
+        "supported": true,
+        "artifact_count": 0
+      },
+      {
         "name": "editor-chat",
         "description": "Cursor·VS Code 대화 기록",
         "target_platform": "any",
