@@ -41,6 +41,9 @@ ARTIFACT_PREVIEW_LIMIT = 200
 # projection; ``record_detail="full"`` restores every per-event block.
 DEFAULT_COLLECTOR_OPTIONS: dict[str, dict[str, object]] = {
     "eventlog": {"structure_rows": False, "record_detail": "triage"},
+    # Orca bot memory (``SOUL.md``, ``MEMORY.md``, ``memory/*.md`` and memory change lines) is exported as counts
+    # and a hash unless the examiner opts in; the payload's ``collector_options`` records the choice.
+    "orca-bots": {"bot_memory_text": False},
 }
 
 

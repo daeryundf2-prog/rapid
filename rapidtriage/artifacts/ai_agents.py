@@ -246,9 +246,9 @@ def json_lines(src, path, mode):
         yield from parse_record(src, doc, mode)
 
 
-def read_source(src, path, mode):
+def read_source(src, path, mode, bot_memory_text=False):
     if src.agent == "orca-bots":
-        yield from orca(src, path, mode)
+        yield from orca(src, path, mode, bot_memory_text)
     elif mode == "database":
         yield from editor(src, path)
     elif path.suffix.lower() == ".jsonl":
@@ -272,9 +272,16 @@ def read_source(src, path, mode):
 class AiAgentProvider:
     target_platform = "any"
 
-    def __init__(self, kind: str):
+    def __init__(self, kind: str, *, bot_memory_text: bool = False):
         self.collector_kind = self.name = kind
         self.description = AI_AGENT_LABELS[kind]
+        # Orca bot memory text is opt-in (``collector_options={"bot_memory_text": True}``). ``options_key`` keeps such
+        # a collection out of the default collection's ``collect_cached`` slot.
+        self.bot_memory_text = bot_memory_text is True
+        self.options_key = "bot_memory_text" if self.bot_memory_text else ""
+
+    def with_options(self, *, bot_memory_text: object = False, **_ignored: object) -> AiAgentProvider:
+        return AiAgentProvider(self.collector_kind, bot_memory_text=bot_memory_text is True)
 
     def supported(self) -> bool:
         return True
@@ -297,7 +304,7 @@ class AiAgentProvider:
             try:
                 if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(root.resolve()):
                     continue
-                with closing(read_source(src, path, mode)) as rows:
+                with closing(read_source(src, path, mode, self.bot_memory_text)) as rows:
                     for index, row in enumerate(rows):
                         if index == ROWS_PER_SOURCE:
                             yield src.note("row-limit")

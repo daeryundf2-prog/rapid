@@ -10,10 +10,12 @@ and ``src/main/bots/bot-home.ts`` (the bot record and its home in ``~/.orca/bots
 
 Credentials are never exported: the Orca Cloud session file gives only its seal format and save time, and token or
 key files only their names. No argv or command line is exported either: a worker's launch options (argv,
-environment, env files), effects and terminal handle can hold unlabelled secrets that redaction cannot see. Every
-exported text passes ``clean()``."""
+environment, env files), effects and terminal handle can hold unlabelled secrets that redaction cannot see. Bot
+memory (``SOUL.md``, ``MEMORY.md``, ``memory/<topic>.md`` and the lines of a memory change) is exported as counts and
+a hash unless the collector option ``bot_memory_text`` asks for its text. Every exported text passes ``clean()``."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import urllib.parse
@@ -150,7 +152,7 @@ def json_cell(value):
         return None
 
 
-def orca(src, path: Path, mode: str):
+def orca(src, path: Path, mode: str, memory_text: bool = False):
     src.location = {"source_offset": 0}
     if mode == "secret":
         # Presence only: never opened.
@@ -163,7 +165,7 @@ def orca(src, path: Path, mode: str):
     with path.open("rb") as stream:
         raw = stream.read(limit + 1)
     if mode == "memory-file":
-        yield memory_file(src, path, raw[:limit], len(raw) > limit)
+        yield memory_file(src, path, raw[:limit], len(raw) > limit, memory_text)
         return
     if len(raw) > limit:
         yield src.note("document-size-limit")
@@ -179,6 +181,8 @@ def orca(src, path: Path, mode: str):
         return
     if mode == "cloud-session":
         yield cloud_session(src, doc, path)
+    elif mode == "memory-history":
+        yield from memory_history(src, doc, path, memory_text)
     else:
         yield from DOCUMENT_ROWS[mode](src, doc, path)
 
@@ -234,22 +238,31 @@ def bot_home(src, doc, path):
     yield listed(out, "member_sources", sorted({text_of(m.get("source")) or "slack" for m in members}))
 
 
-def memory_file(src, path, raw, truncated):
-    """``SOUL.md``, ``MEMORY.md`` and ``memory/<topic>.md``: the bot's own instructions and remembered facts. The text
-    passes the usual redaction and length limit; at most the first 64 KiB is read."""
+def memory_file(src, path, raw, truncated, with_text):
+    """``SOUL.md``, ``MEMORY.md`` and ``memory/<topic>.md``: the bot's own instructions and remembered facts. Memory
+    is free text gathered over months from Slack, Linear and GitHub conversations (names, contacts, values the owner
+    asked it to keep) and Orca does not redact it, so by default a row gives the file's size, its line and character
+    counts and the SHA-256 of the bytes read, flagged ``content-not-exported``. With the collector option
+    ``bot_memory_text`` the text is exported too, after the usual redaction and length limit. At most the first
+    64 KiB is read."""
     folder = path.parent.parent if path.parent.name.casefold() == "memory" else path.parent
     role = MEMORY_FILES.get(path.name.casefold(), "memory-topic")
-    out = src.row("bot-memory-file", text=raw.decode("utf-8", "replace"), bot_folder=folder.name, memory_file=path.name,
-                  memory_role=role, file_bytes=number(path.stat().st_size))
+    text = raw.decode("utf-8", "replace")
+    out = src.row("bot-memory-file", text=text if with_text else "", bot_folder=folder.name, memory_file=path.name,
+                  memory_role=role, file_bytes=number(path.stat().st_size), line_count=number(len(text.splitlines())),
+                  char_count=number(len(text)), text_sha256=hashlib.sha256(raw).hexdigest())
+    if not with_text:
+        out.details["flags"].append("content-not-exported")
     if truncated and "text-length-limit" not in out.details["flags"]:
         out.details["flags"].append("text-length-limit")
     return out
 
 
-def memory_history(src, doc, path):
+def memory_history(src, doc, path, with_text):
     """``bot-memory-history/<bot ID>.json``: one row per change to ``MEMORY.md``, newest first, kept 90 days. ``by``
     names who wrote it: a chat (with the outside speaker in that window, empty for the owner), the owner, the bot's
-    own forget command, Orca restoring a dropped line, an undo or the nightly tidy-up."""
+    own forget command, Orca restoring a dropped line, an undo or the nightly tidy-up. The added and removed lines are
+    counted; their text is exported only with the collector option ``bot_memory_text``."""
     if not isinstance(doc, list):
         yield src.note("invalid-config-shape")
         return
@@ -258,13 +271,18 @@ def memory_history(src, doc, path):
         entry = mapping(entry)
         by = mapping(entry.get("by"))
         change = mapping(entry.get("change"))
+        added, removed = items(change.get("added")), items(change.get("removed"))
         out = replace(src, location={"source_offset": 0, "entry_index": index},
                       session=text_of(by.get("sessionId"))).row(
             "bot-memory-change", timestamp=entry.get("at"), unit="ms", bot_id=bot_id, change_id=entry.get("id"),
             author_kind=by.get("kind"), speaker=by.get("source"), undo_of=by.get("of"),
-            undoable=flag(entry.get("undoable")))
-        listed(out, "added_lines", [mapping(line).get("line") for line in items(change.get("added"))])
-        yield listed(out, "removed_lines", [mapping(line).get("line") for line in items(change.get("removed"))])
+            undoable=flag(entry.get("undoable")), added_count=number(len(added)), removed_count=number(len(removed)))
+        if not with_text:
+            out.details["flags"].append("content-not-exported")
+            yield out
+            continue
+        listed(out, "added_lines", [mapping(line).get("line") for line in added])
+        yield listed(out, "removed_lines", [mapping(line).get("line") for line in removed])
 
 
 def look_around(src, doc, path):
@@ -356,6 +374,9 @@ def store(src, path: Path, mode: str):
     tables_spec = SQLITE_STORES[mode]
     provenance = {}
     with open_sqlite_snapshot(path, provenance=provenance) as db:
+        # A TEXT cell that is not UTF-8 would raise on fetch and end the whole store: decode it with replacement
+        # characters instead (the connection reads a private copy, as knowledgec does).
+        db.text_factory = lambda raw: raw.decode("utf-8", "replace")
         db.execute("PRAGMA trusted_schema=OFF").close()
         snapshot = sqlite_snapshot_reference(provenance)
         with closing(db.execute("PRAGMA main.table_list")) as listing:
@@ -439,6 +460,12 @@ def bot_request_outcome(src, row, context):
     return ()
 
 
+def orchestration_utc(value):
+    """``orchestration.db`` times: SQLite ``datetime('now')`` text, or ``Date.toISOString()`` where Orca updates a row
+    from JavaScript (most dispatch state changes)."""
+    return utc(sqlite_time(value) or value, "")
+
+
 def bot_request(src, row, context):
     """``bot_requests``: a request one bot (or a person through a connector) put to another bot, with purpose
     (status, handoff, question), depth and the original request text, and its outcome when one was recorded."""
@@ -448,17 +475,19 @@ def bot_request(src, row, context):
                      root_key=row["root_key"], from_bot_id=row["from_bot_id"], from_bot_name=record.get("fromBotName"),
                      to_bot_id=row["to_bot_id"], to_bot_name=record.get("toBotName"), purpose=row["purpose"],
                      depth=number(row["depth"]), outcome=outcome.get("outcome"))
-    return [stamped(out, outcome_utc=utc(sqlite_time(outcome.get("recorded_at")), ""))]
+    return [stamped(out, outcome_utc=orchestration_utc(outcome.get("recorded_at")))]
 
 
 def worker_dispatch(src, row, context):
     """``worker_dispatches``: an agent started for a task, with its state, stage, worktree and last error. Orca's
-    worktree ID is ``<repo ID>::<worktree path>``."""
+    worktree ID is ``<repo ID>::<worktree path>``; the path is also the row's ``cwd``, the key that joins the dispatch
+    to the Claude Code or Codex session run there (Orca's own session IDs are not theirs)."""
     worktree = text_of(row["worktree_id"])
-    out = sqlite_row(src, "bot-dispatch", row["created_at"], text=row["last_error"], dispatch_id=row["dispatch_id"],
-                     state=row["state"], stage=row["stage"], worktree_id=worktree,
-                     worktree_path=worktree.partition("::")[2])
-    return [stamped(out, updated_utc=utc(sqlite_time(row["updated_at"]), ""))]
+    path = worktree.partition("::")[2]
+    out = sqlite_row(replace(src, cwd=path), "bot-dispatch", row["created_at"], text=row["last_error"],
+                     dispatch_id=row["dispatch_id"], state=row["state"], stage=row["stage"], worktree_id=worktree,
+                     worktree_path=path)
+    return [stamped(out, updated_utc=orchestration_utc(row["updated_at"]))]
 
 
 def profile_document(src, row, context):
@@ -500,5 +529,5 @@ STORE_FILTERS = {"profile_state_documents": "WHERE domain IN ('bots', 'botsNewer
 STORE_ROWS = {"bot_work": bot_work, "item_links": item_link, "items": bot_item, "item_events": item_event,
               "bot_request_outcomes": bot_request_outcome, "bot_requests": bot_request,
               "worker_dispatches": worker_dispatch, "profile_state_documents": profile_document}
-DOCUMENT_ROWS = {"bot-home": bot_home, "profile-json": profile_bots, "memory-history": memory_history,
-                 "look-around": look_around, "profile-index": profile_index}
+DOCUMENT_ROWS = {"bot-home": bot_home, "profile-json": profile_bots, "look-around": look_around,
+                 "profile-index": profile_index}

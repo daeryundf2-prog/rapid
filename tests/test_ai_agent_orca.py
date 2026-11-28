@@ -1,10 +1,12 @@
 """Orca Bots collector. Synthetic evidence only; layouts follow Orca's public source (stablyai/orca, c46704e1)."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
 
+from rapidtriage.artifacts import clear_collect_cache
 from rapidtriage.core.artifacts import run_artifact_collection
 from rapidtriage.core.schema_validation import load_schema, validate
 from rapidtriage.core.timeline import extract_artifact_events
@@ -120,7 +122,11 @@ class OrcaBotsTests(AgentFixture):
              (json.dumps([{"kind": "env-file", "path": "/w/.env"}]),
               json.dumps({"argv": ["claude", "--api-key", "POSITIONAL-SECRET-NEVER-EXPORTED", "-pHUNTER2-NEVER"],
                           "env": {"STRIPE": "STRIPE-LIVE-NEVER-EXPORTED"}}),
-              f"auth failed token={TOKEN}")))
+              f"auth failed token={TOKEN}")),
+            # State changes from JavaScript store ``Date.toISOString()`` instead of SQLite ``datetime`` text.
+            ("INSERT INTO worker_dispatches (dispatch_id, state, stage, worktree_id, created_at, updated_at) VALUES"
+             " ('disp-2','failed','starting','repo-1::C:\\w\\case','2026-09-21 14:13:20','2026-09-21T14:30:00.123Z')",
+             ()))
 
         rows, events = self.collect()
         found = by_type(rows)
@@ -153,11 +159,14 @@ class OrcaBotsTests(AgentFixture):
         self.assertTrue(request["text"].startswith("이 PR 봐줘 GITHUB_TOKEN="))
         self.assertEqual((request["timestamp_raw"], request["timestamp_utc"], request["outcome_utc"]),
                          ("2026-09-21 14:13:20", CREATED_UTC, CLOSED_UTC))
-        (dispatch,) = found["agent-bot-dispatch"]
-        self.assertEqual((dispatch["state"], dispatch["worktree_id"], dispatch["worktree_path"]),
-                         ("succeeded", "repo-1::/w/rapid-fix", "/w/rapid-fix"))
-        self.assertTrue(dispatch["text"].startswith("auth failed token="))
-        self.assertEqual(dispatch["command_line"], "")
+        done, failed = found["agent-bot-dispatch"]
+        self.assertEqual((done["state"], done["worktree_id"], done["worktree_path"], done["cwd"]),
+                         ("succeeded", "repo-1::/w/rapid-fix", "/w/rapid-fix", "/w/rapid-fix"))
+        self.assertEqual(done["updated_utc"], CLOSED_UTC)
+        self.assertTrue(done["text"].startswith("auth failed token="))
+        self.assertEqual(done["command_line"], "")
+        self.assertEqual((failed["state"], failed["cwd"], failed["updated_utc"]),
+                         ("failed", "C:\\w\\case", "2026-09-21T14:30:00.123000+00:00"))
         exported = json.dumps([r.details for r in rows])
         for hidden in (TOKEN, "SETTINGS-NEVER-READ", "MEMBER-NAME-NEVER-EXPORTED", "POSITIONAL-SECRET-NEVER-EXPORTED",
                        "HUNTER2-NEVER", "STRIPE-LIVE-NEVER-EXPORTED", "UNLABELLED-HANDLE", "/w/.env"):
@@ -165,6 +174,7 @@ class OrcaBotsTests(AgentFixture):
         self.assertNotIn("agent-parse-note", found)
         self.assertEqual(events, [
             ("agent-bot", "created"), ("agent-bot", "last-updated"), ("agent-bot-dispatch", "last-updated"),
+            ("agent-bot-dispatch", "last-updated"), ("agent-bot-dispatch", "started"),
             ("agent-bot-dispatch", "started"), ("agent-bot-item", "completed"), ("agent-bot-item", "created"),
             ("agent-bot-item", "last-updated"), ("agent-bot-item-event", "event"),
             ("agent-bot-item-event", "event"), ("agent-bot-request", "completed"), ("agent-bot-request", "sent"),
@@ -175,13 +185,14 @@ class OrcaBotsTests(AgentFixture):
         self.write(f"{home}/bot.json", {"id": "bot-1", "name": "Rapid helper", "agent": "claude", "avatar": None,
                                         "members": [{"id": "U1", "name": "n"}]})
         self.write(f"{home}/SOUL.md", b"# Rapid helper\nYou fix tests.\n")
-        self.write(f"{home}/MEMORY.md", f"# Memory\n- 2026-09-21 deploy key {TOKEN}\n".encode())
+        memory = f"# Memory\n- 2026-09-21 MEMORY-BODY-OPT-IN deploy key {TOKEN}\n".encode()
+        self.write(f"{home}/MEMORY.md", memory)
         self.write(f"{home}/memory/release.md", b"# Release\nTag on Fridays.\n")
         self.write(f"{home}/AGENTS.md", b"# GENERATED-NEVER-READ\n")
         self.write(f"{home}/.orca/bot-tools.json", {"servers": []})
         self.write(f"{USER_DATA}/bot-memory-history/bot%2F1.json", [{
             "id": "c1", "at": CLOSED_MS, "by": {"kind": "chat", "sessionId": "chat-1", "source": "U2"},
-            "change": {"added": [{"line": "- Tag on Fridays", "after": None}], "removed": []}, "undoable": True}])
+            "change": {"added": [{"line": "- CHANGE-LINE-OPT-IN", "after": None}], "removed": []}, "undoable": True}])
         self.write(f"{USER_DATA}/bot-look-around.json", {"bots": {"bot-1": {
             "runs": [{"sessionId": "run-1", "startedAt": CREATED_MS, "endedAt": CLOSED_MS}],
             "suggestions": [{"id": "s1", "title": "Fix flaky test", "why": "CI red", "ask": "fix it", "source": "github",
@@ -211,12 +222,18 @@ class OrcaBotsTests(AgentFixture):
         self.assertEqual(sorted(files), ["MEMORY.md", "SOUL.md", "release.md"])
         self.assertEqual((files["release.md"]["memory_role"], files["release.md"]["bot_folder"]),
                          ("memory-topic", "rapid-helper"))
-        self.assertTrue(files["MEMORY.md"]["text"].startswith("# Memory\n- 2026-09-21 deploy key "))
-        self.assertNotIn(TOKEN, files["MEMORY.md"]["text"])
+        # Memory text is opt-in: by default only its size, counts and hash.
+        self.assertEqual((files["MEMORY.md"]["text"], files["MEMORY.md"]["line_count"],
+                          files["MEMORY.md"]["char_count"], files["MEMORY.md"]["file_bytes"]),
+                         ("", "2", str(len(memory.decode())), str(len(memory))))
+        self.assertEqual(files["MEMORY.md"]["text_sha256"], hashlib.sha256(memory).hexdigest())
+        self.assertIn("content-not-exported", files["MEMORY.md"]["flags"])
         (change,) = found["agent-bot-memory-change"]
         self.assertEqual((change["bot_id"], change["author_kind"], change["speaker"], change["session_id"]),
                          ("bot/1", "chat", "U2", "chat-1"))
-        self.assertEqual((change["added_lines"], change["removed_lines"]), (["- Tag on Fridays"], []))
+        self.assertEqual((change["added_count"], change["removed_count"]), ("1", "0"))
+        self.assertNotIn("added_lines", change)
+        self.assertIn("content-not-exported", change["flags"])
         look, tidy = found["agent-bot-run"]
         self.assertEqual((look["run_kind"], look["session_id"], look["ended_utc"]), ("look-around", "run-1", CLOSED_UTC))
         self.assertEqual((tidy["run_kind"], tidy["text"]), ("tidy-up", "usage limit"))
@@ -234,7 +251,7 @@ class OrcaBotsTests(AgentFixture):
                          ("dev-plaintext-v1", "p1", CLOSED_UTC))
         text = json.dumps([r.details for r in rows])
         for hidden in ("ACCESS-NEVER-EXPORTED", "REFRESH-NEVER-EXPORTED", "KEY-NEVER-READ", "GENERATED-NEVER-READ",
-                       "DISMISSAL-NEVER-EXPORTED", "SEALED"):
+                       "DISMISSAL-NEVER-EXPORTED", "SEALED", "MEMORY-BODY-OPT-IN", "CHANGE-LINE-OPT-IN", "Tag on"):
             self.assertNotIn(hidden, text)
         self.assertFalse(any("user-settings.conf" in r.path or r.path.endswith("bot-tools.json") for r in rows))
         self.assertNotIn("agent-parse-note", found)
@@ -243,3 +260,50 @@ class OrcaBotsTests(AgentFixture):
             ("agent-bot-run", "started"), ("agent-bot-suggestion", "created"), ("agent-cloud-profile", "created"),
             ("agent-cloud-profile", "last-opened"), ("agent-cloud-profile", "linked"),
             ("agent-secret-file", "session-saved")])
+
+    def test_memory_text_is_opt_in_and_never_served_from_the_other_collection_cache(self):
+        self.addCleanup(clear_collect_cache)
+        self.write(f"{HOME}/bots/rapid-helper/MEMORY.md", f"# Memory\n- MEMORY-BODY-OPT-IN key {TOKEN}\n".encode())
+        self.write(f"{USER_DATA}/bot-memory-history/bot-1.json", [{
+            "id": "c1", "at": CLOSED_MS, "by": {"kind": "owner"},
+            "change": {"added": [{"line": "- added fact"}], "removed": [{"line": f"- old key {TOKEN}"}]}}])
+
+        def collect(**options):
+            payload = run_artifact_collection(self.root, kind="orca-bots", collector_options=options or None)
+            found = {row["artifact_type"]: row["details"] for row in payload["artifacts"]}
+            return payload["collector_options"], found["agent-bot-memory-file"], found["agent-bot-memory-change"]
+
+        # The default run fills the per-process collect cache first; the opt-in run must not reuse it, nor the
+        # default run after it reuse the opt-in rows.
+        for options, with_text in (({}, False), ({"bot_memory_text": True}, True), ({}, False)):
+            recorded, memory, change = collect(**options)
+            self.assertEqual(recorded, {"bot_memory_text": with_text})
+            if with_text:
+                self.assertTrue(memory["text"].startswith("# Memory\n- MEMORY-BODY-OPT-IN key "))
+                self.assertNotIn(TOKEN, memory["text"])
+                self.assertEqual((change["added_lines"], change["removed_lines"][0][:10]),
+                                 (["- added fact"], "- old key "))
+                self.assertNotIn(TOKEN, change["removed_lines"][0])
+                self.assertNotIn("content-not-exported", memory["flags"] + change["flags"])
+            else:
+                self.assertEqual(memory["text"], "")
+                self.assertNotIn("added_lines", change)
+                self.assertIn("content-not-exported", memory["flags"])
+
+    def test_a_cell_that_is_not_utf8_keeps_the_rest_of_the_store(self):
+        self.database(f"{USER_DATA}/bot-items.sqlite", """
+            CREATE TABLE items (uid TEXT PRIMARY KEY, number INTEGER NOT NULL UNIQUE, owner_bot_id TEXT NOT NULL,
+              chat_id TEXT NOT NULL, source TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL,
+              created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+            CREATE TABLE item_links (item_uid TEXT NOT NULL, kind TEXT NOT NULL, ref TEXT NOT NULL,
+              added_event INTEGER NOT NULL);
+            PRAGMA user_version = 3;""",
+            # Read before the items as context: one bad cell here used to end the whole database.
+            ("INSERT INTO item_links VALUES ('i1','url',CAST(? AS TEXT),1)", (b"https://x/\xff",)),
+            ("INSERT INTO items VALUES ('i1',1,'bot-1','chat-1','{}',CAST(? AS TEXT),'open',?,?)",
+             (b"\xffhi", CREATED_MS, CREATED_MS)),
+            ("INSERT INTO items VALUES ('i2',2,'bot-1','chat-1','{}','second','open',?,?)", (CREATED_MS, CREATED_MS)))
+
+        found = by_type(self.rows("orca-bots"))
+        self.assertEqual([item["text"] for item in found["agent-bot-item"]], ["\ufffdhi", "second"])
+        self.assertNotIn("agent-parse-note", found)
