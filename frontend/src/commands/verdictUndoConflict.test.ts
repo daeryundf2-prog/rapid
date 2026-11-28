@@ -157,3 +157,18 @@ describe("verdicts written through the conflict prompt (review P2-2)", () => {
     expect(useVerdictUndo.getState().entries).toHaveLength(0);
   });
 });
+
+describe("back-to-back verdicts on one row", () => {
+  it("the second waits for the first answer and expects the version it stored", async () => {
+    server();
+    const marked = { ...fileRow, fields: { ...fileRow.fields, markVersion: 4 } };
+    resetRowSources();
+    registerRowSource({ getSelectedRows: () => [], getFocusedRow: () => marked });
+    // R then X before R answered (R, K, X in the grid).
+    const first = runCommand("review.mark.relevant");
+    const second = runCommand("review.mark.excluded");
+    expect(await first).toEqual({ ok: true });
+    expect(await second).toEqual({ ok: true });
+    expect(bodies.map((body) => body.targets[0]?.expected_version)).toEqual([4, 5]);
+  });
+});

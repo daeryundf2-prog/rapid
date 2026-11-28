@@ -334,6 +334,20 @@ async function refresh(queryClient: QueryClient | null, runId: string): Promise<
   await queryClient?.invalidateQueries({ predicate: (query) => query.queryKey.includes(runId) });
 }
 
+let writeChain: Promise<unknown> = Promise.resolve();
+
+/**
+ * Verdict and undo writes go out one at a time: each pins the versions it expects when it is sent,
+ * so a key pressed before the previous write answered (R, K, X on one row) expects the version
+ * that write stored, not the one before it (a 409 against the examiner's own verdict otherwise).
+ * The list moves at once; only the requests queue.
+ */
+function queued<T>(write: () => Promise<T>): Promise<T> {
+  const next = writeChain.then(write, write);
+  writeChain = next.catch(() => undefined);
+  return next;
+}
+
 function tell(text: string): void {
   announce(text);
   useAppStore.getState().showNotice(text);
@@ -391,7 +405,9 @@ export async function runVerdict(
     : () => {};
   let result: ApplyResult;
   try {
-    result = await applyReviewAction(runId, scope.rows, action, options.tag ? { tag: options.tag } : {});
+    result = await queued(() =>
+      applyReviewAction(runId, scope.rows, action, options.tag ? { tag: options.tag } : {}),
+    );
   } catch (error) {
     rollback();
     // The write failed: the selection and the cursor go back too, so the analyst retries the same
@@ -462,7 +478,9 @@ export async function undoLastVerdict(queryClient: QueryClient | null): Promise<
     }) ?? (() => {});
   let kept: ReviewConflict[];
   try {
-    ({ kept } = await restoreReviewState(entry.runId, entry.before, entry.action, entry.written));
+    ({ kept } = await queued(() =>
+      restoreReviewState(entry.runId, entry.before, entry.action, entry.written),
+    ));
   } catch (error) {
     rollback();
     // Keep the entry: the analyst can press Z again once the server answers.
