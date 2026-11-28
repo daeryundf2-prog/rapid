@@ -14,7 +14,7 @@ from rapidtriage.core.e01 import (
     DIRECT_IMAGE_HASH_LIMIT_BYTES,
     build_e01_partition_browser_contract,
 )
-from rapidtriage.core.evidence import identify_evidence
+from rapidtriage.core.evidence import discover_snapshot_candidates, identify_evidence
 
 
 class RapidTriageEvidenceAdapterTests(unittest.TestCase):
@@ -676,6 +676,28 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(snapshot_workflow["status"], "candidates-found")
             self.assertGreaterEqual(snapshot_workflow["candidate_count"], 1)
             self.assertEqual(snapshot_workflow["candidates"][0]["snapshot_kind"], "volume-shadow-copy-export")
+
+    def test_snapshot_discovery_stops_at_its_entry_budget(self) -> None:
+        # Identification runs inside POST /api/runs: a whole mounted system drive must not turn
+        # run creation into a full-tree walk.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            for index in range(40):
+                (root / f"dir-{index:02d}").mkdir()
+                (root / f"dir-{index:02d}" / "notes.txt").write_text("x", encoding="utf-8")
+            (root / "zzz-last" / "HarddiskVolumeShadowCopy1").mkdir(parents=True)
+
+            visited: list[Path] = []
+            real_rglob = Path.rglob
+
+            def counting_rglob(self: Path, pattern: str):
+                for path in real_rglob(self, pattern):
+                    visited.append(path)
+                    yield path
+
+            with patch.object(Path, "rglob", counting_rglob):
+                self.assertEqual(discover_snapshot_candidates(root, entry_budget=10), [])
+            self.assertLessEqual(len(visited), 11)
 
 
 if __name__ == "__main__":

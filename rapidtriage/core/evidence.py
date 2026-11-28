@@ -217,12 +217,24 @@ def build_recovery_unlock_profile(source: Path, *, source_kind: str, support_lev
     }
 
 
-def discover_snapshot_candidates(root: Path, *, limit: int = 50) -> list[dict[str, object]]:
+#: Entries `discover_snapshot_candidates` may look at. Evidence identification runs inside
+#: `POST /api/runs`, and a whole mounted system drive has millions of paths: an unbounded walk
+#: left run creation hanging (a C: drive over WSL never answered in 60 s).
+SNAPSHOT_SCAN_ENTRY_BUDGET = 5_000
+
+
+def discover_snapshot_candidates(
+    root: Path, *, limit: int = 50, entry_budget: int = SNAPSHOT_SCAN_ENTRY_BUDGET
+) -> list[dict[str, object]]:
     candidates: list[dict[str, object]] = []
+    seen = 0
     try:
         iterator = root.rglob("*")
         for path in iterator:
             if len(candidates) >= limit:
+                break
+            seen += 1
+            if seen > entry_budget:
                 break
             name = path.name.lower()
             full = str(path).lower()
