@@ -20,3 +20,15 @@ export function setReviewer(name: string): void {
   const clean = name.replace(/\s+/g, " ").trim().slice(0, REVIEWER_MAX);
   writeStored(REVIEWER_STORAGE_KEY, clean || null);
 }
+
+/** Shown for a mark whose stored reviewer names nobody (F13). */
+export const UNNAMED_REVIEWER_LABEL = "이름 없음";
+
+/** Stored reviewer values that name no person: unset, the console's old default, the server's actor fallback. */
+const UNNAMED_REVIEWERS = new Set(["", DEFAULT_REVIEWER, "local-user"]);
+
+/** The reviewer as the board shows it: the stored name, or "이름 없음" for an empty / legacy default value. */
+export function reviewerLabel(name: string | null | undefined): string {
+  const clean = (name ?? "").trim();
+  return UNNAMED_REVIEWERS.has(clean) ? UNNAMED_REVIEWER_LABEL : clean;
+}

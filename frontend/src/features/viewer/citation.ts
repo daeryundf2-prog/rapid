@@ -206,11 +206,19 @@ export function targetAsGridRow(target: ViewerTarget): GridRow {
   };
 }
 
-/** Apply a mark through the shared review implementation (case-db review-batch or case.json bookmark). */
-export async function applyMark(target: ViewerTarget, action: MarkAction): Promise<ApplyResult> {
+/**
+ * Apply a mark through the shared review implementation (case-db review-batch or case.json
+ * bookmark). `row`: the grid row the viewer shows for `target`; its mark version is what the
+ * examiner saw, so a decision someone else made since is a conflict, not an overwrite (P1-1).
+ */
+export async function applyMark(
+  target: ViewerTarget,
+  action: MarkAction,
+  row?: GridRow | null,
+): Promise<ApplyResult> {
   const reason = markDisabledReason(target, action);
   if (reason) throw new Error(reason);
-  return applyReviewAction(target.runId, [targetAsGridRow(target)], action);
+  return applyReviewAction(target.runId, [row ?? targetAsGridRow(target)], action);
 }
 
 /** Tests: forget the per-run case-db handles cached by the shared review implementation. */

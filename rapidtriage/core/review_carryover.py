@@ -33,7 +33,8 @@ from .case import (
     save_case_payload,
 )
 from .case_db import CaseDatabase, CaseDatabaseError
-from .case_db.run_locator import ACTIVE_MARK_SQL, RunLocatorIndex, location_source
+from .case_db.review_conflict import ACTIVE_MARK_SQL
+from .case_db.run_locator import RunLocatorIndex, location_source
 from .run.persist import CASE_DB_FILE_NAME, run_case_id
 
 CARRYOVER_FILE_NAME = "rapidtriage-review-carryover.json"

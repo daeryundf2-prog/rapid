@@ -88,6 +88,8 @@ export interface ColumnSpec {
    * from/to, "number" = min/max, "none" = no input. Default: `timestamp` → time, right-aligned → number.
    */
   filterKind?: "text" | "time" | "number" | "none";
+  /** A text filter matches the whole cell value (case-insensitive), never a part of it (e.g. 포함 / 미포함). */
+  filterExact?: boolean;
   /**
    * The column is filled by an analysis job that has not run yet (e.g. files NTFS columns):
    * the header says so and links to the job's run command.

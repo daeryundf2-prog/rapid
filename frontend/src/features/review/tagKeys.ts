@@ -12,7 +12,7 @@ import { announce } from "../../a11y";
 import { type CaseTag, postTagBatch } from "../../api/reviewTools";
 import type { GridRow } from "../../contracts/collection";
 import { useAppStore } from "../../state/store";
-import { notifyReviewApplied, reviewTargetOf } from "../grid/reviewActions";
+import { notifyReviewApplied, rememberWrite, reviewTargetOf } from "../grid/reviewActions";
 import { targetAsGridRow } from "../viewer/citation";
 import { currentReviewer } from "./author";
 import { currentRowSource } from "./rowSource";
@@ -87,10 +87,13 @@ export async function toggleCaseTagOnContextRow(
   try {
     const has = row.tags.some((name) => name.toLocaleLowerCase() === tag.name.toLocaleLowerCase());
     const handle = await tagHandle(target.runId);
-    await postTagBatch(handle, target.runId, [reviewTarget], {
+    const result = await postTagBatch(handle, target.runId, [reviewTarget], {
       ...(has ? { remove_tag_ids: [tag.id] } : { tag_ids: [tag.id] }),
       reviewer: currentReviewer(),
     });
+    // The version this write stored: a decision right after it (before the review map reloads)
+    // must not conflict with this console's own tag (review P3-2).
+    rememberWrite(target.runId, { marks: result.marks });
     const patch = (current: GridRow): GridRow => ({
       ...current,
       tags: toggledTags(current.tags, tag.name, !has),

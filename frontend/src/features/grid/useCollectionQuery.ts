@@ -319,8 +319,7 @@ export function useCollectionQuery(
       const data = pageData[i];
       if (!data) return;
       const mapped = mapPage(def, data, rawQuery.ref);
-      const rows =
-        reviewMap && reviewMap.size > 0 ? mapped.map((row) => overlayReview(row, reviewMap)) : mapped;
+      const rows = reviewMap ? mapped.map((row) => overlayReview(row, reviewMap)) : mapped;
       map.set(p, def.source === "whole" ? statusFilter(rows, rawQuery.ref.status) : rows);
     });
     return map;

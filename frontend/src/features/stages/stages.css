@@ -198,6 +198,25 @@
   display: none;
 }
 
+/* 보고 left panel: in-page section links (buttons styled as the panel's links). */
+.stage-panel button.stage-link {
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-table-aux);
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 특이사항 grade links: one line saying what the grade means. */
+.stage-link-help {
+  margin: 0 0 var(--space-1);
+  padding: 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+}
+
 .stage-more {
   align-self: flex-start;
   font-size: var(--fs-table-aux);
@@ -355,12 +374,14 @@
 
 .stage-page h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--fs-screen-title);
+  letter-spacing: var(--tracking-heading);
 }
 
 .stage-page h3 {
   margin: 0 0 var(--space-1);
   font-size: var(--fs-panel-title);
+  font-weight: 600;
 }
 
 .stage-section {
@@ -434,20 +455,206 @@
   gap: var(--space-1);
 }
 
-/* 보고 page: the history stays short; the outputs grid takes the rest (one scroll area, no nesting). */
+/* 보고 page (design review F16): checklist → items in the report → exports → the run's files
+   (closed). The page scrolls as one; the outputs grid gets a height of its own when opened. */
 .stage-page.is-report {
-  overflow: hidden;
+  container-type: inline-size;
 }
 
 .stage-page.is-report > .stage-section {
   flex: none;
-  max-height: 180px;
-  overflow-y: auto;
+}
+
+.stage-page.is-report > .stage-section:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.report-checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.report-checklist > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--line-subtle);
+  font-size: var(--fs-body);
+}
+
+.report-checklist > li:first-child {
+  border-top: 0;
+}
+
+.report-check-label {
+  min-width: 13em;
+}
+
+.report-check-count {
+  font-size: var(--fs-panel-title);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The words say the state; the colour only repeats it. */
+.report-checklist > li[data-state="todo"] .report-check-count {
+  color: var(--warn);
+}
+
+.report-checklist > li[data-state="bad"] .report-check-count {
+  color: var(--danger);
+}
+
+.report-check-help {
+  flex-basis: 100%;
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.report-check-actions {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.report-check-link {
+  color: var(--accent);
+  font-size: var(--fs-table-aux);
+}
+
+.report-check-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.report-check-message {
+  margin: var(--space-2) 0 0;
+  font-size: var(--fs-table-aux);
+}
+
+.report-check-message.is-error {
+  color: var(--danger);
+}
+
+.report-preview {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-table-aux);
+}
+
+.report-preview th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.report-preview td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--line-subtle);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.report-preview-target {
+  font-weight: 600;
+}
+
+.report-preview-path {
+  font-family: var(--font-mono);
+}
+
+/* Narrow pages (390): one item per block, each value under its own label; no sideways scroll. */
+@container (max-width: 640px) {
+  .report-preview thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .report-preview tr {
+    display: grid;
+    gap: 2px;
+    padding: var(--space-2) 0;
+    border-bottom: 1px solid var(--line-subtle);
+  }
+
+  .report-preview td {
+    display: grid;
+    grid-template-columns: 6em 1fr;
+    gap: var(--space-2);
+    padding: 0;
+    border: 0;
+  }
+
+  .report-preview td::before {
+    content: attr(data-label);
+    color: var(--text-muted);
+    font-weight: 400;
+  }
+}
+
+.report-export-primary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.report-export-audience {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.report-export-more {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.report-export-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.report-export-list > li {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.stage-page .report-outputs > summary {
+  cursor: pointer;
+  min-height: var(--control-h);
+  display: flex;
+  align-items: center;
+  font-size: var(--fs-panel-title);
+  font-weight: 600;
+}
+
+.report-outputs > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .stage-report-grid {
-  flex: 1;
-  min-height: 0;
+  height: min(70vh, 640px);
+  min-height: 240px;
   display: flex;
   flex-direction: column;
 }

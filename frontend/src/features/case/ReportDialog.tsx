@@ -86,7 +86,7 @@ export function ReportDialog({
       }
     >
       <p className="case-help">
-        보고 후보 {counts.data ? `${counts.data.report_candidates.toLocaleString("ko-KR")}건` : "확인 중"}
+        보고서 포함 {counts.data ? `${counts.data.report_candidates.toLocaleString("ko-KR")}건` : "확인 중"}
       </p>
       <fieldset className="case-field case-choices">
         <legend id={groupId} className="case-label">

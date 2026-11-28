@@ -3,7 +3,8 @@
  * helpers. The URL grammar (`cf=`) lives in router.ts; which filters the API applies is
  * decided in filterModel.partitionFilters. Everything here runs on loaded rows only.
  *
- *  - text   (`col:foo`)          → the cell's display text contains "foo" (case-insensitive)
+ *  - text   (`col:foo`)          → the cell's display text contains "foo" (case-insensitive);
+ *                                  a `filterExact` column (and 유형) matches the whole value only
  *  - number (`col>10`, `col<20`) → numeric cell value ≥ 10 / ≤ 20 (both may be set)
  *  - time   (`col:a..b`)         → the cell instant lies in [a, b]; either side may be empty;
  *                                  a date-only bound covers the whole (UTC) day
@@ -77,8 +78,8 @@ export function matchesColumnFilter(spec: ColumnSpec, row: GridRow, filter: Colu
   }
   const needle = filter.value.toLowerCase();
   if (!needle) return true;
-  // 유형(정확히): exact (case-insensitive) artifact type, never a substring.
-  if (spec.id === "type") return String(spec.value(row) ?? "").toLowerCase() === needle;
+  // 유형(정확히) and `filterExact` columns: the exact (case-insensitive) value, never a substring.
+  if (spec.id === "type" || spec.filterExact) return String(spec.value(row) ?? "").toLowerCase() === needle;
   const shown = displayText(spec, row).toLowerCase();
   if (shown.includes(needle)) return true;
   const raw = spec.value(row);

@@ -21,11 +21,14 @@ import { useRoute } from "../../state/hooks";
 import {
   applyNote,
   applyReviewAction,
+  type ExpectedVersions,
   MARK_LABELS,
+  pinExpected,
+  ReviewConflictError,
   storeNotice,
   unmarkActionOf,
 } from "../grid/reviewActions";
-import { noteKey, setSessionNote } from "../grid/sessionNotes";
+import { getSessionNote, noteKey, setSessionNote } from "../grid/sessionNotes";
 import { NOTE_PANEL_COMMAND, TAG_MANAGER_COMMAND } from "../review/commands";
 import {
   defaultPropagationTags,
@@ -100,9 +103,17 @@ export function propagationItems(row: GridRow | null, runId: string | null): Men
 }
 const EXCLUSIVE = ["relevant", "needs-review", "excluded"];
 
-/** Inline 메모 form: textarea + 저장/취소, Esc cancels. */
-function NoteForm({ onSave, onCancel }: { onSave: (text: string) => void; onCancel: () => void }) {
-  const [text, setText] = useState("");
+/** Inline 메모 form: textarea (the row's current note, which a save replaces) + 저장/취소, Esc cancels. */
+function NoteForm({
+  initial,
+  onSave,
+  onCancel,
+}: {
+  initial: string;
+  onSave: (text: string) => void;
+  onCancel: () => void;
+}) {
+  const [text, setText] = useState(initial);
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => ref.current?.focus(), []);
   return (
@@ -153,7 +164,9 @@ export function ViewerToolbar({
   const row = useViewerRowContext();
   const partialRecord = useFullRecordStatus(row, target?.runId ?? null);
   const { route, navigate } = useRoute();
-  const [noteOpen, setNoteOpen] = useState(false);
+  // The open note form, with the mark version pinned when it opened (P1-1): a review-map reload
+  // while the examiner types must not turn someone else's newer note into the expected one.
+  const [noteForm, setNoteForm] = useState<{ pin: ExpectedVersions; initial: string } | null>(null);
   const [applied, setApplied] = useState<{ key: string; actions: string[]; cleared: string[] }>({
     key: "",
     actions: [],
@@ -165,7 +178,7 @@ export function ViewerToolbar({
 
   // A different row closes the form.
   // biome-ignore lint/correctness/useExhaustiveDependencies: close on target change only
-  useEffect(() => setNoteOpen(false), [key]);
+  useEffect(() => setNoteForm(null), [key]);
 
   const isPressed = (action: string): boolean => {
     if (applied.key === key && applied.actions.includes(action)) return true;
@@ -183,7 +196,7 @@ export function ViewerToolbar({
     const undo = unmarkActionOf(action);
     if (!target || !undo) return;
     try {
-      const result = await applyReviewAction(target.runId, [targetAsGridRow(target)], undo);
+      const result = await applyReviewAction(target.runId, [row ?? targetAsGridRow(target)], undo);
       setApplied((prev) => {
         const base = prev.key === key ? prev : { actions: [], cleared: [] };
         const clears = undo === "clear-review" ? EXCLUSIVE : [action];
@@ -223,15 +236,33 @@ export function ViewerToolbar({
     }
   };
 
+  const noteRow = (): GridRow | null => (target ? (row ?? targetAsGridRow(target)) : null);
+
+  const openNote = () => {
+    const current = noteRow();
+    if (!target || !current) return;
+    const note = getSessionNote(key) ?? (typeof current.fields.note === "string" ? current.fields.note : "");
+    setNoteForm({ pin: pinExpected(target.runId, [current]), initial: note });
+  };
+
   const saveNote = async (text: string) => {
-    if (!target) return;
-    try {
-      const result = await applyNote(target.runId, [targetAsGridRow(target)], text);
+    const current = noteRow();
+    if (!target || !current || !noteForm) return;
+    const saved = (notice: string) => {
       setSessionNote(key, text.trim());
-      setNoteOpen(false);
-      announce(`메모를 저장했습니다.${storeNotice(result)}`);
+      setNoteForm(null);
+      announce(`메모를 저장했습니다.${notice}`);
       moreRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    };
+    try {
+      saved(storeNotice(await applyNote(target.runId, [current], text, { expected: noteForm.pin })));
     } catch (error) {
+      if (error instanceof ReviewConflictError) {
+        // The conflict prompt decides: "내 판정으로" saved this note; "그대로 두기" keeps the form and
+        // its text open (P3-4), and the next save expects the version the prompt showed.
+        if ((await error.choice) === "mine") saved("");
+        return;
+      }
       announce(`메모 저장 실패: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
@@ -273,7 +304,7 @@ export function ViewerToolbar({
       command: "viewer.note",
       icon: "message",
       disabledReason: noteReason,
-      onSelect: () => setNoteOpen(true),
+      onSelect: openNote,
     },
     // Review tools (AXIOM E3): note history with author/time, tag manager.
     ...[NOTE_PANEL_COMMAND, TAG_MANAGER_COMMAND].map((id): MenuItem => {
@@ -396,8 +427,12 @@ export function ViewerToolbar({
           </MenuButton>
         </span>
       </div>
-      {noteOpen && target ? (
-        <NoteForm onSave={(text) => void saveNote(text)} onCancel={() => setNoteOpen(false)} />
+      {noteForm && target ? (
+        <NoteForm
+          initial={noteForm.initial}
+          onSave={(text) => void saveNote(text)}
+          onCancel={() => setNoteForm(null)}
+        />
       ) : null}
     </>
   );

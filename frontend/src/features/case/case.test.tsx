@@ -5,6 +5,7 @@ import { DeleteCaseDialog } from "./CasePicker";
 import { buildCaseCommands } from "./commands";
 import { DoctorDialog } from "./DoctorDialog";
 import { useCaseDialogs } from "./dialogs";
+import { NO_CANDIDATES_REASON } from "./exports";
 import { ImportDialog } from "./ImportDialog";
 import { ReportDialog } from "./ReportDialog";
 import { RunDialog } from "./RunDialog";
@@ -240,15 +241,15 @@ describe("ReportDialog / export commands", () => {
     report_candidates: candidates,
   });
 
-  it("disables report exports with 보고 후보 0건 but keeps the validation package", async () => {
+  it("disables report exports with 보고서 포함 0건 but keeps the validation package", async () => {
     mockFetch({ "GET /api/runs/r1/review-counts": review(0) });
     renderWithQuery(<ReportDialog runId="r1" runIsActive={false} onClose={() => undefined} />);
-    await screen.findByText("보고 후보 0건");
+    await screen.findByText("보고서 포함 0건");
     // One radio group + one primary 내보내기 carrying the chosen kind's single reason (review #4).
     const submit = screen.getByRole("button", { name: "내보내기" });
     expect(screen.getByRole("radio", { name: "보고서" })).toHaveProperty("checked", true);
     await waitFor(() => expect(submit.getAttribute("aria-disabled")).toBe("true"));
-    expect(submit.getAttribute("title")).toContain("보고 후보 0건");
+    expect(submit.getAttribute("title")).toBe(NO_CANDIDATES_REASON);
     expect(screen.getAllByTestId("disabled-reason")).toHaveLength(1);
     fireEvent.click(screen.getByRole("radio", { name: "검증 패키지" }));
     expect(submit.getAttribute("aria-disabled")).toBeNull();
@@ -267,7 +268,7 @@ describe("ReportDialog / export commands", () => {
     URL.createObjectURL = vi.fn(() => "blob:x");
     URL.revokeObjectURL = vi.fn();
     renderWithQuery(<ReportDialog runId="r1" runIsActive={false} onClose={() => undefined} />);
-    await screen.findByText("보고 후보 3건");
+    await screen.findByText("보고서 포함 3건");
     fireEvent.change(screen.getByLabelText("보고서 형식"), { target: { value: "docx" } });
     fireEvent.change(screen.getByLabelText(/보고서 제목/), { target: { value: "최종" } });
     fireEvent.click(screen.getByRole("button", { name: "내보내기" }));
@@ -286,9 +287,13 @@ describe("ReportDialog / export commands", () => {
     const withZero = buildCaseCommands({ reportCandidates: 0 });
     const reason = (id: string, over = {}) =>
       withZero.find((c) => c.id === id)?.disabledReason?.({ ...ctx, ...over });
-    expect(reason("export.case-report")).toBe("보고 후보 0건 — 표시된 항목이 없습니다");
-    expect(reason("export.reviewer-bundle")).toBe("보고 후보 0건 — 표시된 항목이 없습니다");
-    expect(reason("export.submission-manifest")).toBe("보고 후보 0건 — 표시된 항목이 없습니다");
+    // The reason names the real way to include (row menu › 보고서 포함 표시; no key on main), F16.
+    expect(NO_CANDIDATES_REASON).toBe(
+      "보고서에 포함한 항목이 0건입니다. 검토 보드에서 행의 ⋯ 메뉴(행 메뉴) › ‘보고서 포함 표시’로 넣으세요",
+    );
+    expect(reason("export.case-report")).toBe(NO_CANDIDATES_REASON);
+    expect(reason("export.reviewer-bundle")).toBe(NO_CANDIDATES_REASON);
+    expect(reason("export.submission-manifest")).toBe(NO_CANDIDATES_REASON);
     expect(reason("export.validation-package")).toBeUndefined();
     expect(reason("export.case-report", { runId: null })).toBe("열린 케이스가 없습니다");
     expect(

@@ -29,7 +29,8 @@ from .case import (
     upsert_bookmark,
 )
 from .case_db.review import load_review_target_match
-from .case_db.run_locator import ACTIVE_MARK_SQL, RunLocatorIndex, location_source
+from .case_db.review_conflict import ACTIVE_MARK_SQL
+from .case_db.run_locator import RunLocatorIndex, location_source
 
 # Why a mark has no citable output row (``reference.case_db.unresolved_reason``).
 MARK_ROW_NOT_FOUND = "review-mark-row-not-found"

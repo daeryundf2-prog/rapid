@@ -622,7 +622,7 @@ export function FilterBar(props: FilterBarProps) {
         {variant === "review" ? (
           <>
             <label className="filter-field filter-select" htmlFor={statusId}>
-              <span>리뷰 상태</span>
+              <span>판정</span>
               <select
                 id={statusId}
                 value={props.reviewStatus ?? ""}
