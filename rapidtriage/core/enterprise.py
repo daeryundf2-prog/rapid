@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from .forensic_accuracy import build_accuracy_gate
+from .user_tokens import TOKENS_FILE_ENV
 
 CRASH_REPORTING_GAP_ID = "#105"
 LOCAL_ONLY_ENTERPRISE_GAP_ID = "#106"
@@ -111,7 +112,7 @@ FUNCTIONAL_OPS_BATCH_ID = "commercial-uplift-061-065"
 
 
 def build_enterprise_policy() -> dict[str, object]:
-    auth_required = bool(os.environ.get("RAPIDTRIAGE_AUTH_TOKEN"))
+    auth_required = bool(os.environ.get("RAPIDTRIAGE_AUTH_TOKEN") or os.environ.get(TOKENS_FILE_ENV))
     configured_role = os.environ.get("RAPIDTRIAGE_USER_ROLE") or "local-analyst"
     license_file = os.environ.get("RAPIDTRIAGE_LICENSE_FILE") or ""
     license_record = build_license_record(license_file)

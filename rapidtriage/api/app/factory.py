@@ -17,14 +17,21 @@ from fastapi.staticfiles import StaticFiles
 from ...core.case_db import open_case_database
 from ...core.crash import write_crash_report
 from ...core.jobs import RunJobStore, default_job_store
+from ...core.user_tokens import (
+    TOKENS_FILE_ENV,
+    configured_tokens_file,
+    load_user_tokens,
+)
 from .analyses import ANALYSIS_RUNNER, COMPLETION_HOOKS
 from .case_workspace import CaseWorkspace
 from .constants import MUTATING_METHODS
 from .helpers import (
+    REQUEST_TOKEN_ACTOR,
     allowed_api_hosts,
     request_host,
     resolve_case_catalog_path,
     resolve_case_db_path,
+    server_actor,
     truthy_env,
 )
 from .routes_actions import build_actions_router
@@ -110,6 +117,7 @@ def create_app(
     case_db_roots: Iterable[str | Path] | None = None,
     auto_search_index: bool = False,
     cases_db_path: str | Path | None = None,
+    tokens_file: str | Path | None = None,
 ) -> FastAPI:
     store = job_store or default_job_store
     # Workspace case DB (cases, evidence, notes, processing snapshots); opened on first use.
@@ -160,8 +168,17 @@ def create_app(
             "cannot be combined with an explicit auth token; refusing to weaken authentication silently"
         )
     configured_token = auth_token or os.environ.get("RAPIDTRIAGE_AUTH_TOKEN") or ""
-    expected_token = "" if auth_disabled else configured_token or secrets.token_urlsafe(32)
-    api.state.auth_required = bool(expected_token)
+    # Per-user tokens (RAPIDTRIAGE_TOKENS_FILE): the token names the request's actor. A shared
+    # token next to them would let anyone act unattributed, and no-auth would ignore them.
+    tokens_path = configured_tokens_file(tokens_file)
+    user_tokens = load_user_tokens(tokens_path) if tokens_path is not None else None
+    if user_tokens is not None and (auth_disabled or configured_token):
+        raise RuntimeError(
+            f"conflicting authentication settings: {TOKENS_FILE_ENV} cannot be combined with a single "
+            "auth token or RAPIDTRIAGE_DISABLE_AUTH; use one per-user token per person"
+        )
+    expected_token = "" if auth_disabled or user_tokens is not None else configured_token or secrets.token_urlsafe(32)
+    api.state.auth_required = bool(expected_token) or user_tokens is not None
     api.state.auth_token = expected_token
     configured_case_db_roots = frozenset(case_db_roots or ())
     api.state.case_db_roots = configured_case_db_roots
@@ -186,16 +203,29 @@ def create_app(
                     origin_host = request_host(origin.split("//", 1)[-1])
                     if origin_host and origin_host not in allowed_hosts:
                         return JSONResponse(status_code=403, content={"detail": "RapidTriage API origin is not allowed"})
-            if expected_token and request.url.path.startswith("/api"):
+            token_name: str | None = None
+            if (expected_token or user_tokens is not None) and request.url.path.startswith("/api"):
                 if "token" in request.query_params:
                     return JSONResponse(
                         status_code=401,
                         content={"detail": "query token authentication is disabled; use X-RapidTriage-Token header"},
                     )
                 supplied = request.headers.get("X-RapidTriage-Token")
-                if supplied is None or not secrets.compare_digest(supplied, expected_token):
+                if user_tokens is not None:
+                    token_name = user_tokens.actor_for(supplied) if supplied is not None else None
+                    authorized = token_name is not None
+                else:
+                    authorized = supplied is not None and secrets.compare_digest(supplied, expected_token)
+                if not authorized:
                     return JSONResponse(status_code=401, content={"detail": "missing or invalid RapidTriage auth token"})
-            return await call_next(request)
+            # Who acts is the server's call (per-user token, else RAPIDTRIAGE_REVIEWER); every
+            # write path reads it through helpers.resolve_request_reviewer / server_actor.
+            actor_reset = REQUEST_TOKEN_ACTOR.set(token_name)
+            try:
+                request.state.actor = server_actor()
+                return await call_next(request)
+            finally:
+                REQUEST_TOKEN_ACTOR.reset(actor_reset)
         except Exception as exc:
             report = write_crash_report(
                 exc,

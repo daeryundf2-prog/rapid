@@ -8,6 +8,7 @@ import sys
 import textwrap
 from pathlib import Path
 
+from ..core.user_tokens import TOKENS_FILE_ENV, configured_tokens_file, load_user_tokens
 from .helpers import add_web_arguments
 
 
@@ -52,7 +53,28 @@ def run_web_server(
             "conflicting authentication settings: RAPIDTRIAGE_DISABLE_AUTH cannot be combined with "
             "--auth-token; refusing to weaken authentication silently."
         )
-    if remote:
+    tokens_path = configured_tokens_file()
+    if tokens_path is not None:
+        # Per-user tokens name who acts on every API call; a shared token or no-auth beside
+        # them would let someone act unattributed. Only a count is printed, never the file.
+        if disable_auth or allow_remote_without_auth:
+            raise RuntimeError(
+                f"{TOKENS_FILE_ENV} needs API authentication: drop RAPIDTRIAGE_DISABLE_AUTH / --allow-remote-without-auth."
+            )
+        if auth_token or os.environ.get("RAPIDTRIAGE_TOKEN") or os.environ.get("RAPIDTRIAGE_AUTH_TOKEN"):
+            raise RuntimeError(
+                f"{TOKENS_FILE_ENV} replaces the single API token: drop --token/--auth-token "
+                "and RAPIDTRIAGE_TOKEN / RAPIDTRIAGE_AUTH_TOKEN."
+            )
+        users = load_user_tokens(tokens_path)
+        # The uvicorn-imported app reads the same file whatever its working directory.
+        os.environ[TOKENS_FILE_ENV] = str(tokens_path.resolve())
+        print(
+            f"RapidTriage API: per-user tokens for {len(users.entries)} users; "
+            "each person opens the console with their own token.",
+            flush=True,
+        )
+    if remote and tokens_path is None:
         # --remote is the supported non-loopback path: a token is mandatory so
         # /api auth and the Host/Origin gates stay on. RAPIDTRIAGE_TOKEN is the
         # documented env source; RAPIDTRIAGE_AUTH_TOKEN is accepted as the
@@ -60,10 +82,10 @@ def run_web_server(
         auth_token = auth_token or os.environ.get("RAPIDTRIAGE_TOKEN") or os.environ.get("RAPIDTRIAGE_AUTH_TOKEN")
         if not auth_token:
             raise RuntimeError(
-                "--remote requires an API token: pass --token (or --auth-token) "
-                "or set RAPIDTRIAGE_TOKEN / RAPIDTRIAGE_AUTH_TOKEN."
+                "--remote requires an API token: pass --token (or --auth-token), "
+                f"set RAPIDTRIAGE_TOKEN / RAPIDTRIAGE_AUTH_TOKEN, or give per-user tokens in {TOKENS_FILE_ENV}."
             )
-    elif host not in loopback_hosts and not auth_token and not allow_remote_without_auth:
+    elif host not in loopback_hosts and not auth_token and tokens_path is None and not allow_remote_without_auth:
         raise RuntimeError(
             "Refusing to bind RapidTriage to a non-localhost interface without --auth-token. "
             "Use --auth-token, --remote with a token, or --allow-remote-without-auth if you understand the risk."
@@ -83,7 +105,7 @@ def run_web_server(
     if disable_auth:
         os.environ.pop("RAPIDTRIAGE_AUTH_TOKEN", None)
         print("RapidTriage API authentication DISABLED for this local session.", flush=True)
-    elif not auth_token and not allow_remote_without_auth:
+    elif not auth_token and tokens_path is None and not allow_remote_without_auth:
         import secrets
 
         auth_token = os.environ.get("RAPIDTRIAGE_AUTH_TOKEN") or secrets.token_urlsafe(32)

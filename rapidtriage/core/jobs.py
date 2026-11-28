@@ -245,6 +245,9 @@ class RunJob:
     # is not this run's).
     retried_by: str | None = None
     superseded_by: str | None = None
+    # Who created the run, as the server names them (per-user token or RAPIDTRIAGE_REVIEWER);
+    # ``None`` when the server named nobody (single shared token).
+    owner: str | None = None
 
     def __post_init__(self) -> None:
         if not self.steps:
@@ -257,6 +260,7 @@ class RunJob:
             "run_id": self.run_id,
             "status": self.status,
             "origin": self.origin,
+            "owner": self.owner,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "started_at": self.started_at,
@@ -353,6 +357,7 @@ class RunJob:
             retry_attempt=int(payload.get("retry_attempt") or 0),
             retried_by=str(payload["retried_by"]) if payload.get("retried_by") else None,
             superseded_by=str(payload["superseded_by"]) if payload.get("superseded_by") else None,
+            owner=str(payload["owner"]) if payload.get("owner") else None,
         )
 
 
@@ -449,6 +454,8 @@ class RunJobStore:
     def __init__(self, *, max_workers: int = 2, state_path: Path | None = None) -> None:
         self._jobs: dict[str, RunJob] = {}
         self._futures: dict[str, Future[dict[str, object]]] = {}
+        # Runs removed from the list: who removed what (persisted as ``removed_runs``).
+        self._removed: list[dict[str, object]] = []
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="rapidtriage-run")
         self._lock = threading.Lock()
         self._state_path = state_path.expanduser().resolve() if state_path is not None else None
@@ -478,13 +485,21 @@ class RunJobStore:
             except Exception:  # a hook never changes the run outcome
                 logging.getLogger(__name__).exception("run completion hook failed for %s", job.run_id)
 
-    def submit(self, request: RunRequest, *, retry_of_run_id: str | None = None, retry_attempt: int = 0) -> RunJob:
+    def submit(
+        self,
+        request: RunRequest,
+        *,
+        retry_of_run_id: str | None = None,
+        retry_attempt: int = 0,
+        owner: str | None = None,
+    ) -> RunJob:
         run_id = uuid.uuid4().hex[:12]
         job = RunJob(
             run_id=run_id,
             request=request,
             retry_of_run_id=retry_of_run_id,
             retry_attempt=max(0, int(retry_attempt)),
+            owner=owner,
         )
         append_job_transition(
             job,
@@ -651,7 +666,8 @@ class RunJobStore:
             )
         return files
 
-    def import_completed_run(self, output_dir_or_summary: str | Path) -> RunJob:
+    def import_completed_run(self, output_dir_or_summary: str | Path, *, owner: str | None = None) -> RunJob:
+        """Register a finished run folder; a re-import keeps the first import's times and owner."""
         summary_path = resolve_run_summary_path(Path(output_dir_or_summary).expanduser())
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         if not isinstance(summary, dict):
@@ -692,6 +708,7 @@ class RunJobStore:
             started_at=imported_at,
             completed_at=imported_at,
             summary=summary,
+            owner=owner,
         )
         append_job_transition(job, event_type="job-imported", status="completed", message="Completed run imported")
         with self._lock:
@@ -700,19 +717,38 @@ class RunJobStore:
                 job.created_at = existing.created_at
                 job.started_at = existing.started_at
                 job.completed_at = existing.completed_at
+                job.owner = existing.owner or owner
             self._jobs[run_id] = job
             self._write_state_locked()
         _invalidate_summary_outputs(summary)
         return job
 
-    def remove(self, run_id: str) -> None:
+    def remove(self, run_id: str, *, actor: str | None = None) -> None:
+        """Drop the run from the list (its folder stays) and keep a removal record (``removed_runs``)."""
         with self._lock:
             if run_id not in self._jobs:
                 raise KeyError(run_id)
             job = self._jobs.pop(run_id)
             self._futures.pop(run_id, None)
+            output_dir = job.output_dir()
+            self._removed.append(
+                {
+                    "run_id": run_id,
+                    "status": job.status,
+                    "owner": job.owner,
+                    "root": job.request.root,
+                    "output_dir": str(output_dir) if output_dir is not None else None,
+                    "removed_at": now_iso(),
+                    "removed_by": actor,
+                }
+            )
             self._write_state_locked()
         _invalidate_summary_outputs(job.summary)
+
+    def removed_runs(self) -> builtins.list[dict[str, object]]:
+        """Removal records, oldest first: run id, status, owner, root, output folder, when and by whom."""
+        with self._lock:
+            return [dict(record) for record in self._removed]
 
     def cancel(self, run_id: str, *, actor: str = "web") -> RunJob:
         """"모두 취소": a queued run never starts; a running one gets ``cancel_all`` (control file).
@@ -734,7 +770,9 @@ class RunJobStore:
             job = self._jobs[run_id]
             future = self._futures.get(run_id)
             job.cancellation_requested = True
-            append_job_transition(job, event_type="cancel-requested", status=job.status, message="Cancellation requested")
+            append_job_transition(
+                job, event_type="cancel-requested", status=job.status, message="Cancellation requested", details={"actor": actor}
+            )
             if job.status == "queued":
                 if future is not None:
                     future.cancel()
@@ -822,6 +860,7 @@ class RunJobStore:
                     status=job.status,
                     step="triage",
                     message=f"{action} {accepted}",
+                    details={"actor": actor},
                 )
                 job.updated_at = now_iso()
                 self._write_state_locked()
@@ -833,7 +872,7 @@ class RunJobStore:
         plan = progress.get("plan") if isinstance(progress, Mapping) else None
         return dict(plan) if isinstance(plan, Mapping) else None
 
-    def retry(self, run_id: str, *, resume: bool = False) -> RunJob:
+    def retry(self, run_id: str, *, resume: bool = False, owner: str | None = None) -> RunJob:
         """Run a failed/cancelled/interrupted run again.
 
         ``resume`` ("이어서 실행") runs in the same output directory and reuses
@@ -843,7 +882,7 @@ class RunJobStore:
         the default per-run folder, or ``<previous folder>-retry-<id>`` next
         to an explicit one, so the previous run's outputs stay as they were.
         Raises :class:`RunOutputDirBusy` (409) while another queued/running
-        run writes into the target directory.
+        run writes into the target directory. ``owner`` (who asked) owns the new run.
         """
         with self._lock:
             if run_id not in self._jobs:
@@ -870,10 +909,10 @@ class RunJobStore:
                 event_type="retry-requested",
                 status=previous.status,
                 message="Resume submitted" if resume else "Retry submitted",
-                details={"next_retry_attempt": next_attempt, "retry_mode": "resume" if resume else "fresh"},
+                details={"next_retry_attempt": next_attempt, "retry_mode": "resume" if resume else "fresh", "actor": owner},
             )
             self._write_state_locked()
-        job = self.submit(request, retry_of_run_id=previous.run_id, retry_attempt=next_attempt)
+        job = self.submit(request, retry_of_run_id=previous.run_id, retry_attempt=next_attempt, owner=owner)
         with self._lock:
             previous.retried_by = job.run_id
             if resume:
@@ -960,7 +999,12 @@ class RunJobStore:
             payload = json.loads(self._state_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return
-        records = payload.get("runs") if isinstance(payload, Mapping) else None
+        if not isinstance(payload, Mapping):
+            return
+        removed = payload.get("removed_runs")
+        if isinstance(removed, list):
+            self._removed = [dict(record) for record in removed if isinstance(record, Mapping)]
+        records = payload.get("runs")
         if not isinstance(records, list):
             return
         changed = False
@@ -990,6 +1034,7 @@ class RunJobStore:
             "version": 1,
             "updated_at": now_iso(),
             "runs": [job.to_record() for job in self.list_locked()],
+            "removed_runs": self._removed,
         }
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path = self._state_path.with_name(f"{self._state_path.name}.tmp")

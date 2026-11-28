@@ -2,7 +2,7 @@
 
 분석관이 콘솔에서 하는 "이 행 전후를 모두 검토 필요로 표시"와, AI 에이전트에게 맡기는 "A를 분석해라", "B와 관련된 것을 모두 체크/태그해라"는 같은 API를 탄다. 콘솔의 **관련 항목 표시** 대화상자와 **선택 항목 분석** 명령이 이 API를 호출한다.
 
-- 인증: 다른 API와 같은 `X-RapidTriage-Token` 헤더.
+- 인증: 다른 API와 같은 `X-RapidTriage-Token` 헤더. 사람별 토큰(`RAPIDTRIAGE_TOKENS_FILE`)을 쓰면 에이전트는 `agent:<이름>=<토큰>` 줄의 자기 토큰을 쓴다.
 - 카탈로그: `GET /api/actions` (버전, 액션 목록, 선택 형식). 에이전트는 이것부터 읽는다.
 - 상한: 한 번에 표시할 수 있는 행은 10,000건. 넘으면 아무것도 바꾸지 않고 422로 이유를 돌려준다.
 - 오류: 모두 한국어 `detail`.
@@ -64,8 +64,9 @@ curl -s -H "X-RapidTriage-Token: $TOKEN" -H "Content-Type: application/json" \
 - 미리보기도 적용과 같은 검사를 거친다. 적용 때 거절될 요청(`tag_ids`와 다른 표시를 섞은 경우, 런에 없는 행 로케이터, 케이스에 없는 태그 id, 빈 `tag_ids`/`add_tags`만 있는 표시)은 미리보기에서도 같은 상태 코드와 문구로 거절된다. 미리보기는 케이스 DB를 만들지 않는다. 케이스 DB가 아직 없으면 런 출력 행으로 로케이터를 확인한다.
 - `mark`에는 `status`(`relevant` 관련 있음, `needs-review` 재검토, `excluded` 제외(보고서에서도 빠짐), `unreviewed` 미검토), `add_tags`(태그 이름 추가), `tag_ids`(케이스 태그 id), `include_in_report`, `note` 중 필요한 것을 넣는다. `tag_ids`는 다른 표시와 함께 보낼 수 없다(검토 일괄 표시와 같은 규칙).
 - 적용은 런의 케이스 DB(`POST /api/case-db/review-batch`)를 그대로 쓴다. 케이스 DB가 아직 없으면 콘솔의 첫 표시처럼 만든다.
-- `actor.kind = "agent"`이면 검토 이력의 작성자가 `agent:<name>`으로 남는다(이름이 비면 `agent:unnamed`). 사람(`human`)은 `name`, 없으면 서버의 `RAPIDTRIAGE_REVIEWER`, 그것도 없으면 `local-user`로 남는다. `actor`를 생략하면 이름 없는 사람이다. 행의 이전 작성자를 물려받지 않는다.
+- `actor.kind = "agent"`이면 검토 이력의 작성자가 `agent:<name>`으로 남는다(이름이 비면 `agent:unnamed`). 사람(`human`)은 서버의 `RAPIDTRIAGE_REVIEWER`, 그것이 없으면 `name`, 그것도 없으면 `local-user`로 남는다. `actor`를 생략하면 이름 없는 사람이다. 행의 이전 작성자를 물려받지 않는다.
 - 사람(`human`)의 `name`은 `agent:`로 시작할 수 없다(422). 사람의 표시가 에이전트 표시로 기록되지 않게 막는다.
+- 사람별 토큰(`RAPIDTRIAGE_TOKENS_FILE`)이 있으면 토큰이 작성자를 정한다. `agent:` 토큰은 `actor`와 상관없이 그 토큰 이름(예: `agent:triage-bot`)으로 남는다. 사람의 토큰은 `human`이면 그 사람 이름(`name`은 무시), `agent`이면 `agent:<name>@<사람 이름>`으로 남아 누가 돌린 에이전트인지 보인다. 응답의 `actor.kind`는 기록된 작성자 기준이다.
 
 적용 응답에는 `updated_count`와 `case_id`가 더해진다. 표시 이력은 `GET /api/runs/{run_id}/review-history?collection=timeline&locator=/events/12`로 본다.
 
@@ -80,6 +81,6 @@ curl -s -H "X-RapidTriage-Token: $TOKEN" -H "Content-Type: application/json" \
 
 ## 아직 없는 것
 
-- 토큰 종류로 사람/에이전트를 구분하지 않는다. `actor.kind`는 요청이 밝히는 값이다(토큰 하나로 둘 다 쓸 수 있다).
+- 사람별 토큰 없이 토큰 하나를 쓰면 사람/에이전트를 토큰으로 구분하지 않는다. `actor.kind`는 요청이 밝히는 값이다.
 - 묶음 단위 되돌리기가 없다. 되돌리려면 같은 선택으로 이전 상태를 다시 표시한다.
 - `related`는 타임라인 행을 모은다. 같은 해시 전파는 기존 `propagate_by_hash`(파일 행)를 쓴다.

@@ -120,6 +120,20 @@
   fields and tags (only live tags, so a tag removed or deleted after the race
   does not come back), and a `review.duplicates-merged` audit event lists the
   removed citation ids and the dropped tags (`tests/test_review_mark_atomic.py`).
+- Who did what on a shared server (remote-use review R5, R12): the web API
+  recorded the name each browser sent (`web-ui` by default) and ignored
+  `RAPIDTRIAGE_REVIEWER`. `RAPIDTRIAGE_TOKENS_FILE` now gives each person
+  (or `agent:<name>`) a token, and the token decides the author of review
+  marks, tags, notes, baselines and case audit entries; client `reviewer` /
+  `actor` / `author` names are display values then. Without the file
+  `RAPIDTRIAGE_REVIEWER` is the server's author for web writes. Runs record
+  `owner` (create, import, retry), cancel and plan control log their actor,
+  run notes record `updated_by`, and removing a run leaves a `removed_runs`
+  record in `runs.json`. The action API's `actor` follows the token (an
+  `agent:` token is always that agent; a person's agent is
+  `agent:<name>@<person>`). The tokens file cannot be combined with a single
+  token or disabled auth, is never printed, and tokens are compared as
+  SHA-256 digests in constant time (`tests/test_user_tokens_actor.py`).
 - Browser storage (Local Storage, IndexedDB) matches AI service hosts only at
   a host boundary, so GitHub Copilot storage (`api.githubcopilot.com`) is no
   longer labelled Microsoft Copilot and `box.ai` / `bayou.com` no longer read

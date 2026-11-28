@@ -50,7 +50,7 @@ def case_notes_path(output_dir: Path) -> Path:
 
 def read_case_notes(output_dir: Path | None) -> dict[str, Any]:
     """Stored notes, or empty strings when the file is missing/unreadable."""
-    empty: dict[str, Any] = {"examiner": "", "summary": "", "updated_at": None, "exists": False}
+    empty: dict[str, Any] = {"examiner": "", "summary": "", "updated_at": None, "updated_by": None, "exists": False}
     if output_dir is None:
         return empty
     path = case_notes_path(output_dir)
@@ -64,16 +64,19 @@ def read_case_notes(output_dir: Path | None) -> dict[str, Any]:
         "examiner": str(payload.get("examiner") or ""),
         "summary": str(payload.get("summary") or ""),
         "updated_at": payload.get("updated_at"),
+        "updated_by": payload.get("updated_by"),
         "exists": True,
     }
 
 
-def write_case_notes(output_dir: Path, *, examiner: str, summary: str) -> dict[str, Any]:
+def write_case_notes(output_dir: Path, *, examiner: str, summary: str, updated_by: str | None) -> dict[str, Any]:
+    """Last write wins; ``updated_by`` is the server's actor (per-user token / RAPIDTRIAGE_REVIEWER)."""
     payload = {
         "profile_version": CASE_NOTES_PROFILE,
         "examiner": examiner,
         "summary": summary,
         "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "updated_by": updated_by,
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     path = case_notes_path(output_dir)

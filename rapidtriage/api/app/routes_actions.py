@@ -8,7 +8,9 @@
   tags, history and their Korean errors are the review-batch ones; a preview refuses what an
   apply would refuse and writes nothing. ``actor.kind = "agent"`` records the reviewer as
   ``agent:<name>``, which keeps AI marks apart from people's in the history; a person without
-  a name is ``RAPIDTRIAGE_REVIEWER`` or ``local-user``.
+  a name is ``RAPIDTRIAGE_REVIEWER`` or ``local-user``. With per-user tokens
+  (``RAPIDTRIAGE_TOKENS_FILE``) the token decides: an ``agent:`` token is always that agent,
+  a person's token records the person, or ``agent:<name>@<person>`` for an agent they run.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from ...core.case_db.run_locator import (
     canonical_run_case,
 )
 from ...core.jobs import RunJobStore, run_output_dir
+from ...core.user_tokens import ACTOR_NAME_MAX, AGENT_PREFIX
 from .actions import (
     API_VERSION,
     MAX_TARGETS,
@@ -41,6 +44,7 @@ from .helpers import (
     get_output_path,
     resolve_request_reviewer,
     run_not_finished_message,
+    token_actor,
 )
 from .json_rows import LazyRows, large_output_index
 from .models import CaseDbReviewBatchRequest, RunCaseDbEnsureRequest
@@ -50,10 +54,9 @@ from .routes_review_tools import check_tag_batch_fields
 
 class ActionActor(BaseModel):
     kind: Literal["human", "agent"] = "human"
-    name: str | None = Field(default=None, max_length=120)
+    name: str | None = Field(default=None, max_length=ACTOR_NAME_MAX)
 
 
-AGENT_PREFIX = "agent:"
 # The author every other review-tool write records when nobody is named (routes_review_tools).
 UNNAMED_HUMAN = "local-user"
 
@@ -62,12 +65,18 @@ def actor_reviewer(actor: ActionActor) -> str:
     """The history author of a mark: ``agent:<name>``, else the person's name, never empty.
 
     An unnamed person is ``RAPIDTRIAGE_REVIEWER`` or ``local-user`` (as the tag-id path
-    records), never the row's previous reviewer. One token serves people and agents, so a
-    ``human`` cannot use an ``agent:`` name: that would pass a person's mark off as an AI's.
+    records), never the row's previous reviewer. A ``human`` cannot use an ``agent:`` name:
+    that would pass a person's mark off as an AI's. A per-user token outranks the body: an
+    ``agent:`` token is that agent whatever ``actor`` says, a person's token names the person
+    (``agent:<name>@<person>`` when ``actor.kind`` says an agent of theirs acts).
     """
     name = (actor.name or "").strip()
+    identity = token_actor()
+    if identity and identity.casefold().startswith(AGENT_PREFIX):
+        return identity
     if actor.kind == "agent":
-        return f"{AGENT_PREFIX}{name or 'unnamed'}"
+        agent = f"{AGENT_PREFIX}{name or 'unnamed'}"
+        return f"{agent}@{identity}" if identity else agent
     if name.casefold().startswith(AGENT_PREFIX):
         raise HTTPException(
             status_code=422,
@@ -231,7 +240,7 @@ def build_actions_router(store: RunJobStore, case_db_router: APIRouter) -> APIRo
             "run_id": run_id,
             "dry_run": request.dry_run,
             "mark": mark,
-            "actor": {"kind": request.actor.kind, "reviewer": reviewer},
+            "actor": {"kind": "agent" if reviewer.casefold().startswith(AGENT_PREFIX) else "human", "reviewer": reviewer},
             **summary,
         }
         if not resolved.targets:
