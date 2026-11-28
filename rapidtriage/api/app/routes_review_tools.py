@@ -33,6 +33,7 @@ from pydantic import BaseModel
 from ...core.case_db import (
     CaseDatabase,
     CaseDatabaseError,
+    ReviewConflictError,
     ReviewToolError,
     apply_schema,
     apply_tag_ids,
@@ -42,6 +43,7 @@ from ...core.case_db import (
     get_histogram_baseline,
     list_case_tags,
     list_histogram_baselines,
+    review_conflicts,
     review_mark_history_entries,
     update_case_tag,
 )
@@ -55,6 +57,7 @@ from .helpers import (
     resolve_request_reviewer,
     run_not_finished_message,
 )
+from .run_review import review_conflict_http_error
 from .tree import build_run_tree, read_output_key
 
 # Collections counted as one bar each (artifact kinds get one bar per kind).
@@ -133,6 +136,10 @@ def apply_review_tag_batch(database: CaseDatabase, request: Any, targets: list[d
                     "SELECT id FROM evidence_source WHERE case_id = ? ORDER BY id DESC LIMIT 1", (case_id,)
                 ).fetchone()
                 evidence_source_id = int(row[0]) if row is not None else None
+            # F14: a target whose mark changed since the client read it refuses the whole batch.
+            conflicts = review_conflicts(connection, case_id, targets)
+            if conflicts:
+                raise ReviewConflictError(conflicts)
             result = apply_tag_ids(
                 connection,
                 case_id,
@@ -146,6 +153,8 @@ def apply_review_tag_batch(database: CaseDatabase, request: Any, targets: list[d
                 priority=getattr(request, "priority", None),
                 due_at=getattr(request, "due_at", None),
             )
+    except ReviewConflictError as exc:
+        raise review_conflict_http_error(exc) from exc
     except CaseDatabaseError as exc:
         raise review_tool_http_error(exc) from exc
     result.update(database=str(database.path), run_id=request.run_id, updated_count=result["applied_count"])

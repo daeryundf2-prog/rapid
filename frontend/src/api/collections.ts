@@ -1048,17 +1048,25 @@ export interface ReviewMarkBody {
   reviewer?: string;
 }
 
-/** A case-db row, or a run-output locator the server resolves against `run_id`. */
+/** A case-db row, or a run-output locator the server resolves against `run_id`. Either may carry
+ * `expected_updated_at`: the mark's version as last read ("" = no mark); a newer stored mark is a 409 (F14). */
 export type ReviewBatchTarget =
-  | { target_type: string; target_id: string }
-  | { collection: string; kind?: string; locator: string };
+  | { target_type: string; target_id: string; expected_updated_at?: string }
+  | { collection: string; kind?: string; locator: string; expected_updated_at?: string };
+
+/** `POST /api/case-db/review-batch` answer: with `run_id`, `targets[i]` (resolved, locator kept) stored `marks[i]`. */
+export interface ReviewBatchAnswer {
+  updated_count?: number;
+  targets?: Array<Record<string, unknown>>;
+  marks?: RawRow[];
+}
 
 export function postReviewBatch(
   handle: CaseDbHandle,
   targets: ReviewBatchTarget[],
   mark: ReviewMarkBody,
   runId?: string,
-): Promise<{ updated_count?: number }> {
+): Promise<ReviewBatchAnswer> {
   return api("/api/case-db/review-batch", {
     method: "POST",
     body: JSON.stringify({

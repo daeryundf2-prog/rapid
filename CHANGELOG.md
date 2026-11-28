@@ -4,6 +4,19 @@
 
 ### Added
 
+- Console review board and report (design review F12/F13/F14/F16/F21): the
+  review map returns each mark's `reviewer`, `created_at`, `updated_at` and
+  `change_count` (file targets also `file_modified_at`); review and
+  review-batch writes take an optional `expected_updated_at` per target and
+  answer 409 `review-conflict` with the current mark (status, reviewer,
+  updated_at) instead of overwriting another examiner's decision; a batch is
+  all-or-nothing (one transaction). The console sends the version it read and
+  asks "○○가 HH:MM에 ‘재검토’로 바꿈 — [내 판정으로 바꾸기] [그대로 두기]".
+  The 검토 보드 shows 판정 · 보고서 · 대상 · 사건 시각 · 판정 시각 · 판정자 ·
+  출처 · 경로 · 메모, with a 판정자 filter ("이름 없음" for empty/`web-ui`/
+  `local-user`). The 보고 page is a checklist, a preview of the included items
+  and one primary export; the run's output files fold into a closed section
+  (`tests/test_review_mark_conflict.py`).
 - `omp-pi` collector for oh-my-pi (omp), pi, senpi and OmO: session JSONL
   under `<home>/agent/sessions` (subagent transcripts included, linked by
   `parent_session`), sessions in other folders recognized by their `session`

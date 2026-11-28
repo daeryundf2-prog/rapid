@@ -9,16 +9,13 @@ import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-quer
 import { useEffect } from "react";
 import { getReviewMap, type ReviewMapMark } from "../../api/caseDb";
 import type { GridRow } from "../../contracts/collection";
+import { rememberReviewMarks, reviewKey } from "../review/markVersions";
 import { toReviewStatus } from "./columns/common";
 import { onReviewApplied, reviewLocatorTarget } from "./reviewActions";
 
 export type ReviewMap = ReadonlyMap<string, ReviewMapMark>;
 
 export const reviewMapKey = (runId: string | null) => ["review-map", runId] as const;
-
-export function reviewKey(collection: string, kind: string, locator: string): string {
-  return `${collection}|${collection === "artifacts" || collection === "analysis" ? kind : ""}|${locator}`;
-}
 
 export function buildReviewMap(marks: readonly ReviewMapMark[]): ReviewMap {
   const map = new Map<string, ReviewMapMark>();
@@ -57,11 +54,17 @@ export function overlayReview(row: GridRow, map: ReviewMap | undefined): GridRow
   };
 }
 
-/** The run's review map (cached; invalidated after every applied mark). */
+/** The run's review map (cached; invalidated after every applied mark). Each load also records the
+ * marks' versions, which the next write sends back (F14). */
 export function useReviewMap(runId: string | null, enabled = true): ReviewMap | undefined {
   const query = useQuery({
     queryKey: reviewMapKey(runId),
-    queryFn: async ({ signal }) => buildReviewMap((await getReviewMap(runId as string, signal)).marks ?? []),
+    queryFn: async ({ signal }) => {
+      const payload = await getReviewMap(runId as string, signal);
+      const marks = payload.marks ?? [];
+      rememberReviewMarks(runId as string, marks, payload.truncated === true);
+      return buildReviewMap(marks);
+    },
     enabled: enabled && runId !== null,
     staleTime: 30_000,
     retry: false,

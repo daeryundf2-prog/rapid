@@ -70,7 +70,15 @@ export interface ReviewMapMark {
   tags: string[];
   note: string;
   include_in_report: boolean;
+  /** The mark's version token: send it back as `expected_updated_at` (F14). */
   updated_at: string;
+  /** Who stored the mark (server value; "" / "web-ui" / "local-user" = 이름 없음) and when it was made (F13). */
+  reviewer?: string;
+  created_at?: string;
+  /** Times the mark changed (its history versions). */
+  change_count?: number;
+  /** File targets: the copy's modification time (a file has no event time). */
+  file_modified_at?: string;
   /** Grid collection + artifact kind + locator; empty when the row has no run-output locator. */
   collection: string;
   kind: string;
@@ -96,4 +104,63 @@ export interface ReviewMapPayload {
 /** Read-only; never creates the case DB. */
 export function getReviewMap(runId: string, signal?: AbortSignal): Promise<ReviewMapPayload> {
   return api<ReviewMapPayload>(`/api/runs/${encodeURIComponent(runId)}/review-map`, { signal });
+}
+
+/** The stored mark a 409 `review-conflict` reports (F14). */
+export interface ConflictMark {
+  /** false: no mark (never made, or cleared). */
+  exists: boolean;
+  status: string;
+  include_in_report: boolean;
+  note: string;
+  tags: string[];
+  reviewer: string;
+  /** When it last changed (also set for a cleared mark). */
+  updated_at: string;
+  /** What to send as `expected_updated_at` to overwrite it ("" for no mark). */
+  expected_updated_at: string;
+}
+
+/** One target of a refused write: its mark changed after the console read it; nothing was written. */
+export interface ReviewConflict {
+  target_type: string;
+  target_id: string;
+  expected_updated_at: string;
+  /** Run-output locator of a located target (echoed back so the console finds its row). */
+  collection?: string;
+  kind?: string;
+  locator?: string;
+  current: ConflictMark;
+}
+
+function isRecordLike(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** The conflicts of a 409 `{code:"review-conflict", conflicts}` detail; null for any other error. */
+export function reviewConflictsOf(detail: unknown): ReviewConflict[] | null {
+  if (!isRecordLike(detail) || detail.code !== "review-conflict" || !Array.isArray(detail.conflicts))
+    return null;
+  const text = (value: unknown) => (typeof value === "string" ? value : "");
+  return detail.conflicts.filter(isRecordLike).map((raw) => {
+    const current = isRecordLike(raw.current) ? raw.current : {};
+    return {
+      target_type: text(raw.target_type),
+      target_id: text(raw.target_id),
+      expected_updated_at: text(raw.expected_updated_at),
+      ...(typeof raw.collection === "string" ? { collection: raw.collection } : {}),
+      ...(typeof raw.kind === "string" ? { kind: raw.kind } : {}),
+      ...(typeof raw.locator === "string" ? { locator: raw.locator } : {}),
+      current: {
+        exists: current.exists === true,
+        status: text(current.status) || "unreviewed",
+        include_in_report: current.include_in_report === true,
+        note: text(current.note),
+        tags: Array.isArray(current.tags) ? current.tags.map(String) : [],
+        reviewer: text(current.reviewer),
+        updated_at: text(current.updated_at),
+        expected_updated_at: text(current.expected_updated_at),
+      },
+    };
+  });
 }

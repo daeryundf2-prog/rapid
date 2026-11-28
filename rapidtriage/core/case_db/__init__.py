@@ -8,6 +8,7 @@ from .helpers import *
 from .integrity import *
 from .reporting import *
 from .review import *
+from .review_conflict import *
 from .review_schema import *
 from .review_tools import *
 from .schema import *
