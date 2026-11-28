@@ -177,7 +177,7 @@ interface TreeFold {
 
 /**
  * Wide layout tree fold (F24): the tree Panel collapses to the strip while the current collection
- * kind is folded (timeline · search · review start folded, pinned per kind).
+ * kind is folded (timeline · search start folded, pinned per kind).
  */
 function useTreeFold(size: string): TreeFold {
   const ref = useRef<PanelImperativeHandle>(null);
@@ -355,7 +355,8 @@ function ViewerRail() {
 
 /**
  * The viewer lives in its own window (U-F2): the pane is a rail that says so, with 되돌리기 and a
- * button that brings the viewer window forward.
+ * button that brings the viewer window forward. Both buttons sit at the top of the rail: at the
+ * bottom, 되돌리기 lay under the bottom-right toast stack (a lingering toast took its clicks).
  */
 function PopoutRail() {
   return (
@@ -371,7 +372,6 @@ function PopoutRail() {
           <Icon name="external" />
         </span>
       </button>
-      <p className="viewer-rail-text">창으로 보는 중</p>
       <button
         type="button"
         className="viewer-rail-button"
@@ -387,6 +387,7 @@ function PopoutRail() {
           <Icon name="panel-right-open" />
         </span>
       </button>
+      <p className="viewer-rail-text">창으로 보는 중</p>
     </div>
   );
 }

@@ -15,13 +15,14 @@ export const TIMEZONE_KEY = "rapidtriage.v2.timezone";
 export const TREE_PANEL_KEY = "rapidtriage.v2.treePanel";
 
 /**
- * Which tree-fold memory a collection uses (F24, review X2): the event lists (timeline, search,
- * review board) start with the stage panel folded to a strip, the browsing views keep it open.
- * Each kind remembers the analyst's own choice.
+ * Which tree-fold memory a collection uses (F24, review X2): the explore event lists (timeline,
+ * search) start with the evidence tree folded to a strip; the browsing views and the review
+ * board's panel (판정 filters, 태그 관리 — not the evidence tree) start open. Each kind remembers
+ * the analyst's own choice.
  */
 export type TreePanelKind = "timeline" | "search" | "review" | "browse";
 export type TreePanelPins = Partial<Record<TreePanelKind, "hidden" | "shown">>;
-export const TREE_PANEL_FOLDED_BY_DEFAULT: readonly TreePanelKind[] = ["timeline", "search", "review"];
+export const TREE_PANEL_FOLDED_BY_DEFAULT: readonly TreePanelKind[] = ["timeline", "search"];
 
 export function treePanelKind(collection: string | null | undefined): TreePanelKind {
   return collection === "timeline" || collection === "search" || collection === "review"

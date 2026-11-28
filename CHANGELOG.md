@@ -88,10 +88,10 @@
 ### Changed
 
 - Console frame and small screens (design overhaul ②, F23/F24/F29): no stage
-  rail before a case is open; on timeline, search and the review board the
-  stage panel starts folded to a 36 px strip that names the current location
+  rail before a case is open; on the timeline and search the evidence tree
+  starts folded to a 36 px strip that names the current location
   (펼치기/접기 buttons and Alt+0 on wide windows too; the choice is pinned per
-  collection kind, file views keep it open); 0-row families such as 이벤트 로그
+  collection kind; file views and the review board's panel start open); 0-row families such as 이벤트 로그
   fold into "결과 없는 계열 n개", and a domain no longer reads 0 over a child
   with rows. Panes scroll instead of clipping (the tree at 768 px hid its last
   domains and the 결과 없는 계열 toggle). On phones a row tap opens the detail

@@ -168,7 +168,7 @@ describe("Layout from 900px: the foldable panel (F24)", () => {
     expect(document.activeElement).toBe(region().querySelector("h1"));
   });
 
-  it("starts folded on timeline, search and the review board, each kind remembering its own pin", async () => {
+  it("starts folded on timeline and search, open on the review board; each kind keeps its own pin", async () => {
     stubWindowWidth(1280);
     render(<Layout />);
     act(() => s().navigate({ runId: "r1", collection: "timeline" }));
@@ -184,6 +184,8 @@ describe("Layout from 900px: the foldable panel (F24)", () => {
     act(() => s().navigate({ runId: "r1", collection: "search", q: "x" }));
     expect(region().hidden).toBe(true);
     act(() => s().navigate({ runId: "r1", collection: "files" }));
+    expect(region().hidden).toBe(false);
+    act(() => s().navigate({ runId: "r1", collection: "review" }));
     expect(region().hidden).toBe(false);
     act(() => s().navigate({ runId: "r1", collection: "timeline" }));
     expect(region().hidden).toBe(false);
@@ -264,7 +266,8 @@ describe("treePanelHidden (F24)", () => {
     expect(treePanelKind("artifacts")).toBe("browse");
     expect(treePanelHidden(state("timeline"))).toBe(true);
     expect(treePanelHidden(state("search"))).toBe(true);
-    expect(treePanelHidden(state("review"))).toBe(true);
+    expect(treePanelHidden(state("review"))).toBe(false);
+    expect(treePanelHidden(state("review", false, { review: "hidden" }))).toBe(true);
     expect(treePanelHidden(state("files"))).toBe(false);
     expect(treePanelHidden(state("intake"))).toBe(false);
     expect(treePanelHidden(state("timeline", false, { timeline: "shown" }))).toBe(false);
