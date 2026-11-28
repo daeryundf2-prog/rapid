@@ -92,12 +92,18 @@
   names) and the dori-mode skill state in `.dori/state` (lanes with title,
   state, model, working folder, thread, omo session, open and close times and
   state history, lane reports, checkpoints and usage, worklog events, lessons,
-  the Slack thread ledger and the Telegram offset), plus dori LaunchAgents and
-  the presence of `secrets.env` (never read). Brief text, done signals, hook
-  argv, commit identities and the telemetry key are not exported; message
-  text passes the usual redaction and length limit. Lanes and backlog items
-  open and close in the timeline, the other records are one event each. See
+  the Slack thread ledger and the Telegram offset), plus dori LaunchAgents
+  (program only, no arguments) and the presence of `secrets.env` and its
+  `secrets.env.bak*` copies (never read). Brief text, done signals, hook argv,
+  `agentCommand` arguments, commit identities and the telemetry key are not
+  exported. Messenger message text and Telegram, Discord and Slack chat,
+  thread and channel IDs are exported on purpose as personal data, through
+  the usual redaction and length limit. A plist that does not parse leaves a
+  note instead of stopping the collector. Lanes and backlog items open and
+  close in the timeline, the other records are one event each. See
   `docs/ai-agent-artifacts.md` (`tests/test_ai_agent_dori.py`).
+- AI-agent row redaction also masks Telegram bot tokens (including inside a
+  Bot API `/bot<token>/` URL) and Discord bot tokens.
 
 ### Changed
 

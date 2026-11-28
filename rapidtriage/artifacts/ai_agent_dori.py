@@ -4,14 +4,18 @@ commit ``8beff59``: ``src/store.ts``, ``src/store-types.ts``, ``src/store-journa
 ``src/gate.ts``, ``src/telemetry.ts`` and, under ``skills/dori-mode/scripts/src``, ``registry.ts``, ``reports.ts``,
 ``checkpoints.ts``, ``supervision.ts``, ``worklog.ts``, ``lessons.ts``, ``config.ts``, ``cli-messenger.ts`` and
 ``messenger/thread-ledger.ts``. dori keeps no log of messenger traffic: inbound messages are printed for the lead
-and sends print an ID, so the Slack thread ledger and the Telegram offset are what remains on disk."""
+and sends print an ID, so the Slack thread ledger and the Telegram offset are what remains on disk.
+
+Message text (queued messages, reports, worklog entries, lane notes) and Telegram, Discord and Slack chat, thread and
+channel IDs are exported on purpose, as the conversation text of the session collectors is: they are the evidence and
+they are personal data. Every text field passes ``clean()`` and the row text limit. Argument vectors are not exported:
+``agentCommand`` and launchd ``ProgramArguments`` give the program only."""
 from __future__ import annotations
 
 import datetime as dt
 import json
 import plistlib
 import re
-import shlex
 from dataclasses import replace
 from pathlib import Path
 from xml.parsers.expat import ExpatError
@@ -79,8 +83,11 @@ def dori_mode(tail: tuple[str, ...]) -> str | None:
         return "pause"
     if len(tail) == 2 and tail[0] == "migrate" and name.endswith(".json"):
         return "migration"
-    if len(tail) == 1 and name in ("roles.json", "telemetry.json", "secrets.env"):
+    if len(tail) == 1 and name in ("roles.json", "telemetry.json"):
         return name.partition(".")[0]
+    if len(tail) == 1 and (name == "secrets.env" or name.startswith("secrets.env.bak")):
+        # ``secrets.env`` and the operator's ``secrets.env.bak-*`` copies: presence only.
+        return "secrets"
     if len(tail) == 1 and (name == "config.json" or name.startswith("config.json.bak")):
         return "dori-config"
     if len(tail) == 2 and tail[0] == "disabled-launchd" and name.endswith(".plist"):
@@ -139,8 +146,11 @@ def slack_time(value):
     return instant.isoformat()
 
 
-def command(argv) -> str:
-    return shlex.join([v for v in items(argv) if isinstance(v, str)])
+def executable(argv) -> str:
+    """The program only, as ``agent-mcp`` does: arguments can hold unlabelled credentials (bot tokens in URLs,
+    positional keys, owner IDs)."""
+    values = items(argv)
+    return values[0] if values and isinstance(values[0], str) else ""
 
 
 def dori(src, path: Path, mode: str, line_records):
@@ -182,7 +192,8 @@ def dori(src, path: Path, mode: str, line_records):
             doc = raw.decode("ascii").strip()
         else:
             doc = json.loads(raw.decode("utf-8-sig"))
-    except (ValueError, RecursionError, ExpatError):
+    except (ValueError, LookupError, RecursionError, ExpatError):
+        # plistlib raises LookupError for an unknown XML encoding and IndexError for an unbalanced key.
         yield src.note("invalid-document")
         return
     yield from DOCUMENT_ROWS[mode](src, doc, path)
@@ -396,14 +407,15 @@ def telemetry(src, doc, path):
 
 
 def dori_config(src, doc, path):
-    """``config.json``, shared by the harness and the skill. Hook argv templates are named, not exported; commit
-    identities are listed by repository only (the names and e-mail addresses are not exported)."""
+    """``config.json``, shared by the harness and the skill. ``agentCommand`` gives its program only; hook argv
+    templates are named, not exported; commit identities are listed by repository only (the names and e-mail
+    addresses are not exported)."""
     if not isinstance(doc, dict):
         yield src.note("invalid-config-shape")
         return
     out = src.row("settings", model=doc.get("defaultModel"), runtime=doc.get("runtime"), state_dir=doc.get("stateDir"),
                   sessions_dir=doc.get("sessionsDir"), default_cwd=doc.get("defaultCwd"),
-                  lane_workspace=doc.get("laneWorkspace"), command_line=command(doc.get("agentCommand")))
+                  lane_workspace=doc.get("laneWorkspace"), command_line=executable(doc.get("agentCommand")))
     listed(out, "config_keys", list(doc))
     listed(out, "hook_names", list(mapping(doc.get("hooks"))))
     yield listed(out, "repo_identities", list(mapping(doc.get("repoIdentities"))))
@@ -437,13 +449,14 @@ def telegram_offset(src, doc, path):
 
 
 def service(src, doc, path):
-    """A launchd agent: label, ``ProgramArguments`` (or ``Program``, redacted) and environment variable names, never
-    their values."""
+    """A launchd agent: label, the program (first ``ProgramArguments`` entry, or ``Program``) and environment variable
+    names, never their values. dori installs no launchd agent and the operator's own wrappers follow no known
+    layout, so no argument (script, environment file or token) is exported."""
     if not isinstance(doc, dict):
         yield src.note("unrecognized-service-definition")
         return
-    argv = command(doc.get("ProgramArguments")) or doc.get("Program")
-    out = src.row("service", service_label=doc.get("Label"), command_line=argv, run_at_load=flag(doc.get("RunAtLoad")),
+    program = executable(doc.get("ProgramArguments")) or doc.get("Program")
+    out = src.row("service", service_label=doc.get("Label"), command_line=program, run_at_load=flag(doc.get("RunAtLoad")),
                   disabled=flag(path.parent.name == "disabled-launchd"))
     yield listed(out, "env_names", list(mapping(doc.get("EnvironmentVariables"))))
 

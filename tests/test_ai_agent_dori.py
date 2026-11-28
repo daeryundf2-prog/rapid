@@ -16,6 +16,11 @@ OPENED_MS, CLOSED_MS = 1_790_000_000_000, 1_790_000_600_000
 OPENED, CLOSED = "2026-09-21T14:13:20.000Z", "2026-09-21T14:23:20.000Z"
 OPENED_UTC, CLOSED_UTC = "2026-09-21T14:13:20+00:00", "2026-09-21T14:23:20+00:00"
 TOKEN = "ghp_" + "A" * 36
+# Bot token shapes the shared redaction must mask in every exported field, whatever the merge order of #85.
+TG = "7123456789:AAH" + "TgMarker" + "x" * 24
+DC = "MTA" + "DcMarker" + "a" * 15 + ".GxYz12." + "b" * 38
+PLAIN = "plainSecretDoriValue9876"
+OWNER = "5550001111"
 
 
 def exported(rows):
@@ -161,8 +166,10 @@ class DoriStateTests(AgentFixture):
             "hooks": {"threadReply": ["notify", "HOOK-ARGV-NEVER-EXPORTED"]},
             "repoIdentities": {"o/r": {"name": "IDENTITY-NAME", "email": "identity@example.invalid"}}})
         secret = self.write(f"{HOME}/secrets.env", b"DORI_TELEGRAM_TOKEN=SECRET-NEVER-READ\n")
-        os.chmod(secret, 0)
-        self.addCleanup(os.chmod, secret, 0o600)
+        backup = self.write(f"{HOME}/secrets.env.bak-1116", b"DORI_TELEGRAM_TOKEN=BACKUP-SECRET-NEVER-READ\n")
+        for path in (secret, backup):
+            os.chmod(path, 0)
+            self.addCleanup(os.chmod, path, 0o600)
         plist = {"Label": "com.o.dori-backup", "ProgramArguments": ["/bin/sh", "-c", f"backup --token {TOKEN}"],
                  "RunAtLoad": True, "EnvironmentVariables": {"DORI_HOME": "/Users/o/.dori"}}
         self.write("Users/o/Library/LaunchAgents/com.o.dori-backup.plist", plistlib.dumps(plist))
@@ -207,19 +214,21 @@ class DoriStateTests(AgentFixture):
         config = settings["config.json"]
         self.assertEqual((config["model"], config["hook_names"], config["repo_identities"]),
                          ("anthropic/claude-opus", ["threadReply"], ["o/r"]))
-        self.assertTrue(config["command_line"].startswith("omo --key="))
-        (secret_row,) = found["agent-secret-file"]
-        self.assertEqual(secret_row["file_name"], "secrets.env")
+        self.assertEqual(config["command_line"], "omo")
+        self.assertEqual(sorted(s["file_name"] for s in found["agent-secret-file"]),
+                         ["secrets.env", "secrets.env.bak-1116"])
         services = sorted(found["agent-service"], key=lambda s: s["disabled"])
         self.assertEqual([(s["service_label"], s["disabled"]) for s in services],
                          [("com.o.dori-backup", "false"), ("refresh", "true")])
         self.assertEqual(services[0]["env_names"], ["DORI_HOME"])
+        self.assertEqual([s["command_line"] for s in services], ["/bin/sh", "/bin/sh"])
         self.assertFalse([r.path for r in rows if "/src/" in r.path or "adorise" in r.path
                           or r.path.endswith((".lock", "b1.md"))])
         text = exported(rows)
         for hidden in ("BRIEF-BODY-NEVER-EXPORTED", "SCREEN-DUMP-NEVER-EXPORTED", "REVIEWER-OUTPUT-NEVER-READ",
                        "BACKLOG-BRIEF-NEVER-READ", "TELEMETRY-KEY-NEVER-EXPORTED", "HOOK-ARGV-NEVER-EXPORTED",
-                       "IDENTITY-NAME", "identity@example.invalid", "SECRET-NEVER-READ", "/Users/o/.dori", TOKEN):
+                       "IDENTITY-NAME", "identity@example.invalid", "SECRET-NEVER-READ", "/Users/o/.dori", TOKEN,
+                       "--key="):
             self.assertNotIn(hidden, text)
         self.assertEqual(events, [
             ("agent-backlog-item", "closed"), ("agent-backlog-item", "opened"), ("agent-lane", "closed"),
@@ -243,3 +252,72 @@ class DoriStateTests(AgentFixture):
         self.assertIsNone(thread["timestamp_utc"])
         self.assertIn("timestamp-not-normalized", thread["flags"])
         self.assertNotIn("seen_utc", thread)
+
+    def test_broken_plist_leaves_a_note_and_keeps_other_rows(self):
+        """plistlib raises LookupError (unknown XML encoding) and IndexError (unbalanced key), outside ValueError."""
+        self.write(f"{STATE}/lanes/ok.json", {"key": "ok", "title": "정상 레인", "openedAt": OPENED, "status": "working"})
+        self.lines(f"{STATE}/worklog.jsonl", {"op": "add", "id": "1", "at": OPENED, "title": "작업"})
+        self.write("Users/o/Library/LaunchAgents/com.o.dori-enc.plist",
+                   b'<?xml version="1.0" encoding="bogus"?><plist version="1.0"><dict/></plist>')
+        self.write(f"{HOME}/disabled-launchd/com.o.dori-key.plist", b"<plist><key>a</key></plist>")
+        found = by_type(self.rows("dori-state"))
+        self.assertEqual(len(found["agent-lane"]), 1)
+        self.assertEqual(len(found["agent-worklog"]), 1)
+        notes = sorted((n["source_path"].rsplit("/", 1)[-1], n["reason"]) for n in found["agent-parse-note"])
+        self.assertEqual(notes, [("com.o.dori-enc.plist", "invalid-document"),
+                                 ("com.o.dori-key.plist", "invalid-document")])
+
+    def test_reviewer_leak_fixture_masks_bot_tokens_and_exports_programs_only(self):
+        """The PR #86 review fixture: Telegram Bot API URLs and Discord tokens in every body field, and unlabelled
+        secrets and an owner ID in ``agentCommand`` and launchd argv. Message text is exported on purpose, redacted."""
+        leak = f"https://api.telegram.org/bot{TG}/sendMessage {DC} 메시지 본문"
+        self.write(f"{STATE}/lanes/k.json", {
+            "key": "k", "title": leak, "thread": f"telegram:{OWNER}/42", "openedAt": OPENED, "status": "working",
+            "claim": {"at": OPENED, "evidence": leak}, "objection": {"at": OPENED, "reasons": [leak]},
+            "receipt": {"note": leak}, "history": [{"at": OPENED, "status": "working", "note": leak}]})
+        self.lines(f"{STATE}/lanes/k/reports.jsonl", {"type": "report", "key": "k", "at": OPENED, "kind": "done",
+                                                      "text": leak})
+        self.lines(f"{STATE}/lanes/k/checkpoints.jsonl", {"key": "k", "at": OPENED, "step": leak, "result": leak,
+                                                          "evidence": [leak], "remoteEffects": [leak]})
+        self.lines(f"{STATE}/worklog.jsonl", {"op": "add", "id": "1", "at": OPENED, "title": leak,
+                                              "source": f"telegram:{OWNER}/7"})
+        self.lines(f"{STATE}/lessons.jsonl", {"id": "l1", "at": OPENED, "rule": leak, "evidence": leak})
+        self.write(f"{HOME}/lanes/h.json", {
+            "key": "h", "paneId": "w1:p3", "status": "done", "createdAt": OPENED_MS,
+            "final": {"text": leak, "evidence": [leak], "at": CLOSED_MS}, "log": [{"at": OPENED_MS, "kind": "start",
+                                                                                 "text": leak}]})
+        self.lines(f"{HOME}/inbox/w1_p3.jsonl", {"at": OPENED_MS, "from": "duty", "text": leak,
+                                                 "attempt": {"at": OPENED_MS, "state": "failed", "detail": leak}})
+        self.write(f"{HOME}/receipts/o__r_3@abc1234.json", {"pr": "o/r#3", "sha": "abc1234", "verdict": "BLOCK",
+                                                            "at": CLOSED_MS, "summary": leak})
+        self.write(f"{HOME}/backlog/b1.json", {"id": "b1", "title": leak, "status": "asked", "decision": leak,
+                                               "createdAt": OPENED_MS})
+        self.write(f"{HOME}/loop/last-run.json", {"at": OPENED_MS, "status": {"lanes": 1}, "findings": [leak],
+                                                  "asked": [leak], "skipped": leak})
+        self.write(f"{HOME}/duty/stop", {"at": CLOSED_MS, "reason": leak})
+        self.write(f"{HOME}/briefs/k.md", f"# {leak}\n".encode())
+        self.write(f"{HOME}/config.json", {"agentCommand": ["omo", "--model", "{model}", PLAIN, f"--owner={OWNER}"]})
+        argv = ["/bin/bash", "-lc", f"dori inbound telegram --token {TG}",
+                f"https://api.telegram.org/bot{TG}/getUpdates", DC, PLAIN, f"--owner={OWNER}"]
+        self.write("Users/o/Library/LaunchAgents/com.o.dori-autostart.plist",
+                   plistlib.dumps({"Label": "com.o.dori-autostart", "ProgramArguments": argv}))
+        self.write(f"{HOME}/disabled-launchd/com.o.dori-refresh.plist", plistlib.dumps({
+            "Label": "refresh", "ProgramArguments": ["/bin/sh", "-c", f"curl https://api.telegram.org/bot{TG}/x -d {PLAIN}"]}))
+
+        rows = self.rows("dori-state")
+        found = by_type(rows)
+        text = exported(rows)
+        for marker in ("TgMarker", "DcMarker"):
+            self.assertNotIn(marker, text)
+        commands = sorted(r.details["command_line"] for r in rows if r.details["command_line"])
+        self.assertEqual(commands, ["/bin/bash", "/bin/sh", "omo"])
+        self.assertEqual(text.count(PLAIN), 0)
+        self.assertNotIn(f"--owner={OWNER}", text)
+        # The message text and the chat ID are the evidence: exported, with the tokens masked.
+        (queued,) = found["agent-queued-message"]
+        self.assertEqual(queued["text"], "https://api.telegram.org/bot[가림]/sendMessage [가림] 메시지 본문")
+        self.assertEqual(queued["delivery_detail"], queued["text"])
+        self.assertEqual(found["agent-worklog"][0]["source_message"], f"telegram:{OWNER}/7")
+        lane = next(lane for lane in found["agent-lane"] if lane["lane_key"] == "k")
+        self.assertEqual(lane["thread"], f"telegram:{OWNER}/42")
+        self.assertIn("메시지 본문", lane["text"])
