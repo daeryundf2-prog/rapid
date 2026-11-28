@@ -35,7 +35,13 @@ function mockGridWidth(width: number): () => void {
   };
 }
 
-const headers = () => screen.getAllByRole("columnheader").map((h) => h.textContent ?? "");
+// Data column headers only: the sticky select column (checkbox; its screen-reader name may mention 판정)
+// is not a data column and never takes part in the width-priority hiding.
+const headers = () =>
+  screen
+    .getAllByRole("columnheader")
+    .filter((h) => !h.querySelector('input[type="checkbox"]'))
+    .map((h) => h.textContent ?? "");
 const hasHeader = (name: string) => headers().some((text) => text.includes(name));
 
 async function renderFiles(handler = filesHandler(20)) {
