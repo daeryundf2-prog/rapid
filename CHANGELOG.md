@@ -112,13 +112,14 @@
 - Review marks and tags under concurrent users (remote-use review R4): two
   people tagging one row at once lost tags, and concurrent marks on a new row
   created several `review_mark` rows (each with its own citation id). Marks
-  and tag batches now read and write under `BEGIN IMMEDIATE`, `add_tags`
-  merges inside that transaction, case DB connections wait up to 30 s for the
-  write lock, and `idx_review_mark_case_target` is UNIQUE. Opening an older
-  case DB for writing merges its duplicate marks first: the first mark keeps
-  its citation id, the newest mark's fields and the union of tags are kept,
-  and a `review.duplicates-merged` audit event lists the removed citation ids
-  (`tests/test_review_mark_atomic.py`).
+  and tag batches (and tag deletion) now read and write under `BEGIN
+  IMMEDIATE`, `add_tags` merges inside that transaction, case DB connections
+  wait up to 30 s for the write lock, and `idx_review_mark_case_target` is
+  UNIQUE. Opening an older case DB for writing merges its duplicate marks
+  first: the first mark keeps its citation id and takes the newest mark's
+  fields and tags (only live tags, so a tag removed or deleted after the race
+  does not come back), and a `review.duplicates-merged` audit event lists the
+  removed citation ids and the dropped tags (`tests/test_review_mark_atomic.py`).
 - Browser storage (Local Storage, IndexedDB) matches AI service hosts only at
   a host boundary, so GitHub Copilot storage (`api.githubcopilot.com`) is no
   longer labelled Microsoft Copilot and `box.ai` / `bayou.com` no longer read

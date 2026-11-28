@@ -215,10 +215,12 @@ def build_review_tools_router(
         raise HTTPException(status_code=422, detail="run_id 또는 database가 필요합니다")
 
     @contextmanager
-    def _connection(database: CaseDatabase, case_id: str) -> Iterator[sqlite3.Connection]:
+    def _connection(database: CaseDatabase, case_id: str, *, write: bool = False) -> Iterator[sqlite3.Connection]:
+        """``write=True``: write lock before the first read (read-modify-write of marks, R4)."""
         try:
-            with database.connect() as connection:
-                apply_schema(connection)
+            with database.write_transaction() if write else database.connect() as connection:
+                if not write:
+                    apply_schema(connection)
                 if connection.execute("SELECT 1 FROM case_record WHERE case_id = ?", (case_id,)).fetchone() is None:
                     raise HTTPException(status_code=404, detail=f"케이스를 찾을 수 없습니다: {case_id}")
                 yield connection
@@ -307,7 +309,8 @@ def build_review_tools_router(
         """Soft delete: the tag keeps its row (``deleted_at``), leaves every mark and frees its key."""
         opened = _case_database(case_id, run_id, database)
         assert opened is not None
-        with _connection(opened, case_id) as connection:
+        # Write lock before reading the marks that carry the tag: a concurrent add_tags is not overwritten.
+        with _connection(opened, case_id, write=True) as connection:
             try:
                 tag = delete_case_tag(connection, case_id, tag_id, actor=resolve_request_reviewer(actor) or "local-user")
             except CaseDatabaseError as exc:

@@ -115,7 +115,13 @@ from .review import (
     saved_search_to_dict,
     source_citation_package_hash,
 )
-from .review_schema import sync_review_mark_tag_ids, tag_names_for_ids
+from .review_schema import (
+    apply_review_schema,
+    mark_tag_names,
+    migrate_string_tags,
+    sync_review_mark_tag_ids,
+    tag_names_for_ids,
+)
 from .schema import (
     apply_schema,
     artifact_fts_is_external,
@@ -2363,16 +2369,25 @@ def ensure_unique_review_mark_targets(connection: sqlite3.Connection) -> None:
 def merge_duplicate_review_marks(connection: sqlite3.Connection) -> int:
     """Merge every target's extra review marks into its first one; returns the removed row count.
 
-    The first mark (lowest id) keeps its citation id; status, note, reviewer and
-    the other fields come from the most recently updated mark; tags are the
-    union in mark order. The removed marks' history stays in the append-only
+    The first mark (lowest id) keeps its citation id; status, note, reviewer,
+    tags and the other fields come from the most recently updated mark. After
+    a race every later edit went to the first mark only, so the other marks
+    hold stale state: a union of their tags would bring back tags an examiner
+    removed. Tags are taken by id (``tag_ids_json``, the canonical link) and
+    limited to live ``case_tag`` rows, so the merge never creates a tag or
+    revives a deleted one. The removed marks' history stays in the append-only
     ``review_mark_history``; a ``review.duplicates-merged`` audit event per
-    target names the removed citation ids.
+    target names the removed citation ids, the kept tags and the dropped ones.
     """
     groups = connection.execute(
         "SELECT case_id, target_type, target_id FROM review_mark "
         "GROUP BY case_id, target_type, target_id HAVING COUNT(*) > 1"
     ).fetchall()
+    if not groups:
+        return 0
+    # Tag ids for every mark: a DB from before tag ids gets them from its string tags first.
+    apply_review_schema(connection)
+    migrate_string_tags(connection)
     timestamp = now_iso()
     removed_count = 0
     for case_id, target_type, target_id in groups:
@@ -2382,17 +2397,26 @@ def merge_duplicate_review_marks(connection: sqlite3.Connection) -> int:
         ).fetchall()
         kept, extra = rows[0], rows[1:]
         newest = max(rows, key=lambda row: (str(row["updated_at"]), int(row["id"])))
-        tags = normalize_tags(tag for row in rows for tag in review_mark_to_dict(row)["tags"])
+        tag_ids = _live_tag_ids(connection, case_id, newest["tag_ids_json"])
+        tags = tag_names_for_ids(connection, tag_ids)
+        kept_names = {tag.casefold() for tag in tags}
+        dropped_tags = [
+            tag
+            for tag in normalize_tags(tag for row in rows for tag in mark_tag_names(row["tags_json"]))
+            if tag.casefold() not in kept_names
+        ]
         connection.execute(
             """
             UPDATE review_mark
-            SET status = ?, verification_status = ?, note = ?, include_in_report = ?, reviewer = ?,
-                assignee = ?, priority = ?, due_at = ?, source_citation_package_json = ?, updated_at = ?
+            SET status = ?, verification_status = ?, tags_json = ?, tag_ids_json = ?, note = ?, include_in_report = ?,
+                reviewer = ?, assignee = ?, priority = ?, due_at = ?, source_citation_package_json = ?, updated_at = ?
             WHERE id = ?
             """,
             (
                 newest["status"],
                 newest["verification_status"],
+                json.dumps(tags, ensure_ascii=False),
+                json.dumps(tag_ids),
                 newest["note"],
                 newest["include_in_report"],
                 newest["reviewer"],
@@ -2407,7 +2431,6 @@ def merge_duplicate_review_marks(connection: sqlite3.Connection) -> int:
         connection.executemany("DELETE FROM review_mark WHERE id = ?", [(int(row["id"]),) for row in extra])
         citation_id = str(kept["citation_id"])
         removed = [str(row["citation_id"]) for row in extra]
-        tag_ids = sync_review_mark_tag_ids(connection, case_id, citation_id, tags, actor=REVIEW_MARK_MERGE_ACTOR)
         merged = connection.execute("SELECT * FROM review_mark WHERE id = ?", (int(kept["id"]),)).fetchone()
         insert_review_history(
             connection,
@@ -2440,9 +2463,10 @@ def merge_duplicate_review_marks(connection: sqlite3.Connection) -> int:
                 "",
                 json.dumps(
                     {
+                        "dropped_tags": dropped_tags,
                         "kept_citation_id": citation_id,
                         "removed_citation_ids": removed,
-                        "tags": tag_names_for_ids(connection, tag_ids),
+                        "tags": tags,
                     },
                     ensure_ascii=False,
                     sort_keys=True,
@@ -2453,6 +2477,17 @@ def merge_duplicate_review_marks(connection: sqlite3.Connection) -> int:
         )
         removed_count += len(extra)
     return removed_count
+
+
+def _live_tag_ids(connection: sqlite3.Connection, case_id: str, raw_tag_ids: object) -> list[int]:
+    """Ids in a mark's ``tag_ids_json`` that are live ``case_tag`` rows of the case, in mark order."""
+    rows = connection.execute(
+        "SELECT j.value FROM json_each(CASE WHEN json_valid(?1) THEN ?1 ELSE '[]' END) AS j "
+        "JOIN case_tag ON case_tag.id = j.value AND case_tag.case_id = ?2 AND case_tag.deleted_at = '' "
+        "WHERE j.type = 'integer' ORDER BY j.key",
+        (str(raw_tag_ids or "[]"), case_id),
+    ).fetchall()
+    return list(dict.fromkeys(int(row[0]) for row in rows))
 
 
 register_schema_extension(ensure_unique_review_mark_targets)

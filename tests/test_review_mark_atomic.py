@@ -19,7 +19,13 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from rapidtriage.core.case_db import CaseDatabase, apply_schema, create_case_tag
+from rapidtriage.core.case_db import (
+    CaseDatabase,
+    apply_schema,
+    apply_tag_ids,
+    create_case_tag,
+    delete_case_tag,
+)
 
 HAS_FASTAPI = True
 try:
@@ -148,6 +154,10 @@ class DuplicateReviewMarkMigrationTests(unittest.TestCase):
                 case_id=CASE_ID, target_type="file_record", target_id="1", status="relevant", tags=["a"], reviewer="kim"
             )
             database.mark_review(case_id=CASE_ID, target_type="file_record", target_id="2", status="relevant")
+            with database.connect() as connection:
+                tag_id = {"a": int(connection.execute("SELECT id FROM case_tag WHERE name = 'a'").fetchone()[0])}
+                for name in ("b", "c"):
+                    tag_id[name] = int(create_case_tag(connection, CASE_ID, name=name, actor="lee")["id"])
             # A DB written before the fix: no UNIQUE index, two extra rows for file_record:1.
             with contextlib.closing(sqlite3.connect(path)) as connection:
                 connection.execute("DROP INDEX idx_review_mark_case_target")
@@ -159,8 +169,17 @@ class DuplicateReviewMarkMigrationTests(unittest.TestCase):
                     connection.execute(
                         "INSERT INTO review_mark (citation_id, case_id, target_type, target_id, status, tags_json, "
                         "tag_ids_json, note, reviewer, created_at, updated_at) "
-                        "VALUES (?, ?, 'file_record', '1', ?, ?, '[]', ?, 'lee', ?, ?)",
-                        (citation, CASE_ID, status, json.dumps(tags), f"note {citation}", updated, updated),
+                        "VALUES (?, ?, 'file_record', '1', ?, ?, ?, ?, 'lee', ?, ?)",
+                        (
+                            citation,
+                            CASE_ID,
+                            status,
+                            json.dumps(tags),
+                            json.dumps([tag_id[name] for name in tags]),
+                            f"note {citation}",
+                            updated,
+                            updated,
+                        ),
                     )
                 connection.commit()
             self.assertEqual(len(_marks(path, "1")), 3)
@@ -170,11 +189,11 @@ class DuplicateReviewMarkMigrationTests(unittest.TestCase):
             marks = _marks(path, "1")
             self.assertEqual(len(marks), 1)
             kept = marks[0]
-            # The first citation id survives; fields come from the newest row; tags are the union.
+            # The first citation id survives; fields and tags come from the newest row.
             self.assertEqual(kept["citation_id"], first["citation_id"])
             self.assertEqual((kept["status"], kept["note"], kept["reviewer"]), ("needs-review", "note CASE-R4-RV-DUP1", "lee"))
-            self.assertEqual(json.loads(kept["tags_json"]), ["a", "b", "c"])
-            self.assertEqual(len(json.loads(kept["tag_ids_json"])), 3)
+            self.assertEqual(json.loads(kept["tags_json"]), ["b"])
+            self.assertEqual(json.loads(kept["tag_ids_json"]), [tag_id["b"]])
             self.assertEqual(len(_marks(path, "2")), 1)
             with contextlib.closing(sqlite3.connect(path)) as connection:
                 unique = {
@@ -195,6 +214,7 @@ class DuplicateReviewMarkMigrationTests(unittest.TestCase):
             params = json.loads(event[0][1])
             self.assertEqual(params["kept_citation_id"], first["citation_id"])
             self.assertEqual(params["removed_citation_ids"], ["CASE-R4-RV-DUP1", "CASE-R4-RV-DUP2"])
+            self.assertEqual((params["tags"], params["dropped_tags"]), (["b"], ["a", "c"]))
 
             # A second open is a no-op.
             database.initialize()
@@ -203,6 +223,79 @@ class DuplicateReviewMarkMigrationTests(unittest.TestCase):
                     connection.execute("SELECT COUNT(*) FROM audit_event WHERE action = 'review.duplicates-merged'").fetchone()[0],
                     1,
                 )
+
+    def test_merge_keeps_tags_removed_and_deleted_after_the_race_away(self) -> None:
+        # Review of PR #90: after a race, edits went to the first mark only, so the
+        # duplicate still held the old tags; a tag union brought them back.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _make_case_db(Path(tmp), file_count=2)
+            database = CaseDatabase(path)
+            first = database.mark_review(
+                case_id=CASE_ID, target_type="file_record", target_id="1", status="relevant", tags=["suspicious"], reviewer="kim"
+            )
+            database.mark_review(
+                case_id=CASE_ID, target_type="file_record", target_id="2", status="relevant", tags=["privileged"], reviewer="kim"
+            )
+            with contextlib.closing(sqlite3.connect(path)) as connection:
+                connection.row_factory = sqlite3.Row
+                # Code before the fix: no UNIQUE index, and the race left a copy of each mark.
+                connection.execute("DROP INDEX idx_review_mark_case_target")
+                connection.execute("CREATE INDEX idx_review_mark_case_target ON review_mark(case_id, target_type, target_id)")
+                for target_id, citation in (("1", "CASE-R4-RV-DUP1"), ("2", "CASE-R4-RV-DUP2")):
+                    connection.execute(
+                        "INSERT INTO review_mark (citation_id, case_id, target_type, target_id, status, verification_status, "
+                        "tags_json, tag_ids_json, note, include_in_report, reviewer, created_at, updated_at) "
+                        "SELECT ?, case_id, target_type, target_id, status, verification_status, tags_json, tag_ids_json, "
+                        "note, include_in_report, reviewer, created_at, updated_at FROM review_mark "
+                        "WHERE case_id = ? AND target_id = ?",
+                        (citation, CASE_ID, target_id),
+                    )
+                tag_id = {
+                    str(row["name"]): int(row["id"]) for row in connection.execute("SELECT id, name FROM case_tag")
+                }
+                # After the race (old code, first mark only): kim removes 'suspicious' from row 1,
+                # lee deletes the tag 'privileged'.
+                apply_tag_ids(
+                    connection,
+                    CASE_ID,
+                    [{"target_type": "file_record", "target_id": "1"}],
+                    remove_ids=[tag_id["suspicious"]],
+                    actor="kim",
+                )
+                delete_case_tag(connection, CASE_ID, tag_id["privileged"], actor="lee")
+                connection.commit()
+            self.assertEqual(
+                [json.loads(mark["tags_json"]) for target in ("1", "2") for mark in _marks(path, target)],
+                [[], ["suspicious"], [], ["privileged"]],
+            )
+
+            database.initialize()
+
+            marks = _marks(path, "1")
+            self.assertEqual([mark["citation_id"] for mark in marks], [first["citation_id"]])
+            self.assertEqual((json.loads(marks[0]["tags_json"]), json.loads(marks[0]["tag_ids_json"])), ([], []))
+            marks = _marks(path, "2")
+            self.assertEqual(len(marks), 1)
+            self.assertEqual((json.loads(marks[0]["tags_json"]), json.loads(marks[0]["tag_ids_json"])), ([], []))
+            with contextlib.closing(sqlite3.connect(path)) as connection:
+                privileged = connection.execute(
+                    "SELECT id, deleted_at FROM case_tag WHERE name = 'privileged' COLLATE NOCASE"
+                ).fetchall()
+                created_by_merge = connection.execute(
+                    "SELECT COUNT(*) FROM case_tag WHERE created_by = 'rapidtriage-migration'"
+                ).fetchone()[0]
+                events = {
+                    str(row[0]): json.loads(row[1])
+                    for row in connection.execute(
+                        "SELECT target_id, params_json FROM audit_event WHERE action = 'review.duplicates-merged'"
+                    )
+                }
+            # The deleted tag stays deleted: no live 'privileged' tag is created again.
+            self.assertEqual(len(privileged), 1)
+            self.assertNotEqual(privileged[0][1], "")
+            self.assertEqual(created_by_merge, 0)
+            self.assertEqual((events["1"]["tags"], events["1"]["dropped_tags"]), ([], ["suspicious"]))
+            self.assertEqual((events["2"]["tags"], events["2"]["dropped_tags"]), ([], ["privileged"]))
 
 
 if __name__ == "__main__":
