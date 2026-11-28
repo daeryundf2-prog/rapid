@@ -14,7 +14,7 @@ import {
   wallClockToMs,
   zoneName,
 } from "../../utils/time";
-import type { Seal } from "../case/integrity";
+import { canRehash, type Seal, unhashableSentence } from "../case/integrity";
 import type { TimelineHistogramPayload } from "../views/histogram";
 
 const n = (value: number) => value.toLocaleString("ko-KR");
@@ -41,6 +41,8 @@ export interface TodoInput {
   indicators: number | undefined;
   /** Case-DB marks of the run (review-map); undefined while unknown. */
   marks: readonly ReviewMapMark[] | undefined;
+  /** The review-map stopped at its limit: mark-based counts are bounds, not exact. */
+  marksTruncated?: boolean;
 }
 
 /**
@@ -77,10 +79,16 @@ export function relevantNotInReport(marks: readonly ReviewMapMark[] | undefined)
   return marks.filter((mark) => mark.status === "relevant" && !mark.include_in_report).length;
 }
 
+/** Hashable evidence the 먼저 할 일 [검증] / [다시 검증] button hashes: the broken and unverified items. */
+export function todoRehashTargets(seal: Seal | null) {
+  return seal ? seal.pending.filter(canRehash) : [];
+}
+
 /** Only the items that apply, in the order an examiner should take them. */
 export function todoItems(input: TodoInput): TodoItem[] {
   const items: TodoItem[] = [];
   const { seal } = input;
+  const targets = todoRehashTargets(seal);
   if (seal && seal.kind === "broken") {
     const mismatch = seal.items.filter((item) => item.hash_status === "mismatched").length;
     const failed = seal.counts.broken - mismatch;
@@ -91,14 +99,16 @@ export function todoItems(input: TodoInput): TodoItem[] {
     items.push({
       id: "hash",
       text: `증거 무결성이 깨졌습니다: ${parts.filter(Boolean).join(", ")}`,
-      action: seal.rehashable.length ? "검증" : "해시 자세히",
+      action: targets.length ? "다시 검증" : "해시 자세히",
       severity: "danger",
     });
   } else if (seal && seal.kind === "unverified") {
+    const files = seal.counts.unverified - seal.unhashable.length;
+    const text = [files ? `증거 ${n(files)}건의 해시를 검증하지 않았습니다` : "", unhashableSentence(seal)];
     items.push({
       id: "hash",
-      text: `증거 ${n(seal.counts.unverified)}건의 해시를 검증하지 않았습니다`,
-      action: "검증",
+      text: text.filter(Boolean).join(" "),
+      action: targets.length ? "검증" : "해시 자세히",
       severity: "warn",
     });
   }
@@ -111,11 +121,16 @@ export function todoItems(input: TodoInput): TodoItem[] {
       severity: "warn",
     });
   }
+  // A truncated review-map misses marks: fewer verdicts seen (unreviewed is an upper bound) and
+  // fewer 관련 있음 marks seen (the report gap is a lower bound).
+  const truncated = input.marksTruncated === true;
   const indicators = unreviewedIndicators(input.indicators, input.marks);
   if (indicators) {
     items.push({
       id: "indicators",
-      text: `판정하지 않은 지표 후보 ${n(indicators)}건`,
+      text: truncated
+        ? `판정하지 않은 지표 후보 최대 ${n(indicators)}건 (판정 목록이 잘려 정확히 세지 못함)`
+        : `판정하지 않은 지표 후보 ${n(indicators)}건`,
       action: "지표 후보 열기",
       severity: "info",
     });
@@ -124,12 +139,31 @@ export function todoItems(input: TodoInput): TodoItem[] {
   if (gap) {
     items.push({
       id: "report-gap",
-      text: `관련 있음 ${n(gap)}건이 보고서에 포함되지 않았습니다`,
+      text: truncated
+        ? `관련 있음 ${n(gap)}건 이상이 보고서에 포함되지 않았습니다 (판정 목록이 잘림)`
+        : `관련 있음 ${n(gap)}건이 보고서에 포함되지 않았습니다`,
       action: "검토 보드에서 보기",
       severity: "info",
     });
   }
   return items;
+}
+
+/**
+ * The empty 먼저 할 일 sentence, naming only what was really checked: a hash still running, no
+ * hashable evidence or an unfinished run (no indicator or report counts) is said as such.
+ */
+export function todoNoneSentence(seal: Seal | null, completed: boolean): string {
+  let hash: string;
+  if (!seal) hash = "케이스에 연결되지 않아 확인할 증거 해시가 없습니다";
+  else if (seal.kind === "na") hash = "해시할 증거가 없습니다";
+  else if (seal.kind === "hashing") hash = "해시를 검증하는 중입니다 (끝나면 다시 확인합니다)";
+  else if (seal.kind === "computed") hash = "해시는 계산만 됐습니다 (비교할 기대값 없음)";
+  else hash = "해시는 마지막 검증 때 기대값과 일치했습니다";
+  const checked = completed
+    ? "처리 문제, 지표 후보, 보고서 포함을 확인했습니다"
+    : "처리 문제를 확인했습니다 (끝까지 처리되지 않아 지표 후보와 보고서 포함은 세지 않았습니다)";
+  return `지금 먼저 할 일이 없습니다. ${hash}. ${checked}.`;
 }
 
 // --- 사건 숫자 ----------------------------------------------------------------
@@ -148,13 +182,22 @@ export interface Figure {
 export function overviewFigures(
   counts: CanonicalCounts | undefined,
   review: ReviewCounts | undefined,
+  scannedFiles?: number,
 ): Figure[] {
   const figures: Figure[] = [];
   const push = (id: FigureId, label: string, value: number | undefined, population: string) => {
     if (typeof value === "number") figures.push({ id, label, value, population });
   };
   push("timeline", "타임라인 이벤트", counts?.timeline_events, "시각이 있는 이벤트 전체");
-  push("files", "파일 후보", counts?.files, "처리 모드가 검사한 파일 (증거 안 전체 파일 수가 아님)");
+  // `counts.files` is the candidate count (category match, known-good hidden), not the scanned files.
+  push(
+    "files",
+    "파일 후보",
+    counts?.files,
+    typeof scannedFiles === "number"
+      ? `처리 모드의 파일 범주에 걸린 후보 (검사한 파일 ${n(scannedFiles)}개 중)`
+      : "처리 모드의 파일 범주에 걸린 후보 (검사한 파일 수가 아님)",
+  );
   push("artifacts", "아티팩트", counts?.artifacts, "수집기가 해석한 기록 행");
   push("indicators", "지표 후보", counts?.indicators, "자동 탐지된 IOC와 위험 후보");
   if (review) {
@@ -180,14 +223,18 @@ export interface ActivityBar {
   /** Exclusive. */
   endMs: number;
   count: number;
-  /** "10-22 (목)" for a day, "2026-10" for a month. */
+  /** "10-22 (목)" for a day, "2026-10" for a month, "10-14 21:00–10-15 03:00" for a server range. */
   label: string;
   /** 0–1 of the busiest bar. */
   ratio: number;
 }
 
 export interface Activity {
-  unit: "day" | "month";
+  /**
+   * "range": the server buckets cross display-zone day (or month) boundaries, so they are drawn as
+   * they are — a day bar would put events on the wrong date and disagree with the timeline it opens.
+   */
+  unit: "day" | "month" | "range";
   bars: ActivityBar[];
   total: number;
   busiest: ActivityBar | null;
@@ -230,9 +277,17 @@ function dayLabel(ms: number, tz: TimezoneChoice): string {
   return `${formatTimestamp(new Date(ms), tz, { precision: "date" }).slice(5)} (${weekday})`;
 }
 
+function rangeLabel(startMs: number, endMs: number, tz: TimezoneChoice): string {
+  const start = formatTimestamp(new Date(startMs), tz, { precision: "minute" }).slice(5);
+  const end = formatTimestamp(new Date(endMs), tz, { precision: "minute" }).slice(5);
+  return `${start}–${start.slice(0, 5) === end.slice(0, 5) ? end.slice(6) : end}`;
+}
+
 /**
  * Events per display-zone day (per month past 62 days) from `GET …/timeline-histogram`, empty days
- * kept so gaps show; the busiest bar and, inside it, the busiest hour.
+ * kept so gaps show; the busiest bar and, inside it, the busiest hour. A server bucket is never
+ * split: when one crosses a day (month) boundary of the display zone — 6 h UTC buckets in KST, 7 d
+ * buckets at a month end — the server buckets themselves are the bars.
  */
 export function activityBars(payload: TimelineHistogramPayload | undefined, tz: TimezoneChoice): Activity {
   const empty: Activity = { unit: "day", bars: [], total: 0, busiest: null, busiestHour: null };
@@ -264,9 +319,40 @@ export function activityBars(payload: TimelineHistogramPayload | undefined, tz: 
     });
   }
   let index = 0;
+  let crosses = false;
   for (const event of events) {
     while (index < bars.length - 1 && event.at >= (bars[index] as ActivityBar).endMs) index += 1;
-    (bars[index] as ActivityBar).count += event.count;
+    const bar = bars[index] as ActivityBar;
+    if (event.end > bar.endMs) crosses = true;
+    bar.count += event.count;
+  }
+  if (crosses) {
+    const ranges = payload.buckets
+      .map((bucket) => ({ at: parseMs(bucket.start), end: parseMs(bucket.end), count: bucket.count }))
+      .filter(
+        (b): b is { at: number; end: number; count: number } =>
+          b.at !== null && b.end !== null && b.at >= first.at && b.at <= last.at,
+      )
+      .map((b) => ({
+        startMs: b.at,
+        endMs: b.end,
+        count: b.count,
+        label: rangeLabel(b.at, b.end, tz),
+        ratio: 0,
+      }));
+    const top = Math.max(0, ...ranges.map((bar) => bar.count));
+    let busiestRange: ActivityBar | null = null;
+    for (const bar of ranges) {
+      bar.ratio = top > 0 ? bar.count / top : 0;
+      if (!busiestRange || bar.count > busiestRange.count) busiestRange = bar;
+    }
+    return {
+      unit: "range",
+      bars: ranges,
+      total: events.reduce((sum, event) => sum + event.count, 0),
+      busiest: busiestRange,
+      busiestHour: null,
+    };
   }
   const max = Math.max(0, ...bars.map((bar) => bar.count));
   let busiest: ActivityBar | null = null;

@@ -11,6 +11,8 @@ import {
   problemsNeedingAttention,
   relevantNotInReport,
   todoItems,
+  todoNoneSentence,
+  todoRehashTargets,
   unreviewedIndicators,
 } from "./overviewModel";
 
@@ -101,14 +103,69 @@ describe("먼저 할 일 (F7)", () => {
     });
     expect(item?.severity).toBe("danger");
     expect(item?.text).toBe("증거 무결성이 깨졌습니다: 기대값 불일치 1건, 계산 실패 1건");
-    expect(item?.action).toBe("검증");
+    expect(item?.action).toBe("다시 검증");
+    const mismatched = sealState([evidence("mismatched")]);
     const [mismatchOnly] = todoItems({
-      seal: sealState([evidence("mismatched")]),
+      seal: mismatched,
       problems: undefined,
       indicators: undefined,
       marks: undefined,
     });
-    expect(mismatchOnly?.action).toBe("해시 자세히");
+    // review #101 P3-2: [다시 검증] on a mismatch line hashes the mismatched evidence itself.
+    expect(mismatchOnly?.action).toBe("다시 검증");
+    expect(todoRehashTargets(mismatched).map((e) => e.citation_id)).toEqual(["C-mismatched"]);
+    // A matched item next to a failed one is not part of the broken line's action.
+    const mixed = sealState([evidence("failed"), evidence("matched", { citation_id: "m" })]);
+    expect(todoRehashTargets(mixed).map((e) => e.citation_id)).toEqual(["C-failed"]);
+  });
+
+  it("says folder evidence has no hash instead of offering a hash it cannot run (review #101 P1-1)", () => {
+    const folder = evidence("not-requested", { citation_id: "d", size_bytes: null });
+    const [item] = todoItems({
+      seal: sealState([folder]),
+      problems: undefined,
+      indicators: undefined,
+      marks: undefined,
+    });
+    expect(item?.id).toBe("hash");
+    expect(item?.text).toContain("폴더 증거 1건은 해시가 없습니다");
+    expect(item?.text).not.toContain("검증하지 않았습니다");
+    expect(item?.action).toBe("해시 자세히");
+  });
+
+  it("says mark-based counts are bounds when the review-map was truncated (review #101 P3-4)", () => {
+    const items = todoItems({
+      seal: null,
+      problems: undefined,
+      indicators: 10,
+      marks: [
+        mark({ citation_id: "1", status: "relevant" }),
+        mark({ collection: "indicators", status: "excluded" }),
+      ],
+      marksTruncated: true,
+    });
+    expect(items.map((i) => i.text)).toEqual([
+      "판정하지 않은 지표 후보 최대 9건 (판정 목록이 잘려 정확히 세지 못함)",
+      "관련 있음 1건 이상이 보고서에 포함되지 않았습니다 (판정 목록이 잘림)",
+    ]);
+  });
+
+  it("never says hashes were all checked when they were not (review #101 P2-4)", () => {
+    const done = "처리 문제, 지표 후보, 보고서 포함을 확인했습니다";
+    expect(todoNoneSentence(sealState([evidence("hashing")]), true)).toContain("해시를 검증하는 중입니다");
+    expect(todoNoneSentence(null, true)).toContain("케이스에 연결되지 않아 확인할 증거 해시가 없습니다");
+    expect(todoNoneSentence(sealState([]), true)).toContain("해시할 증거가 없습니다");
+    expect(todoNoneSentence(sealState([evidence("computed")]), true)).toContain("계산만");
+    expect(todoNoneSentence(sealState([evidence("matched")]), true)).toContain(
+      "마지막 검증 때 기대값과 일치",
+    );
+    expect(todoNoneSentence(sealState([evidence("matched")]), true)).toContain(done);
+    for (const seal of [null, sealState([evidence("hashing")]), sealState([evidence("matched")])])
+      expect(todoNoneSentence(seal, true)).not.toContain("모두 확인");
+    // A cancelled / failed run counted no indicators or marks: it does not claim it did.
+    const cancelled = todoNoneSentence(sealState([evidence("matched")]), false);
+    expect(cancelled).not.toContain(done);
+    expect(cancelled).toContain("지표 후보와 보고서 포함은 세지 않았습니다");
   });
 
   it("is empty when nothing applies (hashing, matched, computed, no seal, notices only, all reviewed)", () => {
@@ -180,7 +237,11 @@ describe("사건 숫자 (F6)", () => {
       ["marks", 13],
     ]);
     for (const figure of figures) expect(figure.population.length).toBeGreaterThan(4);
-    expect(figures.find((f) => f.id === "files")?.population).toContain("전체 파일 수가 아님");
+    // review #101 P2-3: `counts.files` is the candidates, never the files scanned.
+    const files = (scanned?: number) =>
+      overviewFigures(counts(), undefined, scanned).find((f) => f.id === "files")?.population ?? "";
+    expect(files(10_000)).toBe("처리 모드의 파일 범주에 걸린 후보 (검사한 파일 10,000개 중)");
+    expect(files()).toBe("처리 모드의 파일 범주에 걸린 후보 (검사한 파일 수가 아님)");
   });
 
   it("leaves unknown counts out instead of showing 0", () => {
@@ -263,6 +324,40 @@ describe("날짜별 활동 (F6)", () => {
       ["2026-04", 8],
     ]);
     expect(activity.busiestHour).toBeNull();
+  });
+
+  it("never puts a server bucket that crosses a display-zone midnight on one date (review #101 P2-2)", () => {
+    // The review's repro: 6 h UTC buckets over 29 days; 10 events at KST 10-14 10:00 and 50 at
+    // KST 10-15 01:00 (bucket 2026-10-14T12:00Z..18:00Z = KST 21:00..03:00).
+    const activity = activityBars(
+      payload(
+        [
+          ["2026-10-01T00:00:00Z", 5],
+          ["2026-10-14T00:00:00Z", 10],
+          ["2026-10-14T12:00:00Z", 50],
+          ["2026-10-30T00:00:00Z", 5],
+        ],
+        21_600,
+      ),
+      "Asia/Seoul",
+    );
+    expect(activity.unit).toBe("range");
+    expect(activity.busiest?.count).toBe(50);
+    expect(activity.busiest?.label).toBe("10-14 21:00–10-15 03:00");
+    // The bar opens exactly the bucket it counts, so the timeline shows the same number.
+    expect(new Date(activity.busiest?.startMs ?? 0).toISOString()).toBe("2026-10-14T12:00:00.000Z");
+    expect(new Date(activity.busiest?.endMs ?? 0).toISOString()).toBe("2026-10-14T18:00:00.000Z");
+    expect(activity.bars.some((bar) => bar.count === 60)).toBe(false);
+    expect(activity.total).toBe(70);
+    // The same buckets in UTC fit the days: day bars stay.
+    const utc = payload(
+      [
+        ["2026-10-14T00:00:00Z", 10],
+        ["2026-10-14T12:00:00Z", 50],
+      ],
+      21_600,
+    );
+    expect(activityBars(utc, "utc").unit).toBe("day");
   });
 
   it("is empty without events", () => {

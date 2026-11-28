@@ -414,7 +414,7 @@ describe("CaseDashboard 사건 개요 (F6/F7/F9)", () => {
     await renderDashboard(overviewRoutes);
     const overview = screen.getByTestId("dash-overview");
     const files = await within(overview).findByRole("button", { name: /^파일 후보 30건/ });
-    expect(files.textContent).toContain("전체 파일 수가 아님");
+    expect(files.textContent).toContain("처리 모드의 파일 범주에 걸린 후보 (검사한 파일 수가 아님)");
     expect(within(overview).getByRole("button", { name: /^타임라인 이벤트 9건/ })).toBeTruthy();
     expect(within(overview).getByRole("button", { name: /^아티팩트 125건/ })).toBeTruthy();
     expect(within(overview).getByRole("button", { name: /^지표 후보 2건/ })).toBeTruthy();

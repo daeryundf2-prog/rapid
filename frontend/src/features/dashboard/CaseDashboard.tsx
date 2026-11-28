@@ -16,7 +16,7 @@ import type { IconName } from "../../icons";
 import { useRoute } from "../../state/hooks";
 import { isRunActive } from "../../state/slices/runs";
 import { useRunCaseLink } from "../case/caseLink";
-import { sealState } from "../case/integrity";
+import { runEvidence, sealState } from "../case/integrity";
 import { useSearchState } from "../case/searchState";
 import { reviewMapKey } from "../grid/reviewMap";
 import { Card, CardEmpty, CardError, CardLoading, useCardLayout } from "./Card";
@@ -106,10 +106,15 @@ export function CaseDashboard({ runId }: { runId: string }) {
   const runFinished = Boolean(detail.data) && !isRunActive(detail.data);
   const intake = useCaseIntakeData(runId, snapshot.data, runFinished);
   const caseDetail = intake.detail.data;
-  // The raw marks (not the locator map): marks without a run-output locator still count.
+  // The raw marks (not the locator map): marks without a run-output locator still count. A
+  // truncated map makes the mark-based to-dos bounds (todoItems says so).
   const marks = useQuery({
     queryKey: [...reviewMapKey(runId), "marks"],
-    queryFn: ({ signal }) => getReviewMap(runId, signal).then((payload) => payload.marks ?? []),
+    queryFn: ({ signal }) =>
+      getReviewMap(runId, signal).then((payload) => ({
+        marks: payload.marks ?? [],
+        truncated: payload.truncated === true,
+      })),
     enabled: completed,
     retry: false,
   });
@@ -121,18 +126,27 @@ export function CaseDashboard({ runId }: { runId: string }) {
     () => keywordRows(dashboard.data?.profile.keywords ?? [], saved.data ?? []),
     [dashboard.data, saved.data],
   );
-  const seal = useMemo(() => (caseDetail ? sealState(caseDetail.evidence) : null), [caseDetail]);
+  const seal = useMemo(
+    () =>
+      caseDetail ? sealState(runEvidence(caseDetail.evidence, snapshot.data?.evidence_citation_id)) : null,
+    [caseDetail, snapshot.data?.evidence_citation_id],
+  );
   const todo = useMemo(
     () =>
       todoItems({
         seal,
         problems: intake.problems.data,
         indicators: counts?.indicators,
-        marks: marks.data,
+        marks: marks.data?.marks,
+        marksTruncated: marks.data?.truncated,
       }),
     [seal, intake.problems.data, counts?.indicators, marks.data],
   );
-  const figures = useMemo(() => overviewFigures(counts, review.data), [counts, review.data]);
+  const scanned = summary.data?.summary?.scanned_file_count;
+  const figures = useMemo(
+    () => overviewFigures(counts, review.data, typeof scanned === "number" ? scanned : undefined),
+    [counts, review.data, scanned],
+  );
 
   if (detail.isPending) {
     // The final card shells in their final order, skeleton lines inside (review #11): nothing
@@ -200,7 +214,7 @@ export function CaseDashboard({ runId }: { runId: string }) {
     if (item.id === "hash") reveal("case-evidence");
     else if (item.id === "problems") reveal("problems");
     else if (item.id === "indicators") go("indicators");
-    // 관련 있음 AND 보고서 미포함: the board's 보고서 column filter (cf=report:미포함, PR ⑤ board column).
+    // 관련 있음 AND 보고서 미포함: the board's 보고서 column reads "포함" / "미포함" (columns/review.ts).
     else
       navigate({
         runId,
@@ -239,6 +253,7 @@ export function CaseDashboard({ runId }: { runId: string }) {
         items={todo}
         ready={todoReady}
         waiting={!runFinished}
+        completed={completed}
         seal={seal}
         caseId={intake.caseId}
         onAction={onTodo}

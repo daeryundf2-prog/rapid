@@ -19,7 +19,13 @@ import { useRehash } from "../case/IntegritySeal";
 import type { Seal } from "../case/integrity";
 import { ReasonButton } from "../case/ReasonButton";
 import { fetchTimelineHistogram } from "../views/HistogramView";
-import { activityBars, type Figure, type TodoItem } from "./overviewModel";
+import {
+  activityBars,
+  type Figure,
+  type TodoItem,
+  todoNoneSentence,
+  todoRehashTargets,
+} from "./overviewModel";
 import type { RunDetail } from "./useDashboardData";
 
 const n = (value: number) => value.toLocaleString("ko-KR");
@@ -61,6 +67,7 @@ export function TodoList({
   items,
   ready,
   waiting,
+  completed,
   seal,
   caseId,
   onAction,
@@ -70,14 +77,17 @@ export function TodoList({
   ready: boolean;
   /** The run is still processing (counts come later). */
   waiting: boolean;
+  /** The run finished completely (cancelled / failed runs count no indicators or marks). */
+  completed: boolean;
   seal: Seal | null;
   caseId: string | null;
   onAction: (item: TodoItem) => void;
 }) {
   const headingId = useId();
   const rehash = useRehash(caseId ?? "");
+  const targets = todoRehashTargets(seal);
   const act = (item: TodoItem) => {
-    if (item.id === "hash" && caseId && seal?.rehashable.length) rehash.mutate(seal.rehashable);
+    if (item.id === "hash" && caseId && targets.length) rehash.mutate(targets);
     else onAction(item);
   };
   return (
@@ -104,9 +114,7 @@ export function TodoList({
         <p className="dash-note">처리가 끝나면 처리 문제, 지표 후보, 판정을 세어 할 일을 보여 줍니다.</p>
       ) : !items.length ? (
         <p className="dash-todo-none">
-          {ready
-            ? "지금 먼저 할 일이 없습니다. 해시, 처리 문제, 지표 후보, 보고서 포함을 모두 확인했습니다."
-            : "할 일을 확인하는 중입니다…"}
+          {ready ? todoNoneSentence(seal, completed) : "할 일을 확인하는 중입니다…"}
         </p>
       ) : null}
     </section>
@@ -303,7 +311,7 @@ export function ActivityByDate({
   else {
     const busiest = activity.busiest;
     const share = activity.total ? Math.round((busiest.count / activity.total) * 100) : 0;
-    const unitWord = activity.unit === "day" ? "날" : "달";
+    const unitWord = activity.unit === "day" ? "날" : activity.unit === "month" ? "달" : "구간";
     body = (
       <>
         <div className="dash-activity-lead">
@@ -314,13 +322,18 @@ export function ActivityByDate({
               ? ` 그날 가장 많은 시간은 ${clock(activity.busiestHour.startMs)}~${clock(activity.busiestHour.endMs - 60_000)} (${n(activity.busiestHour.count)}건)입니다.`
               : ""}
           </p>
+          {activity.unit === "range" ? (
+            <p className="dash-note" data-testid="activity-ranges">
+              서버 집계 구간이 {zone} 하루 경계와 맞지 않아, 날짜로 나누지 않고 집계 구간 그대로 보여 줍니다.
+            </p>
+          ) : null}
           <button type="button" className="button" onClick={() => openRange(busiest.startMs, busiest.endMs)}>
             이 {unitWord} 타임라인 열기
           </button>
         </div>
         <ol
           className={`dash-days${activity.bars.length > ACTIVITY_SCROLL_FROM ? " is-scroll" : ""}`}
-          aria-label={`${activity.unit === "day" ? "날짜별" : "달별"} 이벤트 수 (${zone})`}
+          aria-label={`${activity.unit === "day" ? "날짜별" : activity.unit === "month" ? "달별" : "집계 구간별"} 이벤트 수 (${zone})`}
         >
           {activity.bars.map((bar) => (
             <li key={bar.startMs}>

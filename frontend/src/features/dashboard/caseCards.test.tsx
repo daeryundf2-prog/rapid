@@ -252,26 +252,44 @@ describe("접수 case cards (Q-X1/Q-X3/Q-X4)", () => {
     expect(post?.body).toEqual({ text: "USB 2개 확인", author: "홍길동" });
   });
 
-  it("puts a broken seal first in 먼저 할 일, opens the evidence card, and says 사건 with its status", async () => {
+  it("puts a broken seal first in 먼저 할 일, re-checks the mismatched evidence, and says 사건 with its status", async () => {
     window.localStorage.clear();
-    mockFetch(routes(true));
+    // The run's own evidence is the mismatched E-10 (the seal speaks for the run's evidence).
+    const mismatched = "2026-고단-1234-EVID-000002";
+    const { calls } = mockFetch({
+      ...routes(true),
+      "GET /api/runs/r1/processing-snapshot": { ...snapshotLinked, evidence_citation_id: mismatched },
+    });
     renderWithQuery(<CaseDashboard runId="r1" />);
     const todo = await screen.findByTestId("dash-todo");
     const first = await within(todo).findByText("증거 무결성이 깨졌습니다: 기대값 불일치 1건");
     expect(first.closest("li")?.getAttribute("data-severity")).toBe("danger");
     expect(within(todo).getByText("처리 문제 3건 (오류와 경고)을 확인하세요")).toBeTruthy();
-    // A mismatch cannot be re-hashed away: the action opens the per-evidence details instead.
-    fireEvent.click(within(todo).getByRole("button", { name: "해시 자세히" }));
+    // review #101 P3-2: [다시 검증] hashes the mismatched evidence itself.
+    fireEvent.click(within(todo).getByRole("button", { name: "다시 검증" }));
     await waitFor(() =>
       expect(
-        within(cardOf("증거 목록")).getByRole("button", { name: "증거 목록" }).getAttribute("aria-expanded"),
-      ).toBe("true"),
+        calls.some(
+          (call) =>
+            call.method === "POST" &&
+            call.url === `/api/cases/case-1/evidence/${encodeURIComponent(mismatched)}/hash`,
+        ),
+      ).toBe(true),
     );
     await waitFor(() => expect(screen.getByTestId("dash-status").textContent).toContain("사건진행 중"));
     // Case identity stays open on a first visit; the case-info card keeps its own status row.
     expect(
       within(cardOf("사건 정보")).getByRole("button", { name: "사건 정보" }).getAttribute("aria-expanded"),
     ).toBe("true");
+  });
+
+  it("does not flag a sibling evidence item's mismatch on this run's 먼저 할 일 (review #101 P1-1 scope)", async () => {
+    window.localStorage.clear();
+    mockFetch(routes(true));
+    renderWithQuery(<CaseDashboard runId="r1" />);
+    const todo = await screen.findByTestId("dash-todo");
+    await within(todo).findByText("처리 문제 3건 (오류와 경고)을 확인하세요");
+    expect(within(todo).queryByText(/증거 무결성이 깨졌습니다/)).toBeNull();
   });
 
   it("a run without a case keeps working and offers 케이스에 연결 (Q-X2)", async () => {
