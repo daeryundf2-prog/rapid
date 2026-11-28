@@ -35,12 +35,12 @@ function mockGridWidth(width: number): () => void {
   };
 }
 
-// Data column headers only: the sticky select column (checkbox; its screen-reader name may mention 판정)
+// Data column headers only: the sticky select column (its screen-reader name may mention 판정)
 // is not a data column and never takes part in the width-priority hiding.
 const headers = () =>
   screen
     .getAllByRole("columnheader")
-    .filter((h) => !h.querySelector('input[type="checkbox"]'))
+    .filter((h) => !h.classList.contains("grid-cell-select"))
     .map((h) => h.textContent ?? "");
 const hasHeader = (name: string) => headers().some((text) => text.includes(name));
 
