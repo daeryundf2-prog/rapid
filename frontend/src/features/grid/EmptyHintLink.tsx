@@ -2,7 +2,10 @@ import { DisabledReason } from "../../a11y/primitives";
 import { useCommandState } from "../../commands/registry";
 import type { ColumnSpec } from "./types";
 
-/** Header link for a column an analysis job fills ("NTFS 메타 분석을 실행하면 채워집니다 → 실행"). */
+/**
+ * Run button for columns an analysis job fills ("NTFS 메타 분석을 실행하면 채워집니다" →
+ * [NTFS 메타 분석 실행]): the command's own label, no arrow glyph.
+ */
 export function EmptyHintLink({
   hint,
   hintId,
@@ -18,14 +21,14 @@ export function EmptyHintLink({
         className="grid-hint-link"
         aria-label={command?.label ?? hint.commandLabel}
         aria-describedby={hintId}
-        title={disabledReason ? undefined : `${hint.text} → ${hint.commandLabel}`}
+        title={disabledReason ? undefined : hint.text}
         data-command={hint.command}
         onClick={(event) => {
           event.stopPropagation();
           void run();
         }}
       >
-        → {hint.commandLabel}
+        {hint.commandLabel}
       </button>
     </DisabledReason>
   );

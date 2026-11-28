@@ -30,7 +30,7 @@ import { flagsColumn } from "./families";
 export const NTFS_EMPTY_HINT = "NTFS 메타 분석을 실행하면 채워집니다";
 export const NTFS_RUN_COMMAND = "analysis.run.ntfs-meta";
 
-const ntfsHint = { text: NTFS_EMPTY_HINT, command: NTFS_RUN_COMMAND, commandLabel: "실행" };
+const ntfsHint = { text: NTFS_EMPTY_HINT, command: NTFS_RUN_COMMAND, commandLabel: "NTFS 메타 분석 실행" };
 
 /** Fallback when a not-joined `ntfs_join` carries no `reason` (backend files_ntfs.py statuses). */
 const NTFS_STATUS_REASON: Record<string, string> = {
@@ -164,6 +164,16 @@ export function modifiedTooltip(row: { fields: Record<string, unknown> }): strin
   const text = value ? formatGridTime(value, currentTimezone()) : "";
   const hint = origin ? (MODIFIED_ORIGIN_LABELS[origin] ?? origin) : "";
   return [text, hint].filter(Boolean).join(" · ");
+}
+
+/**
+ * 수정 header note (F27): "모두 사본 시각" when every loaded row's time is the acquisition copy's,
+ * "사본 시각 포함" when some are, null when none (or no rows yet).
+ */
+export function copyTimeHeaderNote(rows: readonly { fields: Record<string, unknown> }[]): string | null {
+  const copies = rows.filter((row) => row.fields.modifiedOrigin === "acquisition-copy").length;
+  if (copies === 0) return null;
+  return copies === rows.length ? "모두 사본 시각" : "사본 시각 포함";
 }
 
 /** `deletion_state` of a files / inventory row (core/files.py deletion_state_for). */
@@ -352,7 +362,7 @@ export const filesCollection: CollectionDef = {
       },
     );
   },
-  // Default layout (visual-polish S4, P1 time first): 이름 · 수정 · NTFS 생성 · 크기 · 경로 · 선별.
+  // Default layout (visual-polish S4, P1 time first): 이름 · 수정 · NTFS 생성 · 크기 · 경로 · 판정.
   // The times sit next to 이름 so a grid wider than the pane (특이사항 shown) never scrolls them
   // out of view. Default width = minimum width; 이름 takes the slack and a narrow grid hides
   // columns by FILES_PRIORITY.
@@ -363,8 +373,9 @@ export const filesCollection: CollectionDef = {
     {
       id: "timestamp",
       header: "수정",
-      width: 150,
-      minWidth: 150,
+      // Room for "2026-11-26 07:35:56 사본" and the header "수정 (KST, 사본 시각 포함)" (F27).
+      width: 184,
+      minWidth: 184,
       presets: ["analysis", "compact"],
       filterKind: "time",
       zoneInHeader: true,
@@ -378,6 +389,7 @@ export const filesCollection: CollectionDef = {
         const value = strOrNull(r.fields.modifiedAt);
         return modifiedCell(r, value ? formatGridTime(value, currentTimezone()) : "");
       },
+      headerNote: copyTimeHeaderNote,
     },
     {
       ...ntfsTime("ntfsCreated", "NTFS 생성", "created_at"),
@@ -390,7 +402,8 @@ export const filesCollection: CollectionDef = {
       minWidth: 80,
       format: (r) => formatBytes(r.fields.size),
     }),
-    col.path(200, ["analysis", "source"]),
+    // The whole path, its end (two folders + file name) kept (F28); 이름 takes the slack first.
+    col.path(280, ["analysis", "source"]),
     { ...col.review(), width: 88, minWidth: 88 },
     col.field("extension", "확장자", 80, ["compact"], (r) => fieldStr(r, "extension")),
     col.field("categories", "분류", 160, ["compact"], (r) => fieldStr(r, "categories")),

@@ -159,7 +159,7 @@ describe("loading state while a server filter scans (16)", () => {
 });
 
 describe("files default preset (17)", () => {
-  it("the default (분석) preset is 이름 · 수정 · NTFS 생성 · 크기 · 경로 · 선별 (visual-polish S4, P1 time first)", async () => {
+  it("the default (분석) preset is 이름 · 수정 · NTFS 생성 · 크기 · 경로 · 판정 (visual-polish S4, P1 time first)", async () => {
     setRoute(`#/case/${RUN}/explore/files`);
     installFetch({ "/files": paginatedFiles(2) });
     renderWithClient(<DataGrid />);
@@ -177,9 +177,10 @@ describe("files default preset (17)", () => {
       "path",
       "review",
     ]);
-    // No loaded row is reviewed or flagged yet: 선별 / 특이사항 wait in the 열 menu ("값이 없어 숨김", review #9);
-    // NTFS 생성 stays (its header links to the analysis that fills it).
-    expect(cols).toEqual(["title", "timestamp", "ntfsCreated", "size", "path"]);
+    // No loaded row is reviewed or flagged yet: 판정 / 특이사항 wait in the 열 menu ("값이 없어 숨김", review #9);
+    // NTFS 생성 has no value either: hidden too, the column note names it and runs the analysis (F27).
+    expect(cols).toEqual(["title", "timestamp", "size", "path"]);
+    await waitFor(() => expect(screen.getByTestId("grid-column-note").textContent).toContain("NTFS 생성"));
     expect(filesCollection.columns.find((c) => c.id === "ntfsCreated")?.presets).toEqual([
       "analysis",
       "source",

@@ -2,7 +2,7 @@
 /**
  * 히스토그램 보기 (S9, plan X15).
  *
- * Timeline: time bars (auto hour/day, UTC) from GET /api/runs/{id}/timeline-histogram.
+ * Timeline: time bars (auto hour/day, display zone) from GET /api/runs/{id}/timeline-histogram.
  * Click a bar or drag across bars → `rapidtriage:filter` {from, to} (see
  * filterEvent.ts), which S8's filter bar applies to the grid and the URL.
  * Keys: ←/→ move, Shift+←/→ extend the range, Home/End, Enter/Space apply,
@@ -20,6 +20,7 @@ import { api } from "../../api/client";
 import { getRunTree } from "../../api/runs";
 import type { GridRow } from "../../contracts/collection";
 import { useRoute as useAppRoute, useTimezone } from "../../state/hooks";
+import { zoneShort } from "../../utils/time";
 import { timeRangeText } from "../filters/filterModel";
 import { useFilterStore } from "../filters/filterStore";
 import { hasClock } from "../filters/rowConditions";
@@ -79,9 +80,14 @@ function TimelineHistogram({ runId }: { runId: string }) {
     retry: false,
   });
   const [choice, setChoice] = useState<GranularityChoice>("auto");
+  const { timezone } = useTimezone();
+  // Day bars start at the display zone's midnight and every label reads in that zone (not UTC).
   const { granularity, buckets } = useMemo(
-    () => (histogram.data ? rebucket(histogram.data, choice) : { granularity: "day" as const, buckets: [] }),
-    [histogram.data, choice],
+    () =>
+      histogram.data
+        ? rebucket(histogram.data, choice, timezone)
+        : { granularity: "day" as const, buckets: [] },
+    [histogram.data, choice, timezone],
   );
   const max = useMemo(() => Math.max(1, ...buckets.map((b) => b.count)), [buckets]);
   const [selection, setSelection] = useState<{ anchor: number; focus: number } | null>(null);
@@ -91,7 +97,7 @@ function TimelineHistogram({ runId }: { runId: string }) {
   selectionRef.current = selection;
   const barsRef = useRef<HTMLDivElement | null>(null);
   const filters = useFilterStore((s) => s.filters);
-  const { timezone } = useTimezone();
+  const zone = zoneShort(timezone, new Date(buckets[0]?.startMs ?? Date.now()));
   const filterFrom = filters.from ? Date.parse(filters.from) : null;
   const filterTo = filters.to ? Date.parse(filters.to) : null;
   const hasFilter = filterFrom !== null || filterTo !== null;
@@ -211,7 +217,7 @@ function TimelineHistogram({ runId }: { runId: string }) {
         <span className="view-count">
           이벤트 {data.parsed_events.toLocaleString("ko-KR")}건
           {data.unparsed_events ? ` · 시각 없음 ${data.unparsed_events.toLocaleString("ko-KR")}건 제외` : ""}{" "}
-          · UTC
+          · {zone}
         </span>
         <label className="view-field">
           단위
@@ -232,7 +238,7 @@ function TimelineHistogram({ runId }: { runId: string }) {
         ref={barsRef}
         className="hist-bars"
         role="group"
-        aria-label={`타임라인 히스토그램, 막대 ${buckets.length}개 (${GRANULARITY_LABELS[granularity]}, UTC)`}
+        aria-label={`타임라인 히스토그램, 막대 ${buckets.length}개 (${GRANULARITY_LABELS[granularity]}, ${zone})`}
         style={{ height: CHART_HEIGHT }}
       >
         {buckets.map((bucket, index) => {
@@ -241,7 +247,7 @@ function TimelineHistogram({ runId }: { runId: string }) {
             (filterFrom === null || bucket.endMs > filterFrom) &&
             (filterTo === null || bucket.startMs <= filterTo);
           const selected = index >= lo && index <= hi;
-          const label = bucketAriaLabel(bucket, granularity);
+          const label = bucketAriaLabel(bucket, granularity, timezone);
           return (
             <button
               key={bucket.startMs}
@@ -283,14 +289,15 @@ function TimelineHistogram({ runId }: { runId: string }) {
       <div className="hist-axis" aria-hidden="true">
         {tickIndexes.map((i) => {
           const bucket = buckets[i];
-          return bucket ? <span key={i}>{bucketLabel(bucket.startMs, granularity)}</span> : null;
+          return bucket ? <span key={i}>{bucketLabel(bucket.startMs, granularity, timezone)}</span> : null;
         })}
       </div>
       <div className="hist-status" aria-live="polite">
         {selection ? (
           <span>
-            선택: {bucketLabel(buckets[lo]?.startMs ?? 0, granularity)} ~{" "}
-            {bucketLabel(buckets[hi]?.startMs ?? 0, granularity)} · {selectedCount.toLocaleString("ko-KR")}건
+            선택: {bucketLabel(buckets[lo]?.startMs ?? 0, granularity, timezone)} ~{" "}
+            {bucketLabel(buckets[hi]?.startMs ?? 0, granularity, timezone)} ({zone}) ·{" "}
+            {selectedCount.toLocaleString("ko-KR")}건
           </span>
         ) : null}
         {unappliedConditions ? (

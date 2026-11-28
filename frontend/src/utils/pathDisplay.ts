@@ -1,7 +1,9 @@
 /**
- * Path display (review #9 / #6): grid 경로 cells, the viewer header and the 보고 table show the
- * PARENT folder (the file name is already the row's title) with one consistent middle ellipsis —
- * the leading part ellipsizes ("…"), the last folder stays whole, 4px apart.
+ * Path display (review #9 / F28): grid 경로 cells, the viewer header, the 보고 table and the
+ * action dialogs keep the END of a path — the last two folders and the last segment (the file
+ * name with its extension) — and elide the middle: the leading part ("C:\Users\…") gives way
+ * first, then the two folders from their start, the last segment last. No gap is inserted
+ * between the parts: what is on screen reads as the path itself.
  */
 
 /** "C:\a\b\file.txt" → "C:\a\b"; "/var/log/syslog" → "/var/log"; "file.txt" → "" (no parent). */
@@ -15,29 +17,50 @@ export function parentDir(path: string): string {
   return trimmed.slice(0, cut);
 }
 
-export interface MiddlePathParts {
-  /** Leading part (ellipsizes when the cell is too narrow); "" when the path is one segment. */
+export interface PathEndParts {
+  /** Leading part, elided first ("/tmp/rd-data/evidence/Users/"); "" for a short path. */
   head: string;
-  /** Last segment, never truncated before the head. */
+  /** Up to two folders before the last segment, separators kept ("alice/Documents/"). */
+  dirs: string;
+  /** Last segment (the file name), never elided before the others. */
   tail: string;
 }
 
-/** "C:\a\b\c" → { head: "C:\a\b\", tail: "c" }; "c" → { head: "", tail: "c" }. */
-export function middlePathParts(path: string): MiddlePathParts {
-  // A root ("/", "C:\") is one segment of its own.
-  if (/^([A-Za-z]:)?[\\/]$/.test(path)) return { head: "", tail: path };
+/** How many folders before the last segment stay with it. */
+const KEPT_DIRS = 2;
+
+/**
+ * "/tmp/e/Users/alice/Documents/a.docx" → { head: "/tmp/e/Users/", dirs: "alice/Documents/",
+ * tail: "a.docx" }. A root ("/", "C:\") or a bare name is all tail; a trailing separator is
+ * dropped. Concatenated, the parts are the path as written.
+ */
+export function pathEndParts(path: string): PathEndParts {
+  if (/^([A-Za-z]:)?[\\/]$/.test(path)) return { head: "", dirs: "", tail: path };
   const trimmed = path.replace(/[\\/]+$/, "") || path;
-  const cut = Math.max(trimmed.lastIndexOf("\\"), trimmed.lastIndexOf("/"));
-  if (cut < 0 || cut === trimmed.length - 1) return { head: "", tail: trimmed };
-  return { head: trimmed.slice(0, cut + 1), tail: trimmed.slice(cut + 1) };
+  // Separator positions; each part keeps the separator that ends it.
+  const cuts: number[] = [];
+  for (let i = 0; i < trimmed.length; i++) if (trimmed[i] === "/" || trimmed[i] === "\\") cuts.push(i);
+  const last = cuts.at(-1);
+  if (last === undefined || last === trimmed.length - 1) return { head: "", dirs: "", tail: trimmed };
+  const tail = trimmed.slice(last + 1);
+  // The folders kept with the tail start after the separator KEPT_DIRS + 1 from the end; a
+  // leading "/" (or "C:\") is the head's, so "/a/b/c" keeps "a/b/" with the tail.
+  const from = cuts.length > KEPT_DIRS ? (cuts[cuts.length - 1 - KEPT_DIRS] as number) + 1 : 0;
+  const head = trimmed.slice(0, from);
+  const dirs = trimmed.slice(from, last + 1);
+  if (from === 0 && /^([A-Za-z]:)?[\\/]/.test(dirs)) {
+    const root = /^([A-Za-z]:)?[\\/]/.exec(dirs)?.[0] ?? "";
+    return { head: root, dirs: dirs.slice(root.length), tail };
+  }
+  return { head, dirs, tail };
 }
 
 /**
- * What a path cell shows: the parent folder split for the middle ellipsis. A bare file name
- * (no parent) shows itself; null / "" shows nothing.
+ * What a path renderer shows: the whole path, or (`parentOnly`, the viewer header whose title is
+ * the file name) its parent folder; a bare name shows itself; null / "" shows nothing.
  */
-export function pathCellParts(path: string | null | undefined): MiddlePathParts | null {
+export function pathDisplayParts(path: string | null | undefined, parentOnly = false): PathEndParts | null {
   if (!path) return null;
-  const dir = parentDir(path);
-  return middlePathParts(dir || path);
+  const shown = parentOnly ? parentDir(path) || path : path;
+  return pathEndParts(shown);
 }

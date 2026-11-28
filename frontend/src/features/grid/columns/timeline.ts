@@ -16,6 +16,7 @@ import {
   strOrNull,
 } from "./common";
 import { TIME_KINDS_SEPARATOR, timeKindsCell } from "./TimelineCells";
+import { timelineTarget } from "./timelineTarget";
 
 /** Time-kind labels moved to utils/timeKinds.ts (shared with the record view); re-exported. */
 export { TIMESTAMP_KIND_LABELS, timestampKindLabel } from "../../../utils/timeKinds";
@@ -231,14 +232,12 @@ export const timelineCollection: CollectionDef = {
         : position;
     const kinds = timestampKindsOf(raw);
     const details = isRecord(raw.details) ? raw.details : {};
+    // 대상 (F10): the event's target from its structured fields, not "Artifact event: <family> …".
+    const target = timelineTarget(raw);
     return makeRow(
       makeRef("timeline", `/events/${index}`),
       {
-        title:
-          strOrNull(raw.summary) ??
-          strOrNull(details.title) ??
-          strOrNull(raw.event_type) ??
-          `이벤트 ${index + 1}`,
+        title: target.text || `이벤트 ${index + 1}`,
         sourcePath: timelinePathOf(raw),
         timestamp: strOrNull(raw.timestamp),
         artifactType: strOrNull(raw.event_type),
@@ -247,6 +246,9 @@ export const timelineCollection: CollectionDef = {
       {
         source: str(raw.source),
         eventType: str(raw.event_type),
+        // The generated summary, whole (the 대상 tooltip and the record view keep it).
+        summary: str(raw.summary),
+        targetTitle: target.title,
         inputFile: str(raw.input_file),
         tsKind: kinds[0] ?? "",
         // Every time kind of the event, primary first (labels[]), and their Korean reading.
@@ -312,12 +314,13 @@ export const timelineCollection: CollectionDef = {
       format: timelineEventLabel,
       tooltip: (r) => r.artifactType ?? "",
     }),
-    // 390: 시각 (144) and 요약 share the pane without cutting the time.
-    { ...col.title("요약", 380), minWidth: 100 },
+    // 대상 (F10): file name / URL host+path / executable / key first; the full target and the
+    // original summary on hover. 390: 시각 (144) and 대상 share the pane without cutting the time.
+    { ...col.title("대상", 380), minWidth: 100, tooltip: (r) => str(r.fields.targetTitle) || r.title },
     col.review(),
     // The event's own file: whole path, the leading folders ellipsize and the file name stays.
-    col.path(420, ["analysis", "source"], { whole: true }),
+    col.path(420, ["analysis", "source"]),
   ],
-  // A narrow pane keeps what happened next to when (fe-audit A5): 시각 > 요약 > 이벤트 > 시각 종류 > 출처 > 선별 > 경로.
+  // A narrow pane keeps what happened next to when (fe-audit A5): 시각 > 대상 > 이벤트 > 시각 종류 > 출처 > 판정 > 경로.
   widthPriority: () => TIMELINE_PRIORITY,
 };

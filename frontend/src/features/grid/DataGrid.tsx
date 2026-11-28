@@ -43,6 +43,7 @@ import { flagsPartialNotice, flagsUnavailableReason, mergedKindNode, policyAbsen
 import { useDensity, useGridLocalStore, useRoute, useSelection, useToast, useViewerTarget } from "./adapter";
 import { BatchBar, batchBarState } from "./BatchBar";
 import { ColumnFilterRow } from "./ColumnFilterRow";
+import { ColumnNote, columnNoteScope, type HiddenColumnNote } from "./ColumnNote";
 import { collectionDef, lockedColumnId, presetColumnIds } from "./columns";
 import { analysisFamily } from "./columns/analysis";
 import { artifactTypeFamily, resolveArtifactFamily } from "./columns/artifacts";
@@ -59,7 +60,6 @@ import {
   writeStoredFieldColumns,
 } from "./columns/fieldColumns";
 import { ntfsJoinOf } from "./columns/files";
-import { EmptyHintLink } from "./EmptyHintLink";
 import { GridEmpty, type GridEmptyState } from "./GridEmpty";
 import { ColumnMenu, DocsMatchedToggle, GridFooter, GridToolbar } from "./GridToolbar";
 import { buildViewerTarget, type GridCommandHost, runBatch, runNote, useGridCommands } from "./gridCommands";
@@ -75,6 +75,7 @@ import {
   priorityHiddenColumns,
   resultSentence,
   serverPathFilter,
+  uniformColumns,
 } from "./gridUtils";
 import { RowMenu } from "./RowMenu";
 import { type CellValue, type ColumnSpec, DENSITY_ROW_HEIGHT, type GridPreset } from "./types";
@@ -525,24 +526,33 @@ export function DataGrid(props: DataGridProps = {}) {
   }, [columns, preset]);
 
   // Responsive default layout (분석 기본 preset only): a default column with no value in any
-  // loaded row goes (시각, 선별 … — review #9), then the lowest-priority columns go while their
-  // minimum widths exceed the grid width. 항목 (the first priority id) always stays.
+  // loaded row goes (시각, 판정 … — review #9), so does one whose loaded rows all read the same
+  // (X7: the column note above the table names that value), then the lowest-priority columns go
+  // while their minimum widths exceed the grid width. 항목 (the first column) always stays.
   const widthPriority = preset === "analysis" ? def.widthPriority?.(ref, filterTypes) : undefined;
   const loadedRows = cq.loadedRows;
+  // Empty / uniform candidates: the priority list past 항목, else every shown column past the first.
+  const autoCandidates = useMemo(() => {
+    if (preset !== "analysis") return [];
+    if (widthPriority) return widthPriority.slice(1);
+    return orderedColumns
+      .slice(1)
+      .filter((c) => visibility[c.id] !== false)
+      .map((c) => c.id);
+  }, [preset, widthPriority, orderedColumns, visibility]);
   const emptyIds = useMemo(
-    () =>
-      widthPriority
-        ? emptyColumnIds(orderedColumns, loadedRows, {
-            candidates: widthPriority.slice(1),
-            keep: pinnedColumns,
-          })
-        : [],
-    [widthPriority, orderedColumns, loadedRows, pinnedColumns],
+    () => emptyColumnIds(orderedColumns, loadedRows, { candidates: autoCandidates, keep: pinnedColumns }),
+    [autoCandidates, orderedColumns, loadedRows, pinnedColumns],
+  );
+  const uniformValues = useMemo(
+    () => uniformColumns(orderedColumns, loadedRows, { candidates: autoCandidates, keep: pinnedColumns }),
+    [autoCandidates, orderedColumns, loadedRows, pinnedColumns],
   );
   const autoHidden = useMemo(() => {
     const out = new Map<string, AutoHideReason>();
-    if (!widthPriority) return out;
     for (const id of emptyIds) out.set(id, "empty");
+    for (const id of uniformValues.keys()) out.set(id, "uniform");
+    if (!widthPriority) return out;
     const shown = orderedColumns
       .filter((c) => visibility[c.id] !== false && !out.has(c.id))
       .map((c) => ({ id: c.id, min: columnSizing[c.id] ?? c.minWidth ?? c.width }));
@@ -553,7 +563,16 @@ export function DataGrid(props: DataGridProps = {}) {
     });
     for (const id of hidden) out.set(id, "width");
     return out;
-  }, [widthPriority, emptyIds, pinnedColumns, orderedColumns, visibility, columnSizing, paneWidth]);
+  }, [
+    widthPriority,
+    emptyIds,
+    uniformValues,
+    pinnedColumns,
+    orderedColumns,
+    visibility,
+    columnSizing,
+    paneWidth,
+  ]);
   const tableVisibility = useMemo(() => {
     if (autoHidden.size === 0) return visibility;
     const next = { ...visibility };
@@ -604,6 +623,14 @@ export function DataGrid(props: DataGridProps = {}) {
 
   const visibleColumns = table.getVisibleLeafColumns();
   const specById = useMemo(() => new Map(columns.map((c) => [c.id, c])), [columns]);
+  const headerNotes = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const spec of columns) {
+      const note = spec.headerNote?.(loadedRows);
+      if (note) out.set(spec.id, note);
+    }
+    return out;
+  }, [columns, loadedRows]);
   const specs = visibleColumns.map((c) => specById.get(c.id)).filter((c): c is ColumnSpec => !!c);
   // 항목 flexes into the pane width. Too wide (분석 기본 preset): default-width columns give back
   // width down to their minimum, lowest priority first, before anything is cut at the pane edge;
@@ -1192,9 +1219,24 @@ export function DataGrid(props: DataGridProps = {}) {
   /** Header row (+ the column filter row when shown) precede the data rows in aria-rowindex. */
   const headRows = filterRowShown ? 2 : 1;
   const rowCountAria = (compactMode ? displayCount : (cq.total ?? -1)) + headRows;
-  // Files NTFS columns: until an NTFS-meta analysis is joined their headers link to running it.
+  // Files NTFS columns: until an NTFS-meta analysis is joined the column note offers running it.
   const ntfsJoin = ref.id === "files" ? ntfsJoinOf(cq.pageMeta) : null;
   const hintsActive = ref.id === "files" && !cq.isLoading && ntfsJoin === null;
+  // X7 / F27: what the auto-hidden uniform / empty columns said, kept in one line above the table.
+  const columnNotes: HiddenColumnNote[] = [];
+  for (const [id, reason] of autoHidden) {
+    const spec = specById.get(id);
+    if (!spec || reason === "width" || visibility[id] === false) continue;
+    columnNotes.push(
+      reason === "uniform"
+        ? { id, header: spec.header, kind: "uniform", value: uniformValues.get(id) ?? "" }
+        : { id, header: spec.header, kind: "empty" },
+    );
+  }
+  const columnHint = hintsActive
+    ? [...columnNotes.map((note) => specById.get(note.id)), ...specs].find((spec) => spec?.emptyHint)
+        ?.emptyHint
+    : undefined;
   const statusLines: { id: string; text: string }[] = [];
   if (cq.clientColumnFilters) {
     statusLines.push({
@@ -1411,6 +1453,16 @@ export function DataGrid(props: DataGridProps = {}) {
         </div>
       ) : null}
 
+      <ColumnNote
+        notes={columnNotes}
+        scope={columnNoteScope(cq.loadedRows.length, cq.total)}
+        hint={columnHint}
+        onShow={(id) => {
+          toggleColumn(id, true);
+          announce(`${specById.get(id)?.header ?? id} 열을 다시 표시했습니다.`);
+        }}
+      />
+
       <div className="grid-frame">
         <div
           ref={scrollRef}
@@ -1451,8 +1503,16 @@ export function DataGrid(props: DataGridProps = {}) {
                   if (!spec) return null;
                   const sort = sortOf(spec);
                   const reason = sortReason(spec);
-                  // A time column names the display zone once here; its cells leave it out.
-                  const header = spec.zoneInHeader ? `${spec.header} (${timeHeaderZone})` : spec.header;
+                  // A time column names the display zone once here; its cells leave it out. A
+                  // header note says what some cells are (수정 (KST, 사본 시각 포함), F27).
+                  const note = headerNotes.get(spec.id);
+                  const header = spec.zoneInHeader
+                    ? `${spec.header} (${timeHeaderZone}${note ? `, ${note}` : ""})`
+                    : note
+                      ? `${spec.header} (${note})`
+                      : spec.header;
+                  // An empty column an analysis fills keeps its hint as the tooltip / description;
+                  // the run button lives in the column note above the table (F27).
                   const hint = hintsActive ? spec.emptyHint : undefined;
                   const hintId = `${hintPrefix}-empty-${spec.id}`;
                   const describedBy =
@@ -1494,12 +1554,9 @@ export function DataGrid(props: DataGridProps = {}) {
                         </span>
                       ) : null}
                       {hint ? (
-                        <>
-                          <span id={hintId} hidden>
-                            {hint.text}
-                          </span>
-                          <EmptyHintLink hint={hint} hintId={hintId} />
-                        </>
+                        <span id={hintId} hidden>
+                          {hint.text}
+                        </span>
                       ) : null}
                       <div
                         aria-hidden="true"

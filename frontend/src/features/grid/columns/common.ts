@@ -188,12 +188,8 @@ export const col = {
       value: (r) => r.title,
     };
   },
-  /** `whole`: the whole path, file name kept (a listing whose title is not the file name). */
-  path(
-    width = 360,
-    presets: ColumnSpec["presets"] = ["analysis", "source"],
-    options: { whole?: boolean } = {},
-  ): ColumnSpec {
+  /** 경로: the whole path, its end (two folders + file name) kept and the middle elided (F28). */
+  path(width = 360, presets: ColumnSpec["presets"] = ["analysis", "source"]): ColumnSpec {
     return {
       id: "path",
       header: "경로",
@@ -202,7 +198,7 @@ export const col = {
       minWidth: 200,
       presets,
       value: (r) => r.sourcePath,
-      render: (r) => pathCell(r.sourcePath, options.whole),
+      render: (r) => pathCell(r.sourcePath),
     };
   },
   timestamp(width = 170, presets: ColumnSpec["presets"] = ["analysis", "compact"]): ColumnSpec {
@@ -227,7 +223,7 @@ export const col = {
   review(): ColumnSpec {
     return {
       id: "review",
-      header: "선별",
+      header: "판정",
       width: 96,
       presets: ["analysis", "source"],
       value: (r) => r.reviewStatus,

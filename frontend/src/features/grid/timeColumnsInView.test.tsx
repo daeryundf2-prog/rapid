@@ -127,7 +127,9 @@ describe("date/time columns in view by default (P1)", () => {
     const menu = screen.getByRole("dialog", { name: "열 설정" });
     fireEvent.click(within(menu).getByRole("checkbox", { name: "날짜 및 시각" }));
     await waitFor(() => expect(headerIds()).not.toContain("sum:time"));
-    expect(headerIds()[0]).toBe("type");
+    // Every test row has one 유형: it waits in the column note (X7), so 항목 leads.
+    expect(headerIds()[0]).toBe("title");
+    expect(screen.getByTestId("grid-column-note").textContent).toContain("유형 =");
   });
 });
 

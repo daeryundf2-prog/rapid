@@ -6,6 +6,7 @@
 
 import type { RunTree, TreeNode } from "../../api/runs";
 import type { CollectionId, GridRow } from "../../contracts/collection";
+import { formatTimestamp, startOfDayMs, type TimezoneChoice, zoneShort } from "../../utils/time";
 
 /** `GET /api/runs/{id}/timeline-histogram` (api/app/timeline_hist.py). */
 export interface TimelineHistogramPayload {
@@ -76,14 +77,16 @@ export function chooseGranularity(payload: TimelineHistogramPayload): Granularit
 }
 
 /**
- * Re-aggregate the server buckets into hour/day bars (UTC boundaries), from
- * the first to the last non-empty bar with gaps filled by zero bars so the
- * axis stays linear. A requested granularity finer than the server bucket
- * falls back to the server buckets (it cannot be split).
+ * Re-aggregate the server buckets into hour/day bars, from the first to the last non-empty bar
+ * with gaps filled by zero bars so the axis stays linear. Day bars start at midnight of the
+ * display zone `tz` (the grid's zone, like the 시간 개요 띠; a daylight-saving day is 23/25 h);
+ * hour bars at whole UTC hours. A requested granularity finer than the server bucket falls back
+ * to the server buckets (it cannot be split).
  */
 export function rebucket(
   payload: TimelineHistogramPayload,
   choice: GranularityChoice = "auto",
+  tz: TimezoneChoice = "UTC",
 ): { granularity: Granularity; buckets: TimeBucket[] } {
   let granularity: Granularity = choice === "auto" ? chooseGranularity(payload) : choice;
   const serverMs = (payload.bucket_seconds ?? 0) * 1000;
@@ -98,12 +101,15 @@ export function rebucket(
     }
     return { granularity: "native", buckets: trimEmpty(native) };
   }
+  const slotOf = (ms: number) => (size === DAY ? startOfDayMs(ms, tz) : Math.floor(ms / size) * size);
+  // The next bar's start: +26 h then back to midnight covers 23 h and 25 h days alike.
+  const nextOf = (at: number) => (size === DAY ? startOfDayMs(at + 26 * HOUR, tz) : at + size);
   const counts = new Map<number, number>();
   for (const bucket of payload.buckets) {
     if (!bucket.count) continue;
     const s = parseMs(bucket.start);
     if (s === null) continue;
-    const key = Math.floor(s / size) * size;
+    const key = slotOf(s);
     counts.set(key, (counts.get(key) ?? 0) + bucket.count);
   }
   if (counts.size === 0) return { granularity, buckets: [] };
@@ -111,8 +117,8 @@ export function rebucket(
   const first = Math.min(...keys);
   const last = Math.max(...keys);
   const buckets: TimeBucket[] = [];
-  for (let at = first; at <= last; at += size) {
-    buckets.push({ startMs: at, endMs: at + size, count: counts.get(at) ?? 0 });
+  for (let at = first; at <= last; at = nextOf(at)) {
+    buckets.push({ startMs: at, endMs: nextOf(at), count: counts.get(at) ?? 0 });
   }
   return { granularity, buckets };
 }
@@ -139,22 +145,80 @@ export function rangeOf(
   return { from: new Date(first.startMs).toISOString(), to: new Date(last.endMs - 1).toISOString() };
 }
 
-const pad = (n: number) => String(n).padStart(2, "0");
-
-/** UTC label: day "2026-10-11", hour "10-11 14시", native "2026-10-11 14:00". */
-export function bucketLabel(ms: number, granularity: Granularity): string {
-  const d = new Date(ms);
-  const date = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-  if (granularity === "day") return date;
-  if (granularity === "hour")
-    return `${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}시`;
-  return `${date} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+/**
+ * Bar label in the display zone `tz`: day "2026-10-11", hour "10-11 14시" (a zone off the whole
+ * hour: "10-11 14:30"), native "2026-10-11 14:00".
+ */
+export function bucketLabel(ms: number, granularity: Granularity, tz: TimezoneChoice = "UTC"): string {
+  const minute = formatTimestamp(new Date(ms), tz, { precision: "minute" });
+  if (granularity === "day") return minute.slice(0, 10);
+  if (granularity === "hour") {
+    const clock = minute.slice(11);
+    return `${minute.slice(5, 10)} ${clock.endsWith(":00") ? `${clock.slice(0, 2)}시` : clock}`;
+  }
+  return minute;
 }
 
-export function bucketAriaLabel(bucket: TimeBucket, granularity: Granularity): string {
-  const from = bucketLabel(bucket.startMs, granularity === "day" ? "native" : granularity);
-  const to = bucketLabel(bucket.endMs, granularity === "day" ? "native" : granularity);
-  return `${from} ~ ${to} (UTC): ${bucket.count.toLocaleString("ko-KR")}건`;
+/** "2026-10-11 00:00 ~ 2026-10-12 00:00 (KST): 3건" — a bar's span in the display zone. */
+export function bucketAriaLabel(
+  bucket: TimeBucket,
+  granularity: Granularity,
+  tz: TimezoneChoice = "UTC",
+): string {
+  const from = bucketLabel(bucket.startMs, granularity === "day" ? "native" : granularity, tz);
+  const to = bucketLabel(bucket.endMs, granularity === "day" ? "native" : granularity, tz);
+  return `${from} ~ ${to} (${zoneShort(tz, new Date(bucket.startMs))}): ${bucket.count.toLocaleString("ko-KR")}건`;
+}
+
+/** One label under a bar axis: the bar it starts at and its text. */
+export interface AxisTick {
+  index: number;
+  label: string;
+}
+
+/** Bars between two labels, smallest first (whole hours / days line up). */
+const AXIS_STEPS = [1, 2, 3, 4, 6, 12, 24, 48, 96, 144, 288, 576];
+
+/**
+ * Labels under a bar axis in the display zone (the 시간 개요 띠 / histogram, replacing the two
+ * end labels): at most `maxLabels`, every k-th bar with k from AXIS_STEPS. Day bars read
+ * "10-18" (the year added when the bars cross one, month bars "2026-10"); finer bars sit on
+ * clock-aligned slots (k-th hour of the day) and read "06시" / "06:30", a midnight reads its
+ * date. Bars are assumed equal width (flex), so a label's place is index / bars.
+ */
+export function axisTicks(buckets: readonly TimeBucket[], tz: TimezoneChoice, maxLabels: number): AxisTick[] {
+  const [head] = buckets;
+  if (!head || maxLabels < 1) return [];
+  const size = head.endMs - head.startMs;
+  const need = Math.ceil(buckets.length / Math.floor(maxLabels));
+  const step = AXIS_STEPS.find((candidate) => candidate >= need) ?? need;
+  const texts = buckets.map((bucket) =>
+    formatTimestamp(new Date(bucket.startMs), tz, { precision: "minute" }),
+  );
+  const years = new Set(texts.map((text) => text.slice(0, 4)));
+  const out: AxisTick[] = [];
+  if (size >= 20 * HOUR) {
+    const monthly = size >= 28 * DAY;
+    texts.forEach((text, index) => {
+      if (index % step !== 0) return;
+      const label = monthly ? text.slice(0, 7) : years.size > 1 ? text.slice(0, 10) : text.slice(5, 10);
+      out.push({ index, label });
+    });
+    return out;
+  }
+  const sizeMinutes = Math.max(1, Math.round(size / 60_000));
+  texts.forEach((text, index) => {
+    const minutes = Number(text.slice(11, 13)) * 60 + Number(text.slice(14, 16));
+    if (Math.floor(minutes / sizeMinutes) % step !== 0 || minutes % sizeMinutes !== 0) return;
+    const label =
+      minutes === 0
+        ? text.slice(5, 10)
+        : text.endsWith(":00")
+          ? `${text.slice(11, 13)}시`
+          : text.slice(11, 16);
+    out.push({ index, label });
+  });
+  return out;
 }
 
 export const GRANULARITY_LABELS: Record<GranularityChoice, string> = {
