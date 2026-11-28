@@ -1,17 +1,19 @@
 import { useEffect, useRef } from "react";
 import type { RunExtractResult } from "../../api/extract";
+import { runVerdict, SELECTION_SCOPE_MIN, verdictDisabledReason } from "../../commands/verdict";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
 import type { Command, CommandContext } from "../../contracts/command";
-import type { ViewerMode, ViewerTarget } from "../../contracts/viewer";
+import type { MarkAction, ViewerMode, ViewerTarget } from "../../contracts/viewer";
 import { useAppStore } from "../../state/store";
 import { runDisabledReason } from "../analysis/commands";
 import { caseRoute, otherCaseIds } from "../analysis/crossCase";
 import { useAnalysisStore } from "../analysis/store";
 import { caseCitationParts, citationDisabledReason, resolveCaseLink } from "../case/caseLink";
 import { buildReviewToolGridCommands } from "../review/gridTools";
-import { registerRowSource } from "../review/rowSource";
+import { type RowFocusRequest, registerRowSource } from "../review/rowSource";
 import { recordCitationParts } from "../viewer/citation";
-import { PIVOT_LABELS, PIVOT_ORDER, type PivotId, recordPivots } from "../viewer/pivots";
+import { PIVOT_LABELS, PIVOT_ORDER, PIVOT_SHORTCUTS, type PivotId, recordPivots } from "../viewer/pivots";
+import { cachedSourceRow } from "../viewer/sourceRecord";
 import { registerCommand, registerLocalCommand } from "./adapter";
 import { baseName, currentTimezone, isRecord } from "./columns/common";
 import {
@@ -47,12 +49,19 @@ export interface GridCommandHost {
   getExportColumns?: () => ColumnSpec[];
   /** Selected keys, loaded or not (getSelectedRows only returns loaded rows). */
   getSelectedCount?: () => number;
+  /** Move the focused row (verdict advance, J / K from the viewer, Z back to the judged row). */
+  moveFocus?: (request: RowFocusRequest) => boolean;
+  clearSelection?: () => void;
 }
 
 export function buildViewerTarget(runId: string, row: GridRow, mode?: ViewerMode): ViewerTarget {
   const highlight = row.fields.highlight as ViewerTarget["highlight"] | undefined;
-  // Artifact rows open on the decoded record first (meta) unless a mode was asked for.
-  const isArtifact = row.ref.collection === "artifacts" || row.ref.locator.startsWith("/artifacts/");
+  // Rows that point at a decoded record open on it first (meta), hex second (F18): artifact rows,
+  // and timeline events that carry their source artifact record.
+  const isArtifact =
+    row.ref.collection === "artifacts" ||
+    row.ref.locator.startsWith("/artifacts/") ||
+    (row.ref.collection === "timeline" && isRecord(row.fields.sourceRecord));
   // Rows may ask for a mode (analysis carve hits open their source in hex at the offset).
   const rowMode =
     typeof row.fields.viewerMode === "string" ? (row.fields.viewerMode as ViewerMode) : undefined;
@@ -65,6 +74,46 @@ export function buildViewerTarget(runId: string, row: GridRow, mode?: ViewerMode
     ...(preferred && row.fields.isDirectory !== true ? { preferredMode: preferred } : {}),
     ...(highlight ? { highlight } : {}),
   };
+}
+
+/**
+ * Display index a RowFocusRequest lands on, or null when there is none (end of the list, no
+ * unjudged row among the loaded ones, the key is not loaded). `rowAt` returns undefined for rows
+ * not loaded yet; the 미판정 search stops there instead of guessing.
+ */
+export function rowFocusTarget(
+  request: RowFocusRequest,
+  focus: number,
+  count: number,
+  rowAt: (index: number) => GridRow | undefined,
+): number | null {
+  if (count === 0) return null;
+  if (request.key !== undefined) {
+    for (let i = 0; i < count; i += 1) if (rowAt(i)?.rowKey === request.key) return i;
+    return null;
+  }
+  let from = Math.max(focus, 0);
+  const after = request.after?.length ? new Set(request.after) : null;
+  if (after) {
+    let seen = 0;
+    for (let i = 0; i < count && seen < after.size; i += 1) {
+      const key = rowAt(i)?.rowKey;
+      if (key !== undefined && after.has(key)) {
+        from = i;
+        seen += 1;
+      }
+    }
+  }
+  if (request.unreviewed) {
+    for (let i = from + 1; i < count; i += 1) {
+      const row = rowAt(i);
+      if (!row) return null;
+      if (!row.reviewStatus && !after?.has(row.rowKey)) return i;
+    }
+    return null;
+  }
+  const next = from + (request.step ?? 1);
+  return next < 0 || next >= count ? null : next;
 }
 
 /**
@@ -300,17 +349,24 @@ export function buildGridCommands(hostRef: { current: GridCommandHost }): Comman
     },
   });
 
+  /** Verdicts the batch bar shows: the same commands as R / I / X / B (one scope, one write path). */
+  const VERDICT_ACTIONS: ReadonlySet<BatchAction> = new Set(ROW_MARK_ACTIONS);
   for (const action of BATCH_ACTIONS) {
+    const verdict = VERDICT_ACTIONS.has(action);
     commands.push({
       id: batchCommandId(action),
       label: MARK_LABELS[action],
       group: action === "extract" ? "export" : "review",
       icon: action === "extract" ? "download" : action,
-      disabledReason: () => {
+      disabledReason: (ctx) => {
         const h = host();
         const rows = h.getSelectedRows();
         if (rows.length === 0) return NO_SELECTION;
         if (!h.runId) return "열린 케이스가 없습니다.";
+        if (verdict) {
+          if (rows.length < SELECTION_SCOPE_MIN) return BATCH_NEEDS_TWO;
+          return verdictDisabledReason(action as MarkAction, gridScopeContext(h, ctx));
+        }
         if (action === "extract") {
           const paths = new Set(rows.map((r) => r.sourcePath).filter(Boolean));
           if (paths.size === 0) return NO_PATH;
@@ -318,10 +374,14 @@ export function buildGridCommands(hostRef: { current: GridCommandHost }): Comman
         }
         return undefined;
       },
-      run: async () => {
+      run: async (ctx) => {
         const h = host();
         if (action === "tag") {
           h.openTagPrompt();
+          return;
+        }
+        if (verdict) {
+          await runGridVerdict(h, action, ctx);
           return;
         }
         await runBatch(h, action);
@@ -332,14 +392,19 @@ export function buildGridCommands(hostRef: { current: GridCommandHost }): Comman
   for (const id of PIVOT_ORDER) {
     const pivotOf = () => {
       const row = focused();
-      return row
-        ? recordPivots(row, host().runId ?? "", useAppStore.getState().route.tz).find((p) => p.id === id)
-        : undefined;
+      if (!row) return undefined;
+      const runId = host().runId ?? "";
+      // A timeline event's decoded source record (once the viewer loaded it) fills 같은 대상.
+      return recordPivots(row, runId, useAppStore.getState().route.tz, cachedSourceRow(row, runId)).find(
+        (p) => p.id === id,
+      );
     };
     commands.push({
       id: pivotCommandId(id),
       label: PIVOT_LABELS[id],
       group: "grid",
+      // ±5분 · 같은 대상 · 같은 원본 have keys (F19); the viewer's pivot strip shows them.
+      ...(PIVOT_SHORTCUTS[id] ? { shortcut: PIVOT_SHORTCUTS[id] } : {}),
       icon:
         id === "timeline-window"
           ? "clock"
@@ -384,15 +449,36 @@ const ROW_MARK_LABELS: Partial<Record<BatchAction, string>> = {
   bookmark: "북마크",
 };
 
-/** Rows a row-menu mark applies to: the selection when it contains the focused row, else that row. */
-function menuRows(host: GridCommandHost): GridRow[] {
-  const row = host.getFocusedRow();
-  if (!row) return [];
-  const selected = host.getSelectedRows();
-  return selected.some((r) => r.rowKey === row.rowKey) ? selected : [row];
+/** The grid's own selection as the verdict scope's context (equal to the shell's mirror in the app). */
+function gridScopeContext(host: GridCommandHost, ctx: CommandContext): CommandContext {
+  return {
+    ...ctx,
+    runId: host.runId ?? ctx.runId,
+    selectedRowKeys: host.getSelectedRows().map((row) => row.rowKey),
+  };
 }
 
-/** Row-menu review commands (grid-local: the R/X/I/B shortcuts stay the shell's review.mark.*). */
+export const BATCH_NEEDS_TWO =
+  "두 행 이상 선택했을 때 씁니다. 한 행은 R · I · X · B 키나 행 메뉴로 판정하세요.";
+
+/** Batch bar / row menu verdict: the shared verdict flow (scope, advance, Z), errors as a toast. */
+async function runGridVerdict(
+  host: GridCommandHost,
+  action: BatchAction,
+  ctx: CommandContext,
+): Promise<void> {
+  try {
+    await runVerdict(null, action, { ctx: gridScopeContext(host, ctx) });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    host.toast(`${MARK_LABELS[action]} 처리에 실패했습니다. ${reason}`, "error");
+  }
+}
+
+/**
+ * Row-menu review commands (grid-local): the same scope and write path as R / X / I / B
+ * (`reviewScope()`), so the menu's key hints tell the truth; the menu names the scope above them.
+ */
 export function buildRowMarkCommands(hostRef: { current: GridCommandHost }): Command[] {
   const host = () => hostRef.current;
   return ROW_MARK_ACTIONS.map(
@@ -401,18 +487,13 @@ export function buildRowMarkCommands(hostRef: { current: GridCommandHost }): Com
       label: ROW_MARK_LABELS[action] ?? MARK_LABELS[action],
       group: "review",
       icon: action === "bookmark" ? "bookmark" : "flag",
-      disabledReason: () => {
+      disabledReason: (ctx) => {
         const h = host();
         if (!h.runId) return "열린 케이스가 없습니다.";
-        const rows = menuRows(h);
-        if (rows.length === 0) return NO_ROW;
-        if (rows.some((r) => reviewTargetOf(r) === null))
-          return "출처 위치를 알 수 없는 행은 표시할 수 없습니다.";
-        return undefined;
+        return verdictDisabledReason(action as MarkAction, gridScopeContext(h, ctx));
       },
-      run: async () => {
-        const h = host();
-        await runMark(h, menuRows(h), action);
+      run: async (ctx) => {
+        await runGridVerdict(host(), action, ctx);
       },
     }),
   );
@@ -481,11 +562,14 @@ export function useGridCommands(host: GridCommandHost): void {
       ...buildGridCommands(hostRef).map(registerCommand),
       ...buildRowMarkCommands(hostRef).map(registerLocalCommand),
       ...buildReviewToolGridCommands(hostRef).map(registerCommand),
-      // Shell review tools (tag propagation, digit keys) read the selection through this.
+      // Shell review tools (verdict keys, tag propagation, digit keys) read the list through this.
       registerRowSource({
         getSelectedRows: () => hostRef.current.getSelectedRows(),
+        getFocusedRow: () => hostRef.current.getFocusedRow(),
         patchRows: (keys, patch) => hostRef.current.patchRows(keys, patch),
         refetch: () => hostRef.current.refetch(),
+        moveFocus: (request) => hostRef.current.moveFocus?.(request) ?? false,
+        clearSelection: () => hostRef.current.clearSelection?.(),
       }),
     ];
     return () => {

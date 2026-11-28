@@ -4,6 +4,21 @@
 
 ### Added
 
+- Console verdict keys (design-viewer-keys F15–F26): R/I/X/B, the batch bar, the row menu and
+  the viewer header act on one scope (`reviewScope`: two or more selected rows, else the
+  viewer's row) that the status bar names before and announces after; after a verdict the
+  list moves on (판정 후 이동: 다음 행 · 다음 미판정 행 · 그대로, in `?` and the palette), and
+  `Z` puts the last batch back (status / report flag / tags as they were). J/K work while the
+  viewer has focus, Esc in the viewer returns to the same grid row. The status bar shows where
+  you are, the verdict scope and the keys usable now (from the command registry); grid
+  timings moved behind 진단; at 390 the run status and error count never clip and the timezone
+  sits in a menu. Viewer: four verdict buttons with key caps under a full-width title (the
+  duplicate status chip is gone), timeline events with a source record open on the record
+  (메타) first, modes the row cannot show fold into 쓸 수 없는 보기 n, the hex view fits 16 bytes
+  in the default width (character column behind 문자 열 when narrow), a 2px hex cursor and a
+  polite cursor read-out with signature/record edges; pivots ±5분 · 같은 대상 · 같은 원본 파일
+  have keys Alt+T · Alt+A · Alt+S (`frontend/src/commands/verdict.ts`).
+
 - `omp-pi` collector for oh-my-pi (omp), pi, senpi and OmO: session JSONL
   under `<home>/agent/sessions` (subagent transcripts included, linked by
   `parent_session`), sessions in other folders recognized by their `session`

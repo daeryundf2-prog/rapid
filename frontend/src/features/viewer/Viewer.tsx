@@ -42,8 +42,9 @@ import {
   writeClipboard,
 } from "./commands";
 import { targetKey } from "./history";
-import { ModeTabs, panelId, tabId, VIEWER_PANEL_ID } from "./ModeTabs";
+import { ModeTabs, panelId, tabId, tabModes, VIEWER_PANEL_ID } from "./ModeTabs";
 import { resolveModes } from "./modes";
+import { PivotStrip } from "./PivotStrip";
 import { POPOUT_COMMAND_ID } from "./popout/host";
 import { recordByteRange } from "./record";
 import { viewerSession } from "./session";
@@ -196,7 +197,10 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
       ? userMode.mode
       : null;
   const activeMode: ViewerMode = userChoice ?? best ?? target?.preferredMode ?? "meta";
-  const hasActiveTab = modes.some((m) => m.mode === activeMode);
+  // Record first (F18): artifact rows and events with a source record list 메타 before hex.
+  const recordFirst = target?.ref.collection === "artifacts" || target?.preferredMode === "meta";
+  const tabs = tabModes(modes, recordFirst);
+  const hasActiveTab = tabs.some((m) => m.mode === activeMode);
   const selectMode = useCallback(
     (mode: ViewerMode) => {
       if (key) setUserMode({ key, mode });
@@ -494,10 +498,12 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
       {/* 특이사항 (U-F4): the row's flags with their evidence, above the tabs (every mode). */}
       {/* Keyed by row: each row starts with its own default (open for A), never the last row's toggle. */}
       <FlagBanner key={row?.rowKey ?? key ?? "none"} row={row} />
-      <ModeTabs modes={modes} active={activeMode} onSelect={selectMode} />
+      {/* 함께 볼 것 (F19): ±5분 · 같은 대상 · 같은 원본 파일 with counts and keys. */}
+      {target ? <PivotStrip row={row} runId={target.runId} /> : null}
+      <ModeTabs modes={modes} active={activeMode} onSelect={selectMode} recordFirst={recordFirst} />
       {/* Inactive modes get an empty, hidden panel so every tab's aria-controls resolves to a
           tabpanel labelled by that tab; only the active mode renders content. */}
-      {modes
+      {tabs
         .filter((m) => m.mode !== activeMode)
         .map((m) => (
           <div

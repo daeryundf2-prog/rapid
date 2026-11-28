@@ -62,7 +62,14 @@ import { ntfsJoinOf } from "./columns/files";
 import { EmptyHintLink } from "./EmptyHintLink";
 import { GridEmpty, type GridEmptyState } from "./GridEmpty";
 import { ColumnMenu, DocsMatchedToggle, GridFooter, GridToolbar } from "./GridToolbar";
-import { buildViewerTarget, type GridCommandHost, runBatch, runNote, useGridCommands } from "./gridCommands";
+import {
+  buildViewerTarget,
+  type GridCommandHost,
+  rowFocusTarget,
+  runBatch,
+  runNote,
+  useGridCommands,
+} from "./gridCommands";
 import {
   type AutoHideReason,
   compareValues,
@@ -1066,6 +1073,15 @@ export function DataGrid(props: DataGridProps = {}) {
     runIsActive: false,
     getExportColumns: () => specs,
     getSelectedCount: () => selectedKeys.size,
+    moveFocus: (request) => {
+      const target = rowFocusTarget(request, clampedFocus, displayCount, getDisplayRow);
+      if (target === null) return false;
+      moveFocus(target, false);
+      // From the viewer (J / K, a verdict there): the row follows, DOM focus stays put.
+      if (!request.domFocus) wantDomFocus.current = false;
+      return true;
+    },
+    clearSelection: () => setSelectionKeys([]),
   };
   useGridCommands(host);
 

@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { KeyCap } from "../../commands/CommandButton";
+import { verdictShortcut } from "../../commands/verdict";
 import { isChipStatus } from "../../components/StatusChip";
 import "../../components/status.css";
 import { MenuButton, type MenuItem } from "../../components/MenuButton";
@@ -138,6 +140,8 @@ export function BatchBar({
   const actionButton = (action: BatchAction) => {
     const id = batchCommandId(action);
     const { reason } = reasonOf(id);
+    // Verdicts show the key that does the same on the same rows (R / I / X / B, F17).
+    const key = verdictShortcut(action);
     return (
       <button
         key={action}
@@ -146,10 +150,12 @@ export function BatchBar({
         data-command={id}
         data-status-button={isChipStatus(action) ? action : undefined}
         aria-disabled={reason ? true : undefined}
+        aria-keyshortcuts={key}
         title={reason}
         onClick={() => runCommand(id)}
       >
-        {BAR_LABELS[action] ?? MARK_LABELS[action]}
+        <span>{BAR_LABELS[action] ?? MARK_LABELS[action]}</span>
+        <KeyCap shortcut={key} />
       </button>
     );
   };

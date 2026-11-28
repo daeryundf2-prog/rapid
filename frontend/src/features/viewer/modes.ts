@@ -174,8 +174,9 @@ export function resolveModes(input: ResolveInput): ResolvedModes {
   if (!target) {
     return { modes: MODE_ORDER.map((mode) => state(mode, "선택된 행이 없습니다.")), best: null };
   }
-  // Decoded artifact rows (F2): the record itself (메타 → 레코드) is what the analyst wants first.
-  const recordFirst = target.ref.collection === "artifacts";
+  // Rows that point at a decoded record (F2, F18): artifact rows and timeline events with a source
+  // artifact record (buildViewerTarget asks for 메타) — the record first, hex second.
+  const recordFirst = target.ref.collection === "artifacts" || target.preferredMode === "meta";
   if (!target.sourcePath) {
     return {
       modes: MODE_ORDER.map((mode) => (mode === "meta" ? state("meta") : state(mode, REASONS.noPath))),

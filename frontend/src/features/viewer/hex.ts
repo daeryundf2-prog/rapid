@@ -93,6 +93,33 @@ export function byteAscii(value: number): string {
   return value >= 0x20 && value <= 0x7e ? String.fromCharCode(value) : ".";
 }
 
+/**
+ * The hex cursor read aloud (F26): "0x00000005, 값 65, 문자 e", plus "SQLite 시그니처 시작/끝" and
+ * "레코드 시작/끝" when the cursor sits on such an edge.
+ */
+export function hexCursorSentence(
+  offset: number,
+  size: number,
+  value: number | null,
+  hit?: SignatureHit,
+  record?: { offset?: number; length?: number },
+): string {
+  const parts = [formatOffset(offset, size)];
+  if (value === null) parts.push("값 읽는 중");
+  else {
+    parts.push(`값 ${byteHex(value)}`);
+    parts.push(value >= 0x20 && value <= 0x7e ? `문자 ${String.fromCharCode(value)}` : "문자 없음");
+  }
+  if (hit && offset === hit.offset) parts.push(`${hit.name} 시그니처 시작`);
+  if (hit && offset === hit.offset + hit.length - 1) parts.push(`${hit.name} 시그니처 끝`);
+  if (record?.offset !== undefined) {
+    const end = record.offset + Math.max(1, record.length ?? 1) - 1;
+    if (offset === record.offset) parts.push("레코드 시작");
+    if (offset === end && end !== record.offset) parts.push("레코드 끝");
+  }
+  return parts.join(", ");
+}
+
 export function rowCountForSize(size: number): number {
   return Math.max(1, Math.ceil(size / BYTES_PER_ROW));
 }

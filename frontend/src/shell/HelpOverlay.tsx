@@ -1,9 +1,34 @@
 import { useId, useRef } from "react";
 import { useEscape, useFocusTrap } from "../a11y";
 import { useCommands } from "../commands/registry";
+import { ADVANCE_LABELS, ADVANCE_MODES, useVerdictPrefs } from "../commands/verdict";
 import { Icon } from "../icons";
 import { keyBindingRows, keyLabel } from "../shortcuts";
 import { useAppStore } from "../state/store";
+
+/** 판정 후 이동 (F17): where the list goes after R / I / X / B — persisted, also in the palette. */
+export function AdvanceSetting() {
+  const advance = useVerdictPrefs((s) => s.advance);
+  const setAdvance = useVerdictPrefs((s) => s.setAdvance);
+  const name = useId();
+  return (
+    <fieldset className="help-advance" data-testid="help-advance">
+      <legend>판정 후 이동</legend>
+      {ADVANCE_MODES.map((mode) => (
+        <label key={mode}>
+          <input
+            type="radio"
+            name={name}
+            value={mode}
+            checked={advance === mode}
+            onChange={() => setAdvance(mode)}
+          />
+          <span>{ADVANCE_LABELS[mode]}</span>
+        </label>
+      ))}
+    </fieldset>
+  );
+}
 
 /** `?` — one page of every canonical key, generated from KEY_MAP + the live registry. */
 export function HelpOverlay() {
@@ -46,6 +71,7 @@ function HelpDialog() {
             <Icon name="close" />
           </button>
         </div>
+        <AdvanceSetting />
         <table className="help-table">
           <caption className="visually-hidden">단축키와 동작</caption>
           <thead>

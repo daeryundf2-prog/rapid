@@ -135,26 +135,37 @@
   border-color: var(--line);
 }
 
-/* Header actions (visual-polish S5/S6): 관련 있음 · status dot · 더보기 · ⋯ ------- */
+/* Header (F20): history · title on the first line (never covered), the verdict buttons on their own
+   line below it, the ⋯ menu at the end of that line. */
 
 .viewer-header {
   flex-wrap: wrap;
+  row-gap: var(--space-1);
 }
 
 .viewer-header > .note-form {
   flex-basis: 100%;
+  order: 3;
   padding: var(--space-2) 0 0;
   border-bottom: 0;
 }
 
 .viewer-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1);
-  flex: none;
+  flex-basis: 100%;
+  order: 2;
 }
 
-.viewer-primary,
+.viewer-actions-more {
+  margin-left: auto;
+}
+
+/* One verdict button per key: text + key cap; pressed = filled with the status colour
+   (components/status.css `[data-status-button][aria-pressed]`). */
+.viewer-verdict,
 .viewer-tool-trigger {
   display: inline-flex;
   align-items: center;
@@ -171,34 +182,24 @@
   cursor: pointer;
 }
 
-.viewer-primary {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--on-accent);
+.viewer-verdict:hover:not([aria-pressed="true"]):not([aria-disabled="true"]) {
+  background: var(--bg-hover);
+}
+
+.viewer-verdict[aria-pressed="true"] {
   font-weight: 600;
 }
 
-.viewer-primary[aria-pressed="true"] {
-  border-color: var(--status-relevant);
-  background: var(--status-relevant);
-  color: var(--status-relevant-on);
-}
-
-.viewer-primary[aria-disabled="true"] {
-  border-color: var(--line);
-  background: var(--disabled-bg);
-  color: var(--disabled-text);
+.viewer-verdict[aria-disabled="true"] {
+  border-style: dashed;
+  color: var(--text-muted);
   cursor: not-allowed;
 }
 
-/* The primary carries data-status-button for the shared colours, but no left status stripe. */
-.viewer-primary[data-status-button]:not([aria-pressed="true"]) {
-  border-left-width: 1px;
-  border-left-color: var(--accent);
-}
-
-.viewer-primary[aria-disabled="true"][data-status-button]:not([aria-pressed="true"]) {
-  border-left-color: var(--line);
+.viewer-scope {
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+  white-space: nowrap;
 }
 
 .viewer-tool-trigger {
@@ -212,18 +213,10 @@
   color: var(--text);
 }
 
-.viewer-primary:focus-visible,
+.viewer-verdict:focus-visible,
 .viewer-tool-trigger:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
-}
-
-/* Review status as a chip (dot + text) beside the primary action (review #6). */
-.viewer-status {
-  display: inline-flex;
-  align-items: center;
-  font-size: var(--fs-aux);
-  white-space: nowrap;
 }
 
 /* Mode tabs --------------------------------------------------------------- */
@@ -269,15 +262,125 @@
   font-weight: 600;
 }
 
-/* Unavailable mode: dimmed (still ≥ 4.5:1), no strike-through — the line read as noise in the
-   light theme where --line is dark (B2 #10); the reason is the tab's tooltip. */
-/* Not applicable to this row (review #6): every tab stays in the strip (one tablist, stable
-   e2e names), but the inapplicable ones recede to 45%; the reason is the tooltip. */
-.viewer-tab[aria-disabled="true"] {
-  cursor: not-allowed;
+/* Modes this row cannot show are not tabs (F25): they sit in one 쓸 수 없는 보기 n disclosure after
+   the tabs, each with its reason as text (the old 45% tabs measured 2.65:1). */
+.viewer-tabs-unavailable {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+}
+
+.viewer-tabs-unavailable > summary {
+  display: inline-flex;
+  align-items: center;
+  height: var(--row-h-roomy);
+  padding: 0 var(--space-2);
   color: var(--text-muted);
-  font-weight: 400;
-  opacity: 0.45;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.viewer-tabs-unavailable > summary:hover {
+  color: var(--text);
+}
+
+.viewer-tabs-unavailable > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.viewer-tabs-unavailable > ul {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 20;
+  width: min(22rem, 80vw);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  list-style: none;
+  background: var(--bg-popover);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+  white-space: normal;
+}
+
+.viewer-tabs-unavailable li + li {
+  margin-top: var(--space-1);
+}
+
+.viewer-tabs-unavailable li > strong {
+  margin-right: var(--space-2);
+  color: var(--text);
+}
+
+.viewer-tabs-unavailable li > span {
+  color: var(--text-muted);
+}
+
+/* Tabs + the 쓸 수 없는 보기 disclosure share the strip's line and its bottom rule. */
+.viewer-tabs-row {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.viewer-tabs-row > .viewer-tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-bottom: 0;
+}
+
+.viewer-tabs-loading {
+  padding: 0 var(--space-2);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* 함께 볼 것 (F19): three pivot buttons with counts and key caps, one wrapping line. */
+.viewer-pivots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.viewer-pivot {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 26px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-table-aux);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.viewer-pivot:hover:not([aria-disabled="true"]) {
+  background: var(--bg-hover);
+}
+
+.viewer-pivot[aria-disabled="true"] {
+  border-style: dashed;
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.viewer-pivot:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.viewer-pivot-count {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Panel ------------------------------------------------------------------- */
@@ -576,6 +679,7 @@
   gap: var(--space-2);
   height: 100%;
   min-height: 320px;
+  container: hexview / inline-size;
 }
 
 .hex-toolbar {
@@ -600,6 +704,9 @@
 }
 
 .hex-status {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-2);
   color: var(--text-muted);
   font-size: var(--fs-table-aux);
 }
@@ -629,8 +736,8 @@
 .hex-row {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: 0 var(--space-2);
+  gap: var(--space-2);
+  padding: 0 var(--space-1);
   white-space: pre;
 }
 
@@ -644,7 +751,7 @@
 
 .hex-bytes {
   display: flex;
-  gap: 0.6ch;
+  gap: 0.4ch;
 }
 
 .hex-byte,
@@ -653,7 +760,7 @@
 }
 
 .hex-byte:nth-child(8) {
-  margin-right: 0.6ch;
+  margin-right: 0.4ch;
 }
 
 .hex-byte.is-hl,
@@ -667,9 +774,29 @@
   box-shadow: inset 0 -2px 0 var(--warn);
 }
 
+/* 2px cursor (F26): visible at 200% zoom and to low-vision readers. */
 .hex-byte.is-cursor,
 .hex-char.is-cursor {
-  outline: 1px solid var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+/* The default viewer width (~440px) fits 16 bytes (F25): the character column and the "0x"
+   prefix give way below the full row width; the cursor status line names the character, and
+   문자 열 brings the column back (the row then scrolls sideways on purpose). */
+.hex-ascii-toggle {
+  display: none;
+}
+
+@container hexview (max-width: 560px) {
+  .hex-view:not([data-ascii="show"]) .hex-ascii,
+  .hex-0x {
+    display: none;
+  }
+
+  .hex-ascii-toggle {
+    display: inline-flex;
+  }
 }
 
 .hex-legend {

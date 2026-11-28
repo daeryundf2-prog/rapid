@@ -83,4 +83,10 @@ export const KEY_MAP = {
   timelinePrev: "[",
   timelineNext: "]",
   timelineZoomOut: "-",
+  /** 판정 되돌리기 (design-viewer-keys F17): undo the last R / I / X / B batch. */
+  undoVerdict: "Z",
+  /** Viewer pivots with counts (F19): timeline ±5 min · same target · same source file. */
+  pivotTimeline: "Alt+T",
+  pivotTarget: "Alt+A",
+  pivotSource: "Alt+S",
 } as const;

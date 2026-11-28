@@ -374,3 +374,95 @@ export function ensureRunCaseDb(runId: string): Promise<CaseDbHandle | null> {
 export function notifyReviewApplied(runId: string): void {
   for (const listener of listeners) listener(runId, "case-db");
 }
+
+// ---- undo (design-viewer-keys F17) ------------------------------------------
+
+/** Which review fields an action changed, so its undo puts exactly those back. */
+export function changedReviewFields(action: BatchAction): {
+  status: boolean;
+  report: boolean;
+  tags: boolean;
+} {
+  switch (action) {
+    case "relevant":
+    case "needs-review":
+    case "clear-review":
+      return { status: true, report: false, tags: false };
+    case "excluded":
+      // 제외 also takes the row out of the report (markBody above).
+      return { status: true, report: true, tags: false };
+    case "include-in-report":
+    case "remove-from-report":
+      return { status: false, report: true, tags: false };
+    case "bookmark":
+    case "tag":
+      return { status: false, report: false, tags: true };
+    default:
+      return { status: false, report: false, tags: false };
+  }
+}
+
+const EXCLUSIVE_STATUSES: ReadonlySet<string> = new Set(["relevant", "needs-review", "excluded"]);
+
+/** The exclusive review status of a row as the case DB stores it (`unreviewed` when none). */
+export function storedStatusOf(row: GridRow): string {
+  return row.reviewStatus && EXCLUSIVE_STATUSES.has(row.reviewStatus) ? row.reviewStatus : "unreviewed";
+}
+
+/** True when the row is in the report (the flag, or the derived `include-in-report` status). */
+export function inReportOf(row: GridRow): boolean {
+  return row.fields.includeInReport === true || row.reviewStatus === "include-in-report";
+}
+
+/**
+ * Put rows back to the review state they had before `action` (Z undo): the rows are the
+ * snapshots taken before the mark. Rows sharing one previous state go in one request; only the
+ * fields the action changed are written (a later note or another field stays).
+ */
+export async function restoreReviewState(
+  runId: string,
+  previous: GridRow[],
+  action: BatchAction,
+): Promise<ApplyResult> {
+  const changed = changedReviewFields(action);
+  const groups = new Map<string, { rows: GridRow[]; body: MarkPayload; mark: ReviewMarkBody }>();
+  for (const row of previous) {
+    const body: MarkPayload = {};
+    const mark: ReviewMarkBody = {};
+    if (changed.status) {
+      body.review_status = storedStatusOf(row);
+      body.status = storedStatusOf(row);
+      mark.status = storedStatusOf(row);
+    }
+    if (changed.report) {
+      body.include_in_report = inReportOf(row);
+      mark.include_in_report = inReportOf(row);
+    }
+    if (changed.tags) {
+      body.tags = [...row.tags];
+      mark.tags = [...row.tags];
+    }
+    const key = JSON.stringify(mark);
+    const group = groups.get(key);
+    if (group) group.rows.push(row);
+    else groups.set(key, { rows: [row], body, mark });
+  }
+  let store: ReviewStore | undefined;
+  for (const group of groups.values()) {
+    const result = await applyBody(runId, group.rows, group.body, group.mark);
+    store = result.store;
+  }
+  return { applied: previous.length, store };
+}
+
+/** Optimistic undo: the row's review fields as they were in `before`. */
+export function restoredPatch(before: GridRow, action: BatchAction): (row: GridRow) => GridRow {
+  const changed = changedReviewFields(action);
+  return (row) => {
+    const next: GridRow = { ...row, fields: { ...row.fields } };
+    if (changed.status || changed.report) next.reviewStatus = before.reviewStatus;
+    if (changed.report) next.fields.includeInReport = before.fields.includeInReport;
+    if (changed.tags) next.tags = [...before.tags];
+    return next;
+  };
+}

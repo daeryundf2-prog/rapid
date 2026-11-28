@@ -23,6 +23,7 @@ import {
   bytesFromHexRows,
   CHUNK_BYTES,
   formatOffset,
+  hexCursorSentence,
   parseOffsetInput,
   ROWS_PER_CHUNK,
   rowCountForSize,
@@ -76,6 +77,10 @@ export function HexView({ runId, path, size: declaredSize, highlight, staticRows
   });
   const [gotoText, setGotoText] = useState(formatOffset(initialCursor, size));
   const [gotoError, setGotoError] = useState<string | null>(null);
+  /** The analyst moved the cursor: from then on its position is read out (F26). */
+  const [moved, setMoved] = useState(false);
+  /** 문자 열 at narrow widths (F25): the character column hidden until asked for. */
+  const [showAscii, setShowAscii] = useState(false);
 
   useEffect(() => {
     alive.current = true;
@@ -210,6 +215,7 @@ export function HexView({ runId, path, size: declaredSize, highlight, staticRows
     if (size === 0) return;
     const clamped = Math.min(size - 1, Math.max(0, next));
     setCursor(clamped);
+    setMoved(true);
     setGotoText(formatOffset(clamped, size));
     ensureRowVisible(Math.floor(clamped / BYTES_PER_ROW));
   };
@@ -294,7 +300,7 @@ export function HexView({ runId, path, size: declaredSize, highlight, staticRows
   if (size === 0) return <p className="viewer-empty">빈 파일(0바이트)입니다.</p>;
 
   return (
-    <div className="hex-view">
+    <div className="hex-view" data-ascii={showAscii ? "show" : undefined}>
       <form className="hex-toolbar" onSubmit={onGoto}>
         <label className="hex-goto">
           <span>오프셋 이동</span>
@@ -312,9 +318,34 @@ export function HexView({ runId, path, size: declaredSize, highlight, staticRows
           이동
         </button>
         <span className="hex-status">
-          커서 {formatOffset(cursor, size)} ({cursor.toLocaleString("ko-KR")}) · 값{" "}
-          {typeof cursorValue === "number" ? `0x${byteHex(cursorValue)}` : "—"} · 크기{" "}
-          {size.toLocaleString("ko-KR")}바이트{staticBytes ? " (미리보기 범위만)" : ""}
+          <span>
+            커서 {formatOffset(cursor, size)} ({cursor.toLocaleString("ko-KR")})
+          </span>
+          <span>값 {typeof cursorValue === "number" ? `0x${byteHex(cursorValue)}` : "—"}</span>
+          <span>문자 {typeof cursorValue === "number" ? byteAscii(cursorValue) : "—"}</span>
+          <span>
+            크기 {size.toLocaleString("ko-KR")}바이트{staticBytes ? " (미리보기 범위만)" : ""}
+          </span>
+        </span>
+        <button
+          type="button"
+          className="viewer-button hex-ascii-toggle"
+          aria-pressed={showAscii}
+          onClick={() => setShowAscii((value) => !value)}
+        >
+          문자 열
+        </button>
+        {/* Polite cursor read-out (F26): offset, value, character, signature / record edges. */}
+        <span className="viewer-sr-only" aria-live="polite" data-testid="hex-live">
+          {moved
+            ? hexCursorSentence(
+                cursor,
+                size,
+                typeof cursorValue === "number" ? cursorValue : null,
+                hitByOffset.get(cursor),
+                highlight,
+              )
+            : ""}
         </span>
       </form>
       {gotoError ? (
@@ -358,7 +389,8 @@ export function HexView({ runId, path, size: declaredSize, highlight, staticRows
                   style={{ height: HEX_ROW_HEIGHT }}
                 >
                   <span role="rowheader" className="hex-offset">
-                    {formatOffset(base, size)}
+                    <span className="hex-0x">0x</span>
+                    {formatOffset(base, size).slice(2)}
                   </span>
                   <span role="gridcell" className="hex-bytes" aria-hidden="true">
                     {failed
