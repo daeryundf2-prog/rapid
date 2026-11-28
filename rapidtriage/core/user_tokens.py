@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +19,8 @@ TOKENS_FILE_ENV = "RAPIDTRIAGE_TOKENS_FILE"
 #: Same bound as the action API's ``actor.name``.
 ACTOR_NAME_MAX = 120
 AGENT_PREFIX = "agent:"
+#: Shorter tokens load with a warning (``secrets.token_urlsafe(18)`` gives 24 characters).
+TOKEN_MIN_LENGTH = 24
 
 
 class UserTokenFileError(RuntimeError):
@@ -32,6 +35,8 @@ def _digest(token: str) -> bytes:
 class UserTokens:
     #: ``(sha256(token), name)`` per user, file order.
     entries: tuple[tuple[bytes, str], ...]
+    #: Things to fix that do not stop the server (file mode, short tokens); never a token or name.
+    warnings: tuple[str, ...] = ()
 
     def actor_for(self, supplied: str) -> str | None:
         """Name of the user whose token is ``supplied`` (``None``: no user has it).
@@ -53,14 +58,21 @@ def configured_tokens_file(explicit: str | Path | None = None) -> Path | None:
 
 
 def load_user_tokens(path: Path) -> UserTokens:
-    """Parse ``path``; refuses empty names or tokens, repeated names or tokens, and an empty file."""
+    """Parse ``path``; refuses empty names or tokens, repeated names or tokens, and an empty file.
+
+    A UTF-8 BOM (Windows Notepad) is skipped. A name cannot hold ``@``: the action API writes
+    a person's agent as ``agent:<name>@<person>``. A file other accounts can read (POSIX) and
+    tokens shorter than :data:`TOKEN_MIN_LENGTH` are reported in ``warnings``.
+    """
     try:
-        text = path.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8-sig")
+        mode = stat.S_IMODE(path.stat().st_mode)
     except (OSError, UnicodeDecodeError) as exc:
         raise UserTokenFileError(f"{TOKENS_FILE_ENV} cannot be read ({type(exc).__name__})") from None
     entries: list[tuple[bytes, str]] = []
     names: dict[str, int] = {}
     tokens: dict[bytes, int] = {}
+    short: list[int] = []
     for number, raw_line in enumerate(text.splitlines(), start=1):
         line = raw_line.strip()
         if not line or line.startswith("#"):
@@ -71,6 +83,8 @@ def load_user_tokens(path: Path) -> UserTokens:
             raise UserTokenFileError(f"{TOKENS_FILE_ENV} line {number}: expected 'name=token'")
         if len(name) > ACTOR_NAME_MAX or any(not char.isprintable() for char in name):
             raise UserTokenFileError(f"{TOKENS_FILE_ENV} line {number}: a name is at most {ACTOR_NAME_MAX} printable characters")
+        if "@" in name:
+            raise UserTokenFileError(f"{TOKENS_FILE_ENV} line {number}: a name cannot contain '@' (agent:<name>@<person> uses it)")
         if name.casefold().startswith(AGENT_PREFIX) and not name[len(AGENT_PREFIX):].strip():
             raise UserTokenFileError(f"{TOKENS_FILE_ENV} line {number}: 'agent:' needs an agent name after it")
         if name.casefold() in names:
@@ -78,9 +92,17 @@ def load_user_tokens(path: Path) -> UserTokens:
         digest = _digest(token)
         if digest in tokens:
             raise UserTokenFileError(f"{TOKENS_FILE_ENV} line {number}: the token repeats line {tokens[digest]}")
+        if len(token) < TOKEN_MIN_LENGTH:
+            short.append(number)
         names[name.casefold()] = number
         tokens[digest] = number
         entries.append((digest, name))
     if not entries:
         raise UserTokenFileError(f"{TOKENS_FILE_ENV} has no 'name=token' line")
-    return UserTokens(tuple(entries))
+    warnings: list[str] = []
+    if os.name == "posix" and mode & 0o077:
+        warnings.append(f"{TOKENS_FILE_ENV} can be read by other accounts (mode {mode:o}); restrict it with chmod 600")
+    if short:
+        lines = ", ".join(str(number) for number in short)
+        warnings.append(f"{TOKENS_FILE_ENV} line(s) {lines}: tokens shorter than {TOKEN_MIN_LENGTH} characters are easy to guess")
+    return UserTokens(tuple(entries), tuple(warnings))

@@ -74,6 +74,8 @@ def run_web_server(
             "each person opens the console with their own token.",
             flush=True,
         )
+        for warning in users.warnings:
+            print(f"WARNING: {warning}", file=sys.stderr, flush=True)
     if remote and tokens_path is None:
         # --remote is the supported non-loopback path: a token is mandatory so
         # /api auth and the Host/Origin gates stay on. RAPIDTRIAGE_TOKEN is the

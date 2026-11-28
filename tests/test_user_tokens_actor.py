@@ -87,6 +87,8 @@ class UserTokenFileTests(unittest.TestCase):
             "repeated name": "kim=tok-secret-aaaa\nKIM=tok-secret-bbbb\n",
             "repeated token": "kim=tok-secret-aaaa\nlee=tok-secret-aaaa\n",
             "agent without a name": "agent:=tok-secret-aaaa\n",
+            # agent:<name>@<person> would no longer name one person (PR #92 review P3).
+            "@ in a name": "kim@lee=tok-secret-aaaa\n",
             "no entry": "# only a comment\n\n",
         }
         for label, text in cases.items():
@@ -97,6 +99,23 @@ class UserTokenFileTests(unittest.TestCase):
                 self.assertNotIn("tok-secret", str(raised.exception))
         with self.assertRaises(UserTokenFileError):
             load_user_tokens(Path(self.temp.name) / "missing")
+
+    def test_notepad_bom_short_tokens_and_open_mode(self) -> None:
+        # PR #92 review P3: a UTF-8 BOM made the first name "\ufeffkim" and refused the file.
+        long_token = "tok-kim-0123456789abcdef0123"
+        self.path.write_text(f"\ufeffkim={long_token}\nlee=short-token\n", encoding="utf-8")
+        self.path.chmod(0o600)
+        users = load_user_tokens(self.path)
+        self.assertEqual(users.actor_for(long_token), "kim")
+        self.assertEqual(len(users.warnings), 1)
+        self.assertIn("line(s) 2: tokens shorter than 24", users.warnings[0])
+        if os.name == "posix":
+            self.path.chmod(0o644)
+            warnings = load_user_tokens(self.path).warnings
+            self.assertTrue(any("chmod 600" in warning for warning in warnings), warnings)
+        for warning in load_user_tokens(self.path).warnings:
+            self.assertNotIn("short-token", warning)
+            self.assertNotIn("lee", warning)
 
     def test_web_server_prints_no_token_and_refuses_a_shared_token_beside_it(self) -> None:
         write_tokens(self.path)
@@ -116,6 +135,7 @@ class UserTokenFileTests(unittest.TestCase):
         self.assertEqual(captured["host"], "0.0.0.0")
         printed = out.getvalue() + err.getvalue()
         self.assertIn("per-user tokens for 3 users", printed)
+        self.assertIn("WARNING: RAPIDTRIAGE_TOKENS_FILE line(s) 3, 4, 5: tokens shorter than 24", err.getvalue())
         for token in TOKENS.values():
             self.assertNotIn(token, printed)
 
@@ -297,6 +317,10 @@ class ActionActorTests(unittest.TestCase):
             self.assertEqual(self.reviewer(None, kind="human", name="김분석"), "김분석")
             with self.assertRaises(HTTPException):
                 self.reviewer("kim", kind="human", name="agent:bot")
+            # "x@lee" from kim's token would read as lee's agent (PR #92 review P3).
+            for token_name in ("kim", None):
+                with self.subTest(token_name=token_name), self.assertRaises(HTTPException):
+                    self.reviewer(token_name, kind="agent", name="x@lee")
         with clean_env(RAPIDTRIAGE_REVIEWER="서버 검토자"):
             self.assertEqual(self.reviewer(None, kind="human", name="김분석"), "서버 검토자")
 

@@ -76,6 +76,9 @@ def actor_reviewer(actor: ActionActor) -> str:
     if identity and identity.casefold().startswith(AGENT_PREFIX):
         return identity
     if actor.kind == "agent":
+        if "@" in name:
+            # agent:<name>@<person> must name one person: "x@lee" sent by kim would read as lee's agent.
+            raise HTTPException(status_code=422, detail="에이전트 이름(actor.name)에는 '@'를 쓸 수 없습니다.")
         agent = f"{AGENT_PREFIX}{name or 'unnamed'}"
         return f"{agent}@{identity}" if identity else agent
     if name.casefold().startswith(AGENT_PREFIX):

@@ -66,7 +66,7 @@ curl -s -H "X-RapidTriage-Token: $TOKEN" -H "Content-Type: application/json" \
 - 적용은 런의 케이스 DB(`POST /api/case-db/review-batch`)를 그대로 쓴다. 케이스 DB가 아직 없으면 콘솔의 첫 표시처럼 만든다.
 - `actor.kind = "agent"`이면 검토 이력의 작성자가 `agent:<name>`으로 남는다(이름이 비면 `agent:unnamed`). 사람(`human`)은 서버의 `RAPIDTRIAGE_REVIEWER`, 그것이 없으면 `name`, 그것도 없으면 `local-user`로 남는다. `actor`를 생략하면 이름 없는 사람이다. 행의 이전 작성자를 물려받지 않는다.
 - 사람(`human`)의 `name`은 `agent:`로 시작할 수 없다(422). 사람의 표시가 에이전트 표시로 기록되지 않게 막는다.
-- 사람별 토큰(`RAPIDTRIAGE_TOKENS_FILE`)이 있으면 토큰이 작성자를 정한다. `agent:` 토큰은 `actor`와 상관없이 그 토큰 이름(예: `agent:triage-bot`)으로 남는다. 사람의 토큰은 `human`이면 그 사람 이름(`name`은 무시), `agent`이면 `agent:<name>@<사람 이름>`으로 남아 누가 돌린 에이전트인지 보인다. 응답의 `actor.kind`는 기록된 작성자 기준이다.
+- 사람별 토큰(`RAPIDTRIAGE_TOKENS_FILE`)이 있으면 토큰이 작성자를 정한다. `agent:` 토큰은 `actor`와 상관없이 그 토큰 이름(예: `agent:triage-bot`)으로 남는다. 사람의 토큰은 `human`이면 그 사람 이름(`name`은 무시), `agent`이면 `agent:<name>@<사람 이름>`으로 남아 누가 돌린 에이전트인지 보인다(표시 이력·감사 기록도 같은 이름). 에이전트 `name`에는 `@`를 쓸 수 없다(422). 응답의 `actor.kind`는 기록된 작성자 기준이다.
 
 적용 응답에는 `updated_count`와 `case_id`가 더해진다. 표시 이력은 `GET /api/runs/{run_id}/review-history?collection=timeline&locator=/events/12`로 본다.
 
