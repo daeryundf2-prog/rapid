@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import struct
 import tempfile
@@ -3387,6 +3388,38 @@ class RapidTriageApiTests(unittest.TestCase):
 
             self.assertEqual(response.status_code, 400)
             self.assertIn("Mount or export the evidence first", response.json()["detail"])
+
+    def test_create_run_rejects_a_missing_root_before_queueing(self) -> None:
+        # A typo in the remote console used to queue a run that died inside the engine with
+        # "[Errno 13] Permission denied" on the folder that simply is not there.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            client = api_test_client(RunJobStore())
+
+            response = client.post(
+                "/api/runs",
+                json={
+                    "root": str(Path(tmp_dir) / "no-such-folder"),
+                    "mode": "seizure",
+                    "read_only": True,
+                    "wait": False,
+                },
+            )
+
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("경로가 없습니다", response.json()["detail"])
+
+    def test_create_run_rejects_a_windows_path_on_a_posix_server(self) -> None:
+        if os.sep != "/":
+            self.skipTest("POSIX-only message")
+        client = api_test_client(RunJobStore())
+
+        response = client.post(
+            "/api/runs",
+            json={"root": "D:\\evidence\\case001", "mode": "seizure", "read_only": True, "wait": False},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("윈도우 경로입니다", response.json()["detail"])
 
     def test_bookmark_api_writes_run_case_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
