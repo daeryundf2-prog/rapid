@@ -5439,13 +5439,17 @@ class RapidTriageOpsTests(unittest.TestCase):
     def test_run_job_store_can_cancel_queued_and_retry_failed_runs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             store = RunJobStore(max_workers=1, state_path=Path(tmp_dir) / "runs.json")
-            failed = store.run_sync(
+            queued = store.submit(
                 RunRequest(
                     root=str(Path(tmp_dir) / "missing"),
                     mode="not-a-mode",
                     output_dir=str(Path(tmp_dir) / "run-out"),
                 )
             )
+            future = store.completion_future(queued.run_id)
+            assert future is not None
+            self.assertIsNotNone(future.exception(timeout=30))
+            failed = store.get(queued.run_id)
 
             retry = store.retry(failed.run_id)
             canceled = store.cancel(retry.run_id)
@@ -5456,9 +5460,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(retry.retry_attempt, 1)
             self.assertEqual(failed.error_type, "RunModeError")
             self.assertEqual(failed.to_dict()["error_type"], "RunModeError")
-            self.assertTrue(
-                any(item["event_type"] == "run-sync-exception-observed" for item in failed.transition_log)
-            )
+            self.assertTrue(any(item["event_type"] == "job-failed" for item in failed.transition_log))
             self.assertIn(canceled.status, {"queued", "running", "cancelled", "failed"})
             self.assertTrue(canceled.cancellation_requested)
             self.assertIn("#69", canceled.to_dict()["job_queue_assessment"]["commercial_gap_ids"])

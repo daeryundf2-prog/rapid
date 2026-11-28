@@ -46,6 +46,18 @@ OUTPUT_DIR_BUSY_MESSAGE = "같은 출력 폴더를 쓰는 런({})이 대기·실
 QUEUED_CONTROL_MESSAGE = "대기 중인 런은 시작한 뒤에 제어할 수 있습니다 (모두 취소는 바로 적용됩니다)"
 PLAN_NOT_WRITTEN_MESSAGE = "런이 아직 계획을 쓰지 않았습니다. 잠시 후 다시 시도하세요"
 SUPERSEDED_MESSAGE = "이 런의 출력 폴더는 이어서 실행한 런({})이 이어받았습니다. 진행 상황은 그 런에서 확인하세요"
+#: Runs executed at once by the served store; more runs wait ``queued`` (``wait: true`` included).
+RUN_WORKERS_ENV = "RAPIDTRIAGE_RUN_WORKERS"
+DEFAULT_RUN_WORKERS = 2
+
+
+def run_workers_from_env() -> int:
+    """``RAPIDTRIAGE_RUN_WORKERS`` (at least 1; unset or not a number -> ``DEFAULT_RUN_WORKERS``)."""
+    raw = os.environ.get(RUN_WORKERS_ENV, "").strip()
+    try:
+        return max(1, int(raw)) if raw else DEFAULT_RUN_WORKERS
+    except ValueError:
+        return DEFAULT_RUN_WORKERS
 
 
 def normalize_run_status(status: object) -> str:
@@ -490,30 +502,10 @@ class RunJobStore:
             self._futures[run_id] = future
         return job
 
-    def run_sync(self, request: RunRequest) -> RunJob:
-        job = RunJob(run_id=uuid.uuid4().hex[:12], request=request)
-        append_job_transition(job, event_type="job-queued", status="queued", message="Synchronous job submitted")
+    def completion_future(self, run_id: str) -> Future[dict[str, object]] | None:
+        """The queued run's executor future (done once the run ends); ``None`` for runs not queued here."""
         with self._lock:
-            self._raise_if_output_dir_busy_locked(job)
-            self._jobs[job.run_id] = job
-            self._write_state_locked()
-        try:
-            self._execute(job.run_id)
-        except Exception as exc:
-            with self._lock:
-                stored = self._jobs[job.run_id]
-                stored.error_type = stored.error_type or type(exc).__name__
-                stored.error = stored.error or str(exc)
-                append_job_transition(
-                    stored,
-                    event_type="run-sync-exception-observed",
-                    status=stored.status,
-                    step="triage",
-                    message=str(exc),
-                    details={"exception_type": type(exc).__name__},
-                )
-                self._write_state_locked()
-        return self.get(job.run_id)
+            return self._futures.get(run_id)
 
     def list(self) -> builtins.list[RunJob]:
         with self._lock:
@@ -2304,4 +2296,4 @@ def default_state_path() -> Path:
     return base / "rapidtriage" / "runs.json"
 
 
-default_job_store = RunJobStore(state_path=default_state_path())
+default_job_store = RunJobStore(max_workers=run_workers_from_env(), state_path=default_state_path())

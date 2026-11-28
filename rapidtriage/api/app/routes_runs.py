@@ -17,6 +17,7 @@ from fastapi.responses import (
     FileResponse,
     PlainTextResponse,
 )
+from starlette.concurrency import run_in_threadpool
 
 from ...core.artifact_profiles import payload_record_count
 from ...core.case_db.search import case_search_hit_type
@@ -116,6 +117,7 @@ from .row_conditions import (
     parse_row_conditions,
     rows_page,
 )
+from .run_wait import wait_for_run
 from .runops import (
     build_run_output_preview,
     build_run_viewer_workflow_validation,
@@ -346,14 +348,21 @@ def build_runs_router(
     router = APIRouter()
 
     @router.post("/api/runs", status_code=202)
-    def create_run(request: RunCreateRequest) -> dict[str, Any]:
-        validate_run_evidence_source(request.root)
-        run_request = run_request_from_body(request)
-        try:
-            job = store.run_sync(run_request) if request.wait else store.submit(run_request)
-        except RunOutputDirBusy as exc:
-            raise HTTPException(status_code=409, detail=str(exc))
-        return job.to_dict(include_summary=request.wait)
+    async def create_run(request: RunCreateRequest) -> dict[str, Any]:
+        def queue_run() -> str:
+            validate_run_evidence_source(request.root)
+            run_request = run_request_from_body(request)
+            try:
+                return store.submit(run_request).run_id
+            except RunOutputDirBusy as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+
+        run_id = await run_in_threadpool(queue_run)
+        ended = await wait_for_run(store, run_id) if request.wait else False
+        payload = await run_in_threadpool(lambda: store.get(run_id).to_dict(include_summary=ended))
+        if request.wait:
+            payload["wait_timed_out"] = not ended
+        return payload
 
 
     @router.post("/api/runs/import", status_code=201)

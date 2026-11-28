@@ -81,6 +81,14 @@
 
 ### Fixed
 
+- `wait: true` on `POST /api/runs` and `POST /api/cases/{id}/runs` ran the
+  whole run inside a request thread, so 40 concurrent requests exhausted the
+  server's thread pool and `/api/health`, `/` and the run list stopped
+  answering (remote-use review R3). The run now goes through the run worker
+  pool (`RAPIDTRIAGE_RUN_WORKERS`, default 2) and the request awaits it
+  without a thread for at most `RAPIDTRIAGE_RUN_WAIT_SECONDS` (default 60);
+  past that it answers with the run still `queued`/`running` and
+  `wait_timed_out: true` (`tests/test_rapidtriage_run_wait.py`).
 - Browser storage (Local Storage, IndexedDB) matches AI service hosts only at
   a host boundary, so GitHub Copilot storage (`api.githubcopilot.com`) is no
   longer labelled Microsoft Copilot and `box.ai` / `bayou.com` no longer read
