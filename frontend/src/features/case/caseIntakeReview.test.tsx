@@ -6,11 +6,11 @@
 import { cleanup, configure, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CaseDetail, CaseEvidence } from "../../api/cases";
-import { EvidenceHashButton } from "../dashboard/caseCards";
 import { buildCitation } from "../viewer/citation";
 import { AddRunDialog, CaseEditDialog, changedCaseFields, LinkCaseDialog } from "./CaseDialogs";
 import { adoptableEvidence, CaseWizard } from "./CaseWizard";
 import { CASE_LINK_LOADING_REASON, citationDisabledReason, resolveCaseLink, useCaseLinks } from "./caseLink";
+import { EvidenceHashButton } from "./IntegritySeal";
 import { summarizeRunRequest } from "./runSummary";
 import { mockFetch, type RecordedCall, renderWithQuery } from "./testUtils";
 import { newEvidenceDraft, outputDirReason, samePathText } from "./wizardModel";

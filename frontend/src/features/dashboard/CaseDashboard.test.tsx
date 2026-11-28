@@ -157,6 +157,8 @@ function routes(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   window.localStorage.clear();
+  // The card tests below read every card: open them all (a first visit folds most, see below).
+  window.localStorage.setItem("rt.dashboard.layout.v1", JSON.stringify({ collapsed: [], hidden: [] }));
   window.history.replaceState(null, "", "/v2/#/case/r1/intake");
   resetAppStore({ route: { runId: "r1", collection: "intake" } });
 });
@@ -313,5 +315,173 @@ describe("CaseDashboard (접수)", () => {
     expect(scan.getAttribute("aria-disabled")).toBe("true");
     fireEvent.click(scan);
     expect(window.location.hash).toBe("#/case/r1/intake");
+  });
+});
+
+const histogram = {
+  total_events: 9,
+  parsed_events: 9,
+  unparsed_events: 0,
+  bucket_seconds: 3600,
+  bucket_count: 3,
+  range_start: "2026-10-10T00:00:00Z",
+  range_end: "2026-10-12T02:00:00Z",
+  sources: [],
+  buckets: [
+    { index: 0, start: "2026-10-10T00:00:00Z", end: "2026-10-10T01:00:00Z", count: 2 },
+    { index: 1, start: "2026-10-12T01:00:00Z", end: "2026-10-12T02:00:00Z", count: 6 },
+    { index: 2, start: "2026-10-12T02:00:00Z", end: "2026-10-12T03:00:00Z", count: 1 },
+  ],
+};
+
+const overviewRoutes = {
+  "GET /api/runs/r1/timeline-histogram": histogram,
+  "GET /api/runs/r1/review-map": {
+    marks: [
+      { citation_id: "1", status: "relevant", include_in_report: false, collection: "timeline", tags: [] },
+      { citation_id: "2", status: "relevant", include_in_report: true, collection: "files", tags: [] },
+      { citation_id: "3", status: "excluded", include_in_report: false, collection: "indicators", tags: [] },
+    ],
+  },
+  "GET /api/runs/r1/problems": {
+    run_id: "r1",
+    total: 4,
+    by_level: { warning: 3, notice: 1 },
+    limit: 20,
+    groups: [],
+  },
+};
+
+describe("CaseDashboard 사건 개요 (F6/F7/F9)", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    useAppStore.getState().setTimezone("utc");
+  });
+
+  it("folds every card but evidence, problems and the settings summary on a first visit", async () => {
+    await renderDashboard(overviewRoutes);
+    const expanded = (title: string) =>
+      within(card(title)).getByRole("button", { name: title }).getAttribute("aria-expanded");
+    expect(expanded("증거 목록")).toBe("true");
+    expect(expanded("처리 문제")).toBe("true");
+    expect(expanded("처리 설정 스냅샷")).toBe("true");
+    for (const title of ["사건 정보", "증거 소스", "아티팩트 범주", "태그 및 리뷰 상태", "시작할 곳"])
+      expect(expanded(title)).toBe("false");
+    // Nothing is written until the examiner changes something.
+    expect(window.localStorage.getItem("rt.dashboard.layout.v1")).toBeNull();
+  });
+
+  it("says each status with its subject", async () => {
+    await renderDashboard(overviewRoutes);
+    const status = screen.getByTestId("dash-status");
+    const terms = within(status)
+      .getAllByRole("term")
+      .map((node) => node.textContent);
+    expect(terms).toEqual(["처리", "처리 오류"]);
+    expect(status.textContent).toContain("완료");
+    expect(status.textContent).toContain("0");
+  });
+
+  it("lists 먼저 할 일 that apply and routes each to its screen", async () => {
+    await renderDashboard(overviewRoutes);
+    const todo = screen.getByTestId("dash-todo");
+    await within(todo).findByText("판정하지 않은 지표 후보 1건");
+    expect(within(todo).getByText("처리 문제 3건 (오류와 경고)을 확인하세요")).toBeTruthy();
+    expect(within(todo).getByText("관련 있음 1건이 보고서에 포함되지 않았습니다")).toBeTruthy();
+    fireEvent.click(within(todo).getByRole("button", { name: "지표 후보 열기" }));
+    expect(window.location.hash).toBe("#/case/r1/explore/indicators");
+    fireEvent.click(within(todo).getByRole("button", { name: "검토 보드에서 보기" }));
+    const route = useAppStore.getState().route;
+    expect([route.collection, route.status, route.cf]).toEqual([
+      "review",
+      "relevant",
+      [{ col: "report", op: ":", value: "미포함" }],
+    ]);
+  });
+
+  it("says in one line when nothing needs doing", async () => {
+    await renderDashboard({
+      ...overviewRoutes,
+      "GET /api/runs/r1/summary": { summary: { counts: { ...counts, indicators: 0 } } },
+      "GET /api/runs/r1/review-map": { marks: [] },
+      "GET /api/runs/r1/problems": { run_id: "r1", total: 1, by_level: { notice: 1 }, limit: 20, groups: [] },
+    });
+    const todo = screen.getByTestId("dash-todo");
+    await within(todo).findByText(/지금 먼저 할 일이 없습니다/);
+    expect(within(todo).queryByRole("listitem")).toBeNull();
+  });
+
+  it("shows key numbers with their populations and opens each collection", async () => {
+    await renderDashboard(overviewRoutes);
+    const overview = screen.getByTestId("dash-overview");
+    const files = await within(overview).findByRole("button", { name: /^파일 후보 30건/ });
+    expect(files.textContent).toContain("전체 파일 수가 아님");
+    expect(within(overview).getByRole("button", { name: /^타임라인 이벤트 9건/ })).toBeTruthy();
+    expect(within(overview).getByRole("button", { name: /^아티팩트 125건/ })).toBeTruthy();
+    expect(within(overview).getByRole("button", { name: /^지표 후보 2건/ })).toBeTruthy();
+    // 판정 3 = 관련 있음 2 + 제외 1, with the breakdown linking to the review board.
+    expect(within(overview).getByRole("list", { name: "판정 내역" }).closest("li")?.textContent).toContain(
+      "3판정",
+    );
+    fireEvent.click(within(overview).getByRole("button", { name: "제외 1건 검토 보드에서 열기" }));
+    expect(window.location.hash).toBe("#/case/r1/review/board/excluded");
+    fireEvent.click(files);
+    expect(window.location.hash).toBe("#/case/r1/explore/files");
+  });
+
+  it("draws activity by date with counts and opens the busiest day in the timeline", async () => {
+    await renderDashboard(overviewRoutes);
+    const activity = screen.getByTestId("dash-activity");
+    const days = await within(activity).findByRole("list", { name: "날짜별 이벤트 수 (UTC)" });
+    expect(
+      within(days)
+        .getAllByRole("button")
+        .map((b) => b.getAttribute("aria-label")),
+    ).toEqual([
+      "10-10 (토) 2건, 타임라인 열기",
+      "10-11 (일) 0건, 타임라인 열기",
+      "10-12 (월) 7건, 타임라인 열기",
+    ]);
+    expect(activity.textContent).toContain("7건입니다 (전체 9건의 78%)");
+    expect(activity.textContent).toContain("01:00~01:59 (6건)");
+    fireEvent.click(within(activity).getByRole("button", { name: "이 날 타임라인 열기" }));
+    const route = useAppStore.getState().route;
+    expect(route.collection).toBe("timeline");
+    expect(route.from).toBe("2026-10-12T00:00:00.000Z");
+    expect(route.to).toBe("2026-10-12T23:59:59.999Z");
+  });
+
+  it("replaces the numbers with the failure and a way out when processing failed", async () => {
+    await renderDashboard({
+      ...overviewRoutes,
+      "GET /api/runs/r1": {
+        run_id: "r1",
+        status: "failed",
+        error: "디스크 이미지를 열 수 없습니다",
+        request: { root: "D:/ev/case1.E01", mode: "fraud" },
+        progress: { status: "failed", error_count: 2 },
+      },
+    });
+    const failed = screen.getByTestId("overview-failed");
+    expect(failed.textContent).toContain("처리가 실패했습니다");
+    expect(failed.textContent).toContain("디스크 이미지를 열 수 없습니다");
+    expect(within(failed).getByRole("button", { name: /다시 실행/ })).toBeTruthy();
+    fireEvent.click(within(failed).getByRole("button", { name: "처리 단계 보기" }));
+    expect(useAppStore.getState().route.collection).toBe("process");
+    expect(screen.getByTestId("dash-status").textContent).toContain("2");
+  });
+
+  it("says an empty run is empty instead of 0 0 0 0", async () => {
+    await renderDashboard({
+      ...overviewRoutes,
+      "GET /api/runs/r1/summary": {
+        summary: {
+          counts: { ...counts, artifacts: 0, files: 0, timeline_events: 0, indicators: 0, docs: 0 },
+        },
+      },
+    });
+    const empty = await screen.findByTestId("overview-empty");
+    expect(empty.textContent).toContain("이 런에서 수집된 항목이 없습니다");
+    expect(screen.getByTestId("dash-activity").textContent).toContain("시각이 있는 이벤트가 없습니다");
   });
 });

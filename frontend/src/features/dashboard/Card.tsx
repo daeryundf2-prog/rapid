@@ -27,13 +27,14 @@ function isLayout(value: unknown): value is CardLayout {
   );
 }
 
-export function readCardLayout(): CardLayout {
-  return readStoredJson(LAYOUT_KEY, isLayout) ?? { collapsed: [], hidden: [] };
+/** The stored layout; a first visit (nothing stored) starts with `defaultCollapsed` folded. */
+export function readCardLayout(defaultCollapsed: readonly string[] = []): CardLayout {
+  return readStoredJson(LAYOUT_KEY, isLayout) ?? { collapsed: [...defaultCollapsed], hidden: [] };
 }
 
 /** Collapse / hide state for every card, persisted in localStorage (never throws). */
-export function useCardLayout() {
-  const [layout, setLayout] = useState<CardLayout>(readCardLayout);
+export function useCardLayout(defaultCollapsed: readonly string[] = []) {
+  const [layout, setLayout] = useState<CardLayout>(() => readCardLayout(defaultCollapsed));
   const update = useCallback((next: (prev: CardLayout) => CardLayout) => {
     setLayout((prev) => {
       const value = next(prev);

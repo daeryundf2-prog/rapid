@@ -184,6 +184,8 @@ let unregister: () => void = () => {};
 beforeEach(() => {
   unregister = registerCaseCommands({ reportCandidates: 0 });
   window.localStorage.clear();
+  // Every card open (a first visit folds all but evidence, problems and the settings summary).
+  window.localStorage.setItem("rt.dashboard.layout.v1", JSON.stringify({ collapsed: [], hidden: [] }));
   window.history.replaceState(null, "", "/v2/#/case/r1/intake");
   resetAppStore({ route: { runId: "r1", collection: "intake" } });
 });
@@ -206,7 +208,9 @@ describe("접수 case cards (Q-X1/Q-X3/Q-X4)", () => {
     const rows = within(evidence).getAllByRole("row").slice(1);
     // Korean natural order: E-2 before E-10.
     expect(rows.map((row) => within(row).getAllByRole("rowheader")[0]?.textContent)).toEqual(["E-2", "E-10"]);
-    expect(within(rows[1] as HTMLElement).getByText("해시 불일치")).toBeTruthy();
+    // The hash state reads as shape + word from the integrity seal (F8), the server label as tooltip.
+    expect(within(rows[1] as HTMLElement).getByText("불일치")).toBeTruthy();
+    expect(within(rows[0] as HTMLElement).getByText("대조 일치")).toBeTruthy();
     expect(within(rows[0] as HTMLElement).getByRole("link", { name: "증거 E-2 런 r1 열기" })).toBeTruthy();
     fireEvent.click(within(evidence).getByRole("button", { name: "증거 E-10 런 추가" }));
     expect(useCaseDialogs.getState().open).toBe("run-add");
@@ -218,6 +222,13 @@ describe("접수 case cards (Q-X1/Q-X3/Q-X4)", () => {
     const snapshot = cardOf("처리 설정 스냅샷");
     expect(within(snapshot).getByText("런 시작 시 케이스에 고정된 처리 옵션입니다.")).toBeTruthy();
     expect(within(snapshot).getByText("500개")).toBeTruthy();
+    // One summary line; the 18-row table folds under 설정 전체 보기 (F6).
+    expect(within(snapshot).getByText(/^처리 모드 .+, 수집 계열 2종, 프로필 키워드 2개/)).toBeTruthy();
+    expect(
+      within(snapshot)
+        .getByText(/설정 전체 보기/)
+        .closest("details")?.open,
+    ).toBe(false);
     expect(within(snapshot).getByText("송금, invoice")).toBeTruthy();
 
     const problemCard = cardOf("처리 문제");
@@ -237,6 +248,27 @@ describe("접수 case cards (Q-X1/Q-X3/Q-X4)", () => {
     await waitFor(() => expect(within(memo).getByText("USB 2개 확인")).toBeTruthy());
     const post = calls.find((call) => call.method === "POST");
     expect(post?.body).toEqual({ text: "USB 2개 확인", author: "홍길동" });
+  });
+
+  it("puts a broken seal first in 먼저 할 일, opens the evidence card, and says 사건 with its status", async () => {
+    window.localStorage.clear();
+    mockFetch(routes(true));
+    renderWithQuery(<CaseDashboard runId="r1" />);
+    const todo = await screen.findByTestId("dash-todo");
+    const first = await within(todo).findByText("증거 무결성이 깨졌습니다: 기대값 불일치 1건");
+    expect(first.closest("li")?.getAttribute("data-severity")).toBe("danger");
+    expect(within(todo).getByText("처리 문제 3건 (오류와 경고)을 확인하세요")).toBeTruthy();
+    // A mismatch cannot be re-hashed away: the action opens the per-evidence details instead.
+    fireEvent.click(within(todo).getByRole("button", { name: "해시 자세히" }));
+    await waitFor(() =>
+      expect(
+        within(cardOf("증거 목록")).getByRole("button", { name: "증거 목록" }).getAttribute("aria-expanded"),
+      ).toBe("true"),
+    );
+    await waitFor(() => expect(screen.getByTestId("dash-status").textContent).toContain("사건진행 중"));
+    expect(
+      within(cardOf("사건 정보")).getByRole("button", { name: "사건 정보" }).getAttribute("aria-expanded"),
+    ).toBe("false");
   });
 
   it("a run without a case keeps working and offers 케이스에 연결 (Q-X2)", async () => {

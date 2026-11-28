@@ -1,0 +1,210 @@
+/* Hallmark · shape: app screen · posture: restrained */
+/* Evidence integrity seal (design overhaul F8). Shape + word carry the state; colour only repeats it.
+   Tokens only. */
+
+.integrity-seal-anchor {
+  flex: none;
+}
+
+.integrity-seal {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--control-h);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-body);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--motion) var(--ease);
+}
+
+.integrity-seal:hover,
+.integrity-seal[aria-expanded="true"] {
+  background: var(--bg-hover);
+}
+
+.integrity-seal:active {
+  background: var(--surface-3);
+}
+
+.integrity-seal:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: var(--focus-offset);
+}
+
+/* Broken: the frame itself turns to the error colour; computed: a dashed frame (not a match). */
+.integrity-seal[data-seal="broken"] {
+  border-color: var(--danger);
+}
+
+.integrity-seal[data-seal="computed"] {
+  border-style: dashed;
+}
+
+.seal-glyph {
+  flex: none;
+}
+
+[data-seal="broken"] > .seal-glyph {
+  color: var(--danger);
+}
+
+[data-seal="unverified"] > .seal-glyph {
+  color: var(--warn);
+}
+
+[data-seal="hashing"] > .seal-glyph {
+  color: var(--info);
+}
+
+[data-seal="matched"] > .seal-glyph {
+  color: var(--ok);
+}
+
+[data-seal="computed"] > .seal-glyph,
+[data-seal="na"] > .seal-glyph {
+  color: var(--text-muted);
+}
+
+.seal-stamp {
+  color: var(--text-muted);
+}
+
+.seal-word-short {
+  display: none;
+}
+
+/* Per-evidence state (evidence table, details): the same shape + word, inline. */
+.seal-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+
+.seal-popover {
+  width: 420px;
+  font-size: var(--fs-body);
+}
+
+.seal-title {
+  color: var(--text);
+  font-size: var(--fs-panel-title);
+  letter-spacing: 0;
+}
+
+.seal-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.seal-summary,
+.seal-message {
+  margin: 0;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.seal-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.seal-entry {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.seal-entry + .seal-entry {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line-subtle);
+}
+
+.seal-entry-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.seal-entry-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.seal-entry-file {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.seal-digests {
+  display: grid;
+  gap: var(--space-1);
+  width: 100%;
+  margin: 0;
+}
+
+.seal-digests > div {
+  display: grid;
+  grid-template-columns: 5.5em minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.seal-digests dt {
+  color: var(--text-muted);
+}
+
+.seal-digests dd {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+/* Phones: the seal stays in the top bar in its compact word; the details span the screen. */
+@media (max-width: 599.98px) {
+  .integrity-seal {
+    gap: 2px;
+    padding: 0 var(--space-1);
+  }
+
+  .integrity-seal .seal-word-long,
+  .integrity-seal .seal-stamp {
+    display: none;
+  }
+
+  .integrity-seal .seal-word-short {
+    display: inline;
+  }
+
+  .seal-popover {
+    position: fixed;
+    top: calc(48px + var(--space-1));
+    left: var(--space-2);
+    right: var(--space-2);
+    width: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .integrity-seal {
+    transition: none;
+  }
+}

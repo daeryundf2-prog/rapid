@@ -1,3 +1,4 @@
+/* Hallmark · shape: app screen · posture: restrained */
 /* 접수 dashboard (S7, plan §9 X1/X9/X10/X18). Tokens only; status colours from S10 with fallbacks. */
 
 .dash {
@@ -17,46 +18,320 @@
 
 .dash-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
-  margin-block-end: var(--space-3);
+  gap: var(--space-2) var(--space-3);
+  margin-block-end: var(--space-4);
 }
 
 .dash-head h1 {
   margin: 0;
   font-size: var(--fs-case);
   overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 
 .dash-head-action {
   margin-inline-start: auto;
 }
 
-.dash-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-3);
-  align-items: start;
+/* F9: every status names its subject (처리 / 처리 오류 / 사건) as its own labelled item. */
+.dash-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
 }
 
-@media (min-width: 1200px) {
-  .dash-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+.dash-status > div {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.dash-status dt {
+  color: var(--text-muted);
+}
+
+.dash-status dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.dash-status .num,
+.dash-figure-breakdown .num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- overview: 먼저 할 일 · 사건 개요 · 날짜별 활동 (F6/F7) --------------------------- */
+
+.dash-todo,
+.dash-overview,
+.dash-activity {
+  min-width: 0;
+}
+
+.dash-todo h2,
+.dash-overview h2,
+.dash-activity h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-screen-title);
+  font-weight: 600;
+  text-wrap: balance;
+}
+
+.dash-section-meta {
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+  font-weight: 400;
+}
+
+.dash-todo {
+  margin-block-end: var(--space-5);
+}
+
+.dash-todo-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-block-start: 1px solid var(--line-subtle);
+}
+
+.dash-todo-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) 0;
+  border-block-end: 1px solid var(--line-subtle);
+}
+
+.dash-todo-icon {
+  flex: none;
+}
+
+.dash-todo-item[data-severity="danger"] .dash-todo-icon {
+  color: var(--danger);
+}
+
+.dash-todo-item[data-severity="warn"] .dash-todo-icon {
+  color: var(--warn);
+}
+
+.dash-todo-item[data-severity="info"] .dash-todo-icon {
+  color: var(--info);
+}
+
+.dash-todo-text {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.dash-todo-none {
+  margin: 0;
+}
+
+.dash-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+  margin-block-end: var(--space-5);
+}
+
+@container dash (min-width: 900px) {
+  .dash-top {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
+}
+
+.dash-figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dash-figure {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  inline-size: 100%;
+  block-size: 100%;
+  padding: var(--space-2) var(--space-3);
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  font: inherit;
+  text-align: start;
+}
+
+button.dash-figure {
+  cursor: pointer;
+  transition: border-color var(--motion) var(--ease);
+}
+
+button.dash-figure:hover {
+  border-color: var(--line);
+}
+
+.dash-figure.is-marks {
+  grid-column: 1 / -1;
+}
+
+.dash-figure-value {
+  font-size: var(--fs-case);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.dash-figure-label {
+  font-weight: 600;
+}
+
+.dash-figure-pop {
+  color: var(--text-muted);
+  font-size: var(--fs-table-aux);
+}
+
+.dash-figure-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dash-figure-breakdown .num {
+  font-weight: 600;
+}
+
+.dash-state {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.dash-state-title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.dash-activity-lead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin-block-end: var(--space-2);
+}
+
+.dash-activity-lead p {
+  flex: 1 1 18rem;
+  margin: 0;
+}
+
+.dash-days {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dash-days.is-scroll {
+  max-block-size: 22rem;
+  overflow: auto;
+}
+
+.dash-day {
+  display: grid;
+  grid-template-columns: 7.5em minmax(0, 1fr) 5ch;
+  align-items: center;
+  gap: var(--space-2);
+  inline-size: 100%;
+  min-block-size: 26px;
+  padding: 2px var(--space-1);
+  color: var(--text);
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--motion) var(--ease);
+}
+
+.dash-day:hover {
+  background: var(--bg-hover);
+}
+
+.dash-day-count {
+  text-align: end;
+}
+
+.dash-day[data-busiest="true"] .dash-day-label,
+.dash-day[data-busiest="true"] .dash-day-count {
+  font-weight: 700;
+}
+
+.dash-day-track {
+  block-size: 10px;
+  background: var(--surface-2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.dash-day-fill {
+  display: block;
+  block-size: 100%;
+  background: var(--accent);
+}
+
+.dash-figure:focus-visible,
+.dash-day:focus-visible,
+.dash-link:focus-visible,
+.dash-bar:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: var(--focus-offset);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dash-day,
+  button.dash-figure {
+    transition: none;
+  }
+}
+
+/* --- detail cards: balanced columns, no empty cell under a short card (F6) ------------- */
+
+.dash-grid {
+  columns: 3 22rem;
+  column-gap: var(--space-3);
 }
 
 /* A narrow centre pane stays single-column even on a wide screen. */
 @container dash (max-width: 719px) {
   .dash-grid {
-    grid-template-columns: minmax(0, 1fr);
+    columns: 1;
   }
 }
 
+/* A card never splits across two columns of .dash-grid. */
 .dash-card {
   min-width: 0;
+  margin-block-end: var(--space-3);
   background: var(--bg-panel);
   border: 1px solid var(--line-subtle);
   border-radius: var(--radius);
+  break-inside: avoid;
+  container: dash-card / inline-size;
 }
 
 .dash-card-head {
@@ -203,6 +478,50 @@
 .dash-table .num {
   text-align: end;
   font-variant-numeric: tabular-nums;
+}
+
+/* Dashboard tables wrap instead of clipping at the card edge (the shared .data-table is one-line
+   for the legacy panes): long settings values and hash words stay readable (F6). */
+.data-table.dash-table th,
+.data-table.dash-table td {
+  block-size: auto;
+  min-block-size: var(--row-h);
+  padding-block: var(--space-1);
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+
+.dash-table .seal-item {
+  white-space: normal;
+}
+
+.dash-snapshot-summary {
+  margin: 0;
+}
+
+/* A narrow card (phones, single column) lists each evidence item as a block, not 5 squeezed
+   columns. */
+@container dash-card (max-width: 519px) {
+  .dash-case-evidence thead {
+    display: none;
+  }
+
+  .dash-case-evidence tbody tr {
+    display: grid;
+    gap: var(--space-1);
+    padding-block: var(--space-2);
+    border-block-end: 1px solid var(--line-subtle);
+  }
+
+  .dash-case-evidence .data-table tbody th,
+  .dash-case-evidence .data-table tbody td {
+    min-block-size: 0;
+    display: block;
+    padding: 0;
+    border: 0;
+  }
 }
 
 .dash-details summary {

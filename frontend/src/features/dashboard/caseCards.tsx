@@ -11,16 +11,13 @@ import { announce } from "../../a11y";
 import {
   addCaseNote,
   type CaseDetail,
-  type CaseEvidence,
   type CaseNotes,
   deleteCaseNote,
-  getCase,
   getRunProblems,
   koCompare,
   listCaseNotes,
   type ProcessingSnapshot,
   type RunProblems,
-  rehashEvidence,
 } from "../../api/cases";
 import { CommandButton } from "../../commands/CommandButton";
 import { StatusBadge } from "../../components/Badge";
@@ -28,6 +25,8 @@ import { ToneChip } from "../../components/ToneChip";
 import { serializeRoute } from "../../router";
 import { LEVEL_LABEL } from "../case/CaseDialogs";
 import { useCaseDialogs } from "../case/dialogs";
+import { EvidenceHashButton, ItemSealChip } from "../case/IntegritySeal";
+import { caseQueryKey, useCaseDetail } from "../case/integrity";
 import { ReasonButton } from "../case/ReasonButton";
 import { summarizeRunRequest } from "../case/runSummary";
 import { EVIDENCE_TYPE_LABEL } from "../case/wizardModel";
@@ -43,16 +42,6 @@ const LEVEL_TONE: Record<string, "danger" | "warn" | "info"> = {
   warning: "warn",
   notice: "info",
 };
-const HASH_TONE: Record<string, "ok" | "danger" | "warn" | "info" | ""> = {
-  matched: "ok",
-  computed: "ok",
-  mismatched: "danger",
-  failed: "danger",
-  interrupted: "warn",
-  hashing: "info",
-};
-
-export const caseQueryKey = (caseId: string) => ["case", caseId] as const;
 export const caseNotesQueryKey = (caseId: string) => ["case-notes-db", caseId] as const;
 
 /** Case-side queries of the dashboard (the snapshot query is shared with CaseFeature's link store). */
@@ -62,19 +51,7 @@ export function useCaseIntakeData(
   runFinished: boolean,
 ) {
   const caseId = snapshot?.source === "case-db" ? snapshot.case_id : null;
-  const detail = useQuery({
-    queryKey: caseQueryKey(caseId ?? ""),
-    queryFn: () => getCase(caseId as string),
-    enabled: Boolean(caseId),
-    retry: false,
-    // Hash verification and sibling runs change in the background.
-    refetchInterval: (q) =>
-      q.state.data?.evidence.some(
-        (e) => e.hash_status === "hashing" || e.runs.some((r) => isActive(r.status)),
-      )
-        ? 3000
-        : false,
-  });
+  const detail = useCaseDetail(caseId);
   const notes = useQuery({
     queryKey: caseNotesQueryKey(caseId ?? ""),
     queryFn: () => listCaseNotes(caseId as string),
@@ -91,10 +68,6 @@ export function useCaseIntakeData(
     snapshot?.evidence?.evidence_number ?? snapshot?.snapshot.evidence?.evidence_number ?? "",
   );
   return { caseId, evidenceNumber, detail, notes, problems };
-}
-
-function isActive(status: string): boolean {
-  return status === "queued" || status === "running";
 }
 
 // --- 사건 정보 -------------------------------------------------------------------
@@ -119,7 +92,7 @@ export function CaseInfoCard({ detail }: { detail: CaseDetail }) {
     ["검사관", detail.examiner],
     ["의뢰처", detail.requester],
     ["소속", detail.organization],
-    ["상태", detail.status === "closed" ? "종결" : "진행 중"],
+    ["사건 상태", detail.status === "closed" ? "종결" : "진행 중"],
     ["설명", detail.description],
     ["케이스 폴더", detail.case_root],
     ["인용 ID 접두", detail.citation_prefix],
@@ -148,38 +121,6 @@ export function CaseInfoCard({ detail }: { detail: CaseDetail }) {
 
 // --- 증거 목록 -------------------------------------------------------------------
 
-/** Hash statuses a file evidence item can be hashed (again) from: never asked, failed, cut by a restart. */
-const REHASH_FROM = new Set(["not-requested", "failed", "interrupted"]);
-
-/** "해시 계산" / "해시 다시 계산" for a file evidence item (POST …/evidence/{eid}/hash). */
-export function EvidenceHashButton({ caseId, item }: { caseId: string; item: CaseEvidence }) {
-  const client = useQueryClient();
-  const rehash = useMutation({
-    mutationFn: () => rehashEvidence(caseId, item.citation_id),
-    onSuccess: () => {
-      void client.invalidateQueries({ queryKey: caseQueryKey(caseId) });
-      announce(`증거 ${item.evidence_number} 해시 계산을 시작했습니다`);
-    },
-    onError: (error: unknown) =>
-      announce(`해시 계산 실패: ${error instanceof Error ? error.message : String(error)}`, {
-        politeness: "assertive",
-      }),
-  });
-  // Folder evidence (no size) is never hashed; a running hash cannot be restarted.
-  if (item.size_bytes === null || !REHASH_FROM.has(item.hash_status)) return null;
-  const label = item.hash_status === "not-requested" ? "해시 계산" : "해시 다시 계산";
-  return (
-    <ReasonButton
-      className="button ghost"
-      aria-label={`증거 ${item.evidence_number} ${label}`}
-      reason={rehash.isPending ? "요청 중입니다" : undefined}
-      onClick={() => rehash.mutate()}
-    >
-      {label}
-    </ReasonButton>
-  );
-}
-
 export function CaseEvidenceCard({ detail, currentRunId }: { detail: CaseDetail; currentRunId: string }) {
   const openDialog = useCaseDialogs((s) => s.openDialog);
   const evidence = [...detail.evidence].sort((a, b) => koCompare(a.evidence_number, b.evidence_number));
@@ -191,8 +132,8 @@ export function CaseEvidenceCard({ detail, currentRunId }: { detail: CaseDetail;
         <table className="data-table dash-table" aria-label="증거 목록">
           <thead>
             <tr>
-              <th scope="col">증거 번호</th>
-              <th scope="col">종류 · 이름</th>
+              <th scope="col">번호</th>
+              <th scope="col">증거</th>
               <th scope="col">해시</th>
               <th scope="col">런</th>
               <th scope="col">
@@ -205,17 +146,17 @@ export function CaseEvidenceCard({ detail, currentRunId }: { detail: CaseDetail;
               <tr key={item.citation_id}>
                 <th scope="row">{item.evidence_number}</th>
                 <td>
-                  <span>{EVIDENCE_TYPE_LABEL[item.source_type] ?? item.source_type}</span>
-                  <span className="dash-note"> · {item.display_name}</span>
+                  <span>{item.display_name}</span>{" "}
+                  <span className="dash-note">
+                    {EVIDENCE_TYPE_LABEL[item.source_type] ?? item.source_type}
+                  </span>
                   <div className="dash-note mono break-all" title={item.path}>
                     {item.path}
                     {item.size_bytes !== null ? ` (${formatBytes(item.size_bytes)})` : ""}
                   </div>
                 </td>
                 <td>
-                  <ToneChip tone={HASH_TONE[item.hash_status] ?? ""} title={item.hash_message || undefined}>
-                    {item.hash_status_label}
-                  </ToneChip>
+                  <ItemSealChip item={item} />
                   <EvidenceHashButton caseId={detail.case_id} item={item} />
                 </td>
                 <td>
@@ -284,6 +225,18 @@ const ORIGIN_NOTE: Record<string, string> = {
   "run-request": "케이스 없이 실행된 런 — 런 요청 기준입니다 (케이스에 고정되지 않음).",
 };
 
+/** One-line reading of the snapshot (the full table folds under 설정 전체 보기). */
+export function snapshotSummary(snapshot: ProcessingSnapshot): string {
+  const body = snapshot.snapshot;
+  const mode = summarizeRunRequest(body.request ?? null).find((row) => row.key === "mode")?.value;
+  const parts = [
+    mode ? `처리 모드 ${mode}` : "처리 모드 기록 없음",
+    `수집 계열 ${n(body.profile?.artifacts_kinds?.length ?? 0)}종`,
+    `프로필 키워드 ${n(body.profile?.keywords?.length ?? 0)}개`,
+  ];
+  return `${parts.join(", ")} (${formatTime(snapshot.captured_at)} 고정)`;
+}
+
 export function SnapshotCard({ snapshot }: { snapshot: ProcessingSnapshot }) {
   const body = snapshot.snapshot;
   const rows = summarizeRunRequest(body.request ?? null);
@@ -291,52 +244,56 @@ export function SnapshotCard({ snapshot }: { snapshot: ProcessingSnapshot }) {
   const kinds = body.profile?.artifacts_kinds ?? [];
   return (
     <div className="dash-snapshot" data-testid="snapshot">
-      <p className="dash-note">{ORIGIN_NOTE[String(body.origin)] ?? ORIGIN_NOTE["run-request"]}</p>
-      <dl className="detail-grid">
-        <dt>고정 시각</dt>
-        <dd>{formatTime(snapshot.captured_at)}</dd>
-        {body.evidence?.evidence_number ? (
-          <>
-            <dt>증거</dt>
-            <dd>
-              {body.evidence.evidence_number} <span className="mono break-all">{body.evidence.path}</span>
-            </dd>
-          </>
-        ) : body.request?.root ? (
-          <>
-            <dt>증거 경로</dt>
-            <dd className="mono break-all">{String(body.request.root)}</dd>
-          </>
-        ) : null}
-        {keywords.length ? (
-          <>
-            <dt>프로필 키워드</dt>
-            <dd>{[...keywords].sort(koCompare).join(", ")}</dd>
-          </>
-        ) : null}
-        {kinds.length ? (
-          <>
-            <dt>수집 계열</dt>
-            <dd>{n(kinds.length)}종</dd>
-          </>
-        ) : null}
-        {body.file ? (
-          <>
-            <dt>스냅숏 파일</dt>
-            <dd className="mono break-all">{body.file}</dd>
-          </>
-        ) : null}
-      </dl>
-      <table className="data-table dash-table" aria-label="처리 설정 스냅샷">
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.key} data-key={row.key}>
-              <th scope="row">{row.label}</th>
-              <td className={row.key === "output_dir" ? "mono break-all" : undefined}>{row.value}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <p className="dash-snapshot-summary">{snapshotSummary(snapshot)}</p>
+      <details className="dash-details">
+        <summary>설정 전체 보기 ({n(rows.length)}항목)</summary>
+        <p className="dash-note">{ORIGIN_NOTE[String(body.origin)] ?? ORIGIN_NOTE["run-request"]}</p>
+        <dl className="detail-grid">
+          <dt>고정 시각</dt>
+          <dd>{formatTime(snapshot.captured_at)}</dd>
+          {body.evidence?.evidence_number ? (
+            <>
+              <dt>증거</dt>
+              <dd>
+                {body.evidence.evidence_number} <span className="mono break-all">{body.evidence.path}</span>
+              </dd>
+            </>
+          ) : body.request?.root ? (
+            <>
+              <dt>증거 경로</dt>
+              <dd className="mono break-all">{String(body.request.root)}</dd>
+            </>
+          ) : null}
+          {keywords.length ? (
+            <>
+              <dt>프로필 키워드</dt>
+              <dd>{[...keywords].sort(koCompare).join(", ")}</dd>
+            </>
+          ) : null}
+          {kinds.length ? (
+            <>
+              <dt>수집 계열</dt>
+              <dd>{n(kinds.length)}종</dd>
+            </>
+          ) : null}
+          {body.file ? (
+            <>
+              <dt>스냅숏 파일</dt>
+              <dd className="mono break-all">{body.file}</dd>
+            </>
+          ) : null}
+        </dl>
+        <table className="data-table dash-table" aria-label="처리 설정 스냅샷">
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.key} data-key={row.key}>
+                <th scope="row">{row.label}</th>
+                <td className={row.key === "output_dir" ? "mono break-all" : undefined}>{row.value}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </details>
     </div>
   );
 }
