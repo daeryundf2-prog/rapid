@@ -111,6 +111,10 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     "agent-tool-result": (F("timestamp_utc", "tool-result"),),
     "agent-log": (F("timestamp_utc", "agent-logged"),),
     "macos-unified-log-event": (F("timestamp", "logged"),),
+    # Cataly hub store and event log (artifacts/ai_agent_cataly.py).
+    "agent-lane": (F("timestamp_utc", "opened"), F("closed_utc", "closed")),
+    "agent-request": (F("timestamp_utc", "opened"), F("closed_utc", "closed")),
+    "agent-hub-event": (F("timestamp_utc", "event"),),
     # --- execution -------------------------------------------------------
     "prefetch-file": (
         F("last_run_times[*]", "run"),

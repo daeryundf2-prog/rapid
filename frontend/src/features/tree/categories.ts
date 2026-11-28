@@ -59,6 +59,7 @@ export const KIND_CATEGORY: Readonly<Record<string, KindMeta>> = {
   "omp-pi": { category: "application-usage", icon: "app" },
   "editor-chat": { category: "application-usage", icon: "app" },
   "agent-mcp": { category: "application-usage", icon: "app" },
+  "cataly-hub": { category: "application-usage", icon: "app" },
   browser: { category: "web", icon: "globe" },
   // R5 L3: BitTorrent clients / .torrent / eMule.
   p2p: { category: "web", icon: "globe" },

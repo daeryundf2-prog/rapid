@@ -122,6 +122,9 @@ export const TIMESTAMP_KIND_LABELS: Readonly<Record<string, string>> = {
   server: "서버 수신",
   start: "시작",
   end: "종료",
+  // Agent hub lanes and requests (artifacts/ai_agent_cataly.py).
+  opened: "열림",
+  closed: "닫힘",
   // AI coding-agent transcripts (artifacts/ai_agents.py).
   "tool-call": "도구 호출",
   "tool-result": "도구 결과",

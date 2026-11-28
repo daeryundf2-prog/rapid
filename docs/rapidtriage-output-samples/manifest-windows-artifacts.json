@@ -183,6 +183,13 @@
       "artifacts": []
     },
     {
+      "name": "cataly-hub",
+      "description": "Cataly 허브 기록",
+      "target_platform": "any",
+      "supported": true,
+      "artifacts": []
+    },
+    {
       "name": "kakaotalk-macos-database-inventory",
       "description": "macOS KakaoTalk container and database inventory with SQLite openability checks",
       "target_platform": "macos",
