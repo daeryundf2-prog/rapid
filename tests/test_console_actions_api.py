@@ -16,9 +16,9 @@ from pathlib import Path
 from unittest import mock
 
 try:
-    from fastapi.testclient import TestClient  # noqa: F401
+    from fastapi.testclient import TestClient
 
-    from rapidtriage.api.app import routes_actions
+    from rapidtriage.api.app import create_app, routes_actions
     from rapidtriage.core.case_db.run_locator import parse_ordinal
     from rapidtriage.core.jobs import RunJobStore
     from tests.test_rapidtriage_api import api_test_client
@@ -46,7 +46,8 @@ class ActionApiTests(unittest.TestCase):
         root = base / "case-root"
         root.mkdir()
         build_run_fixture(root)
-        cls.client = api_test_client(RunJobStore(), case_db_roots=[cls.temp.name])
+        cls.store = RunJobStore()
+        cls.client = api_test_client(cls.store, case_db_roots=[cls.temp.name])
         response = cls.client.post(
             "/api/runs",
             json={"root": str(root), "mode": "fraud", "output_dir": str(base / "run-out"), "read_only": True, "wait": True},
@@ -185,6 +186,34 @@ class ActionApiTests(unittest.TestCase):
                 self.assertEqual(applied.status_code, 200, applied.text)
                 self.assertEqual(applied.json()["actor"]["reviewer"], author)
                 self.assertEqual(self.client.get(history_url).json()["entries"][0]["author"], author)
+
+    def test_agent_mark_history_keeps_the_agent_when_the_server_names_a_person(self) -> None:
+        # PR #92 review P1: the batch re-resolved the author, so the server's person replaced the agent.
+        index, _ = self.timed[-6]
+        selection = {"rows": [{"collection": "timeline", "locator": f"/events/{index}"}]}
+        history_url = f"/api/runs/{self.run_id}/review-history?collection=timeline&locator=/events/{index}"
+        agent = {"kind": "agent", "name": "triage-bot"}
+        with mock.patch.dict(os.environ, {"RAPIDTRIAGE_REVIEWER": "kim"}):
+            applied = self._mark(selection, {"status": "relevant"}, dry_run=False, actor=agent)
+        self.assertEqual(applied.status_code, 200, applied.text)
+        self.assertEqual(applied.json()["actor"]["reviewer"], "agent:triage-bot")
+        self.assertEqual(self.client.get(history_url).json()["entries"][0]["author"], "agent:triage-bot")
+
+        with tempfile.TemporaryDirectory() as temp, mock.patch.dict(os.environ):
+            for key in ("RAPIDTRIAGE_REVIEWER", "RAPIDTRIAGE_AUTH_TOKEN", "RAPIDTRIAGE_DISABLE_AUTH"):
+                os.environ.pop(key, None)
+            tokens = Path(temp) / "tokens"
+            tokens.write_text("kim=tok-kim-0123456789abcdef0123\n", encoding="utf-8")
+            app = create_app(self.store, tokens_file=tokens, case_db_roots=[self.temp.name])
+            with TestClient(app, headers={"X-RapidTriage-Token": "tok-kim-0123456789abcdef0123"}) as kim:
+                applied = kim.post(
+                    f"/api/runs/{self.run_id}/actions/mark",
+                    json={"selection": selection, "mark": {"status": "needs-review"}, "dry_run": False, "actor": agent},
+                )
+                self.assertEqual(applied.status_code, 200, applied.text)
+                self.assertEqual(applied.json()["actor"]["reviewer"], "agent:triage-bot@kim")
+                entries = kim.get(history_url).json()["entries"]
+        self.assertEqual([entry["author"] for entry in entries[:2]], ["agent:triage-bot@kim", "agent:triage-bot"])
 
     def test_a_human_cannot_claim_an_agent_name(self) -> None:
         index, _ = self.timed[-3]

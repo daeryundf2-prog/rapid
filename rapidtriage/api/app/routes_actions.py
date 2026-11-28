@@ -39,6 +39,7 @@ from .actions import (
     resolve_selection,
 )
 from .helpers import (
+    decided_author,
     get_job,
     get_named_output,
     get_output_path,
@@ -254,16 +255,18 @@ def build_actions_router(store: RunJobStore, case_db_router: APIRouter) -> APIRo
         if request.dry_run:
             return payload
         handle = ensure_case_db(run_id, RunCaseDbEnsureRequest())
-        result = review_batch(
-            CaseDbReviewBatchRequest(
-                database=str(handle["database"]),
-                case_id=str(handle["case_id"]),
-                run_id=run_id,
-                targets=resolved.targets,
-                reviewer=reviewer,
-                **mark,
+        # The author is decided above (agent:<name>[@<person>]); the batch must not resolve it again.
+        with decided_author(reviewer):
+            result = review_batch(
+                CaseDbReviewBatchRequest(
+                    database=str(handle["database"]),
+                    case_id=str(handle["case_id"]),
+                    run_id=run_id,
+                    targets=resolved.targets,
+                    reviewer=reviewer,
+                    **mark,
+                )
             )
-        )
         payload["case_id"] = handle["case_id"]
         payload["updated_count"] = result.get("updated_count", 0)
         return payload
