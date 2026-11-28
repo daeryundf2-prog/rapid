@@ -13,7 +13,8 @@ import "./review.css";
 export type BoardTimeKind = "event" | "file-mtime" | "none";
 
 export const FILE_TIME_QUALIFIER = "파일 수정";
-export const NO_EVENT_TIME_REASON = "사건 시각 없음: 이 대상(파일·문서·분석 결과)은 기록에 사건 시각이 없습니다.";
+export const NO_EVENT_TIME_REASON =
+  "사건 시각 없음: 이 대상(파일·문서·분석 결과)은 기록에 사건 시각이 없습니다.";
 export const FILE_TIME_REASON =
   "사건 시각이 아니라 사본 파일의 수정 시각(mtime)입니다. 파일 대상에는 사건 시각이 없습니다.";
 

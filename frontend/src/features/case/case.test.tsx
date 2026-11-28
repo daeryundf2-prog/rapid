@@ -287,9 +287,9 @@ describe("ReportDialog / export commands", () => {
     const withZero = buildCaseCommands({ reportCandidates: 0 });
     const reason = (id: string, over = {}) =>
       withZero.find((c) => c.id === id)?.disabledReason?.({ ...ctx, ...over });
-    // The reason says what to do (검토 보드 › I), not only that nothing is marked (F16).
+    // The reason names the real way to include (row menu › 보고서 포함 표시; no key on main), F16.
     expect(NO_CANDIDATES_REASON).toBe(
-      "보고서에 포함한 항목이 0건입니다. 검토 보드에서 I(보고서 포함)로 넣으세요",
+      "보고서에 포함한 항목이 0건입니다. 검토 보드에서 행의 ⋯ 메뉴(행 메뉴) › ‘보고서 포함 표시’로 넣으세요",
     );
     expect(reason("export.case-report")).toBe(NO_CANDIDATES_REASON);
     expect(reason("export.reviewer-bundle")).toBe(NO_CANDIDATES_REASON);

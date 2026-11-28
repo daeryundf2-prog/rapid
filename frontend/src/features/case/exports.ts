@@ -64,7 +64,7 @@ export interface ReportMeta {
 }
 
 export const NO_CANDIDATES_REASON =
-  "보고서에 포함한 항목이 0건입니다. 검토 보드에서 I(보고서 포함)로 넣으세요";
+  "보고서에 포함한 항목이 0건입니다. 검토 보드에서 행의 ⋯ 메뉴(행 메뉴) › ‘보고서 포함 표시’로 넣으세요";
 
 export function exportDisabledReason(
   action: ExportAction,

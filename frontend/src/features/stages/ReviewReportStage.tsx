@@ -403,7 +403,7 @@ export function ReportPage() {
               <strong className="report-check-count">{n(check.included.length)}건</strong>
               {check.included.length === 0 ? (
                 <span className="report-check-help">
-                  아직 없습니다. 검토 보드에서 행을 고르고 I(보고서 포함)로 넣습니다.
+                  아직 없습니다. 검토 보드에서 행의 ⋯ 메뉴(행 메뉴) › ‘보고서 포함 표시’로 넣습니다.
                 </span>
               ) : null}
               {bookmarkIncluded > 0 ? (
