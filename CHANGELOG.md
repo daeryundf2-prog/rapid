@@ -97,10 +97,18 @@
   the error red, 제외 a neutral grey, and `npm run check:contrast` now also
   checks that the five status colours stay apart from each other and from
   danger, warn and accent under deuteranopia and protanopia (Machado 2009,
-  CIEDE2000 ≥ 10; ≥ 20 for normal vision). A click on a row moves the cursor
+  CIEDE2000 ≥ 10; ≥ 20 for normal vision), from each other under tritanopia
+  (≥ 10), and that `--ok` and the tag colours are no near-twin of a status
+  (≥ 10; dark 재검토, `--ok` and tags 3/4/6 and light `--ok` and tags 3/7
+  moved slightly). The viewer's status chip shows the glyph too, and a row
+  marked only by a 북마크 tag shows the ribbon in cards, thumbnails and chat
+  as in the grid. A click on a row moves the cursor
   without ticking its checkbox (selecting is the checkbox, Space, Ctrl-click
   or Shift-click), and the cursor row has a 2 px accent ring that also shows
-  on selected rows. Body, panel and dialog text is 14 px, table cells stay
+  on selected rows; the row menu's 선택 행 OCR 실행 acts on the right-clicked
+  row unless the ticked rows include it, like its review items. The select
+  column is 62 px, so 1280 px beside the viewer still shows 크기. Body, panel
+  and dialog text is 14 px, table cells stay
   13 px, titles step 14, 18 and 24 px (`--fs-table`, `--fs-figure` added),
   the dark surfaces are further apart and input borders are at least 3:1
   (`frontend/src/tokens/tokens.test.ts`, `components/VerdictGlyph.test.tsx`).
