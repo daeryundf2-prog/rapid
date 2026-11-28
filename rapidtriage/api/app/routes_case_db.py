@@ -16,11 +16,13 @@ from ...core.case_catalog import (
     default_case_catalog_path,
 )
 from ...core.case_db import (
+    ACTIVE_MARK_SQL,
+    EXPECTATION_KEYS,
     CaseDatabase,
     CaseDatabaseError,
+    ReviewConflictError,
 )
 from ...core.case_db.run_locator import (
-    ACTIVE_MARK_SQL,
     RunLocatorIndex,
     canonical_run_case,
 )
@@ -62,7 +64,11 @@ from .models import (
     SampleCaseRunRequest,
 )
 from .routes_review_tools import apply_review_tag_batch
-from .run_review import review_map_entries, split_batch_targets
+from .run_review import (
+    review_conflict_http_error,
+    review_map_entries,
+    split_batch_targets,
+)
 
 
 def _summary_output_dir(summary: dict[str, object]) -> Path | None:
@@ -77,17 +83,24 @@ def resolve_run_locator_targets(
     resolve: Callable[[str, str, str], tuple[str, str] | None],
 ) -> list[dict[str, str]]:
     """``{collection, kind?, locator}`` targets -> ``{target_type, target_id}`` by ``resolve``
-    (``RunLocatorIndex.resolve``); any unresolved one is a 400 naming the first ten."""
+    (``RunLocatorIndex.resolve``); any unresolved one is a 400 naming the first ten. The resolved
+    target keeps its locator (the answer's ``targets`` tell the console which row became which
+    mark) and its expectation (``expected_version`` / ``expected_updated_at``, F14)."""
     resolved: list[dict[str, str]] = []
     unresolved: list[str] = []
     for target in located:
         collection = target.get("collection") or target.get("source") or ""
         locator = target.get("locator") or target.get("pointer") or ""
-        hit = resolve(collection, locator, target.get("kind") or "")
+        kind = target.get("kind") or ""
+        hit = resolve(collection, locator, kind)
         if hit is None:
-            unresolved.append(f"{collection}:{target.get('kind') or ''}:{locator}")
-        else:
-            resolved.append({"target_type": hit[0], "target_id": hit[1]})
+            unresolved.append(f"{collection}:{kind}:{locator}")
+            continue
+        entry = {"target_type": hit[0], "target_id": hit[1], "collection": collection, "kind": kind, "locator": locator}
+        for key in EXPECTATION_KEYS:
+            if target.get(key) is not None:
+                entry[key] = target[key]
+        resolved.append(entry)
     if unresolved:
         raise HTTPException(
             status_code=400,
@@ -291,7 +304,11 @@ def build_case_db_router(
                 priority=request.priority,
                 due_at=request.due_at,
                 include_in_report=request.include_in_report,
+                expected_updated_at=request.expected_updated_at,
+                expected_version=request.expected_version,
             )
+        except ReviewConflictError as exc:
+            raise review_conflict_http_error(exc) from exc
         except CaseDatabaseError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
@@ -371,42 +388,42 @@ def build_case_db_router(
     ) -> dict[str, object]:
         """Console marks: omitted ``tags`` keep the row's tags; ``add_tags`` merges.
 
-        The merge happens inside ``mark_review``'s write transaction, so concurrent
-        ``add_tags`` on one row keep every tag (R4).
+        The merge happens inside the batch's write transaction, so concurrent
+        ``add_tags`` on one row keep every tag (R4); a conflict writes nothing (F14).
         """
-        reviewer = resolve_request_reviewer(request.reviewer)
-        marks: list[dict[str, object]] = []
-        for target in targets:
-            marks.append(
-                database.mark_review(
-                    case_id=request.case_id,
-                    target_type=target["target_type"],
-                    target_id=target["target_id"],
-                    status=request.status,
-                    verification_status=request.verification_status,
-                    tags=list(request.tags) if request.tags is not None else None,
-                    add_tags=request.add_tags,
-                    note=request.note,
-                    reviewer=reviewer,
-                    assignee=request.assignee,
-                    priority=request.priority,
-                    due_at=request.due_at,
-                    include_in_report=request.include_in_report,
-                )
-            )
+        result = database.mark_reviews_batch(
+            case_id=request.case_id,
+            targets=targets,
+            status=request.status,
+            verification_status=request.verification_status,
+            tags=request.tags,
+            add_tags=request.add_tags,
+            keep_tags=True,
+            note=request.note,
+            reviewer=resolve_request_reviewer(request.reviewer),
+            assignee=request.assignee,
+            priority=request.priority,
+            due_at=request.due_at,
+            include_in_report=request.include_in_report,
+        )
         return {
             "command": "case-review-batch",
             "database": str(database.path),
             "case_id": request.case_id,
             "run_id": request.run_id,
-            "updated_count": len(marks),
+            "updated_count": result["updated_count"],
             "targets": targets,
-            "marks": marks,
+            "marks": result["marks"],
         }
 
 
     @router.post("/api/case-db/review-batch")
     def mark_case_db_reviews_batch(request: CaseDbReviewBatchRequest) -> dict[str, object]:
+        """Marks on every target in one transaction. A target may carry ``expected_version`` (the
+        mark's ``version`` from the review map or a write answer, ``0`` = no mark; the older
+        ``expected_updated_at`` still works): when any stored mark changed since, the answer is 409
+        with every conflict and nothing is written (F14). Each answered mark carries its new
+        ``version`` and the ``previous_version`` it replaced."""
         try:
             database = open_request_case_database(request.database)
             targets, located = split_batch_targets(request.targets)
@@ -429,6 +446,8 @@ def build_case_db_router(
                 due_at=request.due_at,
                 include_in_report=request.include_in_report,
             )
+        except ReviewConflictError as exc:
+            raise review_conflict_http_error(exc) from exc
         except CaseDatabaseError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 

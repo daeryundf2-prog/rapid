@@ -19,27 +19,39 @@ export interface ExportAction {
   label: string;
   /** Needs at least one include-in-report row (plan 4.3: "보고 후보 0건"). */
   needsCandidates: boolean;
+  /** One line: who the file is for and what is in it (보고 page, F16). */
+  audience: string;
 }
 
 export const EXPORT_ACTIONS: ExportAction[] = [
-  { kind: "case-report", commandId: "export.case-report", label: "보고서", needsCandidates: true },
+  {
+    kind: "case-report",
+    commandId: "export.case-report",
+    label: "보고서",
+    needsCandidates: true,
+    audience:
+      "보고 수신자(검사·수사관)용: 보고서에 포함한 항목과 근거를 문서 하나로 (HTML·Word·PDF·Markdown)",
+  },
   {
     kind: "reviewer-bundle",
     commandId: "export.reviewer-bundle",
     label: "리뷰어 번들",
     needsCandidates: true,
+    audience: "다른 검수자용: 포함 항목과 원본 근거 파일을 ZIP 하나로, 같은 판정을 다시 확인할 때",
   },
   {
     kind: "submission-manifest",
     commandId: "export.submission-manifest",
     label: "제출 매니페스트",
     needsCandidates: true,
+    audience: "제출 담당자용: 제출하는 항목과 그 해시 목록 (JSON)",
   },
   {
     kind: "validation-package",
     commandId: "export.validation-package",
     label: "검증 패키지",
     needsCandidates: false,
+    audience: "처리 검증용: 이 런의 처리 과정·도구·해시 기록 (JSON), 보고 항목이 없어도 만듭니다",
   },
 ];
 
@@ -51,7 +63,8 @@ export interface ReportMeta {
   investigator: string;
 }
 
-export const NO_CANDIDATES_REASON = "보고 후보 0건 — 표시된 항목이 없습니다";
+export const NO_CANDIDATES_REASON =
+  "보고서에 포함한 항목이 0건입니다. 검토 보드에서 행의 ⋯ 메뉴(행 메뉴) › ‘보고서 포함 표시’로 넣으세요";
 
 export function exportDisabledReason(
   action: ExportAction,

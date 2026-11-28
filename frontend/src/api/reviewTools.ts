@@ -110,6 +110,8 @@ export interface TagBatchResult {
   applied_count: number;
   changed_count: number;
   created_count: number;
+  /** The requested targets' versions before and after (not the same-hash rows it spread to). */
+  marks?: Array<Record<string, unknown>>;
   propagation?: {
     hash_values: number;
     matched_file_rows: number;

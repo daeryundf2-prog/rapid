@@ -1,4 +1,5 @@
 import { announce } from "../../a11y/announcer";
+import { type ReviewConflict, reviewConflictsOf } from "../../api/caseDb";
 import { ApiError } from "../../api/client";
 import {
   type BookmarkBody,
@@ -6,6 +7,7 @@ import {
   ensureCaseDb,
   postBookmark,
   postReviewBatch,
+  type ReviewBatchAnswer,
   type ReviewBatchTarget,
   type ReviewMarkBody,
 } from "../../api/collections";
@@ -14,7 +16,17 @@ import type { GridRow, ReviewStatus } from "../../contracts/collection";
 import type { MarkAction } from "../../contracts/viewer";
 import { useAppStore } from "../../state/store";
 import { currentReviewer } from "../review/author";
-import { baseName, str } from "./columns/common";
+import {
+  currentVersion,
+  type MarkAddress,
+  noteSeenVersion,
+  noteWrittenMarks,
+  resolvePin,
+  reviewKey,
+  type WrittenMark,
+} from "../review/markVersions";
+import { type ConflictChoice, conflictSentence, useReviewConflict } from "../review/reviewConflict";
+import { baseName, currentTimezone, str } from "./columns/common";
 
 export type BatchAction = MarkAction | "tag" | "extract" | UnmarkAction;
 
@@ -191,6 +203,24 @@ export interface ApplyResult {
   applied: number;
   extract?: RunExtractResult;
   store?: ReviewStore;
+  /**
+   * Case-DB writes: per row (same order), the version of the mark this write stored. A later write
+   * that must not overwrite someone else's change since (an undo) passes it back as `expected`.
+   */
+  versions?: Array<number | undefined>;
+}
+
+/**
+ * Per row (same order), the version of the mark the examiner saw when the edit began (F14, P1-1):
+ * a write refuses (409 + conflict prompt) when the stored mark changed since. `undefined` for a row
+ * = no check. Take it with `pinExpected` when a form opens, or from a previous `ApplyResult.versions`.
+ */
+export type ExpectedVersions = ReadonlyArray<number | undefined>;
+
+/** Options of a review write. */
+export interface ApplyOptions {
+  /** Pinned versions (`pinExpected`); omitted = the versions drawn on `rows` right now. */
+  expected?: ExpectedVersions;
 }
 
 /** Toast suffix that tells the analyst a mark went to the case.json fallback, not the case DB. */
@@ -273,7 +303,7 @@ export async function applyReviewAction(
   runId: string,
   rows: GridRow[],
   action: BatchAction,
-  options: { tag?: string } = {},
+  options: ApplyOptions & { tag?: string } = {},
 ): Promise<ApplyResult> {
   if (action === "extract") {
     const seen = new Set<string>();
@@ -288,14 +318,26 @@ export async function applyReviewAction(
     const extract = await extractRows(runId, { rows: items });
     return { applied: extract.summary.extracted_count, extract };
   }
-  return applyBody(runId, rows, markBody(action, options.tag), caseDbMark(action, options.tag));
+  return applyBody(
+    runId,
+    rows,
+    markBody(action, options.tag),
+    caseDbMark(action, options.tag),
+    MARK_LABELS[action],
+    options.expected,
+  );
 }
 
 /** Save one free-text note (X5) on every row; same store routing as review marks. */
-export async function applyNote(runId: string, rows: GridRow[], note: string): Promise<ApplyResult> {
+export async function applyNote(
+  runId: string,
+  rows: GridRow[],
+  note: string,
+  options: ApplyOptions = {},
+): Promise<ApplyResult> {
   const text = note.trim();
   if (!text) throw new Error("메모 내용이 비어 있습니다.");
-  return applyBody(runId, rows, { note: text }, { note: text });
+  return applyBody(runId, rows, { note: text }, { note: text }, "메모", options.expected);
 }
 
 function caseDbMark(action: BatchAction, tag?: string): ReviewMarkBody {
@@ -318,11 +360,203 @@ function caseDbMark(action: BatchAction, tag?: string): ReviewMarkBody {
   }
 }
 
+/**
+ * The write was refused (409, F14): another examiner changed a mark after this console read it.
+ * Nothing was written; the conflict prompt (ReviewToolsHost) asks what to do. `choice` settles
+ * with the examiner's answer once the prompt's write is done: a form keeps its text on "keep"
+ * (review P3-4) and treats "mine" as saved.
+ */
+export class ReviewConflictError extends Error {
+  readonly conflicts: ReviewConflict[];
+  readonly choice: Promise<ConflictChoice>;
+
+  constructor(conflicts: ReviewConflict[], tz: string, choice: Promise<ConflictChoice>) {
+    const first = conflicts[0];
+    const more = conflicts.length > 1 ? ` 외 ${conflicts.length - 1}건` : "";
+    super(
+      `${first ? conflictSentence(first, tz) : "다른 판정이 먼저 저장됨"}${more}. 저장하지 않았습니다. 내 판정으로 바꿀지 고르세요.`,
+    );
+    this.name = "ReviewConflictError";
+    this.conflicts = conflicts;
+    this.choice = choice;
+  }
+}
+
+/** Where a row's write goes, for its versions: its case-DB target, else its locator. */
+function markAddress(target: ReviewBatchTarget): MarkAddress {
+  return "target_type" in target
+    ? { target: `${target.target_type}:${target.target_id}` }
+    : { locator: reviewKey(target.collection, target.kind ?? "", target.locator) };
+}
+
+/**
+ * What each row's write expects right now: the version drawn on the row (`fields.markVersion`, set
+ * by the review-map overlay and the board), else the newest version the console knows. Call it
+ * when an edit begins and pass the result as `expected` (P1-1): a review-map reload while the form
+ * is open must not move it.
+ */
+export function pinExpected(runId: string, rows: readonly GridRow[]): ExpectedVersions {
+  return rows.map((row) => {
+    if (typeof row.fields.markVersion === "number") return row.fields.markVersion;
+    const target = reviewTargetOf(row);
+    return target ? currentVersion(runId, markAddress(target)) : undefined;
+  });
+}
+
+function sameTarget(conflict: ReviewConflict, target: ReviewBatchTarget): boolean {
+  if ("target_type" in target) {
+    return target.target_type === conflict.target_type && target.target_id === conflict.target_id;
+  }
+  return (
+    target.collection === conflict.collection &&
+    target.locator === conflict.locator &&
+    (target.kind ?? "") === (conflict.kind ?? "")
+  );
+}
+
+/**
+ * Record the versions a successful write of this console stored (review-batch marks, or a tag
+ * batch's `marks`), so its next write on those rows does not conflict with itself (P3-2). A mark
+ * names its own locator, or `targets[i]` does (review-batch answers keep them in step).
+ */
+export function rememberWrite(
+  runId: string,
+  answer: {
+    marks?: ReadonlyArray<Record<string, unknown>>;
+    targets?: ReadonlyArray<Record<string, unknown>>;
+  },
+): WrittenMark[] {
+  const marks = Array.isArray(answer.marks) ? answer.marks : [];
+  const targets = Array.isArray(answer.targets) ? answer.targets : [];
+  const written: WrittenMark[] = [];
+  marks.forEach((mark, index) => {
+    const at = typeof mark.locator === "string" ? mark : targets[index];
+    const { target_type: type, target_id: id, version, previous_version: previous } = mark;
+    if (typeof type !== "string" || typeof id !== "string") return;
+    if (typeof version !== "number" || typeof previous !== "number") return;
+    const locatorKey =
+      at && typeof at.collection === "string" && typeof at.locator === "string"
+        ? reviewKey(at.collection, typeof at.kind === "string" ? at.kind : "", at.locator)
+        : null;
+    written.push({ target_type: type, target_id: id, previous_version: previous, version, locatorKey });
+  });
+  noteWrittenMarks(runId, written);
+  return written;
+}
+
+/**
+ * POST the marks; a 409 `review-conflict` opens the conflict prompt and rejects with
+ * ReviewConflictError (nothing was written). The prompt's choices post again from here.
+ * Resolves with the stored version per target.
+ */
+async function postChecked(
+  runId: string,
+  handle: CaseDbHandle,
+  targets: ReviewBatchTarget[],
+  rows: GridRow[],
+  mark: ReviewMarkBody,
+  label: string,
+): Promise<Array<number | undefined>> {
+  let answer: ReviewBatchAnswer;
+  try {
+    answer = await postReviewBatch(handle, targets, mark, runId);
+  } catch (error) {
+    const conflicts =
+      error instanceof ApiError && error.status === 409 ? reviewConflictsOf(error.detail) : null;
+    if (!conflicts || conflicts.length === 0) throw error;
+    const choice = openConflictPrompt(runId, handle, targets, rows, mark, label, conflicts);
+    throw new ReviewConflictError(conflicts, currentTimezone(), choice);
+  }
+  // The answer lists case-DB targets before resolved locators: match each request target by address.
+  const written = rememberWrite(runId, answer);
+  return targets.map((target) => {
+    const address = markAddress(target);
+    const hit = written.find((mark) =>
+      "target" in address
+        ? `${mark.target_type}:${mark.target_id}` === address.target
+        : mark.locatorKey === address.locator,
+    );
+    return hit?.version;
+  });
+}
+
+function openConflictPrompt(
+  runId: string,
+  handle: CaseDbHandle,
+  targets: ReviewBatchTarget[],
+  rows: GridRow[],
+  mark: ReviewMarkBody,
+  label: string,
+  conflicts: ReviewConflict[],
+): Promise<ConflictChoice> {
+  const conflictOf = (target: ReviewBatchTarget) => conflicts.find((c) => sameTarget(c, target));
+  const others = targets.filter((target) => !conflictOf(target));
+  const sentence = conflictSentence(conflicts[0] as ReviewConflict, currentTimezone());
+  let settle: (choice: ConflictChoice) => void = () => {};
+  const choice = new Promise<ConflictChoice>((resolve) => {
+    settle = resolve;
+  });
+  // "내 판정으로" met a third change: its own prompt replaces this one and answers for it.
+  let followed = false;
+  useReviewConflict.getState().open({
+    runId,
+    conflicts,
+    titles: conflicts.map((c) => rows[targets.findIndex((target) => sameTarget(c, target))]?.title ?? ""),
+    others: others.length,
+    action: label,
+    ...(typeof mark.note === "string" ? { mine: { note: mark.note } } : {}),
+    resolve: async (picked) => {
+      // Either way the examiner has now seen the current marks: a pin on the version this write
+      // expected means the reported one from here on (no second prompt for the same change).
+      for (const target of targets) {
+        const conflict = conflictOf(target);
+        if (conflict && "expected_version" in target && typeof target.expected_version === "number")
+          noteSeenVersion(runId, markAddress(target), target.expected_version, conflict.current.version);
+      }
+      if (picked === "mine") {
+        // Overwrite exactly the versions the conflict reported; a third change conflicts again.
+        const again = targets.map((target) => {
+          const conflict = conflictOf(target);
+          return conflict ? { ...target, expected_version: conflict.current.version } : target;
+        });
+        followed = true;
+        try {
+          await postChecked(runId, handle, again, rows, mark, label);
+        } catch (error) {
+          if (error instanceof ReviewConflictError) void error.choice.then(settle);
+          else followed = false;
+          throw error;
+        }
+        announce(`내 판정으로 바꿨습니다: ${label} ${targets.length}건.`);
+      } else {
+        const keptRows = rows.filter((_, index) => !conflictOf(targets[index] as ReviewBatchTarget));
+        if (others.length > 0) await postChecked(runId, handle, others, keptRows, mark, label);
+        announce(
+          others.length > 0
+            ? `다른 판정 ${conflicts.length}건은 그대로 두고 나머지 ${others.length}건에 적용했습니다(${label}).`
+            : "다른 판정을 그대로 두었습니다.",
+        );
+      }
+      // Either way the console shows the stored marks now.
+      for (const listener of listeners) listener(runId, "case-db");
+      settle(picked);
+    },
+    abandon: () => {
+      if (!followed) settle("keep");
+    },
+  });
+  announce(`판정 충돌: ${sentence}. 저장하지 않았습니다.`, { politeness: "assertive" });
+  return choice;
+}
+
 async function applyBody(
   runId: string,
   rows: GridRow[],
   body: MarkPayload,
   mark: ReviewMarkBody,
+  // What the conflict prompt calls this write; callers that restore or replay marks keep the default.
+  label = "판정",
+  expected?: ExpectedVersions,
 ): Promise<ApplyResult> {
   const targets = rows.map(reviewTargetOf);
   const unresolved = targets.filter((t) => t === null).length;
@@ -333,10 +567,19 @@ async function applyBody(
   if (!settledRuns.has(runId)) notifyPreparing();
   const handle = await pending;
   let store: ReviewStore;
+  let versions: Array<number | undefined> | undefined;
   if (handle) {
     // The configured review author (AXIOM E3) rides on every mark; "web-ui" when unset.
     const authored: ReviewMarkBody = { ...mark, reviewer: currentReviewer() };
-    await postReviewBatch(handle, targets as ReviewBatchTarget[], authored, runId);
+    // F14 / P1-1: each target carries the version the examiner saw (pinned when the edit began,
+    // moved only by this console's own writes), so another examiner's newer decision is never
+    // overwritten silently (no version known → no check, the old behaviour).
+    const pins = expected ?? pinExpected(runId, rows);
+    const checked = (targets as ReviewBatchTarget[]).map((target, index) => {
+      const version = resolvePin(runId, markAddress(target), pins[index]);
+      return version === undefined ? target : { ...target, expected_version: version };
+    });
+    versions = await postChecked(runId, handle, checked, rows, authored, label);
     store = "case-db";
   } else {
     const bookmarkRows = rows.filter((r) => bookmarkTarget(r) !== null);
@@ -355,7 +598,11 @@ async function applyBody(
     store = "bookmarks";
   }
   for (const listener of listeners) listener(runId, store);
-  return { applied: rows.length, store };
+  return {
+    applied: rows.length,
+    store,
+    ...(versions?.some((version) => version !== undefined) ? { versions } : {}),
+  };
 }
 
 // ---- review tools (AXIOM E3) ---------------------------------------------

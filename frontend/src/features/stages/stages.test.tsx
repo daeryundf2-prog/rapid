@@ -353,11 +353,24 @@ describe("검토 / 보고 stages (Q-IA-5)", () => {
         }),
     });
     renderWithClient(<ReviewPanel />);
-    const statuses = await screen.findByRole("list", { name: "리뷰 상태" });
+    const statuses = await screen.findByRole("list", { name: "판정" });
     await waitFor(() =>
-      expect(within(statuses).getByRole("link", { name: /관련 있음/ }).textContent).toContain("2"),
+      expect(within(statuses).getByRole("link", { name: /^관련 있음 ?\d+$/ }).textContent).toContain("2"),
     );
     expect(within(statuses).getByRole("link", { current: "page" }).textContent).toContain("관련 있음");
+    // F12: a 판정 nobody made is not offered (재검토 0); 보고서 포함 counts include_in_report.
+    expect(within(statuses).queryByRole("link", { name: /재검토/ })).toBeNull();
+    expect(within(statuses).getByRole("link", { name: /보고서 포함/ }).textContent).toContain("1");
+    // 판정자 filter: the people who set a verdict (no name → 이름 없음), as a cf= column filter;
+    // the two bookmark-only marks have no verdict to attribute (P2-1).
+    const reviewers = await screen.findByRole("list", { name: "판정자" });
+    const unnamed = within(reviewers).getByRole("link", { name: /이름 없음/ });
+    expect(unnamed.textContent).toContain("1");
+    expect(unnamed.getAttribute("href")).toContain("cf=reviewer");
+    // 관련 있음 not in the report: a link to exactly those rows.
+    expect(within(statuses).getByRole("link", { name: /관련 있음 중 보고서 미포함/ }).textContent).toContain(
+      "1",
+    );
     const tags = screen.getByRole("list", { name: "태그·북마크" });
     expect(
       within(tags)
@@ -373,7 +386,7 @@ describe("검토 / 보고 stages (Q-IA-5)", () => {
     expect(within(tags).getByRole("link", { name: /북마크/ }).textContent).toContain("2");
   });
 
-  it("the report page shows this session's export history for the run", () => {
+  it("the report page: checklist, the included items, one primary export, files folded (F16)", async () => {
     setRoute(`#/case/${RUN}/report/outputs`);
     useExportHistory.setState({
       records: [
@@ -393,10 +406,81 @@ describe("검토 / 보고 stages (Q-IA-5)", () => {
         },
       ],
     });
+    installFetch({
+      "/review-counts": () =>
+        jsonResponse({
+          by_status: { relevant: 2 },
+          include_in_report: 1,
+          case_json: { bookmarks: 0, include_in_report: 0 },
+          report_candidates: 1,
+        }),
+      "/review-map": () =>
+        jsonResponse({
+          marks: [
+            {
+              target_type: "event",
+              target_id: "1",
+              status: "relevant",
+              tags: [],
+              note: "송금 직전",
+              include_in_report: true,
+              // 김검사 set the verdict; 박검사 wrote last (the note / report flag).
+              reviewer: "박검사",
+              status_by: "김검사",
+              status_at: "2026-11-27T03:20:00+00:00",
+              updated_at: "2026-11-27T03:28:46+00:00",
+              title: "Artifact event: browser-history https://bank.example.test/account",
+              path: "C:/Users/a/History",
+              timestamp: "2026-10-18T08:02:48Z",
+              collection: "timeline",
+              kind: "",
+              locator: "/events/1",
+            },
+            {
+              target_type: "event",
+              target_id: "2",
+              status: "relevant",
+              tags: [],
+              note: "",
+              include_in_report: false,
+              reviewer: "web-ui",
+              status_by: "web-ui",
+              status_at: "2026-11-27T03:28:47+00:00",
+              updated_at: "2026-11-27T03:28:47+00:00",
+              collection: "timeline",
+              kind: "",
+              locator: "/events/2",
+            },
+          ],
+        }),
+      "/output-files": () => jsonResponse({ files: [{ name: "a" }, { name: "b" }] }),
+    });
     renderWithClient(<ReportPage />);
+    const checklist = await screen.findByTestId("report-checklist");
+    await waitFor(() => expect(checklist.textContent).toContain("보고서 포함1건"));
+    expect(screen.getByTestId("report-check-left-out").textContent).toContain("1건");
+    // X4: inclusion only by an explicit action that names the count.
+    expect(screen.getByRole("button", { name: "관련 있음 1건 보고서에 포함" })).toBeTruthy();
+    expect(checklist.textContent).toContain("판정자 이름 없는 판정1건");
+    const preview = screen.getByRole("table", { name: "보고서에 들어갈 항목" });
+    expect(preview.textContent).toContain("browser-history https://bank.example.test/account");
+    expect(preview.textContent).not.toContain("Artifact event:");
+    // P3-5: the preview carries what the report carries: the stored verdict, no 판정자 column.
+    expect(within(preview).queryByRole("columnheader", { name: "판정자" })).toBeNull();
+    expect(preview.textContent).not.toContain("김검사");
+    expect(preview.textContent).toContain("관련 있음");
+    expect(preview.textContent).toContain("송금 직전");
+    // ONE primary export; the other formats say who they are for.
+    expect(screen.getAllByRole("button", { name: /^보고서 내보내기/ })).toHaveLength(1);
+    expect(screen.getByText(/다른 검수자용/)).toBeTruthy();
     const history = screen.getByRole("table", { name: "내보내기 이력" });
     expect(within(history).getAllByRole("row")).toHaveLength(2);
-    expect(history.textContent).toContain("case-report.html");
-    expect(screen.getByTestId("grid-stub")).toBeTruthy();
+    // The run's files are folded; the grid mounts only when opened.
+    expect(screen.queryByTestId("grid-stub")).toBeNull();
+    const summary = await screen.findByText("처리 결과 파일 (2)");
+    const details = summary.closest("details") as HTMLDetailsElement;
+    details.open = true;
+    fireEvent(details, new Event("toggle"));
+    expect(await screen.findByTestId("grid-stub")).toBeTruthy();
   });
 });

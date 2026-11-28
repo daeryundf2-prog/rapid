@@ -47,15 +47,6 @@ ARTIFACT_LOCATOR_KEY = "source_locator"
 ANALYSIS_ROW_TARGET = "analysis_row"
 ANALYSIS_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 INDICATOR_PARSER_NAME = "rapidtriage-indicators"
-# A mark toggled back to its defaults (status ``unreviewed``, no note/tags,
-# not in the report, unverified) is "cleared": the row stays in ``review_mark``
-# (``review_mark_history`` keeps the audit trail) but the review board and the
-# review tallies leave it out.
-ACTIVE_MARK_SQL = (
-    "NOT (status = 'unreviewed' AND include_in_report = 0 AND COALESCE(note, '') = '' "
-    "AND COALESCE(tags_json, '[]') IN ('[]', '') "
-    "AND COALESCE(verification_status, 'unverified') IN ('unverified', ''))"
-)
 SCANNER_COVERAGE = "local-rule-ioc-scanner"
 LOCATOR_COLLECTIONS = ("files", "docs", "timeline", "indicators", "artifacts")
 # Longest row ordinal a locator may carry (``/events/<n>``): far above any run's row count.

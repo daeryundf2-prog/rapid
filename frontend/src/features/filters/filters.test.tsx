@@ -244,14 +244,14 @@ describe("조건 줄 (visual-polish S1/S2, viewer-families U-F1)", () => {
     expect(screen.queryByRole("dialog", { name: "조건" })).toBeNull();
   });
 
-  it("검토 toolbar: review status + tag + search, no time range or 필터 popover", () => {
+  it("검토 toolbar: 판정 + tag + search, no time range or 필터 popover", () => {
     const onReviewStatus = vi.fn();
     bar({ variant: "review", reviewStatus: "relevant", onReviewStatus });
     // The 조건 panel of 검토 holds only 표시 settings: no time range (S2).
     fireEvent.click(screen.getByRole("button", { name: /^조건/ }));
     expect(screen.queryByLabelText("시작 시각")).toBeNull();
     fireEvent.keyDown(screen.getByRole("dialog", { name: "조건" }), { key: "Escape" });
-    const status = screen.getByRole("combobox", { name: "리뷰 상태" }) as HTMLSelectElement;
+    const status = screen.getByRole("combobox", { name: "판정" }) as HTMLSelectElement;
     expect(status.value).toBe("relevant");
     fireEvent.change(status, { target: { value: "excluded" } });
     expect(onReviewStatus).toHaveBeenCalledWith("excluded");
@@ -266,7 +266,7 @@ describe("조건 줄 (visual-polish S1/S2, viewer-families U-F1)", () => {
 
   it("보고 toolbar: export kind + search; the kind is the type filter, shown as 종류", () => {
     bar({ variant: "report", kindOptions: ["보고서", "아티팩트"] });
-    expect(screen.queryByRole("combobox", { name: "리뷰 상태" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "판정" })).toBeNull();
     const kind = screen.getByRole("combobox", { name: "종류" }) as HTMLSelectElement;
     expect(Array.from(kind.options).map((o) => o.textContent)).toEqual(["전체", "보고서", "아티팩트"]);
     fireEvent.change(kind, { target: { value: "아티팩트" } });

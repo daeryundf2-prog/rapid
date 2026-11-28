@@ -148,14 +148,22 @@ class CaseDbReviewRequest(BaseModel):
     priority: str | None = None
     due_at: str | None = None
     include_in_report: bool | None = None
+    # Optimistic concurrency (F14): the mark's version token as last read (``version`` of the
+    # review map / a write answer; 0 = no mark); a stored mark that changed since is a 409 with
+    # the current mark. ``expected_updated_at`` (its ``updated_at`` text, "" = no mark) is the
+    # older form, still honoured. Omitted = no check.
+    expected_version: int | None = Field(None, ge=0)
+    expected_updated_at: str | None = None
 
 
 class CaseDbReviewBatchRequest(BaseModel):
     database: str = Field(..., min_length=1)
     case_id: str = Field(..., min_length=1)
     # Each target is ``{target_type, target_id}`` (case-DB row) or a run-output
-    # locator ``{collection, kind?, locator}`` resolved against ``run_id``.
-    targets: list[dict[str, str]] = Field(..., min_length=1)
+    # locator ``{collection, kind?, locator}`` resolved against ``run_id``; either may
+    # carry ``expected_version`` (int) or the older ``expected_updated_at`` (F14: any
+    # changed mark → 409, nothing written).
+    targets: list[dict[str, str | int]] = Field(..., min_length=1)
     run_id: str | None = None
     # Merged into each target's existing tags (``tags`` replaces them).
     add_tags: list[str] | None = None
