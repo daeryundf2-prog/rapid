@@ -6,9 +6,10 @@ commit ``8beff59``: ``src/store.ts``, ``src/store-types.ts``, ``src/store-journa
 ``messenger/thread-ledger.ts``. dori keeps no log of messenger traffic: inbound messages are printed for the lead
 and sends print an ID, so the Slack thread ledger and the Telegram offset are what remains on disk.
 
-Message text (queued messages, reports, worklog entries, lane notes) and Telegram, Discord and Slack chat, thread and
-channel IDs are exported on purpose, as the conversation text of the session collectors is: they are the evidence and
-they are personal data. Every text field passes ``clean()`` and the row text limit. Argument vectors are not exported:
+Message text (queued messages, reports, worklog entries, lane notes) is exported on purpose, as the conversation text
+of the session collectors is: it is the evidence and it is personal data. Every text field passes ``clean()`` and the
+row text limit. Owner IDs and references to the owner's private chat (``PRIVATE_ROOM``) are not exported: such a lane
+``thread``, request ``source``, evidence entry or Slack DM channel is left empty. Argument vectors are not exported:
 ``agentCommand`` and launchd ``ProgramArguments`` give the program only."""
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ from dataclasses import replace
 from pathlib import Path
 from xml.parsers.expat import ExpatError
 
-from .ai_agent_records import clean, items, mapping, utc
+from .ai_agent_records import PRIVATE_ROOM, clean, items, mapping, reference, utc
 
 KIND = "dori-state"
 DOCUMENT_BYTES = 8 << 20
@@ -118,6 +119,11 @@ def listed(row, key, values):
     if len(values) > LIST_LIMIT:
         row.details["flags"].append("list-length-limit")
     return row
+
+
+def public(values) -> list:
+    """List entries other than references to a private chat."""
+    return [value for value in items(values) if reference(value)]
 
 
 def stamped(row, **times):
@@ -220,10 +226,11 @@ def skill_lane(src, doc):
     claim = mapping(doc.get("claim"))
     objection = mapping(doc.get("objection"))
     out = src.row("lane", timestamp=doc["openedAt"], text=doc.get("title"), model=doc.get("model"), lane_key=key,
-                  state="closed" if doc.get("closedAt") else doc.get("status") or "working", thread=doc.get("thread"),
-                  session_ref=ref_text(doc.get("sessionRef"), doc.get("pane")), session_via=doc.get("sessionVia"),
-                  brief_path=doc.get("brief"), paused_from=doc.get("pausedFrom"), claim_evidence=claim.get("evidence"),
-                  receipt_note=mapping(doc.get("receipt")).get("note"), record_layout="dori-mode")
+                  state="closed" if doc.get("closedAt") else doc.get("status") or "working",
+                  thread=reference(doc.get("thread")), session_ref=ref_text(doc.get("sessionRef"), doc.get("pane")),
+                  session_via=doc.get("sessionVia"), brief_path=doc.get("brief"), paused_from=doc.get("pausedFrom"),
+                  claim_evidence=reference(claim.get("evidence")), receipt_note=mapping(doc.get("receipt")).get("note"),
+                  record_layout="dori-mode")
     listed(out, "worktrees", doc.get("worktrees"))
     listed(out, "objection_reasons", objection.get("reasons"))
     yield stamped(out, closed_utc=iso(doc.get("closedAt")), claimed_utc=iso(claim.get("at")),
@@ -246,7 +253,7 @@ def harness_lane(src, doc):
                   session_ref=ref_text(doc.get("sessionRef"), doc.get("paneId")), session_file=doc.get("sessionPath"),
                   brief_path=doc.get("brief"), result=final.get("text"), nudges=number(doc.get("nudges")),
                   record_layout="dori-harness")
-    listed(out, "evidence", final.get("evidence"))
+    listed(out, "evidence", public(final.get("evidence")))
     yield stamped(out, closed_utc=ms(done[-1] if done else final.get("at")),
                   last_activity_utc=ms(doc.get("lastActivityAt")))
     for index, entry in enumerate(log):
@@ -277,8 +284,8 @@ def checkpoint(src, doc, path):
         return
     out = src.row("lane-checkpoint", timestamp=doc.get("at"), text=doc.get("result"), lane_key=lane_key(doc, path),
                   step=doc["step"])
-    listed(out, "evidence", doc.get("evidence"))
-    yield listed(out, "remote_effects", doc.get("remoteEffects"))
+    listed(out, "evidence", public(doc.get("evidence")))
+    yield listed(out, "remote_effects", public(doc.get("remoteEffects")))
 
 
 def usage(src, doc, path):
@@ -294,7 +301,7 @@ def worklog(src, doc, path):
         yield src.note("unrecognized-worklog-record", damaged_count=1)
         return
     yield src.row("worklog", timestamp=doc.get("at"), text=doc.get({"add": "title", "close": "result"}.get(op, "text")),
-                  item_id=doc.get("id"), worklog_op=op, source_message=doc.get("source"))
+                  item_id=doc.get("id"), worklog_op=op, source_message=reference(doc.get("source")))
 
 
 def lesson(src, doc, path):
@@ -305,7 +312,7 @@ def lesson(src, doc, path):
     src = replace(src, cwd=doc.get("cwd") or "")
     out = src.row("lesson", timestamp=doc.get("at"), text=doc["rule"], lesson_id=doc.get("id"), lane_key=doc.get("lane"),
                   scope=doc.get("scope"), outcome=doc.get("outcome"))
-    yield listed(out, "evidence", [doc.get("evidence")])
+    yield listed(out, "evidence", public([doc.get("evidence")]))
 
 
 def queued(src, doc, path):
@@ -340,7 +347,7 @@ def backlog(src, doc, path):
     ends = [mapping(e).get("at") for e in items(doc.get("log")) if mapping(e).get("kind") in ("done", "drop")]
     src = replace(src, cwd=doc.get("cwd") or "")
     out = src.row("backlog-item", timestamp=doc.get("createdAt"), unit="ms", text=doc["title"], item_id=doc["id"],
-                  state=doc.get("status"), priority=number(doc.get("priority")), source_message=doc.get("source"),
+                  state=doc.get("status"), priority=number(doc.get("priority")), source_message=reference(doc.get("source")),
                   decision=doc.get("decision"), attempts=number(doc.get("attempts")), brief_path=doc.get("brief"))
     closed = doc.get("status") in ("done", "dropped") and ends
     yield stamped(out, updated_utc=ms(doc.get("updatedAt")), asked_utc=ms(doc.get("askedAt")),
@@ -423,16 +430,17 @@ def dori_config(src, doc, path):
 
 def slack_threads(src, doc, path):
     """``slack-threads.json`` (``ThreadLedger``): Slack threads the lead watches, with the root message's and the
-    newest seen reply's ``ts``."""
+    newest seen reply's ``ts``. A direct-message channel (``D``) is the owner's chat and is left empty."""
     if not isinstance(doc, list):
         yield src.note("invalid-config-shape")
         return
     for index, thread in enumerate(doc):
         thread = mapping(thread)
-        root = thread.get("rootTs")
+        root, channel = thread.get("rootTs"), thread.get("channel")
+        if isinstance(channel, str) and PRIVATE_ROOM.fullmatch(f"slack:{channel}"):
+            channel = ""
         out = replace(src, location={"source_offset": 0, "entry_index": index}).row(
-            "messenger-thread", channel_kind="slack", channel=thread.get("channel"), thread_ts=root,
-            seen_ts=thread.get("seenTs"))
+            "messenger-thread", channel_kind="slack", channel=channel, thread_ts=root, seen_ts=thread.get("seenTs"))
         out.details["timestamp_raw"] = clean(root) if isinstance(root, str) else None
         out.details["timestamp_utc"] = slack_time(root)
         if isinstance(root, str) and out.details["timestamp_utc"] is None:

@@ -123,7 +123,8 @@ class CatalyHubTests(AgentFixture):
         events = extract_artifact_events(payload, self.root.parent / "artifacts-cataly-hub.json")
         kinds = sorted((e["details"]["artifact_type"], e["timestamp_kind"]) for e in events)
         self.assertEqual(kinds, [("agent-hub-event", "event"), ("agent-lane", "closed"), ("agent-lane", "opened"),
-                                 ("agent-request", "closed"), ("agent-request", "opened")])
+                                 ("agent-lane-history", "status-changed"), ("agent-request", "closed"),
+                                 ("agent-request", "opened")])
 
     def test_older_or_foreign_stores_and_oversized_values(self):
         _, old = self.store()

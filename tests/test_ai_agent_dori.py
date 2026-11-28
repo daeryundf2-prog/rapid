@@ -66,15 +66,15 @@ class DoriStateTests(AgentFixture):
         self.write(f"{lane_dir}/supervision.json", {"at": OPENED_MS})
         torn = b'{"op":"note","id":"0a1b2c3d","at":"' + OPENED.encode()
         self.write(f"{STATE}/worklog.jsonl", b"\n".join([
-            json.dumps({"op": "add", "id": "0a1b2c3d", "at": OPENED, "title": "도리 수집기", "source": "slack:D1/1.1"},
+            json.dumps({"op": "add", "id": "0a1b2c3d", "at": OPENED, "title": "도리 수집기", "source": "slack:C1/1.1"},
                        ensure_ascii=False).encode(),
             json.dumps({"op": "close", "id": "0a1b2c3d", "at": CLOSED, "result": "PR 열림"},
                        ensure_ascii=False).encode(), torn]) + b"\n")
         self.write(f"{STATE}/worklog.md", b"# Worklog\nRENDER-NEVER-READ\n")
         self.lines(f"{STATE}/lessons.jsonl", {
             "id": "4f1c9a7e-0000-4000-8000-000000000001", "at": CLOSED, "lane": "fix-login", "cwd": "/w/repo",
-            "rule": "푸시 전에 테스트", "evidence": "slack:D1/1.1", "outcome": "pending"})
-        self.write(f"{STATE}/slack-threads.json", [{"channel": "D1", "rootTs": "1790000000.000100",
+            "rule": "푸시 전에 테스트", "evidence": "slack:C1/1.1", "outcome": "pending"})
+        self.write(f"{STATE}/slack-threads.json", [{"channel": "C1", "rootTs": "1790000000.000100",
                                                     "seenTs": "1790000600.123456"}])
         self.write(f"{STATE}/telegram-offset", b"596098530\n")
 
@@ -100,16 +100,16 @@ class DoriStateTests(AgentFixture):
         (usage,) = found["agent-lane-usage"]
         self.assertEqual((usage["tokens"], usage["cost_usd"], usage["final"]), ("12000", "0.42", "true"))
         add, close = found["agent-worklog"]
-        self.assertEqual((add["worklog_op"], add["text"], add["source_message"]), ("add", "도리 수집기", "slack:D1/1.1"))
+        self.assertEqual((add["worklog_op"], add["text"], add["source_message"]), ("add", "도리 수집기", "slack:C1/1.1"))
         self.assertEqual((close["worklog_op"], close["text"], close["item_id"]), ("close", "PR 열림", "0a1b2c3d"))
         torn_note = next(n for n in found["agent-parse-note"] if n["source_path"].endswith("worklog.jsonl"))
         self.assertEqual((torn_note["reason"], torn_note["source_line"]), ("invalid-json-line", 3))
         (lesson,) = found["agent-lesson"]
         self.assertEqual((lesson["text"], lesson["lane_key"], lesson["cwd"], lesson["evidence"]),
-                         ("푸시 전에 테스트", "fix-login", "/w/repo", ["slack:D1/1.1"]))
+                         ("푸시 전에 테스트", "fix-login", "/w/repo", ["slack:C1/1.1"]))
         (thread,) = found["agent-messenger-thread"]
         self.assertEqual((thread["channel_kind"], thread["channel"], thread["timestamp_raw"]),
-                         ("slack", "D1", "1790000000.000100"))
+                         ("slack", "C1", "1790000000.000100"))
         self.assertEqual((thread["timestamp_utc"], thread["seen_utc"]),
                          ("2026-09-21T14:13:20.000100+00:00", "2026-09-21T14:23:20.123456+00:00"))
         (offset,) = found["agent-messenger-offset"]
@@ -312,12 +312,65 @@ class DoriStateTests(AgentFixture):
         commands = sorted(r.details["command_line"] for r in rows if r.details["command_line"])
         self.assertEqual(commands, ["/bin/bash", "/bin/sh", "omo"])
         self.assertEqual(text.count(PLAIN), 0)
-        self.assertNotIn(f"--owner={OWNER}", text)
-        # The message text and the chat ID are the evidence: exported, with the tokens masked.
+        self.assertNotIn(OWNER, text)
+        # The message text is the evidence: exported, with the tokens masked. The owner's chat references are not.
         (queued,) = found["agent-queued-message"]
         self.assertEqual(queued["text"], "https://api.telegram.org/bot[가림]/sendMessage [가림] 메시지 본문")
         self.assertEqual(queued["delivery_detail"], queued["text"])
-        self.assertEqual(found["agent-worklog"][0]["source_message"], f"telegram:{OWNER}/7")
+        self.assertEqual(found["agent-worklog"][0]["source_message"], "")
         lane = next(lane for lane in found["agent-lane"] if lane["lane_key"] == "k")
-        self.assertEqual(lane["thread"], f"telegram:{OWNER}/42")
+        self.assertEqual(lane["thread"], "")
         self.assertIn("메시지 본문", lane["text"])
+
+    def test_owner_ids_and_owner_chat_references_are_not_exported(self):
+        """Owner decision on PR #86 (as on #85): owner IDs and references to the owner's private chat appear in no
+        output row; group, channel and Discord thread references and the secrets file name stay."""
+        telegram, slack_dm = "7770001234", "D0OWNERDM"
+        self.write(f"{STATE}/lanes/own.json", {
+            "key": "own", "title": "t", "thread": f"telegram:{telegram}", "openedAt": OPENED,
+            "claim": {"at": OPENED, "evidence": f"telegram:{telegram}/44"}})
+        self.write(f"{STATE}/lanes/topic.json", {"key": "topic", "thread": f"telegram:{telegram}:9/45", "openedAt": OPENED})
+        self.write(f"{STATE}/lanes/dm.json", {"key": "dm", "thread": f"slack:{slack_dm}/1.1", "openedAt": OPENED})
+        self.write(f"{STATE}/lanes/grp.json", {"key": "grp", "thread": "telegram:-100123/7", "openedAt": OPENED})
+        self.write(f"{STATE}/lanes/dc.json", {"key": "dc", "thread": "discord:123456789012345678/9", "openedAt": OPENED})
+        self.lines(f"{STATE}/lanes/own/checkpoints.jsonl", {
+            "key": "own", "at": OPENED, "step": "reply", "evidence": [f"telegram:{telegram}/46", "pr:12"],
+            "remoteEffects": [f"slack:{slack_dm}/2.2", "push:abc123"]})
+        self.lines(f"{STATE}/worklog.jsonl",
+                   {"op": "add", "id": "1", "at": OPENED, "title": "a", "source": f"telegram:{telegram}/43"},
+                   {"op": "add", "id": "2", "at": OPENED, "title": "b", "source": "slack:C0TEAM/3.3"})
+        self.lines(f"{STATE}/lessons.jsonl", {"id": "l1", "at": OPENED, "rule": "r", "evidence": f"slack:{slack_dm}/4.4"})
+        self.write(f"{STATE}/slack-threads.json", [{"channel": slack_dm, "rootTs": "1790000000.000100"},
+                                                   {"channel": "C0TEAM", "rootTs": "1790000000.000200"}])
+        self.write(f"{HOME}/lanes/h.json", {"key": "h", "paneId": "w1:p3", "status": "done", "createdAt": OPENED_MS,
+                                            "final": {"text": "ok", "evidence": [f"telegram:{telegram}/47"]}})
+        self.write(f"{HOME}/backlog/b1.json", {"id": "b1", "title": "x", "status": "queued", "createdAt": OPENED_MS,
+                                               "source": f"telegram:{telegram}/48"})
+        self.write(f"{HOME}/config.json", {"defaultModel": "m", "telegram": {"ownerId": telegram, "chatId": telegram},
+                                           "slack": {"ownerChannel": slack_dm}})
+        self.write(f"{HOME}/secrets.env", f"DORI_TELEGRAM_OWNER={telegram}\n".encode())
+
+        rows = self.rows("dori-state")
+        payload = run_artifact_collection(self.root, kind="dori-state", records_path=self.root.parent / "rows.jsonl",
+                                          preview_limit=100)
+        events = extract_artifact_events(payload, self.root.parent / "artifacts-dori-state.json")
+        output = "\n".join((exported(rows), json.dumps(payload, ensure_ascii=False),
+                            json.dumps(events, ensure_ascii=False),
+                            (self.root.parent / "rows.jsonl").read_text(encoding="utf-8")))
+        self.assertEqual({owner: output.count(owner) for owner in (telegram, slack_dm)}, {telegram: 0, slack_dm: 0})
+
+        found = by_type(rows)
+        self.assertEqual(sorted((d["lane_key"], d["thread"]) for d in found["agent-lane"] if d["record_layout"] == "dori-mode"),
+                         [("dc", "discord:123456789012345678/9"), ("dm", ""), ("grp", "telegram:-100123/7"),
+                          ("own", ""), ("topic", "")])
+        own = next(d for d in found["agent-lane"] if d["lane_key"] == "own")
+        self.assertEqual(own["claim_evidence"], "")
+        (checkpoint,) = found["agent-lane-checkpoint"]
+        self.assertEqual((checkpoint["evidence"], checkpoint["remote_effects"]), (["pr:12"], ["push:abc123"]))
+        self.assertEqual([d["source_message"] for d in found["agent-worklog"]], ["", "slack:C0TEAM/3.3"])
+        self.assertEqual(found["agent-lesson"][0]["evidence"], [])
+        self.assertEqual([d["channel"] for d in found["agent-messenger-thread"]], ["", "C0TEAM"])
+        harness = next(d for d in found["agent-lane"] if d["lane_key"] == "h")
+        self.assertEqual(harness["evidence"], [])
+        self.assertEqual(found["agent-backlog-item"][0]["source_message"], "")
+        self.assertEqual([d["file_name"] for d in found["agent-secret-file"]], ["secrets.env"])

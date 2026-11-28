@@ -96,14 +96,18 @@
   (program only, no arguments) and the presence of `secrets.env` and its
   `secrets.env.bak*` copies (never read). Brief text, done signals, hook argv,
   `agentCommand` arguments, commit identities and the telemetry key are not
-  exported. Messenger message text and Telegram, Discord and Slack chat,
-  thread and channel IDs are exported on purpose as personal data, through
-  the usual redaction and length limit. A plist that does not parse leaves a
-  note instead of stopping the collector. Lanes and backlog items open and
-  close in the timeline, the other records are one event each. See
+  exported. Messenger message text is exported on purpose as personal data,
+  through the usual redaction and length limit. Owner IDs are not exported:
+  references to a private chat (a Telegram chat whose ID is the user's, a
+  Slack direct message) are left empty in lane `thread` and worklog and
+  backlog `source_message`, dropped from `evidence` and `remote_effects`
+  lists, and a Slack thread ledger entry in a direct-message channel has an
+  empty `channel`. A plist that does not parse leaves a note instead of
+  stopping the collector. Lanes and backlog items open and close in the
+  timeline, the other records are one event each. See
   `docs/ai-agent-artifacts.md` (`tests/test_ai_agent_dori.py`).
-- AI-agent row redaction also masks Telegram bot tokens (including inside a
-  Bot API `/bot<token>/` URL) and Discord bot tokens.
+- Cataly lane history entries are now `status-changed` events in the
+  timeline, the event kind dori lane history uses.
 
 ### Changed
 

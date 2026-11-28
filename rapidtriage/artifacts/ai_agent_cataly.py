@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import plistlib
-import re
 import sys
 from contextlib import closing
 from dataclasses import replace
@@ -20,7 +19,7 @@ else:
 
 from ..core.sqlite_snapshot import open_sqlite_snapshot, sqlite_snapshot_reference
 from .ai_agent_editor import DB_BYTES, VALUE_BYTES, database_bytes
-from .ai_agent_records import TEXT_LIMIT, clean, items, mapping, utc
+from .ai_agent_records import TEXT_LIMIT, clean, items, mapping, reference, utc
 
 DOCUMENT_BYTES = 8 << 20
 LIST_LIMIT = 64
@@ -28,11 +27,6 @@ LIST_LIMIT = 64
 CONFIG_SECTIONS = frozenset({"hub", "omp", "sessions", "lead", "fallback", "discord", "telegram", "slack", "voice",
                              "lanes", "jobs", "destinations", "coord", "workers", "update", "ops"})
 RELAYS = ("discord", "telegram", "slack")
-# A relay reference is ``<relay>:<room>`` (a thread) or ``<relay>:<room>/<message>`` (``src/lanes/record.rs``). A
-# Telegram private chat's ID is the user's own ID (``src/relay/telegram.rs`` admits the owner's chat by it) and a Slack
-# ``D`` room is a direct-message conversation, so either names the owner's chat. Groups (negative Telegram IDs),
-# channels and Discord threads stay; a Discord direct-message channel cannot be told apart from a channel by its ID.
-PRIVATE_ROOM = re.compile(r"(?:telegram:[0-9]+|slack:D[0-9A-Z]+)(?:[:/].*)?", re.DOTALL)
 # Columns read from each store table: ``int`` as stored, ``text`` cut just past the row text limit (so the row is
 # flagged), ``json`` whole up to the per-value cap and empty beyond it. A column an older schema lacks reads NULL.
 # Message bodies (``events.body``), the owner's request text (``requests.title``, the first line of the owner's
@@ -112,11 +106,6 @@ def listed(row, key, values):
     if len(values) > LIST_LIMIT:
         row.details["flags"].append("list-length-limit")
     return row
-
-
-def reference(value):
-    """A relay thread or message reference, empty when its room is a private chat (``PRIVATE_ROOM``)."""
-    return "" if isinstance(value, str) and PRIVATE_ROOM.fullmatch(value) else value
 
 
 def stamped(row, **times):
