@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import datetime as dt
 import hashlib
+import json
 import mmap
 import re
 import sqlite3
@@ -30,11 +31,28 @@ DESKTOP_AI_MESSAGE_ROW_LIMIT = 200
 DESKTOP_AI_MESSAGE_TABLE_LIMIT = 5
 EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 URL_RE = re.compile(r"(?i)https?://[^\s\x00\"'<>]{4,300}")
+# Matched against the lowercased path with "/" separators and "_" read as a
+# space. Data folders per vendor docs: docs/ai-usage-coverage-matrix.md.
 LOCAL_LLM_PATH_TERMS = {
     "ollama": "Ollama",
     "lm studio": "LM Studio",
     "lmstudio": "LM Studio",
     "gpt4all": "GPT4All",
+    # Jan's data folder only (Windows, macOS, Linux) and the Jan Agent home: a
+    # bare "/jan/data/" also matches a user named Jan or a "2024/Jan/data" folder.
+    "appdata/roaming/jan/data/": "Jan",
+    "application support/jan/data/": "Jan",
+    ".local/share/jan/data/": "Jan",
+    "/.jan/": "Jan",
+    "anythingllm": "AnythingLLM",
+    "/msty/": "Msty",
+    "ai.backend.go": "AI:GO",
+    "/.backend-ai-go/": "AI:GO",
+    "/localai/": "LocalAI",
+    "open webui": "Open WebUI",
+    "open-webui": "Open WebUI",
+    "text-generation-webui": "text-generation-webui",
+    "koboldcpp": "KoboldCpp",
 }
 DESKTOP_AI_APP_PATH_TERMS = {
     "chatgpt": "ChatGPT Desktop",
@@ -49,7 +67,7 @@ LOCAL_LLM_MODEL_SUFFIXES = {".gguf", ".ggml", ".bin", ".safetensors"}
 # ``.bin`` is far too generic (firmware, caches, VBA projects): it is only a
 # model file when the content carries a GGUF / safetensors header.
 LOCAL_LLM_MAGIC_REQUIRED_SUFFIXES = {".bin"}
-LOCAL_LLM_CONFIG_SUFFIXES = {".json", ".yaml", ".yml", ".toml", ".log", ".txt", ".sqlite", ".db"}
+LOCAL_LLM_CONFIG_SUFFIXES = {".json", ".jsonl", ".yaml", ".yml", ".toml", ".log", ".txt", ".sqlite", ".db"}
 LOCAL_LLM_PROMPT_SCAN_BYTES = 2 * 1024 * 1024
 LOCAL_LLM_PROMPT_ROW_LIMIT = 200
 LOCAL_LLM_TEXT_PROMPT_TERMS = (
@@ -2276,14 +2294,15 @@ def collect_local_llm_prompt_candidates(
     if suffix in {".sqlite", ".db"}:
         yield from collect_local_llm_sqlite_prompt_candidates(path=path, product=product, source_hashes=source_hashes)
         return
-    if suffix not in {".json", ".yaml", ".yml", ".toml", ".log", ".txt"}:
+    if suffix not in {".json", ".jsonl", ".yaml", ".yml", ".toml", ".log", ".txt"}:
         return
     data = read_prefix(path, LOCAL_LLM_PROMPT_SCAN_BYTES)
     if not data:
         return
     text = data.decode("utf-8", errors="replace")
+    fragments = local_llm_jsonl_prompt_fragments(text) if suffix == ".jsonl" else local_llm_text_prompt_fragments(text)
     emitted = 0
-    for offset, fragment in local_llm_text_prompt_fragments(text):
+    for offset, fragment in fragments:
         if emitted >= LOCAL_LLM_PROMPT_ROW_LIMIT:
             break
         emitted += 1
@@ -2765,7 +2784,7 @@ def local_llm_model_magic(path: Path) -> str:
 
 
 def infer_local_llm_product(path: Path) -> str:
-    lowered = str(path).lower().replace("_", " ")
+    lowered = str(path).lower().replace("\\", "/").replace("_", " ")
     for term, product in LOCAL_LLM_PATH_TERMS.items():
         if term in lowered:
             return product
@@ -2816,6 +2835,50 @@ def local_llm_text_prompt_fragments(text: str) -> list[tuple[int, str]]:
         if len(fragments) >= LOCAL_LLM_PROMPT_ROW_LIMIT:
             break
     return fragments
+
+
+def local_llm_jsonl_prompt_fragments(text: str) -> list[tuple[int, str]]:
+    """One chat message per JSON line, as Jan's ``threads/<id>/messages.jsonl``.
+
+    A line with ``role`` and ``content`` becomes ``"<role>: <text>"`` at the byte
+    offset where the line starts, so direction reads as for plain-text logs. A
+    file without such lines falls back to the plain-text scan.
+    """
+    fragments: list[tuple[int, str]] = []
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        message = jsonl_role_message(line)
+        if message:
+            fragments.append((offset, message[:2000]))
+            if len(fragments) >= LOCAL_LLM_PROMPT_ROW_LIMIT:
+                break
+        offset += len(line.encode("utf-8", errors="replace"))
+    return fragments or local_llm_text_prompt_fragments(text)
+
+
+def jsonl_role_message(line: str) -> str:
+    try:
+        item = json.loads(line)
+    except ValueError:
+        return ""
+    if not isinstance(item, dict):
+        return ""
+    role = item.get("role")
+    content = item.get("content")
+    if not isinstance(role, str) or not role.strip() or content is None:
+        return ""
+    # Jan ThreadMessage content: [{"type": "text", "text": {"value": "..."}}];
+    # OpenAI-style lines use a plain string or [{"type": "text", "text": "..."}].
+    texts = []
+    for part in content if isinstance(content, list) else [content]:
+        value = part.get("text") if isinstance(part, dict) else part
+        if isinstance(value, dict):
+            value = value.get("value")
+        if isinstance(value, str) and value.strip():
+            texts.append(" ".join(value.split()))
+    if not texts:
+        return ""
+    return f"{role.strip()}: {' '.join(texts)}"
 
 
 def local_llm_prompt_direction(value: str) -> str:
