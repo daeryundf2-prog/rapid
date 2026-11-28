@@ -43,6 +43,7 @@ from ...core.case_db import (
     get_histogram_baseline,
     list_case_tags,
     list_histogram_baselines,
+    mark_version,
     review_conflicts,
     review_mark_history_entries,
     update_case_tag,
@@ -140,6 +141,7 @@ def apply_review_tag_batch(database: CaseDatabase, request: Any, targets: list[d
             conflicts = review_conflicts(connection, case_id, targets)
             if conflicts:
                 raise ReviewConflictError(conflicts)
+            previous = [mark_version(connection, case_id, t["target_type"], t["target_id"]) for t in targets]
             result = apply_tag_ids(
                 connection,
                 case_id,
@@ -153,6 +155,16 @@ def apply_review_tag_batch(database: CaseDatabase, request: Any, targets: list[d
                 priority=getattr(request, "priority", None),
                 due_at=getattr(request, "due_at", None),
             )
+            # The requested targets' version tokens before and after (P3-2: the console records
+            # its own tag write, so its next decision on the row does not conflict with itself).
+            result["marks"] = [
+                {
+                    **{key: target[key] for key in ("target_type", "target_id", "collection", "kind", "locator") if key in target},
+                    "previous_version": before,
+                    "version": mark_version(connection, case_id, target["target_type"], target["target_id"]),
+                }
+                for target, before in zip(targets, previous, strict=True)
+            ]
     except ReviewConflictError as exc:
         raise review_conflict_http_error(exc) from exc
     except CaseDatabaseError as exc:

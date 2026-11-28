@@ -117,7 +117,9 @@ from .review import (
 )
 from .review_conflict import (
     EXPECTED_UPDATED_AT_KEY,
+    EXPECTED_VERSION_KEY,
     ReviewConflictError,
+    mark_version,
     review_conflicts,
 )
 from .review_schema import (
@@ -127,6 +129,7 @@ from .review_schema import (
     sync_review_mark_tag_ids,
     tag_names_for_ids,
 )
+from .review_verdict import verdict_changed
 from .schema import (
     apply_schema,
     artifact_fts_is_external,
@@ -1039,18 +1042,23 @@ class CaseDatabase:
         due_at: str | None = None,
         source_citation_package: Mapping[str, object] | None = None,
         expected_updated_at: str | None = None,
+        expected_version: int | None = None,
     ) -> dict[str, object]:
         """Create or update the case's one mark on a target (``tags`` replaces, ``add_tags`` merges).
 
         The read of the current mark and the write run in one ``BEGIN IMMEDIATE``
         transaction, so concurrent marks on the same target neither lose tags nor
-        insert a second mark. ``expected_updated_at`` (the ``updated_at`` the caller
-        last read; ``""`` = no mark) refuses the write with :class:`ReviewConflictError`
-        when the stored mark changed since (F14); ``None`` skips the check.
+        insert a second mark. ``expected_version`` (the mark's version token the caller
+        last read; ``0`` = no mark) refuses the write with :class:`ReviewConflictError`
+        when the stored mark changed since (F14); ``expected_updated_at`` is the older
+        clock-text form of the same check. ``None`` skips the check. The returned mark
+        carries its new ``version`` and the ``previous_version`` it replaced.
         """
         target: dict[str, object] = {"target_type": target_type, "target_id": target_id}
         if expected_updated_at is not None:
             target[EXPECTED_UPDATED_AT_KEY] = expected_updated_at
+        if expected_version is not None:
+            target[EXPECTED_VERSION_KEY] = expected_version
         with self.write_transaction() as connection:
             return self._write_review_marks(
                 connection,
@@ -1122,6 +1130,7 @@ class CaseDatabase:
                 (normalized_case_id, target_type, target_id),
             ).fetchone()
             previous_review = review_mark_to_dict(existing) if existing is not None else {}
+            previous_version = mark_version(connection, normalized_case_id, target_type, target_id)
             effective_status = str(status if status is not None else previous_review.get("status", "unreviewed"))
             effective_verification = str(
                 verification_status
@@ -1154,6 +1163,14 @@ class CaseDatabase:
                 ensure_ascii=False,
                 sort_keys=True,
             )
+            # P2-1: who set the verdict (status) and when, apart from the last writer of any field.
+            effective_actor = effective_reviewer or "local-user"
+            if verdict_changed(previous_review, effective_status):
+                status_by, status_at = effective_actor, timestamp
+            elif existing is not None:
+                status_by, status_at = str(existing["status_by"] or ""), str(existing["status_at"] or "")
+            else:
+                status_by, status_at = "", ""
             if existing is None:
                 citation_id = next_citation_id_for_connection(connection, normalized_case_id, "review")
                 connection.execute(
@@ -1162,9 +1179,9 @@ class CaseDatabase:
                         citation_id, case_id, target_type, target_id, status,
                         verification_status, tags_json, note, include_in_report,
                         reviewer, assignee, priority, due_at, source_citation_package_json,
-                        created_at, updated_at
+                        created_at, updated_at, status_by, status_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         citation_id,
@@ -1183,6 +1200,8 @@ class CaseDatabase:
                         source_citation_package_json,
                         timestamp,
                         timestamp,
+                        status_by,
+                        status_at,
                     ),
                 )
             else:
@@ -1192,7 +1211,8 @@ class CaseDatabase:
                     UPDATE review_mark
                     SET status = ?, verification_status = ?, tags_json = ?, note = ?,
                         include_in_report = ?, reviewer = ?, assignee = ?, priority = ?,
-                        due_at = ?, source_citation_package_json = ?, updated_at = ?
+                        due_at = ?, source_citation_package_json = ?, updated_at = ?,
+                        status_by = ?, status_at = ?
                     WHERE id = ?
                     """,
                     (
@@ -1207,6 +1227,8 @@ class CaseDatabase:
                         effective_due_at,
                         source_citation_package_json,
                         timestamp,
+                        status_by,
+                        status_at,
                         existing["id"],
                     ),
                 )
@@ -1285,7 +1307,15 @@ class CaseDatabase:
                 "SELECT * FROM review_mark WHERE case_id = ? AND target_type = ? AND target_id = ? LIMIT 1",
                 (normalized_case_id, target_type, target_id),
             ).fetchone()
-            marks.append(review_mark_to_dict(row))
+            mark = review_mark_to_dict(row)
+            # F14 / P3-1: the version token this write stored and the one it replaced (0 = none).
+            mark.update(
+                status_by=str(row["status_by"] or ""),
+                status_at=str(row["status_at"] or ""),
+                version=mark_version(connection, normalized_case_id, target_type, target_id),
+                previous_version=previous_version,
+            )
+            marks.append(mark)
         return marks
 
     def mark_reviews_batch(
@@ -1308,8 +1338,9 @@ class CaseDatabase:
         """One mark per target in one write transaction (all targets or none).
 
         Omitted ``tags`` clear the targets' tags unless ``keep_tags`` (the console keeps them and
-        merges ``add_tags``). A target may carry ``expected_updated_at``: when any stored mark
-        changed since, :class:`ReviewConflictError` lists every conflict and nothing is written.
+        merges ``add_tags``). A target may carry ``expected_version`` (or the older
+        ``expected_updated_at``): when any stored mark changed since,
+        :class:`ReviewConflictError` lists every conflict and nothing is written.
         """
         checked: list[dict[str, object]] = []
         for target in targets:

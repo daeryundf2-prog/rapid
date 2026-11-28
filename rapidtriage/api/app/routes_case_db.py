@@ -17,7 +17,7 @@ from ...core.case_catalog import (
 )
 from ...core.case_db import (
     ACTIVE_MARK_SQL,
-    EXPECTED_UPDATED_AT_KEY,
+    EXPECTATION_KEYS,
     CaseDatabase,
     CaseDatabaseError,
     ReviewConflictError,
@@ -85,7 +85,7 @@ def resolve_run_locator_targets(
     """``{collection, kind?, locator}`` targets -> ``{target_type, target_id}`` by ``resolve``
     (``RunLocatorIndex.resolve``); any unresolved one is a 400 naming the first ten. The resolved
     target keeps its locator (the answer's ``targets`` tell the console which row became which
-    mark) and its ``expected_updated_at`` (F14)."""
+    mark) and its expectation (``expected_version`` / ``expected_updated_at``, F14)."""
     resolved: list[dict[str, str]] = []
     unresolved: list[str] = []
     for target in located:
@@ -97,9 +97,9 @@ def resolve_run_locator_targets(
             unresolved.append(f"{collection}:{kind}:{locator}")
             continue
         entry = {"target_type": hit[0], "target_id": hit[1], "collection": collection, "kind": kind, "locator": locator}
-        expected = target.get(EXPECTED_UPDATED_AT_KEY)
-        if expected is not None:
-            entry[EXPECTED_UPDATED_AT_KEY] = expected
+        for key in EXPECTATION_KEYS:
+            if target.get(key) is not None:
+                entry[key] = target[key]
         resolved.append(entry)
     if unresolved:
         raise HTTPException(
@@ -305,6 +305,7 @@ def build_case_db_router(
                 due_at=request.due_at,
                 include_in_report=request.include_in_report,
                 expected_updated_at=request.expected_updated_at,
+                expected_version=request.expected_version,
             )
         except ReviewConflictError as exc:
             raise review_conflict_http_error(exc) from exc
@@ -418,9 +419,11 @@ def build_case_db_router(
 
     @router.post("/api/case-db/review-batch")
     def mark_case_db_reviews_batch(request: CaseDbReviewBatchRequest) -> dict[str, object]:
-        """Marks on every target in one transaction. A target may carry ``expected_updated_at``
-        (the mark's ``updated_at`` from the review map, ``""`` = no mark): when any stored mark
-        changed since, the answer is 409 with every conflict and nothing is written (F14)."""
+        """Marks on every target in one transaction. A target may carry ``expected_version`` (the
+        mark's ``version`` from the review map or a write answer, ``0`` = no mark; the older
+        ``expected_updated_at`` still works): when any stored mark changed since, the answer is 409
+        with every conflict and nothing is written (F14). Each answered mark carries its new
+        ``version`` and the ``previous_version`` it replaced."""
         try:
             database = open_request_case_database(request.database)
             targets, located = split_batch_targets(request.targets)

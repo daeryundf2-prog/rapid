@@ -18,9 +18,10 @@ from ...core.case_db.helpers import parse_json_object
 from ...core.case_db.review import load_review_target_match
 from ...core.case_db.review_conflict import (
     ACTIVE_MARK_SQL,
-    EXPECTED_UPDATED_AT_KEY,
+    EXPECTATION_KEYS,
     ReviewConflictError,
 )
+from ...core.case_db.review_verdict import verdict_select_sql
 from ...core.case_db.run_locator import (
     ANALYSIS_ROW_TARGET,
     RunLocatorIndex,
@@ -31,14 +32,15 @@ from ...core.case_db.schema import artifact_data_select_sql, artifact_row_data_j
 def split_batch_targets(
     targets: Iterable[Mapping[str, object]],
 ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
-    """Separate ``{target_type, target_id}`` targets from run-locator targets (``expected_updated_at`` kept)."""
+    """Separate ``{target_type, target_id}`` targets from run-locator targets (expectations kept)."""
     direct: list[dict[str, str]] = []
     located: list[dict[str, str]] = []
     for target in targets:
         if target.get("target_type") and target.get("target_id"):
             entry = {"target_type": str(target["target_type"]), "target_id": str(target["target_id"])}
-            if target.get(EXPECTED_UPDATED_AT_KEY) is not None:
-                entry[EXPECTED_UPDATED_AT_KEY] = str(target[EXPECTED_UPDATED_AT_KEY])
+            for key in EXPECTATION_KEYS:
+                if target.get(key) is not None:
+                    entry[key] = str(target[key])
             direct.append(entry)
         else:
             located.append({key: str(value) for key, value in target.items() if value is not None})
@@ -46,7 +48,7 @@ def split_batch_targets(
 
 
 def review_conflict_http_error(exc: ReviewConflictError) -> HTTPException:
-    """409 with every conflicting target and its current mark (status, reviewer, updated_at); nothing was written."""
+    """409 with every conflicting target, its current mark and what changed since; nothing was written."""
     return HTTPException(
         status_code=409,
         detail={"code": "review-conflict", "message": str(exc), "conflicts": exc.conflicts},
@@ -104,13 +106,15 @@ def review_map_entries(
 ) -> tuple[list[dict[str, object]], bool]:
     """Every review mark of the case with its run-output locator (when known).
 
-    Each mark names who stored it and when (``reviewer``, ``created_at``, ``updated_at``) and how
-    many times it changed (``change_count``, its ``review_mark_history`` versions; F13).
+    Each mark names who last wrote it and when (``reviewer``, ``created_at``, ``updated_at``), who
+    set its verdict and when (``status_by``, ``status_at``; P2-1), how many times it changed
+    (``change_count``, its ``review_mark_history`` versions; F13) and its version token
+    (``version``: a write sends it back as ``expected_version``; F14).
     """
     index = RunLocatorIndex(connection, case_id, outputs, output_dir=output_dir)
     rows = connection.execute(
         "SELECT citation_id, target_type, target_id, status, tags_json, note, include_in_report, updated_at, "
-        "reviewer, created_at, "
+        f"reviewer, created_at, {verdict_select_sql(connection)}, "
         "(SELECT COALESCE(MAX(h.version), 0) FROM review_mark_history h WHERE h.case_id = review_mark.case_id "
         "AND h.target_type = review_mark.target_type AND h.target_id = review_mark.target_id) "
         f"FROM review_mark WHERE case_id = ? AND {ACTIVE_MARK_SQL} ORDER BY updated_at DESC, id DESC LIMIT ?",
@@ -137,7 +141,11 @@ def review_map_entries(
             "updated_at": str(row[7] or ""),
             "reviewer": str(row[8] or ""),
             "created_at": str(row[9] or ""),
-            "change_count": int(row[10] or 0),
+            "status_by": str(row[10] or ""),
+            "status_at": str(row[11] or ""),
+            # Listed marks are active, so the token is the newest history version (P3-1).
+            "change_count": int(row[12] or 0),
+            "version": int(row[12] or 0),
             "collection": "",
             "kind": "",
             "locator": "",

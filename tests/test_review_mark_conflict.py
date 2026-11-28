@@ -7,6 +7,12 @@ the stored mark changed since, the API answers 409 with the current mark
 (status, reviewer, updated_at) and writes nothing; a batch is all-or-nothing.
 Writes without an expectation behave as before. The review map names who stored
 each mark and when.
+
+Review follow-ups: the token is the mark's history version, not clock text
+(P3-1: two writes in one clock tick); who set the verdict (``status_by`` /
+``status_at``) is kept apart from the last writer of a note, tag or report flag
+(P2-1); a conflict lists what changed since the client's version (P3-4); tag
+batches answer the versions they stored (P3-2).
 """
 
 from __future__ import annotations
@@ -17,12 +23,16 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from rapidtriage.core.case_db import (
     CaseDatabase,
+    CaseDatabaseError,
     ReviewConflictError,
     apply_schema,
+    apply_tag_ids,
     create_case_tag,
+    verdict_select_sql,
 )
 
 HAS_FASTAPI = True
@@ -145,6 +155,143 @@ class ReviewConflictCoreTests(unittest.TestCase):
         self.assertIsNone(_row(self.path, "1"))
 
 
+    def test_version_token_survives_two_writes_in_one_clock_tick(self) -> None:
+        # P3-1: on a coarse clock (Windows, 15.6 ms) two writes share an updated_at; the history
+        # version still moves, so the stale expectation is refused.
+        with mock.patch("rapidtriage.core.case_db.database.now_iso", return_value="2026-11-28T00:00:00+00:00"):
+            first = self._mark("1", status="relevant", reviewer="kim", expected_version=0)
+            seen = int(first["version"])
+            again = self._mark("1", status="excluded", reviewer="kim", expected_version=seen)
+            self.assertEqual(again["updated_at"], first["updated_at"])
+            self.assertEqual((again["previous_version"], again["version"]), (seen, seen + 1))
+            with self.assertRaises(ReviewConflictError) as caught:
+                self._mark("1", status="needs-review", reviewer="lee", expected_version=seen)
+        (conflict,) = caught.exception.conflicts
+        self.assertEqual((conflict["expected_version"], conflict["current"]["version"]), (seen, seen + 1))
+        self.assertEqual(_row(self.path, "1")["status"], "excluded")
+
+    def test_write_answers_the_version_it_stored_and_the_one_it_replaced(self) -> None:
+        created = self._mark("2", note="메모", reviewer="kim", expected_version=0)
+        self.assertEqual((created["previous_version"], created["version"]), (0, 1))
+        cleared = self._mark("2", note="", reviewer="kim", expected_version=1)
+        # A cleared mark is "no mark": its token is 0 again, and 0 is what a reader of the board sends.
+        self.assertEqual((cleared["previous_version"], cleared["version"]), (1, 0))
+        remade = self._mark("2", status="relevant", reviewer="lee", expected_version=0)
+        self.assertEqual((remade["previous_version"], remade["version"]), (0, 3))
+
+    def test_bad_expected_version_is_refused(self) -> None:
+        with self.assertRaisesRegex(CaseDatabaseError, "expected_version"):
+            self.database.mark_reviews_batch(
+                case_id=CASE_ID,
+                targets=[{"target_type": "file_record", "target_id": "1", "expected_version": "v1"}],
+                status="relevant",
+            )
+        self.assertIsNone(_row(self.path, "1"))
+
+    def test_conflict_lists_what_changed_since_the_clients_version(self) -> None:
+        seen = self._mark("3", status="relevant", reviewer="kim")
+        self._mark("3", note="lee의 메모", reviewer="lee")
+        self._mark("3", add_tags=["지갑"], reviewer="park")
+        with self.assertRaises(ReviewConflictError) as caught:
+            self._mark("3", note="kim의 메모", reviewer="kim", expected_version=int(seen["version"]))
+        current = caught.exception.conflicts[0]["current"]
+        self.assertEqual(
+            [(change["actor"], change["fields"]) for change in current["changes"]],
+            [("park", ["tags"]), ("lee", ["note"])],
+        )
+        # The verdict is still kim's: only the note and the tags moved.
+        self.assertEqual((current["status_by"], current["status_at"]), ("kim", seen["status_at"]))
+        self.assertEqual(current["reviewer"], "park")
+
+    def test_conflict_from_no_mark_lists_changes_since_the_mark_was_last_cleared(self) -> None:
+        self._mark("1", status="relevant", reviewer="kim")
+        self._mark("1", status="unreviewed", reviewer="kim")
+        self._mark("1", status="excluded", reviewer="lee")
+        with self.assertRaises(ReviewConflictError) as caught:
+            self._mark("1", status="relevant", reviewer="park", expected_version=0)
+        changes = caught.exception.conflicts[0]["current"]["changes"]
+        self.assertEqual([(c["version"], c["actor"], c["fields"]) for c in changes], [(3, "lee", ["status"])])
+
+    def test_verdict_actor_and_time_stay_with_the_status_writer(self) -> None:
+        # P2-1: lee decides; kim only adds a note and puts the row in the report.
+        decided = self._mark("1", status="excluded", reviewer="lee")
+        self._mark("1", note="kim의 메모", include_in_report=True, reviewer="kim")
+        row = _row(self.path, "1")
+        self.assertEqual((row["reviewer"], row["status_by"], row["status_at"]), ("kim", "lee", decided["updated_at"]))
+        changed = self._mark("1", status="relevant", reviewer="kim")
+        self.assertEqual((changed["status_by"], changed["status_at"]), ("kim", changed["updated_at"]))
+        # A mark made with a note only has no verdict yet.
+        note_only = self._mark("2", note="메모만", reviewer="park")
+        self.assertEqual((note_only["status_by"], note_only["status_at"]), ("", ""))
+
+    def test_tag_writes_do_not_move_the_verdict(self) -> None:
+        decided = self._mark("1", status="relevant", reviewer="lee")
+        batch = self.database.mark_reviews_batch(
+            case_id=CASE_ID,
+            targets=[{"target_type": "file_record", "target_id": "1"}],
+            add_tags=["메모용"],
+            keep_tags=True,
+            reviewer="kim",
+        )
+        self.assertEqual(batch["marks"][0]["status_by"], "lee")
+        with self.database.write_transaction() as connection:
+            tag_id = int(create_case_tag(connection, CASE_ID, name="지갑", actor="kim")["id"])
+            apply_tag_ids(connection, CASE_ID, [{"target_type": "file_record", "target_id": "1"}], add_ids=[tag_id], actor="park")
+        row = _row(self.path, "1")
+        self.assertEqual((row["reviewer"], row["status_by"], row["status_at"]), ("park", "lee", decided["updated_at"]))
+
+
+class ReviewVerdictMigrationTests(unittest.TestCase):
+    """P2-1 migration: a DB from before ``status_by`` / ``status_at`` gets them from the history."""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.path = _make_case_db(Path(self.temp.name))
+        database = CaseDatabase(self.path)
+
+        def mark(target_id: str, **fields: object) -> dict[str, object]:
+            return database.mark_review(case_id=CASE_ID, target_type="file_record", target_id=target_id, **fields)
+
+        self.decided = mark("1", status="relevant", reviewer="kim")
+        mark("1", note="lee의 메모", include_in_report=True, reviewer="lee")
+        mark("2", note="메모만", reviewer="park")
+        mark("3", status="excluded", reviewer="kim")
+        self.undone = mark("3", status="unreviewed", note="다시 볼 것", reviewer="lee")
+        with contextlib.closing(sqlite3.connect(self.path)) as connection:
+            connection.execute("ALTER TABLE review_mark DROP COLUMN status_by")
+            connection.execute("ALTER TABLE review_mark DROP COLUMN status_at")
+            connection.commit()
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def _expected(self) -> dict[str, tuple[str, str]]:
+        return {
+            "1": ("kim", str(self.decided["updated_at"])),
+            "2": ("", ""),
+            # Set back to unreviewed by lee: lee made the current (empty) verdict.
+            "3": ("lee", str(self.undone["updated_at"])),
+        }
+
+    def test_read_only_db_derives_the_verdict_from_the_history(self) -> None:
+        with contextlib.closing(sqlite3.connect(f"{self.path.as_uri()}?mode=ro", uri=True)) as connection:
+            rows = connection.execute(
+                f"SELECT target_id, {verdict_select_sql(connection)} FROM review_mark ORDER BY target_id"
+            ).fetchall()
+        self.assertEqual({str(row[0]): (str(row[1]), str(row[2])) for row in rows}, self._expected())
+
+    def test_opening_for_write_adds_and_backfills_the_columns(self) -> None:
+        with CaseDatabase(self.path).write_transaction() as connection:
+            columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(review_mark)")}
+        self.assertLessEqual({"status_by", "status_at"}, columns)
+        with contextlib.closing(sqlite3.connect(self.path)) as connection:
+            stored = {
+                str(row[0]): (str(row[1]), str(row[2]))
+                for row in connection.execute("SELECT target_id, status_by, status_at FROM review_mark ORDER BY target_id")
+            }
+        self.assertEqual(stored, self._expected())
+
+
 @unittest.skipUnless(HAS_FASTAPI, "fastapi is required for RapidTriage API tests")
 class ReviewConflictApiTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -233,6 +380,44 @@ class ReviewConflictApiTests(unittest.TestCase):
         self.assertEqual(refused.status_code, 409, refused.text)
         self.assertNotIn("충돌 태그", _row(self.path, "3")["tags_json"])
 
+    def test_expected_version_over_http_single_and_batch(self) -> None:
+        created = self._review("1", status="relevant", reviewer="kim", expected_version=0)
+        self.assertEqual(created.status_code, 200, created.text)
+        self.assertEqual((created.json()["previous_version"], created.json()["version"]), (0, 1))
+        moved = self._batch(
+            [{"target_type": "file_record", "target_id": "1", "expected_version": 1}], status="excluded", reviewer="lee"
+        )
+        self.assertEqual(moved.status_code, 200, moved.text)
+        self.assertEqual(moved.json()["marks"][0]["version"], 2)
+        stale = self._review("1", status="needs-review", reviewer="park", expected_version=1)
+        self.assertEqual(stale.status_code, 409, stale.text)
+        (conflict,) = stale.json()["detail"]["conflicts"]
+        self.assertEqual(conflict["expected_version"], 1)
+        self.assertEqual(
+            (conflict["current"]["version"], conflict["current"]["status_by"], conflict["current"]["changes"][0]["fields"]),
+            (2, "lee", ["status"]),
+        )
+        self.assertEqual(self._review("1", status="relevant", expected_version=-1).status_code, 422)
+
+    def test_tag_id_batch_answers_the_versions_it_stored(self) -> None:
+        mark = self._review("2", status="relevant", reviewer="kim").json()
+        with CaseDatabase(self.path).connect() as connection:
+            apply_schema(connection)
+            tag_id = int(create_case_tag(connection, CASE_ID, name="버전 태그", actor="kim")["id"])
+        tagged = self._batch([{"target_type": "file_record", "target_id": "2"}], tag_ids=[tag_id], reviewer="kim")
+        self.assertEqual(tagged.status_code, 200, tagged.text)
+        self.assertEqual(
+            tagged.json()["marks"],
+            [
+                {
+                    "target_type": "file_record",
+                    "target_id": "2",
+                    "previous_version": mark["version"],
+                    "version": mark["version"] + 1,
+                }
+            ],
+        )
+
 
 @unittest.skipUnless(HAS_FASTAPI, "fastapi is required for RapidTriage API tests")
 class ReviewMapAttributionTests(unittest.TestCase):
@@ -307,3 +492,16 @@ class ReviewMapAttributionTests(unittest.TestCase):
         marks = self.client.get(f"/api/runs/{self.run_id}/review-map").json()["marks"]
         self.assertFalse(any(mark["locator"] == "/candidates/2" and mark["collection"] == "files" for mark in marks))
         self.assertEqual(self._map_mark("/candidates/1")["status"], "needs-review")
+
+    def test_review_map_names_who_set_the_verdict_apart_from_the_last_writer(self) -> None:
+        # P2-1: lee decides, kim only puts the row in the report; the verdict stays lee's.
+        located = [{"collection": "files", "locator": "/candidates/3"}]
+        self.assertEqual(self._batch(located, status="excluded", reviewer="lee").status_code, 200)
+        decided = self._map_mark("/candidates/3")
+        seen = [{**located[0], "expected_version": decided["version"]}]
+        included = self._batch(seen, include_in_report=True, reviewer="kim")
+        self.assertEqual(included.status_code, 200, included.text)
+        mark = self._map_mark("/candidates/3")
+        self.assertEqual((mark["reviewer"], mark["status_by"], mark["status_at"]), ("kim", "lee", decided["status_at"]))
+        self.assertEqual((mark["version"], mark["change_count"]), (decided["version"] + 1, decided["change_count"] + 1))
+        self.assertEqual(included.json()["marks"][0]["previous_version"], decided["version"])
