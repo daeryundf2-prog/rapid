@@ -136,7 +136,10 @@ export function downloadNameFromDisposition(disposition: string, fallbackName: s
     name = raw;
   }
   const printable = [...name].filter((character) => (character.codePointAt(0) ?? 0) >= 0x20).join("");
-  const safe = printable.replace(UNSAFE_IN_FILENAME, "_").replace(/^\.+/, "").trim();
+  // `/` and `\` are already replaced, so "../x" cannot traverse; a name of only dots is the
+  // remaining bad case. A leading dot is kept: ".bash_history" must save under its own name.
+  const safe = printable.replace(UNSAFE_IN_FILENAME, "_").trim();
+  if (/^\.+$/.test(safe)) return fallbackName;
   return safe || fallbackName;
 }
 

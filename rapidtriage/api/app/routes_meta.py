@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 
-from ...core.browse import BrowseError, browse_directory
+from ...core.browse import BrowseError, browse_directory, foreign_path_message
 from ...core.collect_plan import (
     CollectPlanError,
     build_collect_plan,
@@ -154,6 +154,9 @@ def build_meta_router(store: RunJobStore | None = None) -> APIRouter:
 
     @router.post("/api/evidence/identify")
     def identify_evidence_path(request: EvidenceIdentifyRequest) -> dict[str, object]:
+        foreign = foreign_path_message(request.path)
+        if foreign:
+            raise HTTPException(status_code=400, detail=foreign)
         try:
             result = identify_evidence(Path(request.path))
             return {

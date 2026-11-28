@@ -128,15 +128,25 @@ describe("downloadNameFromDisposition (원격 윈도우 다운로드)", () => {
     );
   });
 
-  it("replaces characters Windows rejects in a file name", () => {
+  it("replaces characters Windows rejects in a file name but keeps a leading dot", () => {
     expect(downloadNameFromDisposition("attachment; filename*=utf-8''a%3Ab%7Cc.txt", "fallback.txt")).toBe(
       "a_b_c.txt",
     );
+    expect(downloadNameFromDisposition('attachment; filename=".bash_history"', "fallback.txt")).toBe(
+      ".bash_history",
+    );
+    expect(downloadNameFromDisposition('attachment; filename="../../etc/passwd"', "fallback.txt")).toBe(
+      ".._.._etc_passwd",
+    );
   });
 
-  it("falls back when the header is missing or undecodable", () => {
+  it("falls back when the header has no name, and on a name of only dots", () => {
     expect(downloadNameFromDisposition("", "fallback.json")).toBe("fallback.json");
     expect(downloadNameFromDisposition("attachment", "fallback.json")).toBe("fallback.json");
+    expect(downloadNameFromDisposition('attachment; filename=".."', "fallback.json")).toBe("fallback.json");
+  });
+
+  it("keeps an undecodable percent sequence as typed rather than losing the name", () => {
     expect(downloadNameFromDisposition("attachment; filename*=utf-8''%E0%A4%A.txt", "fallback.json")).toBe(
       "%E0%A4%A.txt",
     );

@@ -78,6 +78,19 @@ class BrowseDirectoryTest(unittest.TestCase):
         self.assertIsNone(foreign_path_message("/Users/analyst/evidence"))
         self.assertIsNone(foreign_path_message(""))
 
+    def test_posix_server_also_catches_quoted_and_drive_relative_pastes(self) -> None:
+        # Explorer's "경로로 복사" wraps the path in quotes; "D:data" is drive-relative.
+        if os.sep != "/":
+            self.skipTest("POSIX-only message")
+        for pasted in ('"D:\\evidence\\case001"', "D:evidence", "D:/evidence", "\\\\nas\\share\\case"):
+            self.assertIsNotNone(foreign_path_message(pasted), pasted)
+
+    def test_posix_paths_and_relative_names_are_left_alone(self) -> None:
+        if os.sep != "/":
+            self.skipTest("POSIX-only message")
+        for ok in ("/mnt/c/evidence", "~/evidence", "evidence/case001", "C-drive-copy", ""):
+            self.assertIsNone(foreign_path_message(ok), ok)
+
 
 if __name__ == "__main__":
     unittest.main()

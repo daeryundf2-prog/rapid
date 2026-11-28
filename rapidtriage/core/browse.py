@@ -37,7 +37,8 @@ class BrowseError(ValueError):
     """Raised when a browse path cannot be listed."""
 
 
-_WINDOWS_ABSOLUTE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
+#: ``D:\evidence``, ``D:/evidence``, ``D:evidence`` (drive-relative) and ``\\nas\share``.
+_WINDOWS_ABSOLUTE = re.compile(r"^(?:[A-Za-z]:|\\\\)")
 
 
 def foreign_path_message(raw: str) -> str | None:
@@ -46,21 +47,24 @@ def foreign_path_message(raw: str) -> str | None:
     The console is used remotely: a Windows analyst pastes ``D:\\evidence`` into a
     picker whose paths belong to the (POSIX) API host, where that text is just a
     relative name and the resulting "경로가 없습니다" points at a nonsense path.
+    Explorer's "copy as path" wraps the text in quotes, so those are stripped first.
     """
-    text = str(raw).strip()
+    text = str(raw).strip().strip('"')
     if not text:
         return None
     if os.sep == "/" and _WINDOWS_ABSOLUTE.match(text):
-        return (
-            f"윈도우 경로입니다: {text}. 경로는 분석 서버(현재 macOS·Linux) 기준으로 "
-            "입력하세요. 예: /Users/<사용자>/evidence"
-        )
-    if os.sep == "\\" and text.startswith("/"):
-        return (
-            f"POSIX 경로입니다: {text}. 경로는 분석 서버(현재 Windows) 기준으로 "
-            "입력하세요. 예: D:\\evidence"
-        )
+        return f"윈도우 경로입니다: {text}. 경로는 분석 서버 기준으로 입력하세요. 예: {_posix_example()}"
+    # The reverse is not an error: on a Windows host "/evidence" is drive-relative and
+    # "\\\\nas\\share" is a UNC path, and both open.
     return None
+
+
+def _posix_example() -> str:
+    """An example path on this host: the WSL mount of a Windows drive, else the home folder."""
+    mnt = Path("/mnt/c")
+    if mnt.is_dir():
+        return "/mnt/c/evidence (윈도우 C: 드라이브)"
+    return f"{Path.home()}/evidence"
 
 
 def list_roots() -> list[str]:

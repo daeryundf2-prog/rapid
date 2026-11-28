@@ -121,11 +121,12 @@ def validate_run_evidence_source(raw_root: str) -> None:
     if foreign:
         raise HTTPException(status_code=400, detail=foreign)
     source = Path(raw_root).expanduser()
-    if not source.exists():
-        # Without this the run is queued and dies later inside the engine with a misleading
-        # "[Errno 13] Permission denied" on the missing folder (remote check, 2026-11-28).
-        raise HTTPException(status_code=400, detail=f"경로가 없습니다: {source}")
     try:
+        if not source.exists():
+            # Without this the run is queued and dies later inside the engine with a misleading
+            # "[Errno 13] Permission denied" on the missing folder (remote check, 2026-11-28).
+            # exists() itself raises on EACCES/EPERM, so it stays inside the OSError guard.
+            raise HTTPException(status_code=400, detail=f"경로가 없습니다: {raw_root}")
         evidence = identify_evidence(source)
     except OSError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

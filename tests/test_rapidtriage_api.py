@@ -3421,6 +3421,32 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("윈도우 경로입니다", response.json()["detail"])
 
+    def test_create_run_answers_400_when_the_evidence_folder_cannot_be_read(self) -> None:
+        # A folder the service account cannot traverse: Path.exists() raises EACCES there, so the
+        # existence check has to stay inside the OSError guard or the analyst gets a 500.
+        if os.name == "nt" or os.geteuid() == 0:
+            self.skipTest("POSIX permissions needed, and root bypasses them")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            closed = Path(tmp_dir) / "closed"
+            (closed / "evidence").mkdir(parents=True)
+            closed.chmod(0o000)
+            try:
+                client = api_test_client(RunJobStore())
+                response = client.post(
+                    "/api/runs",
+                    json={
+                        "root": str(closed / "evidence"),
+                        "mode": "seizure",
+                        "read_only": True,
+                        "wait": False,
+                    },
+                )
+            finally:
+                closed.chmod(0o700)
+
+            self.assertEqual(response.status_code, 400, response.text)
+            self.assertIn("Permission denied", response.json()["detail"])
+
     def test_bookmark_api_writes_run_case_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"
