@@ -17,6 +17,7 @@ import { searchSpec } from "../../app/gridBridge";
 import type { GridRow } from "../../contracts/collection";
 import type { Route } from "../../router";
 import { isRecord } from "../grid/columns/common";
+import { timelinePathOf } from "../grid/columns/timeline";
 import type { Pivot } from "./pivots";
 
 export interface PivotCount {
@@ -93,7 +94,10 @@ async function artifactPathCount(
   return { count, capped: true };
 }
 
-/** One capped scan of the run's timeline: events per source path. */
+/**
+ * One capped scan of the run's timeline: events per source path, the path the timeline list
+ * filters on (`timelinePathOf`: `path`, else `details.source_path` …), lower-cased.
+ */
 interface PathTally {
   counts: Map<string, number>;
   capped: boolean;
@@ -114,7 +118,7 @@ async function scanTimelinePaths(runId: string, signal: AbortSignal): Promise<Pa
     });
     const events = Array.isArray(payload.events) ? payload.events : [];
     for (const event of events) {
-      const path = isRecord(event) && typeof event.path === "string" ? event.path : "";
+      const path = isRecord(event) ? (timelinePathOf(event) ?? "").toLowerCase() : "";
       if (path) counts.set(path, (counts.get(path) ?? 0) + 1);
     }
     const pagination = isRecord(payload.pagination) ? payload.pagination : {};
@@ -133,7 +137,19 @@ async function timelinePathCount(runId: string, path: string, signal: AbortSigna
     pending.catch(() => timelineTallies.delete(runId));
   }
   const tally = await raceAbort(pending, signal);
-  return { count: tally.counts.get(path) ?? 0, capped: tally.capped };
+  return { count: tallyPathCount(tally.counts, path), capped: tally.capped };
+}
+
+/**
+ * Events the opened list shows for `path`: its 경로 filter is a case-insensitive substring of the
+ * event path (filterModel `filters.path`), so `…/History` also counts `…/History-journal`
+ * (review P3-5: the count follows the list's rule).
+ */
+export function tallyPathCount(counts: ReadonlyMap<string, number>, path: string): number {
+  const needle = path.toLowerCase();
+  let total = 0;
+  for (const [key, n] of counts) if (key.includes(needle)) total += n;
+  return total;
 }
 
 function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {

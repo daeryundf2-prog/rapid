@@ -92,6 +92,8 @@ function hasCommandModifier(shortcut: string): boolean {
   return shortcut.startsWith("Ctrl+") || shortcut.startsWith("Alt+");
 }
 
+const ALT_LETTER = /^Alt\+(Shift\+)?[A-Z]$/;
+
 /**
  * Global keys that still act while focus is inside a modal dialog: Escape (close) and
  * Ctrl+K (the palette toggles itself closed). Everything else — stage switches (Alt+1~5),
@@ -129,6 +131,9 @@ export function dispatchShortcut(event: KeyboardEvent): boolean {
     if (isTextEntry(target)) return false;
     if ((shortcut === "Enter" || shortcut === "Space") && isInteractiveTarget(target)) return false;
   }
+  // macOS Option+letter types a character (å ß †): Alt+letter keys never fire inside text entry
+  // (review P3-1). Alt+digit / Alt+arrows still do.
+  if (ALT_LETTER.test(shortcut) && isTextEntry(target)) return false;
 
   event.preventDefault();
   void runCommand(command.id, { silentWhenDisabled: SILENT_WHEN_DISABLED.has(shortcut) });

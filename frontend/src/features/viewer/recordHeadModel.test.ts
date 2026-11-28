@@ -112,3 +112,29 @@ describe("같은 대상 count (F19)", () => {
     expect(urls[0]?.searchParams.get("limit")).toBe(String(SEARCH_LIST_LIMIT));
   });
 });
+
+describe("같은 원본 파일 count on the timeline (review P3-5)", () => {
+  it("counts by the list's rule: the event path or its fallbacks, case-insensitive substring", async () => {
+    const history = "C:/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History";
+    const events = [
+      { path: history },
+      { path: `${history}-journal` },
+      { details: { source_path: history.toUpperCase() } },
+      { input_file: history },
+      { path: "C:/other.log" },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ events, pagination: { has_more: false } }), {
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+    const pivot = recordPivots(timelineRow, "r1", "utc", decoded).find((p) => p.id === "same-source");
+    expect(pivot).toBeDefined();
+    const count = await countPivot(pivot as never, timelineRow, "r1", new AbortController().signal);
+    expect(count).toEqual({ count: 4, capped: false });
+  });
+});

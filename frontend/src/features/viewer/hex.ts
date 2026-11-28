@@ -94,7 +94,7 @@ export function byteAscii(value: number): string {
 }
 
 /**
- * The hex cursor read aloud (F26): "0x00000005, 값 65, 문자 e", plus "SQLite 시그니처 시작/끝" and
+ * The hex cursor read aloud (F26): "0x00000005, 값 0x65, 문자 e", plus "SQLite 시그니처 시작/끝" and
  * "레코드 시작/끝" when the cursor sits on such an edge.
  */
 export function hexCursorSentence(
@@ -107,7 +107,8 @@ export function hexCursorSentence(
   const parts = [formatOffset(offset, size)];
   if (value === null) parts.push("값 읽는 중");
   else {
-    parts.push(`값 ${byteHex(value)}`);
+    // Hex said as hex: "값 0x51", not "값 51" (81 read as fifty-one; review P3-2).
+    parts.push(`값 0x${byteHex(value)}`);
     parts.push(value >= 0x20 && value <= 0x7e ? `문자 ${String.fromCharCode(value)}` : "문자 없음");
   }
   if (hit && offset === hit.offset) parts.push(`${hit.name} 시그니처 시작`);
