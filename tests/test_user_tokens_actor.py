@@ -122,7 +122,12 @@ class UserTokenFileTests(unittest.TestCase):
         captured: dict[str, object] = {}
         fake_uvicorn = types.SimpleNamespace(run=lambda *args, **kwargs: captured.update(kwargs))
         out, err = io.StringIO(), io.StringIO()
-        with clean_env(**{TOKENS_FILE_ENV: str(self.path), "RAPIDTRIAGE_NO_BROWSER": "1"}):
+        # Any non-loopback bind also needs both server root lists (PR #91); synthetic, non-overlapping folders.
+        roots = {
+            "RAPIDTRIAGE_ANALYSIS_ROOTS": str(Path(self.temp.name) / "evidence"),
+            "RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS": str(Path(self.temp.name) / "output"),
+        }
+        with clean_env(**{TOKENS_FILE_ENV: str(self.path), "RAPIDTRIAGE_NO_BROWSER": "1"}, **roots):
             with mock.patch.dict(sys.modules, {"uvicorn": fake_uvicorn}):
                 with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                     self.assertEqual(run_web_server("0.0.0.0", 8899, remote=True), 0)
