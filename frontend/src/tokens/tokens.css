@@ -97,24 +97,25 @@
   --on-accent: #0b1117;
   --scrim: #000000;
 
-  --ok: #45c07a;
+  --ok: #4cc468;
   --warn: #e0aa3e;
   --danger: #f47676;
   --info: #5aa2ff;
 
   --tag-1: #f06b6b;
   --tag-2: #e0aa3e;
-  --tag-3: #45c07a;
-  --tag-4: #3fb3c4;
+  --tag-3: #4cc468;
+  --tag-4: #40a8b8;
   --tag-5: #5aa2ff;
-  --tag-6: #9784ec;
+  --tag-6: #9888ec;
   --tag-7: #d276c2;
   --tag-8: #a59a84;
 
   /* Review-status colours (X3, F1): one meaning, one colour on every screen. Red stays for
      errors / mismatches (--danger) only: 관련 있음 is magenta, 재검토 cyan, 제외 a neutral grey
      (빠짐), 북마크 green, 보고서 포함 violet. scripts/check-contrast.mjs checks they stay apart
-     from each other and from danger / warn / accent under deuteranopia and protanopia. The
+     from each other (also under tritanopia) and from danger / warn / accent under deuteranopia
+     and protanopia, and that --ok and the tag colours are no near-twin of a status. The
      verdict glyph's shape carries the meaning; the colour only repeats it. */
   --status-relevant: #e024b7;
   --status-relevant-on: #0b1117;
@@ -122,7 +123,7 @@
   --status-bookmark-on: #0b1117;
   --status-excluded: #b8bbc2;
   --status-excluded-on: #0b1117;
-  --status-needs-review: #00cfeb;
+  --status-needs-review: #00dcf8;
   --status-needs-review-on: #0b1117;
   --status-report: #7c65fa;
   --status-report-on: #0b1117;
@@ -154,18 +155,18 @@
   --on-accent: #ffffff;
   --scrim: #000000;
 
-  --ok: #176e3e;
+  --ok: #1c5c28;
   --warn: #7c580d;
   --danger: #b63131;
   --info: #1a63c2;
 
   --tag-1: #b63131;
   --tag-2: #87600f;
-  --tag-3: #1b7a45;
+  --tag-3: #20801c;
   --tag-4: #177283;
   --tag-5: #1a63c2;
   --tag-6: #5f4bc0;
-  --tag-7: #a03e8e;
+  --tag-7: #ac589c;
   --tag-8: #6e6350;
 
   --status-relevant: #9d2b8a;
@@ -205,17 +206,17 @@
     --accent-active: #134a91;
     --on-accent: #ffffff;
     --scrim: #000000;
-    --ok: #176e3e;
+    --ok: #1c5c28;
     --warn: #7c580d;
     --danger: #b63131;
     --info: #1a63c2;
     --tag-1: #b63131;
     --tag-2: #87600f;
-    --tag-3: #1b7a45;
+    --tag-3: #20801c;
     --tag-4: #177283;
     --tag-5: #1a63c2;
     --tag-6: #5f4bc0;
-    --tag-7: #a03e8e;
+    --tag-7: #ac589c;
     --tag-8: #6e6350;
     --status-relevant: #9d2b8a;
     --status-relevant-on: #ffffff;

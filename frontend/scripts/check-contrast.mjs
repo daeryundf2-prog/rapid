@@ -199,8 +199,12 @@ export function contrast(fg, bg) {
 //   - normal vision ≥ 20 (clearly different hues side by side),
 //   - deuteranopia and protanopia ≥ 10 (a small glyph still reads as a different colour; ΔE00
 //     ≈ 2 is a just-noticeable difference, ≈ 10 a plainly different swatch at 13–14px),
+//   - tritanopia ≥ 10 between two statuses (two verdicts never share a colour for anyone),
 //   - 관련 있음 vs danger ≥ 25 under normal vision (red stays the error colour).
-// Tritanopia is printed for information only (rare; the glyph shapes carry the meaning).
+// Neighbours (--ok and the --tag-* palette) always come with their own text (the 완료 tone chip,
+// the tag name), so they need only be no near-twin of a status: normal vision ≥ 10.
+// Tritanopia against danger / warn / accent and CVD against the neighbours are printed for
+// information only (rare; the glyph shapes carry the meaning).
 export const CVD_MATRICES = {
   deutan: [
     [0.367322, 0.860646, -0.227968],
@@ -218,8 +222,16 @@ export const CVD_MATRICES = {
     [0.004733, 0.691367, 0.3039],
   ],
 };
-export const STATUS_SEPARATION = { normal: 20, deutan: 10, protan: 10, relevantVsDanger: 25 };
+export const STATUS_SEPARATION = {
+  normal: 20,
+  deutan: 10,
+  protan: 10,
+  tritan: 10,
+  relevantVsDanger: 25,
+  neighbour: 10,
+};
 const SEPARATION_OTHERS = ["--danger", "--warn", "--accent"];
+const SEPARATION_NEIGHBOURS = ["--ok", ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => `--tag-${n}`)];
 
 const toLinear = (c) => {
   const s = c / 255;
@@ -298,28 +310,34 @@ export function cvdDelta(hexA, hexB, kind) {
 }
 
 /**
- * Every status pair and every status × danger/warn/accent pair of one theme, with ΔE00 per
- * vision and whether it meets STATUS_SEPARATION. A missing token gives `missing: true`.
+ * Every status pair, every status × danger/warn/accent pair and every status × --ok/--tag-* pair
+ * of one theme, with ΔE00 per vision and whether it meets STATUS_SEPARATION (`kind`: "status",
+ * "other" or "neighbour"). A missing token gives `missing: true`.
  */
 export function statusSeparation(vars) {
   const statuses = STATUSES.map((n) => `--status-${n}`);
   const pairs = [];
   statuses.forEach((a, i) => {
-    for (const b of [...statuses.slice(i + 1), ...SEPARATION_OTHERS]) pairs.push([a, b]);
+    for (const b of statuses.slice(i + 1)) pairs.push([a, b, "status"]);
+    for (const b of SEPARATION_OTHERS) pairs.push([a, b, "other"]);
+    for (const b of SEPARATION_NEIGHBOURS) pairs.push([a, b, "neighbour"]);
   });
-  return pairs.map(([a, b]) => {
+  return pairs.map(([a, b, kind]) => {
     const ha = resolveToken(vars, a);
     const hb = resolveToken(vars, b);
-    if (!ha || !hb) return { a, b, missing: true, ok: false };
+    if (!ha || !hb) return { a, b, kind, missing: true, ok: false };
     const delta = Object.fromEntries(
-      ["normal", "deutan", "protan", "tritan"].map((kind) => [kind, cvdDelta(ha, hb, kind)]),
+      ["normal", "deutan", "protan", "tritan"].map((k) => [k, cvdDelta(ha, hb, k)]),
     );
     const relevantDanger = a === "--status-relevant" && b === "--danger";
     const ok =
-      delta.normal >= (relevantDanger ? STATUS_SEPARATION.relevantVsDanger : STATUS_SEPARATION.normal) &&
-      delta.deutan >= STATUS_SEPARATION.deutan &&
-      delta.protan >= STATUS_SEPARATION.protan;
-    return { a, b, ha, hb, delta, ok };
+      kind === "neighbour"
+        ? delta.normal >= STATUS_SEPARATION.neighbour
+        : delta.normal >= (relevantDanger ? STATUS_SEPARATION.relevantVsDanger : STATUS_SEPARATION.normal) &&
+          delta.deutan >= STATUS_SEPARATION.deutan &&
+          delta.protan >= STATUS_SEPARATION.protan &&
+          (kind !== "status" || delta.tritan >= STATUS_SEPARATION.tritan);
+    return { a, b, kind, ha, hb, delta, ok };
   });
 }
 function main() {
@@ -360,7 +378,10 @@ function main() {
   for (const [theme, vars] of Object.entries(themes)) {
     console.log(`\n== ${theme}: status separation (ΔE00; normal ≥ ${STATUS_SEPARATION.normal}, `);
     console.log(
-      `   deutan/protan ≥ ${STATUS_SEPARATION.deutan}, relevant vs danger ≥ ${STATUS_SEPARATION.relevantVsDanger}; tritan informative) ==`,
+      `   deutan/protan ≥ ${STATUS_SEPARATION.deutan}, tritan between statuses ≥ ${STATUS_SEPARATION.tritan}, relevant vs danger ≥ ${STATUS_SEPARATION.relevantVsDanger};`,
+    );
+    console.log(
+      `   --ok / --tag-* normal ≥ ${STATUS_SEPARATION.neighbour}; other CVD columns informative) ==`,
     );
     for (const r of statusSeparation(vars)) {
       if (r.missing) {

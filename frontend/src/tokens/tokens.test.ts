@@ -18,12 +18,12 @@ interface Separation {
 }
 
 describe("review-status colours (F1)", () => {
-  it("every theme keeps the statuses apart under normal, deutan and protan vision", () => {
+  it("every theme keeps the statuses apart (normal, deutan, protan; tritan between statuses) and from --ok / tags", () => {
     expect(Object.keys(themes).sort()).toEqual(["dark", "light", "print"]);
     for (const [theme, vars] of Object.entries(themes)) {
       const results = statusSeparation(vars) as Separation[];
-      // 5 statuses: 10 status pairs + 15 status × danger/warn/accent pairs.
-      expect(results, theme).toHaveLength(25);
+      // 5 statuses: 10 status pairs + 15 status × danger/warn/accent + 45 status × --ok/--tag-1…8.
+      expect(results, theme).toHaveLength(70);
       const failing = results.filter((r) => !r.ok).map((r) => `${theme} ${r.a}/${r.b}`);
       expect(failing).toEqual([]);
     }
@@ -49,6 +49,32 @@ describe("review-status colours (F1)", () => {
     const failing = (statusSeparation(old) as Separation[]).filter((r) => !r.ok).map((r) => `${r.a}/${r.b}`);
     expect(failing).toContain("--status-relevant/--danger");
     expect(failing).toContain("--status-report/--accent");
+  });
+
+  it("the gate covers tritan status pairs, --ok and the tag colours (review #99 P3)", () => {
+    // The PR's first dark palette: 북마크 / 재검토 only ΔE 8.2 apart for tritanopes, --ok and
+    // --tag-3 a near-twin of 북마크, and (light) --tag-7 a near-twin of 관련 있음.
+    const oldDark = {
+      ...themes.dark,
+      "--status-needs-review": "#00cfeb",
+      "--ok": "#45c07a",
+      "--tag-3": "#45c07a",
+    };
+    const failingDark = (statusSeparation(oldDark) as Separation[])
+      .filter((r) => !r.ok)
+      .map((r) => `${r.a}/${r.b}`);
+    expect(failingDark).toEqual(
+      expect.arrayContaining([
+        "--status-bookmark/--status-needs-review",
+        "--status-bookmark/--ok",
+        "--status-bookmark/--tag-3",
+      ]),
+    );
+    const oldLight = { ...themes.light, "--tag-7": "#a03e8e" };
+    const failingLight = (statusSeparation(oldLight) as Separation[])
+      .filter((r) => !r.ok)
+      .map((r) => `${r.a}/${r.b}`);
+    expect(failingLight).toEqual(["--status-relevant/--tag-7"]);
   });
 
   it("CIEDE2000 matches the Sharma et al. reference pairs and the simulation keeps greys grey", () => {
