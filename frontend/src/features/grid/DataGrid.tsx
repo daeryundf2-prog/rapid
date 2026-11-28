@@ -65,9 +65,11 @@ import { ColumnMenu, DocsMatchedToggle, GridFooter, GridToolbar } from "./GridTo
 import { buildViewerTarget, type GridCommandHost, runBatch, runNote, useGridCommands } from "./gridCommands";
 import {
   type AutoHideReason,
+  autoHideKeep,
   compareValues,
   displayText,
   emptyColumnIds,
+  exportColumnSpecs,
   fitColumnWidths,
   formatCount,
   indexFromRef,
@@ -540,13 +542,23 @@ export function DataGrid(props: DataGridProps = {}) {
       .filter((c) => visibility[c.id] !== false)
       .map((c) => c.id);
   }, [preset, widthPriority, orderedColumns, visibility]);
+  // A column the user filters or sorts by stays (review P2-2), like one shown explicitly.
+  const autoKeep = useMemo(
+    () =>
+      autoHideKeep(
+        pinnedColumns,
+        columnFilters,
+        sorting.map((item) => item.id),
+      ),
+    [pinnedColumns, columnFilters, sorting],
+  );
   const emptyIds = useMemo(
-    () => emptyColumnIds(orderedColumns, loadedRows, { candidates: autoCandidates, keep: pinnedColumns }),
-    [autoCandidates, orderedColumns, loadedRows, pinnedColumns],
+    () => emptyColumnIds(orderedColumns, loadedRows, { candidates: autoCandidates, keep: autoKeep }),
+    [autoCandidates, orderedColumns, loadedRows, autoKeep],
   );
   const uniformValues = useMemo(
-    () => uniformColumns(orderedColumns, loadedRows, { candidates: autoCandidates, keep: pinnedColumns }),
-    [autoCandidates, orderedColumns, loadedRows, pinnedColumns],
+    () => uniformColumns(orderedColumns, loadedRows, { candidates: autoCandidates, keep: autoKeep }),
+    [autoCandidates, orderedColumns, loadedRows, autoKeep],
   );
   const autoHidden = useMemo(() => {
     const out = new Map<string, AutoHideReason>();
@@ -1091,7 +1103,17 @@ export function DataGrid(props: DataGridProps = {}) {
     showExtract: setExtractResult,
     openTagPrompt: () => setTagPromptOpen(true),
     runIsActive: false,
-    getExportColumns: () => specs,
+    // Uniform / empty columns hidden on screen still go to the CSV (review P2-1).
+    getExportColumns: () =>
+      exportColumnSpecs(
+        table
+          .getAllLeafColumns()
+          .filter((c) => visibility[c.id] !== false)
+          .map((c) => specById.get(c.id))
+          .filter((c): c is ColumnSpec => !!c),
+        new Set(specs.map((c) => c.id)),
+        autoHidden,
+      ),
     getSelectedCount: () => selectedKeys.size,
   };
   useGridCommands(host);

@@ -14,8 +14,16 @@ export interface HiddenColumnNote {
 /** Longest shared value quoted in the note before it is cut ("…"; the button title has it all). */
 const VALUE_MAX = 40;
 
-function shortValue(value: string): string {
-  return value.length > VALUE_MAX ? `${value.slice(0, VALUE_MAX - 1)}…` : value;
+/**
+ * The quoted value, cut to VALUE_MAX characters (code points, never half an emoji). A path keeps
+ * its end — the file name and the folders right above it — like the 경로 cell (F28, review P3-1).
+ */
+export function shortValue(value: string, columnId = ""): string {
+  const chars = Array.from(value);
+  if (chars.length <= VALUE_MAX) return value;
+  return columnId === "path"
+    ? `…${chars.slice(-(VALUE_MAX - 1)).join("")}`
+    : `${chars.slice(0, VALUE_MAX - 1).join("")}…`;
 }
 
 /**
@@ -70,7 +78,7 @@ export function ColumnNote({
           {uniform.map((note) =>
             item(
               note,
-              `${note.header} = ${shortValue(note.value ?? "")}`,
+              `${note.header} = ${shortValue(note.value ?? "", note.id)}`,
               `${note.header} = ${note.value ?? ""} — 열 다시 표시`,
               `${note.header} 열 다시 표시 (모든 행 ${note.value ?? ""})`,
             ),

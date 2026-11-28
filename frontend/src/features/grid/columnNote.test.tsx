@@ -1,11 +1,17 @@
 /** X7 / F27: uniform and empty columns hide by default and keep their information in one note. */
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ColumnNote, columnNoteScope } from "./ColumnNote";
+import { ColumnNote, columnNoteScope, shortValue } from "./ColumnNote";
 import { col, makeRef, makeRow } from "./columns/common";
 import { modifiedCell } from "./columns/FileCells";
 import { copyTimeHeaderNote } from "./columns/files";
-import { emptyColumnIds, UNIFORM_MIN_ROWS, uniformColumns } from "./gridUtils";
+import {
+  autoHideKeep,
+  emptyColumnIds,
+  exportColumnSpecs,
+  UNIFORM_MIN_ROWS,
+  uniformColumns,
+} from "./gridUtils";
 import type { ColumnSpec } from "./types";
 
 function rows(values: { kw: string; state: string; when?: string; empty?: string }[]) {
@@ -117,5 +123,47 @@ describe("files copy time (F27)", () => {
     expect(cell.querySelector(".grid-copy-mark")?.textContent).toBe("사본");
     expect(cell.getAttribute("title")).toBe("취득 사본의 시각 — 원본 시각 아님");
     expect(cell.textContent).toContain("원본 시각 아님");
+  });
+});
+
+describe("review fixes (auto-hide)", () => {
+  it("P3-4: values differing only in surrounding spaces are not uniform", () => {
+    const loaded = rows([
+      { kw: " invoice", state: "a" },
+      { kw: "invoice", state: "b" },
+      { kw: "invoice ", state: "c" },
+    ]);
+    expect(uniformColumns(columns, loaded, { candidates: ids }).has("kw")).toBe(false);
+  });
+
+  it("P3-1: a path value keeps its end (file name) in the note", () => {
+    const path =
+      "/Users/examiner/case/evidence/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History";
+    const short = shortValue(path, "path");
+    expect(short.endsWith("/Default/History")).toBe(true);
+    expect(short.startsWith("…")).toBe(true);
+    expect(shortValue("x".repeat(60)).endsWith("…")).toBe(true);
+  });
+
+  it("P2-2: a filtered or sorted column is kept from the auto-hide", () => {
+    const keep = autoHideKeep(new Set(["a"]), [{ col: "source" }], ["state"]);
+    expect([...keep].sort()).toEqual(["a", "source", "state"]);
+    const loaded = rows(Array.from({ length: 3 }, () => ({ kw: "문서", state: "x" })));
+    expect(
+      uniformColumns(columns, loaded, {
+        candidates: ids,
+        keep: autoHideKeep(new Set(), [{ col: "kw" }], []),
+      }).has("kw"),
+    ).toBe(false);
+  });
+
+  it("P2-1: the CSV keeps uniform / empty columns hidden on screen, not width-hidden ones", () => {
+    const auto = new Map([
+      ["kw", "uniform"],
+      ["empty", "empty"],
+      ["state", "width"],
+    ] as const);
+    const out = exportColumnSpecs(columns, new Set(["title", "timestamp", "review"]), auto);
+    expect(out.map((c) => c.id)).toEqual(["title", "kw", "empty", "timestamp", "review"]);
   });
 });

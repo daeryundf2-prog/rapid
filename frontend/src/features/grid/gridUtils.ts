@@ -227,8 +227,44 @@ export function uniformColumns(
   for (const c of columns) {
     if (!wanted.has(c.id) || options.keep?.has(c.id) || NEVER_UNIFORM[c.id]) continue;
     if (c.zoneInHeader || c.filterKind === "time") continue;
-    const first = displayText(c, head).trim();
-    if (first && rows.every((row) => displayText(c, row).trim() === first)) out.set(c.id, first);
+    // Compared as shown, untrimmed (review P3-4): " invoice" and "invoice" are different evidence.
+    const first = displayText(c, head);
+    if (first.trim() && rows.every((row) => displayText(c, row) === first)) out.set(c.id, first);
   }
   return out;
+}
+
+/**
+ * Columns the auto-hide must leave on screen (review P2-2): the ones the user showed, plus any
+ * with an active column filter or sort — hiding those would take the filter input away mid-typing
+ * because of the very rows the filter left.
+ */
+export function autoHideKeep(
+  pinned: ReadonlySet<string>,
+  filters: readonly { col: string }[] | undefined,
+  sortIds: readonly string[],
+): ReadonlySet<string> {
+  if (!filters?.length && !sortIds.length) return pinned;
+  const out = new Set(pinned);
+  for (const filter of filters ?? []) out.add(filter.col);
+  for (const id of sortIds) out.add(id);
+  return out;
+}
+
+/**
+ * Columns a selection CSV writes (review P2-1): the ones on screen plus those auto-hidden only
+ * because every loaded row reads the same or nothing — the grid hid them for width, the export
+ * must not lose their values. Width-hidden and user-hidden columns stay out. `all` is the
+ * grid's column order, `shown` the ids on screen.
+ */
+export function exportColumnSpecs(
+  all: readonly ColumnSpec[],
+  shown: ReadonlySet<string>,
+  autoHidden: ReadonlyMap<string, AutoHideReason>,
+): ColumnSpec[] {
+  return all.filter((c) => {
+    if (shown.has(c.id)) return true;
+    const reason = autoHidden.get(c.id);
+    return reason === "uniform" || reason === "empty";
+  });
 }
