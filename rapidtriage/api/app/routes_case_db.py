@@ -446,7 +446,7 @@ def build_case_db_router(
                 metadata_filters=request.metadata_filters,
                 review_status=request.review_status,
                 verification_status=request.verification_status,
-                created_by=request.created_by,
+                created_by=resolve_request_reviewer(request.created_by) or "",
             )
         except CaseDatabaseError as exc:
             raise HTTPException(status_code=400, detail=str(exc))

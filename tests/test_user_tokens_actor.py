@@ -209,6 +209,17 @@ class PerUserTokenApiTests(unittest.TestCase):
         self.assertEqual(note.status_code, 201, note.text)
         self.assertEqual(note.json()["note"]["author"], "lee")
 
+    def test_case_db_saved_search_records_the_token_owner(self) -> None:
+        # PR #92 review P2: the console's save button sent created_by and it was stored as sent.
+        saved = self.client("kim").post(
+            "/api/case-db/saved-searches",
+            json={"database": str(self.database), "case_id": CASE_ID, "name": "s1", "keywords": ["invoice"], "created_by": "lee"},
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        with contextlib.closing(sqlite3.connect(self.database)) as connection:
+            created_by = connection.execute("SELECT created_by FROM saved_search WHERE name = 's1'").fetchone()[0]
+        self.assertEqual(created_by, "kim")
+
     def test_runs_record_owner_canceller_and_remover(self) -> None:
         # R12: anyone may cancel or remove a run; the server now records who did.
         created = self.client("kim").post("/api/runs", json={"root": str(self.evidence), "mode": "hacking"})

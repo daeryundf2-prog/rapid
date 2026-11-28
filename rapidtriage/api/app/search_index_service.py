@@ -40,7 +40,7 @@ from ...core.search_index.build import (
 )
 from ...core.search_index.schema import INDEX_FILE_NAME
 from .analyses import ACTIVE_STATUSES, ANALYSIS_RUNNER, public_state, run_scope
-from .helpers import get_job
+from .helpers import get_job, resolve_request_reviewer
 
 LOGGER = logging.getLogger(__name__)
 
@@ -627,6 +627,8 @@ def create_saved(job: RunJob, run_id: str, body: Mapping[str, object]) -> dict[s
         if connection.execute("SELECT 1 FROM saved_search WHERE case_id = ? AND name = ?", (case_id, name)).fetchone() is not None:
             raise HTTPException(status_code=400, detail=DUPLICATE_SAVED)
         timestamp = now_iso()
+        # The server's actor (per-user token / RAPIDTRIAGE_REVIEWER); the body names nobody.
+        author = resolve_request_reviewer(None)
         citation_id = next_citation_id_for_connection(connection, case_id, "search")
         cursor = connection.execute(
             "INSERT INTO saved_search (citation_id, case_id, name, keywords_json, filters_json, created_by, created_at, updated_at, last_run_at) "
@@ -637,7 +639,7 @@ def create_saved(job: RunJob, run_id: str, body: Mapping[str, object]) -> dict[s
                 name,
                 json.dumps([body.get("q")], ensure_ascii=False),
                 json.dumps(_filters(body), ensure_ascii=False, sort_keys=True),
-                "web-ui",
+                author or "web-ui",
                 timestamp,
                 timestamp,
                 "",
@@ -650,7 +652,7 @@ def create_saved(job: RunJob, run_id: str, body: Mapping[str, object]) -> dict[s
             action=SAVED_SEARCH_ACTION,
             target_type="saved_search",
             target_id=citation_id,
-            actor="local-user",
+            actor=author or "local-user",
             tool_name="rapidtriage-search",
             params_json=json.dumps(_filters(body), ensure_ascii=False, sort_keys=True, default=str),
             result="ok",
