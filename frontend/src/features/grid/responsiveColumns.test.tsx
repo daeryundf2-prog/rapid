@@ -70,7 +70,7 @@ afterEach(() => {
 
 describe("responsive default columns (files, 분석 기본)", () => {
   it("hides the lowest-priority columns on a narrow grid and lists them in the 열 menu", async () => {
-    // 600 − select 56 − tools 40 = 504px: NTFS 생성, 경로 and 판정 go; 이름 · 수정 · 크기 stay.
+    // A 600px grid minus the select and tool columns: NTFS 생성, 경로 and 판정 go; 이름 · 수정 · 크기 stay.
     restoreWidth = mockGridWidth(600);
     await renderFiles();
     await waitFor(() => expect(hasHeader("경로")).toBe(false));
