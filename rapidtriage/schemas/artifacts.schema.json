@@ -312,7 +312,8 @@
                 "gemini-cli",
                 "omp-pi",
                 "editor-chat",
-                "agent-mcp"
+                "agent-mcp",
+                "cataly-hub"
               ]
             }
           },

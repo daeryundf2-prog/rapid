@@ -64,6 +64,26 @@
   paths with either separator, and reads `.jsonl` chat logs one message per
   line: a Jan `messages.jsonl` line becomes a user or assistant prompt
   candidate at the line's byte offset (`tests/test_ai_service_domains.py`).
+- `cataly-hub` collector for the Cataly agent hub (github.com/vntrevx/Cataly):
+  the store `cataly.db` (and `backup/cataly-v*.db`) read from a private
+  snapshot with its WAL -- lanes with state, outcome, thread, open and close
+  times, worktrees, model, OMP session and Cataly's spend estimate, lane
+  history, requests (IDs, message references, times and open/closed state;
+  the owner's message text is not read), questions and answers, stream jobs
+  (program only), hosted OMP sessions and events -- plus `logs/events.jsonl`,
+  `logs/hub.log`, session stderr `logs/**/*.err`, `config.toml` (models,
+  token and voice key file paths, job programs; relay owner IDs are omitted),
+  the OMP overlay, launchd/systemd service definitions (program and env file
+  path, no arguments), install records and the presence of token files (never
+  read). Lanes and requests open and close in the timeline, events and hub log
+  lines too. Any XDG base is recognized, so several hubs on one account are
+  found. A document that does not parse leaves a note instead of stopping the
+  collector. References to a private chat (a Telegram chat whose ID is the
+  user's, a Slack direct message) are left empty in `thread`,
+  `source_message`, `origin` and job `destinations`. See
+  `docs/ai-agent-artifacts.md` (`tests/test_ai_agent_cataly.py`).
+- AI-agent row redaction also masks Telegram bot tokens (including inside a
+  Bot API `/bot<token>/` URL) and Discord bot tokens.
 
 ### Changed
 

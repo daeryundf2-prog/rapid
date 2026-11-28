@@ -109,8 +109,13 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     "agent-message": (F("timestamp_utc", "message"),),
     "agent-tool-call": (F("timestamp_utc", "tool-call"),),
     "agent-tool-result": (F("timestamp_utc", "tool-result"),),
-    "agent-log": (F("timestamp_utc", "agent-logged"),),
+    # Not "agent-logged": canonical_label drops the type's own nouns and would merge it into journald "logged".
+    "agent-log": (F("timestamp_utc", "written"),),
     "macos-unified-log-event": (F("timestamp", "logged"),),
+    # Cataly hub store and event log (artifacts/ai_agent_cataly.py).
+    "agent-lane": (F("timestamp_utc", "opened"), F("closed_utc", "closed")),
+    "agent-request": (F("timestamp_utc", "opened"), F("closed_utc", "closed")),
+    "agent-hub-event": (F("timestamp_utc", "event"),),
     # --- execution -------------------------------------------------------
     "prefetch-file": (
         F("last_run_times[*]", "run"),

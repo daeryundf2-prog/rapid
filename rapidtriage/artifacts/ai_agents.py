@@ -18,6 +18,7 @@ else:
 from ..core.ai_agent_kinds import AI_AGENT_LABELS
 from ..core.models import ArtifactRecord
 from ._walk import iter_evidence_paths
+from .ai_agent_cataly import cataly, identify_cataly
 from .ai_agent_editor import editor, editor_value, prompt_history
 from .ai_agent_records import Source, content, items, mapping
 from .ai_agent_sessions import (
@@ -146,7 +147,7 @@ def identify(parts: tuple[str, ...]) -> tuple[str, str] | None:
     if name.endswith(".json") and len(parts) >= 5 and parts[-5] in EDITORS and parts[-4:-1] == (
             "user", "globalstorage", "emptywindowchatsessions"):
         return "editor-chat", "document"
-    return None
+    return identify_cataly(parts)
 
 
 def configuration(src, doc):
@@ -227,7 +228,8 @@ def parse_record(src, doc, mode):
         yield from pi_log(src, doc)
 
 
-def line_records(path):
+def line_records(path, text=False):
+    """JSON records, or with ``text`` the decoded lines (undecodable bytes replaced, line ending removed)."""
     with path.open("rb") as stream:
         size = path.stat().st_size
         limit = min(size, STREAM_BYTES)
@@ -249,7 +251,7 @@ def line_records(path):
             if stream.tell() == limit and limit < size and not raw.endswith(b"\n"):
                 break
             try:
-                doc = json.loads(raw.decode("utf-8"))
+                doc = raw.decode("utf-8", "replace").rstrip("\r\n") if text else json.loads(raw.decode("utf-8"))
             except (ValueError, RecursionError):
                 yield location, None, "invalid-json-line"
                 continue
@@ -412,6 +414,9 @@ def parse_document(suffix, text):
 
 
 def read_source(src, path, mode):
+    if src.agent == "cataly-hub":
+        yield from cataly(src, path, mode, line_records)
+        return
     if mode == "database":
         yield from editor(src, path)
     elif mode == "history" and src.agent in PI_AGENTS:

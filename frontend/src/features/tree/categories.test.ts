@@ -13,6 +13,7 @@ import {
 /** `artifact_collectors()` keys in rapidtriage/core/artifacts (25 kinds + R5 L1 email-clients, media-player, windows-phone-link + AI coding agents). */
 const ENGINE_KINDS = [
   "agent-mcp",
+  "cataly-hub",
   "claude-code",
   "codex-cli",
   "editor-chat",

@@ -2,7 +2,7 @@
 
 | Area | Status | Notes |
 | --- | --- | --- |
-| AI coding agents and MCP | Synthetic fixture coverage | Claude Code, Codex CLI, Gemini CLI, omp, pi, senpi and OmO sessions (including header-detected sessions in other folders), omp prompt history and logs, Cursor and VS Code-family global and workspace storage and chat session files, and MCP server settings. [Fields, paths and limits](ai-agent-artifacts.md) |
+| AI coding agents and MCP | Synthetic fixture coverage | Claude Code, Codex CLI, Gemini CLI, omp, pi, senpi and OmO sessions (including header-detected sessions in other folders), omp prompt history and logs, Cursor and VS Code-family global and workspace storage and chat session files, MCP server settings, and the Cataly agent hub's store, event and hub logs, settings, service definitions and install records. [Fields, paths and limits](ai-agent-artifacts.md) |
 | AI usage traces (web, desktop, local LLM) | Partial | Web AI service visits in browser history and memory strings, browser-storage conversation candidates, ChatGPT exports, desktop AI app and local LLM path inventory. What each AI setup leaves and what Rapid does not collect yet: [AI 사용 흔적 커버리지 매트릭스](ai-usage-coverage-matrix.md) |
 | File metadata | Implemented | Names, paths, extensions, sizes, modified time, categories. |
 | KAPE-style collect planning/export | Implemented baseline | `collect-plan` profiles preview present/missing Windows/macOS collection targets before heavy scanning or copying. `collect-export` can build a bounded source-relative export package with SHA256 copy logs. |
