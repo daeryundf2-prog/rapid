@@ -313,16 +313,16 @@ test("Q-F14/Q-F15: R/X/B marks give one status tint each; the meta tail lists se
   await row.focus();
   await page.keyboard.press("r");
   await expect(row).toHaveAttribute("data-mark", "relevant");
-  await expect(row).toHaveAttribute("aria-description", "검토 표시: 관련 있음");
-  await expect.poll(() => rowTint(row)).toBe(tints.relevant);
   // A verdict moves the list to the next row (판정 후 이동: 다음 행, F17); K comes back to judge it again.
   await page.keyboard.press("k");
+  await expect(row).toHaveAttribute("aria-description", "검토 표시: 관련 있음");
+  await expect.poll(() => rowTint(row)).toBe(tints.relevant);
   await page.keyboard.press("x");
   await expect(row).toHaveAttribute("data-mark", "excluded");
+  await page.keyboard.press("k");
   await expect(row).toHaveAttribute("aria-description", "검토 표시: 제외");
   await expect.poll(() => rowTint(row)).toBe(tints.excluded);
   await expect(row.locator(".grid-row-stripe")).toHaveCount(0);
-  await page.keyboard.press("k");
   // Meta tail.
   await page.keyboard.press("Enter");
   const viewer = page.getByRole("region", { name: "원본 뷰어" });
