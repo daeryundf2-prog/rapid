@@ -403,12 +403,14 @@
   font-size: var(--fs-table-aux);
 }
 
-/* The select cell and the first data column never scroll out of view. */
+/* The select cell and the first data column never scroll out of view. Its 4px padding and 2px
+   gaps keep it at SELECT_COL_WIDTH (62px), so 1280px beside the viewer keeps 크기 (review #99). */
 .grid-cell-select {
   position: sticky;
   left: 0;
   z-index: 2;
-  gap: var(--space-1);
+  gap: 2px;
+  padding: 0 var(--space-1);
   background: inherit;
 }
 

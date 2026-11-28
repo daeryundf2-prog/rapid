@@ -64,7 +64,7 @@ afterEach(() => {
 
 describe("responsive default columns (files, 분석 기본)", () => {
   it("hides the lowest-priority columns on a narrow grid and lists them in the 열 menu", async () => {
-    // 600 − select 56 − tools 40 = 504px: NTFS 생성, 경로 and 선별 go; 이름 · 수정 · 크기 stay.
+    // 600 − select 62 = 538px: NTFS 생성, 경로 and 선별 go; 이름 · 수정 · 크기 stay.
     restoreWidth = mockGridWidth(600);
     await renderFiles();
     await waitFor(() => expect(hasHeader("경로")).toBe(false));
@@ -86,6 +86,14 @@ describe("responsive default columns (files, 분석 기본)", () => {
     expect(within(menu).queryByTestId("grid-autohidden-path")).toBeNull();
     expect(within(menu).getByTestId("grid-autohidden-size")).toBeTruthy();
     expect(hasHeader("크기")).toBe(false);
+  });
+
+  it("1280px beside the open viewer (grid ≈ 512px) keeps 이름 · 수정 · 크기 (review #99 P3)", async () => {
+    // 512 − select 62 = 450 = 이름 220 + 수정 150 + 크기 80: the verdict slot costs no column.
+    restoreWidth = mockGridWidth(512);
+    await renderFiles();
+    await waitFor(() => expect(hasHeader("경로")).toBe(false));
+    for (const name of ["이름", "수정", "크기"]) expect(hasHeader(name), name).toBe(true);
   });
 
   it("shows every default column with values when the grid is wide enough", async () => {

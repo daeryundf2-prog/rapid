@@ -666,9 +666,9 @@ describe("DataGrid notes and AXIOM preset", () => {
     const chipCell = rowAt(0).querySelector<HTMLElement>('[data-col="tagstatus"]');
     const titleCell = rowAt(0).querySelector<HTMLElement>('[data-col="title"]');
     expect(chipCell?.classList.contains("grid-cell-first")).toBe(true);
-    expect(chipCell?.style.left).toBe("76px");
+    expect(chipCell?.style.left).toBe("62px");
     expect(titleCell?.classList.contains("grid-cell-first")).toBe(true);
-    expect(titleCell?.style.left).toBe("226px");
+    expect(titleCell?.style.left).toBe("212px");
 
     // Two rows: the batch bar is for multi-selections (review #2).
     rowAt(0).focus();

@@ -23,7 +23,7 @@ vi.mock("../../a11y", () => ({ announce: vi.fn() }));
  * with the viewer rail ≈ 1076px, 1024px (viewer drawer, tree 28%) ≈ 700px.
  */
 const WIDTHS = { "1440 + viewer": 672, "1440 rail": 1076, "1024 drawer": 700 } as const;
-const SELECT_COL_WIDTH = 56;
+const SELECT_COL_WIDTH = 62;
 
 let restoreLayout: () => void;
 let restoreWidth: () => void;
