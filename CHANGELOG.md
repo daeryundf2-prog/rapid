@@ -31,14 +31,18 @@
   (github.com/herdrdev/herdr): panes from `session.json`, its
   `session-snapshots/` and `session-backups/` recovery copies and named
   sessions (workspace, tab, working folder, worktree, detected agent, the
-  agent session ID or session file the pane reported, and the launch and
-  resume commands redacted), pane screen history from `session-history.json`
-  (escape sequences removed, usual redaction and length limit), pane spawn and
-  exit, workspace, tab, save and API events and warnings from `herdr*.log`,
-  installed plugins, storage-related settings and the last agent-detection
-  rule check. The pane's agent session ID is `session_id`, the key to the
-  Claude Code and Codex rows. Recovery copies take their time from the file
-  name. See `docs/ai-agent-artifacts.md` (`tests/test_ai_agent_herdr.py`).
+  agent session ID or session file the pane reported, the launch and resume
+  program only and `--env-file` paths; other arguments can hold unlabelled
+  credentials and are not exported), pane screen history from
+  `session-history.json` as counts and a SHA-256 by default (the text, redacted
+  whole and then its most recent 8,192 characters, only with the collector
+  option `pane_history_text`), pane spawn and exit, workspace, tab, save and
+  API events and warnings from `herdr*.log`, installed plugins,
+  storage-related settings and the last agent-detection rule check. The pane's
+  agent session ID is `session_id`, the key to the Claude Code and Codex rows.
+  Recovery copies take their time from the file name (`layout-preserved`);
+  names are matched without letter case and an out-of-range name keeps its row
+  untimed. See `docs/ai-agent-artifacts.md` (`tests/test_ai_agent_herdr.py`).
 
 ### Changed
 

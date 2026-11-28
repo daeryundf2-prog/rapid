@@ -41,6 +41,9 @@ ARTIFACT_PREVIEW_LIMIT = 200
 # projection; ``record_detail="full"`` restores every per-event block.
 DEFAULT_COLLECTOR_OPTIONS: dict[str, dict[str, object]] = {
     "eventlog": {"structure_rows": False, "record_detail": "triage"},
+    # herdr pane scrollback (``session-history.json``) is exported as metadata and a hash unless the examiner
+    # opts in; the payload's ``collector_options`` records the choice.
+    "herdr-sessions": {"pane_history_text": False},
 }
 
 

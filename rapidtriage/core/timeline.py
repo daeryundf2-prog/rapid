@@ -111,7 +111,7 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     "agent-tool-result": (F("timestamp_utc", "tool-result"),),
     "macos-unified-log-event": (F("timestamp", "logged"),),
     # herdr layouts, logs, plugins and detection-rule checks (artifacts/ai_agent_herdr.py).
-    "agent-terminal-pane": (F("timestamp_utc", "layout-saved"),),
+    "agent-terminal-pane": (F("timestamp_utc", "layout-preserved"),),
     "agent-pane-spawned": (F("timestamp_utc", "started"),),
     "agent-pane-exited": (F("timestamp_utc", "ended"),),
     "agent-terminal-event": (F("timestamp_utc", "event"),),

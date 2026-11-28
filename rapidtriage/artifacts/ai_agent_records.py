@@ -36,13 +36,19 @@ _PRIVATE_KEY = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-
 _RFC3339 = re.compile(r"(\d{4}-\d{2}-\d{2})[Tt](\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?([Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)")
 
 
-def clean(value: object) -> str:
+def redact(value: object) -> str:
+    """The whole text with credentials masked and no length limit, for a caller that keeps another part than the
+    head (masking before cutting, so a secret across the cut never leaks)."""
     if not isinstance(value, str):
         return ""
     text = redact_url(_PRIVATE_KEY.sub(REDACTED_VALUE, value))
     text = _HEADER.sub(lambda m: m["label"] + REDACTED_VALUE, text)
     text = _SECRET.sub(lambda m: m["label"] + REDACTED_VALUE, text)
-    return _TOKEN.sub(REDACTED_VALUE, text)[:TEXT_LIMIT].encode("utf-8", "replace").decode()
+    return _TOKEN.sub(REDACTED_VALUE, text).encode("utf-8", "replace").decode()
+
+
+def clean(value: object) -> str:
+    return redact(value)[:TEXT_LIMIT]
 
 
 def mapping(value: object) -> dict:

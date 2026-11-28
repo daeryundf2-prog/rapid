@@ -126,7 +126,7 @@ export const TIMESTAMP_KIND_LABELS: Readonly<Record<string, string>> = {
   "tool-call": "도구 호출",
   "tool-result": "도구 결과",
   // herdr layouts and agent-detection checks (artifacts/ai_agent_herdr.py).
-  "layout-saved": "패널 배치 저장",
+  "layout-preserved": "패널 배치 사본 보관",
   "detection-checked": "감지 규칙 확인",
   // KakaoTalk shared picture: the time is read from the file name (local time, zone unknown).
   saved: "저장(파일 이름)",

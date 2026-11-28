@@ -246,9 +246,9 @@ def json_lines(src, path, mode):
         yield from parse_record(src, doc, mode)
 
 
-def read_source(src, path, mode):
+def read_source(src, path, mode, pane_history_text=False):
     if src.agent == "herdr-sessions":
-        yield from herdr(src, path, mode)
+        yield from herdr(src, path, mode, pane_history_text)
     elif mode == "database":
         yield from editor(src, path)
     elif path.suffix.lower() == ".jsonl":
@@ -272,9 +272,14 @@ def read_source(src, path, mode):
 class AiAgentProvider:
     target_platform = "any"
 
-    def __init__(self, kind: str):
+    def __init__(self, kind: str, *, pane_history_text: bool = False):
         self.collector_kind = self.name = kind
         self.description = AI_AGENT_LABELS[kind]
+        # herdr pane screen history text is opt-in (``collector_options={"pane_history_text": True}``).
+        self.pane_history_text = pane_history_text is True
+
+    def with_options(self, *, pane_history_text: object = False, **_ignored: object) -> AiAgentProvider:
+        return AiAgentProvider(self.collector_kind, pane_history_text=pane_history_text is True)
 
     def supported(self) -> bool:
         return True
@@ -297,7 +302,7 @@ class AiAgentProvider:
             try:
                 if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(root.resolve()):
                     continue
-                with closing(read_source(src, path, mode)) as rows:
+                with closing(read_source(src, path, mode, self.pane_history_text)) as rows:
                     for index, row in enumerate(rows):
                         if index == ROWS_PER_SOURCE:
                             yield src.note("row-limit")
