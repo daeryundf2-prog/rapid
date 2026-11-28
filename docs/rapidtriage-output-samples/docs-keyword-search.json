@@ -239,6 +239,13 @@
         "artifact_count": 0
       },
       {
+        "name": "dori-state",
+        "description": "dori 레인·워크로그 기록",
+        "target_platform": "any",
+        "supported": true,
+        "artifact_count": 0
+      },
+      {
         "name": "kakaotalk-macos-database-inventory",
         "description": "macOS KakaoTalk container and database inventory with SQLite openability checks",
         "target_platform": "macos",

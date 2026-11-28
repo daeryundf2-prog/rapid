@@ -19,6 +19,7 @@ from ..core.ai_agent_kinds import AI_AGENT_LABELS
 from ..core.models import ArtifactRecord
 from ._walk import iter_evidence_paths
 from .ai_agent_cataly import cataly, identify_cataly
+from .ai_agent_dori import dori, identify_dori
 from .ai_agent_editor import editor, editor_value, prompt_history
 from .ai_agent_records import Source, content, items, mapping
 from .ai_agent_sessions import (
@@ -147,7 +148,7 @@ def identify(parts: tuple[str, ...]) -> tuple[str, str] | None:
     if name.endswith(".json") and len(parts) >= 5 and parts[-5] in EDITORS and parts[-4:-1] == (
             "user", "globalstorage", "emptywindowchatsessions"):
         return "editor-chat", "document"
-    return identify_cataly(parts)
+    return identify_cataly(parts) or identify_dori(parts)
 
 
 def configuration(src, doc):
@@ -416,6 +417,9 @@ def parse_document(suffix, text):
 def read_source(src, path, mode):
     if src.agent == "cataly-hub":
         yield from cataly(src, path, mode, line_records)
+        return
+    if src.agent == "dori-state":
+        yield from dori(src, path, mode, line_records)
         return
     if mode == "database":
         yield from editor(src, path)

@@ -112,10 +112,24 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     # Not "agent-logged": canonical_label drops the type's own nouns and would merge it into journald "logged".
     "agent-log": (F("timestamp_utc", "written"),),
     "macos-unified-log-event": (F("timestamp", "logged"),),
-    # Cataly hub store and event log (artifacts/ai_agent_cataly.py).
+    # Cataly hub store and event log (artifacts/ai_agent_cataly.py), dori harness store and dori-mode skill state
+    # (artifacts/ai_agent_dori.py).
     "agent-lane": (F("timestamp_utc", "opened"), F("closed_utc", "closed")),
     "agent-request": (F("timestamp_utc", "opened"), F("closed_utc", "closed")),
     "agent-hub-event": (F("timestamp_utc", "event"),),
+    "agent-lane-history": (F("timestamp_utc", "status-changed"),),
+    "agent-lane-report": (F("timestamp_utc", "reported"),),
+    "agent-lane-checkpoint": (F("timestamp_utc", "checkpoint"),),
+    "agent-lane-usage": (F("timestamp_utc", "cost-recorded"),),
+    "agent-worklog": (F("timestamp_utc", "worklog"),),
+    "agent-lesson": (F("timestamp_utc", "lesson"),),
+    "agent-queued-message": (F("timestamp_utc", "queued"), F("delivery_utc", "delivery-attempted")),
+    "agent-messenger-thread": (F("timestamp_utc", "root-posted"), F("seen_utc", "reply-seen")),
+    "agent-review-receipt": (F("timestamp_utc", "reviewed"),),
+    "agent-backlog-item": (F("timestamp_utc", "opened"), F("closed_utc", "closed")),
+    "agent-loop-run": (F("timestamp_utc", "run"),),
+    "agent-pause": (F("timestamp_utc", "paused"),),
+    "agent-migration": (F("timestamp_utc", "migrated"),),
     # --- execution -------------------------------------------------------
     "prefetch-file": (
         F("last_run_times[*]", "run"),

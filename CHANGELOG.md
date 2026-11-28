@@ -84,6 +84,20 @@
   `docs/ai-agent-artifacts.md` (`tests/test_ai_agent_cataly.py`).
 - AI-agent row redaction also masks Telegram bot tokens (including inside a
   Bot API `/bot<token>/` URL) and Discord bot tokens.
+- `dori-state` collector for the dori lead harness
+  (github.com/sisyphuslabs/dori-superagent): the harness store in `.dori`
+  (lanes with their event log, brief titles, messages queued for agent
+  sessions, review verdicts, backlog items, hourly-loop runs, loop and duty
+  pauses, session migrations, roles, telemetry install ID, `config.json` key
+  names) and the dori-mode skill state in `.dori/state` (lanes with title,
+  state, model, working folder, thread, omo session, open and close times and
+  state history, lane reports, checkpoints and usage, worklog events, lessons,
+  the Slack thread ledger and the Telegram offset), plus dori LaunchAgents and
+  the presence of `secrets.env` (never read). Brief text, done signals, hook
+  argv, commit identities and the telemetry key are not exported; message
+  text passes the usual redaction and length limit. Lanes and backlog items
+  open and close in the timeline, the other records are one event each. See
+  `docs/ai-agent-artifacts.md` (`tests/test_ai_agent_dori.py`).
 
 ### Changed
 

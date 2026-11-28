@@ -8,4 +8,5 @@ AI_AGENT_LABELS = {
     "editor-chat": "Cursor·VS Code 대화 기록",
     "agent-mcp": "코딩 에이전트 MCP 서버 설정",
     "cataly-hub": "Cataly 허브 기록",
+    "dori-state": "dori 레인·워크로그 기록",
 }
