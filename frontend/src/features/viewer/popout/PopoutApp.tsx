@@ -66,6 +66,11 @@ const MARK_KEYS: ReadonlyArray<{ id: string; shortcut: string; label: string }> 
   { id: "review.mark.excluded", shortcut: KEY_MAP.markExcluded, label: "제외 표시" },
   { id: "review.mark.needs-review", shortcut: KEY_MAP.markNeedsReview, label: "재검토 표시" },
   { id: "review.mark.bookmark", shortcut: KEY_MAP.bookmark, label: "북마크" },
+  {
+    id: "review.mark.include-in-report",
+    shortcut: KEY_MAP.markIncludeInReport,
+    label: "보고서 포함 표시",
+  },
 ];
 
 function windowBounds() {

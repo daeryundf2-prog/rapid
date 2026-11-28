@@ -35,7 +35,7 @@ const MARKS: ReadonlyArray<{ action: MarkAction; label: string; shortcut?: strin
   { action: "excluded", label: "제외 표시", shortcut: KEY_MAP.markExcluded },
   { action: "needs-review", label: "재검토 표시", shortcut: KEY_MAP.markNeedsReview },
   { action: "bookmark", label: "북마크", shortcut: KEY_MAP.bookmark },
-  { action: "include-in-report", label: "보고서 포함 표시" },
+  { action: "include-in-report", label: "보고서 포함 표시", shortcut: KEY_MAP.markIncludeInReport },
 ];
 
 /** The row the keys act on (see module comment). */

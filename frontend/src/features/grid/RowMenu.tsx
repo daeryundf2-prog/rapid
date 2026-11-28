@@ -44,13 +44,17 @@ export const ROW_MENU_REVIEW_IDS = [
   "grid.row.bookmark",
 ] as const;
 
-/** Keys a row-menu entry mirrors (review #13): Enter opens, R / X / I / B mark the row. */
+/** Keys a row-menu entry mirrors (review #13): Enter opens, R / X / I / B / Shift+R mark the row. */
 const ROW_MENU_KEYS: Record<string, { command?: string; fallback: string }> = {
   "grid.openSource": { fallback: KEY_MAP.openViewer },
   "grid.row.relevant": { command: "review.mark.relevant", fallback: KEY_MAP.markRelevant },
   "grid.row.excluded": { command: "review.mark.excluded", fallback: KEY_MAP.markExcluded },
   "grid.row.needs-review": { command: "review.mark.needs-review", fallback: KEY_MAP.markNeedsReview },
   "grid.row.bookmark": { command: "review.mark.bookmark", fallback: KEY_MAP.bookmark },
+  "grid.row.include-in-report": {
+    command: "review.mark.include-in-report",
+    fallback: KEY_MAP.markIncludeInReport,
+  },
 };
 
 /**

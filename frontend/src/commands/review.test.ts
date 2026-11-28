@@ -77,6 +77,24 @@ describe("review keys", () => {
     row.remove();
   });
 
+  it("Shift+R marks 보고서 포함, the status every report export needs", async () => {
+    s().navigate({ runId: "r1", collection: "files" });
+    s().setViewerTarget(target("/candidates/3"));
+    const row = document.createElement("div");
+    row.setAttribute("role", "row");
+    document.body.append(row);
+    const event = new KeyboardEvent("keydown", { key: "R", shiftKey: true, bubbles: true, cancelable: true });
+    Object.defineProperty(event, "target", { value: row });
+    expect(dispatchShortcut(event)).toBe(true);
+    await vi.waitFor(() => expect(posts).toHaveLength(2));
+    expect(posts[1]?.body).toMatchObject({
+      run_id: "r1",
+      include_in_report: true,
+      targets: [{ collection: "files", locator: "/candidates/3" }],
+    });
+    row.remove();
+  });
+
   it("1–5 add a priority tag", async () => {
     s().navigate({ runId: "r1", collection: "files" });
     s().setViewerTarget(target("/candidates/2"));

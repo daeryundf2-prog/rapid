@@ -45,6 +45,8 @@ export const KEY_MAP = {
   markExcluded: "X",
   markNeedsReview: "I",
   bookmark: "B",
+  /** 보고서 포함 표시: the mark every report export needs (R is 관련 있음, so the report mark is Shift+R). */
+  markIncludeInReport: "Shift+R",
   viewerBack: "Alt+ArrowLeft",
   viewerForward: "Alt+ArrowRight",
   help: "?",

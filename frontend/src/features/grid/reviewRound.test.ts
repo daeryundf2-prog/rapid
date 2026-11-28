@@ -138,13 +138,13 @@ describe("유형 filter list (review #10)", () => {
 });
 
 describe("row menu key hints (review #13)", () => {
-  it("come from the key map: Enter opens, R / X / I / B mark, others have none", () => {
+  it("come from the key map: Enter opens, R / X / I / B / Shift+R mark, others have none", () => {
     expect(rowMenuShortcut("grid.openSource")).toBe("Enter");
     expect(rowMenuShortcut("grid.row.relevant")).toBe("R");
     expect(rowMenuShortcut("grid.row.excluded")).toBe("X");
     expect(rowMenuShortcut("grid.row.needs-review")).toBe("I");
     expect(rowMenuShortcut("grid.row.bookmark")).toBe("B");
-    expect(rowMenuShortcut("grid.row.include-in-report")).toBeUndefined();
+    expect(rowMenuShortcut("grid.row.include-in-report")).toBe("Shift+R");
     expect(rowMenuShortcut("grid.copyPath")).toBeUndefined();
     expect(rowMenuShortcut("grid.copyPath", "Ctrl+C")).toBe("Ctrl+C");
   });
