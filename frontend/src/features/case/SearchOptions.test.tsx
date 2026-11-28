@@ -61,12 +61,50 @@ describe("SearchOptionsButton", () => {
     fireEvent.click(screen.getByRole("button", { name: "검색 옵션" }));
     const dialog = screen.getByRole("dialog", { name: "검색 옵션" });
     expect(dialog.classList.contains("popover")).toBe(true);
-    expect(document.activeElement).toBe(screen.getByLabelText("검색 방식"));
+    expect(document.activeElement).toBe(screen.getByLabelText("질문으로 시작"));
     const close = screen.getByRole("button", { name: "닫기" });
     close.focus();
     fireEvent.keyDown(close, { key: "Tab" });
-    expect(document.activeElement).toBe(screen.getByLabelText("검색 방식"));
+    expect(document.activeElement).toBe(screen.getByLabelText("질문으로 시작"));
     fireEvent.pointerDown(document.body);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("a chosen question fills the search with its keywords, scope and packs", async () => {
+    mockFetch({
+      "GET /api/keyword-packs": { packs: [] },
+      "GET /api/question-packs": {
+        categories: ["유출"],
+        limits: ["질문 팩은 조사 출발점이다"],
+        packs: [
+          {
+            id: "exfil-cloud-upload",
+            question: "클라우드에 자료를 올린 기록이 있나?",
+            category: "유출",
+            keyword_packs: ["exfiltration"],
+            keywords: ["업로드"],
+            expanded_keywords: ["mega.nz", "업로드"],
+            collections: ["artifacts", "timeline"],
+            artifact_kinds: ["cloud-sync"],
+            event_ids: [],
+            extensions: [".zip"],
+            references: [],
+            note: "동기화 폴더는 업로드와 구분되지 않는다.",
+            source_ref: "builtin",
+          },
+        ],
+      },
+    });
+    renderWithQuery(<SearchOptionsButton runId="r1" />);
+    fireEvent.click(screen.getByRole("button", { name: "검색 옵션" }));
+    const picker = await screen.findByLabelText("질문으로 시작");
+    await screen.findByRole("option", { name: "클라우드에 자료를 올린 기록이 있나?" });
+    fireEvent.change(picker, { target: { value: "exfil-cloud-upload" } });
+    expect(useSearchState.getState().keywords).toEqual(["mega.nz", "업로드"]);
+    expect(useSearchState.getState().options).toMatchObject({
+      sources: ["artifacts", "timeline"],
+      keywordPacks: ["exfiltration"],
+      extensions: ["zip"],
+    });
   });
 });
