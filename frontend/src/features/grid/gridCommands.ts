@@ -303,7 +303,7 @@ export function buildGridCommands(hostRef: { current: GridCommandHost }): Comman
   ];
 
   // Palette / BatchBar: the ticked rows, else the focused row. The row menu has its own entry
-  // (ROW_OCR_COMMAND) that follows the menuRows rule instead (review #99 P2).
+  // (ROW_OCR_COMMAND) that targets the right-clicked row instead (review #99 P2).
   const ocrRows = (): GridRow[] => {
     const selected = host().getSelectedRows();
     if (selected.length) return selected;
@@ -431,12 +431,25 @@ export function buildRowMarkCommands(hostRef: { current: GridCommandHost }): Com
 }
 
 /**
- * The row menu's "선택 행 OCR 실행" (grid-local): like the review items it follows menuRows, so
- * right-clicking an unticked row never runs OCR on earlier ticks (review #99 P2).
+ * The row menu's "선택 행 OCR 실행" (grid-local): the right-clicked row, or every ticked row when
+ * the right-clicked row is one of them; right-clicking an unticked row never runs OCR on earlier
+ * ticks (review #99 P2). The rule is spelled out here (not shared with the review items) because
+ * the review items' own targeting is being reworked separately (#106 reviewScope).
  */
 export function buildRowOcrCommand(hostRef: { current: GridCommandHost }): Command {
   const host = () => hostRef.current;
-  return ocrCommand(ROW_OCR_COMMAND, host, () => menuRows(host()), NO_ROW);
+  return ocrCommand(
+    ROW_OCR_COMMAND,
+    host,
+    () => {
+      const h = host();
+      const row = h.getFocusedRow();
+      if (!row) return [];
+      const ticked = h.getSelectedRows();
+      return ticked.some((r) => r.rowKey === row.rowKey) ? ticked : [row];
+    },
+    NO_ROW,
+  );
 }
 
 /** Apply a batch mark with optimistic update + rollback and a Korean error toast. */
