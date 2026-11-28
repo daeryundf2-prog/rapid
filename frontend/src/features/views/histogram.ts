@@ -80,8 +80,9 @@ export function chooseGranularity(payload: TimelineHistogramPayload): Granularit
  * Re-aggregate the server buckets into hour/day bars, from the first to the last non-empty bar
  * with gaps filled by zero bars so the axis stays linear. Day bars start at midnight of the
  * display zone `tz` (the grid's zone, like the 시간 개요 띠; a daylight-saving day is 23/25 h);
- * hour bars at whole UTC hours. A requested granularity finer than the server bucket falls back
- * to the server buckets (it cannot be split).
+ * hour bars at whole UTC hours. A requested granularity finer than the server bucket, or a server
+ * bucket that straddles a bar edge of the zone (UTC day buckets vs KST midnight), falls back to
+ * the server buckets (they cannot be split; their span and click filter stay exact).
  */
 export function rebucket(
   payload: TimelineHistogramPayload,
@@ -108,8 +109,13 @@ export function rebucket(
   for (const bucket of payload.buckets) {
     if (!bucket.count) continue;
     const s = parseMs(bucket.start);
+    const e = parseMs(bucket.end);
     if (s === null) continue;
     const key = slotOf(s);
+    // A server bucket that crosses a bar edge of the display zone (a UTC day bucket vs a KST
+    // midnight) cannot be split: keep the server's own buckets, whose span and click filter are
+    // exact, rather than count its events into the wrong day (review P2-3).
+    if (e !== null && e > s && slotOf(e - 1) !== key) return rebucket(payload, "native", tz);
     counts.set(key, (counts.get(key) ?? 0) + bucket.count);
   }
   if (counts.size === 0) return { granularity, buckets: [] };
@@ -207,11 +213,15 @@ export function axisTicks(buckets: readonly TimeBucket[], tz: TimezoneChoice, ma
     return out;
   }
   const sizeMinutes = Math.max(1, Math.round(size / 60_000));
+  const minutesOf = (text: string) => Number(text.slice(11, 13)) * 60 + Number(text.slice(14, 16));
+  // Bars off the zone's clock (UTC hours in a +05:30 / +05:45 zone, review P3-5) line up on
+  // their own phase ("05:30", "06:30") instead of losing every label.
+  const phase = texts[0] ? minutesOf(texts[0]) % sizeMinutes : 0;
   texts.forEach((text, index) => {
-    const minutes = Number(text.slice(11, 13)) * 60 + Number(text.slice(14, 16));
-    if (Math.floor(minutes / sizeMinutes) % step !== 0 || minutes % sizeMinutes !== 0) return;
+    const minutes = minutesOf(text) - phase;
+    if (minutes < 0 || Math.floor(minutes / sizeMinutes) % step !== 0 || minutes % sizeMinutes !== 0) return;
     const label =
-      minutes === 0
+      minutes + phase === 0
         ? text.slice(5, 10)
         : text.endsWith(":00")
           ? `${text.slice(11, 13)}시`

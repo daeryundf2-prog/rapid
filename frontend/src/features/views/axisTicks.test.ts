@@ -100,3 +100,70 @@ describe("histogram view in the display zone (not UTC)", () => {
     expect(axisTicks(buckets, "Asia/Seoul", 10)[0]?.label).toBe("10-18");
   });
 });
+
+describe("review P2-3: day bars never regroup UTC server buckets into the wrong zone day", () => {
+  const dayPayload = (): TimelineHistogramPayload => ({
+    total_events: 0,
+    parsed_events: 0,
+    unparsed_events: 0,
+    bucket_count: 0,
+    range_start: null,
+    range_end: null,
+    sources: [],
+    bucket_seconds: 86_400,
+    buckets: Array.from({ length: 90 }, (_, i) => {
+      const start = Date.parse("2026-08-01T00:00:00Z") + i * DAY;
+      return {
+        index: i,
+        start: new Date(start).toISOString(),
+        end: new Date(start + DAY).toISOString(),
+        count: new Date(start).toISOString().startsWith("2026-10-20") ? 10 : 0,
+      };
+    }),
+  });
+
+  it("KST: keeps the server's UTC day bucket (exact span, click range = bar)", () => {
+    const { granularity, buckets } = rebucket(dayPayload(), "auto", "Asia/Seoul");
+    expect(granularity).toBe("native");
+    const bar = buckets.find((b) => b.count === 10);
+    expect(bar && new Date(bar.startMs).toISOString()).toBe("2026-10-20T00:00:00.000Z");
+    expect(bar && new Date(bar.endMs).toISOString()).toBe("2026-10-21T00:00:00.000Z");
+  });
+
+  it("UTC display zone: the same buckets still make day bars", () => {
+    expect(rebucket(dayPayload(), "auto", "UTC").granularity).toBe("day");
+  });
+
+  it("hour server buckets regroup into KST midnights (no bucket straddles one)", () => {
+    const start = Date.parse("2026-10-20T14:00:00Z");
+    const payload: TimelineHistogramPayload = {
+      total_events: 0,
+      parsed_events: 0,
+      unparsed_events: 0,
+      bucket_count: 0,
+      range_start: null,
+      range_end: null,
+      sources: [],
+      bucket_seconds: 3600,
+      buckets: Array.from({ length: 4 }, (_, i) => ({
+        index: i,
+        start: new Date(start + i * HOUR).toISOString(),
+        end: new Date(start + (i + 1) * HOUR).toISOString(),
+        count: 1,
+      })),
+    };
+    const { granularity, buckets } = rebucket(payload, "day", "Asia/Seoul");
+    expect(granularity).toBe("day");
+    expect(buckets.map((b) => b.count)).toEqual([1, 3]);
+  });
+});
+
+describe("review P3-5: half-hour zones keep hour axis labels", () => {
+  it("Asia/Kolkata hour bars (all at :30) get labels", () => {
+    const hours = bars("2026-10-20T00:00:00Z", HOUR, 24);
+    const ticks = axisTicks(hours, "Asia/Kolkata", 8);
+    expect(ticks.length).toBeGreaterThan(0);
+    expect(ticks.every((t) => t.label.endsWith(":30"))).toBe(true);
+    expect(axisTicks(hours, "Asia/Seoul", 8).length).toBe(8);
+  });
+});
