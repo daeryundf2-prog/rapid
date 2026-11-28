@@ -270,13 +270,17 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
 
     @router.post("/api/cases/{case_id}/evidence/{citation_id}/hash", status_code=202)
     def rehash_evidence(case_id: str, citation_id: str, actor: str = Query("", max_length=200)) -> dict[str, Any]:
-        """Hash (again) a file evidence item: after a restart (`interrupted`), a failure, or never asked."""
+        """Hash (again) a file evidence item: after a restart (`interrupted`), a failure, or never asked.
+
+        The stored path is checked against the server roots of *now* (``RAPIDTRIAGE_ANALYSIS_ROOTS``,
+        422 like a case run): a server restarted with narrower roots never reads outside them.
+        """
         case = case_or_404(case_id)
         try:
             current = intake().get_evidence(case_id, citation_id)
         except CaseDatabaseError as exc:
             _raise(exc)
-        path = Path(str(current["path"]))
+        path = Path(checked_local_path(str(current["path"]), label="증거", confine_to_analysis_roots=True))
         if not path.is_file():
             raise HTTPException(status_code=422, detail="파일 증거만 해시를 계산할 수 있습니다 (폴더·없는 경로 제외)")
         if workspace.hash_running(citation_id):
