@@ -27,6 +27,24 @@
   date or date-time and lists runnable commands before disabled ones;
   "선택 항목 분석…" and "관련 항목 표시…" open one dialog over the action API that
   also shows the request an agent would send.
+- AI usage coverage matrix (`docs/ai-usage-coverage-matrix.md`, Korean, with
+  the GitHub 500-star appendix `docs/ai-usage-coverage-github.md`): AI usage
+  setups by category (web chat, desktop apps, browser AI, IDEs, CLI agents,
+  harnesses, orchestrators, messenger agents, cloud agents, local LLMs, API and
+  automation, image and voice generation, mobile), the traces each leaves, the
+  primary source for each path, what Rapid collects today and the ordered list
+  of next collectors.
+- Browser history and memory URL classification recognise more web AI
+  services: Microsoft 365 Copilot (`copilot.cloud.microsoft`), `copilot.com`,
+  NotebookLM, 뤼튼, CLOVA X, 에이닷, Kimi, Qwen, Doubao, ChatGLM, Genspark,
+  Manus and Felo. Both collectors now read one host table
+  (`rapidtriage/core/ai_service_domains.py`), so memory strings also classify
+  Google AI Studio, Grok, Mistral Le Chat, DeepSeek, Meta AI, Character.AI,
+  You.com and Phind, which only browser history knew before.
+- Local LLM inventory names Jan, AnythingLLM, Msty, AI:GO, LocalAI, Open
+  WebUI, text-generation-webui and KoboldCpp data folders, matches Windows
+  paths with either separator, and reads `.jsonl` files (Jan thread messages)
+  for prompt candidates (`tests/test_ai_service_domains.py`).
 
 ### Changed
 
