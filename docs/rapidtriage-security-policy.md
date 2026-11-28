@@ -6,7 +6,7 @@ RapidTriage is safest as a local-only forensic workstation tool. The default web
 
 ## Remote Access
 
-Any non-localhost bind (`--remote`, `--host 0.0.0.0 --auth-token`, even `--allow-remote-without-auth`) refuses to start unless the server roots are set: `RAPIDTRIAGE_ANALYSIS_ROOTS` (evidence inputs) and `RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS` (run outputs), absolute local folders separated by the platform path separator. No output root may be, contain, or lie inside an evidence root. Use `--remote`, which also requires a token:
+Any non-localhost bind (`--remote`, `--host 0.0.0.0 --auth-token`, even `--allow-remote-without-auth`) refuses to start unless the server roots are set: `RAPIDTRIAGE_ANALYSIS_ROOTS` (evidence inputs) and `RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS` (run outputs), absolute local folders separated by the platform path separator. No output root and no `RAPIDTRIAGE_CASE_DB_ROOTS` entry may be, contain, or lie inside an evidence root (also through another letter case or Unicode normalization of the same folder). Case databases and catalogs named by API clients go only into run output folders, `~/.rapidtriage/cases` or `RAPIDTRIAGE_CASE_DB_ROOTS` (never the server's working directory, never evidence). Use `--remote`, which also requires a token:
 
 ```bash
 RAPIDTRIAGE_ANALYSIS_ROOTS=/srv/evidence \

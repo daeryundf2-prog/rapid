@@ -543,6 +543,7 @@ class CaseDatabase:
         document_texts: Iterable[tuple[str, str, str | None]] | None = None,
         hash_files: bool = True,
         on_progress: ImportProgress | None = None,
+        source_allowed: Callable[[str], bool] | None = None,
     ) -> dict[str, object]:
         """Import a run's outputs (files, docs, artifacts, indicators, timeline).
 
@@ -557,6 +558,10 @@ class CaseDatabase:
         every file candidate (hashes the run already recorded are kept); the
         run pipeline's persist step uses it so a 100+ GB image is not read
         again just to build the search index.
+
+        ``source_allowed(path)`` (API imports under server roots) gates every
+        evidence path the summary names: a refused path is never opened, so it is
+        neither hashed (recorded hashes only) nor text-extracted.
         """
         summary = load_run_summary(run_summary)
         outputs = summary.get("outputs")
@@ -573,7 +578,9 @@ class CaseDatabase:
         if case_row is None:
             self.create_case(case_id=case_id, name=case_name, case_root=case_root)
 
-        evidence_source_id = self._insert_evidence_source(case_id, summary, hash_source=hash_files)
+        evidence_source_id = self._insert_evidence_source(
+            case_id, summary, hash_source=hash_files, source_allowed=source_allowed
+        )
         # Parser-quality r1: rows link to each other (file_record <- artifact /
         # indexed_document / event, artifact <- event) through these maps.
         self._file_ids = {}
@@ -583,8 +590,12 @@ class CaseDatabase:
         self._import_progress = on_progress
         counts = {
             "evidence_source_count": 1,
-            "file_record_count": self._import_files(case_id, evidence_source_id, outputs, hash_files=hash_files),
-            "indexed_document_count": self._import_docs(case_id, evidence_source_id, outputs, document_texts=document_texts),
+            "file_record_count": self._import_files(
+                case_id, evidence_source_id, outputs, hash_files=hash_files, source_allowed=source_allowed
+            ),
+            "indexed_document_count": self._import_docs(
+                case_id, evidence_source_id, outputs, document_texts=document_texts, source_allowed=source_allowed
+            ),
             "artifact_count": self._import_artifacts(case_id, evidence_source_id, outputs),
             "indicator_count": self._import_indicators(case_id, evidence_source_id, outputs),
             "event_count": self._import_timeline(case_id, evidence_source_id, outputs),
@@ -1634,14 +1645,22 @@ class CaseDatabase:
             "items": items,
         }
 
-    def _insert_evidence_source(self, case_id: str, summary: Mapping[str, object], *, hash_source: bool = True) -> int:
+    def _insert_evidence_source(
+        self,
+        case_id: str,
+        summary: Mapping[str, object],
+        *,
+        hash_source: bool = True,
+        source_allowed: Callable[[str], bool] | None = None,
+    ) -> int:
         source = summary.get("source")
         source_payload = source if isinstance(source, Mapping) else {}
         source_path = str(source_payload.get("source_path") or summary.get("root") or "")
         analysis_root = str(source_payload.get("analysis_root") or summary.get("root") or "")
         timestamp = now_iso()
-        size = path_size(source_path)
-        hashes = hash_existing_file(source_path) if hash_source else {}
+        readable = bool(source_path) and (source_allowed is None or source_allowed(source_path))
+        size = path_size(source_path) if readable else None
+        hashes = hash_existing_file(source_path) if hash_source and readable else {}
         with self.connect() as connection:
             citation_id = next_citation_id_for_connection(connection, case_id, "evidence")
             cursor = connection.execute(
@@ -1680,6 +1699,7 @@ class CaseDatabase:
         outputs: Mapping[str, object],
         *,
         hash_files: bool = True,
+        source_allowed: Callable[[str], bool] | None = None,
     ) -> int:
         # Candidates first, then the lightweight inventory of every other
         # scanned file (parser-quality r2): events/artifacts link to both;
@@ -1697,7 +1717,8 @@ class CaseDatabase:
                 path = str(row.get("path") or "")
                 if inventory_only and normalize_path_for_db(path) in self._file_ids:
                     continue
-                hashes = hash_existing_file(path) if hash_files and not inventory_only else recorded_candidate_hashes(row)
+                rehash = hash_files and not inventory_only and (source_allowed is None or source_allowed(path))
+                hashes = hash_existing_file(path) if rehash else recorded_candidate_hashes(row)
                 recovery = recovery_record_from_payload(row)
                 candidate_kind = str(recovery.get("candidate_kind") or "")
                 times = file_record_times(row)
@@ -1770,6 +1791,7 @@ class CaseDatabase:
         outputs: Mapping[str, object],
         *,
         document_texts: Iterable[tuple[str, str, str | None]] | None = None,
+        source_allowed: Callable[[str], bool] | None = None,
     ) -> int:
         rows = iter_output_member(outputs, "docs", "candidates")
         texts = iter(document_texts) if document_texts is not None else None
@@ -1787,7 +1809,10 @@ class CaseDatabase:
                 else:
                     if supplied is not None:
                         texts = None  # out of step: extract the rest directly
-                    body, extraction_error = safe_extract_text(path, kind)
+                    if source_allowed is not None and not source_allowed(str(path)):
+                        body, extraction_error = "", "document outside the run's allowed roots was not read"
+                    else:
+                        body, extraction_error = safe_extract_text(path, kind)
                 # indexed_document is the content table of indexed_document_fts
                 # (external content): store NFC so the index, snippet() and
                 # 'rebuild' all see the same composed text (NFD Korean names).

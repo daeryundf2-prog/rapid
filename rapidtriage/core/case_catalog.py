@@ -58,7 +58,7 @@ class CaseCatalog:
     def add_run(
         self,
         *,
-        run_output: Path,
+        run_output: Path | Mapping[str, object],
         case_id: str,
         name: str | None = None,
         description: str = "",

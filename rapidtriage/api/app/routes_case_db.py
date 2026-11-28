@@ -41,13 +41,16 @@ from ...core.sample_case import (
 )
 from ...core.search import (
     SearchError,
+    load_run_summary,
 )
 from .case_workspace import checked_output_path
 from .helpers import (
     get_job,
     resolve_request_reviewer,
     run_not_finished_message,
+    run_source_filter,
     server_actor,
+    summary_with_allowed_outputs,
 )
 from .models import (
     CaseCatalogAddRunRequest,
@@ -63,6 +66,33 @@ from .models import (
 )
 from .routes_review_tools import apply_review_tag_batch
 from .run_review import review_map_entries, split_batch_targets
+
+RUN_OUTPUT_REFUSED = (
+    f"run_output 경로를 쓸 수 없습니다: 출력 루트({ANALYSIS_OUTPUT_ROOTS_ENV}) 안, 증거 루트 밖에 있는 "
+    "런 출력 폴더(rapidtriage-run-summary.json)를 지정하세요"
+)
+
+
+def confined_run_summary(raw: str) -> tuple[dict[str, object], Callable[[str], bool] | None]:
+    """The run summary named by an import's ``run_output`` and the filter for the paths it names.
+
+    ``run_output`` (a run output folder or its summary file) is an output path:
+    under the output roots, never in evidence (``checked_output_path``), the
+    summary a regular JSON file of bounded size. A run made before the roots were
+    set (output elsewhere) cannot be re-imported. Every refusal is the same 422,
+    so the answer never tells whether a server path exists.
+    """
+    try:
+        path = Path(checked_output_path(raw, label="런 출력(run_output)"))
+        if path.is_dir():
+            path = Path(checked_output_path(str(path / "rapidtriage-run-summary.json"), label="런 출력(run_output)"))
+        summary = load_run_summary(path)
+        if not isinstance(summary, Mapping):
+            raise ValueError("run summary is not a JSON object")
+        allowed = run_source_filter(summary)
+    except (HTTPException, SearchError, OSError, ValueError, RuntimeError):
+        raise HTTPException(status_code=422, detail=RUN_OUTPUT_REFUSED) from None
+    return summary_with_allowed_outputs(summary, allowed), allowed
 
 
 def _summary_output_dir(summary: dict[str, object]) -> Path | None:
@@ -202,9 +232,12 @@ def build_case_db_router(
 
     @router.post("/api/case-db/import-run")
     def import_run_to_case_db(request: CaseDbImportRunRequest) -> dict[str, object]:
+        summary, allowed = confined_run_summary(request.run_output)
         try:
             database = open_request_case_database(request.database)
-            return database.import_run_output(Path(request.run_output), case_id=request.case_id, case_name=request.name)
+            return database.import_run_output(
+                summary, case_id=request.case_id, case_name=request.name, source_allowed=allowed
+            )
         except (CaseDatabaseError, SearchError, OSError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
@@ -225,7 +258,9 @@ def build_case_db_router(
             already_imported = bool(storage["exists"]) and int(storage["summary"].get("evidence_source_count") or 0) > 0
             import_result = None
             if not already_imported:
-                import_result = database.import_run_output(output_dir, case_id=case_id, case_name=case_name)
+                import_result = database.import_run_output(
+                    output_dir, case_id=case_id, case_name=case_name, source_allowed=run_source_filter(job.summary)
+                )
                 storage = database.case_storage_summary(case_id)
             return {
                 "command": "case-db.ensure-run",
@@ -493,9 +528,10 @@ def build_case_db_router(
     def add_case_catalog_run(request: CaseCatalogAddRunRequest) -> dict[str, object]:
         try:
             catalog_path = resolve_request_catalog_path(request.catalog) if request.catalog else default_case_catalog_path()
+            summary, _allowed = confined_run_summary(request.run_output)
             case_catalog = CaseCatalog(catalog_path)
             case = case_catalog.add_run(
-                run_output=Path(request.run_output),
+                run_output=summary,
                 case_id=request.case_id,
                 name=request.name,
                 description=request.description,

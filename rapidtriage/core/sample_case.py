@@ -13,7 +13,9 @@ from .run import run_triage_mode
 DEFAULT_SAMPLE_DIR = "rapidtriage-sample"
 DEFAULT_SAMPLE_MODE = "fraud"
 # Written first into every sample folder: ``overwrite`` deletes only folders
-# carrying it (or the expected-results file of samples made before it existed).
+# carrying it. The expected-results file alone is not enough (any folder could
+# hold a file of that name); a sample made before the marker existed is not
+# replaced: delete it by hand.
 SAMPLE_MARKER_NAME = ".rapidtriage-sample-case"
 SAMPLE_EXPECTED_NAME = "rapidtriage-sample-expected.json"
 
@@ -23,8 +25,8 @@ class SampleCaseError(ValueError):
 
 
 def is_sample_case_dir(root: Path) -> bool:
-    """Whether ``root`` is a folder this module created (marker or expected-results file present)."""
-    return (root / SAMPLE_MARKER_NAME).is_file() or (root / SAMPLE_EXPECTED_NAME).is_file()
+    """Whether ``root`` is a folder this module created (its marker file is present)."""
+    return (root / SAMPLE_MARKER_NAME).is_file()
 
 
 def create_sample_case(output_dir: Path, *, overwrite: bool = False) -> dict[str, object]:

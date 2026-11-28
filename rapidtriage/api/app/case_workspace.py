@@ -27,6 +27,7 @@ from ...core.e01 import is_e01_path
 from ...core.e01_hash import run_e01_streaming_hash
 from ...core.evidence import discover_raw_parts_for_guidance, identify_evidence
 from ...core.jobs import RunJob, RunJobStore, RunRequest
+from ...core.local_paths import configured_root_entries, path_within
 from ...core.run.profiles import RUN_PROFILES
 from .analyses import (
     ANALYSIS_OUTPUT_ROOTS_ENV,
@@ -77,9 +78,20 @@ def checked_local_path(
     return lexical
 
 
+def inside_evidence_roots(path: str | Path) -> bool:
+    """Whether ``path`` lies under an evidence root (``RAPIDTRIAGE_ANALYSIS_ROOTS``); false when unset.
+
+    Also through case-insensitive / Unicode-normalization aliases of the
+    evidence folders (``path_within`` compares the existing folders by identity).
+    """
+    return under_configured_roots(path, ANALYSIS_ROOTS_ENV) or any(
+        path_within(str(path), root) for root in configured_root_entries(ANALYSIS_ROOTS_ENV)
+    )
+
+
 def output_inside_evidence_roots(path: str | Path) -> bool:
     """With both server root lists set: whether ``path`` lies under an evidence root (never an output target)."""
-    return bool(extra_analysis_roots(ANALYSIS_OUTPUT_ROOTS_ENV)) and under_configured_roots(path, ANALYSIS_ROOTS_ENV)
+    return bool(extra_analysis_roots(ANALYSIS_OUTPUT_ROOTS_ENV)) and inside_evidence_roots(path)
 
 
 def checked_output_path(raw: str, *, label: str) -> str:

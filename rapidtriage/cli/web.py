@@ -11,6 +11,7 @@ from pathlib import Path
 from ..core.local_paths import (
     ANALYSIS_OUTPUT_ROOTS_ENV,
     ANALYSIS_ROOTS_ENV,
+    CASE_DB_ROOTS_ENV,
     configured_root_entries,
     overlapping_roots,
 )
@@ -43,8 +44,9 @@ def require_server_roots(reason: str) -> None:
     inside them: without them a token holder (or anyone, with
     ``--allow-remote-without-auth``) runs and reads any server path as evidence
     through source-file and writes output anywhere (R1, R10), and the picker lists
-    the whole server file system (R2). An output root that is, contains, or lies in
-    an evidence root puts run output inside the evidence.
+    the whole server file system (R2). An output root (or a case-DB root) that is,
+    contains, or lies in an evidence root puts run output (case databases) inside
+    the evidence.
     """
     entries = {env: configured_root_entries(env) for env in (ANALYSIS_ROOTS_ENV, ANALYSIS_OUTPUT_ROOTS_ENV)}
     missing = [env for env, values in entries.items() if not values]
@@ -53,13 +55,14 @@ def require_server_roots(reason: str) -> None:
             f"{reason} requires server roots: set {' and '.join(missing)} "
             "(os.pathsep-separated absolute local folders: evidence inputs / run outputs)."
         )
-    overlaps = overlapping_roots(entries[ANALYSIS_ROOTS_ENV], entries[ANALYSIS_OUTPUT_ROOTS_ENV])
-    if overlaps:
-        listed = "; ".join(f"{evidence} <-> {output}" for evidence, output in overlaps)
-        raise RuntimeError(
-            f"{reason}: {ANALYSIS_OUTPUT_ROOTS_ENV} must not be, contain, or lie inside a "
-            f"{ANALYSIS_ROOTS_ENV} folder (run output would land in evidence): {listed}"
-        )
+    for env, wanted in ((ANALYSIS_OUTPUT_ROOTS_ENV, "run output"), (CASE_DB_ROOTS_ENV, "case databases")):
+        overlaps = overlapping_roots(entries[ANALYSIS_ROOTS_ENV], configured_root_entries(env))
+        if overlaps:
+            listed = "; ".join(f"{evidence} <-> {other}" for evidence, other in overlaps)
+            raise RuntimeError(
+                f"{reason}: {env} must not be, contain, or lie inside a "
+                f"{ANALYSIS_ROOTS_ENV} folder ({wanted} would land in evidence): {listed}"
+            )
 
 
 def run_web_server(

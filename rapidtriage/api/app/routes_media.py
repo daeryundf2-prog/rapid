@@ -15,6 +15,7 @@ from fastapi.responses import (
 from ...core.jobs import RunJobStore
 from ...core.sqlite_wal import SqliteWalPreviewError, build_sqlite_wal_preview
 from .analyses import AnalysisRowRef, analysis_row_ref
+from .case_workspace import run_output_write_problem
 from .constants import (
     HEX_RANGE_EXPORT_MAX_BYTES,
     IMAGE_GALLERY_DEFAULT_LIMIT,
@@ -111,6 +112,8 @@ def build_media_router(
         summary = get_job(store, run_id).summary or {}
         output_value = summary.get("output_dir")
         output_dir = Path(output_value) if isinstance(output_value, str) and output_value else None
+        if output_dir is not None and run_output_write_problem(output_dir) is not None:
+            output_dir = None  # outside the output roots / in evidence: render in memory, cache nothing
         cache_path, data = cached_thumbnail(source_path, size, output_dir)
         headers = {"Cache-Control": THUMBNAIL_CACHE_CONTROL}
         if cache_path is not None:
