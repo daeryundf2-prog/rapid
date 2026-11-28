@@ -551,19 +551,8 @@ kbd {
     white-space: nowrap;
   }
 
-  /* The seal shares this row: the case name keeps a few letters ("fold…") instead of vanishing
-     behind the seal and 실행, and the search gives way down to its placeholder width. */
   .topbar-case {
-    max-width: 50%;
-  }
-
-  .case-picker-name {
-    min-width: 3em;
-  }
-
-  .topbar-search,
-  .global-search {
-    min-width: 72px;
+    max-width: 40%;
   }
 
   .topbar-search {
@@ -579,6 +568,22 @@ kbd {
     right: var(--space-2);
     width: auto;
     max-width: none;
+  }
+
+  /* The integrity seal shares the case row: the case name keeps a few letters ("fold…") instead
+     of vanishing behind the seal and 실행, and the search gives way down to its placeholder width.
+     (Own block with .topbar scope so other phone rules for .topbar-case stay untouched.) */
+  .topbar .topbar-case {
+    max-width: 50%;
+  }
+
+  .topbar .case-picker-name {
+    min-width: 3em;
+  }
+
+  .topbar .topbar-search,
+  .topbar .global-search {
+    min-width: 72px;
   }
 }
 
