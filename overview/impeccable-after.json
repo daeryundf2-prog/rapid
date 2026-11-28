@@ -1,0 +1,188 @@
+[
+{"screen":"01-cases","viewport":"1440x900","count":2,"findings":[
+  {
+    "antipattern": "flat-type-hierarchy",
+    "name": "Flat type hierarchy",
+    "description": "Dominant heading and body roles are separated by less than 1.25× at every step, leaving the size hierarchy flat. Add at least one stronger size step.",
+    "severity": "advisory",
+    "category": "slop",
+    "file": "http://127.0.0.1:8844/v2/#/?token=review-token",
+    "line": 0,
+    "snippet": "Role sizes: body 13px, h2 13px, h1 16px (largest adjacent step 1.23:1; target 1.25:1; weight separates headings from body text)",
+    "advisory": true,
+    "selector": "body"
+  },
+  {
+    "antipattern": "nested-cards",
+    "name": "Nested cards",
+    "description": "Cards inside cards create visual noise and excessive depth. Flatten the hierarchy — use spacing, typography, and dividers instead of nesting containers.",
+    "severity": "warning",
+    "category": "slop",
+    "file": "http://127.0.0.1:8844/v2/#/?token=review-token",
+    "line": 0,
+    "snippet": "Card inside card",
+    "selector": "ul.landing-cases"
+  }
+]}
+,
+{"screen":"01-cases","viewport":"390x844","count":2,"findings":[
+  {
+    "antipattern": "flat-type-hierarchy",
+    "name": "Flat type hierarchy",
+    "description": "Dominant heading and body roles are separated by less than 1.25× at every step, leaving the size hierarchy flat. Add at least one stronger size step.",
+    "severity": "advisory",
+    "category": "slop",
+    "file": "http://127.0.0.1:8844/v2/#/?token=review-token",
+    "line": 0,
+    "snippet": "Role sizes: body 13px, h2 13px, h1 16px (largest adjacent step 1.23:1; target 1.25:1; weight separates headings from body text)",
+    "advisory": true,
+    "selector": "body"
+  },
+  {
+    "antipattern": "nested-cards",
+    "name": "Nested cards",
+    "description": "Cards inside cards create visual noise and excessive depth. Flatten the hierarchy — use spacing, typography, and dividers instead of nesting containers.",
+    "severity": "warning",
+    "category": "slop",
+    "file": "http://127.0.0.1:8844/v2/#/?token=review-token",
+    "line": 0,
+    "snippet": "Card inside card",
+    "selector": "ul.landing-cases"
+  }
+]}
+,
+{"screen":"02-dashboard","viewport":"1440x900","count":0,"findings":[]}
+,
+{"screen":"02-dashboard","viewport":"390x844","count":0,"findings":[]}
+,
+{"screen":"03-timeline","viewport":"1440x900","count":1,"findings":[
+  {
+    "antipattern": "side-tab",
+    "name": "Side-tab accent border",
+    "description": "A bar down one side of a rounded box. Use a full border, a background tint, or a leading icon or label instead.",
+    "severity": "warning",
+    "category": "slop",
+    "file": "http://127.0.0.1:8844/v2/#/case/ce781cdd7fc7/explore/timeline?token=review-token",
+    "line": 0,
+    "snippet": "li.case-tree-item.selected — inset box-shadow 2px stripe (left)",
+    "selector": "li.case-tree-item.selected"
+  }
+]}
+,
+{"screen":"03-timeline","viewport":"390x844","count":1,"findings":[
+  {
+    "antipattern": "text-occlusion",
+    "name": "Text occluded by an overlapping element",
+    "description": "Text is painted under an opaque element or a second text run, so part of it cannot be read. A decorative box, a stacked layer, or an inline element with leaked padding lands on the words instead of beside them. Give overlapping layers room, or move the text out from under the layer above it.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "http://127.0.0.1:8844/v2/#/case/ce781cdd7fc7/explore/timeline?token=review-token",
+    "line": 0,
+    "snippet": "span.grid-cell-text \"Artifact event: browser-\" is 80% covered by an opaque element (button.button)",
+    "selector": "div.grid-row:nth-of-type(21) > div.grid-cell:nth-of-type(3) > span.grid-cell-text"
+  }
+]}
+,
+{"screen":"05-files","viewport":"1440x900","count":2,"findings":[
+  {
+    "antipattern": "side-tab",
+    "name": "Side-tab accent border",
+    "description": "A bar down one side of a rounded box. Use a full border, a background tint, or a leading icon or label instead.",
+    "severity": "warning",
+    "category": "slop",
+    "file": "http://127.0.0.1:8844/v2/#/case/ce781cdd7fc7/explore/files?token=review-token",
+    "line": 0,
+    "snippet": "li.case-tree-item.selected — inset box-shadow 2px stripe (left)",
+    "selector": "li.case-tree-item.selected"
+  },
+  {
+    "antipattern": "em-dash-overuse",
+    "name": "Em-dash overuse",
+    "description": "Em-dash saturation in body copy is an AI cadence tell. Advisory only: humans use em-dashes legitimately, so this fires only on saturation — at least 8 em-dashes (— or --) at a density near one per 500 characters of body text — never on a long article that uses a few. Prefer commas, colons, periods, or parentheses.",
+    "severity": "advisory",
+    "category": "slop",
+    "file": "http://127.0.0.1:8844/v2/#/case/ce781cdd7fc7/explore/files?token=review-token",
+    "line": 0,
+    "snippet": "9 em-dashes in body text",
+    "advisory": true,
+    "selector": "body"
+  }
+]}
+,
+{"screen":"05-files","viewport":"390x844","count":0,"findings":[]}
+,
+{"screen":"06-search","viewport":"1440x900","count":1,"findings":[
+  {
+    "antipattern": "side-tab",
+    "name": "Side-tab accent border",
+    "description": "A bar down one side of a rounded box. Use a full border, a background tint, or a leading icon or label instead.",
+    "severity": "warning",
+    "category": "slop",
+    "file": "http://127.0.0.1:8844/v2/#/case/ce781cdd7fc7/explore/search?q=invoice&token=review-token",
+    "line": 0,
+    "snippet": "li.case-tree-item.selected — inset box-shadow 2px stripe (left)",
+    "selector": "li.case-tree-item.selected"
+  }
+]}
+,
+{"screen":"06-search","viewport":"390x844","count":1,"findings":[
+  {
+    "antipattern": "text-occlusion",
+    "name": "Text occluded by an overlapping element",
+    "description": "Text is painted under an opaque element or a second text run, so part of it cannot be read. A decorative box, a stacked layer, or an inline element with leaked padding lands on the words instead of beside them. Give overlapping layers room, or move the text out from under the layer above it.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "http://127.0.0.1:8844/v2/#/case/ce781cdd7fc7/explore/search?q=invoice&token=review-token",
+    "line": 0,
+    "snippet": "span.grid-cell-text \"Artifact event: amcache-\" is 30% covered by an opaque element (button.button)",
+    "selector": "div.grid-row:nth-of-type(22) > div.grid-cell.grid-cell-first > span.grid-cell-text"
+  }
+]}
+,
+{"screen":"07-review","viewport":"1440x900","count":1,"findings":[
+  {
+    "antipattern": "flat-type-hierarchy",
+    "name": "Flat type hierarchy",
+    "description": "Dominant heading and body roles are separated by less than 1.25× at every step, leaving the size hierarchy flat. Add at least one stronger size step.",
+    "severity": "advisory",
+    "category": "slop",
+    "file": "http://127.0.0.1:8844/v2/#/case/ce781cdd7fc7/review/board?token=review-token",
+    "line": 0,
+    "snippet": "Role sizes: body 13px, h1 13px, h2 13px (largest adjacent step 1.00:1; target 1.25:1; weight separates headings from body text)",
+    "advisory": true,
+    "selector": "body"
+  }
+]}
+,
+{"screen":"07-review","viewport":"390x844","count":0,"findings":[]}
+,
+{"screen":"08-report","viewport":"1440x900","count":1,"findings":[
+  {
+    "antipattern": "flat-type-hierarchy",
+    "name": "Flat type hierarchy",
+    "description": "Dominant heading and body roles are separated by less than 1.25× at every step, leaving the size hierarchy flat. Add at least one stronger size step.",
+    "severity": "advisory",
+    "category": "slop",
+    "file": "http://127.0.0.1:8844/v2/#/case/ce781cdd7fc7/report/outputs?token=review-token",
+    "line": 0,
+    "snippet": "Role sizes: body 13px, h1 13px, h3 14px (largest adjacent step 1.08:1; target 1.25:1; weight separates headings from body text)",
+    "advisory": true,
+    "selector": "body"
+  }
+]}
+,
+{"screen":"08-report","viewport":"390x844","count":1,"findings":[
+  {
+    "antipattern": "flat-type-hierarchy",
+    "name": "Flat type hierarchy",
+    "description": "Dominant heading and body roles are separated by less than 1.25× at every step, leaving the size hierarchy flat. Add at least one stronger size step.",
+    "severity": "advisory",
+    "category": "slop",
+    "file": "http://127.0.0.1:8844/v2/#/case/ce781cdd7fc7/report/outputs?token=review-token",
+    "line": 0,
+    "snippet": "Role sizes: body 13px, h3 14px, h2 16px (largest adjacent step 1.14:1; target 1.25:1; weight separates headings from body text)",
+    "advisory": true,
+    "selector": "body"
+  }
+]}
+]
