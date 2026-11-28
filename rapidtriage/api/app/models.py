@@ -162,7 +162,8 @@ class CaseDbReviewBatchRequest(BaseModel):
     # Each target is ``{target_type, target_id}`` (case-DB row) or a run-output
     # locator ``{collection, kind?, locator}`` resolved against ``run_id``; either may
     # carry ``expected_version`` (int) or the older ``expected_updated_at`` (F14: any
-    # changed mark → 409, nothing written).
+    # changed mark → 409, nothing written). A Z (undo) write also carries ``undo_of_version``
+    # (the history version of the verdict it undoes): its history row is recorded as an undo.
     targets: list[dict[str, str | int]] = Field(..., min_length=1)
     run_id: str | None = None
     # Merged into each target's existing tags (``tags`` replaces them).

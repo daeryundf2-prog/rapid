@@ -11,6 +11,7 @@ from .review import *
 from .review_conflict import *
 from .review_schema import *
 from .review_tools import *
+from .review_undo import *
 from .review_verdict import *
 from .schema import *
 from .search import *

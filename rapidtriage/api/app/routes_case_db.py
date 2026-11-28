@@ -17,7 +17,7 @@ from ...core.case_catalog import (
 )
 from ...core.case_db import (
     ACTIVE_MARK_SQL,
-    EXPECTATION_KEYS,
+    TARGET_CARRIED_KEYS,
     CaseDatabase,
     CaseDatabaseError,
     ReviewConflictError,
@@ -97,7 +97,7 @@ def resolve_run_locator_targets(
             unresolved.append(f"{collection}:{kind}:{locator}")
             continue
         entry = {"target_type": hit[0], "target_id": hit[1], "collection": collection, "kind": kind, "locator": locator}
-        for key in EXPECTATION_KEYS:
+        for key in TARGET_CARRIED_KEYS:
             if target.get(key) is not None:
                 entry[key] = target[key]
         resolved.append(entry)

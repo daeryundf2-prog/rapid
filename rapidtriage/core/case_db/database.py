@@ -129,6 +129,7 @@ from .review_schema import (
     sync_review_mark_tag_ids,
     tag_names_for_ids,
 )
+from .review_undo import UNDO_OF_VERSION_KEY, undo_detail
 from .review_verdict import verdict_changed
 from .schema import (
     apply_schema,
@@ -1265,6 +1266,10 @@ class CaseDatabase:
                 current_review=current_review,
                 actor=effective_reviewer or "local-user",
                 changed_at=timestamp,
+                # A Z write names the verdict version it undoes (re-review P2).
+                undo=undo_detail(
+                    connection, normalized_case_id, target_type, target_id, target.get(UNDO_OF_VERSION_KEY)
+                ),
             )
             connection.execute(
                 """
@@ -2379,7 +2384,9 @@ def insert_review_history(
     current_review: Mapping[str, object],
     actor: str,
     changed_at: str,
+    undo: Mapping[str, object] | None = None,
 ) -> None:
+    """Append the mark's next history version; ``undo`` (``review_undo.undo_detail``) marks a Z write."""
     row = connection.execute(
         """
         SELECT COALESCE(MAX(version), 0) AS version
@@ -2390,26 +2397,28 @@ def insert_review_history(
     ).fetchone()
     version = int(row["version"] or 0) + 1 if row is not None else 1
     changed_fields = review_changed_fields(previous_review, current_review)
+    values = (
+        case_id,
+        review_citation_id,
+        target_type,
+        target_id,
+        version,
+        changed_at,
+        actor,
+        json.dumps(changed_fields, ensure_ascii=False, sort_keys=True),
+        json.dumps(previous_review, ensure_ascii=False, sort_keys=True),
+        json.dumps(current_review, ensure_ascii=False, sort_keys=True),
+    )
+    columns = (
+        "case_id, review_citation_id, target_type, target_id, version, "
+        "changed_at, actor, changed_fields_json, previous_json, current_json"
+    )
+    if undo:
+        columns += ", kind, undone_version, undone_reviewer"
+        values = (*values, str(undo["kind"]), undo["undone_version"], str(undo["undone_reviewer"]))
     connection.execute(
-        """
-        INSERT INTO review_mark_history (
-            case_id, review_citation_id, target_type, target_id, version,
-            changed_at, actor, changed_fields_json, previous_json, current_json
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            case_id,
-            review_citation_id,
-            target_type,
-            target_id,
-            version,
-            changed_at,
-            actor,
-            json.dumps(changed_fields, ensure_ascii=False, sort_keys=True),
-            json.dumps(previous_review, ensure_ascii=False, sort_keys=True),
-            json.dumps(current_review, ensure_ascii=False, sort_keys=True),
-        ),
+        f"INSERT INTO review_mark_history ({columns}) VALUES ({', '.join('?' * len(values))})",
+        values,
     )
 
 
