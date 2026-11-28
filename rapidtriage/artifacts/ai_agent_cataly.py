@@ -19,7 +19,7 @@ else:
     import tomli as tomllib
 
 from ..core.sqlite_snapshot import open_sqlite_snapshot, sqlite_snapshot_reference
-from .ai_agent_editor import DB_BYTES, VALUE_BYTES
+from .ai_agent_editor import DB_BYTES, VALUE_BYTES, database_bytes
 from .ai_agent_records import TEXT_LIMIT, clean, items, mapping, utc
 
 DOCUMENT_BYTES = 8 << 20
@@ -298,20 +298,10 @@ def column_sql(name, kind, present):
     return f'"{name}"'
 
 
-def store_bytes(path: Path) -> int:
-    size = 0
-    for suffix in ("", "-wal", "-shm", "-journal"):
-        try:
-            size += path.with_name(path.name + suffix).lstat().st_size
-        except FileNotFoundError:
-            continue
-    return size
-
-
 def store(src, path: Path):
     """Read-only from a verified private snapshot (committed WAL content included). Table and column names are fixed;
     the evidence's views, triggers and virtual tables are never run."""
-    if store_bytes(path) > DB_BYTES:
+    if database_bytes(path) > DB_BYTES:
         yield src.note("database-size-limit")
         return
     provenance = {}
