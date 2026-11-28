@@ -201,7 +201,13 @@ describe("Layout from 900px: the foldable panel (F24)", () => {
 });
 
 describe("Layout below 600px: list ↔ detail (F23)", () => {
-  const target = { runId: "r1", collection: "files", rowKey: "k1", ref: { kind: "file", id: "1" } };
+  // A complete RowRef: other shell parts (the status-bar hint) read the target's locator.
+  const target = {
+    runId: "r1",
+    collection: "files",
+    rowKey: "files:/files/1",
+    ref: { collection: "files", locator: "/files/1" },
+  };
 
   function addRow(): HTMLElement {
     const main = document.getElementById("main") as HTMLElement;
