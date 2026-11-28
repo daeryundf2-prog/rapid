@@ -11,6 +11,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRovingTabindex } from "../../a11y";
+import { VerdictGlyph } from "../../components/VerdictGlyph";
 import type { GridRow } from "../../contracts/collection";
 import { encodeRowRef } from "../../contracts/rowRef";
 import { useViewerTarget } from "../grid/adapter";
@@ -313,6 +314,11 @@ function MessageList({
                         </li>
                       ))}
                     </ul>
+                  ) : null}
+                  {message.row.reviewStatus ? (
+                    <span className="chat-verdict">
+                      <VerdictGlyph status={message.row.reviewStatus} withLabel />
+                    </span>
                   ) : null}
                   <time className="chat-time">{message.timestamp ?? "시각 없음"}</time>
                 </div>

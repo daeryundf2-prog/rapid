@@ -30,6 +30,7 @@ import {
 } from "react";
 import { announce, DisabledReason } from "../../a11y";
 import { fetchSourceImage, fetchSourceThumbnailBlob, isArchiveEntryPath } from "../../api/viewer";
+import { VerdictShape } from "../../components/VerdictGlyph";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
 import { encodeRowRef } from "../../contracts/rowRef";
 import { useAppStore } from "../../state/store";
@@ -145,8 +146,12 @@ const Tile = memo(function Tile({
       <span className="thumb-frame">
         <Thumb runId={runId} path={row.sourcePath ?? ""} />
       </span>
-      <span className="thumb-name" title={row.sourcePath ?? name}>
-        {name}
+      <span className="thumb-caption">
+        {/* The tile's aria-label names the verdict; the shape is its visual twin (F2). */}
+        {row.reviewStatus ? <VerdictShape status={row.reviewStatus} /> : null}
+        <span className="thumb-name" title={row.sourcePath ?? name}>
+          {name}
+        </span>
       </span>
     </div>
   );

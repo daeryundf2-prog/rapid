@@ -22,7 +22,7 @@
   box-sizing: border-box;
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--line-subtle);
-  background: var(--row-bg, var(--bg));
+  background: var(--bg);
   cursor: default;
 }
 
@@ -30,28 +30,17 @@
   background: var(--bg-hover);
 }
 
-.card-item[aria-current="true"],
+/* Cursor / selection / verdict as in the grid (F3): the selected card has the light accent
+   tint, the current card (J/K, the viewer's row) a 2px inset accent ring — on a selected card
+   too — and the verdict is the glyph chip, never a card tint (F2). */
 .card-item[data-selected] {
   background: var(--bg-selected);
 }
 
+.card-item[aria-current="true"],
 .card-item:focus-visible {
-  outline: var(--focus-width) solid var(--focus);
-  outline-offset: calc(-1 * var(--focus-width));
-}
-
-/* Review status as a light tint of the status colour (like the grid rows and thumbnails, U-F8);
-   a selected or current card's accent tint wins. */
-.card-item[data-review="relevant"] {
-  --row-bg: color-mix(in srgb, var(--status-relevant) 12%, var(--bg));
-}
-
-.card-item[data-review="needs-review"] {
-  --row-bg: color-mix(in srgb, var(--status-needs-review) 12%, var(--bg));
-}
-
-.card-item[data-review="excluded"] {
-  --row-bg: color-mix(in srgb, var(--status-excluded) 12%, var(--bg));
+  outline: none;
+  box-shadow: inset 0 0 0 var(--focus-width) var(--focus);
 }
 
 .card-main {

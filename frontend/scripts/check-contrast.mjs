@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // WCAG 2.1 contrast gate for src/tokens/tokens.css (plan §4.4 / Q-A6).
 // Text pairs need >= 4.5:1; large text, UI borders, focus rings and status/tag
-// indicators (non-text) need >= 3:1. Exit code 1 when any pair fails.
+// indicators (non-text) need >= 3:1. Status colours must also stay apart under colour-vision
+// deficiency (F1, see STATUS_SEPARATION below). Exit code 1 when any check fails.
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,6 +44,8 @@ const PAIRS = [
   ["caution muted text", "--text-muted", CAUTION, TEXT, "text"],
   ["caution icon / bar", "--warn", CAUTION, UI, "ui"],
   ...SURFACES.map((b) => ["border/line (controls)", "--line", b, UI, "ui"]),
+  // Input / select / textarea edges (tokens.css --field-edge, F5).
+  ...SURFACES.map((b) => ["input edge", "--field-edge", b, UI, "ui"]),
   ...["--ok", "--warn", "--danger", "--info", "--deleted"].flatMap((f) =>
     ROWS.map((b) => [`status ${f.slice(2)}`, f, b, TEXT, "text"]),
   ),
@@ -188,6 +191,137 @@ export function contrast(fg, bg) {
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
+// --- Status separation under colour-vision deficiency (F1) -------------------------------
+// The five review-status colours must be told apart from each other and from the semantic
+// danger / warn / accent colours, also by deuteranopes and protanopes. Each pair is simulated
+// with the Machado, Oliveira & Fernandes (2009) matrices at severity 1.0 (applied to linear
+// sRGB) and compared with CIEDE2000 ΔE00:
+//   - normal vision ≥ 20 (clearly different hues side by side),
+//   - deuteranopia and protanopia ≥ 10 (a small glyph still reads as a different colour; ΔE00
+//     ≈ 2 is a just-noticeable difference, ≈ 10 a plainly different swatch at 13–14px),
+//   - 관련 있음 vs danger ≥ 25 under normal vision (red stays the error colour).
+// Tritanopia is printed for information only (rare; the glyph shapes carry the meaning).
+export const CVD_MATRICES = {
+  deutan: [
+    [0.367322, 0.860646, -0.227968],
+    [0.280085, 0.672501, 0.047413],
+    [-0.01182, 0.04294, 0.968881],
+  ],
+  protan: [
+    [0.152286, 1.052583, -0.204868],
+    [0.114503, 0.786281, 0.099216],
+    [-0.003882, -0.048116, 1.051998],
+  ],
+  tritan: [
+    [1.255528, -0.076749, -0.178779],
+    [-0.078411, 0.930809, 0.147602],
+    [0.004733, 0.691367, 0.3039],
+  ],
+};
+export const STATUS_SEPARATION = { normal: 20, deutan: 10, protan: 10, relevantVsDanger: 25 };
+const SEPARATION_OTHERS = ["--danger", "--warn", "--accent"];
+
+const toLinear = (c) => {
+  const s = c / 255;
+  return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+};
+const fromLinear = (c) => {
+  const s = Math.max(0, Math.min(1, c));
+  return 255 * (s <= 0.0031308 ? 12.92 * s : 1.055 * s ** (1 / 2.4) - 0.055);
+};
+
+/** sRGB [0-255] as seen with a colour-vision deficiency ("normal" = unchanged). */
+export function simulateCvd(rgb, kind) {
+  if (kind === "normal") return rgb;
+  const lin = rgb.map(toLinear);
+  return CVD_MATRICES[kind].map((row) => fromLinear(row[0] * lin[0] + row[1] * lin[1] + row[2] * lin[2]));
+}
+
+/** sRGB [0-255] → CIE L*a*b* (D65). */
+export function toLab(rgb) {
+  const [r, g, b] = rgb.map(toLinear);
+  const x = (0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / 0.95047;
+  const y = 0.2126729 * r + 0.7151522 * g + 0.072175 * b;
+  const z = (0.0193339 * r + 0.119192 * g + 0.9503041 * b) / 1.08883;
+  const f = (t) => (t > 216 / 24389 ? Math.cbrt(t) : ((24389 / 27) * t + 16) / 116);
+  return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))];
+}
+
+const rad = (d) => (d * Math.PI) / 180;
+
+/** CIEDE2000 colour difference of two L*a*b* colours (Sharma, Wu & Dalal 2005). */
+export function deltaE2000([l1, a1, b1], [l2, a2, b2]) {
+  const c7 = ((Math.hypot(a1, b1) + Math.hypot(a2, b2)) / 2) ** 7;
+  const g = 0.5 * (1 - Math.sqrt(c7 / (c7 + 25 ** 7)));
+  const a1p = (1 + g) * a1;
+  const a2p = (1 + g) * a2;
+  const c1p = Math.hypot(a1p, b1);
+  const c2p = Math.hypot(a2p, b2);
+  const hue = (b, a) => ((Math.atan2(b, a) * 180) / Math.PI + 360) % 360;
+  const h1p = c1p === 0 ? 0 : hue(b1, a1p);
+  const h2p = c2p === 0 ? 0 : hue(b2, a2p);
+  let dhp = 0;
+  if (c1p * c2p !== 0) {
+    dhp = h2p - h1p;
+    if (dhp > 180) dhp -= 360;
+    else if (dhp < -180) dhp += 360;
+  }
+  const dLp = l2 - l1;
+  const dCp = c2p - c1p;
+  const dHp = 2 * Math.sqrt(c1p * c2p) * Math.sin(rad(dhp / 2));
+  const lbp = (l1 + l2) / 2;
+  const cbp = (c1p + c2p) / 2;
+  let hbp = h1p + h2p;
+  if (c1p * c2p !== 0) {
+    if (Math.abs(h1p - h2p) <= 180) hbp = (h1p + h2p) / 2;
+    else hbp = h1p + h2p < 360 ? (h1p + h2p + 360) / 2 : (h1p + h2p - 360) / 2;
+  }
+  const t =
+    1 -
+    0.17 * Math.cos(rad(hbp - 30)) +
+    0.24 * Math.cos(rad(2 * hbp)) +
+    0.32 * Math.cos(rad(3 * hbp + 6)) -
+    0.2 * Math.cos(rad(4 * hbp - 63));
+  const dTheta = 30 * Math.exp(-(((hbp - 275) / 25) ** 2));
+  const cbp7 = cbp ** 7;
+  const rc = 2 * Math.sqrt(cbp7 / (cbp7 + 25 ** 7));
+  const sl = 1 + (0.015 * (lbp - 50) ** 2) / Math.sqrt(20 + (lbp - 50) ** 2);
+  const sc = 1 + 0.045 * cbp;
+  const sh = 1 + 0.015 * cbp * t;
+  const rt = -Math.sin(rad(2 * dTheta)) * rc;
+  return Math.sqrt((dLp / sl) ** 2 + (dCp / sc) ** 2 + (dHp / sh) ** 2 + rt * (dCp / sc) * (dHp / sh));
+}
+
+/** ΔE00 between two hex colours as seen with `kind` vision. */
+export function cvdDelta(hexA, hexB, kind) {
+  return deltaE2000(toLab(simulateCvd(hexToRgb(hexA), kind)), toLab(simulateCvd(hexToRgb(hexB), kind)));
+}
+
+/**
+ * Every status pair and every status × danger/warn/accent pair of one theme, with ΔE00 per
+ * vision and whether it meets STATUS_SEPARATION. A missing token gives `missing: true`.
+ */
+export function statusSeparation(vars) {
+  const statuses = STATUSES.map((n) => `--status-${n}`);
+  const pairs = [];
+  statuses.forEach((a, i) => {
+    for (const b of [...statuses.slice(i + 1), ...SEPARATION_OTHERS]) pairs.push([a, b]);
+  });
+  return pairs.map(([a, b]) => {
+    const ha = resolveToken(vars, a);
+    const hb = resolveToken(vars, b);
+    if (!ha || !hb) return { a, b, missing: true, ok: false };
+    const delta = Object.fromEntries(
+      ["normal", "deutan", "protan", "tritan"].map((kind) => [kind, cvdDelta(ha, hb, kind)]),
+    );
+    const relevantDanger = a === "--status-relevant" && b === "--danger";
+    const ok =
+      delta.normal >= (relevantDanger ? STATUS_SEPARATION.relevantVsDanger : STATUS_SEPARATION.normal) &&
+      delta.deutan >= STATUS_SEPARATION.deutan &&
+      delta.protan >= STATUS_SEPARATION.protan;
+    return { a, b, ha, hb, delta, ok };
+  });
+}
 function main() {
   const themes = parseThemes(readFileSync(cssPath, "utf8"));
   // Every non-dark theme must redefine every literal colour token of the dark theme.
@@ -223,7 +357,25 @@ function main() {
       );
     }
   }
-  console.log(`\n${failures} failing pair(s), ${missing} missing token(s).`);
+  for (const [theme, vars] of Object.entries(themes)) {
+    console.log(`\n== ${theme}: status separation (ΔE00; normal ≥ ${STATUS_SEPARATION.normal}, `);
+    console.log(
+      `   deutan/protan ≥ ${STATUS_SEPARATION.deutan}, relevant vs danger ≥ ${STATUS_SEPARATION.relevantVsDanger}; tritan informative) ==`,
+    );
+    for (const r of statusSeparation(vars)) {
+      if (r.missing) {
+        missing++;
+        console.log(`MISSING  ${r.a} / ${r.b}`);
+        continue;
+      }
+      if (!r.ok) failures++;
+      const d = r.delta;
+      console.log(
+        `${r.ok ? "PASS   " : "FAIL   "} normal ${d.normal.toFixed(1).padStart(5)}  deutan ${d.deutan.toFixed(1).padStart(5)}  protan ${d.protan.toFixed(1).padStart(5)}  tritan ${d.tritan.toFixed(1).padStart(5)}  ${r.a} ${r.ha} / ${r.b} ${r.hb}`,
+      );
+    }
+  }
+  console.log(`\n${failures} failing check(s), ${missing} missing token(s).`);
   process.exit(failures > 0 || missing > 0 ? 1 : 0);
 }
 

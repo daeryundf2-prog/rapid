@@ -19,7 +19,8 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { type FocusEvent, type KeyboardEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 import { announce } from "../../a11y";
-import type { GridRow } from "../../contracts/collection";
+import { VerdictGlyph } from "../../components/VerdictGlyph";
+import type { GridRow, ReviewStatus } from "../../contracts/collection";
 import { encodeRowRef } from "../../contracts/rowRef";
 import { useTimezone } from "../../state/hooks";
 import { formatGridTime } from "../../utils/time";
@@ -75,7 +76,14 @@ export interface CardModel {
   date: string;
   clock: string;
   path: string;
-  chips: Array<{ id: string; label: string; tone: "flag" | "review" | "tag"; grade?: string }>;
+  chips: Array<{
+    id: string;
+    label: string;
+    tone: "flag" | "review" | "tag";
+    grade?: string;
+    /** Review chips: the verdict, drawn as the shared glyph + short word (F2). */
+    status?: ReviewStatus;
+  }>;
 }
 
 /** The text of one card (pure; tested). */
@@ -96,7 +104,12 @@ export function cardModel(row: GridRow, tz: string): CardModel {
     });
   }
   if (row.reviewStatus)
-    chips.push({ id: `review:${row.reviewStatus}`, label: REVIEW_LABELS[row.reviewStatus], tone: "review" });
+    chips.push({
+      id: `review:${row.reviewStatus}`,
+      label: REVIEW_LABELS[row.reviewStatus],
+      tone: "review",
+      status: row.reviewStatus,
+    });
   for (const tag of row.tags.slice(0, MAX_CHIPS)) chips.push({ id: `tag:${tag}`, label: tag, tone: "tag" });
   return {
     title: row.title || (row.sourcePath ?? "").split(/[\\/]/).pop() || "(제목 없음)",
@@ -198,7 +211,7 @@ const Card = memo(function Card({
           <ul className="card-chips" aria-hidden="true">
             {model.chips.map((chip) => (
               <li key={chip.id} className={`card-chip is-${chip.tone}`} data-grade={chip.grade}>
-                {chip.label}
+                {chip.status ? <VerdictGlyph status={chip.status} withLabel /> : chip.label}
               </li>
             ))}
           </ul>

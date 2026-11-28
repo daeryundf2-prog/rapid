@@ -27,6 +27,8 @@ import { ApiError, downloadFile } from "../../api/client";
 import { DOCS_MATCHED } from "../../api/collections";
 import type { RunExtractResult } from "../../api/extract";
 import { getRunTree } from "../../api/runs";
+import type { ChipStatus } from "../../components/StatusChip";
+import { VerdictShape } from "../../components/VerdictGlyph";
 import { WaitPanel } from "../../components/WaitPanel";
 import { ZoneTime } from "../../components/ZoneTime";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
@@ -95,8 +97,9 @@ type SortingState = { id: string; desc: boolean }[];
 type VisibilityState = Record<string, boolean>;
 type ColumnSizingState = Record<string, number>;
 
-/** Checkbox 16 + gap 4 + row-menu button 20 + padding 2×8. */
-const SELECT_COL_WIDTH = 56;
+/** Checkbox 16 + gap 4 + verdict glyph slot 14 + gap 4 + row-menu button 20 + padding 2×8 (F2: the
+ *  verdict lives in this sticky cell so width-priority column hiding can never drop it). */
+const SELECT_COL_WIDTH = 76;
 /** The column menu moved to the 조건 줄 (U-F1): the header keeps no room for it. */
 const HEAD_TOOLS_WIDTH = 0;
 /** The header row is 32px at every density (visual-polish U-V4); rows follow the density. */
@@ -165,8 +168,9 @@ interface RowViewProps {
   headerZone: string;
 }
 
-/** Review mark shown as the row's tint (U-F8): the review status, else a 북마크 tag. */
-export function rowMark(row: GridRow): { id: string; label: string } | null {
+/** The row's verdict (F2): the review status, else a 북마크 tag. Shown as the verdict glyph in the
+ *  select column's fixed slot (never as a row tint) and read out through aria-description. */
+export function rowMark(row: GridRow): { id: ChipStatus; label: string } | null {
   if (row.reviewStatus) return { id: row.reviewStatus, label: REVIEW_LABELS[row.reviewStatus] };
   if (row.tags.some((tag) => tag === "북마크" || tag === "bookmark"))
     return { id: "bookmark", label: "북마크" };
@@ -222,6 +226,11 @@ const RowView = memo(function RowView(props: RowViewProps) {
           onChange={(event) => props.onToggle(index, event.target.checked)}
           onClick={(event) => event.stopPropagation()}
         />
+        {/* Fixed verdict slot (F2): same place on every row, empty when unmarked; the row's
+            aria-description names the verdict, so the shape itself is hidden from AT. */}
+        <span className="grid-verdict" aria-hidden="true" title={mark?.label}>
+          {mark ? <VerdictShape status={mark.id} /> : null}
+        </span>
         <button
           type="button"
           tabIndex={-1}
@@ -974,8 +983,9 @@ export function DataGrid(props: DataGridProps = {}) {
     } else if (event.ctrlKey || event.metaKey) {
       toggleAt(index);
     } else {
+      // A plain click moves the cursor (and the viewer) only (F3): the checkbox, Space, Ctrl-click
+      // and Shift-click are the selection gestures, so focusing a row never ticks its box.
       anchorRef.current = index;
-      setSelectionKeys([row.rowKey]);
     }
   };
 
@@ -988,10 +998,9 @@ export function DataGrid(props: DataGridProps = {}) {
     if (!row) return;
     userNavigated.current = true;
     setFocusIdx(index);
-    if (!selectedKeys.has(row.rowKey)) {
-      anchorRef.current = index;
-      setSelectionKeys([row.rowKey]);
-    }
+    // The menu acts on the selection when it holds this row, else on this row alone
+    // (gridCommands menuRows): opening it never ticks the row's checkbox (F3).
+    if (!selectedKeys.has(row.rowKey)) anchorRef.current = index;
     setMenuRow(index);
     setMenuAnchor({ x: event.clientX, y: event.clientY });
   };
@@ -1444,7 +1453,7 @@ export function DataGrid(props: DataGridProps = {}) {
                   className="grid-cell grid-cell-select"
                   style={{ width: SELECT_COL_WIDTH }}
                 >
-                  <span className="sr-only">선택</span>
+                  <span className="sr-only">선택과 판정</span>
                 </div>
                 {visibleColumns.map((column, i) => {
                   const spec = specs[i];

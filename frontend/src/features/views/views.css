@@ -8,7 +8,8 @@
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-ui);
-  font-size: var(--fs-body);
+  /* Card, thumbnail and chat lists read at the table size (F4, 13px). */
+  font-size: var(--fs-table);
 }
 
 /* Icon segment (visual-polish S1): sits on the filter-bar line in the column view, on its own
@@ -222,13 +223,14 @@
   cursor: pointer;
 }
 
+/* As in the grid (F3): selected = the light accent tint; the current tile (arrow keys, the
+   viewer's image) = the 2px accent border, on a selected tile too. */
 .thumb-tile[aria-selected="true"] {
   background: var(--bg-selected);
-  border-color: var(--accent);
 }
 
 .thumb-tile[data-active] {
-  border-color: var(--line);
+  border-color: var(--focus);
 }
 
 .thumb-frame {
@@ -242,16 +244,12 @@
   overflow: hidden;
 }
 
-.thumb-tile[data-review="relevant"] .thumb-frame {
-  background: color-mix(in srgb, var(--status-relevant) 16%, var(--bg-panel));
-}
-
-.thumb-tile[data-review="excluded"] .thumb-frame {
-  background: color-mix(in srgb, var(--status-excluded) 16%, var(--bg-panel));
-}
-
-.thumb-tile[data-review="needs-review"] .thumb-frame {
-  background: color-mix(in srgb, var(--status-needs-review) 16%, var(--bg-panel));
+/* The caption row: the verdict shape (F2, never a frame tint) before the file name. */
+.thumb-caption {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 136px;
 }
 
 .thumb-img {
@@ -266,7 +264,7 @@
 }
 
 .thumb-name {
-  max-width: 136px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -378,12 +376,11 @@
   border-color: var(--warn);
 }
 
-.chat-row[data-review="relevant"] .chat-bubble {
-  background: color-mix(in srgb, var(--status-relevant) 12%, var(--bg-panel));
-}
-
-.chat-row[data-review="excluded"] .chat-bubble {
-  background: color-mix(in srgb, var(--status-excluded) 12%, var(--bg-panel));
+/* A message's verdict: the shared glyph and word under the text (F2), never a bubble tint. */
+.chat-verdict {
+  display: flex;
+  margin-top: var(--space-1);
+  font-size: var(--fs-table-aux);
 }
 
 .chat-text {
