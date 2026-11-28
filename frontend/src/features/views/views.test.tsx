@@ -395,6 +395,47 @@ describe("ThumbnailView", () => {
     expect(await screen.findByText("이 노드에는 썸네일로 표시할 이미지가 없습니다.")).toBeTruthy();
   });
 
+  it("a tile marked only by a 북마크 tag shows the bookmark glyph and names it (review #99 P3)", async () => {
+    installFetch({
+      "/files": () =>
+        jsonResponse({
+          candidates: ["a.jpg", "b.png"].map((name) => ({
+            path: `C:/case/${name}`,
+            name,
+            extension: name.split(".")[1],
+          })),
+          total: 2,
+        }),
+      "/review-map": () =>
+        jsonResponse({
+          marks: [
+            {
+              citation_id: "c1",
+              target_type: "file",
+              target_id: "1",
+              status: "unreviewed",
+              tags: ["북마크"],
+              note: "",
+              include_in_report: false,
+              updated_at: "",
+              collection: "files",
+              kind: "",
+              locator: "/candidates/1",
+            },
+          ],
+        }),
+    });
+    renderQ(<ThumbnailView />);
+    const tile = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('[data-thumb-index] svg[data-verdict="bookmark"]');
+      if (!el) throw new Error("no bookmark glyph yet");
+      return el.closest<HTMLElement>("[data-thumb-index]") as HTMLElement;
+    });
+    expect(tile.getAttribute("aria-label")).toContain("b.png");
+    expect(tile.getAttribute("aria-label")).toContain("북마크");
+    expect(document.querySelectorAll(".thumb-caption .verdict-shape")).toHaveLength(1);
+  });
+
   it("미디어 탐색기: 유사 사진 찾기 narrows the grid, selects the set, and keeps the blur", async () => {
     installFetch({
       "/files": () =>
@@ -561,6 +602,42 @@ describe("ChatView", () => {
 
     fireEvent.keyDown(document.activeElement as HTMLElement, { key: "ArrowLeft" });
     expect(document.activeElement?.getAttribute("role")).toBe("option");
+  });
+
+  it("a bubble marked only by a 북마크 tag shows the bookmark glyph and names it (review #99 P3)", async () => {
+    useGridLocalStore.setState((s) => ({
+      route: { ...s.route, collection: { id: "artifacts", kind: "mobile-export" }, q: "" },
+    }));
+    installFetch({
+      "/artifacts": () =>
+        jsonResponse({ artifacts: { "mobile-export": { artifacts: CHAT_ROWS, total: CHAT_ROWS.length } } }),
+      "/review-map": () =>
+        jsonResponse({
+          marks: [
+            {
+              citation_id: "c1",
+              target_type: "artifact",
+              target_id: "1",
+              status: "unreviewed",
+              tags: ["북마크"],
+              note: "",
+              include_in_report: false,
+              updated_at: "",
+              collection: "artifacts",
+              kind: "mobile-export",
+              locator: "/artifacts/1",
+            },
+          ],
+        }),
+    });
+    renderQ(<ChatView />);
+    // room-b (the newest conversation, shown first) holds message 1.
+    const glyph = await waitFor(() => {
+      const el = document.querySelector('.chat-verdict svg[data-verdict="bookmark"]');
+      if (!el) throw new Error("no bookmark glyph yet");
+      return el;
+    });
+    expect(glyph.closest("[data-chat-index]")?.getAttribute("aria-label")).toContain("북마크");
   });
 
   it("reads Teams / Slack desktop messenger rows as conversations (r2 M1)", async () => {

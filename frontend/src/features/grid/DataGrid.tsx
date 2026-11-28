@@ -27,7 +27,6 @@ import { ApiError, downloadFile } from "../../api/client";
 import { DOCS_MATCHED } from "../../api/collections";
 import type { RunExtractResult } from "../../api/extract";
 import { getRunTree } from "../../api/runs";
-import type { ChipStatus } from "../../components/StatusChip";
 import { VerdictShape } from "../../components/VerdictGlyph";
 import { WaitPanel } from "../../components/WaitPanel";
 import { ZoneTime } from "../../components/ZoneTime";
@@ -48,7 +47,7 @@ import { ColumnFilterRow } from "./ColumnFilterRow";
 import { collectionDef, lockedColumnId, presetColumnIds } from "./columns";
 import { analysisFamily } from "./columns/analysis";
 import { artifactTypeFamily, resolveArtifactFamily } from "./columns/artifacts";
-import { isRecord, REVIEW_LABELS } from "./columns/common";
+import { isRecord, rowMark } from "./columns/common";
 import { auxColumnIds } from "./columns/families";
 import {
   colsToKeys,
@@ -166,15 +165,6 @@ interface RowViewProps {
   ariaRowOffset: number;
   /** Display-zone name the time headers carry ("KST"): `zoneInHeader` cells leave it out. */
   headerZone: string;
-}
-
-/** The row's verdict (F2): the review status, else a 북마크 tag. Shown as the verdict glyph in the
- *  select column's fixed slot (never as a row tint) and read out through aria-description. */
-export function rowMark(row: GridRow): { id: ChipStatus; label: string } | null {
-  if (row.reviewStatus) return { id: row.reviewStatus, label: REVIEW_LABELS[row.reviewStatus] };
-  if (row.tags.some((tag) => tag === "북마크" || tag === "bookmark"))
-    return { id: "bookmark", label: "북마크" };
-  return null;
 }
 
 const RowView = memo(function RowView(props: RowViewProps) {

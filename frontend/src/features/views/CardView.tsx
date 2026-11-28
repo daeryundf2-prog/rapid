@@ -19,8 +19,9 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { type FocusEvent, type KeyboardEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 import { announce } from "../../a11y";
+import type { ChipStatus } from "../../components/StatusChip";
 import { VerdictGlyph } from "../../components/VerdictGlyph";
-import type { GridRow, ReviewStatus } from "../../contracts/collection";
+import type { GridRow } from "../../contracts/collection";
 import { encodeRowRef } from "../../contracts/rowRef";
 import { useTimezone } from "../../state/hooks";
 import { formatGridTime } from "../../utils/time";
@@ -29,7 +30,7 @@ import { artifactTypeLabel } from "../filters/typeLabels";
 import { familyForType } from "../flags/catalog";
 import { GRADE_NAME, rowFlags } from "../flags/flags";
 import { useSelection, useViewerTarget } from "../grid/adapter";
-import { REVIEW_LABELS } from "../grid/columns/common";
+import { rowMark } from "../grid/columns/common";
 import { buildViewerTarget, citationText, copyText } from "../grid/gridCommands";
 import { applyReviewAction, optimisticPatch, storeNotice } from "../grid/reviewActions";
 import { registerRowSource } from "../review/rowSource";
@@ -82,7 +83,7 @@ export interface CardModel {
     tone: "flag" | "review" | "tag";
     grade?: string;
     /** Review chips: the verdict, drawn as the shared glyph + short word (F2). */
-    status?: ReviewStatus;
+    status?: ChipStatus;
   }>;
 }
 
@@ -103,14 +104,13 @@ export function cardModel(row: GridRow, tz: string): CardModel {
       grade: flag.grade,
     });
   }
-  if (row.reviewStatus)
-    chips.push({
-      id: `review:${row.reviewStatus}`,
-      label: REVIEW_LABELS[row.reviewStatus],
-      tone: "review",
-      status: row.reviewStatus,
-    });
-  for (const tag of row.tags.slice(0, MAX_CHIPS)) chips.push({ id: `tag:${tag}`, label: tag, tone: "tag" });
+  // The same verdict as the grid's select column (review status, else a 북마크 tag), whose
+  // bookmark tag then shows as the verdict chip rather than a second plain tag chip.
+  const mark = rowMark(row);
+  if (mark) chips.push({ id: `review:${mark.id}`, label: mark.label, tone: "review", status: mark.id });
+  const tags =
+    mark?.id === "bookmark" ? row.tags.filter((tag) => tag !== "북마크" && tag !== "bookmark") : row.tags;
+  for (const tag of tags.slice(0, MAX_CHIPS)) chips.push({ id: `tag:${tag}`, label: tag, tone: "tag" });
   return {
     title: row.title || (row.sourcePath ?? "").split(/[\\/]/).pop() || "(제목 없음)",
     subtitle,

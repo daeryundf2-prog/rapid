@@ -58,8 +58,8 @@
 [data-status-button][aria-pressed="true"] .verdict-shape {
   color: inherit;
 }
-/* Unpressed mark buttons: the status's faint tint, the same reading as a marked row or card
-   (no side stripe). A primary keeps its accent fill. */
+/* Unpressed mark buttons: the status's faint tint behind the verdict glyph (no side stripe; rows
+   and cards carry the glyph only, no tint). A primary keeps its accent fill. */
 .button.ghost[data-status-button]:not([aria-pressed="true"]) {
   background: color-mix(in srgb, var(--chip-bg) 14%, transparent);
 }
