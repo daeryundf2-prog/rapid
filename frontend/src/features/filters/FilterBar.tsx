@@ -593,13 +593,13 @@ export function FilterBar(props: FilterBarProps) {
       <div className="filter-row">
         {props.lead}
         <label className="filter-field filter-search">
-          <span className="sr-only">검색어</span>
+          <span className="sr-only">이 목록에서 찾기</span>
           <Icon name="search" className="filter-search-icon" />
           <input
             ref={props.filterRef}
             type="search"
             value={text}
-            placeholder="검색어 필터 ( / )"
+            placeholder="이 목록에서 찾기 ( / )"
             aria-keyshortcuts="/"
             onChange={(event) => setText(event.target.value)}
             onKeyDown={(event) => {

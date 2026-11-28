@@ -1,7 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { caseCommands, TREE_INLINE_REASON } from "../commands/builtin";
+import { caseCommands } from "../commands/builtin";
 import { registerCommands, resetCommandRegistry, runCommand } from "../commands/registry";
 import { TREE_DRAWER_KEY } from "../state/slices/overlays";
 import { resetAppStore, useAppStore } from "../state/store";
@@ -136,12 +136,19 @@ describe("Layout below 900px", () => {
 });
 
 describe("Layout from 900px", () => {
-  it("keeps the panel beside the page and says why the toggle command cannot run", async () => {
+  it("keeps the panel beside the page until the toggle folds it away", async () => {
     stubWindowWidth(1024);
     render(<Layout />);
     expect(screen.queryByTestId("tree-drawer")).toBeNull();
-    expect(screen.queryByTestId("tree-drawer-toggle")).toBeNull();
     expect(screen.getByTestId("tree-region")).toBeTruthy();
-    expect(await runCommand("tree.panel")).toEqual({ ok: false, reason: TREE_INLINE_REASON });
+    const toggle = screen.getByTestId("tree-drawer-toggle");
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+
+    expect(await runCommand("tree.panel")).toEqual({ ok: true });
+    await waitFor(() => expect(screen.queryByTestId("tree-region")).toBeNull());
+    expect(screen.getByTestId("tree-drawer-toggle").getAttribute("aria-expanded")).toBe("false");
+
+    expect(await runCommand("tree.panel")).toEqual({ ok: true });
+    await waitFor(() => expect(screen.getByTestId("tree-region")).toBeTruthy());
   });
 });

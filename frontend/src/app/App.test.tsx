@@ -21,6 +21,8 @@ beforeAll(() => {
 
 beforeEach(() => {
   window.history.replaceState(null, "", "/v2/");
+  // 접수 cards as an analyst who arranged them: a first visit collapses most of them.
+  window.localStorage.setItem("rt.dashboard.layout.v1", JSON.stringify({ collapsed: [], hidden: [] }));
   resetAppStore({ route: { runId: null, collection: null } });
   vi.stubGlobal(
     "fetch",
@@ -204,7 +206,7 @@ describe("App shell", () => {
   it("global search routes to the search collection", async () => {
     renderApp();
     act(() => useAppStore.getState().navigate({ runId: "run-aaaaaaaa", collection: "files" }));
-    const input = screen.getByLabelText("전체 검색어");
+    const input = screen.getByLabelText("이 런 전체에서 검색");
     fireEvent.change(input, { target: { value: "powershell" } });
     fireEvent.submit(input);
     expect(window.location.hash).toBe("#/case/run-aaaaaaaa/explore/search?q=powershell");

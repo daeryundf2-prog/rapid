@@ -121,17 +121,17 @@ describe("domain tree review fixes", () => {
     expect(domain.getAttribute("aria-expanded")).toBe("false");
     expect(window.location.hash).toBe("");
 
-    const search = screen.getByRole("searchbox", { name: "트리 검색" });
+    const search = screen.getByRole("searchbox", { name: "왼쪽 목록에서 항목 찾기" });
     fireEvent.change(search, { target: { value: "powershell" } });
     const hit = await screen.findByRole("treeitem", { name: /^PowerShell 히스토리/ });
     expect(screen.getByRole("treeitem", { name: /^실행 흔적/ }).getAttribute("aria-expanded")).toBe("true");
     // Only matches and their ancestors are listed (이벤트 로그 stays: its R3
-    // "PowerShell" channel group matches; 파일 has no match).
-    expect(screen.queryByRole("treeitem", { name: /^파일(?!시스템)/ })).toBeNull();
+    // "PowerShell" channel group matches; 전체 파일 has no match).
+    expect(screen.queryByRole("treeitem", { name: /^전체 파일/ })).toBeNull();
     fireEvent.keyDown(search, { key: "Enter" });
     expect(document.activeElement).toBe(hit);
     fireEvent.change(search, { target: { value: "" } });
-    await waitFor(() => expect(screen.getByRole("treeitem", { name: /^파일(?!시스템)/ })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("treeitem", { name: /^전체 파일/ })).toBeTruthy());
   });
 });
 

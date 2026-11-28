@@ -140,8 +140,13 @@ function TreeDrawer() {
   );
 }
 
-/** The stage's left panel and the page: side by side, or (`drawer`) the page alone under the panel drawer. */
+/**
+ * The stage's left panel and the page: side by side, the page alone under the panel drawer
+ * (`drawer`), or the page alone while the panel is folded away on a wide window (`tree.panel`,
+ * Alt+0 — the console complexity review asked for a way to drop to two columns).
+ */
 function TreeAndGrid({ id, treeSize, drawer }: { id: string; treeSize: string; drawer: boolean }) {
+  const hidden = useAppStore((s) => s.treePanelHidden);
   if (drawer) {
     return (
       <>
@@ -150,6 +155,7 @@ function TreeAndGrid({ id, treeSize, drawer }: { id: string; treeSize: string; d
       </>
     );
   }
+  if (hidden) return <GridPane />;
   return (
     <Group id={id} orientation="horizontal" style={{ height: "100%" }}>
       <Panel id={PANEL.tree} defaultSize={treeSize} minSize="240px" maxSize="320px">

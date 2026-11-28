@@ -103,19 +103,21 @@ describe("status bar plan progress (R4 V1)", () => {
     expect(screen.getByTestId("run-cancel")).toBeTruthy();
   });
 
-  it("an interrupted run reads 중단됨 · 서버 재시작 and offers 이어서 실행", () => {
+  it("an interrupted run reads 중단됨 · 서버 재시작 and points at 처리 to restart it", () => {
     renderBar(run({ status: "interrupted" }));
     const bar = screen.getByTestId("status-run");
     expect(bar.textContent).toContain("중단됨");
     expect(bar.textContent).toContain("서버 재시작");
     expect(screen.queryByTestId("status-stale")).toBeNull();
-    expect(screen.getByTestId("run-resume").getAttribute("aria-disabled")).toBeNull();
+    // Restart controls live in 처리 only (one place, one wording); the bar links there.
+    expect(screen.queryByTestId("run-resume")).toBeNull();
+    expect(screen.getByTestId("run-plan-open").getAttribute("href")).toContain("/process");
     expect(screen.queryByTestId("run-cancel")).toBeNull();
   });
 
-  it("an old canceled run reads 취소됨 and can resume", () => {
+  it("an old canceled run reads 취소됨 and links to 처리", () => {
     renderBar(run({ status: "canceled", progress: null }));
     expect(screen.getByTestId("status-run").textContent).toContain("취소됨");
-    expect(screen.getByTestId("run-resume").getAttribute("aria-disabled")).toBeNull();
+    expect(screen.getByTestId("run-plan-open").getAttribute("href")).toContain("/process");
   });
 });

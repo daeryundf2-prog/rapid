@@ -35,7 +35,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
+  gap: 4px;
+  min-width: 28px;
   height: 24px;
   padding: 0;
   border: 0;
@@ -43,6 +44,13 @@
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
+}
+
+/* The active view writes its name next to the icon (six bare icons said nothing). */
+.view-switch-active {
+  font-size: var(--fs-table-aux);
+  padding-right: var(--space-1);
+  white-space: nowrap;
 }
 
 .view-switch-button:hover:not([aria-disabled="true"]) {

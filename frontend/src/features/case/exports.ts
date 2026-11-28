@@ -17,28 +17,39 @@ export interface ExportAction {
   kind: ExportKind;
   commandId: string;
   label: string;
+  /** One line in the 보고 panel: who gets what (terms per docs/console-glossary.md). */
+  description: string;
   /** Needs at least one include-in-report row (plan 4.3: "보고 후보 0건"). */
   needsCandidates: boolean;
 }
 
 export const EXPORT_ACTIONS: ExportAction[] = [
-  { kind: "case-report", commandId: "export.case-report", label: "보고서", needsCandidates: true },
+  {
+    kind: "case-report",
+    commandId: "export.case-report",
+    label: "보고서",
+    description: "보고 후보로 표시한 행을 정리한 문서 — 사건을 읽을 사람에게",
+    needsCandidates: true,
+  },
   {
     kind: "reviewer-bundle",
     commandId: "export.reviewer-bundle",
     label: "리뷰어 번들",
+    description: "표시·메모·원본을 담은 zip — 다음 검토자에게",
     needsCandidates: true,
   },
   {
     kind: "submission-manifest",
     commandId: "export.submission-manifest",
     label: "제출 매니페스트",
+    description: "제출본에 들어간 파일과 해시 목록(JSON) — 제출본을 받는 쪽에",
     needsCandidates: true,
   },
   {
     kind: "validation-package",
     commandId: "export.validation-package",
     label: "검증 패키지",
+    description: "실행 조건과 해시를 담은 묶음 — 결과를 재현·검증할 사람에게",
     needsCandidates: false,
   },
 ];

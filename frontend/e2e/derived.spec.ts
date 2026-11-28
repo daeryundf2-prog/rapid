@@ -50,6 +50,7 @@ async function copyCitation(page: Page): Promise<string> {
     (window as unknown as { __clip: string }).__clip = "";
   });
   await page.getByTestId("viewer-actions-menu").click();
+  await page.getByRole("menuitem", { name: "복사…" }).click();
   await page.getByRole("menuitem", { name: "인용 복사" }).click();
   await expect.poll(() => page.evaluate(() => (window as unknown as { __clip: string }).__clip)).not.toBe("");
   return page.evaluate(() => (window as unknown as { __clip: string }).__clip);

@@ -55,19 +55,25 @@ function HelpDialog() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              // A key nothing is bound to right now is dimmed; its description says what it does.
-              <tr
-                key={row.name}
-                className={row.commands.length ? undefined : "muted"}
-                title={row.commands.length ? undefined : "해당 화면이 열려 있을 때 동작합니다"}
-              >
-                <td>
-                  <kbd>{keyLabel(row.shortcut)}</kbd>
-                </td>
-                <td>{row.description}</td>
-              </tr>
-            ))}
+            {rows.map((row) => {
+              // Dimmed only when nothing handles the key: a grid key needs no registration.
+              const unbound = row.commands.length === 0 && !row.gridNative;
+              return (
+                <tr
+                  key={row.name}
+                  className={unbound ? "muted" : undefined}
+                  title={unbound ? "해당 화면이 열려 있을 때 동작합니다" : undefined}
+                >
+                  <td>
+                    <kbd>{keyLabel(row.shortcut)}</kbd>
+                  </td>
+                  <td>
+                    {row.description}
+                    {row.gridNative ? " — 목록에서 바로 동작" : null}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
         <p className="help-foot">

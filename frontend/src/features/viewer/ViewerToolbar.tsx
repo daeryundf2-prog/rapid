@@ -36,7 +36,7 @@ import {
 } from "../review/gridTools";
 import { useViewerRowContext, useViewerTarget } from "./adapter";
 import { markDisabledReason, targetAsGridRow } from "./citation";
-import { writeClipboard } from "./commands";
+import { VIEWER_COMMAND_IDS, writeClipboard } from "./commands";
 import { layoutFields } from "./fieldSheets";
 import { PARTIAL_COPY_REASON, useFullRecordStatus } from "./fullRecord";
 import { type PivotId, recordPivots } from "./pivots";
@@ -100,6 +100,18 @@ export function propagationItems(row: GridRow | null, runId: string | null): Men
 }
 const EXCLUSIVE = ["relevant", "needs-review", "excluded"];
 
+/**
+ * Levels of the 더보기 menu (review: one flat list of 20+ entries). MenuButton has no nested
+ * menus, so the one menu swaps its items: the first level keeps the frequent entries and two
+ * 복사… / 고급… entries open the rarer ones, each with a 뒤로 entry back to its parent level.
+ */
+type MenuStage = "root" | "copy" | "advanced" | "pivot";
+const STAGE_BACK: Record<Exclude<MenuStage, "root">, MenuStage> = {
+  copy: "root",
+  advanced: "root",
+  pivot: "advanced",
+};
+
 /** Inline 메모 form: textarea + 저장/취소, Esc cancels. */
 function NoteForm({ onSave, onCancel }: { onSave: (text: string) => void; onCancel: () => void }) {
   const [text, setText] = useState("");
@@ -154,6 +166,10 @@ export function ViewerToolbar({
   const partialRecord = useFullRecordStatus(row, target?.runId ?? null);
   const { route, navigate } = useRoute();
   const [noteOpen, setNoteOpen] = useState(false);
+  const [stage, setStage] = useState<MenuStage>("root");
+  /** Bumped by a stage entry; the effect re-opens the menu on the new level. */
+  const [reopen, setReopen] = useState(0);
+  const reopening = useRef(false);
   const [applied, setApplied] = useState<{ key: string; actions: string[]; cleared: string[] }>({
     key: "",
     actions: [],
@@ -163,9 +179,25 @@ export function ViewerToolbar({
   const key = target ? noteKey(target.runId, target.ref) : "";
   const noteReason = target ? markDisabledReason(target, "relevant") : "뷰어에 표시된 행이 없습니다.";
 
-  // A different row closes the form.
+  // A different row closes the form and returns the menu to its first level.
   // biome-ignore lint/correctness/useExhaustiveDependencies: close on target change only
-  useEffect(() => setNoteOpen(false), [key]);
+  useEffect(() => {
+    setNoteOpen(false);
+    setStage("root");
+  }, [key]);
+
+  // MenuButton closes on every activation, so a stage entry clicks the trigger again.
+  useEffect(() => {
+    if (reopen === 0) return;
+    reopening.current = true;
+    moreRef.current?.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')?.click();
+    reopening.current = false;
+  }, [reopen]);
+
+  const goStage = (next: MenuStage) => {
+    setStage(next);
+    setReopen((count) => count + 1);
+  };
 
   const isPressed = (action: string): boolean => {
     if (applied.key === key && applied.actions.includes(action)) return true;
@@ -252,68 +284,70 @@ export function ViewerToolbar({
   const markShortcut = (command: Command, action: string) =>
     command.shortcut ?? getCommand(`review.mark.${action}`)?.shortcut;
 
-  const reviewItems: MenuItem[] = [
-    ...others.map((command, index) => {
-      const action = markOf(command);
-      return {
-        id: command.id,
-        label: command.label.replace(/^표시: /, ""),
-        command: command.id,
-        status: action,
-        checked: isPressed(action),
-        shortcut: markShortcut(command, action),
-        disabledReason: command.disabledReason?.(ctx),
-        section: index === 0 ? "리뷰" : undefined,
-        onSelect: () => run(command),
-      };
-    }),
-    {
-      id: "viewer.note",
-      label: "메모…",
-      command: "viewer.note",
-      icon: "message",
-      disabledReason: noteReason,
-      onSelect: () => setNoteOpen(true),
-    },
-    // Review tools (AXIOM E3): note history with author/time, tag manager.
-    ...[NOTE_PANEL_COMMAND, TAG_MANAGER_COMMAND].map((id): MenuItem => {
-      const command = getCommand(id);
-      return {
-        id,
-        label: command?.label ?? id,
-        command: id,
-        icon: id === NOTE_PANEL_COMMAND ? "clock" : "tag",
-        disabledReason: command ? command.disabledReason?.(ctx) : POPOUT_ONLY_REASON,
-        onSelect: () => void runCommand(id),
-      };
-    }),
-    ...propagationItems(target ? (row ?? targetAsGridRow(target)) : null, target?.runId ?? null),
-  ];
-
-  const sourceItems: MenuItem[] = [
-    ...sourceCommands.map((command, index) => ({
+  const markItems: MenuItem[] = others.map((command, index) => {
+    const action = markOf(command);
+    return {
       id: command.id,
-      label: command.label,
+      label: command.label.replace(/^표시: /, ""),
       command: command.id,
-      icon: isIconName(command.icon) ? command.icon : undefined,
-      shortcut: command.shortcut,
+      status: action,
+      checked: isPressed(action),
+      shortcut: markShortcut(command, action),
       disabledReason: command.disabledReason?.(ctx),
-      section: index === 0 ? "원본" : undefined,
+      section: index === 0 ? "리뷰" : undefined,
       onSelect: () => run(command),
-    })),
-    {
-      id: "navigate.rows-for-source",
-      label: "같은 출처의 다른 행",
-      command: "navigate.rows-for-source",
-      icon: "list",
-      disabledReason: rowsForSource.reason,
-      onSelect: rowsForSource.run,
-    },
-  ];
+    };
+  });
+
+  const noteItem: MenuItem = {
+    id: "viewer.note",
+    label: "메모…",
+    command: "viewer.note",
+    icon: "message",
+    disabledReason: noteReason,
+    onSelect: () => setNoteOpen(true),
+  };
+
+  // Review tools (AXIOM E3): note history with author/time, tag manager.
+  const reviewToolItems: MenuItem[] = [NOTE_PANEL_COMMAND, TAG_MANAGER_COMMAND].map((id, index): MenuItem => {
+    const command = getCommand(id);
+    return {
+      id,
+      label: command?.label ?? id,
+      command: id,
+      icon: id === NOTE_PANEL_COMMAND ? "clock" : "tag",
+      section: index === 0 ? "리뷰 도구" : undefined,
+      disabledReason: command ? command.disabledReason?.(ctx) : POPOUT_ONLY_REASON,
+      onSelect: () => void runCommand(id),
+    };
+  });
+
+  const sourceItem = (command: Command, section?: string): MenuItem => ({
+    id: command.id,
+    label: command.label,
+    command: command.id,
+    icon: isIconName(command.icon) ? command.icon : undefined,
+    shortcut: command.shortcut,
+    disabledReason: command.disabledReason?.(ctx),
+    section,
+    onSelect: () => run(command),
+  });
+  // 원본 열기 stays on the first level; the copies move behind 복사….
+  const openCommand = sourceCommands.find((command) => command.id === VIEWER_COMMAND_IDS.openOriginal);
+  const copyCommands = sourceCommands.filter((command) => command !== openCommand);
+
+  const rowsForSourceItem: MenuItem = {
+    id: "navigate.rows-for-source",
+    label: "같은 출처의 다른 행",
+    command: "navigate.rows-for-source",
+    icon: "list",
+    disabledReason: rowsForSource.reason,
+    onSelect: rowsForSource.run,
+  };
 
   // Pivots (viewer redesign §5): the same list as the grid row menu, each with its reason.
   const pivotItems: MenuItem[] = recordPivots(target ? row : null, target?.runId ?? "", route.tz).map(
-    (pivot, index) => ({
+    (pivot) => ({
       id: `viewer.pivot.${pivot.id}`,
       label: pivot.value
         ? `${pivot.label}: ${pivot.value.length > 40 ? `${pivot.value.slice(0, 39)}…` : pivot.value}`
@@ -321,7 +355,6 @@ export function ViewerToolbar({
       command: `viewer.pivot.${pivot.id}`,
       icon: PIVOT_ICONS[pivot.id],
       disabledReason: pivot.reason,
-      section: index === 0 ? "피벗" : undefined,
       onSelect: () => {
         if (pivot.route) navigate(pivot.route);
       },
@@ -347,6 +380,51 @@ export function ViewerToolbar({
       );
     },
   };
+
+  /** Entry that opens another level of the menu; "…" marks it as a group, like a submenu. */
+  const stageItem = (
+    to: Exclude<MenuStage, "root">,
+    label: string,
+    icon: MenuItem["icon"],
+    extra?: Partial<MenuItem>,
+  ): MenuItem => ({
+    id: `viewer.menu.${to}`,
+    label: `${label}…`,
+    command: `viewer.menu.${to}`,
+    icon,
+    onSelect: () => goStage(to),
+    ...extra,
+  });
+  const backItem = (from: Exclude<MenuStage, "root">, section: string): MenuItem => ({
+    id: "viewer.menu.back",
+    label: "뒤로",
+    command: "viewer.menu.back",
+    icon: "arrow-left",
+    section,
+    onSelect: () => goStage(STAGE_BACK[from]),
+  });
+
+  /** The entries of the open level: eight on the first one, the rest behind 복사… / 고급…. */
+  const menuItems: MenuItem[] =
+    stage === "copy"
+      ? [backItem("copy", "복사"), ...copyCommands.map((command) => sourceItem(command)), copyJsonItem]
+      : stage === "advanced"
+        ? [
+            backItem("advanced", "고급"),
+            rowsForSourceItem,
+            stageItem("pivot", "피벗", "filter"),
+            ...reviewToolItems,
+            ...propagationItems(target ? (row ?? targetAsGridRow(target)) : null, target?.runId ?? null),
+          ]
+        : stage === "pivot"
+          ? [backItem("pivot", "피벗"), ...pivotItems]
+          : [
+              ...markItems,
+              noteItem,
+              ...(openCommand ? [sourceItem(openCommand, "원본")] : []),
+              stageItem("copy", "복사", "copy"),
+              stageItem("advanced", "고급", "more", { separator: true }),
+            ];
 
   return (
     <>
@@ -384,10 +462,22 @@ export function ViewerToolbar({
         >
           {currentLabel}
         </span>
-        <span ref={moreRef} className="viewer-actions-more">
+        {/* Opening the menu by hand always starts on the first level (Esc can leave it deeper). */}
+        <span
+          ref={moreRef}
+          className="viewer-actions-more"
+          onClickCapture={(event) => {
+            if (reopening.current) return;
+            if ((event.target as HTMLElement).closest('[aria-haspopup="menu"]')) setStage("root");
+          }}
+          onKeyDownCapture={(event) => {
+            if (event.key !== "ArrowDown") return;
+            if ((event.target as HTMLElement).closest('[aria-haspopup="menu"]')) setStage("root");
+          }}
+        >
           <MenuButton
             label="더보기"
-            items={[...reviewItems, ...sourceItems, copyJsonItem, ...pivotItems]}
+            items={menuItems}
             triggerClassName="viewer-icon-button"
             onDisabled={(reason) => announce(reason)}
             testId="viewer-actions-menu"

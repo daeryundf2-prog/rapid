@@ -205,12 +205,26 @@ export function keyLabel(shortcut: string, mac: boolean = isMacPlatform()): stri
     .join(" ");
 }
 
+/**
+ * Keys the grid itself handles in its own keydown (DataGrid.tsx) rather than through the
+ * command registry: they act on the focused list, so the help table must not read them
+ * as unbound.
+ */
+const GRID_NATIVE_KEYS: Partial<Record<keyof typeof KEY_MAP, true>> = {
+  gridFilter: true,
+  rowDown: true,
+  rowUp: true,
+  toggleSelect: true,
+};
+
 export interface KeyBindingRow {
   name: keyof typeof KEY_MAP;
   shortcut: string;
   description: string;
   /** Commands currently bound to this key (several only for a digit range). */
   commands: Command[];
+  /** Handled inside the grid (no command registration) — works whenever the list has focus. */
+  gridNative: boolean;
 }
 
 /** One row per KEY_MAP entry, with the commands currently bound (help overlay). */
@@ -230,6 +244,12 @@ export function keyBindingRows(): KeyBindingRow[] {
             c.id.startsWith("popout.mode.") === (name === "viewerModes"),
         )
       : all.filter((c) => c.shortcut === normalizeShortcut(shortcut));
-    return { name, shortcut, description: KEY_DESCRIPTIONS[name], commands: bound };
+    return {
+      name,
+      shortcut,
+      description: KEY_DESCRIPTIONS[name],
+      commands: bound,
+      gridNative: GRID_NATIVE_KEYS[name] === true,
+    };
   });
 }

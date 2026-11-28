@@ -101,7 +101,9 @@ describe("EvidenceTree on a running run", () => {
     const banner = await screen.findByTestId("live-run-banner");
     expect(banner.textContent).toContain(LIVE_MESSAGE);
     expect(banner.textContent).toContain("열람 가능 1 · 대기 1");
-    fireEvent.change(screen.getByRole("searchbox", { name: "트리 검색" }), { target: { value: "EVTX" } });
+    fireEvent.change(screen.getByRole("searchbox", { name: "왼쪽 목록에서 항목 찾기" }), {
+      target: { value: "EVTX" },
+    });
     const pending = await screen.findAllByRole("treeitem", { name: /\(처리 중\)/ });
     const item = pending[0] as HTMLElement;
     expect(item.getAttribute("aria-disabled")).toBe("true");

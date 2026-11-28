@@ -35,13 +35,17 @@ function RailButton({ stage, current }: { stage: Stage; current: boolean }) {
 }
 
 /**
- * Narrow layout (< 900px): the stage's left panel is a drawer and this button, above the stages,
- * shows or hides it (Alt+0). Its name is the panel's (탐색 트리 · 처리 패널 …); the face is its last word.
+ * Shows or hides the stage's left panel (Alt+0): a drawer on a narrow window (< 900px), and a
+ * folded-away column on a wide one. Its name is the panel's (탐색 트리 · 처리 패널 …); the face is
+ * its last word.
  */
 function PanelToggle() {
-  const open = useAppStore((s) => s.treeDrawerOpen);
+  const drawer = useAppStore((s) => s.treeIsDrawer);
+  const drawerOpen = useAppStore((s) => s.treeDrawerOpen);
+  const folded = useAppStore((s) => s.treePanelHidden);
   const panel = useAppStore((s) => STAGE_DEFS[stageOf(s.route)].panelLabel);
   const { run } = useCommandState("tree.panel");
+  const open = drawer ? drawerOpen : !folded;
   return (
     <div className="stage-rail-panel">
       <button
@@ -51,7 +55,7 @@ function PanelToggle() {
         data-testid="tree-drawer-toggle"
         aria-label={panel}
         aria-expanded={open}
-        aria-controls={TREE_DRAWER_ID}
+        aria-controls={drawer ? TREE_DRAWER_ID : undefined}
         aria-keyshortcuts={KEY_MAP.treePanel}
         title={`${panel} ${open ? "닫기" : "열기"} (${keyLabel(KEY_MAP.treePanel)})`}
         onClick={() => {
@@ -70,7 +74,6 @@ export function StageRail() {
   const stage = useAppStore((s) => (s.route.runId ? stageOf(s.route) : null));
   // No case: every stage is disabled (each button says why); the rail recedes (review #14).
   const hasCase = useAppStore((s) => Boolean(s.route.runId));
-  const panelIsDrawer = useAppStore((s) => s.treeIsDrawer);
   return (
     <nav
       className="stage-rail"
@@ -78,7 +81,7 @@ export function StageRail() {
       data-testid="stage-rail"
       data-disabled={hasCase ? undefined : ""}
     >
-      {panelIsDrawer ? <PanelToggle /> : null}
+      <PanelToggle />
       <ul>
         {STAGES.map((id) => (
           <RailButton key={id} stage={id} current={stage === id} />

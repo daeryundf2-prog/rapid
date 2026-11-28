@@ -201,6 +201,10 @@ export function ReportPanel() {
         {EXPORT_ACTIONS.map((action) => (
           <li key={action.commandId}>
             <CommandButton command={action.commandId} />
+            {/* 이름만으로는 넷을 구분할 수 없어 한 줄 설명을 붙인다 (용어: docs/console-glossary.md). */}
+            <p className="analysis-help" data-testid={`export-desc-${action.kind}`}>
+              {action.description}
+            </p>
           </li>
         ))}
       </ul>

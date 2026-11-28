@@ -250,8 +250,8 @@ export function EvidenceTree({ runId }: { runId: string }) {
       <input
         type="search"
         className="case-tree-search"
-        aria-label="트리 검색"
-        placeholder="트리 검색"
+        aria-label="왼쪽 목록에서 항목 찾기"
+        placeholder="왼쪽 목록에서 항목 찾기"
         value={search}
         onChange={(event) => setSearch(event.target.value)}
         onKeyDown={(event) => {

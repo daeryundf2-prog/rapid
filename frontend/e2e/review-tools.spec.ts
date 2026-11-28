@@ -299,6 +299,7 @@ test("E3 fixes: propagation from the viewer acts on the viewer row; a tag key to
   // 더보기 › 같은 해시 행에 전파 lists the row's tags; the default spreads its user tags.
   await page.getByTestId("viewer-actions-menu").click();
   const menu = page.getByRole("menu", { name: "더보기" });
+  await menu.getByRole("menuitem", { name: "고급…" }).click();
   await expect(menu.getByRole("menuitem", { name: "'증거 B'만 전파" })).toBeVisible();
   let batch = batchResponse(page);
   await menu.getByRole("menuitem", { name: "같은 해시 행에 태그 전파: 사용자 태그 전부 (증거 B)" }).click();

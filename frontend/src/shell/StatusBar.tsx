@@ -192,27 +192,19 @@ function RunProgress({ run }: { run: RunWithProgress }) {
         <StatusSep />
         <span className={errors > 0 ? "status-errors" : undefined}>오류 {errors}</span>
       </span>
-      {/* Run actions only when they apply (review #8): 취소 while running, 재시도 after a failure;
-          an interrupted or cancelled run resumes (R4 V1). */}
+      {/* 취소만 상태바에 남긴다: 되살리기(이어서 실행 · 처음부터 다시)는 처리 단계 한 곳에서만
+          하도록 모았다 — 같은 명령이 두 화면에서 다른 이름으로 보이던 문제(콘솔 복잡도 검토). */}
       {active || retryable ? (
         <span className="status-group status-actions">
+          <a
+            className="button ghost"
+            href={serializeRoute({ runId: run.run_id, collection: "process" })}
+            data-testid="run-plan-open"
+          >
+            {active ? "진행 상세…" : "처리에서 다시 실행…"}
+          </a>
           {active ? (
-            <>
-              <a
-                className="button ghost"
-                href={serializeRoute({ runId: run.run_id, collection: "process" })}
-                data-testid="run-plan-open"
-              >
-                진행 상세…
-              </a>
-              <CommandButton command="case.cancel" label="취소" variant="ghost" testId="run-cancel" />
-            </>
-          ) : null}
-          {status === "interrupted" || status === "cancelled" ? (
-            <CommandButton command="run.resume" label="이어서 실행" variant="ghost" testId="run-resume" />
-          ) : null}
-          {status === "failed" ? (
-            <CommandButton command="case.retry" label="재시도" variant="ghost" testId="run-retry" />
+            <CommandButton command="case.cancel" label="취소" variant="ghost" testId="run-cancel" />
           ) : null}
         </span>
       ) : null}

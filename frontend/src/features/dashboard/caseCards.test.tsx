@@ -184,6 +184,8 @@ let unregister: () => void = () => {};
 beforeEach(() => {
   unregister = registerCaseCommands({ reportCandidates: 0 });
   window.localStorage.clear();
+  // Cards as an analyst who arranged them once sees them (first visit collapses most of them).
+  window.localStorage.setItem("rt.dashboard.layout.v1", JSON.stringify({ collapsed: [], hidden: [] }));
   window.history.replaceState(null, "", "/v2/#/case/r1/intake");
   resetAppStore({ route: { runId: "r1", collection: "intake" } });
 });

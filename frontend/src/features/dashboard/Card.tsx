@@ -27,8 +27,26 @@ function isLayout(value: unknown): value is CardLayout {
   );
 }
 
+/**
+ * Cards that start collapsed for an analyst who has never arranged the 접수 화면: the stage opens
+ * with 사건 정보 · 증거 목록 · 처리 문제 · 시작할 곳 and the other ten are one click away. An
+ * analyst who arranged the layout once keeps exactly what they stored.
+ */
+export const DEFAULT_COLLAPSED_CARDS = [
+  "case-memo",
+  "notes",
+  "evidence",
+  "categories",
+  "processing",
+  "disclosures",
+  "review",
+  "keywords",
+  "exports",
+  "snapshot",
+];
+
 export function readCardLayout(): CardLayout {
-  return readStoredJson(LAYOUT_KEY, isLayout) ?? { collapsed: [], hidden: [] };
+  return readStoredJson(LAYOUT_KEY, isLayout) ?? { collapsed: [...DEFAULT_COLLAPSED_CARDS], hidden: [] };
 }
 
 /** Collapse / hide state for every card, persisted in localStorage (never throws). */

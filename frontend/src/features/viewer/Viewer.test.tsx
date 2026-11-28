@@ -61,26 +61,30 @@ function routes(previewBody: unknown, extra: Record<string, Handler> = {}) {
 const region = () => screen.getByRole("region", { name: "원본 뷰어" });
 const tab = (name: string) => screen.getByRole("tab", { name });
 const live = () => (screen.getByTestId("live-polite").textContent ?? "").trim();
-/** Menu holding each viewer command (review #6): one "⋯" 더보기 menu with 리뷰 / 원본 sections. */
-const MENU_OF: Record<string, string> = {
-  "viewer.open-original": "더보기",
-  "viewer.hash": "더보기",
-  "viewer.copy-path": "더보기",
-  "viewer.cite": "더보기",
-  "navigate.rows-for-source": "더보기",
-  "viewer.mark.needs-review": "더보기",
-  "viewer.mark.excluded": "더보기",
-  "viewer.mark.include-in-report": "더보기",
-  "viewer.mark.bookmark": "더보기",
-  "viewer.note": "더보기",
+/** Levels of the "⋯" 더보기 menu a viewer command sits behind (empty = its first level). */
+const MENU_PATH: Record<string, string[]> = {
+  "viewer.open-original": [],
+  "viewer.hash": ["viewer.menu.copy"],
+  "viewer.copy-path": ["viewer.menu.copy"],
+  "viewer.cite": ["viewer.menu.copy"],
+  "navigate.rows-for-source": ["viewer.menu.advanced"],
+  "viewer.mark.needs-review": [],
+  "viewer.mark.excluded": [],
+  "viewer.mark.include-in-report": [],
+  "viewer.mark.bookmark": [],
+  "viewer.note": [],
 };
-/** The control of a viewer command, opening the menu that holds it first. */
+/** The control of a viewer command, opening the menu (and its level) that holds it first. */
 const tool = (id: string) => {
   const selector = `[data-command="${id}"]`;
-  const shown = document.querySelector(selector);
-  if (shown) return shown as HTMLButtonElement;
-  const menu = MENU_OF[id];
-  if (menu) fireEvent.click(screen.getByRole("button", { name: menu }));
+  const path = MENU_PATH[id];
+  if (!path) return document.querySelector(selector) as HTMLButtonElement;
+  const trigger = screen.getByRole("button", { name: "더보기" });
+  // Re-open from the first level: the menu may be left on a deeper one.
+  if (trigger.getAttribute("aria-expanded") === "true") fireEvent.click(trigger);
+  fireEvent.click(trigger);
+  for (const stage of path)
+    fireEvent.click(document.querySelector(`[data-command="${stage}"]`) as HTMLButtonElement);
   return document.querySelector(selector) as HTMLButtonElement;
 };
 
@@ -532,9 +536,8 @@ describe("Viewer — history and navigation", () => {
 
   it("'같은 출처의 다른 행' emits navigate.rows-for-source when a handler is registered", async () => {
     await show({ preview_type: "text", extension: ".txt", text: "hi" });
-    // It lives in the one "⋯" 더보기 menu (review #6).
-    fireEvent.click(screen.getByRole("button", { name: "더보기" }));
-    const button = screen.getByRole("menuitem", { name: "같은 출처의 다른 행" });
+    // It lives behind 고급… in the one "⋯" 더보기 menu (review #6).
+    const button = tool("navigate.rows-for-source");
     expect(button.getAttribute("aria-disabled")).toBe("true");
     const run = vi.fn();
     const events: unknown[] = [];

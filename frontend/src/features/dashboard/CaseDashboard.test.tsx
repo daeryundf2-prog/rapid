@@ -157,6 +157,9 @@ function routes(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   window.localStorage.clear();
+  // An analyst who already arranged the 접수 화면: every card expanded. The default for a first
+  // visit (most cards collapsed) has its own test below.
+  window.localStorage.setItem("rt.dashboard.layout.v1", JSON.stringify({ collapsed: [], hidden: [] }));
   window.history.replaceState(null, "", "/v2/#/case/r1/intake");
   resetAppStore({ route: { runId: "r1", collection: "intake" } });
 });
@@ -288,6 +291,22 @@ describe("CaseDashboard (접수)", () => {
     expect(screen.queryByRole("heading", { name: "증거 소스" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "숨긴 카드 1개 다시 표시" }));
     expect(screen.getByRole("heading", { name: "증거 소스" })).toBeTruthy();
+  });
+
+  it("opens with four cards for an analyst who has not arranged the stage yet", async () => {
+    window.localStorage.clear();
+    const mock = mockFetch(routes());
+    renderWithQuery(<CaseDashboard runId="r1" />);
+    await screen.findByRole("heading", { name: "케이스 요약 노트" });
+    const expanded = (title: string) =>
+      within(card(title)).getByRole("button", { name: title }).getAttribute("aria-expanded");
+    for (const open of ["사건 정보", "증거 목록", "처리 문제", "시작할 곳"]) {
+      expect(expanded(open), open).toBe("true");
+    }
+    for (const folded of ["케이스 요약 노트", "증거 소스", "아티팩트 범주", "키워드 일치"]) {
+      expect(expanded(folded), folded).toBe("false");
+    }
+    expect(mock.calls.length).toBeGreaterThan(0);
   });
 
   it("explains empty cards while the run is still processing", async () => {

@@ -401,7 +401,9 @@ describe("결과 없는 계열 숨김 (viewer-families U-F7)", () => {
     await screen.findByText("이벤트 로그");
     await waitFor(() => expect(item("이벤트 로그").textContent).toContain("100"));
     expect(screen.queryByRole("treeitem", { name: /^위치·여행/ })).toBeNull();
-    fireEvent.change(screen.getByRole("searchbox", { name: "트리 검색" }), { target: { value: "위치" } });
+    fireEvent.change(screen.getByRole("searchbox", { name: "왼쪽 목록에서 항목 찾기" }), {
+      target: { value: "위치" },
+    });
     expect(item("위치·여행").hasAttribute("data-hidden-empty")).toBe(true);
   });
 

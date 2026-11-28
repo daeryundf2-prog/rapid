@@ -49,7 +49,9 @@ export function ViewSwitch({ children }: { children: ReactNode }) {
     if (route.view && route.view !== active) patchRoute({ view: undefined }, { replace: true });
   }, [route.view, active, patchRoute]);
 
-  // A compact icon segment (visual-polish S1); the label is each button's name and tooltip.
+  // An icon segment with the active view written out: six unlabelled icons alone did not say
+  // which view is on, or what the others are (console complexity review, 2026-11-28).
+  const activeLabel = VIEW_DEFS.find((def) => def.id === active)?.label ?? "";
   const bar = showBar ? (
     <div className="view-switch segmented" role="toolbar" aria-label="보기 전환">
       {VIEW_DEFS.map((def) => (
@@ -64,6 +66,7 @@ export function ViewSwitch({ children }: { children: ReactNode }) {
             onClick={() => switchView(def.id)}
           >
             <Icon name={VIEW_ICONS[def.id]} />
+            {active === def.id ? <span className="view-switch-active">{activeLabel}</span> : null}
           </button>
         </DisabledReason>
       ))}

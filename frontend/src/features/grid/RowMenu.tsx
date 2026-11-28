@@ -1,13 +1,15 @@
-import { Fragment, useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useEscape } from "../../a11y/focus";
 import { type CommandContext, KEY_MAP } from "../../contracts/command";
-import { Icon, isIconName } from "../../icons";
+import { Icon, type IconName, isIconName } from "../../icons";
 import { keyLabel } from "../../shortcuts";
 import { getRegisteredCommand } from "./adapter";
 
-/** Row-menu entries in order; each is a registered `grid.*` Command. */
-export const ROW_MENU_COMMAND_IDS = [
-  "grid.openSource",
+/** First-level row-menu entries in order; each is a registered `grid.*` Command. */
+export const ROW_MENU_COMMAND_IDS = ["grid.openSource"] as const;
+
+/** Entries behind "고급…", the rarer per-row actions (review: 22 entries on one level). */
+export const ROW_MENU_ADVANCED_IDS = [
   "grid.openHex",
   "grid.copyPath",
   "grid.copyCitation",
@@ -22,7 +24,7 @@ export const ROW_MENU_COMMAND_IDS = [
  */
 export const ROW_MENU_CONTEXTUAL_IDS = ["grid.openOtherCase"] as const;
 
-/** Record pivots (viewer redesign §5), listed after a separator; disabled with a reason when absent. */
+/** Record pivots (viewer redesign §5), behind 고급… › 피벗…; disabled with a reason when absent. */
 export const ROW_MENU_PIVOT_IDS = [
   "grid.pivot.same-user",
   "grid.pivot.same-logon",
@@ -35,7 +37,7 @@ export const ROW_MENU_PIVOT_IDS = [
   "grid.pivot.source-artifact",
 ] as const;
 
-/** Review items, always listed after a separator (disabled with a reason when they cannot run). */
+/** Review items, always on the first level (disabled with a reason when they cannot run). */
 export const ROW_MENU_REVIEW_IDS = [
   "grid.row.relevant",
   "grid.row.needs-review",
@@ -64,6 +66,25 @@ export function rowMenuShortcut(id: string, ownShortcut?: string): string | unde
   return (entry.command ? getRegisteredCommand(entry.command)?.shortcut : undefined) ?? entry.fallback;
 }
 
+/** Levels of the menu; "고급…" / "피벗…" open one, "뒤로" returns to its parent. */
+type RowMenuStage = "root" | "advanced" | "pivot";
+
+/** One rendered row of the open level: a `grid.*` command, or an entry that changes level. */
+interface RowMenuEntry {
+  /** `data-command` of the entry (tests, e2e). */
+  command: string;
+  label: string;
+  icon?: IconName;
+  shortcut?: string;
+  /** Korean reason the entry cannot run; the entry stays listed. */
+  reason?: string;
+  /** Section heading above the entry; implies a rule unless it is the first entry. */
+  section?: string;
+  /** Rule above the entry. */
+  separator?: boolean;
+  run: () => void;
+}
+
 export interface RowMenuProps {
   /** Element id, referenced by the trigger's aria-controls. */
   id?: string;
@@ -77,12 +98,23 @@ export interface RowMenuProps {
 
 export function RowMenu({ id, anchor, context, onClose, onDisabled }: RowMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const [stage, setStage] = useState<RowMenuStage>("root");
   // Esc closes the menu wherever focus went (shared Esc stack), not only from inside it.
   useEscape(onClose, anchor !== null);
 
+  // A closed (or re-anchored) menu opens on its first level again.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset the level when the menu re-opens
+  useEffect(() => setStage("root"), [anchor]);
+
+  // The first entry of the open level takes focus.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refocus when the level changes
   useEffect(() => {
     if (!anchor) return;
     ref.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+  }, [anchor, stage]);
+
+  useEffect(() => {
+    if (!anchor) return;
     const onDown = (event: MouseEvent) => {
       const target = event.target as Element | null;
       // The trigger toggles the menu itself (its click closes it again).
@@ -95,16 +127,64 @@ export function RowMenu({ id, anchor, context, onClose, onDisabled }: RowMenuPro
 
   if (!anchor) return null;
 
-  const registered = (ids: readonly string[]) =>
-    ids
-      .map((id) => getRegisteredCommand(id))
-      .filter((command): command is NonNullable<typeof command> => !!command);
-  const items = [
-    ...registered(ROW_MENU_CONTEXTUAL_IDS).filter((command) => !command.disabledReason?.(context)),
-    ...registered(ROW_MENU_COMMAND_IDS),
-  ];
-  const pivotItems = registered(ROW_MENU_PIVOT_IDS);
-  const reviewItems = registered(ROW_MENU_REVIEW_IDS);
+  const entriesOf = (ids: readonly string[], section?: string): RowMenuEntry[] => {
+    const entries = ids.flatMap((commandId): RowMenuEntry[] => {
+      const command = getRegisteredCommand(commandId);
+      if (!command) return [];
+      return [
+        {
+          command: command.id,
+          label: command.label,
+          icon: isIconName(command.icon) ? command.icon : undefined,
+          shortcut: rowMenuShortcut(command.id, command.shortcut),
+          reason: command.disabledReason?.(context),
+          run: () => {
+            onClose();
+            void command.run(context);
+          },
+        },
+      ];
+    });
+    const [first] = entries;
+    if (first && section) first.section = section;
+    return entries;
+  };
+  /** Entry that opens another level; "…" marks it as a group, like a submenu. */
+  const stageEntry = (
+    to: RowMenuStage,
+    label: string,
+    icon: IconName,
+    extra?: Partial<RowMenuEntry>,
+  ): RowMenuEntry => ({
+    command: `grid.menu.${to}`,
+    label: `${label}…`,
+    icon,
+    run: () => setStage(to),
+    ...extra,
+  });
+  const backEntry = (to: RowMenuStage, section: string): RowMenuEntry => ({
+    command: "grid.menu.back",
+    label: "뒤로",
+    icon: "arrow-left",
+    section,
+    run: () => setStage(to),
+  });
+
+  const entries: RowMenuEntry[] =
+    stage === "advanced"
+      ? [
+          backEntry("root", "고급"),
+          ...entriesOf(ROW_MENU_ADVANCED_IDS),
+          stageEntry("pivot", "피벗", "filter", { separator: true }),
+        ]
+      : stage === "pivot"
+        ? [backEntry("advanced", "피벗"), ...entriesOf(ROW_MENU_PIVOT_IDS)]
+        : [
+            ...entriesOf(ROW_MENU_CONTEXTUAL_IDS).filter((entry) => !entry.reason),
+            ...entriesOf(ROW_MENU_COMMAND_IDS),
+            ...entriesOf(ROW_MENU_REVIEW_IDS, "리뷰"),
+            stageEntry("advanced", "고급", "more", { separator: true }),
+          ];
 
   const move = (delta: number, from: HTMLElement) => {
     const nodes = Array.from(ref.current?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? []);
@@ -138,53 +218,51 @@ export function RowMenu({ id, anchor, context, onClose, onDisabled }: RowMenuPro
         }
       }}
     >
-      {[...items, ...pivotItems, ...reviewItems].map((command, index) => {
-        const reason = command.disabledReason?.(context);
-        const shortcut = rowMenuShortcut(command.id, command.shortcut);
-        return (
-          <Fragment key={command.id}>
-            {(index === items.length || index === items.length + pivotItems.length) && index > 0 ? (
-              <hr className="grid-menu-sep" />
-            ) : null}
-            <button
-              type="button"
-              role="menuitem"
-              className="grid-menu-item menu-item"
-              aria-disabled={reason ? true : undefined}
-              aria-keyshortcuts={shortcut}
-              title={reason}
-              data-disabled-reason={reason || undefined}
-              data-command={command.id}
-              onClick={() => {
-                if (reason) {
-                  onDisabled(reason);
-                  return;
-                }
-                onClose();
-                void command.run(context);
-              }}
-            >
-              {/* 16px lead slot (icon or empty), label + 11px reason line, right-aligned key. */}
-              <span className="menu-item-lead" aria-hidden="true">
-                {isIconName(command.icon) ? <Icon name={command.icon} /> : null}
-              </span>
-              <span className="menu-item-text">
-                <span className="menu-item-label">{command.label}</span>
-                {reason ? (
-                  <span className="menu-item-reason" aria-hidden="true">
-                    {reason}
-                  </span>
-                ) : null}
-              </span>
-              {shortcut ? (
-                <span className="menu-item-kbd" aria-hidden="true">
-                  {keyLabel(shortcut)}
+      {entries.map((entry, index) => (
+        <Fragment key={entry.command}>
+          {(entry.section || entry.separator) && index > 0 ? <hr className="grid-menu-sep" /> : null}
+          {entry.section ? (
+            <div className="menu-heading" aria-hidden="true">
+              {entry.section}
+            </div>
+          ) : null}
+          <button
+            type="button"
+            role="menuitem"
+            className="grid-menu-item menu-item"
+            aria-disabled={entry.reason ? true : undefined}
+            aria-keyshortcuts={entry.shortcut}
+            title={entry.reason}
+            data-disabled-reason={entry.reason || undefined}
+            data-command={entry.command}
+            onClick={() => {
+              if (entry.reason) {
+                onDisabled(entry.reason);
+                return;
+              }
+              entry.run();
+            }}
+          >
+            {/* 16px lead slot (icon or empty), label + 11px reason line, right-aligned key. */}
+            <span className="menu-item-lead" aria-hidden="true">
+              {entry.icon ? <Icon name={entry.icon} /> : null}
+            </span>
+            <span className="menu-item-text">
+              <span className="menu-item-label">{entry.label}</span>
+              {entry.reason ? (
+                <span className="menu-item-reason" aria-hidden="true">
+                  {entry.reason}
                 </span>
               ) : null}
-            </button>
-          </Fragment>
-        );
-      })}
+            </span>
+            {entry.shortcut ? (
+              <span className="menu-item-kbd" aria-hidden="true">
+                {keyLabel(entry.shortcut)}
+              </span>
+            ) : null}
+          </button>
+        </Fragment>
+      ))}
     </div>
   );
 }

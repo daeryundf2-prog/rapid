@@ -15,6 +15,7 @@ import { COLLECTION_NODES, runDisplayName } from "../app/collections";
 import { type Command, type CommandContext, KEY_MAP } from "../contracts/command";
 import { conditionsCommand } from "../features/filters/conditionPanel";
 import { useViewPrefs } from "../features/review/viewPrefs";
+import { STAGE_HEADING_ID } from "../features/stages/stages";
 import { treeEmptyCommand } from "../features/tree/treePrefs";
 import { focusPopout } from "../features/viewer/popout/host";
 import { NO_VIEWER_REASON, stageHasViewer, stageOf } from "../router";
@@ -101,7 +102,14 @@ export function collapseViewerPane(): void {
   focusById(VIEWER_EXPAND_ID);
 }
 
-export const TREE_INLINE_REASON = "창이 넓을 때는 패널이 항상 표시됩니다";
+/** Fold the stage panel away on a wide window, or bring it back; focus follows what is left. */
+export function toggleTreePanel(): void {
+  const s = useAppStore.getState();
+  const hidden = !s.treePanelHidden;
+  s.setTreePanelHidden(hidden);
+  if (hidden) focusById(TREE_TOGGLE_ID);
+  else focusById(STAGE_HEADING_ID);
+}
 
 /** Narrow layout: show the stage panel (tree) drawer; focus lands on its heading, like a stage switch. */
 export function openTreeDrawer(): void {
@@ -540,15 +548,16 @@ export function caseCommands(queryClient: QueryClient): Command[] {
       },
     },
     {
-      // Narrow layout (< 900 px): the stage's left panel is a drawer; the stage rail shows the button.
+      // The stage's left panel: a drawer on a narrow window (< 900px), a folded column on a wide one.
       id: "tree.panel",
       label: "단계 패널(탐색 트리) 열기/닫기",
       group: "navigate",
       shortcut: KEY_MAP.treePanel,
       icon: "sidebar",
-      disabledReason: (ctx) => needsRun(ctx) ?? (store().treeIsDrawer ? undefined : TREE_INLINE_REASON),
+      disabledReason: (ctx) => needsRun(ctx),
       run: () => {
-        if (store().treeDrawerOpen) closeTreeDrawer();
+        if (!store().treeIsDrawer) toggleTreePanel();
+        else if (store().treeDrawerOpen) closeTreeDrawer();
         else openTreeDrawer();
       },
     },

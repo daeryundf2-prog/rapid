@@ -106,4 +106,15 @@ describe("help rows", () => {
     expect(rows.find((r) => r.name === "help")?.commands.map((c) => c.id)).toEqual(["h"]);
     expect(rows.find((r) => r.name === "rowDown")?.commands).toEqual([]);
   });
+
+  it("marks the keys the grid handles itself", () => {
+    const rows = keyBindingRows();
+    expect(rows.filter((r) => r.gridNative).map((r) => r.name)).toEqual([
+      "gridFilter",
+      "rowDown",
+      "rowUp",
+      "toggleSelect",
+    ]);
+    expect(rows.find((r) => r.name === "help")?.gridNative).toBe(false);
+  });
 });

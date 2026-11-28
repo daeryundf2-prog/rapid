@@ -1310,7 +1310,7 @@ export function buildTreeModel(input: TreeModelInput): TreeModelNode[] {
       dataNode("files", "전체 파일", counts?.files, "이 런에는 파일 목록이 없습니다", loaded),
       explorerViewNode(
         "fs-explorer",
-        "파일 시스템",
+        "폴더 탐색기",
         { collection: "files", dir: "" },
         counts?.files,
         "이 런에는 파일 목록이 없습니다",

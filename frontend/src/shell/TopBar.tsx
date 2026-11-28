@@ -55,10 +55,10 @@ function GlobalSearch() {
           id={GLOBAL_SEARCH_ID}
           type="search"
           value={value}
-          aria-label="전체 검색어"
+          aria-label="이 런 전체에서 검색"
           aria-describedby={hintId}
           aria-disabled={route.runId ? undefined : true}
-          placeholder={route.runId ? "전체 검색 (Enter)" : NO_RUN_REASON}
+          placeholder={route.runId ? "이 런 전체에서 검색 (Enter)" : NO_RUN_REASON}
           onChange={(event) => setValue(event.target.value)}
         />
         <span id={hintId} className="visually-hidden">
@@ -140,7 +140,12 @@ export function TopBar() {
       <Brand />
       <div className="topbar-case">
         <Slot name="case-picker" fallback={<CasePickerFallback />} />
-        <CommandButton command="case.run-dialog" variant="ghost" label="실행" testId="run-dialog-button" />
+        <CommandButton
+          command="case.run-dialog"
+          variant="ghost"
+          label="새 런 시작…"
+          testId="run-dialog-button"
+        />
       </div>
       <div className="topbar-search">
         {hasCase ? <GlobalSearch /> : null}

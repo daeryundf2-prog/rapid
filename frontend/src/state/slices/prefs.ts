@@ -12,6 +12,7 @@ export const THEME_KEY = "rapidtriage.v2.theme";
 export const DENSITY_KEY = "rapidtriage.v2.density";
 export const PANELS_KEY = "rapidtriage.v2.panels";
 export const TIMEZONE_KEY = "rapidtriage.v2.timezone";
+export const TREE_PANEL_KEY = "rapidtriage.v2.treePanel";
 
 export const DENSITIES: readonly Density[] = ["compact", "default", "comfortable"];
 export const DENSITY_LABEL: Record<Density, string> = {
@@ -78,6 +79,9 @@ export interface PrefsSlice {
   panelLayout: PanelLayout | null;
   /** Explicit display timezone ("utc" | "local" | IANA); null = default (evidence tz, else local). */
   timezone: string | null;
+  /** 넓은 창에서 단계 패널(탐색 트리)을 접어 둔 상태 (persisted). */
+  treePanelHidden: boolean;
+  setTreePanelHidden: (hidden: boolean) => void;
   setTimezone: (timezone: string | null) => void;
   setTheme: (theme: Theme | null) => void;
   toggleTheme: () => void;
@@ -93,6 +97,11 @@ export const createPrefsSlice: StateCreator<AppState, [], [], PrefsSlice> = (set
   density: storedDensity(),
   panelLayout: readStoredJson(PANELS_KEY, isPanelLayout),
   timezone: storedTimezone(),
+  treePanelHidden: readStored(TREE_PANEL_KEY) === "hidden",
+  setTreePanelHidden: (hidden) => {
+    writeStored(TREE_PANEL_KEY, hidden ? "hidden" : null);
+    set({ treePanelHidden: hidden });
+  },
   setTimezone: (timezone) => {
     writeStored(TIMEZONE_KEY, timezone);
     set({ timezone });

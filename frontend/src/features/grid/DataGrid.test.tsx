@@ -229,23 +229,29 @@ describe("DataGrid keyboard", () => {
   it("/ focuses the filter input (not while typing elsewhere)", async () => {
     await renderFiles();
     fireEvent.keyDown(document.body, { key: "/" });
-    expect(document.activeElement).toBe(screen.getByPlaceholderText(/필터/));
+    expect(document.activeElement).toBe(screen.getByPlaceholderText(/이 목록에서 찾기/));
   });
 
-  it("Shift+F10 opens the row menu with the seven grid.* commands and the review items; Esc closes it", async () => {
+  it("Shift+F10 opens the row menu: 원본 보기 + review items, the rest behind 고급…; Esc closes it", async () => {
     await renderFiles();
     rowAt(0).focus();
     fireEvent.keyDown(rowAt(0), { key: "F10", shiftKey: true });
     const menu = await screen.findByRole("menu", { name: "행 메뉴" });
     expect(screen.getAllByRole("button", { name: "행 메뉴" })[0]?.getAttribute("aria-expanded")).toBe("true");
-    const items = within(menu).getAllByRole("menuitem");
-    const labels = items.map((i) => i.querySelector(".menu-item-label")?.textContent);
+    const labelsOf = () =>
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((i) => i.querySelector(".menu-item-label")?.textContent);
+    const open = (command: string) =>
+      fireEvent.click(menu.querySelector(`[data-command='${command}']`) as HTMLElement);
     // Review #13: right-aligned key hints from the registry, and a disabled item's reason line.
     const keys = Object.fromEntries(
-      items.map((i) => [
-        i.querySelector(".menu-item-label")?.textContent,
-        i.querySelector(".menu-item-kbd")?.textContent,
-      ]),
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((i) => [
+          i.querySelector(".menu-item-label")?.textContent,
+          i.querySelector(".menu-item-kbd")?.textContent,
+        ]),
     );
     expect(keys).toMatchObject({
       "원본 보기": "Enter",
@@ -255,19 +261,39 @@ describe("DataGrid keyboard", () => {
       북마크: "B",
     });
     expect(keys["보고서 포함 표시"]).toBeUndefined();
-    const ocr = items.find((i) => i.dataset.command === "grid.ocrSelected");
-    expect(ocr?.querySelector(".menu-item-reason")?.textContent).toBe(
-      ocr?.getAttribute("data-disabled-reason"),
-    );
-    expect(labels).toEqual([
+    expect(labelsOf()).toEqual([
       "원본 보기",
+      "관련 있음 표시",
+      "재검토 표시",
+      "제외 표시",
+      "보고서 포함 표시",
+      "북마크",
+      "고급…",
+    ]);
+    // Review items are always listed and enabled for a row with a run-output locator.
+    const relevant = within(menu).getByRole("menuitem", { name: "관련 있음 표시" });
+    expect(relevant.getAttribute("aria-disabled")).toBeNull();
+
+    open("grid.menu.advanced");
+    expect(labelsOf()).toEqual([
+      "뒤로",
       "헥스로 보기",
       "경로 복사",
       "인용 복사",
       "타임라인에서 보기",
       "같은 출처 행",
       "선택 행 OCR 실행",
-      // Record pivots (viewer redesign §5), each disabled with a reason when the row lacks the field.
+      "피벗…",
+    ]);
+    const ocr = menu.querySelector("[data-command='grid.ocrSelected']");
+    expect(ocr?.querySelector(".menu-item-reason")?.textContent).toBe(
+      ocr?.getAttribute("data-disabled-reason"),
+    );
+
+    open("grid.menu.pivot");
+    // Record pivots (viewer redesign §5), each disabled with a reason when the row lacks the field.
+    expect(labelsOf()).toEqual([
+      "뒤로",
       "같은 사용자/SID",
       "같은 로그온 ID",
       "같은 해시",
@@ -277,15 +303,10 @@ describe("DataGrid keyboard", () => {
       "타임라인 ±5분",
       "탐지 → 원 이벤트 열기",
       "원본 아티팩트 열기",
-      "관련 있음 표시",
-      "재검토 표시",
-      "제외 표시",
-      "보고서 포함 표시",
-      "북마크",
     ]);
-    // Review items are always listed and enabled for a row with a run-output locator.
-    const relevant = within(menu).getByRole("menuitem", { name: "관련 있음 표시" });
-    expect(relevant.getAttribute("aria-disabled")).toBeNull();
+    // 뒤로 from 피벗 returns to 고급, not to the first level.
+    open("grid.menu.back");
+    expect(labelsOf()).toContain("피벗…");
     fireEvent.keyDown(menu, { key: "Escape" });
     expect(screen.queryByRole("menu")).toBeNull();
   });
@@ -331,8 +352,8 @@ describe("DataGrid keyboard", () => {
     expect(button.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(button);
     const menu = await screen.findByRole("menu", { name: "행 메뉴" });
-    // 7 row actions + 9 pivots + 5 review marks (+ contextual entries that apply).
-    expect(within(menu).getAllByRole("menuitem")).toHaveLength(21);
+    // 원본 보기 + 5 review marks + 고급… (+ contextual entries that apply).
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(7);
     const trigger = screen.getAllByRole("button", { name: "행 메뉴" })[1] as HTMLButtonElement;
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(trigger.getAttribute("aria-controls")).toBe(menu.id);
@@ -357,7 +378,7 @@ describe("DataGrid keyboard", () => {
 describe("DataGrid filter", () => {
   it("filters the loaded rows client-side and says so in the footer", async () => {
     await renderFiles(600);
-    const input = screen.getByPlaceholderText(/필터/);
+    const input = screen.getByPlaceholderText(/이 목록에서 찾기/);
     fireEvent.change(input, { target: { value: "file-12" } });
     await waitFor(() => expect(screen.getByText(/서버 필터 미지원/)).toBeTruthy());
     // file-12, file-120..129 (all in the first page of 250) = 11 rows.
@@ -369,7 +390,7 @@ describe("DataGrid filter", () => {
 
   it("shows an empty message when nothing matches", async () => {
     await renderFiles(50);
-    fireEvent.change(screen.getByPlaceholderText(/필터/), { target: { value: "zzzz-no-match" } });
+    fireEvent.change(screen.getByPlaceholderText(/이 목록에서 찾기/), { target: { value: "zzzz-no-match" } });
     await waitFor(() => expect(screen.getByText(/조건에 맞는 행이 없습니다/)).toBeTruthy());
   });
 });
