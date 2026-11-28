@@ -1049,10 +1049,17 @@ export interface ReviewMarkBody {
 }
 
 /** A case-db row, or a run-output locator the server resolves against `run_id`. Either may carry
- * `expected_version`: the version of the mark the examiner saw (0 = no mark); a changed mark is a 409 (F14). */
+ * `expected_version`: the version of the mark the examiner saw (0 = no mark); a changed mark is a 409 (F14).
+ * A Z write also carries `undo_of_version` (the verdict version it undoes): the history records an undo. */
 export type ReviewBatchTarget =
-  | { target_type: string; target_id: string; expected_version?: number }
-  | { collection: string; kind?: string; locator: string; expected_version?: number };
+  | { target_type: string; target_id: string; expected_version?: number; undo_of_version?: number }
+  | {
+      collection: string;
+      kind?: string;
+      locator: string;
+      expected_version?: number;
+      undo_of_version?: number;
+    };
 
 /** `POST /api/case-db/review-batch` answer: with `run_id`, `targets[i]` (resolved, locator kept) stored `marks[i]`;
  * each mark carries its new `version` and the `previous_version` it replaced. */

@@ -27,6 +27,12 @@
   and cursor back; "불러온 마지막 행" when the list stopped at unloaded rows; Alt+letter keys
   never fire inside text entry; the hex read-out says "값 0x51"; the timeline 같은 원본 파일
   count uses the list's path rule.
+  Z in the review history (#106 re-review): a Z write sends `undo_of_version` per target and its
+  `review_mark_history` row records `kind = "undo"`, `undone_version` and `undone_reviewer`
+  (schema extension, no backfill; `review-history` returns them, the review map names
+  `undo_of`); the actor stays whoever pressed Z. 메모·이력 and the 검토 보드 판정자 tooltip say
+  "되돌림 (원래 판정: lee v3)"; the Z help says the undo list is per tab and lost on refresh
+  (`docs/rapidtriage-user-guide.md`, `tests/test_review_undo_history.py`).
 - Console review board and report (design review F12/F13/F14/F16/F21): the
   review map returns each mark's `reviewer`, `created_at`, `updated_at` and
   `change_count` (file targets also `file_modified_at`); review and

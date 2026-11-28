@@ -193,7 +193,8 @@ export const KEY_DESCRIPTIONS: Record<keyof typeof KEY_MAP, string> = {
   timelinePrev: "타임라인: 같은 폭의 이전 구간",
   timelineNext: "타임라인: 같은 폭의 다음 구간",
   timelineZoomOut: "타임라인: 범위 넓히기 (3배)",
-  undoVerdict: "마지막 판정 되돌리기 (이전 상태·태그 그대로)",
+  undoVerdict:
+    "직전 판정을 되돌림 — 이전 판정을 다시 적용하고 작업자는 되돌린 사람으로 기록. 되돌리기 목록은 이 탭에만 있고 새로고침하면 사라짐",
   pivotTimeline: "피벗: 타임라인 ±5분",
   pivotTarget: "피벗: 같은 대상",
   pivotSource: "피벗: 같은 원본 파일",

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type ReviewConflict, type ReviewMapMark, reviewConflictsOf } from "../../api/caseDb";
 import type { GridRow } from "../../contracts/collection";
+import { HINT_GROUPS } from "../../shell/ContextHint";
+import { KEY_DESCRIPTIONS } from "../../shortcuts";
 import { matchesColumnFilter } from "../filters/columnFilters";
 import { makeRef, makeRow } from "../grid/columns/common";
 import { boardTargetTitle, noteFirstLine, reviewCollection, reviewerTooltip } from "../grid/columns/review";
@@ -360,6 +362,27 @@ describe("board model (F12/F16, P2-1, P3-6)", () => {
     });
     expect(column("reviewer").value(noteOnly)).toBe("");
     expect(reviewerCounts([board, noteOnly])).toEqual([{ label: "lee", count: 1 }]);
+  });
+
+  it("a verdict set by Z says so in the 판정자 tooltip (re-review P2)", () => {
+    const board = boardRow({
+      target_type: "file_record",
+      target_id: "12",
+      status: "excluded",
+      reviewer: "kim",
+      status_by: "kim",
+      status_at: "2026-11-28T05:05:00+00:00",
+      undo_of: { undone_version: 3, undone_reviewer: "lee" },
+    });
+    // The actor stays the one who pressed Z; the tooltip names the verdict it undid.
+    expect(column("reviewer").value(board)).toBe("kim");
+    expect(reviewerTooltip(board)).toBe("판정자 kim, 되돌림 (원래 판정: lee v3)");
+    expect(KEY_DESCRIPTIONS.undoVerdict).toBe(
+      "직전 판정을 되돌림 — 이전 판정을 다시 적용하고 작업자는 되돌린 사람으로 기록. 되돌리기 목록은 이 탭에만 있고 새로고침하면 사라짐",
+    );
+    expect(HINT_GROUPS.find((group) => group.ids.includes("review.undo"))?.title).toBe(
+      `Z: ${KEY_DESCRIPTIONS.undoVerdict}`,
+    );
   });
 
   it("P3-6: the 보고서 filter 포함 does not match 미포함", () => {

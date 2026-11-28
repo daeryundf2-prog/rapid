@@ -22,7 +22,7 @@ import {
   storeNotice,
 } from "../grid/reviewActions";
 import { noteKey, setSessionNote } from "../grid/sessionNotes";
-import { currentReviewer, DEFAULT_REVIEWER, setReviewer } from "./author";
+import { currentReviewer, DEFAULT_REVIEWER, setReviewer, undoText } from "./author";
 import type { NotePanelTarget } from "./uiStore";
 import "./review.css";
 
@@ -59,11 +59,16 @@ function HistoryItem({ entry, timezone }: { entry: ReviewHistoryEntry; timezone:
   const noteChanged = entry.changed_fields.includes("note");
   const tagsChanged = entry.changed_fields.includes("tags");
   const statusChanged = entry.changed_fields.includes("status");
+  const undone =
+    entry.kind === "undo" && typeof entry.undone_version === "number"
+      ? undoText(entry.undone_reviewer, entry.undone_version)
+      : "";
   return (
     <li className="note-history-item" data-testid="note-history-item">
       <p className="note-history-head">
         <strong>{entry.author || "작성자 없음"}</strong> · <time dateTime={entry.changed_at}>{when}</time> ·{" "}
         {changedLabel(entry)}
+        {undone ? ` · ${undone}` : null}
       </p>
       {noteChanged ? (
         <p className="note-history-body">

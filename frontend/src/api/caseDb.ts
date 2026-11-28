@@ -80,6 +80,8 @@ export interface ReviewMapMark {
   status_at?: string;
   /** Times the mark changed (its history versions). */
   change_count?: number;
+  /** The current verdict was set by Z: the verdict version it undid and that version's reviewer. */
+  undo_of?: { undone_version: number; undone_reviewer: string };
   /** The mark's version token: a write sends it back as `expected_version` (F14). */
   version?: number;
   /** File targets: the copy's modification time (a file has no event time). */

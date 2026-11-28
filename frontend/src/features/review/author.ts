@@ -32,3 +32,12 @@ export function reviewerLabel(name: string | null | undefined): string {
   const clean = (name ?? "").trim();
   return UNNAMED_REVIEWERS.has(clean) ? UNNAMED_REVIEWER_LABEL : clean;
 }
+
+/**
+ * "되돌림 (원래 판정: lee v3)": a write made by Z (re-review P2). Its actor is whoever pressed Z; this
+ * names the verdict it undid — that verdict's reviewer and history version. The 메모·이력 list and
+ * the review board's 판정자 tooltip both say it.
+ */
+export function undoText(undoneReviewer: string | null | undefined, undoneVersion: number): string {
+  return `되돌림 (원래 판정: ${reviewerLabel(undoneReviewer)} v${undoneVersion})`;
+}

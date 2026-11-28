@@ -1,7 +1,7 @@
 import { fetchReviewRows, type RawRow } from "../../../api/collections";
 import type { GridRow } from "../../../contracts/collection";
 import { formatGridTime, formatMinute } from "../../../utils/time";
-import { reviewerLabel } from "../../review/author";
+import { reviewerLabel, undoText } from "../../review/author";
 import {
   type BoardTimeKind,
   boardReportCell,
@@ -128,6 +128,10 @@ function mapCaseDbMark(raw: RawRow, index: number) {
       markUpdatedAt: str(raw.updated_at),
       markCreatedAt: str(raw.created_at),
       changeCount: typeof raw.change_count === "number" ? raw.change_count : 0,
+      // The verdict was set by Z (re-review P2): which verdict it undid.
+      ...(isRecord(raw.undo_of) && typeof raw.undo_of.undone_version === "number"
+        ? { undoneVersion: raw.undo_of.undone_version, undoneReviewer: str(raw.undo_of.undone_reviewer) }
+        : {}),
       ...(typeof raw.version === "number" ? { markVersion: raw.version } : {}),
       source: boardSource(collection, targetType, targetKind),
     },
@@ -203,6 +207,9 @@ export function decidedByText(row: GridRow): string {
 export function reviewerTooltip(row: GridRow): string {
   const by = decidedByText(row);
   const parts = [by ? `판정자 ${by}` : "판정 없음"];
+  if (by && typeof row.fields.undoneVersion === "number") {
+    parts.push(undoText(fieldStr(row, "undoneReviewer"), row.fields.undoneVersion));
+  }
   const last = minuteText(row, "markUpdatedAt");
   if (last) parts.push(`마지막 변경 ${reviewerLabel(fieldStr(row, "lastBy"))} ${last}`);
   const created = minuteText(row, "markCreatedAt");

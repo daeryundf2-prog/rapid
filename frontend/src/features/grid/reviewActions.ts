@@ -557,6 +557,8 @@ async function applyBody(
   // What the conflict prompt calls this write; callers that restore or replay marks keep the default.
   label = "판정",
   expected?: ExpectedVersions,
+  // Z: per row, the verdict version this write undoes (the history records an undo; re-review P2).
+  undoOf?: ExpectedVersions,
 ): Promise<ApplyResult> {
   const targets = rows.map(reviewTargetOf);
   const unresolved = targets.filter((t) => t === null).length;
@@ -577,7 +579,9 @@ async function applyBody(
     const pins = expected ?? pinExpected(runId, rows);
     const checked = (targets as ReviewBatchTarget[]).map((target, index) => {
       const version = resolvePin(runId, markAddress(target), pins[index]);
-      return version === undefined ? target : { ...target, expected_version: version };
+      const undone = undoOf?.[index];
+      const sent = version === undefined ? target : { ...target, expected_version: version };
+      return undone === undefined ? sent : { ...sent, undo_of_version: undone };
     });
     versions = await postChecked(runId, handle, checked, rows, authored, label);
     store = "case-db";
@@ -674,7 +678,9 @@ export interface RestoreResult extends ApplyResult {
  * `written` (per row, same order) is the version the verdict itself stored (`ApplyResult.versions`):
  * each row expects it, so a row another examiner changed since answers 409 and the conflict prompt
  * asks (review #106 P1-1); the undo waits for the answer. "그대로 두기" leaves those rows (they come
- * back in `kept`), "내 판정으로 바꾸기" restores them anyway.
+ * back in `kept`), "내 판정으로 바꾸기" restores them anyway. The same version goes out as
+ * `undo_of_version`, so the history row of the write says it was an undo of that verdict; the actor
+ * is whoever pressed Z.
  */
 export async function restoreReviewState(
   runId: string,
@@ -719,6 +725,7 @@ export async function restoreReviewState(
         group.body,
         group.mark,
         "되돌리기",
+        written ? group.expected : undefined,
         written ? group.expected : undefined,
       );
       store = result.store;

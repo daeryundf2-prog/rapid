@@ -13,7 +13,7 @@ import { focusInViewer, reviewScope } from "../commands/verdict";
 import type { CommandContext } from "../contracts/command";
 import { STAGE_DEFS } from "../features/stages/stages";
 import { stageOf } from "../router";
-import { keyLabel } from "../shortcuts";
+import { KEY_DESCRIPTIONS, keyLabel } from "../shortcuts";
 import { useAppStore } from "../state/store";
 
 /** One hint group: the commands whose keys show, and what they do (short). */
@@ -22,6 +22,8 @@ export interface HintGroup {
   label: string;
   /** Only while focus is in / out of the viewer. */
   viewer?: boolean;
+  /** The full sentence (tooltip), when the short label leaves out what matters. */
+  title?: string;
 }
 
 export const HINT_GROUPS: readonly HintGroup[] = [
@@ -30,7 +32,8 @@ export const HINT_GROUPS: readonly HintGroup[] = [
     ids: ["review.mark.relevant", "review.mark.needs-review", "review.mark.excluded", "review.mark.bookmark"],
     label: "판정",
   },
-  { ids: ["review.undo"], label: "되돌리기" },
+  // Z: the actor of the undo write and the per-tab undo list are said in full (re-review P2).
+  { ids: ["review.undo"], label: "되돌리기", title: `Z: ${KEY_DESCRIPTIONS.undoVerdict}` },
   { ids: ["viewer.open"], label: "뷰어", viewer: false },
   { ids: ["app.close"], label: "표로", viewer: true },
   { ids: ["app.help"], label: "모든 키" },
@@ -39,6 +42,7 @@ export const HINT_GROUPS: readonly HintGroup[] = [
 export interface HintKeys {
   label: string;
   keys: string[];
+  title?: string;
 }
 
 /** The groups whose commands are registered and can run now, each with its keys. */
@@ -50,7 +54,7 @@ export function usableHints(ctx: CommandContext, inViewer: boolean): HintKeys[] 
       .map((id) => getCommand(id))
       .filter((command) => command?.shortcut && !disabledReasonOf(command, ctx))
       .map((command) => command?.shortcut as string);
-    if (keys.length) out.push({ label: group.label, keys });
+    if (keys.length) out.push({ label: group.label, keys, ...(group.title ? { title: group.title } : {}) });
   }
   return out;
 }
@@ -100,7 +104,7 @@ export function ContextHint() {
       {hints.length ? (
         <span className="status-hint-keys">
           {hints.map((hint) => (
-            <span key={hint.label} className="status-hint-key">
+            <span key={hint.label} className="status-hint-key" title={hint.title}>
               {hint.keys.map((key) => (
                 <kbd key={key}>{keyLabel(key)}</kbd>
               ))}

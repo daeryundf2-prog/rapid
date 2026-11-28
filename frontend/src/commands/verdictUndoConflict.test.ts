@@ -19,7 +19,7 @@ import {
 // Z against other examiners' changes (review #106 P1-1 / P2-2, with #102's versioned writes).
 const RUN = "run-z";
 
-type Batch = { status?: string; targets: Array<{ expected_version?: number }> };
+type Batch = { status?: string; targets: Array<{ expected_version?: number; undo_of_version?: number }> };
 
 /** A 409 for file_record 1: lee set 재검토, now at `version`. */
 function leeConflict(expected: number, version: number) {
@@ -116,6 +116,23 @@ describe("Z expects the version the verdict wrote (review P1-1)", () => {
     expect(useVerdictUndo.getState().entries.at(-1)?.written).toEqual([1]);
     expect(await runCommand("review.undo")).toEqual({ ok: true });
     expect(bodies[1]).toMatchObject({ status: "unreviewed", targets: [{ expected_version: 1 }] });
+  });
+
+  it("names the verdict it undoes (undo_of_version), so the history records an undo (re-review P2)", async () => {
+    server();
+    await runCommand("review.mark.excluded");
+    await runCommand("review.undo");
+    expect(bodies[0]?.targets[0]?.undo_of_version).toBeUndefined();
+    expect(bodies[1]?.targets[0]).toMatchObject({ expected_version: 1, undo_of_version: 1 });
+  });
+
+  it("내 판정으로 바꾸기 on a Z conflict still says it is an undo", async () => {
+    server({ 2: leeConflict(1, 2) });
+    await runCommand("review.mark.relevant");
+    const undo = runCommand("review.undo");
+    await answerPrompt("mine");
+    expect(await undo).toEqual({ ok: true });
+    expect(bodies[2]?.targets[0]).toMatchObject({ expected_version: 2, undo_of_version: 1 });
   });
 
   it("someone changed the row since: 409, 그대로 두기 leaves it, says so, and the entry is gone", async () => {
