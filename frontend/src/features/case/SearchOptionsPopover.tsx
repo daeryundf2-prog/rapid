@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type RefObject, useId, useRef, useState } from "react";
 import { ensureCaseDb, saveSearch } from "../../api/caseDb";
 import { listKeywordPacks, SEARCH_SOURCES } from "../../api/keywordPacks";
+import { listQuestionPacks } from "../../api/questionPacks";
 import { Popover } from "../../components/Popover";
 import { Icon } from "../../icons";
 import { ErrorText } from "./ErrorText";
@@ -74,8 +75,12 @@ export function SearchOptionsPopover({
   const keywords = useSearchState((s) => s.keywords);
   const patch = useSearchState((s) => s.patchOptions);
   const reset = useSearchState((s) => s.resetOptions);
+  const applyQuestion = useSearchState((s) => s.applyQuestion);
   const [saveName, setSaveName] = useState("");
+  const [chosenId, setChosenId] = useState("");
   const packs = useQuery({ queryKey: ["keyword-packs"], queryFn: listKeywordPacks, retry: false });
+  const questions = useQuery({ queryKey: ["question-packs"], queryFn: listQuestionPacks, retry: false });
+  const chosenQuestion = questions.data?.packs.find((pack) => pack.id === chosenId);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -113,6 +118,38 @@ export function SearchOptionsPopover({
       align="end"
       className="search-options-popover"
     >
+      <div className="case-field">
+        <label htmlFor="so-question">질문으로 시작</label>
+        <select
+          id="so-question"
+          value={chosenId}
+          onChange={(e) => {
+            setChosenId(e.target.value);
+            const chosen = questions.data?.packs.find((pack) => pack.id === e.target.value);
+            if (chosen) applyQuestion(chosen);
+          }}
+        >
+          <option value="">질문 고르기…</option>
+          {questions.data?.categories.map((category) => (
+            <optgroup key={category} label={category}>
+              {questions.data?.packs
+                .filter((pack) => pack.category === category)
+                .map((pack) => (
+                  <option key={pack.id} value={pack.id}>
+                    {pack.question}
+                  </option>
+                ))}
+            </optgroup>
+          ))}
+        </select>
+        {questions.isError && <span className="case-error">질문 팩을 불러오지 못했습니다.</span>}
+        {chosenQuestion ? (
+          <p className="case-reason">
+            {chosenQuestion.note || "질문의 키워드를 검색어로 넣었습니다."} 검색어{" "}
+            {chosenQuestion.expanded_keywords.length}개.
+          </p>
+        ) : null}
+      </div>
       <div className="case-field">
         <label htmlFor="so-mode">검색 방식</label>
         <select

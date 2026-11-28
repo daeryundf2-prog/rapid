@@ -29,6 +29,7 @@ from ...core.keyword_packs import (
     keyword_pack_library_assessment,
     list_keyword_packs,
 )
+from ...core.question_packs import QuestionPackError, question_pack_catalog
 from ...core.visible_capabilities import build_visible_capability_response
 from .models import (
     CollectPlanRequest,
@@ -177,6 +178,15 @@ def build_meta_router(store: RunJobStore | None = None) -> APIRouter:
             "packs": list_keyword_packs(),
             "keyword_pack_library_assessment": keyword_pack_library_assessment(),
         }
+
+
+    @router.get("/api/question-packs")
+    def question_packs() -> dict[str, object]:
+        """수사관 질문 → 검색 조건 카탈로그 (내장 + 사용자 파일)."""
+        try:
+            return {"command": "question-packs", **question_pack_catalog()}
+        except QuestionPackError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
 
     @router.post("/api/collect/plan")
