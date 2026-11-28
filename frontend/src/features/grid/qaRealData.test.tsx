@@ -291,23 +291,20 @@ describe("pressed review toggles clear the mark (4)", () => {
       </>,
     );
     act(() => setViewerTarget(target({ sourcePath: row.sourcePath, ref: row.ref }), row));
-    // 재검토 lives in the viewer's review 더보기 menu (visual-polish S6) as a checked item.
+    // 재검토 is a header verdict button with its key (F20); pressed = this row is 재검토.
     const item = () => {
-      if (!document.querySelector('[data-command="viewer.mark.needs-review"]'))
-        fireEvent.click(screen.getByRole("button", { name: "더보기" }));
-      const el = document.querySelector<HTMLElement>('[data-command="viewer.mark.needs-review"]');
-      if (!el) throw new Error("no menu item");
+      const el = document.querySelector<HTMLElement>('.viewer-verdict[data-status-button="needs-review"]');
+      if (!el) throw new Error("no verdict button");
       return el;
     };
     const button = await waitFor(item);
-    expect(button.getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByTestId("viewer-review-status").getAttribute("aria-label")).toBe("리뷰 상태: 재검토");
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByTestId("viewer-review-status")).toBeNull();
     fireEvent.click(button);
     await waitFor(() => expect(calls.some((c) => c.url.pathname.endsWith("review-batch"))).toBe(true));
     const post = calls.find((c) => c.url.pathname.endsWith("review-batch"));
     expect(JSON.parse(String(post?.init?.body))).toMatchObject({ status: "unreviewed" });
-    await waitFor(() => expect(item().getAttribute("aria-checked")).toBe("false"));
-    expect(screen.getByTestId("viewer-review-status").getAttribute("aria-label")).toBe("리뷰 상태: 미검토");
+    await waitFor(() => expect(item().getAttribute("aria-pressed")).toBe("false"));
   });
 
   it("the grid overlay and optimistic patch clear the status", () => {

@@ -92,12 +92,20 @@ function hasCommandModifier(shortcut: string): boolean {
   return shortcut.startsWith("Ctrl+") || shortcut.startsWith("Alt+");
 }
 
+const ALT_LETTER = /^Alt\+(Shift\+)?[A-Z]$/;
+
 /**
  * Global keys that still act while focus is inside a modal dialog: Escape (close) and
  * Ctrl+K (the palette toggles itself closed). Everything else — stage switches (Alt+1~5),
  * view switches, viewer history — would act on the page behind the dialog.
  */
 const MODAL_SAFE_SHORTCUTS: ReadonlySet<string> = new Set(["Escape", "Ctrl+K"]);
+
+/**
+ * Keys whose "cannot run now" is not news: Esc with nothing to close, J / K where no row list is
+ * mounted (a tree, a derived graph handle their own J / K).
+ */
+const SILENT_WHEN_DISABLED: ReadonlySet<string> = new Set(["Escape", "J", "K"]);
 
 /**
  * Route one keydown to its command. Returns true when a command claimed the
@@ -123,9 +131,12 @@ export function dispatchShortcut(event: KeyboardEvent): boolean {
     if (isTextEntry(target)) return false;
     if ((shortcut === "Enter" || shortcut === "Space") && isInteractiveTarget(target)) return false;
   }
+  // macOS Option+letter types a character (å ß †): Alt+letter keys never fire inside text entry
+  // (review P3-1). Alt+digit / Alt+arrows still do.
+  if (ALT_LETTER.test(shortcut) && isTextEntry(target)) return false;
 
   event.preventDefault();
-  void runCommand(command.id, { silentWhenDisabled: shortcut === "Escape" });
+  void runCommand(command.id, { silentWhenDisabled: SILENT_WHEN_DISABLED.has(shortcut) });
   return true;
 }
 
@@ -148,8 +159,8 @@ export function useShortcuts(): void {
 export const KEY_DESCRIPTIONS: Record<keyof typeof KEY_MAP, string> = {
   palette: "명령 팔레트 열기",
   gridFilter: "그리드 필터로 이동",
-  rowDown: "다음 행",
-  rowUp: "이전 행",
+  rowDown: "다음 행 (뷰어에 포커스가 있어도 표의 행이 넘어갑니다)",
+  rowUp: "이전 행 (뷰어에 포커스가 있어도 표의 행이 넘어갑니다)",
   openViewer: "뷰어로 이동 (좁은 화면에서는 뷰어 열기)",
   toggleSelect: "행 선택/해제",
   markRelevant: "관련 있음 표시",
@@ -159,7 +170,7 @@ export const KEY_DESCRIPTIONS: Record<keyof typeof KEY_MAP, string> = {
   viewerBack: "뷰어 이전 항목",
   viewerForward: "뷰어 다음 항목",
   help: "단축키 도움말",
-  close: "닫기",
+  close: "닫기 (뷰어에서는 표의 같은 행으로 돌아가기)",
   viewColumns: "열 보기",
   viewThumbnails: "썸네일 보기",
   viewChat: "대화 보기",
@@ -182,6 +193,11 @@ export const KEY_DESCRIPTIONS: Record<keyof typeof KEY_MAP, string> = {
   timelinePrev: "타임라인: 같은 폭의 이전 구간",
   timelineNext: "타임라인: 같은 폭의 다음 구간",
   timelineZoomOut: "타임라인: 범위 넓히기 (3배)",
+  undoVerdict:
+    "직전 판정을 되돌림 — 이전 판정을 다시 적용하고 작업자는 되돌린 사람으로 기록. 되돌리기 목록은 이 탭에만 있고 새로고침하면 사라짐",
+  pivotTimeline: "피벗: 타임라인 ±5분",
+  pivotTarget: "피벗: 같은 대상",
+  pivotSource: "피벗: 같은 원본 파일",
 };
 
 /** Apple platform (review #14): only there does Ctrl+K read as the ⌘ glyph. */

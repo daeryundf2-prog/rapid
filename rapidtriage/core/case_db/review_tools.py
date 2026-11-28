@@ -28,6 +28,7 @@ from .review_schema import (
     normalize_tag_name,
     tag_names_for_ids,
 )
+from .review_undo import history_undo_select_sql
 from .schema import artifact_row_data_json
 
 __all__ = [
@@ -729,9 +730,13 @@ def hash_propagation_targets(
 def review_mark_history_entries(
     connection: sqlite3.Connection, case_id: str, target_type: str, target_id: str, *, limit: int = 200
 ) -> list[dict[str, object]]:
-    """A mark's change history, newest first: author, time, changed fields, note/tags before and after."""
+    """A mark's change history, newest first: author, time, changed fields, note/tags before and after.
+
+    A Z (undo) write says so: ``kind`` ``"undo"``, the ``undone_version`` it put back and that
+    version's ``undone_reviewer``; ``kind`` is ``""`` for every other write."""
     rows = connection.execute(
-        "SELECT version, changed_at, actor, changed_fields_json, previous_json, current_json "
+        "SELECT version, changed_at, actor, changed_fields_json, previous_json, current_json, "
+        f"{history_undo_select_sql(connection)} "
         "FROM review_mark_history WHERE case_id = ? AND target_type = ? AND target_id = ? "
         "ORDER BY version DESC LIMIT ?",
         (case_id, target_type, target_id, limit),
@@ -761,6 +766,9 @@ def review_mark_history_entries(
                 "tags_after": list(current.get("tags") or []),
                 "status_before": str(previous.get("status") or ""),
                 "status_after": str(current.get("status") or ""),
+                "kind": str(row[6] or ""),
+                "undone_version": int(row[7]) if row[7] is not None else None,
+                "undone_reviewer": str(row[8] or ""),
             }
         )
     return entries

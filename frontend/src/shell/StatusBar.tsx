@@ -5,12 +5,15 @@ import type { RunWithProgress } from "../api/runsProgress";
 import { runDisplayName } from "../app/collections";
 import { CommandButton } from "../commands/CommandButton";
 import { StatusBadge, statusLabel } from "../components/Badge";
+import { MenuButton } from "../components/MenuButton";
 import "../components/status.css";
+import { Icon } from "../icons";
 import { serializeRoute } from "../router";
 import { useRuns, useTimezone } from "../state/hooks";
 import { isRunActive } from "../state/slices/runs";
 import { useAppStore } from "../state/store";
 import { tzOffsetLabel } from "../utils/time";
+import { ContextHint } from "./ContextHint";
 import { Slot } from "./slots";
 
 const NOTICE_MS = 6000;
@@ -252,6 +255,34 @@ export function TimezoneControl() {
   );
 }
 
+/**
+ * Narrow windows (F22): the timezone moves behind one small menu so the run status and the
+ * error count keep their room; the trigger still names the zone ("UTC+09:00").
+ */
+export function TimezoneMenu() {
+  const { timezone, setTimezone } = useTimezone();
+  const known = TZ_OPTIONS.some(([value]) => value === timezone);
+  const options: ReadonlyArray<[string, string]> = known ? TZ_OPTIONS : [[timezone, timezone], ...TZ_OPTIONS];
+  return (
+    <span className="status-tz-menu" data-testid="status-tz-menu">
+      <MenuButton
+        label={`표시 시간대: ${tzOffsetLabel(timezone)}`}
+        triggerClassName="button ghost status-tz-trigger"
+        placement="above"
+        items={options.map(([value, label]) => ({
+          id: value,
+          label,
+          checked: value === timezone,
+          onSelect: () => setTimezone(value),
+        }))}
+      >
+        <Icon name="clock" />
+        <span>{tzOffsetLabel(timezone).replace(/^UTC/, "")}</span>
+      </MenuButton>
+    </span>
+  );
+}
+
 /** Bottom status bar (plan U8): run progress, cancel/retry, connection, last command notice. */
 export function StatusBar() {
   const { runs, runsStatus, currentRun } = useRuns();
@@ -276,8 +307,11 @@ export function StatusBar() {
         <span>실행 중 런 {activeCount}건</span>
       ) : null}
       <Slot name="status-extra" />
+      {/* 지금 어디 · 판정 대상 · 쓸 수 있는 키 (F15); it yields first when the bar is narrow. */}
+      <ContextHint />
       <span className="statusbar-spacer" />
       <TimezoneControl />
+      <TimezoneMenu />
       <StatusSep />
       <span className="status-connection-wrap">
         <span

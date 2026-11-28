@@ -14,7 +14,8 @@ import { dispatchShortcut } from "../shortcuts";
 import { resetAppStore, useAppStore } from "../state/store";
 import { caseCommands, NO_RUN_REASON, ROWS_FOR_SOURCE_INTAKE_REASON } from "./builtin";
 import { registerCommands, resetCommandRegistry, runCommand } from "./registry";
-import { NO_ROW_REASON, reviewCommands } from "./review";
+import { reviewCommands } from "./review";
+import { NO_ROW_REASON } from "./verdict";
 
 const s = () => useAppStore.getState();
 const target = (locator: string): ViewerTarget => ({

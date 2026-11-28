@@ -8,6 +8,7 @@
  */
 
 import type { GridRow } from "../../contracts/collection";
+import { KEY_MAP } from "../../contracts/command";
 import type { Route } from "../../router";
 import { flatValue } from "../../utils/flatValue";
 import { shiftIso } from "../../utils/time";
@@ -40,19 +41,27 @@ export const PIVOT_LABELS: Record<PivotId, string> = {
   "same-user": "같은 사용자/SID",
   "same-logon": "같은 로그온 ID",
   "same-hash": "같은 해시",
-  "same-target": "같은 대상 경로/실행 파일",
+  "same-target": "같은 대상",
   "same-key": "같은 레지스트리 키",
-  "same-source": "같은 출처 파일",
+  "same-source": "같은 원본 파일",
   "timeline-window": "타임라인 ±5분",
   "matched-event": "탐지 → 원 이벤트 열기",
   "source-artifact": "원본 아티팩트 열기",
+};
+
+/** The three pivots of the viewer's 함께 볼 것 strip, in strip order, each with its key (F19). */
+export const STRIP_PIVOTS: readonly PivotId[] = ["timeline-window", "same-target", "same-source"];
+export const PIVOT_SHORTCUTS: Partial<Record<PivotId, string>> = {
+  "timeline-window": KEY_MAP.pivotTimeline,
+  "same-target": KEY_MAP.pivotTarget,
+  "same-source": KEY_MAP.pivotSource,
 };
 
 const REASONS: Record<PivotId, string> = {
   "same-user": "이 레코드에 사용자 SID나 사용자 이름이 없습니다.",
   "same-logon": "이 레코드에 로그온 ID가 없습니다.",
   "same-hash": "이 레코드에 파일 해시(SHA-256/SHA-1)가 없습니다.",
-  "same-target": "이 레코드에 대상 경로나 실행 파일이 없습니다.",
+  "same-target": "이 레코드에 대상(경로·실행 파일·URL)이 없습니다.",
   "same-key": "이 레코드에 레지스트리 키 경로가 없습니다.",
   "same-source": "원본 파일 경로가 없는 행입니다.",
   "timeline-window": "이 레코드에 해석할 수 있는 시각이 없습니다.",
@@ -99,6 +108,9 @@ const TARGET_KEYS = [
   "referenced_path",
   "executable_hint",
   "command",
+  // Web records (browser history, downloads): the visited / downloaded URL is the target.
+  "url",
+  "download_url",
 ];
 const KEY_KEYS = ["key", "key_path", "source_key_path"];
 const TIME_KEYS = [
@@ -212,8 +224,18 @@ function matchedEventRoute(row: GridRow, runId: string, fields: Record<string, u
   return null;
 }
 
-export function recordPivots(row: GridRow | null, runId: string, tz?: string): Pivot[] {
-  const fields = layoutFields(row);
+/**
+ * `decoded`: the artifact record a timeline event points at (sourceRecord.ts), when loaded — its
+ * fields (URL, user, hash …) fill the value pivots the list-view event row cannot; the event's own
+ * time and source file still drive ±5분 and 같은 원본 파일.
+ */
+export function recordPivots(
+  row: GridRow | null,
+  runId: string,
+  tz?: string,
+  decoded?: GridRow | null,
+): Pivot[] {
+  const fields = decoded ? { ...layoutFields(decoded), ...layoutFields(row) } : layoutFields(row);
   const details = row && isRecord(row.fields.details) ? row.fields.details : {};
   const isDetail = (key: string) => Object.hasOwn(details, key);
   const make = (id: PivotId, found: { key: string; value: string; route: Route | null } | null): Pivot =>
@@ -246,7 +268,16 @@ export function recordPivots(row: GridRow | null, runId: string, tz?: string): P
     (row.ref.collection === "files" && row.sha256
       ? { key: "sha256", value: row.sha256, route: valueRoute(row, runId, "sha256", row.sha256, false) }
       : null);
-  const target = valuePivot(TARGET_KEYS);
+  // 같은 대상 is run-wide (F19): every source mentioning the target (timeline, artifacts, documents),
+  // so the strip's count and the list it opens are the same search.
+  const targetHit = firstKey(fields, TARGET_KEYS);
+  const target = targetHit
+    ? {
+        key: targetHit[0],
+        value: targetHit[1],
+        route: valueRoute(row, runId, targetHit[0], targetHit[1], false),
+      }
+    : null;
   const regKey = valuePivot(KEY_KEYS);
   const source = row.sourcePath
     ? {
@@ -292,4 +323,11 @@ export function recordPivots(row: GridRow | null, runId: string, tz?: string): P
       sourceArtifact ? { key: "sourceRecord", value: "", route: sourceArtifact } : null,
     ),
   ];
+}
+
+/** The record's target (path / executable / URL): the 대상 line of the viewer's detail head. */
+export function recordTargetValue(row: GridRow | null, decoded?: GridRow | null): string | null {
+  if (!row) return null;
+  const fields = decoded ? { ...layoutFields(decoded), ...layoutFields(row) } : layoutFields(row);
+  return firstKey(fields, TARGET_KEYS)?.[1] ?? null;
 }

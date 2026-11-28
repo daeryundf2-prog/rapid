@@ -13,6 +13,7 @@ import { MiddlePath } from "../../components/MiddlePath";
 import type { Command } from "../../contracts/command";
 import type { MarkAction, ViewerMode, ViewerTarget } from "../../contracts/viewer";
 import { Icon } from "../../icons";
+import { useAppStore } from "../../state/store";
 import { resolveCaseLink } from "../case/caseLink";
 import { FlagBanner } from "../flags/FlagCell";
 import { currentTimezone } from "../grid/columns/common";
@@ -42,11 +43,15 @@ import {
   writeClipboard,
 } from "./commands";
 import { targetKey } from "./history";
-import { ModeTabs, panelId, tabId, VIEWER_PANEL_ID } from "./ModeTabs";
+import { ModeTabs, panelId, tabId, tabModes, VIEWER_PANEL_ID } from "./ModeTabs";
 import { resolveModes } from "./modes";
+import { PivotStrip } from "./PivotStrip";
 import { POPOUT_COMMAND_ID } from "./popout/host";
+import { RecordHead } from "./RecordHead";
 import { recordByteRange } from "./record";
+import { hasRecordHead, type RecordOpen, recordHeadModel } from "./recordHeadModel";
 import { viewerSession } from "./session";
+import { useSourceRecord } from "./sourceRecord";
 import { errorText, useAsync } from "./useAsync";
 import { ViewerBody } from "./ViewerBody";
 import { ViewerToolbar } from "./ViewerToolbar";
@@ -196,7 +201,10 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
       ? userMode.mode
       : null;
   const activeMode: ViewerMode = userChoice ?? best ?? target?.preferredMode ?? "meta";
-  const hasActiveTab = modes.some((m) => m.mode === activeMode);
+  // Record first (F18): artifact rows and events with a source record list 메타 before hex.
+  const recordFirst = target?.ref.collection === "artifacts" || target?.preferredMode === "meta";
+  const tabs = tabModes(modes, recordFirst);
+  const hasActiveTab = tabs.some((m) => m.mode === activeMode);
   const selectMode = useCallback(
     (mode: ViewerMode) => {
       if (key) setUserMode({ key, mode });
@@ -404,6 +412,33 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
   };
 
   const busy = previewState.status === "loading";
+
+  // 레코드 요약 (F18): decoded-record rows open on 대상 · 시각 의미 · 증거 · 원본 위치.
+  const sourceRecord = useSourceRecord(row, target?.runId ?? null);
+  const headModel =
+    target && row && hasRecordHead(row, target.runId)
+      ? recordHeadModel(
+          row,
+          sourceRecord?.row ?? null,
+          target,
+          currentTimezone(),
+          modes.some((m) => m.mode === "sqlite" && m.available),
+        )
+      : null;
+  const citeCommand = byId(VIEWER_COMMAND_IDS.cite);
+  const openRecordLocation = (open: RecordOpen) => {
+    if (!target) return;
+    if (open.kind === "route") {
+      useAppStore.getState().navigate(open.route);
+      return;
+    }
+    const highlight =
+      open.kind === "hex"
+        ? { offset: open.offset, ...(open.length !== undefined ? { length: open.length } : {}) }
+        : { table: open.table, ...(open.rowid !== undefined ? { rowid: open.rowid } : {}) };
+    setViewerTarget({ ...target, highlight }, row);
+    selectMode(open.kind);
+  };
   const title = target ? targetTitle(target, preview, row) : "원본 뷰어";
 
   return (
@@ -494,10 +529,21 @@ export function Viewer({ drawer = false }: { drawer?: boolean } = {}) {
       {/* 특이사항 (U-F4): the row's flags with their evidence, above the tabs (every mode). */}
       {/* Keyed by row: each row starts with its own default (open for A), never the last row's toggle. */}
       <FlagBanner key={row?.rowKey ?? key ?? "none"} row={row} />
-      <ModeTabs modes={modes} active={activeMode} onSelect={selectMode} />
+      {/* 함께 볼 것 (F19): ±5분 · 같은 대상 · 같은 원본 파일 with counts and keys. */}
+      {target && row && headModel ? (
+        <RecordHead
+          model={headModel}
+          target={target}
+          row={row}
+          cite={{ reason: citeCommand.disabledReason?.(ctx), run: () => runCommand(citeCommand) }}
+          onOpen={openRecordLocation}
+        />
+      ) : null}
+      {target ? <PivotStrip row={row} runId={target.runId} /> : null}
+      <ModeTabs modes={modes} active={activeMode} onSelect={selectMode} recordFirst={recordFirst} />
       {/* Inactive modes get an empty, hidden panel so every tab's aria-controls resolves to a
           tabpanel labelled by that tab; only the active mode renders content. */}
-      {modes
+      {tabs
         .filter((m) => m.mode !== activeMode)
         .map((m) => (
           <div

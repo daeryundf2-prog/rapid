@@ -25,6 +25,7 @@ import { useAppStore } from "../state/store";
 import { CANCEL_ALL_CONFIRM, confirmAction, NO_RUN_REASON } from "./reasons";
 import { registerCommands } from "./registry";
 import { reviewCommands } from "./review";
+import { focusInViewer } from "./verdict";
 
 export { NO_RUN_REASON };
 
@@ -304,9 +305,14 @@ export function appCommands(): Command[] {
       group: "app",
       shortcut: "Escape",
       icon: "close",
-      disabledReason: () => (topOverlay(store()) ? undefined : "닫을 창이 없습니다"),
+      // With nothing open, Esc in the (wide) viewer goes back to the same grid row (F17).
+      disabledReason: () => (topOverlay(store()) || focusInViewer() ? undefined : "닫을 창이 없습니다"),
       run: () => {
         const top = topOverlay(store());
+        if (!top) {
+          focusMain();
+          return;
+        }
         // The tree drawer hands focus back to its toggle, the viewer drawer to the page.
         if (top === "treeDrawer") closeTreeDrawer();
         else store().closeTopOverlay();

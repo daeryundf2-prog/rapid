@@ -616,12 +616,13 @@ kbd {
   padding: 0 var(--space-2);
 }
 
+/* The run facts never clip (F22): id, status and 오류 n stay whole; only the plan text yields. */
 .status-run {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  flex: 0 1 auto;
   min-width: 0;
-  overflow: hidden;
 }
 
 /* One run fact group ("런 … · 완료 · 오류 0"), then the run actions behind a divider. */
@@ -629,6 +630,15 @@ kbd {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
+}
+
+.status-group > * {
+  flex: none;
+}
+
+.status-group > .status-text {
+  flex: 0 1 auto;
   min-width: 0;
 }
 
@@ -686,6 +696,162 @@ kbd {
 
 .status-connection.error {
   color: var(--danger);
+}
+
+.status-connection-wrap,
+.status-tz,
+.status-tz-menu {
+  flex: none;
+}
+
+/* 지금 어디 · 판정 대상 · 쓸 수 있는 키 (F15): yields first, its keys clip at the end. */
+.status-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--line-subtle);
+}
+
+/* The hint itself fills the bar's middle; the spacer after it is not needed while it shows. */
+.status-hint + .statusbar-spacer {
+  flex: none;
+}
+
+.status-hint > * {
+  flex: none;
+}
+
+.status-hint-where {
+  color: var(--text);
+}
+
+.status-hint-scope strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.status-hint-keys {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.status-hint-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.status-hint-key > span {
+  margin-left: var(--space-1);
+}
+
+.status-hint kbd {
+  min-width: 1.4em;
+  padding: 0 var(--space-1);
+  line-height: 1.3;
+  font-size: var(--fs-aux);
+}
+
+/* The timezone menu only replaces the inline select on narrow bars (F22). */
+.status-tz-menu {
+  display: none;
+}
+
+.statusbar .status-tz-trigger {
+  gap: var(--space-1);
+  height: 22px;
+  padding: 0 var(--space-1);
+  color: var(--text);
+  font: inherit;
+}
+
+@media (max-width: 1023.98px) {
+  .status-hint-keys {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .statusbar .status-hint,
+  .statusbar .status-tz,
+  .status-progress,
+  .status-run .status-text,
+  .status-run [data-testid="run-plan-open"] {
+    display: none;
+  }
+
+  .status-hint + .statusbar-spacer {
+    flex: 1;
+  }
+
+  .statusbar .status-tz-menu {
+    display: inline-flex;
+  }
+
+  .statusbar {
+    gap: var(--space-2);
+    padding: 0 var(--space-2);
+  }
+}
+
+/* Key caps on buttons (F15): the key that runs the same command, always visible (commands/CommandButton KeyCap). */
+.keycap {
+  display: inline-block;
+  min-width: 1.5em;
+  margin-left: var(--space-1);
+  padding: 0 var(--space-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-aux);
+  font-weight: 400;
+  line-height: 1.35;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* A filled (pressed / primary) button keeps the cap readable on its own surface. */
+[aria-pressed="true"] > .keycap,
+.button.primary > .keycap {
+  color: var(--text);
+}
+
+/* ? help: 판정 후 이동 setting (F17), one row of radios above the key table. */
+.help-advance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.help-advance legend {
+  float: left;
+  margin-right: var(--space-2);
+  padding: 0;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.help-advance label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  cursor: pointer;
 }
 
 /* --- overlays: palette, help, drawer --------------------------------------- */

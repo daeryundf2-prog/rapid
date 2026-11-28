@@ -4,7 +4,7 @@
 
 import type { GridRow } from "../../contracts/collection";
 import type { MarkAction, ViewerTarget } from "../../contracts/viewer";
-import { evidenceTime } from "../../utils/time";
+import { type EvidenceTime, evidenceTime } from "../../utils/time";
 import { timestampKindLabel } from "../../utils/timeKinds";
 import { caseCitationParts } from "../case/caseLink";
 import { derivedOriginOf } from "../derived/store";
@@ -58,17 +58,30 @@ export function recordCitationParts(row: GridRow | null | undefined, tz: string)
     }
   }
   if (typeof fields.record_sha256 === "string") parts.push(`레코드 sha256=${fields.record_sha256}`);
+  const time = recordTime(row, tz);
+  if (time) parts.push(`시각=${time.kind ? `${time.kind}: ` : ""}${time.reading.text}`);
+  return parts;
+}
+
+/**
+ * The record's own time and what it means ("마지막 방문", "생성"): the core time field of the
+ * record sheet, else the row time with its `timestamp_kind`; null when nothing parses.
+ */
+export function recordTime(
+  row: GridRow | null | undefined,
+  tz: string,
+): { kind: string; reading: EvidenceTime } | null {
+  if (!row) return null;
+  const fields = layoutFields(row);
   const layout = recordLayout(row);
   const entry = layout.core.find((e) => e.format === "time" && evidenceTime(scalarOf(e.raw), tz) !== null);
   const value = entry ? scalarOf(entry.raw) : row.timestamp;
   const reading = evidenceTime(value, tz);
-  if (reading) {
-    const own = entry?.key === "timestamp" ? (fields.timestamp_kind ?? fields.timestamp_label) : undefined;
-    const kind = typeof own === "string" && own ? own : (entry?.timeKind ?? "");
-    const kindText = kind ? `${entry?.label ?? timestampKindLabel(kind)}: ` : "";
-    parts.push(`시각=${kindText}${reading.text}`);
-  }
-  return parts;
+  if (!reading) return null;
+  const own =
+    !entry || entry.key === "timestamp" ? (fields.timestamp_kind ?? fields.timestamp_label) : undefined;
+  const kind = typeof own === "string" && own ? own : (entry?.timeKind ?? "");
+  return { kind: kind ? (entry?.label ?? timestampKindLabel(kind)) : "", reading };
 }
 
 function scalarOf(value: unknown): string | number | null {

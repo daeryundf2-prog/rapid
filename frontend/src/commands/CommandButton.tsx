@@ -3,6 +3,20 @@ import { Icon, isIconName } from "../icons";
 import { keyLabel } from "../shortcuts";
 import { useCommandState } from "./registry";
 
+/**
+ * The visible key cap of a button whose command has a key (F15): the one place the batch bar,
+ * the viewer header and command buttons print "R" / "Z" next to their text. aria-hidden — the
+ * button's aria-keyshortcuts carries the key for assistive technology.
+ */
+export function KeyCap({ shortcut }: { shortcut: string | undefined }) {
+  if (!shortcut) return null;
+  return (
+    <span className="keycap" aria-hidden="true">
+      {keyLabel(shortcut)}
+    </span>
+  );
+}
+
 export interface CommandButtonProps {
   /** Registered command id. */
   command: string;
@@ -64,6 +78,7 @@ export function CommandButton({
       >
         {cmd?.icon && isIconName(cmd.icon) ? <Icon name={cmd.icon} /> : null}
         {iconOnly ? null : <span>{text}</span>}
+        {iconOnly ? null : <KeyCap shortcut={cmd?.shortcut} />}
       </button>
     </DisabledReason>
   );

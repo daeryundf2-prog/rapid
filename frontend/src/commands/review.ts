@@ -1,10 +1,11 @@
 /**
- * Review keys (plan U5): R / X / I / B mark, 1–5 priority tags. One command
- * per key; each applies to the row in context — the viewer target when the
- * viewer has focus, otherwise the grid's focused row (the viewer target
- * follows grid focus). All marks go through the single shared implementation
- * `applyReviewAction` (features/grid/reviewActions.ts), the same code the grid
- * batch bar and the viewer toolbar use.
+ * Review keys (plan U5, design-viewer-keys F17): R / X / I / B give a verdict, Z undoes the last
+ * one, J / K move the list's row (also while the viewer has focus), 1–9 tag keys.
+ *
+ * R / X / I / B act on `reviewScope()` (commands/verdict.ts): every selected row when two or
+ * more are selected, else the viewer's row (which follows the grid's focused row). The batch bar,
+ * the row menu and the viewer header buttons run these same commands, and the status-bar hint
+ * names the same scope, so what is announced is what is marked.
  */
 
 import type { QueryClient } from "@tanstack/react-query";
@@ -13,6 +14,7 @@ import type { CaseTag } from "../api/reviewTools";
 import { type Command, KEY_MAP } from "../contracts/command";
 import type { MarkAction, ViewerTarget } from "../contracts/viewer";
 import { applyReviewAction, type BatchAction, storeNotice } from "../features/grid/reviewActions";
+import { currentRowSource } from "../features/review/rowSource";
 import {
   resolveTagKey,
   TAG_KEY_DIGITS,
@@ -24,8 +26,19 @@ import { markDisabledReason, targetAsGridRow } from "../features/viewer/citation
 import { useAppStore } from "../state/store";
 import { NO_RUN_REASON } from "./reasons";
 import { relabelCommand } from "./registry";
+import {
+  ADVANCE_LABELS,
+  ADVANCE_MODES,
+  focusInViewer,
+  NO_ROW_REASON,
+  runVerdict,
+  UNLOADED_END,
+  undoDisabledReason,
+  undoLastVerdict,
+  useVerdictPrefs,
+  verdictDisabledReason,
+} from "./verdict";
 
-export const NO_ROW_REASON = "표시할 행이 없습니다. 그리드에서 행을 선택하세요";
 export const PRIORITY_LEVELS = [1, 2, 3, 4, 5] as const;
 
 export const priorityTag = (level: number) => `우선순위 ${level}`;
@@ -38,7 +51,7 @@ const MARKS: ReadonlyArray<{ action: MarkAction; label: string; shortcut?: strin
   { action: "include-in-report", label: "보고서 포함 표시" },
 ];
 
-/** The row the keys act on (see module comment). */
+/** The row the tag keys act on: the viewer target (it follows grid focus). */
 export function reviewTarget(): ViewerTarget | null {
   return useAppStore.getState().viewerTarget;
 }
@@ -48,6 +61,60 @@ function reasonFor(action: MarkAction, runId: string | null): string | undefined
   const target = reviewTarget();
   if (!target) return NO_ROW_REASON;
   return markDisabledReason(target, action);
+}
+
+export const NO_LIST_REASON = "행 목록이 열려 있지 않습니다";
+
+/** J / K as commands: the grid handles them on its own rows; these serve focus elsewhere (the viewer). */
+function rowStepCommand(step: 1 | -1): Command {
+  return {
+    id: step === 1 ? "navigate.row.next" : "navigate.row.prev",
+    label: step === 1 ? "다음 행" : "이전 행",
+    group: "navigate",
+    shortcut: step === 1 ? KEY_MAP.rowDown : KEY_MAP.rowUp,
+    icon: step === 1 ? "chevron-down" : "chevron-up",
+    disabledReason: () => (currentRowSource()?.moveFocus ? undefined : NO_LIST_REASON),
+    run: () => {
+      // From the viewer the viewer keeps focus (it follows the new row); elsewhere focus lands on the row.
+      const moved = currentRowSource()?.moveFocus?.({ step, domFocus: !focusInViewer() });
+      if (moved === "end") announce(step === 1 ? "마지막 행입니다" : "첫 행입니다");
+      if (moved === "unloaded") announce(UNLOADED_END);
+    },
+  };
+}
+
+/** Z, the advance setting and J / K (registered with the review keys). */
+export function verdictFlowCommands(queryClient: QueryClient | null): Command[] {
+  const advance = ADVANCE_MODES.map(
+    (mode): Command => ({
+      id: `review.advance.${mode}`,
+      label: `판정 후 이동: ${ADVANCE_LABELS[mode]}`,
+      group: "review",
+      icon: "chevron-down",
+      disabledReason: () =>
+        useVerdictPrefs.getState().advance === mode ? "지금 쓰는 설정입니다" : undefined,
+      run: () => {
+        useVerdictPrefs.getState().setAdvance(mode);
+        announce(`판정 후 이동: ${ADVANCE_LABELS[mode]}`);
+      },
+    }),
+  );
+  return [
+    {
+      id: "review.undo",
+      label: "판정 되돌리기",
+      group: "review",
+      shortcut: KEY_MAP.undoVerdict,
+      icon: "refresh",
+      disabledReason: (ctx) => undoDisabledReason(ctx.runId),
+      run: async () => {
+        await undoLastVerdict(queryClient);
+      },
+    },
+    ...advance,
+    rowStepCommand(1),
+    rowStepCommand(-1),
+  ];
 }
 
 /** Apply a mark or tag to the context row; refreshes cached grid pages of the run on success. */
@@ -106,6 +173,10 @@ if (typeof window !== "undefined") {
   });
 }
 
+/** Undo of a pressed verdict toggle (viewer header): status back to 미판정 / out of the report. */
+export const CLEAR_VERDICT_COMMAND = "review.clear";
+export const UNREPORT_COMMAND = "review.unreport";
+
 export function reviewCommands(queryClient: QueryClient | null): Command[] {
   const marks = MARKS.map(
     ({ action, label, shortcut }): Command => ({
@@ -114,10 +185,34 @@ export function reviewCommands(queryClient: QueryClient | null): Command[] {
       group: "review",
       shortcut,
       icon: action === "bookmark" ? "bookmark" : "flag",
-      disabledReason: (ctx) => reasonFor(action, ctx.runId),
-      run: () => applyToContextRow(queryClient, action, label),
+      disabledReason: (ctx) => verdictDisabledReason(action, ctx),
+      run: async (ctx) => {
+        await runVerdict(queryClient, action, { ctx });
+      },
     }),
   );
+  const unmarks: Command[] = [
+    {
+      id: CLEAR_VERDICT_COMMAND,
+      label: "판정 해제 (미판정으로)",
+      group: "review",
+      icon: "close",
+      disabledReason: (ctx) => verdictDisabledReason("relevant", ctx),
+      run: async (ctx) => {
+        await runVerdict(queryClient, "clear-review", { advance: false, ctx });
+      },
+    },
+    {
+      id: UNREPORT_COMMAND,
+      label: "보고서 포함 해제",
+      group: "review",
+      icon: "close",
+      disabledReason: (ctx) => verdictDisabledReason("include-in-report", ctx),
+      run: async (ctx) => {
+        await runVerdict(queryClient, "remove-from-report", { advance: false, ctx });
+      },
+    },
+  ];
   // Digit keys (AXIOM E3): the case tag bound to the digit in 태그 관리 (1–5 default: 우선순위 n).
   // Ids review.priority.1–5 are kept; 6–9 are review.tagKey.n.
   const tagKey = (level: number, id: string): Command => ({
@@ -139,5 +234,5 @@ export function reviewCommands(queryClient: QueryClient | null): Command[] {
   const extraKeys = TAG_KEY_DIGITS.filter((level) => level > PRIORITY_LEVELS.length).map((level) =>
     tagKey(level, tagKeyCommandId(level)),
   );
-  return [...marks, ...priorities, ...extraKeys];
+  return [...marks, ...unmarks, ...verdictFlowCommands(queryClient), ...priorities, ...extraKeys];
 }

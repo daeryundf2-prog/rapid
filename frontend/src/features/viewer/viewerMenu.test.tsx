@@ -75,11 +75,18 @@ describe("viewer header (review #6)", () => {
       expect(item.querySelector(".menu-item-lead")).not.toBeNull();
   });
 
-  it("shows the review status as a chip with text and the parent folder as the path line", async () => {
+  it("shows one set of verdict buttons with key caps (no duplicate status chip) and the path line", async () => {
     await showText();
-    const status = screen.getByTestId("viewer-review-status");
-    expect(status.classList.contains("status-chip")).toBe(true);
-    expect(status.textContent).toBe("미검토");
+    // F20: the duplicate status chip is gone; each verdict is one button with its key.
+    expect(screen.queryByTestId("viewer-review-status")).toBeNull();
+    const verdicts = Array.from(document.querySelectorAll<HTMLElement>(".viewer-verdict"));
+    expect(verdicts.map((b) => b.dataset.statusButton)).toEqual([
+      "relevant",
+      "needs-review",
+      "excluded",
+      "bookmark",
+    ]);
+    expect(verdicts.every((b) => b.getAttribute("aria-pressed") === "false")).toBe(true);
     const path = document.querySelector(".viewer-path .mid-path") as HTMLElement;
     expect(path.getAttribute("title")).toBe("C:\\evidence\\Users\\alice\\notes.txt");
     expect(path.textContent).toBe("C:\\evidence\\Users\\alice");

@@ -10,7 +10,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { announce, DisabledReason } from "../../a11y";
+import { KeyCap } from "../../commands/CommandButton";
 import { getCommand, runCommand } from "../../commands/registry";
+import { CLEAR_VERDICT_COMMAND } from "../../commands/review";
+import { reviewScope, verdictShortcut } from "../../commands/verdict";
 import { MenuButton, type MenuItem } from "../../components/MenuButton";
 import { STATUS_META } from "../../components/StatusChip";
 import "../../components/status.css";
@@ -43,6 +46,9 @@ import { writeClipboard } from "./commands";
 import { layoutFields } from "./fieldSheets";
 import { PARTIAL_COPY_REASON, useFullRecordStatus } from "./fullRecord";
 import { type PivotId, recordPivots } from "./pivots";
+
+/** The verdicts with a header button and a key (F20): 관련 있음 R · 재검토 I · 제외 X · 북마크 B. */
+const HEADER_VERDICTS: readonly string[] = ["relevant", "needs-review", "excluded", "bookmark"];
 
 /** Menu icons of the pivots. */
 const PIVOT_ICONS: Record<PivotId, MenuItem["icon"]> = {
@@ -268,16 +274,73 @@ export function ViewerToolbar({
   };
 
   const markOf = (command: Command) => command.id.slice(MARK_PREFIX.length);
-  const relevant = markCommands.find((command) => markOf(command) === "relevant");
-  const others = markCommands.filter((command) => markOf(command) !== "relevant");
-  const relevantReason = relevant?.disabledReason?.(ctx);
-  const relevantPressed = isPressed("relevant");
+  // 관련 있음 · 재검토 · 제외 · 북마크 are header buttons (F20); the menu keeps 보고서 포함.
+  const others = markCommands.filter((command) => !HEADER_VERDICTS.includes(markOf(command)));
+  // The keys' scope (F17): the header buttons are the same commands, so they act on the same rows.
+  const scope = reviewScope(ctx);
 
-  // The status dot: the current exclusive status, else 보고서 포함 / 북마크, else 미검토.
-  const current =
-    EXCLUSIVE.find((action) => isPressed(action)) ??
-    (isPressed("include-in-report") ? "include-in-report" : isPressed("bookmark") ? "bookmark" : null);
-  const currentLabel = current ? STATUS_META[current as keyof typeof STATUS_META].label : "미검토";
+  /**
+   * One verdict button: the shell's review.mark.* (scope, advance, Z) in the main window, the
+   * viewer's own mark command in the pop-out window. Pressed = this row has the verdict; pressing
+   * it again on this row clears it (판정 해제, also undoable with Z).
+   */
+  const verdictButton = (action: string) => {
+    const shellId = `review.mark.${action}`;
+    const shell = getCommand(shellId);
+    const own = markCommands.find((command) => markOf(command) === action);
+    const command = shell ?? own;
+    if (!command) return null;
+    const reason = command.disabledReason?.(ctx);
+    const pressed = scope.kind !== "selection" && isPressed(action);
+    const shortcut = verdictShortcut(action);
+    const label = STATUS_META[action as keyof typeof STATUS_META]?.label ?? action;
+    const onClick = () => {
+      if (!shell) {
+        run(command);
+        return;
+      }
+      const clear = pressed && unmarkActionOf(action) === "clear-review";
+      const judged = key; // the row the verdict is for (the list may move on right after)
+      void runCommand(clear ? CLEAR_VERDICT_COMMAND : shellId).then((result) => {
+        if (!result.ok || scope.kind === "selection") return;
+        setApplied((prev) => {
+          const base = prev.key === judged ? prev : { actions: [], cleared: [] };
+          if (clear) {
+            return {
+              key: judged,
+              actions: base.actions.filter((a) => !EXCLUSIVE.includes(a)),
+              cleared: EXCLUSIVE,
+            };
+          }
+          const kept = EXCLUSIVE.includes(action)
+            ? base.actions.filter((a) => !EXCLUSIVE.includes(a))
+            : base.actions;
+          return {
+            key: judged,
+            actions: [...kept, action],
+            cleared: base.cleared.filter((a) => a !== action),
+          };
+        });
+      });
+    };
+    return (
+      <DisabledReason key={action} reason={reason}>
+        <button
+          type="button"
+          className="viewer-verdict"
+          data-command={command.id}
+          data-status-button={action}
+          aria-pressed={pressed}
+          aria-keyshortcuts={shortcut}
+          title={reason ? undefined : pressed ? `${label} — 다시 누르면 판정을 해제합니다` : undefined}
+          onClick={onClick}
+        >
+          <span>{label}</span>
+          <KeyCap shortcut={shortcut} />
+        </button>
+      </DisabledReason>
+    );
+  };
 
   /** The key that marks the row (R / X / I / B): the viewer command's own, else the shell's review.mark.*. */
   const markShortcut = (command: Command, action: string) =>
@@ -382,39 +445,12 @@ export function ViewerToolbar({
   return (
     <>
       <div className="viewer-actions">
-        {relevant ? (
-          <DisabledReason reason={relevantReason}>
-            <button
-              type="button"
-              className="viewer-primary"
-              data-command={relevant.id}
-              data-status-button="relevant"
-              aria-pressed={relevantPressed}
-              title={
-                relevantReason
-                  ? undefined
-                  : relevantPressed
-                    ? "관련 있음 — 다시 누르면 해제합니다"
-                    : `${relevant.label}${relevant.shortcut ? ` (${relevant.shortcut})` : ""}`
-              }
-              onClick={() => run(relevant)}
-            >
-              {relevantPressed ? <Icon name="check" /> : <Icon name="flag" />}
-              <span>관련 있음</span>
-            </button>
-          </DisabledReason>
+        {HEADER_VERDICTS.map((action) => verdictButton(action))}
+        {scope.kind === "selection" ? (
+          <span className="viewer-scope" data-testid="viewer-verdict-scope">
+            {scope.label}에 적용
+          </span>
         ) : null}
-        {/* Status as a chip with text (review #6), not a bare dot. */}
-        <span
-          className="status-chip viewer-status"
-          data-status={current ?? undefined}
-          role="img"
-          aria-label={`리뷰 상태: ${currentLabel}`}
-          title={`리뷰 상태: ${currentLabel}`}
-          data-testid="viewer-review-status"
-        >
-          {currentLabel}
-        </span>
         <span ref={moreRef} className="viewer-actions-more">
           <MenuButton
             label="더보기"

@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as announcer from "../../a11y/announcer";
+import { NO_LOCATION_REASON, NO_ROW_REASON } from "../../commands/verdict";
 import type { GridRow } from "../../contracts/collection";
 import { useAppStore } from "../../state/store";
+import { registerRowSource } from "../review/rowSource";
 import { COLLECTIONS } from "./columns";
 import { buildRowMarkCommands, type GridCommandHost } from "./gridCommands";
 import {
@@ -273,6 +275,9 @@ describe("row-menu review commands", () => {
   };
 
   it("always exist (관련/재검토/제외/보고서/북마크) and explain why they cannot run", () => {
+    // The menu acts on the verdict scope (F17): the list's focused row when nothing is selected.
+    let focusedRow: GridRow | undefined = fileRow(1);
+    const offSource = registerRowSource({ getSelectedRows: () => [], getFocusedRow: () => focusedRow });
     const enabled = buildRowMarkCommands(host());
     expect(enabled.map((c) => c.label)).toEqual([
       "관련 있음 표시",
@@ -284,11 +289,10 @@ describe("row-menu review commands", () => {
     expect(enabled.every((c) => c.disabledReason?.(ctx) === undefined)).toBe(true);
     const noRun = buildRowMarkCommands(host({ runId: null }));
     expect(noRun[0]?.disabledReason?.(ctx)).toBe("열린 케이스가 없습니다.");
-    const noRow = buildRowMarkCommands(host({ getFocusedRow: () => undefined }));
-    expect(noRow[0]?.disabledReason?.(ctx)).toBe("행을 먼저 선택하세요.");
-    const unknown = buildRowMarkCommands(
-      host({ getFocusedRow: () => ({ ...fileRow(1), ref: { collection: "search", locator: "hit-1" } }) }),
-    );
-    expect(unknown[4]?.disabledReason?.(ctx)).toBe("출처 위치를 알 수 없는 행은 표시할 수 없습니다.");
+    focusedRow = undefined;
+    expect(enabled[0]?.disabledReason?.(ctx)).toBe(NO_ROW_REASON);
+    focusedRow = { ...fileRow(1), ref: { collection: "search", locator: "hit-1" } };
+    expect(enabled[0]?.disabledReason?.(ctx)).toBe(NO_LOCATION_REASON);
+    offSource();
   });
 });

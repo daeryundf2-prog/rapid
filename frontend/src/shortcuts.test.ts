@@ -88,6 +88,23 @@ describe("dispatchShortcut", () => {
     expect(dispatchShortcut(event)).toBe(false);
     expect(run).not.toHaveBeenCalled();
   });
+
+  it("never fires Alt+letter inside text entry (macOS Option types å ß †; review P3-1)", () => {
+    const pivot = vi.fn();
+    const stage = vi.fn();
+    registerCommand({ id: "t.pivot", label: "피벗", group: "viewer", shortcut: "Alt+A", run: pivot });
+    registerCommand({ id: "t.stage", label: "단계", group: "app", shortcut: "Alt+1", run: stage });
+    const note = document.createElement("textarea");
+    document.body.append(note);
+    const option = keydown({ key: "å", code: "KeyA", altKey: true }, note);
+    expect(dispatchShortcut(option)).toBe(false);
+    expect(option.defaultPrevented).toBe(false);
+    expect(pivot).not.toHaveBeenCalled();
+    expect(dispatchShortcut(keydown({ key: "1", code: "Digit1", altKey: true }, note))).toBe(true);
+    expect(stage).toHaveBeenCalledTimes(1);
+    expect(dispatchShortcut(keydown({ key: "å", code: "KeyA", altKey: true }))).toBe(true);
+    expect(pivot).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("help rows", () => {

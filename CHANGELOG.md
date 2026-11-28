@@ -4,6 +4,35 @@
 
 ### Added
 
+- Console verdict keys (design-viewer-keys F15–F26): R/I/X/B, the batch bar, the row menu and
+  the viewer header act on one scope (`reviewScope`: two or more selected rows, else the
+  viewer's row) that the status bar names before and announces after; after a verdict the
+  list moves on (판정 후 이동: 다음 행 · 다음 미판정 행 · 그대로, in `?` and the palette), and
+  `Z` puts the last batch back (status / report flag / tags as they were). J/K work while the
+  viewer has focus, Esc in the viewer returns to the same grid row. The status bar shows where
+  you are, the verdict scope and the keys usable now (from the command registry); grid
+  timings moved behind 진단; at 390 the run status and error count never clip and the timezone
+  sits in a menu. Viewer: four verdict buttons with key caps under a full-width title (the
+  duplicate status chip is gone), timeline events with a source record open on the record
+  (메타) first, modes the row cannot show fold into 쓸 수 없는 보기 n, the hex view fits 16 bytes
+  in the default width (character column behind 문자 열 when narrow), a 2px hex cursor and a
+  polite cursor read-out with signature/record edges; pivots ±5분 · 같은 대상 · 같은 원본 파일
+  have keys Alt+T · Alt+A · Alt+S (`frontend/src/commands/verdict.ts`).
+  Review follow-ups (#106): Z sends the version its verdict wrote as `expected_version`, so a
+  row another examiner changed since opens the conflict prompt instead of being overwritten
+  ("lee가 바꾼 n건은 그대로 둠"; the undo entry is used up either way), and a verdict saved
+  through the conflict prompt leaves a Z barrier; the advance after a verdict follows the next
+  row by key (no skipped rows on a filtered or status-sorted list); a verdict on a selection
+  judges only the rows the list shows ("숨은 선택 n건 제외"); a failed write puts the selection
+  and cursor back; "불러온 마지막 행" when the list stopped at unloaded rows; Alt+letter keys
+  never fire inside text entry; the hex read-out says "값 0x51"; the timeline 같은 원본 파일
+  count uses the list's path rule.
+  Z in the review history (#106 re-review): a Z write sends `undo_of_version` per target and its
+  `review_mark_history` row records `kind = "undo"`, `undone_version` and `undone_reviewer`
+  (schema extension, no backfill; `review-history` returns them, the review map names
+  `undo_of`); the actor stays whoever pressed Z. 메모·이력 and the 검토 보드 판정자 tooltip say
+  "되돌림 (원래 판정: lee v3)"; the Z help says the undo list is per tab and lost on refresh
+  (`docs/rapidtriage-user-guide.md`, `tests/test_review_undo_history.py`).
 - Console review board and report (design review F12/F13/F14/F16/F21): the
   review map returns each mark's `reviewer`, `created_at`, `updated_at` and
   `change_count` (file targets also `file_modified_at`); review and

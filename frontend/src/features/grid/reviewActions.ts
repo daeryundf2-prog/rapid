@@ -557,6 +557,8 @@ async function applyBody(
   // What the conflict prompt calls this write; callers that restore or replay marks keep the default.
   label = "판정",
   expected?: ExpectedVersions,
+  // Z: per row, the verdict version this write undoes (the history records an undo; re-review P2).
+  undoOf?: ExpectedVersions,
 ): Promise<ApplyResult> {
   const targets = rows.map(reviewTargetOf);
   const unresolved = targets.filter((t) => t === null).length;
@@ -577,7 +579,9 @@ async function applyBody(
     const pins = expected ?? pinExpected(runId, rows);
     const checked = (targets as ReviewBatchTarget[]).map((target, index) => {
       const version = resolvePin(runId, markAddress(target), pins[index]);
-      return version === undefined ? target : { ...target, expected_version: version };
+      const undone = undoOf?.[index];
+      const sent = version === undefined ? target : { ...target, expected_version: version };
+      return undone === undefined ? sent : { ...sent, undo_of_version: undone };
     });
     versions = await postChecked(runId, handle, checked, rows, authored, label);
     store = "case-db";
@@ -620,4 +624,129 @@ export function ensureRunCaseDb(runId: string): Promise<CaseDbHandle | null> {
 /** Tell the listeners (review-map / review-counts invalidation) that marks of the run changed. */
 export function notifyReviewApplied(runId: string): void {
   for (const listener of listeners) listener(runId, "case-db");
+}
+
+// ---- undo (design-viewer-keys F17) ------------------------------------------
+
+/** Which review fields an action changed, so its undo puts exactly those back. */
+export function changedReviewFields(action: BatchAction): {
+  status: boolean;
+  report: boolean;
+  tags: boolean;
+} {
+  switch (action) {
+    case "relevant":
+    case "needs-review":
+    case "clear-review":
+      return { status: true, report: false, tags: false };
+    case "excluded":
+      // 제외 also takes the row out of the report (markBody above).
+      return { status: true, report: true, tags: false };
+    case "include-in-report":
+    case "remove-from-report":
+      return { status: false, report: true, tags: false };
+    case "bookmark":
+    case "tag":
+      return { status: false, report: false, tags: true };
+    default:
+      return { status: false, report: false, tags: false };
+  }
+}
+
+const EXCLUSIVE_STATUSES: ReadonlySet<string> = new Set(["relevant", "needs-review", "excluded"]);
+
+/** The exclusive review status of a row as the case DB stores it (`unreviewed` when none). */
+export function storedStatusOf(row: GridRow): string {
+  return row.reviewStatus && EXCLUSIVE_STATUSES.has(row.reviewStatus) ? row.reviewStatus : "unreviewed";
+}
+
+/** True when the row is in the report (the flag, or the derived `include-in-report` status). */
+export function inReportOf(row: GridRow): boolean {
+  return row.fields.includeInReport === true || row.reviewStatus === "include-in-report";
+}
+
+/** What a Z undo did: rows written, and the conflicts the examiner chose to keep (not undone). */
+export interface RestoreResult extends ApplyResult {
+  kept: ReviewConflict[];
+}
+
+/**
+ * Put rows back to the review state they had before `action` (Z undo): the rows are the
+ * snapshots taken before the mark. Rows sharing one previous state go in one request; only the
+ * fields the action changed are written (a later note or another field stays).
+ *
+ * `written` (per row, same order) is the version the verdict itself stored (`ApplyResult.versions`):
+ * each row expects it, so a row another examiner changed since answers 409 and the conflict prompt
+ * asks (review #106 P1-1); the undo waits for the answer. "그대로 두기" leaves those rows (they come
+ * back in `kept`), "내 판정으로 바꾸기" restores them anyway. The same version goes out as
+ * `undo_of_version`, so the history row of the write says it was an undo of that verdict; the actor
+ * is whoever pressed Z.
+ */
+export async function restoreReviewState(
+  runId: string,
+  previous: GridRow[],
+  action: BatchAction,
+  written?: ExpectedVersions,
+): Promise<RestoreResult> {
+  const changed = changedReviewFields(action);
+  const groups = new Map<
+    string,
+    { rows: GridRow[]; expected: Array<number | undefined>; body: MarkPayload; mark: ReviewMarkBody }
+  >();
+  previous.forEach((row, index) => {
+    const body: MarkPayload = {};
+    const mark: ReviewMarkBody = {};
+    if (changed.status) {
+      body.review_status = storedStatusOf(row);
+      body.status = storedStatusOf(row);
+      mark.status = storedStatusOf(row);
+    }
+    if (changed.report) {
+      body.include_in_report = inReportOf(row);
+      mark.include_in_report = inReportOf(row);
+    }
+    if (changed.tags) {
+      body.tags = [...row.tags];
+      mark.tags = [...row.tags];
+    }
+    const key = JSON.stringify(mark);
+    const group = groups.get(key) ?? { rows: [], expected: [], body, mark };
+    group.rows.push(row);
+    group.expected.push(written?.[index]);
+    groups.set(key, group);
+  });
+  let store: ReviewStore | undefined;
+  const kept: ReviewConflict[] = [];
+  for (const group of groups.values()) {
+    try {
+      const result = await applyBody(
+        runId,
+        group.rows,
+        group.body,
+        group.mark,
+        "되돌리기",
+        written ? group.expected : undefined,
+        written ? group.expected : undefined,
+      );
+      store = result.store;
+    } catch (error) {
+      if (!(error instanceof ReviewConflictError)) throw error;
+      // The prompt writes the group's other rows (keep) or all of them (mine) itself.
+      store = "case-db";
+      if ((await error.choice) === "keep") kept.push(...error.conflicts);
+    }
+  }
+  return { applied: previous.length, store, kept };
+}
+
+/** Optimistic undo: the row's review fields as they were in `before`. */
+export function restoredPatch(before: GridRow, action: BatchAction): (row: GridRow) => GridRow {
+  const changed = changedReviewFields(action);
+  return (row) => {
+    const next: GridRow = { ...row, fields: { ...row.fields } };
+    if (changed.status || changed.report) next.reviewStatus = before.reviewStatus;
+    if (changed.report) next.fields.includeInReport = before.fields.includeInReport;
+    if (changed.tags) next.tags = [...before.tags];
+    return next;
+  };
 }

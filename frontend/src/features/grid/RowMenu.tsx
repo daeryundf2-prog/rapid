@@ -1,5 +1,6 @@
-import { Fragment, useEffect, useRef } from "react";
+import { Fragment, useEffect, useId, useRef } from "react";
 import { useEscape } from "../../a11y/focus";
+import { reviewScope } from "../../commands/verdict";
 import { type CommandContext, KEY_MAP } from "../../contracts/command";
 import { Icon, isIconName } from "../../icons";
 import { keyLabel } from "../../shortcuts";
@@ -77,6 +78,7 @@ export interface RowMenuProps {
 
 export function RowMenu({ id, anchor, context, onClose, onDisabled }: RowMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const scopeId = useId();
   // Esc closes the menu wherever focus went (shared Esc stack), not only from inside it.
   useEscape(onClose, anchor !== null);
 
@@ -105,6 +107,8 @@ export function RowMenu({ id, anchor, context, onClose, onDisabled }: RowMenuPro
   ];
   const pivotItems = registered(ROW_MENU_PIVOT_IDS);
   const reviewItems = registered(ROW_MENU_REVIEW_IDS);
+  // The verdict items act on the verdict scope (same as R / I / X / B): the menu names it.
+  const scopeLabel = reviewScope(context).label;
 
   const move = (delta: number, from: HTMLElement) => {
     const nodes = Array.from(ref.current?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? []);
@@ -146,12 +150,18 @@ export function RowMenu({ id, anchor, context, onClose, onDisabled }: RowMenuPro
             {(index === items.length || index === items.length + pivotItems.length) && index > 0 ? (
               <hr className="grid-menu-sep" />
             ) : null}
+            {index === items.length + pivotItems.length && scopeLabel ? (
+              <div className="menu-heading" id={scopeId} data-testid="row-menu-scope">
+                판정 대상: {scopeLabel}
+              </div>
+            ) : null}
             <button
               type="button"
               role="menuitem"
               className="grid-menu-item menu-item"
               aria-disabled={reason ? true : undefined}
               aria-keyshortcuts={shortcut}
+              aria-describedby={index >= items.length + pivotItems.length && scopeLabel ? scopeId : undefined}
               title={reason}
               data-disabled-reason={reason || undefined}
               data-command={command.id}

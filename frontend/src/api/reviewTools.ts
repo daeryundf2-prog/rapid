@@ -211,6 +211,10 @@ export interface ReviewHistoryEntry {
   tags_after: string[];
   status_before: string;
   status_after: string;
+  /** "undo" for a Z write ("" otherwise), the verdict version it undid and that version's reviewer. */
+  kind?: string;
+  undone_version?: number | null;
+  undone_reviewer?: string;
 }
 
 export function getReviewHistory(

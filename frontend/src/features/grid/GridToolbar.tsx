@@ -357,9 +357,6 @@ export function GridFooter(props: GridFooterProps) {
   return (
     <div className="grid-footer">
       {props.scope ? <span className="grid-scope">{props.scope}</span> : null}
-      <span>
-        {props.pageCount !== null ? `페이지 ${props.page}/${formatCount(props.pageCount)}` : "페이지 -"}
-      </span>
       <span data-testid="grid-footer-total">
         총{" "}
         {props.total !== null ? `${formatCount(props.total)}건` : props.loading ? "세는 중…" : "알 수 없음"}
@@ -369,11 +366,18 @@ export function GridFooter(props: GridFooterProps) {
           {props.loadingText ?? "불러오는 중…"}
         </span>
       ) : null}
-      {props.backend ? (
+      {/* Server paging and timings are diagnostics (F15): one disclosure, closed by default. */}
+      <details className="grid-diag" data-testid="grid-footer-diag">
+        <summary>진단</summary>
         <span>
-          {backendLabel(props.backend)} {seconds}
+          {props.pageCount !== null ? `페이지 ${props.page}/${formatCount(props.pageCount)}` : "페이지 -"}
         </span>
-      ) : null}
+        {props.backend ? (
+          <span>
+            {backendLabel(props.backend)} {seconds}
+          </span>
+        ) : null}
+      </details>
       {props.filtering ? (
         <span className="grid-note">
           필터 결과 {formatCount(props.shown)}건 ·{" "}

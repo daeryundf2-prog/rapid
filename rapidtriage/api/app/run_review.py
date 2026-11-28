@@ -18,9 +18,9 @@ from ...core.case_db.helpers import parse_json_object
 from ...core.case_db.review import load_review_target_match
 from ...core.case_db.review_conflict import (
     ACTIVE_MARK_SQL,
-    EXPECTATION_KEYS,
     ReviewConflictError,
 )
+from ...core.case_db.review_undo import TARGET_CARRIED_KEYS, verdict_undo
 from ...core.case_db.review_verdict import verdict_select_sql
 from ...core.case_db.run_locator import (
     ANALYSIS_ROW_TARGET,
@@ -38,7 +38,7 @@ def split_batch_targets(
     for target in targets:
         if target.get("target_type") and target.get("target_id"):
             entry = {"target_type": str(target["target_type"]), "target_id": str(target["target_id"])}
-            for key in EXPECTATION_KEYS:
+            for key in TARGET_CARRIED_KEYS:
                 if target.get(key) is not None:
                     entry[key] = str(target[key])
             direct.append(entry)
@@ -150,6 +150,10 @@ def review_map_entries(
             "kind": "",
             "locator": "",
         }
+        # The current verdict came from a Z write: the board says what it undid (re-review P2).
+        undo = verdict_undo(connection, case_id, target_type, target_id)
+        if undo is not None:
+            entry["undo_of"] = undo
         location = index.locate(target_type, target_id)
         if location is not None:
             entry.update(location)

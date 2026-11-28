@@ -61,6 +61,41 @@ describe("메모·이력 panel (P1-1)", () => {
     await waitFor(() => expect(bodies).toHaveLength(1));
     expect(bodies[0]?.targets[0]?.expected_version).toBe(1);
   });
+
+  it("says which verdict a Z write undid (re-review P2)", async () => {
+    const entry = (version: number, author: string, over: Record<string, unknown>) => ({
+      version,
+      changed_at: "2026-11-28T02:00:00+00:00",
+      author,
+      changed_fields: ["status", "reviewer"],
+      note_before: "",
+      note_after: "",
+      tags_before: [],
+      tags_after: [],
+      ...over,
+    });
+    installFetch({
+      "/review-history": () =>
+        jsonResponse({
+          entries: [
+            entry(4, "kim", {
+              status_before: "relevant",
+              status_after: "unreviewed",
+              kind: "undo",
+              undone_version: 3,
+              undone_reviewer: "lee",
+            }),
+            entry(3, "lee", { status_before: "", status_after: "relevant", kind: "", undone_version: null }),
+          ],
+        }),
+    });
+    renderWithClient(<NotePanel target={{ runId: RUN, row }} onClose={() => {}} />);
+    const items = await screen.findAllByTestId("note-history-item");
+    expect(items).toHaveLength(2);
+    expect(items[0]?.textContent).toContain("kim");
+    expect(items[0]?.textContent).toContain("되돌림 (원래 판정: lee v3)");
+    expect(items[1]?.textContent).not.toContain("되돌림");
+  });
 });
 
 describe("conflict prompt (P3-4)", () => {

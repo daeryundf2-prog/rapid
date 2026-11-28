@@ -271,9 +271,9 @@ describe("DataGrid keyboard", () => {
       "같은 사용자/SID",
       "같은 로그온 ID",
       "같은 해시",
-      "같은 대상 경로/실행 파일",
+      "같은 대상",
       "같은 레지스트리 키",
-      "같은 출처 파일",
+      "같은 원본 파일",
       "타임라인 ±5분",
       "탐지 → 원 이벤트 열기",
       "원본 아티팩트 열기",
@@ -468,9 +468,11 @@ describe("DataGrid batch commands", () => {
         { collection: "files", locator: "/candidates/1" },
       ],
     });
-    // Grid feedback goes to the shell toast stack (U-V7).
+    // The verdict flow announces the result and the undo key (F17) through the shell toast stack.
     await waitFor(() =>
-      expect(useToastStore.getState().toasts.some((t) => /관련: 2건 처리했습니다/.test(t.text))).toBe(true),
+      expect(useToastStore.getState().toasts.some((t) => /관련 있음 2건 · Z 되돌리기/.test(t.text))).toBe(
+        true,
+      ),
     );
     expect(within(rowAt(0)).getByText("관련 있음")).toBeTruthy();
   });

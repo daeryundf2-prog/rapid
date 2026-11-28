@@ -591,6 +591,15 @@ When generating a case report in the web review board, choose the template that 
 - `Technical appendix`: includes processing warning context.
 - `Hash-only appendix`: focuses on submission evidence hashes.
 
+### Undoing a verdict (`Z`)
+
+In the console, `R` / `I` / `X` / `B` mark the rows in scope and `Z` undoes the last such batch:
+
+- `Z` writes the review state the rows had before the verdict again (status, report flag, tags; a note written since stays). It is an ordinary new write: the mark's writer and verdict setter (`reviewer`, `status_by`, `status_at`) become the examiner who pressed `Z` and that time. The original verdict is not erased; the history keeps it.
+- Each `Z` write sends, per target, `expected_version` and `undo_of_version` (both the history version the verdict stored) to `POST /api/case-db/review-batch`. If someone changed the row since, the write is refused (409) and the console asks; `그대로 두기` leaves their change ("○○가 바꾼 n건은 그대로 둠").
+- The history row of an undo says so: `GET /api/runs/{run_id}/review-history` entries carry `kind: "undo"`, `undone_version` (the verdict version that was undone) and `undone_reviewer` (who made that verdict); other writes have `kind: ""`. The review map names it as `undo_of` while that undo set the current verdict. The 메모·이력 panel and the 검토 보드 판정자 tooltip show "되돌림 (원래 판정: lee v3)".
+- The undo list lives only in the browser tab (last 20 batches). It is not shared with other tabs or examiners and is lost on refresh; after a refresh, change a verdict by marking it again.
+
 ## Case Catalog
 
 The case catalog is a lightweight user-facing list of cases and run outputs. It helps users reopen previous work without remembering raw output folders.
