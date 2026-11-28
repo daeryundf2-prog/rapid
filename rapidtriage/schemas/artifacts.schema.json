@@ -313,7 +313,8 @@
                 "omp-pi",
                 "editor-chat",
                 "agent-mcp",
-                "cataly-hub"
+                "cataly-hub",
+                "dori-state"
               ]
             }
           },

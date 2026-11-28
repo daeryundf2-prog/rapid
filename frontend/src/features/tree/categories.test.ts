@@ -16,6 +16,7 @@ const ENGINE_KINDS = [
   "cataly-hub",
   "claude-code",
   "codex-cli",
+  "dori-state",
   "editor-chat",
   "gemini-cli",
   "omp-pi",

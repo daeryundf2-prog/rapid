@@ -122,9 +122,23 @@ export const TIMESTAMP_KIND_LABELS: Readonly<Record<string, string>> = {
   server: "서버 수신",
   start: "시작",
   end: "종료",
-  // Agent hub lanes and requests (artifacts/ai_agent_cataly.py).
+  // Agent hub lanes and requests (artifacts/ai_agent_cataly.py), dori lanes and backlog items
+  // (artifacts/ai_agent_dori.py).
   opened: "열림",
   closed: "닫힘",
+  "status-changed": "상태 변경",
+  reported: "레인 보고",
+  checkpoint: "체크포인트",
+  "cost-recorded": "사용량 기록",
+  worklog: "워크로그",
+  lesson: "교훈 기록",
+  queued: "전달 대기 등록",
+  "delivery-attempted": "전달 시도",
+  "root-posted": "스레드 첫 메시지",
+  "reply-seen": "마지막으로 본 답글",
+  reviewed: "리뷰 판정",
+  paused: "일시 정지",
+  migrated: "세션 이전",
   // AI coding-agent transcripts (artifacts/ai_agents.py).
   "tool-call": "도구 호출",
   "tool-result": "도구 결과",

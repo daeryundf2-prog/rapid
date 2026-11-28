@@ -782,6 +782,7 @@ export const DOMAINS: readonly DomainDef[] = [
       { id: "exec-editor-chat", label: "Cursor·VS Code 대화 기록", target: a("editor-chat") },
       { id: "exec-agent-mcp", label: "코딩 에이전트 MCP 서버 설정", target: a("agent-mcp") },
       { id: "exec-cataly-hub", label: "Cataly 허브 기록", target: a("cataly-hub") },
+      { id: "exec-dori-state", label: "dori 레인·워크로그 기록", target: a("dori-state") },
       { id: "exec-search-index", label: "Windows 검색 색인", target: a("windows-search-index") },
       {
         id: "exec-powershell",

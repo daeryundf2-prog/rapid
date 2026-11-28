@@ -34,6 +34,12 @@ _TOKEN = re.compile(
     r"|(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{6,7}\.[A-Za-z0-9_-]{27,}"
 )
 _PRIVATE_KEY = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.DOTALL)
+# A messenger thread or message reference is ``<relay>:<room>`` or ``<relay>:<room>/<message>`` (Cataly's
+# ``src/lanes/record.rs``, dori's lane ``thread`` and request ``source``). A Telegram private chat's ID is the user's
+# own ID (the relay admits the owner's chat by it) and a Slack ``D`` room is a direct-message conversation, so either
+# names the owner's chat. Groups (negative Telegram IDs), channels and Discord threads stay; a Discord direct-message
+# channel cannot be told apart from a channel by its ID.
+PRIVATE_ROOM = re.compile(r"(?:telegram:[0-9]+|slack:D[0-9A-Z]+)(?:[:/].*)?", re.DOTALL)
 # RFC 3339 date-time only: no week dates, basic format, space separator or local wall time.
 # The offset is range-checked here (section 5.6: hour 00-23, minute 00-59) because the datetime
 # parser would roll an out-of-range minute such as "+01:60" over into the next hour.
@@ -55,6 +61,11 @@ def mapping(value: object) -> dict:
 
 def items(value: object) -> list:
     return value if isinstance(value, list) else []
+
+
+def reference(value):
+    """A messenger thread or message reference, empty when its room is a private chat (``PRIVATE_ROOM``)."""
+    return "" if isinstance(value, str) and PRIVATE_ROOM.fullmatch(value) else value
 
 
 def content(value: object) -> str:
