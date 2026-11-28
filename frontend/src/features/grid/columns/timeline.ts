@@ -15,6 +15,7 @@ import {
   str,
   strOrNull,
 } from "./common";
+import { targetCell } from "./TargetCell";
 import { TIME_KINDS_SEPARATOR, timeKindsCell } from "./TimelineCells";
 import { timelineTarget } from "./timelineTarget";
 
@@ -249,6 +250,8 @@ export const timelineCollection: CollectionDef = {
         // The generated summary, whole (the 대상 tooltip and the record view keep it).
         summary: str(raw.summary),
         targetTitle: target.title,
+        targetDisplay: target.display,
+        targetKind: target.kind,
         inputFile: str(raw.input_file),
         tsKind: kinds[0] ?? "",
         // Every time kind of the event, primary first (labels[]), and their Korean reading.
@@ -314,9 +317,14 @@ export const timelineCollection: CollectionDef = {
       format: timelineEventLabel,
       tooltip: (r) => r.artifactType ?? "",
     }),
-    // 대상 (F10): file name / URL host+path / executable / key first; the full target and the
+    // 대상 (F10): the whole target is the value (copy / filter / CSV); the cell shows it short; the full target and the
     // original summary on hover. 390: 시각 (144) and 대상 share the pane without cutting the time.
-    { ...col.title("대상", 380), minWidth: 100, tooltip: (r) => str(r.fields.targetTitle) || r.title },
+    {
+      ...col.title("대상", 380),
+      minWidth: 100,
+      render: targetCell,
+      tooltip: (r) => str(r.fields.targetTitle) || r.title,
+    },
     col.review(),
     // The event's own file: whole path, the leading folders ellipsize and the file name stays.
     col.path(420, ["analysis", "source"]),

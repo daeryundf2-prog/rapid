@@ -22,8 +22,9 @@ import {
   searchHitTexts,
   searchMatch,
 } from "./searchMatch";
+import { targetCell } from "./TargetCell";
 import { eventTypeLabel, TIMELINE_SOURCE_LABELS } from "./timeline";
-import { timelineTarget } from "./timelineTarget";
+import { type TimelineTarget, timelineTarget } from "./timelineTarget";
 
 /**
  * Korean names of the search sources (core/search.py): the timeline's 파일 / 문서 / 아티팩트 plus
@@ -60,17 +61,21 @@ export function searchTypeLabel(raw: Record<string, unknown>): string {
   return kind;
 }
 
-/** 항목 of a hit: a timeline event's target (F10), an artifact's file, else the server title. */
-function searchTitle(raw: Record<string, unknown>, index: number): string {
+/** 항목 of a hit: a timeline event's target (F10, whole), an artifact's file, else the server title. */
+function searchTitle(
+  raw: Record<string, unknown>,
+  index: number,
+): Pick<TimelineTarget, "text" | "display" | "kind"> {
   const source = str(raw.source);
   const metadata = isRecord(raw.metadata) ? raw.metadata : {};
   const path = strOrNull(raw.path);
   if (source === "timeline") {
-    const target = timelineTarget({ ...metadata, summary: metadata.summary ?? raw.title }).text;
-    if (target) return target;
+    const target = timelineTarget({ ...metadata, summary: metadata.summary ?? raw.title });
+    if (target.text) return target;
   }
-  if ((source === "artifacts" || source === "web") && path) return baseName(path);
-  return strOrNull(raw.title) ?? (baseName(path) || `결과 ${index + 1}`);
+  const plain = (text: string) => ({ text, display: text, kind: "text" as const });
+  if ((source === "artifacts" || source === "web") && path) return plain(baseName(path));
+  return plain(strOrNull(raw.title) ?? (baseName(path) || `결과 ${index + 1}`));
 }
 
 /** Search columns, highest priority first (narrow panes keep the hit's name and its context). */
@@ -107,10 +112,11 @@ export const searchCollection: CollectionDef = {
     const match = searchMatch(raw);
     // A hit with no readable context (a fuzzy match) reads its own text, never the JSON preview.
     const fallback = searchHitTexts(raw).body[0] ?? "";
+    const title = searchTitle(raw, index);
     const row = makeRow(
       ref,
       {
-        title: searchTitle(raw, index),
+        title: title.text,
         sourcePath: path,
         timestamp: strOrNull(raw.timestamp) ?? strOrNull(metadata.timestamp),
         artifactType: kind,
@@ -126,13 +132,15 @@ export const searchCollection: CollectionDef = {
         matchContext: match.context,
         preview: contextText(match.context) || fallback.slice(0, 120),
         serverTitle: str(raw.title),
+        targetDisplay: title.display,
+        targetKind: title.kind,
       },
     );
     row.rowKey = `search:${[source, kind, locator].filter(Boolean).join(":")}`;
     return row;
   },
   columns: [
-    { ...col.title("항목", 260), tooltip: (r) => fieldStr(r, "serverTitle") || r.title },
+    { ...col.title("항목", 260), render: targetCell, tooltip: (r) => fieldStr(r, "serverTitle") || r.title },
     col.review(),
     col.field("source", "출처", 90, ["analysis", "compact", "source"], (r) => r.provider, {
       format: (r) => SEARCH_SOURCE_LABELS[r.provider ?? ""] ?? r.provider ?? "",

@@ -101,7 +101,13 @@
   without a gap. 선별 column headers read 판정. The timeline overview strip
   labels each day (or clock-aligned hour), names its whole span in the
   display zone, and the histogram view bins days and labels bars in the
-  display zone instead of UTC.
+  display zone instead of UTC; server buckets that straddle a display-zone
+  midnight (coarse UTC day buckets) stay as the server's own bars so a bar's
+  count equals its click filter. The 대상 value (copy, filter, sort, CSV)
+  stays the whole URL with its query, the full executable path and the full
+  registry key with its hive; only the cell shortens it. Hidden same-value
+  and empty columns still go to the selection CSV, and a column with an
+  active filter or sort is never auto-hidden.
 
 - Console layout: toolbar buttons no longer wrap their label ("조건" split
   into two lines at 390 px), a narrow timeline keeps 요약 next to 시각, the

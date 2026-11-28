@@ -41,7 +41,7 @@ describe("timelineTarget — synthetic run families (summary basis, prefix remov
   ])("%s → the named file, not 'Artifact event: …'", (type, eventType, target) => {
     const summary = `Artifact event: ${type} ${target}`;
     const result = timelineTarget(synthetic(type, eventType, summary));
-    expect(result).toEqual({ text: target, title: summary, basis: "summary" });
+    expect(result).toEqual({ text: target, display: target, kind: "text", title: summary, basis: "summary" });
   });
 
   it("file events drop '파일 <kind>: ' (kind stays in the 이벤트 column)", () => {
@@ -76,7 +76,12 @@ describe("timelineTarget — synthetic run families (summary basis, prefix remov
       path: "/tmp/rd-data/evidence/Users/alice/Desktop/screen-capture.png",
       details: { synthetic: true },
     };
-    expect(timelineTarget(raw)).toMatchObject({ text: "screen-capture.png", basis: "field" });
+    expect(timelineTarget(raw)).toMatchObject({
+      text: "/tmp/rd-data/evidence/Users/alice/Desktop/screen-capture.png",
+      display: "screen-capture.png",
+      kind: "path",
+      basis: "field",
+    });
   });
 });
 
@@ -95,7 +100,8 @@ describe("timelineTarget — structured fields (build_artifact_summary branches)
       },
     };
     const result = timelineTarget(raw);
-    expect(result.text).toBe("bank.example.test/account");
+    expect(result.text).toBe("https://bank.example.test/account");
+    expect(result.display).toBe("bank.example.test/account");
     expect(result.basis).toBe("field");
     expect(result.title).toContain("https://bank.example.test/account");
     expect(result.title).toContain(raw.summary);
@@ -113,16 +119,22 @@ describe("timelineTarget — structured fields (build_artifact_summary branches)
         target_path: "C:\\Users\\alice\\Downloads\\payload-installer.exe",
       },
     };
-    expect(timelineTarget(raw)).toMatchObject({ text: "payload-installer.exe", basis: "field" });
-    expect(timelineTarget(raw).title).toContain("C:\\Users\\alice\\Downloads\\payload-installer.exe");
+    expect(timelineTarget(raw)).toMatchObject({
+      text: "C:\\Users\\alice\\Downloads\\payload-installer.exe",
+      display: "payload-installer.exe",
+      kind: "path",
+      basis: "field",
+    });
+    expect(timelineTarget(raw).title).toContain("https://example.test/tools/payload-installer.exe");
   });
 
-  it("a source_url alone reads as host + path", () => {
+  it("a source_url alone: whole URL as value, host + path + query on screen", () => {
     const raw = {
       event_type: "x",
       details: { artifact_type: "x", source_url: "https://cdn.test/a/b.zip?x=1" },
     };
-    expect(timelineTarget(raw).text).toBe("cdn.test/a/b.zip");
+    expect(timelineTarget(raw).text).toBe("https://cdn.test/a/b.zip?x=1");
+    expect(timelineTarget(raw).display).toBe("cdn.test/a/b.zip?x=1");
   });
 
   it("AI usage: the query first, the service after", () => {
@@ -144,13 +156,13 @@ describe("timelineTarget — structured fields (build_artifact_summary branches)
     expect(
       timelineTarget({ event_type: "e", details: { executable_path: "C:\\Windows\\System32\\cmd.exe" } })
         .text,
-    ).toBe("cmd.exe");
+    ).toBe("C:\\Windows\\System32\\cmd.exe");
     expect(
       timelineTarget({
         event_type: "e",
         details: { key_path: "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run" },
-      }).text,
-    ).toBe("…\\CurrentVersion\\Run");
+      }).display,
+    ).toBe("HKLM\\…\\CurrentVersion\\Run");
     expect(timelineTarget({ event_type: "e", details: { entry_name: "evil.lnk" } }).text).toBe("evil.lnk");
   });
 
@@ -176,6 +188,46 @@ describe("timelineTarget — structured fields (build_artifact_summary branches)
       "Something else happened",
     );
     expect(timelineTarget({ event_type: "custom-event" }).text).toBe("custom-event");
+  });
+});
+
+describe("review P1-1: the target is shortened on screen only", () => {
+  const google = "https://www.google.com/search?q=wipe+disk+evidence";
+  const event = (details: Record<string, unknown>) => ({
+    event_type: "artifact-x-run",
+    source: "artifacts",
+    summary: "Artifact event: x y",
+    path: history,
+    details: { artifact_type: "x", ...details },
+  });
+  const value = (details: Record<string, unknown>) => {
+    const row = timelineCollection.mapRow(event(details), 0, { ref: { id: "timeline" } });
+    const column = timelineCollection.columns.find((c) => c.id === "title");
+    return { row, column, value: column?.value(row) };
+  };
+
+  it("keeps a URL's query and fragment in the value (copy / filter / CSV)", () => {
+    expect(value({ url: google }).value).toBe(google);
+    expect(value({ url: "https://drive.test/file/d/ABC123/view#frag" }).value).toBe(
+      "https://drive.test/file/d/ABC123/view#frag",
+    );
+    expect(urlTarget(google)).toBe("www.google.com/search?q=wipe+disk+evidence");
+  });
+
+  it("keeps an executable's folder, and the cell renders the whole path", () => {
+    const fake = value({ executable_path: "C:\\Users\\Public\\svchost.exe" });
+    const real = value({ executable_path: "C:\\Windows\\System32\\svchost.exe" });
+    expect(fake.value).not.toBe(real.value);
+    expect(fake.row.fields.targetKind).toBe("path");
+    expect(fake.column?.render).toBeTypeOf("function");
+  });
+
+  it("keeps the registry hive (HKLM vs HKCU) in value and display", () => {
+    const tail = "\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
+    const hklm = value({ key_path: `HKLM${tail}` });
+    const hkcu = value({ key_path: `HKCU${tail}` });
+    expect(hklm.value).toBe(`HKLM${tail}`);
+    expect(hklm.row.fields.targetDisplay).not.toBe(hkcu.row.fields.targetDisplay);
   });
 });
 
