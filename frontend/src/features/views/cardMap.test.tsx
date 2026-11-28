@@ -114,6 +114,14 @@ describe("cardModel", () => {
     expect(name.endsWith("선택됨")).toBe(true);
     expect(cardAccessibleName(cardModel(row({ rowKey: "b" }), "utc"), false)).toContain("시각 없음");
   });
+
+  it("a row marked only by a 북마크 tag gets the bookmark verdict chip, not a second tag chip (review #99 P3)", () => {
+    const model = cardModel(row({ rowKey: "c", tags: ["북마크", "악성"] }), "utc");
+    expect(model.chips.map((chip) => [chip.tone, chip.label, chip.status])).toEqual([
+      ["review", "북마크", "bookmark"],
+      ["tag", "악성", undefined],
+    ]);
+  });
 });
 
 describe("CardView", () => {

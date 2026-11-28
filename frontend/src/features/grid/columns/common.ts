@@ -1,4 +1,5 @@
 import { createElement, type ReactNode } from "react";
+import type { ChipStatus } from "../../../components/StatusChip";
 import { ZoneTime } from "../../../components/ZoneTime";
 import type { CollectionId, GridRow, ReviewStatus } from "../../../contracts/collection";
 import type { RowRef } from "../../../contracts/rowRef";
@@ -149,6 +150,15 @@ export const REVIEW_LABELS: Record<ReviewStatus, string> = {
   excluded: "제외",
   "include-in-report": "보고서 포함",
 };
+
+/** The row's verdict (F2): the review status, else a 북마크/bookmark tag. Shown as the verdict glyph
+ *  wherever a row appears (grid select column, cards, thumbnails, chat), never as a tint. */
+export function rowMark(row: GridRow): { id: ChipStatus; label: string } | null {
+  if (row.reviewStatus) return { id: row.reviewStatus, label: REVIEW_LABELS[row.reviewStatus] };
+  if (row.tags.some((tag) => tag === "북마크" || tag === "bookmark"))
+    return { id: "bookmark", label: "북마크" };
+  return null;
+}
 
 export function makeRef(collection: CollectionId, locator: string, kind?: string): RowRef {
   return kind ? { collection, kind, locator } : { collection, locator };

@@ -11,10 +11,11 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRovingTabindex } from "../../a11y";
+import { VerdictGlyph } from "../../components/VerdictGlyph";
 import type { GridRow } from "../../contracts/collection";
 import { encodeRowRef } from "../../contracts/rowRef";
 import { useViewerTarget } from "../grid/adapter";
-import { REVIEW_LABELS } from "../grid/columns/common";
+import { rowMark } from "../grid/columns/common";
 import { buildViewerTarget } from "../grid/gridCommands";
 import { errorText } from "../viewer/useAsync";
 import {
@@ -55,7 +56,8 @@ function Highlighted({ text, terms }: { text: string; terms: readonly string[] }
 function bubbleLabel(message: ChatMessage): string {
   const parts = [message.sender || "발신자 미상", message.timestamp ?? "시각 없음", message.text];
   if (message.attachments.length) parts.push(`첨부 ${message.attachments.length}개`);
-  if (message.row.reviewStatus) parts.push(REVIEW_LABELS[message.row.reviewStatus]);
+  const mark = rowMark(message.row);
+  if (mark) parts.push(mark.label);
   return parts.join(", ");
 }
 
@@ -265,6 +267,8 @@ function MessageList({
             const message = messages[item.index] as ChatMessage;
             const previous = messages[item.index - 1];
             const showSender = !previous || previous.sender !== message.sender;
+            // The grid's verdict (review status, else a 북마크 tag).
+            const mark = rowMark(message.row);
             return (
               <div
                 key={message.row.rowKey}
@@ -313,6 +317,11 @@ function MessageList({
                         </li>
                       ))}
                     </ul>
+                  ) : null}
+                  {mark ? (
+                    <span className="chat-verdict">
+                      <VerdictGlyph status={mark.id} withLabel />
+                    </span>
                   ) : null}
                   <time className="chat-time">{message.timestamp ?? "시각 없음"}</time>
                 </div>

@@ -6,10 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useToastStore } from "../../components/toastStore";
 import type { GridRow } from "../../contracts/collection";
 import type { CommandContext } from "../../contracts/command";
+import { useAnalysisStore } from "../analysis/store";
 import { getRegisteredCommand, useGridLocalStore } from "./adapter";
 import { DataGrid } from "./DataGrid";
+import { OCR_SELECTED_COMMAND } from "./gridCommands";
 import { applyReviewAction } from "./reviewActions";
 import {
+  fileCandidates,
   filesHandler,
   installFetch,
   jsonResponse,
@@ -170,22 +173,83 @@ describe("DataGrid keyboard", () => {
     expect(useGridLocalStore.getState().selectedKeys.size).toBe(3);
   });
 
-  it("click, Ctrl-click and Shift-click select single / toggle / range", async () => {
+  it("a click moves the cursor without ticking the box; Ctrl-click and Shift-click select (F3)", async () => {
     await renderFiles();
     fireEvent.mouseDown(rowAt(2));
-    expect(useGridLocalStore.getState().selectedKeys.size).toBe(1);
+    // The cursor (J/K row, the viewer's row) moved; the checkbox did not.
+    expect(useGridLocalStore.getState().selectedKeys.size).toBe(0);
+    expect(rowAt(2).classList.contains("is-focused")).toBe(true);
+    expect(rowAt(2).getAttribute("aria-selected")).toBe("false");
+    expect((within(rowAt(2)).getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+    expect(useGridLocalStore.getState().target?.ref.locator).toBe("/candidates/2");
+    fireEvent.mouseDown(rowAt(2), { ctrlKey: true });
     fireEvent.mouseDown(rowAt(4), { ctrlKey: true });
     expect([...useGridLocalStore.getState().selectedKeys]).toEqual([
       "files:/candidates/2",
       "files:/candidates/4",
     ]);
+    // A plain click keeps the ticked rows ticked and only moves the cursor.
+    fireEvent.mouseDown(rowAt(5));
+    expect(useGridLocalStore.getState().selectedKeys.size).toBe(2);
+    expect(rowAt(5).classList.contains("is-focused")).toBe(true);
+    expect(rowAt(4).classList.contains("is-focused")).toBe(false);
     fireEvent.mouseDown(rowAt(6), { shiftKey: true });
-    // Range from anchor (row 4) to row 6 replaces the selection.
+    // Range from the anchor (the clicked row 5) to row 6 replaces the selection.
     expect([...useGridLocalStore.getState().selectedKeys].sort()).toEqual([
-      "files:/candidates/4",
       "files:/candidates/5",
       "files:/candidates/6",
     ]);
+  });
+
+  it("opening the row's context menu does not tick its checkbox (F3)", async () => {
+    await renderFiles();
+    fireEvent.contextMenu(rowAt(3));
+    expect(useGridLocalStore.getState().selectedKeys.size).toBe(0);
+    expect(rowAt(3).classList.contains("is-focused")).toBe(true);
+    expect(screen.getByRole("menu")).toBeTruthy();
+  });
+
+  it("the row menu's OCR targets the right-clicked row unless the ticked rows hold it (review #99 P2)", async () => {
+    installFetch({
+      "/files": (url) => {
+        const offset = Number(url.searchParams.get("offset") ?? 0);
+        const limit = Number(url.searchParams.get("limit") ?? 0);
+        const candidates = fileCandidates(offset, Math.min(offset + limit, 20)).map((c) => ({
+          ...c,
+          path: c.path.replace(/\.txt$/, ".png"),
+          name: c.name.replace(/\.txt$/, ".png"),
+          extension: ".png",
+        }));
+        return jsonResponse({ candidates, total: 20, offset, limit });
+      },
+    });
+    renderWithClient(<DataGrid />);
+    await waitFor(() => expect(rows().length).toBeGreaterThan(0));
+    useAnalysisStore.setState({ dialog: null });
+    const runMenuOcr = (index: number) => {
+      fireEvent.contextMenu(rowAt(index));
+      const item = within(screen.getByRole("menu"))
+        .getAllByRole("menuitem")
+        .find((i) => i.querySelector(".menu-item-label")?.textContent === "선택 행 OCR 실행") as HTMLElement;
+      expect(item.getAttribute("aria-disabled")).toBeNull();
+      fireEvent.click(item);
+      return useAnalysisStore.getState().dialog?.preset;
+    };
+    // Nothing ticked: the right-clicked row.
+    expect(runMenuOcr(4)).toEqual({ locators: ["/candidates/4"] });
+    // Rows 1 and 2 ticked, row 3 right-clicked: row 3 alone, never the earlier ticks.
+    fireEvent.mouseDown(rowAt(1), { ctrlKey: true });
+    fireEvent.mouseDown(rowAt(2), { ctrlKey: true });
+    expect(runMenuOcr(3)).toEqual({ locators: ["/candidates/3"] });
+    // A ticked row right-clicked: the whole selection (as the menu's review items do).
+    expect(runMenuOcr(1)).toEqual({ locators: ["/candidates/1", "/candidates/2"] });
+    // The BatchBar / palette command still runs on the selection.
+    fireEvent.contextMenu(rowAt(5));
+    void getRegisteredCommand(OCR_SELECTED_COMMAND)?.run(ctx());
+    expect(useAnalysisStore.getState().dialog?.preset).toEqual({
+      locators: ["/candidates/1", "/candidates/2"],
+    });
+    useAnalysisStore.setState({ dialog: null });
   });
 
   it("Enter publishes the ViewerTarget and requests viewer focus", async () => {
@@ -255,7 +319,8 @@ describe("DataGrid keyboard", () => {
       북마크: "B",
     });
     expect(keys["보고서 포함 표시"]).toBeUndefined();
-    const ocr = items.find((i) => i.dataset.command === "grid.ocrSelected");
+    const ocr = items.find((i) => i.dataset.command === "grid.row.ocr");
+    expect(ocr).toBeTruthy();
     expect(ocr?.querySelector(".menu-item-reason")?.textContent).toBe(
       ocr?.getAttribute("data-disabled-reason"),
     );
@@ -472,7 +537,11 @@ describe("DataGrid batch commands", () => {
     await waitFor(() =>
       expect(useToastStore.getState().toasts.some((t) => /관련: 2건 처리했습니다/.test(t.text))).toBe(true),
     );
-    expect(within(rowAt(0)).getByText("관련 있음")).toBeTruthy();
+    // The verdict shows in the select column's fixed slot and as the chip's glyph + word (F2).
+    expect(
+      rowAt(0).querySelector('.grid-cell-select .grid-verdict svg[data-verdict="relevant"]'),
+    ).not.toBeNull();
+    expect(rowAt(0).getAttribute("aria-description")).toBe("검토 표시: 관련 있음");
   });
 
   it("rolls the optimistic mark back and shows a Korean error toast when the API fails", async () => {
@@ -597,9 +666,9 @@ describe("DataGrid notes and AXIOM preset", () => {
     const chipCell = rowAt(0).querySelector<HTMLElement>('[data-col="tagstatus"]');
     const titleCell = rowAt(0).querySelector<HTMLElement>('[data-col="title"]');
     expect(chipCell?.classList.contains("grid-cell-first")).toBe(true);
-    expect(chipCell?.style.left).toBe("56px");
+    expect(chipCell?.style.left).toBe("62px");
     expect(titleCell?.classList.contains("grid-cell-first")).toBe(true);
-    expect(titleCell?.style.left).toBe("206px");
+    expect(titleCell?.style.left).toBe("212px");
 
     // Two rows: the batch bar is for multi-selections (review #2).
     rowAt(0).focus();

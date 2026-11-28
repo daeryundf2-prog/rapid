@@ -8,7 +8,8 @@
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-ui);
-  font-size: var(--fs-body);
+  /* Table cells and their aux text read at 13px (F4); panels and dialogs use --fs-body (14px). */
+  font-size: var(--fs-table);
   position: relative;
 }
 
@@ -327,8 +328,7 @@
   align-items: stretch;
   width: 100%;
   border-bottom: 1px solid var(--line-subtle);
-  /* --row-bg: the review-status tint of a marked row (below), else the page. */
-  background: var(--row-bg, var(--bg));
+  background: var(--bg);
 }
 
 .grid-body .grid-row {
@@ -348,9 +348,13 @@
   border-bottom: 1px solid var(--line-subtle);
 }
 
-/* Selection / hover / focus (review #1): three distinct signals that never stack into a box.
-   Selected = the accent tint (--bg-selected, shared with the tree) with its checked box;
-   hover = a 4% text tint; the 1px accent outline is for keyboard focus only. */
+/* Cursor / selection / verdict (F3): three signals that never share a channel.
+   - Selected (checkbox) = the ticked box and the light accent tint (--bg-selected, shared with
+     the tree). Only the checkbox, Space, Ctrl-click and Shift-click select; a click moves the
+     cursor.
+   - Cursor (the J/K row the viewer shows) = a 2px inset accent ring drawn above the sticky
+     cells (::after), visible on a selected row too. Hover = a 4% text tint.
+   - Verdict = the glyph in the select column (no row tint, F2). */
 .grid-row.is-selected {
   background: var(--bg-selected);
 }
@@ -358,12 +362,23 @@
 /* Cells inherit the row background; the tint is painted on the row and the sticky cells
    repeat it over an opaque base so scrolled cells never show through. */
 .grid-body .grid-row:hover:not(.is-selected) {
-  background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--row-bg, var(--bg));
+  background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg);
+}
+
+/* The row's transform makes it a stacking context, so z-index 3 lifts the ring over the sticky
+   select / first cells (z-index 2). The keyboard focus ring is the same mark. */
+.grid-row.is-focused::after,
+.grid-row:focus-visible::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  box-shadow: inset 0 0 0 var(--focus-width) var(--focus);
+  pointer-events: none;
 }
 
 .grid-row:focus-visible {
-  outline: 1px solid var(--accent);
-  outline-offset: -1px;
+  outline: none;
 }
 
 .grid-cell {
@@ -388,13 +403,26 @@
   font-size: var(--fs-table-aux);
 }
 
-/* The select cell and the first data column never scroll out of view. */
+/* The select cell and the first data column never scroll out of view. Its 4px padding and 2px
+   gaps keep it at SELECT_COL_WIDTH (62px), so 1280px beside the viewer keeps 크기 (review #99). */
 .grid-cell-select {
   position: sticky;
   left: 0;
   z-index: 2;
-  gap: var(--space-1);
+  gap: 2px;
+  padding: 0 var(--space-1);
   background: inherit;
+}
+
+/* Fixed verdict slot between the checkbox and the row menu (F2): 14px wide whether or not
+   the row has a verdict, so the glyphs line up in one column. */
+.grid-verdict {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
 }
 
 .grid-cell-first {
@@ -859,28 +887,6 @@
   font-size: var(--fs-aux);
   line-height: 18px;
   white-space: nowrap;
-}
-
-/* U-F8: a reviewed row is tinted with its status colour (the 선별 chip names it); a selected row's
-   accent tint wins, and hover adds its 4% over either. No stripe on the row edge. */
-.grid-row[data-mark="relevant"] {
-  --row-bg: color-mix(in srgb, var(--status-relevant) 12%, var(--bg));
-}
-
-.grid-row[data-mark="excluded"] {
-  --row-bg: color-mix(in srgb, var(--status-excluded) 12%, var(--bg));
-}
-
-.grid-row[data-mark="needs-review"] {
-  --row-bg: color-mix(in srgb, var(--status-needs-review) 12%, var(--bg));
-}
-
-.grid-row[data-mark="include-in-report"] {
-  --row-bg: color-mix(in srgb, var(--status-report) 12%, var(--bg));
-}
-
-.grid-row[data-mark="bookmark"] {
-  --row-bg: color-mix(in srgb, var(--status-bookmark) 12%, var(--bg));
 }
 
 /* U-F8 mixed-family grid: label above value inside one cell (fits the 28px row). */

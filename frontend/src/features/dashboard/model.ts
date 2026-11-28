@@ -116,28 +116,23 @@ export function categoryBars(tree: RunTree | undefined): { bars: CategoryBar[]; 
 export interface ReviewSummaryRow {
   key: ReviewStatus | "bookmark";
   label: string;
-  /** CSS custom property (S10 tokens) with a fallback colour. */
+  /** The status token (tokens.css `--status-*`, no literal fallback: colours live only there). */
   color: string;
   count: number;
   status?: ReviewStatus;
 }
 
 export const REVIEW_ROWS: ReadonlyArray<Omit<ReviewSummaryRow, "count">> = [
-  { key: "relevant", label: "관련 있음", color: "var(--status-relevant, #ef6b6b)", status: "relevant" },
-  {
-    key: "needs-review",
-    label: "재검토",
-    color: "var(--status-needs-review, #5aa8ff)",
-    status: "needs-review",
-  },
-  { key: "excluded", label: "제외", color: "var(--status-excluded, #e8863a)", status: "excluded" },
+  { key: "relevant", label: "관련 있음", color: "var(--status-relevant)", status: "relevant" },
+  { key: "needs-review", label: "재검토", color: "var(--status-needs-review)", status: "needs-review" },
+  { key: "excluded", label: "제외", color: "var(--status-excluded)", status: "excluded" },
   {
     key: "include-in-report",
     label: "보고서 포함",
-    color: "var(--status-report, #a58bf0)",
+    color: "var(--status-report)",
     status: "include-in-report",
   },
-  { key: "bookmark", label: "리뷰보드 항목(북마크)", color: "var(--status-bookmark, #3fb96f)" },
+  { key: "bookmark", label: "리뷰보드 항목(북마크)", color: "var(--status-bookmark)" },
 ];
 
 export function reviewSummary(review: ReviewCounts | undefined): { rows: ReviewSummaryRow[]; total: number } {

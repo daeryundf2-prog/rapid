@@ -111,13 +111,12 @@ test("Q-F3/Q-F4: Ctrl+Shift+V opens the viewer window; it follows J/K; closing i
   await expect(popup).not.toHaveTitle(firstTitle, { timeout: 2000 });
   const elapsed = Date.now() - started;
   test.info().annotations.push({ type: "popout-follow-ms", description: String(elapsed) });
-  // R inside the window marks the same row in the main window (its grid shows the status).
+  // R inside the window marks the same row in the main window (its grid shows the verdict).
   await popup.locator("body").press("r");
-  await expect(page.locator('[role="grid"] [role="row"][aria-rowindex="3"]').first()).toContainText(
-    "관련 있음",
-    {
-      timeout: 5000,
-    },
+  await expect(page.locator('[role="grid"] [role="row"][aria-rowindex="3"]').first()).toHaveAttribute(
+    "aria-description",
+    "검토 표시: 관련 있음",
+    { timeout: 5000 },
   );
   // The token reached the window by postMessage (its sessionStorage copy had none), never the URL.
   const stored = await popup.evaluate(() => window.sessionStorage.getItem("rapidtriage.authToken"));
@@ -250,49 +249,22 @@ test("Q-F13: every artifact = summary columns with label-above-value cells; one 
   await expect(page.getByRole("columnheader", { name: /주요 세부 정보/ })).toHaveCount(0);
 });
 
-/**
- * The review tint a grid row paints (U-F8: a marked row's background is its status colour, no side
- * stripe): the row's `--row-bg` resolved to a colour, transparent when the row carries none. Read
- * through a probe inside the row because a selected row shows the accent tint over it.
- */
-function rowTint(row: Locator): Promise<string> {
-  return row.evaluate((el) => {
-    const probe = document.createElement("span");
-    probe.style.background = "var(--row-bg, transparent)";
-    el.appendChild(probe);
-    const colour = getComputedStyle(probe).backgroundColor;
-    probe.remove();
-    return colour;
-  });
+/** The verdict shape in the row's fixed select-column slot (F2), or null when the row has none. */
+function rowVerdict(row: Locator): Promise<string | null> {
+  return row.evaluate(
+    (el) => el.querySelector(".grid-cell-select .grid-verdict svg")?.getAttribute("data-verdict") ?? null,
+  );
 }
 
-/** The tint a status token should give a row: 12% of the status colour over the page. */
-function statusTint(page: Page, token: string): Promise<string> {
-  return page.evaluate((name) => {
-    const probe = document.createElement("span");
-    probe.style.background = `color-mix(in srgb, var(${name}) 12%, var(--bg))`;
-    document.body.appendChild(probe);
-    const colour = getComputedStyle(probe).backgroundColor;
-    probe.remove();
-    return colour;
-  }, token);
-}
-
-test("Q-F14/Q-F15: R/X/B marks give one status tint each; the meta tail lists seven facts", async ({
+test("Q-F14/Q-F15: R/X/B marks show one verdict glyph each, never a row tint; the meta tail lists seven facts", async ({
   page,
 }) => {
   await open(page, `#/case/${runId}/explore/files`);
   const row = page.locator('[role="grid"] [role="row"][aria-rowindex="2"]').first();
-  const tints = {
-    relevant: await statusTint(page, "--status-relevant"),
-    excluded: await statusTint(page, "--status-excluded"),
-    bookmark: await statusTint(page, "--status-bookmark"),
-  };
-  // Three different tints, none of them the bare page.
-  expect(new Set(Object.values(tints)).size).toBe(3);
-  expect(Object.values(tints)).not.toContain("rgba(0, 0, 0, 0)");
+  // The page background a row keeps whatever its verdict (F2: no review tint).
+  const pageBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
   // B on an unmarked row (other specs mark rows of this run, and a review status wins over the
-  // 북마크 tag): a 북마크 tint and its accessible name. Pinned by its key: once marked it no
+  // 북마크 tag): a 북마크 glyph and its accessible name. Pinned by its key: once marked it no
   // longer matches :not([data-mark]).
   const unmarked = page
     .locator(
@@ -304,21 +276,25 @@ test("Q-F14/Q-F15: R/X/B marks give one status tint each; the meta tail lists se
   const other = page.locator(`[role="grid"] [role="row"][data-row-key="${otherKey}"]`);
   await other.click();
   await other.focus();
+  // A click moves the cursor only (F3): the row's checkbox stays clear.
+  await expect(other.getByRole("checkbox")).not.toBeChecked();
   await page.keyboard.press("b");
   await expect(other).toHaveAttribute("data-mark", "bookmark");
   await expect(other).toHaveAttribute("aria-description", "검토 표시: 북마크");
-  await expect.poll(() => rowTint(other)).toBe(tints.bookmark);
-  // R then X on one row: one mark at a time, its tint follows the mark; no side stripe.
+  await expect.poll(() => rowVerdict(other)).toBe("bookmark");
+  // R then X on one row: one mark at a time, its glyph follows the mark; the background stays.
   await row.click();
   await row.focus();
   await page.keyboard.press("r");
   await expect(row).toHaveAttribute("data-mark", "relevant");
   await expect(row).toHaveAttribute("aria-description", "검토 표시: 관련 있음");
-  await expect.poll(() => rowTint(row)).toBe(tints.relevant);
+  await expect.poll(() => rowVerdict(row)).toBe("relevant");
   await page.keyboard.press("x");
   await expect(row).toHaveAttribute("data-mark", "excluded");
   await expect(row).toHaveAttribute("aria-description", "검토 표시: 제외");
-  await expect.poll(() => rowTint(row)).toBe(tints.excluded);
+  await expect.poll(() => rowVerdict(row)).toBe("excluded");
+  await page.mouse.move(0, 0);
+  expect(await row.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(pageBg);
   await expect(row.locator(".grid-row-stripe")).toHaveCount(0);
   // Meta tail.
   await page.keyboard.press("Enter");

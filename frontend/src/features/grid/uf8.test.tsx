@@ -25,7 +25,7 @@ import {
 } from "../tree/model";
 import { EvidenceTail, TAIL_REASONS } from "../viewer/views/MetaView";
 import { artifactColumnsForKind, isMixedGrid } from "./columns/artifacts";
-import { rowMark } from "./DataGrid";
+import { rowMark } from "./columns/common";
 
 // viewer-families U-F8 (AXIOM observations): review stripe, mixed-family summary cells, the
 // fixed evidence tail, and the condition line's applied label / save / recent ranges.

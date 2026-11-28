@@ -457,12 +457,15 @@
   min-height: 0;
 }
 
+/* The stage's screen title (h1, F4): one size step above the panel titles below it. */
 .stage-heading {
   margin: 0;
   padding: var(--space-2) var(--space-2) 0;
-  font-size: var(--fs-table-aux);
+  font-size: var(--fs-screen-title);
   font-weight: 600;
-  color: var(--text-muted);
+  line-height: 1.25;
+  letter-spacing: var(--tracking-heading);
+  color: var(--text);
 }
 
 .stage-heading:focus-visible {

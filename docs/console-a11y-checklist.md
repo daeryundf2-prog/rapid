@@ -11,7 +11,7 @@ Verification legend: **U** = vitest unit (`frontend/src/a11y/a11y.test.tsx` and 
 | 1.3.2 Meaningful sequence | DOM order matches visual order (tree, grid, viewer) | 4.4 | Review in DOM, tab order walk | M |
 | 1.3.4 Orientation | No orientation lock; 1024 px narrow layout works | Q-A7 | Viewport run | E, M |
 | 1.3.5 Identify input purpose | Search/filter inputs named | 4.4 | `field-name` rule | E |
-| 1.4.1 Use of color | Review status, deleted marker and tags also carry text or icon | 4.5 tokens | Component review | M |
+| 1.4.1 Use of color | Review verdicts carry a shape and a word (`VerdictGlyph`: ◆ 관련, ◐ 재검토, ⊘ 제외, ribbon 북마크, page 보고서) in a fixed grid slot, never a row tint, and the same glyph in cards, thumbnails, chat and the viewer's status chip; status colours stay apart under deuteranopia/protanopia (ΔE00 ≥ 10), from each other under tritanopia (ΔE00 ≥ 10), and --ok / tag colours are no near-twin of a status (ΔE00 ≥ 10); deleted marker and tags also carry text or icon | 4.5 tokens, F1/F2 | `VerdictGlyph.test.tsx`, status separation in `check-contrast.mjs` | U, C |
 | 1.4.3 Contrast (minimum) | Text >= 4.5:1 in dark, light, light-OS themes | 4.4 contrast | Pair table in `check-contrast.mjs` | C |
 | 1.4.4 Resize text | 200% zoom without loss | Q-A7 | rem-based font tokens, manual zoom | M |
 | 1.4.10 Reflow | No 2-D scroll at 320 CSS px except grid/hex viewer | Q-A7 | Manual | M |

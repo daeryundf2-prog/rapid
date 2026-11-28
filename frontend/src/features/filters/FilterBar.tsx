@@ -9,6 +9,7 @@
 import { type ReactNode, type RefObject, useEffect, useId, useRef, useState } from "react";
 import { announce } from "../../a11y";
 import { Popover } from "../../components/Popover";
+import { VerdictShape } from "../../components/VerdictGlyph";
 import type { ReviewStatus } from "../../contracts/collection";
 import { Icon } from "../../icons";
 import { useTimezone } from "../../state/hooks";
@@ -256,7 +257,7 @@ function FilterPopoverBody({ tagListId }: { tagListId: string }) {
               aria-label={`상태 필터: ${REVIEW_LABELS[status]}`}
               onClick={() => patch({ statuses: toggle(filters.statuses, status) })}
             >
-              <span className="status-dot" data-status={status} aria-hidden="true" />
+              <VerdictShape status={status} />
               {REVIEW_LABELS[status]}
             </button>
           ))}

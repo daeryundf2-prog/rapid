@@ -1,64 +1,65 @@
-.status-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0 var(--space-2);
-  height: 20px;
-  border-radius: var(--radius-sm);
-  font-size: var(--fs-table-aux);
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.status-chip[data-status="relevant"] {
+/* Verdict colours (F1/F2): every verdict sets --chip-bg (its --status-* colour) and --chip-fg (the
+   text on that fill). The glyph shape (components/VerdictGlyph) is drawn in --chip-bg; the chip
+   itself stays neutral (controls.css) so the shape and word carry the verdict, not a fill. */
+[data-verdict="relevant"],
+[data-status-button="relevant"] {
   --chip-bg: var(--status-relevant);
   --chip-fg: var(--status-relevant-on);
 }
-.status-chip[data-status="bookmark"] {
+[data-verdict="bookmark"],
+[data-status-button="bookmark"] {
   --chip-bg: var(--status-bookmark);
   --chip-fg: var(--status-bookmark-on);
 }
-.status-chip[data-status="excluded"] {
+[data-verdict="excluded"],
+[data-status-button="excluded"] {
   --chip-bg: var(--status-excluded);
   --chip-fg: var(--status-excluded-on);
 }
-.status-chip[data-status="needs-review"] {
+[data-verdict="needs-review"],
+[data-status-button="needs-review"] {
   --chip-bg: var(--status-needs-review);
   --chip-fg: var(--status-needs-review-on);
 }
-.status-chip[data-status="include-in-report"] {
+[data-verdict="include-in-report"],
+[data-status-button="include-in-report"] {
   --chip-bg: var(--status-report);
   --chip-fg: var(--status-report-on);
 }
 
-/* Toggle buttons that carry a status (viewer mark buttons, batch bar): pressed = filled. */
+.verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  line-height: 1;
+}
+
+.verdict-shape {
+  flex: none;
+  display: block;
+  color: var(--chip-bg, var(--text-muted));
+}
+
+.verdict-word {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Toggle buttons that carry a status (viewer mark buttons, batch bar): pressed = filled, and a
+   glyph inside follows the button's text colour. */
 [data-status-button][aria-pressed="true"] {
   background: var(--chip-bg);
   color: var(--chip-fg);
   border-color: var(--chip-bg);
 }
-[data-status-button="relevant"] {
-  --chip-bg: var(--status-relevant);
-  --chip-fg: var(--status-relevant-on);
+[data-status-button][aria-pressed="true"] .verdict-shape {
+  color: inherit;
 }
-[data-status-button="bookmark"] {
-  --chip-bg: var(--status-bookmark);
-  --chip-fg: var(--status-bookmark-on);
-}
-[data-status-button="excluded"] {
-  --chip-bg: var(--status-excluded);
-  --chip-fg: var(--status-excluded-on);
-}
-[data-status-button="needs-review"] {
-  --chip-bg: var(--status-needs-review);
-  --chip-fg: var(--status-needs-review-on);
-}
-[data-status-button="include-in-report"] {
-  --chip-bg: var(--status-report);
-  --chip-fg: var(--status-report-on);
-}
-/* Unpressed mark buttons: the status's faint tint, the same reading as a marked row or card
-   (no side stripe). A primary keeps its accent fill. */
+/* Unpressed mark buttons: the status's faint tint behind the verdict glyph (no side stripe; rows
+   and cards carry the glyph only, no tint). A primary keeps its accent fill. */
 .button.ghost[data-status-button]:not([aria-pressed="true"]) {
   background: color-mix(in srgb, var(--chip-bg) 14%, transparent);
 }

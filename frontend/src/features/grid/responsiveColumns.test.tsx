@@ -1,6 +1,7 @@
 // biome-ignore-all lint/a11y: tests drive a virtualized ARIA grid through its DOM roles
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { filesCollection } from "./columns/files";
 import { DataGrid } from "./DataGrid";
 import {
   fileCandidates,
@@ -86,6 +87,19 @@ describe("responsive default columns (files, 분석 기본)", () => {
     expect(within(menu).queryByTestId("grid-autohidden-path")).toBeNull();
     expect(within(menu).getByTestId("grid-autohidden-size")).toBeTruthy();
     expect(hasHeader("크기")).toBe(false);
+  });
+
+  it("the verdict slot costs only its own width: select + 이름 · 수정 · 크기 widths keeps all three (review #99 P3)", async () => {
+    // At 1280 with the viewer open the grid is ≈ 512px. Sum the three columns' own widths from the
+    // collection (so a later width change elsewhere moves the bound with it) and add the 62px select
+    // column: exactly that much room must keep 이름 · 수정 · 크기 and drop only 경로.
+    const width = (header: string) =>
+      filesCollection.columns.find((c) => typeof c.header === "string" && c.header.startsWith(header))
+        ?.width ?? 0;
+    restoreWidth = mockGridWidth(62 + width("이름") + width("수정") + width("크기"));
+    await renderFiles();
+    await waitFor(() => expect(hasHeader("경로")).toBe(false));
+    for (const name of ["이름", "수정", "크기"]) expect(hasHeader(name), name).toBe(true);
   });
 
   it("shows every default column with values when the grid is wide enough", async () => {

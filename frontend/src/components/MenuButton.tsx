@@ -10,6 +10,7 @@ import { useEscape } from "../a11y/focus";
 import { Icon, type IconName } from "../icons";
 import { keyLabel } from "../shortcuts";
 import "./popover.css";
+import { isVerdictStatus, VerdictShape } from "./VerdictGlyph";
 
 export interface MenuItem {
   id: string;
@@ -180,8 +181,8 @@ export function MenuButton({
             const content = (
               <>
                 <span className="menu-item-lead" aria-hidden="true">
-                  {item.status ? (
-                    <span className="status-dot" data-status={item.status} />
+                  {isVerdictStatus(item.status) ? (
+                    <VerdictShape status={item.status} />
                   ) : item.icon ? (
                     <Icon name={item.icon} />
                   ) : null}

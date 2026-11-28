@@ -87,6 +87,31 @@
 
 ### Changed
 
+- Console verdicts and type (design PR ①, F1–F5): every review verdict has one
+  glyph, a shape plus a short word (◆ 관련, ◐ 재검토, ⊘ 제외, a bookmark
+  ribbon for 북마크, a page for 보고서), shared by the grid, cards, thumbnails,
+  messages, menus and status chips (`components/VerdictGlyph.tsx`). The grid
+  shows it in a fixed slot of the sticky select column, so narrow panes,
+  390 px and 200 % zoom never hide it; rows, cards, thumbnails and chat
+  bubbles lose their verdict background tint. 관련 있음 is magenta instead of
+  the error red, 제외 a neutral grey, and `npm run check:contrast` now also
+  checks that the five status colours stay apart from each other and from
+  danger, warn and accent under deuteranopia and protanopia (Machado 2009,
+  CIEDE2000 ≥ 10; ≥ 20 for normal vision), from each other under tritanopia
+  (≥ 10), and that `--ok` and the tag colours are no near-twin of a status
+  (≥ 10; dark 재검토, `--ok` and tags 3/4/6 and light `--ok` and tags 3/7
+  moved slightly). The viewer's status chip shows the glyph too, and a row
+  marked only by a 북마크 tag shows the ribbon in cards, thumbnails and chat
+  as in the grid. A click on a row moves the cursor
+  without ticking its checkbox (selecting is the checkbox, Space, Ctrl-click
+  or Shift-click), and the cursor row has a 2 px accent ring that also shows
+  on selected rows; the row menu's 선택 행 OCR 실행 acts on the right-clicked
+  row unless the ticked rows include it, like its review items. The select
+  column is 62 px, so 1280 px beside the viewer still shows 크기. Body, panel
+  and dialog text is 14 px, table cells stay
+  13 px, titles step 14, 18 and 24 px (`--fs-table`, `--fs-figure` added),
+  the dark surfaces are further apart and input borders are at least 3:1
+  (`frontend/src/tokens/tokens.test.ts`, `components/VerdictGlyph.test.tsx`).
 - Console layout: toolbar buttons no longer wrap their label ("조건" split
   into two lines at 390 px), a narrow timeline keeps 요약 next to 시각, the
   stage rail is 48 px on phones, 실행 is icon-only there so the global search

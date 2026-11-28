@@ -19,15 +19,19 @@
   --font-mono:
     "JetBrains Mono Variable", "D2Coding", "Cascadia Mono", Consolas, "RapidForensic UI", monospace;
 
-  /* 4 font sizes. Nothing under 13px on screen (design-blend): the 보조 / 표 보조 roles read
-     at the body size and stay apart by colour and weight; dense grids keep their density with
-     row height and column priority, not smaller type. */
+  /* Type scale (F4, review X5). Nothing under 13px on screen (design-blend). Running text in
+     panels and dialogs reads at 14px; dense data (grid cells, card / thumbnail lists) and the
+     보조 roles stay at 13px so a 1440×900 grid still shows 20+ rows. The title steps are at
+     least 1.25× apart (panel 14 → screen 18 → case 24) so headings are told apart by size,
+     not weight alone; --fs-figure is for big counts (dashboard numbers). */
   --fs-aux: 0.8125rem; /* 13px — 보조 텍스트 */
+  --fs-table: 0.8125rem; /* 13px — 표 셀 */
   --fs-table-aux: 0.8125rem; /* 13px — 표 보조 */
-  --fs-body: 0.8125rem; /* 13px — 기본 */
-  --fs-panel-title: 0.875rem; /* 14px — 패널 제목 */
-  --fs-screen-title: 1rem; /* 16px — 화면 제목 */
-  --fs-case: 1.25rem; /* 20px — 케이스명 */
+  --fs-body: 0.875rem; /* 14px — 본문, 패널, 대화상자 */
+  --fs-panel-title: 0.875rem; /* 14px — 패널 제목 (semibold) */
+  --fs-screen-title: 1.125rem; /* 18px — 화면 제목 */
+  --fs-case: 1.5rem; /* 24px — 케이스명 */
+  --fs-figure: 1.75rem; /* 28px — 큰 숫자 */
   --lh: 1.4;
   --tracking-heading: -0.01em;
 
@@ -72,17 +76,19 @@
 :root,
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --surface-0: #0e1217; /* app background */
-  --surface-1: #141920; /* panels, bars */
-  --surface-2: #1b222b; /* raised: buttons, hover, inputs-in-bars */
-  --surface-3: #232c37; /* popovers, menus, toasts */
-  --line: #68778a; /* control borders (≥ 3:1) */
-  --line-subtle: #262f3a; /* dividers, row rules */
+  /* Surface steps ≈ 6 L* apart (F5; were 3–5): rail / tree (1), table (0), inputs and hover (2)
+     and popovers (3) separate without borders. */
+  --surface-0: #0b0e13; /* app background */
+  --surface-1: #161c24; /* panels, bars */
+  --surface-2: #202833; /* raised: buttons, hover, inputs-in-bars */
+  --surface-3: #28313d; /* popovers, menus, toasts */
+  --line: #75849a; /* control and input borders (≥ 3:1 on every surface) */
+  --line-subtle: #2c3643; /* dividers, row rules */
   --text: #e6eaef;
   --text-muted: #a6b0bc;
   --text-subtle: #939fac; /* placeholders, hints — still ≥ 4.5:1 */
   /* Disabled controls (incl. primary): never muted text on the accent fill (≈1.4:1). */
-  --disabled-bg: #1b222b;
+  --disabled-bg: #202833;
   --disabled-text: #9aa5b1;
 
   --accent: #5aa2ff;
@@ -91,30 +97,35 @@
   --on-accent: #0b1117;
   --scrim: #000000;
 
-  --ok: #45c07a;
+  --ok: #4cc468;
   --warn: #e0aa3e;
   --danger: #f47676;
   --info: #5aa2ff;
 
   --tag-1: #f06b6b;
   --tag-2: #e0aa3e;
-  --tag-3: #45c07a;
-  --tag-4: #3fb3c4;
+  --tag-3: #4cc468;
+  --tag-4: #40a8b8;
   --tag-5: #5aa2ff;
-  --tag-6: #9784ec;
+  --tag-6: #9888ec;
   --tag-7: #d276c2;
   --tag-8: #a59a84;
 
-  /* Review-status colours (X3): one meaning, one colour on every screen. */
-  --status-relevant: #f06b6b;
+  /* Review-status colours (X3, F1): one meaning, one colour on every screen. Red stays for
+     errors / mismatches (--danger) only: 관련 있음 is magenta, 재검토 cyan, 제외 a neutral grey
+     (빠짐), 북마크 green, 보고서 포함 violet. scripts/check-contrast.mjs checks they stay apart
+     from each other (also under tritanopia) and from danger / warn / accent under deuteranopia
+     and protanopia, and that --ok and the tag colours are no near-twin of a status. The
+     verdict glyph's shape carries the meaning; the colour only repeats it. */
+  --status-relevant: #e024b7;
   --status-relevant-on: #0b1117;
-  --status-bookmark: #45c07a;
+  --status-bookmark: #38bd92;
   --status-bookmark-on: #0b1117;
-  --status-excluded: #eb8c45;
+  --status-excluded: #b8bbc2;
   --status-excluded-on: #0b1117;
-  --status-needs-review: #3cc4d6; /* cyan: apart from the selection accent (#5aa2ff) */
+  --status-needs-review: #00dcf8;
   --status-needs-review-on: #0b1117;
-  --status-report: #a98ff2;
+  --status-report: #7c65fa;
   --status-report-on: #0b1117;
 
   --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(0 0 0 / 0.2);
@@ -144,29 +155,29 @@
   --on-accent: #ffffff;
   --scrim: #000000;
 
-  --ok: #176e3e;
+  --ok: #1c5c28;
   --warn: #7c580d;
   --danger: #b63131;
   --info: #1a63c2;
 
   --tag-1: #b63131;
   --tag-2: #87600f;
-  --tag-3: #1b7a45;
+  --tag-3: #20801c;
   --tag-4: #177283;
   --tag-5: #1a63c2;
   --tag-6: #5f4bc0;
-  --tag-7: #a03e8e;
+  --tag-7: #ac589c;
   --tag-8: #6e6350;
 
-  --status-relevant: #b63131;
+  --status-relevant: #9d2b8a;
   --status-relevant-on: #ffffff;
-  --status-bookmark: #1b7a45;
+  --status-bookmark: #14794c;
   --status-bookmark-on: #ffffff;
-  --status-excluded: #a5520c;
+  --status-excluded: #6c6e75;
   --status-excluded-on: #ffffff;
-  --status-needs-review: #0b7285; /* cyan: apart from the selection accent (#1a63c2) */
+  --status-needs-review: #02545b;
   --status-needs-review-on: #ffffff;
-  --status-report: #6c4bbf;
+  --status-report: #2a00e0;
   --status-report-on: #ffffff;
 
   --shadow-pop: 0 8px 24px rgb(16 24 32 / 0.14), 0 0 0 1px rgb(16 24 32 / 0.06);
@@ -195,27 +206,27 @@
     --accent-active: #134a91;
     --on-accent: #ffffff;
     --scrim: #000000;
-    --ok: #176e3e;
+    --ok: #1c5c28;
     --warn: #7c580d;
     --danger: #b63131;
     --info: #1a63c2;
     --tag-1: #b63131;
     --tag-2: #87600f;
-    --tag-3: #1b7a45;
+    --tag-3: #20801c;
     --tag-4: #177283;
     --tag-5: #1a63c2;
     --tag-6: #5f4bc0;
-    --tag-7: #a03e8e;
+    --tag-7: #ac589c;
     --tag-8: #6e6350;
-    --status-relevant: #b63131;
+    --status-relevant: #9d2b8a;
     --status-relevant-on: #ffffff;
-    --status-bookmark: #1b7a45;
+    --status-bookmark: #14794c;
     --status-bookmark-on: #ffffff;
-    --status-excluded: #a5520c;
+    --status-excluded: #6c6e75;
     --status-excluded-on: #ffffff;
-    --status-needs-review: #0b7285;
+    --status-needs-review: #02545b;
     --status-needs-review-on: #ffffff;
-    --status-report: #6c4bbf;
+    --status-report: #2a00e0;
     --status-report-on: #ffffff;
     --shadow-pop: none;
   }
@@ -229,6 +240,8 @@
   --bg-hover: color-mix(in srgb, var(--text) 4%, transparent);
   /* Caution box in dialogs (review #4): 10% warn over the dialog surface. */
   --caution-bg: color-mix(in srgb, var(--warn) 10%, var(--surface-1));
+  /* Input / select / textarea edge (F5): the full control line, ≥ 3:1 on every surface. */
+  --field-edge: var(--line);
   --bg: var(--surface-0);
   --bg-panel: var(--surface-1);
   --bg-raised: var(--surface-2);

@@ -13,7 +13,8 @@ export const ROW_MENU_COMMAND_IDS = [
   "grid.copyCitation",
   "grid.showInTimeline",
   "grid.sameSource",
-  "grid.ocrSelected",
+  // The menu's own OCR entry (menuRows rule), not the BatchBar/palette grid.ocrSelected.
+  "grid.row.ocr",
 ] as const;
 
 /**

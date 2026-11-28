@@ -30,6 +30,7 @@ import {
 } from "react";
 import { announce, DisabledReason } from "../../a11y";
 import { fetchSourceImage, fetchSourceThumbnailBlob, isArchiveEntryPath } from "../../api/viewer";
+import { VerdictShape } from "../../components/VerdictGlyph";
 import type { CollectionRef, GridRow } from "../../contracts/collection";
 import { encodeRowRef } from "../../contracts/rowRef";
 import { useAppStore } from "../../state/store";
@@ -42,7 +43,7 @@ import {
   NO_ACTIVE_IMAGE_REASON,
 } from "../explorers/MediaExplorerPanel";
 import { useRoute, useSelection, useViewerTarget } from "../grid/adapter";
-import { formatBytes, REVIEW_LABELS } from "../grid/columns/common";
+import { formatBytes, rowMark } from "../grid/columns/common";
 import { buildViewerTarget } from "../grid/gridCommands";
 import { PAGE_SIZE, useCollectionQuery } from "../grid/useCollectionQuery";
 import { MediaBlurToggle, RelatedMediaBadge } from "../review/MediaTools";
@@ -122,8 +123,9 @@ const Tile = memo(function Tile({
 }) {
   const name = (row.sourcePath ?? row.title).split(/[\\/]/).pop() || row.title;
   const size = formatBytes(rowSize(row));
-  const status = row.reviewStatus ? REVIEW_LABELS[row.reviewStatus] : "";
-  const label = [name, size, row.timestamp ?? "", status, selected ? "선택됨" : ""]
+  // The grid's verdict (review status, else a 북마크 tag).
+  const mark = rowMark(row);
+  const label = [name, size, row.timestamp ?? "", mark?.label ?? "", selected ? "선택됨" : ""]
     .filter(Boolean)
     .join(", ");
   return (
@@ -145,8 +147,12 @@ const Tile = memo(function Tile({
       <span className="thumb-frame">
         <Thumb runId={runId} path={row.sourcePath ?? ""} />
       </span>
-      <span className="thumb-name" title={row.sourcePath ?? name}>
-        {name}
+      <span className="thumb-caption">
+        {/* The tile's aria-label names the verdict; the shape is its visual twin (F2). */}
+        {mark ? <VerdictShape status={mark.id} /> : null}
+        <span className="thumb-name" title={row.sourcePath ?? name}>
+          {name}
+        </span>
       </span>
     </div>
   );
