@@ -6,10 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useToastStore } from "../../components/toastStore";
 import type { GridRow } from "../../contracts/collection";
 import type { CommandContext } from "../../contracts/command";
+import { useAnalysisStore } from "../analysis/store";
 import { getRegisteredCommand, useGridLocalStore } from "./adapter";
 import { DataGrid } from "./DataGrid";
+import { OCR_SELECTED_COMMAND } from "./gridCommands";
 import { applyReviewAction } from "./reviewActions";
 import {
+  fileCandidates,
   filesHandler,
   installFetch,
   jsonResponse,
@@ -206,6 +209,49 @@ describe("DataGrid keyboard", () => {
     expect(screen.getByRole("menu")).toBeTruthy();
   });
 
+  it("the row menu's OCR targets the right-clicked row unless the ticked rows hold it (review #99 P2)", async () => {
+    installFetch({
+      "/files": (url) => {
+        const offset = Number(url.searchParams.get("offset") ?? 0);
+        const limit = Number(url.searchParams.get("limit") ?? 0);
+        const candidates = fileCandidates(offset, Math.min(offset + limit, 20)).map((c) => ({
+          ...c,
+          path: c.path.replace(/\.txt$/, ".png"),
+          name: c.name.replace(/\.txt$/, ".png"),
+          extension: ".png",
+        }));
+        return jsonResponse({ candidates, total: 20, offset, limit });
+      },
+    });
+    renderWithClient(<DataGrid />);
+    await waitFor(() => expect(rows().length).toBeGreaterThan(0));
+    useAnalysisStore.setState({ dialog: null });
+    const runMenuOcr = (index: number) => {
+      fireEvent.contextMenu(rowAt(index));
+      const item = within(screen.getByRole("menu"))
+        .getAllByRole("menuitem")
+        .find((i) => i.querySelector(".menu-item-label")?.textContent === "선택 행 OCR 실행") as HTMLElement;
+      expect(item.getAttribute("aria-disabled")).toBeNull();
+      fireEvent.click(item);
+      return useAnalysisStore.getState().dialog?.preset;
+    };
+    // Nothing ticked: the right-clicked row.
+    expect(runMenuOcr(4)).toEqual({ locators: ["/candidates/4"] });
+    // Rows 1 and 2 ticked, row 3 right-clicked: row 3 alone, never the earlier ticks.
+    fireEvent.mouseDown(rowAt(1), { ctrlKey: true });
+    fireEvent.mouseDown(rowAt(2), { ctrlKey: true });
+    expect(runMenuOcr(3)).toEqual({ locators: ["/candidates/3"] });
+    // A ticked row right-clicked: the whole selection (as the menu's review items do).
+    expect(runMenuOcr(1)).toEqual({ locators: ["/candidates/1", "/candidates/2"] });
+    // The BatchBar / palette command still runs on the selection.
+    fireEvent.contextMenu(rowAt(5));
+    void getRegisteredCommand(OCR_SELECTED_COMMAND)?.run(ctx());
+    expect(useAnalysisStore.getState().dialog?.preset).toEqual({
+      locators: ["/candidates/1", "/candidates/2"],
+    });
+    useAnalysisStore.setState({ dialog: null });
+  });
+
   it("Enter publishes the ViewerTarget and requests viewer focus", async () => {
     await renderFiles();
     rowAt(0).focus();
@@ -273,7 +319,8 @@ describe("DataGrid keyboard", () => {
       북마크: "B",
     });
     expect(keys["보고서 포함 표시"]).toBeUndefined();
-    const ocr = items.find((i) => i.dataset.command === "grid.ocrSelected");
+    const ocr = items.find((i) => i.dataset.command === "grid.row.ocr");
+    expect(ocr).toBeTruthy();
     expect(ocr?.querySelector(".menu-item-reason")?.textContent).toBe(
       ocr?.getAttribute("data-disabled-reason"),
     );

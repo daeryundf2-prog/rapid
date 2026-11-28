@@ -123,6 +123,8 @@ export function otherCasesOf(row: GridRow, runId: string | null): string[] {
 
 /** "선택 행 OCR 실행" (plan analysis-workbench-p1 §3.2 ocr-batch `target.locators`). */
 export const OCR_SELECTED_COMMAND = "grid.ocrSelected";
+/** The row menu's OCR entry: the right-clicked row, or the selection only when it holds that row. */
+export const ROW_OCR_COMMAND = "grid.row.ocr";
 export const OCR_NO_IMAGE_REASON = "선택한 행에 이미지가 없습니다.";
 export const OCR_COLLECTION_REASON = "파일·아티팩트 목록에서만 선택 행 OCR을 실행할 수 있습니다.";
 export const OCR_MAX_IMAGES = 1000;
@@ -152,6 +154,42 @@ export function ocrLocatorOf(row: GridRow): string | null {
     .replace(/^\./, "")
     .toLowerCase();
   return IMAGE_EXTENSIONS.has(ext) ? row.ref.locator : null;
+}
+
+/** An OCR command over `rows()` (image rows only, deduplicated locators). */
+function ocrCommand(
+  id: string,
+  host: () => GridCommandHost,
+  rows: () => GridRow[],
+  emptyReason: string,
+): Command {
+  const locators = () =>
+    new Set(
+      rows()
+        .map(ocrLocatorOf)
+        .filter((l): l is string => l !== null),
+    );
+  return {
+    id,
+    label: "선택 행 OCR 실행",
+    group: "grid",
+    icon: "image",
+    disabledReason: (ctx) => {
+      const h = host();
+      if (!h.runId) return "열린 케이스가 없습니다.";
+      if (h.collection.id !== "files" && h.collection.id !== "artifacts") return OCR_COLLECTION_REASON;
+      if (rows().length === 0) return emptyReason;
+      const images = locators();
+      if (images.size === 0) return OCR_NO_IMAGE_REASON;
+      if (images.size > OCR_MAX_IMAGES) return OCR_TOO_MANY_REASON;
+      return runDisabledReason("ocr-batch", { runId: ctx.runId ?? h.runId });
+    },
+    run: () => {
+      const images = [...locators()];
+      if (images.length)
+        useAnalysisStore.getState().openDialog({ kind: "ocr-batch", preset: { locators: images } });
+    },
+  };
 }
 
 export function batchCommandId(action: BatchAction): string {
@@ -264,41 +302,15 @@ export function buildGridCommands(hostRef: { current: GridCommandHost }): Comman
     },
   ];
 
+  // Palette / BatchBar: the ticked rows, else the focused row. The row menu has its own entry
+  // (ROW_OCR_COMMAND) that follows the menuRows rule instead (review #99 P2).
   const ocrRows = (): GridRow[] => {
-    const h = host();
-    const selected = h.getSelectedRows();
+    const selected = host().getSelectedRows();
     if (selected.length) return selected;
     const row = focused();
     return row ? [row] : [];
   };
-  commands.push({
-    id: OCR_SELECTED_COMMAND,
-    label: "선택 행 OCR 실행",
-    group: "grid",
-    icon: "image",
-    disabledReason: (ctx) => {
-      const h = host();
-      if (!h.runId) return "열린 케이스가 없습니다.";
-      if (h.collection.id !== "files" && h.collection.id !== "artifacts") return OCR_COLLECTION_REASON;
-      const rows = ocrRows();
-      if (rows.length === 0) return NO_SELECTION;
-      const images = new Set(rows.map(ocrLocatorOf).filter((l): l is string => l !== null));
-      if (images.size === 0) return OCR_NO_IMAGE_REASON;
-      if (images.size > OCR_MAX_IMAGES) return OCR_TOO_MANY_REASON;
-      return runDisabledReason("ocr-batch", { runId: ctx.runId ?? h.runId });
-    },
-    run: () => {
-      const locators = [
-        ...new Set(
-          ocrRows()
-            .map(ocrLocatorOf)
-            .filter((l): l is string => l !== null),
-        ),
-      ];
-      if (locators.length)
-        useAnalysisStore.getState().openDialog({ kind: "ocr-batch", preset: { locators } });
-    },
-  });
+  commands.push(ocrCommand(OCR_SELECTED_COMMAND, host, ocrRows, NO_SELECTION));
 
   for (const action of BATCH_ACTIONS) {
     commands.push({
@@ -418,6 +430,15 @@ export function buildRowMarkCommands(hostRef: { current: GridCommandHost }): Com
   );
 }
 
+/**
+ * The row menu's "선택 행 OCR 실행" (grid-local): like the review items it follows menuRows, so
+ * right-clicking an unticked row never runs OCR on earlier ticks (review #99 P2).
+ */
+export function buildRowOcrCommand(hostRef: { current: GridCommandHost }): Command {
+  const host = () => hostRef.current;
+  return ocrCommand(ROW_OCR_COMMAND, host, () => menuRows(host()), NO_ROW);
+}
+
 /** Apply a batch mark with optimistic update + rollback and a Korean error toast. */
 export async function runBatch(host: GridCommandHost, action: BatchAction, tag?: string): Promise<boolean> {
   return runMark(host, host.getSelectedRows(), action, tag);
@@ -480,6 +501,7 @@ export function useGridCommands(host: GridCommandHost): void {
     const unregister = [
       ...buildGridCommands(hostRef).map(registerCommand),
       ...buildRowMarkCommands(hostRef).map(registerLocalCommand),
+      registerLocalCommand(buildRowOcrCommand(hostRef)),
       ...buildReviewToolGridCommands(hostRef).map(registerCommand),
       // Shell review tools (tag propagation, digit keys) read the selection through this.
       registerRowSource({
