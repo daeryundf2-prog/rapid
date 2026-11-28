@@ -12,21 +12,35 @@ from .run import run_triage_mode
 
 DEFAULT_SAMPLE_DIR = "rapidtriage-sample"
 DEFAULT_SAMPLE_MODE = "fraud"
+# Written first into every sample folder: ``overwrite`` deletes only folders
+# carrying it (or the expected-results file of samples made before it existed).
+SAMPLE_MARKER_NAME = ".rapidtriage-sample-case"
+SAMPLE_EXPECTED_NAME = "rapidtriage-sample-expected.json"
 
 
 class SampleCaseError(ValueError):
     """Raised when the synthetic sample case cannot be created or run."""
 
 
+def is_sample_case_dir(root: Path) -> bool:
+    """Whether ``root`` is a folder this module created (marker or expected-results file present)."""
+    return (root / SAMPLE_MARKER_NAME).is_file() or (root / SAMPLE_EXPECTED_NAME).is_file()
+
+
 def create_sample_case(output_dir: Path, *, overwrite: bool = False) -> dict[str, object]:
     root = output_dir.expanduser().resolve()
     evidence_root = root / "evidence"
-    expected_path = root / "rapidtriage-sample-expected.json"
+    expected_path = root / SAMPLE_EXPECTED_NAME
     if root.exists() and any(root.iterdir()):
         if not overwrite:
             raise SampleCaseError(f"sample output already exists and is not empty: {root}")
+        if not is_sample_case_dir(root):
+            # Never delete a folder this module did not create (a mistyped or
+            # hostile output_dir would otherwise lose its whole tree).
+            raise SampleCaseError(f"refusing to overwrite a non-empty folder that is not a sample case: {root}")
         shutil.rmtree(root)
     root.mkdir(parents=True, exist_ok=True)
+    (root / SAMPLE_MARKER_NAME).write_text("RapidTriage synthetic sample case folder\n", encoding="utf-8")
 
     build_sample_evidence(evidence_root)
     expected = build_expected_payload(root, evidence_root)

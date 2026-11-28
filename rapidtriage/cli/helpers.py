@@ -149,7 +149,14 @@ def resolve_reviewer_identity(explicit: str | None) -> str | None:
 
 
 def add_web_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--host", default="127.0.0.1", help="Host interface for the local web server")
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help=(
+            "Host interface for the local web server; a non-loopback host requires RAPIDTRIAGE_ANALYSIS_ROOTS and "
+            "RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS (no output root may overlap an evidence root)"
+        ),
+    )
     parser.add_argument("--port", type=int, default=8765, help="Port for the local web server")
     parser.add_argument(
         "--auth-token",
@@ -160,7 +167,11 @@ def add_web_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--remote",
         action="store_true",
-        help="Hardened remote mode: allow non-loopback binding only with a token; keeps auth and Host/Origin gates on",
+        help=(
+            "Hardened remote mode: allow non-loopback binding only with a token; keeps auth and Host/Origin gates on. "
+            "Requires RAPIDTRIAGE_ANALYSIS_ROOTS and RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS: run paths and the file picker "
+            "stay inside them"
+        ),
     )
     parser.add_argument("--allow-remote-without-auth", action="store_true", help="Allow non-localhost binding without auth token")
     parser.add_argument("--reload", action="store_true", help="Enable uvicorn reload for UI/API development")

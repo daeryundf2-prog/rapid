@@ -4,7 +4,13 @@ import { type BrowseScope, browseDirectory } from "../../api/browse";
 import { Icon } from "../../icons";
 import { ErrorText } from "./ErrorText";
 
-/** Server-side path picker over GET /api/browse. */
+/**
+ * Server-side path picker over GET /api/browse.
+ *
+ * A listing with `at_roots` is root-confined: the analysis dialog's run scope, or the
+ * server roots the operator set (RAPIDTRIAGE_ANALYSIS_ROOTS / _OUTPUT_ROOTS, always under
+ * `--remote`). Its top level is the root list; it never goes above a root.
+ */
 export function BrowsePanel({
   initialPath,
   directoriesOnly = false,
@@ -39,17 +45,18 @@ export function BrowsePanel({
           폴더를 불러오지 못했습니다:{" "}
           {listing.error instanceof Error ? listing.error.message : "알 수 없는 오류"}
         </ErrorText>
-        {scope && path !== null ? (
+        {path !== null ? (
           // A typed path outside the allowed roots (403): start again from the roots.
           <button type="button" className="button" onClick={() => setPath(null)}>
-            허용 루트 목록 보기
+            {scope ? "허용 루트 목록 보기" : "처음 목록 보기"}
           </button>
         ) : null}
       </div>
     );
   }
   const data = listing.data;
-  const atRoots = Boolean(scope) && (data.at_roots === true || (path === null && !data.path));
+  const confined = Boolean(scope) || data.at_roots !== undefined;
+  const atRoots = confined && (data.at_roots === true || (path === null && !data.path));
   return (
     <div className="case-browse-wrap">
       <div className="case-actions" style={{ justifyContent: "space-between" }}>
@@ -63,7 +70,7 @@ export function BrowsePanel({
             <button type="button" className="button" onClick={() => setPath(data.parent)}>
               상위 폴더
             </button>
-          ) : scope && !atRoots ? (
+          ) : confined && !atRoots ? (
             <button type="button" className="button" onClick={() => setPath(null)}>
               허용 루트 목록
             </button>
@@ -76,7 +83,9 @@ export function BrowsePanel({
         </span>
       </div>
       {atRoots && data.entries.length === 0 ? (
-        <p className="case-reason">이 런에 허용된 루트가 없습니다.</p>
+        <p className="case-reason">
+          {scope ? "이 런에 허용된 루트가 없습니다." : "서버에 허용된 루트가 없습니다."}
+        </p>
       ) : null}
       <ul
         className="case-browse"

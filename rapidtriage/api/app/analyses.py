@@ -52,6 +52,12 @@ from pydantic import BaseModel, ValidationError
 
 from ...core.jobs import RunJob, RunJobStore, is_relative_to, run_output_dir
 from ...core.json_safe import json_default
+from ...core.local_paths import (
+    ANALYSIS_OUTPUT_ROOTS_ENV,
+    ANALYSIS_ROOTS_ENV,
+    configured_root_entries,
+    local_path_problem,
+)
 from .helpers import allowed_source_roots, get_job
 
 LOGGER = logging.getLogger(__name__)
@@ -74,11 +80,6 @@ ANALYSIS_MAX_WORKERS = 2
 REPLACE_ATTEMPTS = 5
 TERMINAL_REPLACE_ATTEMPTS = 40
 RUNNING_PERCENT_CAP = 99.9
-# Extra roots an operator allows for analysis *inputs* (os.pathsep list). They are
-# evidence: never an output target.
-ANALYSIS_ROOTS_ENV = "RAPIDTRIAGE_ANALYSIS_ROOTS"
-# Extra roots an operator allows for analysis *outputs* (same parsing rules).
-ANALYSIS_OUTPUT_ROOTS_ENV = "RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS"
 _BACKSLASH = "\\"
 
 
@@ -223,22 +224,9 @@ def lexical_absolute_path(raw: str, *, label: str) -> str:
         raise HTTPException(status_code=400, detail=f"{label} 경로가 비어 있습니다")
     if "\x00" in text:
         raise HTTPException(status_code=400, detail=f"{label} 경로에 NUL 문자가 있습니다")
-    if text.startswith("~"):
-        raise _forbidden(label, "홈 디렉터리(~) 표기는 쓸 수 없습니다")
-    if os.name == "nt":
-        normalized = text.replace("/", _BACKSLASH)
-        if normalized.startswith(_BACKSLASH * 2):
-            raise _forbidden(label, r"UNC·장치 경로(\\server, \\?\, \\.\)는 쓸 수 없습니다")
-        drive, rest = ntpath.splitdrive(normalized)
-        if not drive:
-            raise _forbidden(label, "드라이브 문자를 포함한 절대 경로여야 합니다")
-        if not rest.startswith(_BACKSLASH):
-            raise _forbidden(label, "드라이브 상대 경로(C:foo)는 쓸 수 없습니다")
-    else:
-        if text.startswith("//"):
-            raise _forbidden(label, "네트워크 경로는 쓸 수 없습니다")
-        if not text.startswith("/"):
-            raise _forbidden(label, "절대 경로여야 합니다")
+    problem = local_path_problem(text)
+    if problem is not None:
+        raise _forbidden(label, problem)
     return os.path.abspath(text)
 
 
@@ -270,22 +258,39 @@ def extra_analysis_roots(env: str = ANALYSIS_ROOTS_ENV) -> list[Path]:
     ``RAPIDTRIAGE_ANALYSIS_ROOTS`` (default) lists input roots,
     ``RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS`` output roots.
     """
-    entries: list[str] = []
-    for item in os.environ.get(env, "").split(os.pathsep):
-        item = item.strip().strip("\"'").strip()
-        if not item:
-            continue
-        try:
-            lexical_absolute_path(item, label=env)
-        except HTTPException as exc:
-            LOGGER.warning("ignoring %s entry %r: %s", env, item, exc.detail)
-            continue
-        entries.append(item)
-    return _root_forms(entries)
+    return _root_forms(configured_root_entries(env))
 
 
 def _under_any(path: Path, roots: Iterable[Path]) -> bool:
     return any(path == root or is_relative_to(path, root) for root in roots)
+
+
+def under_configured_roots(path: str | Path, env: str = ANALYSIS_ROOTS_ENV) -> bool:
+    """Whether ``path`` (lexical or resolved form) lies under a root listed in ``env``; false when unset."""
+    roots = extra_analysis_roots(env)
+    return bool(roots) and any(_under_any(form, roots) for form in _root_forms([str(path)]))
+
+
+def confine_run_roots(input_roots: Iterable[Path], output_roots: Iterable[Path]) -> tuple[list[Path], list[Path]]:
+    """A run's own roots that stay inside the operator's configured server roots.
+
+    With ``RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS`` set, a run output root is kept only
+    under it; with ``RAPIDTRIAGE_ANALYSIS_ROOTS`` set, a run input root is kept only
+    under an input root, an output root or a kept run output root (an image run
+    scans ``<output>/_e01/fs``). Unset lists keep the run's roots as they are.
+    A run registered before the lists were set (``runs.json``) or imported from a
+    summary that names another root then reaches nothing outside them.
+    """
+    configured_inputs = extra_analysis_roots()
+    configured_outputs = extra_analysis_roots(ANALYSIS_OUTPUT_ROOTS_ENV)
+    outputs = list(output_roots)
+    if configured_outputs:
+        outputs = [root for root in outputs if _under_any(root, configured_outputs)]
+    inputs = list(input_roots)
+    if configured_inputs:
+        allowed = [*configured_inputs, *configured_outputs, *outputs]
+        inputs = [root for root in inputs if _under_any(root, allowed)]
+    return inputs, outputs
 
 
 MAX_LINK_HOPS = 40
@@ -405,15 +410,17 @@ class RunScope:
         raise AnalysisFailure("런 요약에 스캔 루트가 없습니다")
 
     def input_roots(self) -> list[Path]:
-        raw = [self.summary.get(key) for key in ("root", "scan_scope_root", "output_dir")]
-        raw += [self.source.get(key) for key in ("analysis_root", "stage_dir", "source_path")]
-        roots = _root_forms([*raw, *allowed_source_roots(self.summary)])
+        run_inputs = [self.summary.get(key) for key in ("root", "scan_scope_root")]
+        run_inputs += [self.source.get(key) for key in ("analysis_root", "source_path")]
+        run_outputs = [self.summary.get("output_dir"), self.source.get("stage_dir")]
+        inputs, outputs = confine_run_roots(_root_forms(run_inputs), _root_forms(run_outputs))
+        roots = _root_forms([*inputs, *outputs, *allowed_source_roots(self.summary)])
         roots.extend(root for root in extra_analysis_roots() if root not in roots)
         return roots
 
     def output_roots(self) -> list[Path]:
         """Run output dir + ``RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS`` (input roots are never output targets)."""
-        roots = _root_forms([self.summary.get("output_dir"), self.output_dir])
+        _, roots = confine_run_roots((), _root_forms([self.summary.get("output_dir"), self.output_dir]))
         roots.extend(root for root in extra_analysis_roots(ANALYSIS_OUTPUT_ROOTS_ENV) if root not in roots)
         return roots
 
@@ -1339,15 +1346,47 @@ def _browse_root_entries(roots: list[Path]) -> list[dict[str, object]]:
     return entries
 
 
+SERVER_ROOTS_SCOPE = f"서버 허용 루트({ANALYSIS_ROOTS_ENV}·{ANALYSIS_OUTPUT_ROOTS_ENV})"
+
+
 def browse_analysis_scope(
     store: RunJobStore, *, run_id: str | None, scope_name: str, path: str | None, show_hidden: bool
 ) -> dict[str, object]:
-    """The analysis dialog's picker: only the run's allowed input (or output) roots.
+    """The analysis dialog's picker: only the run's allowed input (or output) roots."""
+    label = BROWSE_SCOPES.get(scope_name)
+    if label is None:
+        raise HTTPException(status_code=400, detail=f"알 수 없는 찾아보기 범위(scope)입니다: {scope_name} (analysis-input 또는 analysis-output)")
+    if not run_id:
+        raise HTTPException(status_code=400, detail="분석 찾아보기(scope)에는 run_id가 필요합니다")
+    scope = run_scope(store, run_id, require_ready=False)
+    roots = scope.input_roots() if scope_name == "analysis-input" else scope.output_roots()
+    return _browse_within_roots(
+        roots, path=path, show_hidden=show_hidden, scope_label=label, extra={"scope": scope_name, "run_id": run_id}
+    )
 
-    No ``path`` lists the roots themselves; a ``path`` must lie under a root
-    (``confine_path``: lexical form, links never followed out) or the answer is
-    403 in Korean. ``parent`` is ``None`` at a root (the console goes back to
-    the root list by browsing without ``path``).
+
+def browse_server_roots(path: str | None, *, show_hidden: bool) -> dict[str, object] | None:
+    """The unscoped picker when the operator set server roots: only inside them (``None`` when none are set).
+
+    ``RAPIDTRIAGE_ANALYSIS_ROOTS`` + ``RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS``: the
+    evidence and output folders a run may use. No home folder, no drive list.
+    """
+    roots = extra_analysis_roots()
+    roots.extend(root for root in extra_analysis_roots(ANALYSIS_OUTPUT_ROOTS_ENV) if root not in roots)
+    if not roots:
+        return None
+    return _browse_within_roots(roots, path=path, show_hidden=show_hidden, scope_label=SERVER_ROOTS_SCOPE, extra={})
+
+
+def _browse_within_roots(
+    roots: list[Path], *, path: str | None, show_hidden: bool, scope_label: str, extra: Mapping[str, object]
+) -> dict[str, object]:
+    """List ``roots`` (no ``path``) or a folder under them.
+
+    A ``path`` must lie under a root (``confine_path``: lexical form, links
+    never followed out) or the answer is 403 in Korean. ``parent`` is ``None``
+    at a root (the console goes back to the root list by browsing without
+    ``path``); ``home`` is empty and ``roots`` lists only ``roots``.
     """
     from ...core.browse import (
         BROWSE_ENTRY_LIMIT,
@@ -1356,19 +1395,11 @@ def browse_analysis_scope(
         browse_directory,
     )
 
-    label = BROWSE_SCOPES.get(scope_name)
-    if label is None:
-        raise HTTPException(status_code=400, detail=f"알 수 없는 찾아보기 범위(scope)입니다: {scope_name} (analysis-input 또는 analysis-output)")
-    if not run_id:
-        raise HTTPException(status_code=400, detail="분석 찾아보기(scope)에는 run_id가 필요합니다")
-    scope = run_scope(store, run_id, require_ready=False)
-    roots = scope.input_roots() if scope_name == "analysis-input" else scope.output_roots()
     root_entries = _browse_root_entries(roots)
     base: dict[str, object] = {
         "profile_version": BROWSE_PROFILE_VERSION,
-        "scope": scope_name,
-        "scope_label": label,
-        "run_id": run_id,
+        **extra,
+        "scope_label": scope_label,
         "home": "",
         "separator": os.sep,
         "roots": [{"name": entry["name"], "path": entry["path"], "kind": entry["kind"]} for entry in root_entries],
@@ -1386,7 +1417,7 @@ def browse_analysis_scope(
     }
     if not path or not path.strip():
         return root_listing
-    resolved = confine_path(path, roots, label="찾아보기", scope=label)
+    resolved = confine_path(path, roots, label="찾아보기", scope=scope_label)
     directory = resolved.parent if resolved.is_file() else resolved
     if directory != resolved and not _under_any(directory, roots):
         return root_listing  # a file root (e.g. the run's disk image): its folder is not browsable

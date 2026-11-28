@@ -684,6 +684,10 @@ def build_ui_virtualization_trusted_diff(
     }
 
 
+#: ``validation_package`` values naming the bundled internal package (not a path).
+INTERNAL_VALIDATION_PACKAGE_NAMES = frozenset({"internal", "default", "known-answer-001-120"})
+
+
 def resolve_commercial_readiness_validation_package(
     value: str | None,
     *,
@@ -698,7 +702,7 @@ def resolve_commercial_readiness_validation_package(
         )
     if not raw:
         return None
-    if raw in {"internal", "default", "known-answer-001-120"}:
+    if raw in INTERNAL_VALIDATION_PACKAGE_NAMES:
         if DEFAULT_INTERNAL_VALIDATION_PACKAGE.is_file():
             return DEFAULT_INTERNAL_VALIDATION_PACKAGE
         raise CommercialReadinessError(

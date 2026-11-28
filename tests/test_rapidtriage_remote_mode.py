@@ -10,7 +10,18 @@ from unittest.mock import patch
 
 from rapidtriage.cli import build_parser, main, run_web_server
 
-TOKEN_ENV_KEYS = ("RAPIDTRIAGE_TOKEN", "RAPIDTRIAGE_AUTH_TOKEN", "RAPIDTRIAGE_DISABLE_AUTH")
+TOKEN_ENV_KEYS = (
+    "RAPIDTRIAGE_TOKEN",
+    "RAPIDTRIAGE_AUTH_TOKEN",
+    "RAPIDTRIAGE_DISABLE_AUTH",
+    "RAPIDTRIAGE_ANALYSIS_ROOTS",
+    "RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS",
+)
+# --remote refuses to start without server roots (absolute paths; they need not exist here).
+SERVER_ROOTS = {
+    "RAPIDTRIAGE_ANALYSIS_ROOTS": os.path.abspath(os.path.join(os.sep, "rapid-test-evidence")),
+    "RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS": os.path.abspath(os.path.join(os.sep, "rapid-test-output")),
+}
 
 
 @contextlib.contextmanager
@@ -18,7 +29,7 @@ def _clean_token_env(**overrides):
     saved = {key: os.environ.get(key) for key in TOKEN_ENV_KEYS}
     for key in TOKEN_ENV_KEYS:
         os.environ.pop(key, None)
-    os.environ.update(overrides)
+    os.environ.update({**SERVER_ROOTS, **overrides})
     try:
         yield
     finally:

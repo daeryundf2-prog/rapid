@@ -23,7 +23,7 @@ from ...core.user_tokens import (
     load_user_tokens,
 )
 from .analyses import ANALYSIS_RUNNER, COMPLETION_HOOKS
-from .case_workspace import CaseWorkspace
+from .case_workspace import CaseWorkspace, run_output_write_problem
 from .constants import MUTATING_METHODS
 from .helpers import (
     REQUEST_TOKEN_ACTOR,
@@ -97,6 +97,11 @@ REVIEW_BATCH_FIELD_LABELS = {
 }
 # Case intake routes (AXIOM adoption E1): every validation error in Korean.
 CASE_INTAKE_PATH = re.compile(r"/api/cases(/.*)?|/api/runs/[^/]+/(problems|processing-snapshot)")
+# Mutating run sub-routes write into the run's output folder (extract, notes,
+# reports, bookmarks, analyses, search history...). Cancelling only stops work;
+# retry checks its own paths (``check_retry_paths``).
+RUN_WRITE_PATH = re.compile(r"/api/runs/(?P<run_id>[^/]+)/(?P<rest>.+)")
+RUN_WRITE_EXEMPT = re.compile(r"cancel|retry|analyses/[^/]+/cancel")
 
 
 def _without_surrogates(value: object) -> object:
@@ -189,6 +194,25 @@ def create_app(
 
     def resolve_request_catalog_path(raw_path: str | Path) -> Path:
         return resolve_case_catalog_path(store, raw_path, configured_case_db_roots)
+
+    @api.middleware("http")
+    async def refuse_run_writes_outside_output_roots(request: Request, call_next):
+        """403 for a write into a run output folder outside the output roots or inside an evidence root.
+
+        Runs registered before the server roots were set, or imported from an
+        evidence folder, otherwise keep writing into the evidence (review F2).
+        Registered before the auth middleware, so it runs after it.
+        """
+        match = RUN_WRITE_PATH.fullmatch(request.url.path) if request.method.upper() in MUTATING_METHODS else None
+        if match is not None and not RUN_WRITE_EXEMPT.fullmatch(match["rest"]):
+            try:
+                output_dir = store.get(match["run_id"]).output_dir()
+            except KeyError:
+                output_dir = None  # the route answers 404
+            problem = run_output_write_problem(output_dir) if output_dir is not None else None
+            if problem is not None:
+                return JSONResponse(status_code=403, content={"detail": problem})
+        return await call_next(request)
 
     @api.middleware("http")
     async def require_auth_token(request: Request, call_next):

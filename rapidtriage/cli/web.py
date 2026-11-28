@@ -8,6 +8,12 @@ import sys
 import textwrap
 from pathlib import Path
 
+from ..core.local_paths import (
+    ANALYSIS_OUTPUT_ROOTS_ENV,
+    ANALYSIS_ROOTS_ENV,
+    configured_root_entries,
+    overlapping_roots,
+)
 from ..core.user_tokens import TOKENS_FILE_ENV, configured_tokens_file, load_user_tokens
 from .helpers import add_web_arguments
 
@@ -28,6 +34,32 @@ def build_web_parser() -> argparse.ArgumentParser:
     )
     add_web_arguments(parser)
     return parser
+
+
+def require_server_roots(reason: str) -> None:
+    """Refuse to start unless both server root lists are set and no evidence root overlaps an output root.
+
+    Any client that can reach a non-loopback (or ``--remote``) server must stay
+    inside them: without them a token holder (or anyone, with
+    ``--allow-remote-without-auth``) runs and reads any server path as evidence
+    through source-file and writes output anywhere (R1, R10), and the picker lists
+    the whole server file system (R2). An output root that is, contains, or lies in
+    an evidence root puts run output inside the evidence.
+    """
+    entries = {env: configured_root_entries(env) for env in (ANALYSIS_ROOTS_ENV, ANALYSIS_OUTPUT_ROOTS_ENV)}
+    missing = [env for env, values in entries.items() if not values]
+    if missing:
+        raise RuntimeError(
+            f"{reason} requires server roots: set {' and '.join(missing)} "
+            "(os.pathsep-separated absolute local folders: evidence inputs / run outputs)."
+        )
+    overlaps = overlapping_roots(entries[ANALYSIS_ROOTS_ENV], entries[ANALYSIS_OUTPUT_ROOTS_ENV])
+    if overlaps:
+        listed = "; ".join(f"{evidence} <-> {output}" for evidence, output in overlaps)
+        raise RuntimeError(
+            f"{reason}: {ANALYSIS_OUTPUT_ROOTS_ENV} must not be, contain, or lie inside a "
+            f"{ANALYSIS_ROOTS_ENV} folder (run output would land in evidence): {listed}"
+        )
 
 
 def run_web_server(
@@ -92,6 +124,8 @@ def run_web_server(
             "Refusing to bind RapidTriage to a non-localhost interface without --auth-token. "
             "Use --auth-token, --remote with a token, or --allow-remote-without-auth if you understand the risk."
         )
+    if remote or host not in loopback_hosts:
+        require_server_roots("--remote" if remote else f"binding to non-loopback host {host}")
     if remote and host not in loopback_hosts:
         print(
             "WARNING: RapidTriage remote mode is localhost-tool-grade: API token auth and "

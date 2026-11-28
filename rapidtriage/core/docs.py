@@ -41,6 +41,7 @@ from .doc_text import (
 from .files import file_time_origin_for_input_kind, is_tool_output_dir
 from .input_root import InputRoot, resolve_input_root
 from .json_safe import json_default
+from .link_safe_walk import RootLinkGuard
 from .models import DocumentCandidate, DocumentMatch
 from .provider_progress import PROVIDER_SCAN_REPORT_EVERY
 from .rules import RuleSet, annotate_docs_payload
@@ -147,6 +148,7 @@ def scan_document_candidates(
     origin = file_time_origin_for_input_kind(input_root.kind)
     candidates: list[DocumentCandidate] = []
     seen = 0
+    guard = RootLinkGuard(input_root.root_path)
     for dirpath, dirnames, files in os.walk(input_root.root_path):
         dirnames[:] = [name for name in dirnames if not is_tool_output_dir(Path(dirpath) / name)]
         for name in files:
@@ -157,6 +159,8 @@ def scan_document_candidates(
             suffix = path.suffix.lower()
             if suffix not in SUPPORTED_DOC_EXTS:
                 continue
+            if not guard.allows(path):
+                continue  # a link out of the run root: never index the server's own files
             try:
                 stat = path.stat()
             except OSError:

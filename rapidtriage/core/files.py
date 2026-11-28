@@ -40,6 +40,7 @@ from .hash_cache import (
     hash_cache_assessment,
 )
 from .input_root import InputRoot, resolve_input_root
+from .link_safe_walk import RootLinkGuard, info_is_link
 from .models import FileCandidate
 from .recovery import (
     CANDIDATE_KIND_EXISTING,
@@ -258,7 +259,13 @@ def iter_evidence_paths(root: Path, pattern: str = "*") -> Iterable[Path]:
         yield path
 
 
-def _walk_evidence_paths(root: Path, pattern: str) -> Iterable[tuple[Path, Path]]:
+def _walk_evidence_paths(
+    root: Path, pattern: str, *, on_lstat: Callable[[str, os.stat_result], None] | None = None
+) -> Iterable[tuple[Path, Path]]:
+    # rglob yields file links (and descends junctions on Windows): skip any path
+    # that leaves ``root`` through one, so the run never reads the analysis
+    # server's own files through a link in the evidence.
+    guard = RootLinkGuard(root, on_lstat=on_lstat)
     for path in root.rglob(pattern):
         try:
             relative = path.relative_to(root)
@@ -266,7 +273,16 @@ def _walk_evidence_paths(root: Path, pattern: str) -> Iterable[tuple[Path, Path]
             relative = path
         if _relative_has_tool_output_dir(root, relative.parts):
             continue
+        if not guard.allows(path):
+            continue
         yield path, relative
+
+
+def _memo_walk_lstat(path: str, info: os.stat_result) -> None:
+    """Seed the run's stat memo with the walk's ``lstat`` (a non-link stats the same followed)."""
+    _EVIDENCE_STAT_MEMO[(path, False)] = info
+    if not info_is_link(info):
+        _EVIDENCE_STAT_MEMO.setdefault((path, True), info)
 
 
 class _EvidencePathSnapshot:
@@ -428,7 +444,10 @@ def _cached_evidence_paths(root: Path, pattern: str) -> list[Path] | None:
         if located is None:
             if not root.is_dir():
                 return None
-            entries = [(_SnapshotPath(path), str(relative)) for path, relative in _walk_evidence_paths(root, "*")]
+            entries = [
+                (_SnapshotPath(path), str(relative))
+                for path, relative in _walk_evidence_paths(root, "*", on_lstat=_memo_walk_lstat)
+            ]
             snapshot = _EvidencePathSnapshot(str(root), entries)
             # An ancestor snapshot answers every sub-root, so drop snapshots
             # this one now covers to keep memory bounded to one tree.

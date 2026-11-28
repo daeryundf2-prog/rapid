@@ -711,11 +711,16 @@ The bundle includes `rapidtriage-reviewer.html`, selected evidence JSON, a hash 
 
 ## Security Notes
 
-RapidTriage web defaults to `127.0.0.1`. If you bind to `0.0.0.0`, pass an auth token:
+RapidTriage web defaults to `127.0.0.1`. To bind to `0.0.0.0` (or any non-localhost address) use `--remote` with a token and the server roots: the evidence folders remote users may analyse and the folders runs may write to. Without both root lists — or with an output root that is, contains, or lies inside an evidence root — any non-localhost bind refuses to start, `--auth-token` and `--allow-remote-without-auth` included.
 
 ```bash
-rapidtriage web --host 0.0.0.0 --auth-token "change-me"
+RAPIDTRIAGE_ANALYSIS_ROOTS=/srv/evidence \
+RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS=/srv/rapidtriage-out \
+RAPIDTRIAGE_TOKEN="change-me" \
+rapidtriage web --remote --host 0.0.0.0
 ```
+
+On Windows (PowerShell) set the same variables with `$env:NAME = "..."` and separate several folders with `;`.
 
 In the browser console, set:
 

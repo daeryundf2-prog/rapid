@@ -523,7 +523,7 @@ class AnalysisApiTests(unittest.TestCase):
     def test_env_roots_parsing(self) -> None:
         good = str(self.base / "extra")
         value = os.pathsep.join([f'"{good}"', "relative-dir", "", "'~/x'"])
-        with patch.dict(os.environ, {analyses.ANALYSIS_ROOTS_ENV: value}), self.assertLogs(analyses.LOGGER, "WARNING") as logs:
+        with patch.dict(os.environ, {analyses.ANALYSIS_ROOTS_ENV: value}), self.assertLogs("rapidtriage.core.local_paths", "WARNING") as logs:
             roots = analyses.extra_analysis_roots()
         self.assertIn(Path(os.path.abspath(good)), roots)
         self.assertEqual({str(root) for root in roots} - {os.path.abspath(good), str(Path(good).resolve())}, set())
@@ -1867,7 +1867,8 @@ class AnalysisApiTests(unittest.TestCase):
         (snapshot / "Users" / "gone.txt").write_text("deleted later", encoding="utf-8")
         elsewhere = self.base / "elsewhere"
         roots = os.pathsep.join(f'"{path}"' for path in (snapshot, self.evidence))
-        outputs = os.pathsep.join(f'"{path}"' for path in (snapshot, self.evidence, elsewhere))
+        # The run's own output folder is an output root too: writes into a run outside them are refused (403) first.
+        outputs = os.pathsep.join(f'"{path}"' for path in (snapshot, self.evidence, elsewhere, self.run_dir))
         with patch.dict(os.environ, {analyses.ANALYSIS_ROOTS_ENV: roots, analyses.ANALYSIS_OUTPUT_ROOTS_ENV: outputs}):
             for target in (snapshot / "out", snapshot, self.evidence / "out", self.evidence):
                 detail = self.submit("vsc-extract", {"snapshot_root": str(snapshot), "output_dir": str(target)}, expect=403)["detail"]
@@ -2281,12 +2282,14 @@ class AnalysisApiTests(unittest.TestCase):
             for target in (inputs, inputs / "out"):
                 detail = self.submit("vsc-extract", {**options, "output_dir": str(target)}, expect=403)["detail"]
                 self.assertIn("허용 범위", detail)
-            # An output root inside an operator input root is still evidence.
-            with patch.dict(os.environ, {analyses.ANALYSIS_OUTPUT_ROOTS_ENV: f'"{inputs / "out"}"'}):
+            # An output root inside an operator input root is still evidence. (The run's own
+            # output folder is listed too: writes into a run outside the output roots are refused first.)
+            run_output_root = f'"{self.run_dir}"'
+            with patch.dict(os.environ, {analyses.ANALYSIS_OUTPUT_ROOTS_ENV: f'"{inputs / "out"}"{os.pathsep}{run_output_root}'}):
                 detail = self.submit("vsc-extract", {**options, "output_dir": str(inputs / "out")}, expect=403)["detail"]
                 self.assertIn("증거 경로", detail)
             target = self.base / "exports"
-            with patch.dict(os.environ, {analyses.ANALYSIS_OUTPUT_ROOTS_ENV: f'"{target}"'}):
+            with patch.dict(os.environ, {analyses.ANALYSIS_OUTPUT_ROOTS_ENV: f'"{target}"{os.pathsep}{run_output_root}'}):
                 state = self.wait(str(self.submit("vsc-extract", {**options, "output_dir": str(target)})["analysis_id"]))
         self.assertEqual(state["status"], "completed", state)
         self.assertEqual(state["summary"]["copied_count"], 3)
