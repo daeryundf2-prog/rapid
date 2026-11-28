@@ -238,7 +238,10 @@ export interface Activity {
   bars: ActivityBar[];
   total: number;
   busiest: ActivityBar | null;
-  /** The busiest hour inside the busiest day (hour-or-finer server buckets only). */
+  /**
+   * The busiest display-zone hour inside the busiest day (hours counted from that day's local
+   * midnight, so "+05:30" hours start at :00 local). Null when a server bucket spans two local hours.
+   */
   busiestHour: { startMs: number; endMs: number; count: number } | null;
 }
 
@@ -363,12 +366,14 @@ export function activityBars(payload: TimelineHistogramPayload | undefined, tz: 
   let busiestHour: Activity["busiestHour"] = null;
   if (busiest && unit === "day" && (payload.bucket_seconds ?? Number.POSITIVE_INFINITY) <= 3600) {
     const hours = new Map<number, number>();
+    let fits = true;
     for (const event of events) {
       if (event.at < busiest.startMs || event.at >= busiest.endMs) continue;
-      const hour = Math.floor(event.at / HOUR) * HOUR;
+      const hour = busiest.startMs + Math.floor((event.at - busiest.startMs) / HOUR) * HOUR;
+      if (event.end > hour + HOUR) fits = false;
       hours.set(hour, (hours.get(hour) ?? 0) + event.count);
     }
-    for (const [startMs, count] of hours) {
+    for (const [startMs, count] of fits ? hours : []) {
       if (!busiestHour || count > busiestHour.count) busiestHour = { startMs, endMs: startMs + HOUR, count };
     }
   }

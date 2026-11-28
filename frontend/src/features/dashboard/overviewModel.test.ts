@@ -305,6 +305,43 @@ describe("날짜별 활동 (F6)", () => {
     expect(new Date(activity.bars[0]?.startMs ?? 0).toISOString()).toBe("2026-10-17T15:00:00.000Z");
   });
 
+  it("aligns the busiest hour to the display zone's hour at +05:30 (review #101 re-review P3)", () => {
+    // 30-min UTC buckets: 18:30Z and 19:00Z are 00:00 and 00:30 on 10-20 in Asia/Kolkata (+05:30).
+    const activity = activityBars(
+      payload(
+        [
+          ["2026-10-19T18:30:00Z", 7],
+          ["2026-10-19T19:00:00Z", 5],
+          ["2026-10-20T05:00:00Z", 3],
+        ],
+        1800,
+      ),
+      "Asia/Kolkata",
+    );
+    expect(activity.busiest?.label).toBe("10-20 (화)");
+    expect(activity.busiestHour).toEqual({
+      startMs: Date.parse("2026-10-19T18:30:00Z"), // 00:00 local, not 23:30 of 10-19
+      endMs: Date.parse("2026-10-19T19:30:00Z"),
+      count: 12,
+    });
+    // Hourly UTC buckets straddle +05:30 hours: no hour is claimed rather than a wrong one.
+    const hourly = activityBars(
+      payload(
+        [
+          ["2026-10-20T04:00:00Z", 4],
+          ["2026-10-20T05:00:00Z", 6],
+        ],
+        3600,
+      ),
+      "Asia/Kolkata",
+    );
+    expect(hourly.unit).toBe("day");
+    expect(hourly.busiestHour).toBeNull();
+    // UTC keeps its UTC hours.
+    const utc = activityBars(payload([["2026-10-20T04:00:00Z", 4]], 3600), "utc");
+    expect(utc.busiestHour?.startMs).toBe(Date.parse("2026-10-20T04:00:00Z"));
+  });
+
   it("switches to month bars past 62 days and gives no hour inside a month", () => {
     const activity = activityBars(
       payload(
