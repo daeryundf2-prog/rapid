@@ -16,6 +16,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { create } from "zustand";
 import { announce } from "../a11y";
+import type { ReviewConflict } from "../api/caseDb";
 import type { GridRow } from "../contracts/collection";
 import { type CommandContext, KEY_MAP } from "../contracts/command";
 import type { MarkAction } from "../contracts/viewer";
@@ -24,12 +25,16 @@ import {
   type ApplyResult,
   applyReviewAction,
   type BatchAction,
+  type ExpectedVersions,
   optimisticPatch,
+  ReviewConflictError,
   restoredPatch,
   restoreReviewState,
   reviewTargetOf,
   storeNotice,
 } from "../features/grid/reviewActions";
+import { reviewerLabel } from "../features/review/author";
+import { withSubject } from "../features/review/reviewConflict";
 import { currentRowSource, type RowFocusResult } from "../features/review/rowSource";
 import { targetAsGridRow } from "../features/viewer/citation";
 import { readStored, writeStored } from "../state/storage";
@@ -266,8 +271,28 @@ interface UndoEntry {
   label: string;
   /** Row snapshots taken before the verdict. */
   before: GridRow[];
+  /**
+   * Per row of `before`, the version the verdict stored (`ApplyResult.versions`): Z expects it, so
+   * a row someone else changed since conflicts instead of being overwritten (review P1-1).
+   */
+  written?: ExpectedVersions;
   /** The list's focused row when the verdict was given (Z returns there). */
   focusKey: string | null;
+  /**
+   * A barrier, not a batch: a verdict written through the conflict prompt has no snapshot Z could
+   * trust, so Z stops here (says why) instead of undoing an older batch (review P2-2).
+   */
+  blocked?: string;
+}
+
+export const CONFLICT_WRITE_UNDO_REASON = "충돌 창에서 저장한 판정은 Z로 되돌릴 수 없습니다";
+
+/** "lee가 바꾼 2건은 그대로 둠": rows Z left because their mark changed since and the examiner kept it. */
+export function keptByOthersText(kept: readonly ReviewConflict[]): string {
+  if (kept.length === 0) return "";
+  const names = [...new Set(kept.map((c) => reviewerLabel(c.current.status_by || c.current.reviewer)))];
+  const who = names.length > 1 ? `${names[0]} 외 ${names.length - 1}명` : (names[0] ?? "다른 검토자");
+  return `${withSubject(who)} 바꾼 ${kept.length.toLocaleString("ko-KR")}건은 그대로 둠`;
 }
 
 /** Last verdict batches, newest last; Z pops one. */
@@ -375,12 +400,33 @@ export async function runVerdict(
       if (scope.kind === "selection") source?.setSelection?.(selectedKeys);
       if (focusKey) source?.moveFocus?.({ key: focusKey, domFocus: !focusInViewer() });
     }
+    // Refused (409): whatever the conflict prompt then writes ("내 판정으로 바꾸기", or the rows
+    // that did not conflict) is outside this batch, so Z must not reach past it (review P2-2).
+    if (error instanceof ReviewConflictError) {
+      const conflicted = error.conflicts.length;
+      void error.choice.then((choice) => {
+        if (choice === "keep" && conflicted >= scope.rows.length) return;
+        useVerdictUndo.getState().push({
+          runId,
+          action,
+          label: verdictLabel(action, options.tag),
+          before: [],
+          focusKey: null,
+          blocked: CONFLICT_WRITE_UNDO_REASON,
+        });
+      });
+    }
     throw error;
   }
   if (scope.restorable) {
-    useVerdictUndo
-      .getState()
-      .push({ runId, action, label: verdictLabel(action, options.tag), before, focusKey });
+    useVerdictUndo.getState().push({
+      runId,
+      action,
+      label: verdictLabel(action, options.tag),
+      before,
+      ...(result.versions ? { written: result.versions } : {}),
+      focusKey,
+    });
   }
   const count = scope.rows.length.toLocaleString("ko-KR");
   const tail = [
@@ -394,10 +440,19 @@ export async function runVerdict(
   return { scope, text };
 }
 
-/** Z: put the last verdict batch back (status / report flag / tags as they were). */
+/**
+ * Z: put the last verdict batch back (status / report flag / tags as they were). Each row expects
+ * the version the verdict wrote; a row another examiner changed since opens the conflict prompt,
+ * and "그대로 두기" leaves it (announced). The entry is used up either way: a second Z never
+ * retries over a kept change (review P1-1).
+ */
 export async function undoLastVerdict(queryClient: QueryClient | null): Promise<string> {
   const entry = useVerdictUndo.getState().pop();
   if (!entry) throw new Error(NOTHING_TO_UNDO_REASON);
+  if (entry.blocked) {
+    tell(entry.blocked);
+    return entry.blocked;
+  }
   const source = currentRowSource();
   const byKey = new Map(entry.before.map((row) => [row.rowKey, row]));
   const rollback =
@@ -405,8 +460,9 @@ export async function undoLastVerdict(queryClient: QueryClient | null): Promise<
       const before = byKey.get(row.rowKey);
       return before ? restoredPatch(before, entry.action)(row) : row;
     }) ?? (() => {});
+  let kept: ReviewConflict[];
   try {
-    await restoreReviewState(entry.runId, entry.before, entry.action);
+    ({ kept } = await restoreReviewState(entry.runId, entry.before, entry.action, entry.written));
   } catch (error) {
     rollback();
     // Keep the entry: the analyst can press Z again once the server answers.
@@ -415,7 +471,10 @@ export async function undoLastVerdict(queryClient: QueryClient | null): Promise<
   }
   // Back to the row that was judged, so the right key can follow at once.
   if (entry.focusKey) source?.moveFocus?.({ key: entry.focusKey, domFocus: !focusInViewer() });
-  const text = `되돌림: ${entry.label} ${entry.before.length.toLocaleString("ko-KR")}건`;
+  const undone = entry.before.length - kept.length;
+  const text = [`되돌림: ${entry.label} ${undone.toLocaleString("ko-KR")}건`, keptByOthersText(kept)]
+    .filter(Boolean)
+    .join(" · ");
   tell(text);
   await refresh(queryClient, entry.runId);
   return text;

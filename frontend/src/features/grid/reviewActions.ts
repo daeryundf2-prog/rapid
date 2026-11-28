@@ -661,19 +661,33 @@ export function inReportOf(row: GridRow): boolean {
   return row.fields.includeInReport === true || row.reviewStatus === "include-in-report";
 }
 
+/** What a Z undo did: rows written, and the conflicts the examiner chose to keep (not undone). */
+export interface RestoreResult extends ApplyResult {
+  kept: ReviewConflict[];
+}
+
 /**
  * Put rows back to the review state they had before `action` (Z undo): the rows are the
  * snapshots taken before the mark. Rows sharing one previous state go in one request; only the
  * fields the action changed are written (a later note or another field stays).
+ *
+ * `written` (per row, same order) is the version the verdict itself stored (`ApplyResult.versions`):
+ * each row expects it, so a row another examiner changed since answers 409 and the conflict prompt
+ * asks (review #106 P1-1); the undo waits for the answer. "그대로 두기" leaves those rows (they come
+ * back in `kept`), "내 판정으로 바꾸기" restores them anyway.
  */
 export async function restoreReviewState(
   runId: string,
   previous: GridRow[],
   action: BatchAction,
-): Promise<ApplyResult> {
+  written?: ExpectedVersions,
+): Promise<RestoreResult> {
   const changed = changedReviewFields(action);
-  const groups = new Map<string, { rows: GridRow[]; body: MarkPayload; mark: ReviewMarkBody }>();
-  for (const row of previous) {
+  const groups = new Map<
+    string,
+    { rows: GridRow[]; expected: Array<number | undefined>; body: MarkPayload; mark: ReviewMarkBody }
+  >();
+  previous.forEach((row, index) => {
     const body: MarkPayload = {};
     const mark: ReviewMarkBody = {};
     if (changed.status) {
@@ -690,16 +704,32 @@ export async function restoreReviewState(
       mark.tags = [...row.tags];
     }
     const key = JSON.stringify(mark);
-    const group = groups.get(key);
-    if (group) group.rows.push(row);
-    else groups.set(key, { rows: [row], body, mark });
-  }
+    const group = groups.get(key) ?? { rows: [], expected: [], body, mark };
+    group.rows.push(row);
+    group.expected.push(written?.[index]);
+    groups.set(key, group);
+  });
   let store: ReviewStore | undefined;
+  const kept: ReviewConflict[] = [];
   for (const group of groups.values()) {
-    const result = await applyBody(runId, group.rows, group.body, group.mark);
-    store = result.store;
+    try {
+      const result = await applyBody(
+        runId,
+        group.rows,
+        group.body,
+        group.mark,
+        "되돌리기",
+        written ? group.expected : undefined,
+      );
+      store = result.store;
+    } catch (error) {
+      if (!(error instanceof ReviewConflictError)) throw error;
+      // The prompt writes the group's other rows (keep) or all of them (mine) itself.
+      store = "case-db";
+      if ((await error.choice) === "keep") kept.push(...error.conflicts);
+    }
   }
-  return { applied: previous.length, store };
+  return { applied: previous.length, store, kept };
 }
 
 /** Optimistic undo: the row's review fields as they were in `before`. */

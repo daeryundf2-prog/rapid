@@ -18,6 +18,15 @@
   in the default width (character column behind 문자 열 when narrow), a 2px hex cursor and a
   polite cursor read-out with signature/record edges; pivots ±5분 · 같은 대상 · 같은 원본 파일
   have keys Alt+T · Alt+A · Alt+S (`frontend/src/commands/verdict.ts`).
+  Review follow-ups (#106): Z sends the version its verdict wrote as `expected_version`, so a
+  row another examiner changed since opens the conflict prompt instead of being overwritten
+  ("lee가 바꾼 n건은 그대로 둠"; the undo entry is used up either way), and a verdict saved
+  through the conflict prompt leaves a Z barrier; the advance after a verdict follows the next
+  row by key (no skipped rows on a filtered or status-sorted list); a verdict on a selection
+  judges only the rows the list shows ("숨은 선택 n건 제외"); a failed write puts the selection
+  and cursor back; "불러온 마지막 행" when the list stopped at unloaded rows; Alt+letter keys
+  never fire inside text entry; the hex read-out says "값 0x51"; the timeline 같은 원본 파일
+  count uses the list's path rule.
 - Console review board and report (design review F12/F13/F14/F16/F21): the
   review map returns each mark's `reviewer`, `created_at`, `updated_at` and
   `change_count` (file targets also `file_modified_at`); review and
