@@ -38,6 +38,7 @@ RUN_STATUSES = ("queued", "running", "completed", "failed", "cancelled", "interr
 RETRYABLE_RUN_STATUSES = frozenset({"failed", "cancelled", "interrupted"})
 ACTIVE_JOB_STATUSES = frozenset({"queued", "running"})
 INTERRUPTED_MESSAGE = REASON_INTERRUPTED
+SHUTDOWN_INTERRUPTED_MESSAGE = "서버 종료로 실행 전에 중단"
 RETRY_NOT_ALLOWED_MESSAGE = "실패·취소·중단된 런만 다시 실행할 수 있습니다"
 NOT_RUNNING_MESSAGE = "실행 중인 런이 아닙니다"
 TARGETS_REQUIRED_MESSAGE = "대상을 지정하세요"
@@ -807,6 +808,35 @@ class RunJobStore:
             poke_run_control(control_dir)
         return job
 
+    def interrupt_queued(self) -> builtins.list[str]:
+        """Server stopping: queued runs never start and are marked ``interrupted``; returns their ids.
+
+        Without this the executor's exit join ran every queued run before the process
+        ended (Ctrl-C). Running runs keep going and are marked ``interrupted`` at the
+        next start if the process ends first.
+        """
+        interrupted: builtins.list[str] = []
+        with self._lock:
+            for job in self._jobs.values():
+                if job.status != "queued":
+                    continue
+                future = self._futures.get(job.run_id)
+                if future is not None:
+                    future.cancel()
+                job.status = "interrupted"
+                job.error = SHUTDOWN_INTERRUPTED_MESSAGE
+                job.error_type = "ServerShutdown"
+                job.completed_at = now_iso()
+                job.updated_at = job.completed_at
+                job.steps = update_step(job.steps, "prepare", "cancelled", message=SHUTDOWN_INTERRUPTED_MESSAGE)
+                append_job_transition(
+                    job, event_type="job-interrupted-shutdown", status="interrupted", step="prepare", message=SHUTDOWN_INTERRUPTED_MESSAGE
+                )
+                interrupted.append(job.run_id)
+            if interrupted:
+                self._write_state_locked()
+        return interrupted
+
     def control(
         self,
         run_id: str,
@@ -925,6 +955,8 @@ class RunJobStore:
     def _execute(self, run_id: str) -> dict[str, object]:
         with self._lock:
             job = self._jobs[run_id]
+            if job.status == "interrupted":
+                return {}  # interrupt_queued() reached it after a worker had picked it up
             job.status = "running"
             job.started_at = now_iso()
             job.updated_at = job.started_at

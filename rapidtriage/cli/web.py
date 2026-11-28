@@ -17,6 +17,55 @@ from ..core.local_paths import (
 from ..core.user_tokens import TOKENS_FILE_ENV, configured_tokens_file, load_user_tokens
 from .helpers import add_web_arguments
 
+try:
+    import resource
+except ImportError:  # Windows: no RLIMIT_NOFILE
+    resource = None
+
+#: Soft open-file limit asked for at start (audit GAP-10): macOS terminals often start at 256,
+#: and about 245 idle connections then stalled the server for every client.
+OPEN_FILES_TARGET = 8192
+LIMIT_CONCURRENCY_ENV = "RAPIDTRIAGE_LIMIT_CONCURRENCY"
+#: Concurrent connections + requests before uvicorn answers 503; at most half the open-file limit.
+DEFAULT_LIMIT_CONCURRENCY = 1000
+KEEP_ALIVE_SECONDS = 5
+#: In-flight requests get this long after SIGTERM / Ctrl-C before uvicorn cancels them.
+GRACEFUL_SHUTDOWN_SECONDS = 10
+
+
+def raise_open_file_limit() -> tuple[int, int] | None:
+    """Raise the soft ``RLIMIT_NOFILE`` toward the hard limit (at most ``OPEN_FILES_TARGET``).
+
+    Returns ``(before, now)`` soft limits, or ``None`` where unknown (Windows, unlimited).
+    A refused raise is ignored: the server starts with the limit it has.
+    """
+    if resource is None:
+        return None
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    except (OSError, ValueError):
+        return None
+    if soft == resource.RLIM_INFINITY:
+        return None
+    wanted = OPEN_FILES_TARGET if hard == resource.RLIM_INFINITY else min(OPEN_FILES_TARGET, hard)
+    if soft >= wanted:
+        return soft, soft
+    try:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (wanted, hard))
+    except (OSError, ValueError):
+        return soft, soft
+    return soft, wanted
+
+
+def server_limit_concurrency(open_files: int | None) -> int:
+    """``RAPIDTRIAGE_LIMIT_CONCURRENCY`` (a positive integer), else the default capped at half ``open_files``."""
+    raw = os.environ.get(LIMIT_CONCURRENCY_ENV, "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    if open_files is None:
+        return DEFAULT_LIMIT_CONCURRENCY
+    return max(16, min(DEFAULT_LIMIT_CONCURRENCY, open_files // 2))
+
 
 def build_web_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -180,7 +229,31 @@ def run_web_server(
 
         fragment = f"/#token={auth_token}" if auth_token else ""
         threading.Timer(1.2, lambda: webbrowser.open(f"http://{host}:{port}{fragment}")).start()
-    uvicorn.run("rapidtriage.api.app:app", host=host, port=port, reload=reload)
+    limits = raise_open_file_limit()
+    limit_concurrency = server_limit_concurrency(limits[1] if limits else None)
+    if limits is not None:
+        before, now = limits
+        raised = f" (raised from {before})" if now > before else ""
+        print(
+            f"Open-file limit {now}{raised}; at most {limit_concurrency} concurrent connections "
+            f"(503 beyond; {LIMIT_CONCURRENCY_ENV}).",
+            flush=True,
+        )
+        if now <= 1024:
+            print(
+                f"Open-file limit is only {now}: for many LAN clients raise it before starting "
+                "(`ulimit -n 4096`, or LimitNOFILE for a service).",
+                flush=True,
+            )
+    uvicorn.run(
+        "rapidtriage.api.app:app",
+        host=host,
+        port=port,
+        reload=reload,
+        limit_concurrency=limit_concurrency,
+        timeout_keep_alive=KEEP_ALIVE_SECONDS,
+        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
+    )
     return 0
 
 

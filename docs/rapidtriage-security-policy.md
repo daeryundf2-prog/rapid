@@ -15,7 +15,9 @@ RAPIDTRIAGE_TOKEN="replace-me" \
 rapidtriage web --remote --host 0.0.0.0
 ```
 
-Authentication tokens are header-only. Clients must send `X-RapidTriage-Token`; URL query-string tokens are rejected to avoid token leakage through logs, browser history, or referrers.
+Authentication tokens are header-only. Clients must send `X-RapidTriage-Token`; URL query-string tokens are rejected to avoid token leakage through logs, browser history, or referrers. With authentication on, the API schema and docs pages (`/openapi.json`, `/docs`, `/docs/oauth2-redirect`, `/redoc`) need the token as well. The token is compared as bytes (SHA-256 digests), so a wrong header with non-ASCII bytes is a plain 401, never a server error.
+
+Request bodies are capped at 8 MiB (`RAPIDTRIAGE_MAX_BODY_BYTES`; hash-set uploads 50 MB), and `rapidtriage web` raises the open-file limit and caps concurrent connections (`RAPIDTRIAGE_LIMIT_CONCURRENCY`). Idle or slow connections are not timed out before their first request; for LAN use put a reverse proxy with header/body timeouts in front (see the admin deployment guide).
 
 Do not expose the service directly to the public internet.
 

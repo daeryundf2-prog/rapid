@@ -142,6 +142,37 @@
   without a thread for at most `RAPIDTRIAGE_RUN_WAIT_SECONDS` (default 60);
   past that it answers with the run still `queued`/`running` and
   `wait_timed_out: true` (`tests/test_rapidtriage_run_wait.py`).
+- Remote-use follow-ups, availability (`tests/test_remote_followup_robust.py`):
+  - Request bodies had no size cap (audit GAP-6): a few 65 MiB JSON bodies
+    were read and parsed whole. Bodies are now capped at 8 MiB
+    (`RAPIDTRIAGE_MAX_BODY_BYTES`); `POST /api/hash-sets` keeps its own 50 MB
+    cap. An oversized `Content-Length` gets 413 before authentication; a body
+    without one gets 413 once it passes the cap.
+  - A non-ASCII `X-RapidTriage-Token` header in single-token mode was a 500
+    that wrote a crash report and returned its server path, without a token
+    (audit GAP-7). The token is now compared as SHA-256 digests of the header
+    bytes: 401.
+  - `/openapi.json`, `/docs`, `/docs/oauth2-redirect` and `/redoc` were open
+    without a token (audit GAP-8); with API auth on they now need it (401).
+    Local no-auth mode keeps them open.
+  - `rapidtriage web` raises the soft open-file limit toward the hard limit
+    (at most 8192, POSIX) and prints it, and runs uvicorn with
+    `limit_concurrency` (`RAPIDTRIAGE_LIMIT_CONCURRENCY`, default 1000 and at
+    most half the open-file limit), a 5 s keep-alive timeout and a 10 s
+    graceful-shutdown timeout. With the 256 limit of a macOS terminal about
+    245 idle LAN connections stalled the server (audit GAP-10).
+  - SIGTERM / Ctrl-C waited for every `wait: true` request to reach its
+    limit (60 s), and Ctrl-C then ran every queued run before the process
+    exited (PR #89 review P2). A stop signal now answers waiting requests at
+    once with the run's current status, and on shutdown queued runs are
+    marked `interrupted` (`job-interrupted-shutdown`) without running.
+  - A `wait: true` run that ended just after the wait limit was answered as
+    `completed` with `wait_timed_out: true` and no `summary` (PR #89 review
+    P3). The status is now read after the wait and `wait_timed_out` follows it.
+  - The first `GET /api/cases/{id}/tags` of a case could fail with
+    `database is locked` (500) while another examiner was writing: the
+    system tags were read and then inserted in a deferred transaction (PR #90
+    review). They are now created under `BEGIN IMMEDIATE`.
 - Review marks and tags under concurrent users (remote-use review R4): two
   people tagging one row at once lost tags, and concurrent marks on a new row
   created several `review_mark` rows (each with its own citation id). Marks

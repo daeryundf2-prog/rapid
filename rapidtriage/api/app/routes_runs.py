@@ -29,6 +29,7 @@ from ...core.indicators import (
     build_indicator_ti_enrichment_package,
 )
 from ...core.jobs import (
+    ACTIVE_JOB_STATUSES,
     RunControlConflict,
     RunJob,
     RunJobStore,
@@ -122,7 +123,7 @@ from .row_conditions import (
     parse_row_conditions,
     rows_page,
 )
-from .run_wait import wait_for_run
+from .run_wait import RunWaits
 from .runops import (
     build_run_output_preview,
     build_run_viewer_workflow_validation,
@@ -407,6 +408,7 @@ def check_retry_paths(job: RunJob, *, resume: bool) -> None:
 
 def build_runs_router(
     store: RunJobStore,
+    run_waits: RunWaits,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -421,10 +423,12 @@ def build_runs_router(
                 raise HTTPException(status_code=409, detail=str(exc))
 
         run_id = await run_in_threadpool(queue_run)
-        ended = await wait_for_run(store, run_id) if request.wait else False
-        payload = await run_in_threadpool(lambda: store.get(run_id).to_dict(include_summary=ended))
         if request.wait:
-            payload["wait_timed_out"] = not ended
+            await run_waits.wait(store, run_id)
+        # Read after the wait: a run that ended right after the cap is reported as ended (PR #89 review P3).
+        payload = await run_in_threadpool(lambda: store.get(run_id).to_dict(include_summary=request.wait))
+        if request.wait:
+            payload["wait_timed_out"] = payload["status"] in ACTIVE_JOB_STATUSES
         return payload
 
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import os
 import re
 import secrets
@@ -23,6 +25,7 @@ from ...core.user_tokens import (
     load_user_tokens,
 )
 from .analyses import ANALYSIS_RUNNER, COMPLETION_HOOKS
+from .body_limit import HASH_SET_UPLOAD_MAX_BYTES, RequestBodyLimit, max_body_bytes
 from .case_workspace import CaseWorkspace, run_output_write_problem
 from .constants import MUTATING_METHODS
 from .helpers import (
@@ -50,6 +53,7 @@ from .routes_run_plan import build_run_plan_router
 from .routes_runs import build_runs_router
 from .routes_search import build_search_router
 from .routes_search_index import build_search_index_router
+from .run_wait import RunWaits, chain_stop_signals
 from .search_index_service import (
     auto_build_on_completion,
     auto_incremental_after_analysis,
@@ -129,15 +133,26 @@ def create_app(
     case_workspace = CaseWorkspace(store, Path(cases_db_path) if cases_db_path else None)
     # Identifies this app's analyses in the process-wide runner.
     analysis_owner = object()
+    run_waits = RunWaits()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        yield
-        # Shutdown: cancel this app's running analyses at their next unit, drop its queued ones.
+        # SIGTERM / Ctrl-C answers the waiting ``wait: true`` requests at once (the signal
+        # handler only schedules the release on this loop), so the server stops in seconds.
+        loop = asyncio.get_running_loop()
+        restore_signals = chain_stop_signals(lambda: loop.call_soon_threadsafe(run_waits.release_all))
+        try:
+            yield
+        finally:
+            restore_signals()
+        # Shutdown: queued runs never start (interrupted); cancel this app's running analyses at
+        # their next unit, drop its queued ones.
+        store.interrupt_queued()
         ANALYSIS_RUNNER.shutdown(owner=analysis_owner)
 
     api = FastAPI(title="rapidtriage local API", version="0.2.0", lifespan=lifespan)
     api.state.analysis_owner = analysis_owner
+    api.state.run_waits = run_waits
     api.state.case_workspace = case_workspace
     if auto_search_index:
         # Search index (plan search §0 결정 1): full build when a run completes, incremental
@@ -185,6 +200,14 @@ def create_app(
     expected_token = "" if auth_disabled or user_tokens is not None else configured_token or secrets.token_urlsafe(32)
     api.state.auth_required = bool(expected_token) or user_tokens is not None
     api.state.auth_token = expected_token
+    # Header values arrive as latin-1 text: ``encode("latin-1")`` gives back the bytes sent, so a
+    # non-ASCII header is a 401, not a TypeError in compare_digest (audit GAP-7). Fixed-length
+    # digests, as for per-user tokens.
+    expected_digest = hashlib.sha256(expected_token.encode("utf-8", "surrogateescape")).digest()
+    # The API schema and its docs pages need the token too when auth is on (audit GAP-8).
+    schema_paths = frozenset(
+        path for path in (api.openapi_url, api.docs_url, api.swagger_ui_oauth2_redirect_url, api.redoc_url) if path
+    )
     configured_case_db_roots = frozenset(case_db_roots or ())
     api.state.case_db_roots = configured_case_db_roots
 
@@ -228,7 +251,8 @@ def create_app(
                     if origin_host and origin_host not in allowed_hosts:
                         return JSONResponse(status_code=403, content={"detail": "RapidTriage API origin is not allowed"})
             token_name: str | None = None
-            if (expected_token or user_tokens is not None) and request.url.path.startswith("/api"):
+            path = request.url.path
+            if (expected_token or user_tokens is not None) and (path.startswith("/api") or path in schema_paths):
                 if "token" in request.query_params:
                     return JSONResponse(
                         status_code=401,
@@ -239,7 +263,9 @@ def create_app(
                     token_name = user_tokens.actor_for(supplied) if supplied is not None else None
                     authorized = token_name is not None
                 else:
-                    authorized = supplied is not None and secrets.compare_digest(supplied, expected_token)
+                    authorized = supplied is not None and secrets.compare_digest(
+                        hashlib.sha256(supplied.encode("latin-1")).digest(), expected_digest
+                    )
                 if not authorized:
                     return JSONResponse(status_code=401, content={"detail": "missing or invalid RapidTriage auth token"})
             # Who acts is the server's call (per-user token, else RAPIDTRIAGE_REVIEWER); every
@@ -268,13 +294,17 @@ def create_app(
                 },
             )
 
+    # Outermost: 413 for an oversized body, by Content-Length before auth or any route reads it,
+    # else once the bytes read pass the cap (audit GAP-6).
+    api.add_middleware(RequestBodyLimit, max_bytes=max_body_bytes(), upload_max_bytes=HASH_SET_UPLOAD_MAX_BYTES)
+
     api.include_router(build_meta_router(store))
     case_db_router = build_case_db_router(store, open_request_case_database, resolve_request_catalog_path)
     api.include_router(case_db_router)
     api.include_router(build_actions_router(store, case_db_router))
-    api.include_router(build_runs_router(store))
+    api.include_router(build_runs_router(store, run_waits))
     api.include_router(build_run_plan_router(store))
-    api.include_router(build_cases_router(store, case_workspace))
+    api.include_router(build_cases_router(store, case_workspace, run_waits))
     api.include_router(build_flags_router(store))
     api.include_router(build_derived_router(store))
     api.include_router(build_explorers_router(store))
