@@ -1,0 +1,539 @@
+{
+ "aaif-goose/goose": {
+  "category": "E",
+  "matrix_ref": "§E Goose",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "affaan-m/ecc": {
+  "category": "F",
+  "matrix_ref": "§F ECC",
+  "rapid": ""
+ },
+ "aider-ai/aider": {
+  "category": "E",
+  "matrix_ref": "§E Aider",
+  "rapid": ""
+ },
+ "anomalyco/opencode": {
+  "category": "E",
+  "matrix_ref": "§E OpenCode",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "anthropics/claude-code": {
+  "category": "E",
+  "matrix_ref": "§E Claude Code",
+  "owner_named": true,
+  "rapid": "있음(`claude-code`)"
+ },
+ "automatic1111/stable-diffusion-webui": {
+  "category": "L",
+  "matrix_ref": "§L SD WebUI",
+  "rapid": "부분(문자열 힌트)"
+ },
+ "aws/amazon-q-developer-cli": {
+  "category": "E",
+  "matrix_ref": "§E Amazon Q CLI",
+  "rapid": ""
+ },
+ "badlogic/pi-mono": {
+  "category": "E",
+  "matrix_ref": "§E pi",
+  "rapid": ""
+ },
+ "berriai/litellm": {
+  "category": "K",
+  "matrix_ref": "§K LiteLLM",
+  "rapid": ""
+ },
+ "block/goose": {
+  "category": "E",
+  "matrix_ref": "§E Goose",
+  "rapid": ""
+ },
+ "bloopai/vibe-kanban": {
+  "category": "G",
+  "matrix_ref": "§G Vibe Kanban",
+  "rapid": ""
+ },
+ "brave/brave-core": {
+  "category": "C",
+  "matrix_ref": "§C Brave Leo",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "browser-use/browser-use": {
+  "category": "C",
+  "matrix_ref": "§C Browser Use",
+  "rapid": ""
+ },
+ "bytedance/ui-tars-desktop": {
+  "category": "C",
+  "matrix_ref": "§C UI-TARS",
+  "rapid": ""
+ },
+ "can1357/oh-my-pi": {
+  "category": "E",
+  "matrix_ref": "§E oh-my-pi",
+  "rapid": ""
+ },
+ "ccusage/ccusage": {
+  "category": "F",
+  "matrix_ref": "§F ccusage",
+  "owner_named": true,
+  "rapid": "해당 없음"
+ },
+ "charmbracelet/crush": {
+  "category": "E",
+  "matrix_ref": "§E Crush",
+  "rapid": ""
+ },
+ "cline/cline": {
+  "category": "D",
+  "matrix_ref": "§D Cline",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "code-yeongyu/oh-my-openagent": {
+  "category": "F",
+  "matrix_ref": "§F OmO",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "code-yeongyu/oh-my-opencode": {
+  "category": "F",
+  "matrix_ref": "§F OmO",
+  "rapid": ""
+ },
+ "code-yeongyu/senpi": {
+  "category": "F",
+  "matrix_ref": "§F senpi",
+  "rapid": ""
+ },
+ "comfy-org/comfyui": {
+  "category": "L",
+  "matrix_ref": "§L ComfyUI",
+  "owner_named": true,
+  "rapid": "부분(문자열 힌트)"
+ },
+ "comfyanonymous/comfyui": {
+  "category": "L",
+  "matrix_ref": "§L ComfyUI",
+  "rapid": "부분(문자열 힌트)"
+ },
+ "continuedev/continue": {
+  "category": "D",
+  "matrix_ref": "§D Continue",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "crewaiinc/crewai": {
+  "category": "G",
+  "matrix_ref": "§G CrewAI",
+  "rapid": ""
+ },
+ "earendil-works/pi": {
+  "category": "E",
+  "matrix_ref": "§E pi",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "father-bot/chatgpt_telegram_bot": {
+  "category": "H",
+  "matrix_ref": "§H 직접 운영 봇",
+  "rapid": "부분"
+ },
+ "flowiseai/flowise": {
+  "category": "K",
+  "matrix_ref": "§K Flowise",
+  "rapid": ""
+ },
+ "foundationagents/metagpt": {
+  "category": "G",
+  "matrix_ref": "§G MetaGPT",
+  "rapid": ""
+ },
+ "ggml-org/llama.cpp": {
+  "category": "J",
+  "matrix_ref": "§J llama.cpp",
+  "owner_named": true,
+  "rapid": "부분(GGUF)"
+ },
+ "github/copilot-cli": {
+  "category": "E",
+  "matrix_ref": "§E Copilot CLI",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "google-antigravity/antigravity-cli": {
+  "category": "E",
+  "matrix_ref": "§E Antigravity",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "google-gemini/gemini-cli": {
+  "category": "E",
+  "matrix_ref": "§E Gemini CLI",
+  "rapid": "있음(`gemini-cli`)"
+ },
+ "herdrdev/herdr": {
+  "category": "G",
+  "matrix_ref": "§G herdr",
+  "rapid": ""
+ },
+ "huggingface/huggingface_hub": {
+  "category": "J",
+  "matrix_ref": "§J Hugging Face 캐시",
+  "owner_named": true,
+  "rapid": "부분"
+ },
+ "imbue-ai/sculptor": {
+  "category": "G",
+  "matrix_ref": "§G Sculptor",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "invoke-ai/invokeai": {
+  "category": "L",
+  "matrix_ref": "§L InvokeAI",
+  "rapid": ""
+ },
+ "janhq/jan": {
+  "category": "J",
+  "matrix_ref": "§J Jan",
+  "rapid": "부분(이번 PR)"
+ },
+ "kbwo/ccmanager": {
+  "category": "G",
+  "matrix_ref": "§G ccmanager",
+  "rapid": ""
+ },
+ "kilo-org/kilocode": {
+  "category": "D",
+  "matrix_ref": "§D Kilo Code",
+  "rapid": ""
+ },
+ "langchain-ai/langchain": {
+  "category": "K",
+  "matrix_ref": "§K LangChain",
+  "rapid": ""
+ },
+ "langchain-ai/langgraph": {
+  "category": "G",
+  "matrix_ref": "§G LangGraph",
+  "rapid": ""
+ },
+ "langflow-ai/langflow": {
+  "category": "K",
+  "matrix_ref": "§K Langflow",
+  "rapid": ""
+ },
+ "langgenius/dify": {
+  "category": "K",
+  "matrix_ref": "§K Dify",
+  "rapid": ""
+ },
+ "letta-ai/letta": {
+  "category": "G",
+  "matrix_ref": "§G Letta",
+  "rapid": ""
+ },
+ "lllyasviel/fooocus": {
+  "category": "L",
+  "matrix_ref": "§L Fooocus",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "lllyasviel/stable-diffusion-webui-forge": {
+  "category": "L",
+  "matrix_ref": "§L SD WebUI",
+  "owner_named": true,
+  "rapid": "부분(문자열 힌트)"
+ },
+ "lmstudio-ai/lms": {
+  "category": "J",
+  "matrix_ref": "§J LM Studio",
+  "rapid": "부분(경로 용어)"
+ },
+ "lostruins/koboldcpp": {
+  "category": "J",
+  "matrix_ref": "§J KoboldCpp",
+  "owner_named": true,
+  "rapid": "부분(이번 PR)"
+ },
+ "microsoft/autogen": {
+  "category": "G",
+  "matrix_ref": "§G AutoGen Studio",
+  "rapid": ""
+ },
+ "mintplex-labs/anything-llm": {
+  "category": "J",
+  "matrix_ref": "§J AnythingLLM",
+  "rapid": "부분(이번 PR)"
+ },
+ "moonshotai/kimi-cli": {
+  "category": "E",
+  "matrix_ref": "§E Kimi CLI",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "mudler/localai": {
+  "category": "J",
+  "matrix_ref": "§J LocalAI",
+  "rapid": "부분(이번 PR)"
+ },
+ "musistudio/claude-code-router": {
+  "category": "K",
+  "matrix_ref": "§K claude-code-router",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "n8n-io/n8n": {
+  "category": "K",
+  "matrix_ref": "§K n8n",
+  "rapid": ""
+ },
+ "nomic-ai/gpt4all": {
+  "category": "J",
+  "matrix_ref": "§J GPT4All",
+  "rapid": "부분(경로 용어)"
+ },
+ "nousresearch/hermes-agent": {
+  "category": "H",
+  "matrix_ref": "§H Hermes Agent",
+  "rapid": ""
+ },
+ "obra/superpowers": {
+  "category": "F",
+  "matrix_ref": "§F Superpowers",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "ollama/ollama": {
+  "category": "J",
+  "matrix_ref": "§J Ollama",
+  "rapid": "부분(경로 용어)"
+ },
+ "omnara-ai/omnara": {
+  "category": "G",
+  "matrix_ref": "§G Omnara",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "oobabooga/text-generation-webui": {
+  "category": "J",
+  "matrix_ref": "§J text-generation-webui",
+  "rapid": "부분(이번 PR)"
+ },
+ "oobabooga/textgen": {
+  "category": "J",
+  "matrix_ref": "§J text-generation-webui",
+  "owner_named": true,
+  "rapid": "부분(이번 PR)"
+ },
+ "open-webui/open-webui": {
+  "category": "J",
+  "matrix_ref": "§J Open WebUI",
+  "rapid": "부분(이번 PR)"
+ },
+ "openai/codex": {
+  "category": "E",
+  "matrix_ref": "§E Codex",
+  "owner_named": true,
+  "rapid": "있음(`codex-cli`)"
+ },
+ "openai/tiktoken": {
+  "category": "K",
+  "matrix_ref": "§K tiktoken",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "openai/whisper": {
+  "category": "L",
+  "matrix_ref": "§L Whisper",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "openclaw/openclaw": {
+  "category": "H",
+  "matrix_ref": "§H OpenClaw",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "openhands/openhands": {
+  "category": "E",
+  "matrix_ref": "§E OpenHands",
+  "rapid": ""
+ },
+ "openhands/openhands-cli": {
+  "category": "E",
+  "matrix_ref": "§E OpenHands",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "openinterpreter/open-interpreter": {
+  "category": "E",
+  "matrix_ref": "§E Open Interpreter",
+  "rapid": ""
+ },
+ "openinterpreter/openinterpreter": {
+  "category": "E",
+  "matrix_ref": "§E Open Interpreter",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "overwirehq/claude-code-telegram": {
+  "category": "H",
+  "matrix_ref": "§H 직접 운영 봇",
+  "owner_named": true,
+  "rapid": "부분"
+ },
+ "pedramamini/maestro": {
+  "category": "G",
+  "matrix_ref": "§G Maestro",
+  "rapid": ""
+ },
+ "qwenlm/qwen-code": {
+  "category": "E",
+  "matrix_ref": "§E Qwen Code",
+  "rapid": ""
+ },
+ "richardatct/claude-code-telegram": {
+  "category": "H",
+  "matrix_ref": "§H 직접 운영 봇",
+  "rapid": "부분"
+ },
+ "roocodeinc/roo-code": {
+  "category": "D",
+  "matrix_ref": "§D Roo Code",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "rooveterinaryinc/roo-code": {
+  "category": "D",
+  "matrix_ref": "§D Roo Code",
+  "rapid": ""
+ },
+ "router-for-me/cliproxyapi": {
+  "category": "K",
+  "matrix_ref": "§K CLIProxyAPI",
+  "rapid": ""
+ },
+ "runmaestro/maestro": {
+  "category": "G",
+  "matrix_ref": "§G Maestro",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "rynfar/meridian": {
+  "category": "K",
+  "matrix_ref": "§K Meridian",
+  "rapid": ""
+ },
+ "ryoppippi/ccusage": {
+  "category": "F",
+  "matrix_ref": "§F ccusage",
+  "rapid": "해당 없음"
+ },
+ "significant-gravitas/autogpt": {
+  "category": "G",
+  "matrix_ref": "§G AutoGPT",
+  "rapid": ""
+ },
+ "simular-ai/agent-s": {
+  "category": "C",
+  "matrix_ref": "§C Agent S",
+  "rapid": ""
+ },
+ "sisyphuslabs/dori-superagent": {
+  "category": "G",
+  "matrix_ref": "§G dori",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "siteboon/claudecodeui": {
+  "category": "G",
+  "matrix_ref": "§G Claude Code UI",
+  "rapid": ""
+ },
+ "skyvern-ai/skyvern": {
+  "category": "C",
+  "matrix_ref": "§C Skyvern",
+  "rapid": ""
+ },
+ "slopus/happy": {
+  "category": "F",
+  "matrix_ref": "§F Happy",
+  "rapid": ""
+ },
+ "smtg-ai/claude-squad": {
+  "category": "G",
+  "matrix_ref": "§G Claude Squad",
+  "rapid": ""
+ },
+ "sst/opencode": {
+  "category": "E",
+  "matrix_ref": "§E OpenCode",
+  "rapid": ""
+ },
+ "stablyai/orca": {
+  "category": "G",
+  "matrix_ref": "§G Orca",
+  "rapid": ""
+ },
+ "stravu/crystal": {
+  "category": "G",
+  "matrix_ref": "§G Crystal",
+  "rapid": ""
+ },
+ "swe-agent/swe-agent": {
+  "category": "E",
+  "matrix_ref": "§E SWE-agent",
+  "rapid": ""
+ },
+ "thedotmack/claude-mem": {
+  "category": "F",
+  "matrix_ref": "§F claude-mem",
+  "rapid": ""
+ },
+ "vllm-project/vllm": {
+  "category": "J",
+  "matrix_ref": "§J vLLM",
+  "rapid": ""
+ },
+ "vntrevx/cataly": {
+  "category": "G",
+  "matrix_ref": "§G Cataly",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "voideditor/void": {
+  "category": "D",
+  "matrix_ref": "§D Void",
+  "rapid": ""
+ },
+ "warpdotdev/warp": {
+  "category": "E",
+  "matrix_ref": "§E Warp",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "winfunc/opcode": {
+  "category": "G",
+  "matrix_ref": "§G Opcode",
+  "rapid": ""
+ },
+ "xai-org/grok-build": {
+  "category": "E",
+  "matrix_ref": "§E Grok Build",
+  "owner_named": true,
+  "rapid": ""
+ },
+ "zed-industries/zed": {
+  "category": "D",
+  "matrix_ref": "§D Zed",
+  "owner_named": true,
+  "rapid": ""
+ }
+}

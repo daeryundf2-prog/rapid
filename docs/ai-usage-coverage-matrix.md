@@ -1,6 +1,6 @@
 # AI 사용 흔적 커버리지 매트릭스
 
-조사일 2026-11-28. 시중 AI 사용 세팅마다 어떤 흔적이 어디에 남는지, Rapid가 지금 무엇을 잡는지 정리한 표다. 판정 규칙은 [§0](#0-읽는-법)에 있다. GitHub 별 500개 이상 프로젝트 전수 목록은 부록 [ai-usage-coverage-github.md](ai-usage-coverage-github.md)에 있다.
+조사일 2026-11-28. 시중 AI 사용 세팅마다 어떤 흔적이 어디에 남는지, Rapid가 지금 무엇을 잡는지 정리한 표다. 판정 규칙은 [§0](#0-읽는-법)에 있다. GitHub 별 500개 이상 프로젝트 조사(10,406개) 중 이 표와 연결된 저장소와 별 5,000개 이상 저장소는 부록 [ai-usage-coverage-github.md](ai-usage-coverage-github.md)에 있고, 전체 목록은 `scripts/ai-usage-github-appendix.py`로 다시 만든다.
 
 ## 요약 (분류별 한 쪽)
 
@@ -45,10 +45,10 @@ Rapid 공통: 방문 기록에서 아래 호스트와 그 하위 도메인을 `b
 | Claude | `claude.ai` (`claude.com`은 회사·문서 사이트) | [Claude 다운로드](https://claude.com/download), [네트워크 설정](https://code.claude.com/docs/en/network-config) | 있음 | P1 |
 | Gemini, Gems, 예약 작업 | `gemini.google.com` (구 `bard.google.com`). Project Mariner(`labs.google.com/mariner`)는 2026-05-04 종료 | [예약 작업](https://support.google.com/gemini/answer/16316416), [Mariner](https://labs.google.com/mariner/dashboard) | 있음 | P1 |
 | Google AI Studio | `aistudio.google.com` | [AI Studio](https://aistudio.google.com/welcome) | 있음 | P2 |
-| NotebookLM (2026-07 Gemini Notebook으로 이름 변경) | `notebooklm.google` | [notebooklm.google](https://notebooklm.google/) | 있음(이번 PR) | P2 |
+| NotebookLM (2026-07 Gemini Notebook으로 이름 변경) | `notebooklm.google.com`(앱·노트북 `/notebook/<id>`), `notebooklm.google`(소개 페이지) | [notebooklm.google](https://notebooklm.google/) | 있음(이번 PR) | P2 |
 | Perplexity | `perplexity.ai` | [perplexity.ai](https://www.perplexity.ai) | 있음 | P1 |
 | Microsoft Copilot(개인) | `copilot.microsoft.com`, `copilot.com` | [copilot.microsoft.com](https://copilot.microsoft.com) (canonical `copilot.com`) | 있음(`copilot.com`은 이번 PR) | P1 |
-| Microsoft 365 Copilot Chat | `copilot.cloud.microsoft`. `m365.cloud.microsoft/chat`은 Office 웹 전체와 호스트가 같아 넣지 않음 | [Manage Copilot Chat](https://learn.microsoft.com/en-us/copilot/manage/manage-copilot-chat) | 있음(이번 PR) | P1 |
+| Microsoft 365 Copilot Chat | `copilot.cloud.microsoft`, `m365.cloud.microsoft/chat`. 뒤의 호스트는 Word·Outlook 웹도 함께 서비스하므로 브라우저 기록에서 경로가 `/chat`일 때만 잡고(`detect_ai_service`), 경로가 없는 메모리 URL 분류와 브라우저 저장소에는 넣지 않음 | [Manage Copilot Chat](https://learn.microsoft.com/en-us/copilot/manage/manage-copilot-chat) | 있음(이번 PR). `m365.cloud.microsoft/chat`은 브라우저 기록만 | P1 |
 | Copilot Studio 에이전트 | `copilotstudio.microsoft.com` | [Copilot Studio](https://learn.microsoft.com/en-us/microsoft-copilot-studio/agents-overview) | 없음 | P3 |
 | Poe | `poe.com` | [poe.com](https://poe.com) | 있음 | P3 |
 | DeepSeek | `chat.deepseek.com` (`deepseek.com` 하위로 매칭) | [chat.deepseek.com](https://chat.deepseek.com), [API 문서](https://api-docs.deepseek.com/) | 있음 | P1 |
@@ -69,8 +69,8 @@ Rapid 공통: 방문 기록에서 아래 호스트와 그 하위 도메인을 `b
 | You.com | `you.com` | [you.com](https://you.com/) | 있음 | P3 |
 | Phind (2026-01 종료 (2차)) | `phind.com` | (2차) [felloai.com](https://felloai.com/phind-ai-answer-engine-everything-you-need-to-know/) | 있음 | P3 |
 | HuggingChat(현재 Omni) | `huggingface.co/chat` — 경로 단위. 호스트 `huggingface.co`는 "Hugging Face"로만 잡힘 | [huggingface.co/chat](https://huggingface.co/chat/) | 부분 | P3 |
-| Pi | `pi.ai` | [Inflection 상태 페이지](http://status.inflection.ai/) | 없음. `pi.ai`가 `api.airtable.com` 같은 문자열에도 들어 있어 저장소 본문 탐지(`likely_ai_storage_text`)가 오탐한다. 본문 탐지를 호스트 단위로 바꾼 뒤 추가 | P3 |
-| Liner | `liner.com` | [liner.com](https://liner.com/) (검색 요약 경유) | 없음. `airliner.com` 오탐 문제가 Pi와 같음 | P3 |
+| Pi | `pi.ai` | [Inflection 상태 페이지](http://status.inflection.ai/) | 없음. 저장소 본문·경로 탐지(`likely_ai_storage_text`, `infer_ai_service_from_path`)가 부분 문자열로 찾던 동안에는 `api.airtable.com`에서 오탐했다. 이번 PR에서 호스트 경계 비교(`AI_SERVICE_DOMAIN_PATTERNS`)로 바꿨으므로 다음 PR에서 추가 | P3 |
+| Liner | `liner.com` | [liner.com](https://liner.com/) (검색 요약 경유) | 없음. `airliner.com` 오탐은 호스트 경계 비교로 막힘. Pi와 함께 다음 PR에서 추가 | P3 |
 | 카카오 Kanana / ChatGPT for Kakao | `kanana.kakao.com`, `kakaotalk-ai.kakao.com`, `mate.kanana.ai`. 카카오톡 안에서 쓰면 PC 카카오톡 DB에 남는지 [미확인] | [kanana.kakao.com](https://kanana.kakao.com/), [카카오 발표](https://www.kakaocorp.com/page/detail/11794?lang=ENG) | 없음 | P2 |
 | Meta AI in WhatsApp·Instagram, ChatGPT in WhatsApp(2026-01 종료), LINE AI Assistant(종료), Telegram AI 요약 | 각 메신저 서버. PC 흔적은 메신저 앱 쪽 [미확인] | [Telegram AI summaries](https://telegram.org/blog/new-design-ai-summaries), [LINE 발표](https://www.linecorp.com/en/pr/news/global/2024/138/) | 메신저 일반 수집만 | P3 |
 | 생성형 미디어 사이트 | Midjourney `midjourney.com`, Leonardo `leonardo.ai`, Ideogram `ideogram.ai`, Runway `runwayml.com`, Kling `klingai.com`, Sora `sora.com`(2026-04 웹 종료), Suno `suno.com`, Udio `udio.com`, ElevenLabs `elevenlabs.io`, Microsoft Designer `designer.microsoft.com`, Adobe Firefly | 각 공식 사이트, [Sora 종료 안내](https://help.openai.com/en/articles/20001152-what-to-know-about-the-sora-discontinuation), [Midjourney Creating on Web](https://docs.midjourney.com/hc/en-us/articles/33390732264589-Creating-on-Web) | 없음 | P2 |
@@ -267,7 +267,7 @@ Rapid 공통: `editor-chat`이 Cursor·Code·Code - Insiders·VSCodium의 `state
 
 정의: 사용자 PC에서 모델을 내려받아 돌리는 런타임과 채팅 UI. 모델 파일·로그·대화 DB가 로컬이다.
 
-Rapid 공통: 경로에 제품 이름이 들어 있는 설정·로그·DB(`.json`, `.jsonl`, `.yaml`, `.toml`, `.log`, `.txt`, `.sqlite`, `.db`)와 GGUF·safetensors 모델을 `local-llm-artifact`로 인벤토리하고, 텍스트·SQLite에서 프롬프트 후보를 `local-llm-prompt-candidate`로 낸다(`rapidtriage/artifacts/generic.py`의 `LOCAL_LLM_PATH_TERMS`, `infer_local_llm_product`). 이번 PR에서 Jan·AnythingLLM·Msty·AI:GO·LocalAI·Open WebUI·text-generation-webui·KoboldCpp 경로 용어와 `.jsonl` 읽기를 더했다.
+Rapid 공통: 경로에 제품 이름이 들어 있는 설정·로그·DB(`.json`, `.jsonl`, `.yaml`, `.toml`, `.log`, `.txt`, `.sqlite`, `.db`)와 GGUF·safetensors 모델을 `local-llm-artifact`로 인벤토리하고, 텍스트·SQLite에서 프롬프트 후보를 `local-llm-prompt-candidate`로 낸다(`rapidtriage/artifacts/generic.py`의 `LOCAL_LLM_PATH_TERMS`, `infer_local_llm_product`). 이번 PR에서 Jan·AnythingLLM·Msty·AI:GO·LocalAI·Open WebUI·text-generation-webui·KoboldCpp 경로 용어와 `.jsonl` 읽기를 더했다. `.jsonl`은 줄마다 `role`·`content`를 읽어 `user: …`/`assistant: …` 후보로 낸다(`local_llm_jsonl_prompt_fragments`).
 
 | 제품 | 분류 | 흔적 | 근거 | Rapid 현재 | 우선순위 |
 |---|---|---|---|---|---|
@@ -275,7 +275,7 @@ Rapid 공통: 경로에 제품 이름이 들어 있는 설정·로그·DB(`.json
 | Ollama 데스크톱 앱 | 로컬 | `%LOCALAPPDATA%\Ollama\db.sqlite`(+`-wal`), mac `~/Library/Application Support/Ollama/db.sqlite`. 테이블 `chats`, `messages`(role, content, thinking, model_name), `tool_calls`. WAL에 삭제한 대화가 남을 수 있음 | [schema.sql](https://github.com/ollama/ollama/blob/main/app/store/schema.sql), [app_state.go](https://github.com/ollama/ollama/blob/main/internal/onboarding/app_state.go), [이슈 #12452](https://github.com/ollama/ollama/issues/12452) | 부분(범용 SQLite 프롬프트 후보) | P1 |
 | LM Studio | 로컬 | `~/.lmstudio/conversations/*.json`, `~/.lmstudio/models/`, `config-presets/`, CLI `~/.lmstudio/bin/lms` | [Chat 문서](https://lmstudio.ai/docs/app/basics/chat), [import-model](https://lmstudio.ai/docs/app/advanced/import-model) | 있음(경로 용어) | P1 |
 | GPT4All | 로컬 | `%LOCALAPPDATA%\nomic.ai\GPT4All\gpt4all-<chatId>.chat`(바이너리 직렬화), mac `~/Library/Application Support/nomic.ai/GPT4All/` | [settings](https://docs.gpt4all.io/gpt4all_desktop/settings.html), [chatlistmodel.cpp](https://github.com/nomic-ai/gpt4all/blob/main/gpt4all-chat/src/chatlistmodel.cpp) | 부분(경로 용어, `.chat` 미파싱) | P2 |
-| Jan | 로컬 | `%APPDATA%\Jan\data`(mac `~/Library/Application Support/Jan/data`, Linux `~/.local/share/Jan/data`): `threads/<id>/messages.jsonl`, `thread.json`, `logs/app.log`; Jan Agent `~/.jan/projects/<slug>/threads` | [Data folder](https://docs.jan.ai/llms.mdx/desktop/data-folder/content.md), [Agent sessions](https://docs.jan.ai/agent/sessions) | 있음(이번 PR) | P2 |
+| Jan | 로컬 | `%APPDATA%\Jan\data`(mac `~/Library/Application Support/Jan/data`, Linux `~/.local/share/Jan/data`): `threads/<id>/messages.jsonl`(줄마다 `ThreadMessage`: `role`, `content[].text.value`), `thread.json`, `logs/app.log`; Jan Agent `~/.jan/projects/<slug>/threads` | [Data folder](https://docs.jan.ai/llms.mdx/desktop/data-folder/content.md), [Agent sessions](https://docs.jan.ai/agent/sessions), [messageEntity.ts](https://github.com/janhq/jan/blob/main/core/src/types/message/messageEntity.ts) | 있음(이번 PR): 위 세 데이터 폴더와 `~/.jan`만 Jan으로 본다(사용자 이름이 Jan인 `C:\Users\Jan\data` 같은 폴더는 제외). `messages.jsonl`의 user·assistant 메시지를 프롬프트 후보로 냄 | P2 |
 | AnythingLLM Desktop | 로컬 | `%APPDATA%\anythingllm-desktop\storage\anythingllm.db`, `documents/`, `lancedb/`, `logs/` | [Storage](https://docs.anythingllm.com/installation-desktop/storage) | 있음(이번 PR) | P2 |
 | Msty(1.x) | 로컬 | `%APPDATA%\Msty`(mac `~/Library/Application Support/Msty`). 대화 DB 이름 [미확인]. Msty Studio 2.x 이상 경로는 (2차)라 넣지 않음 | [Msty 문서](https://docs.msty.app/how-to-guides/get-the-latest-version-of-local-ai-service) | 있음(이번 PR, `Msty` 폴더) | P3 |
 | AI:GO(Lablup Backend.AI GO) | 로컬 | `%APPDATA%\ai.backend.go\`(mac `~/Library/Application Support/ai.backend.go/`, Linux `~/.local/share/ai.backend.go/`): `logs/`, `engines/`, 대화 JSON 파일. 구 `~/.backend-ai-go/`. 앱을 지워도 대화가 남음(FAQ) | [Logs](https://go.backend.ai/en/manual/core-features/logs/), [FAQ](https://go.backend.ai/en/manual/reference/faq) | 있음(이번 PR) | P2 |
@@ -391,4 +391,4 @@ Rapid 공통: 경로에 제품 이름이 들어 있는 설정·로그·DB(`.json
 13. Brave Leo `AIChat`, Comet·Dia 프로필 경로 등록, AI 확장 ID 표.
 14. 생성 이미지 PNG 청크(`parameters`, `prompt`, `workflow`)와 C2PA.
 15. API 키 이름 인벤토리(값 없이)와 claude-code-router·n8n.
-16. Microsoft Copilot 활동 CSV, Takeout Gemini 활동, `pi.ai`·`liner.com`·`pickle.com`(본문 탐지를 호스트 단위로 바꾼 뒤).
+16. Microsoft Copilot 활동 CSV, Takeout Gemini 활동, `pi.ai`·`liner.com`·`pickle.com`(저장소 탐지는 이번 PR에서 호스트 경계 비교로 바뀌어 막는 것이 없음).

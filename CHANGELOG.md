@@ -28,23 +28,30 @@
   "선택 항목 분석…" and "관련 항목 표시…" open one dialog over the action API that
   also shows the request an agent would send.
 - AI usage coverage matrix (`docs/ai-usage-coverage-matrix.md`, Korean, with
-  the GitHub 500-star appendix `docs/ai-usage-coverage-github.md`): AI usage
+  the GitHub appendix `docs/ai-usage-coverage-github.md`): AI usage
   setups by category (web chat, desktop apps, browser AI, IDEs, CLI agents,
   harnesses, orchestrators, messenger agents, cloud agents, local LLMs, API and
   automation, image and voice generation, mobile), the traces each leaves, the
   primary source for each path, what Rapid collects today and the ordered list
-  of next collectors.
+  of next collectors. The appendix lists the repositories the matrix links to
+  and the non-excluded ones with 5,000+ stars (1,561 of 10,406 surveyed, no
+  descriptions); `scripts/ai-usage-github-appendix.py` holds the searches and
+  classification rules and regenerates the full list outside Git.
 - Browser history and memory URL classification recognise more web AI
   services: Microsoft 365 Copilot (`copilot.cloud.microsoft`), `copilot.com`,
-  NotebookLM, 뤼튼, CLOVA X, 에이닷, Kimi, Qwen, Doubao, ChatGLM, Genspark,
-  Manus and Felo. Both collectors now read one host table
-  (`rapidtriage/core/ai_service_domains.py`), so memory strings also classify
-  Google AI Studio, Grok, Mistral Le Chat, DeepSeek, Meta AI, Character.AI,
-  You.com and Phind, which only browser history knew before.
-- Local LLM inventory names Jan, AnythingLLM, Msty, AI:GO, LocalAI, Open
-  WebUI, text-generation-webui and KoboldCpp data folders, matches Windows
-  paths with either separator, and reads `.jsonl` files (Jan thread messages)
-  for prompt candidates (`tests/test_ai_service_domains.py`).
+  NotebookLM (`notebooklm.google.com`), 뤼튼, CLOVA X, 에이닷, Kimi, Qwen,
+  Doubao, ChatGLM, Genspark, Manus and Felo. Both collectors now read one host
+  table (`rapidtriage/core/ai_service_domains.py`), so memory strings also
+  classify Google AI Studio, Grok, Mistral Le Chat, DeepSeek, Meta AI,
+  Character.AI, You.com and Phind, which only browser history knew before.
+  Browser history also counts `m365.cloud.microsoft/chat` (only the `/chat`
+  path: the host also serves Office on the web) as Microsoft 365 Copilot.
+- Local LLM inventory names Jan (its data folder on Windows, macOS and Linux
+  and `~/.jan`, not any `jan/data` folder), AnythingLLM, Msty, AI:GO, LocalAI,
+  Open WebUI, text-generation-webui and KoboldCpp data folders, matches Windows
+  paths with either separator, and reads `.jsonl` chat logs one message per
+  line: a Jan `messages.jsonl` line becomes a user or assistant prompt
+  candidate at the line's byte offset (`tests/test_ai_service_domains.py`).
 
 ### Changed
 
@@ -62,6 +69,12 @@
 
 ### Fixed
 
+- Browser storage (Local Storage, IndexedDB) matches AI service hosts only at
+  a host boundary, so GitHub Copilot storage (`api.githubcopilot.com`) is no
+  longer labelled Microsoft Copilot and `box.ai` / `bayou.com` no longer read
+  as Grok / You.com. The AI-uplift `supported_ai_services` list no longer
+  repeats a service per host; its manifest hash changes with it
+  (`tests/test_ai_service_domains.py`).
 - "더 보기" in the console's text view decoded the original as UTF-8 only, so
   a CP949, UTF-16 or UTF-32 file turned into replacement characters once
   expanded. It now decodes in the order of the server preview
