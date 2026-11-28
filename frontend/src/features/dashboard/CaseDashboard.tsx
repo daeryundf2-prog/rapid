@@ -1,8 +1,9 @@
 /**
  * 접수 dashboard = 사건 개요 (design overhaul F6/F7/F9; plan §9 X1/X9/X10/X18): statuses with
  * their subject, 먼저 할 일, the case's key numbers and activity by date on top, then the detail
- * cards in balanced columns (collapsed by default except evidence, problems and the settings
- * summary). Mounted in the grid slot when the route's collection is "intake" (app/IntakePane.tsx).
+ * cards in balanced columns (on a first visit only the case intake cards are open: case info,
+ * evidence, settings summary, problems, case memo). Mounted in the grid slot when the route's
+ * collection is "intake" (app/IntakePane.tsx).
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -47,11 +48,12 @@ import { useDashboardData } from "./useDashboardData";
 import "./dashboard.css";
 
 export const CARD_IDS = [
-  // Case intake (AXIOM adoption E1); the first three stay open on a first visit.
+  // Case intake (AXIOM adoption E1); the first five stay open on a first visit (case identity
+  // first: reviewers and report recipients check whose case this is before anything else).
+  "case-info",
   "case-evidence",
   "snapshot",
   "problems",
-  "case-info",
   "case-memo",
   "notes",
   "evidence",
@@ -66,9 +68,7 @@ export const CARD_IDS = [
 export type CardId = (typeof CARD_IDS)[number];
 
 /** Collapsed until the examiner opens them (the overview above already carries their headline). */
-export const DEFAULT_COLLAPSED_CARDS: readonly CardId[] = CARD_IDS.filter(
-  (id) => id !== "case-evidence" && id !== "problems" && id !== "snapshot",
-);
+export const DEFAULT_COLLAPSED_CARDS: readonly CardId[] = CARD_IDS.slice(5);
 
 const CARD_META: Record<CardId, { title: string; icon: IconName }> = {
   "case-info": { title: "사건 정보", icon: "inbox" },
@@ -260,6 +260,28 @@ export function CaseDashboard({ runId }: { runId: string }) {
       </div>
 
       <div className="dash-grid">
+        {visible("case-info") ? (
+          <Card
+            {...cardProps("case-info", () => {
+              void snapshot.refetch();
+              void intake.detail.refetch();
+            })}
+            meta={caseDetail ? caseDetail.case_number : snapshot.data ? "케이스 없음" : undefined}
+          >
+            {snapshot.isPending || (intake.caseId && intake.detail.isPending) ? (
+              <CardLoading />
+            ) : snapshot.isError ? (
+              <CardError error={snapshot.error} />
+            ) : !intake.caseId ? (
+              <NoCaseLink />
+            ) : intake.detail.isError || !caseDetail ? (
+              <CardError error={intake.detail.error} />
+            ) : (
+              <CaseInfoCard detail={caseDetail} />
+            )}
+          </Card>
+        ) : null}
+
         {visible("case-evidence") ? (
           <Card
             {...cardProps("case-evidence", () => void intake.detail.refetch())}
@@ -308,28 +330,6 @@ export function CaseDashboard({ runId }: { runId: string }) {
               <CardError error={intake.problems.error} />
             ) : (
               <ProblemsCard runId={runId} problems={intake.problems.data} />
-            )}
-          </Card>
-        ) : null}
-
-        {visible("case-info") ? (
-          <Card
-            {...cardProps("case-info", () => {
-              void snapshot.refetch();
-              void intake.detail.refetch();
-            })}
-            meta={caseDetail ? caseDetail.case_number : snapshot.data ? "케이스 없음" : undefined}
-          >
-            {snapshot.isPending || (intake.caseId && intake.detail.isPending) ? (
-              <CardLoading />
-            ) : snapshot.isError ? (
-              <CardError error={snapshot.error} />
-            ) : !intake.caseId ? (
-              <NoCaseLink />
-            ) : intake.detail.isError || !caseDetail ? (
-              <CardError error={intake.detail.error} />
-            ) : (
-              <CaseInfoCard detail={caseDetail} />
             )}
           </Card>
         ) : null}

@@ -242,57 +242,65 @@ export function SnapshotCard({ snapshot }: { snapshot: ProcessingSnapshot }) {
   const rows = summarizeRunRequest(body.request ?? null);
   const keywords = body.profile?.keywords ?? [];
   const kinds = body.profile?.artifacts_kinds ?? [];
+  // The full table renders only while open: the folded card reads one line (and one copy of each
+  // value, so the summary is the only "처리 모드" on screen).
+  const [open, setOpen] = useState(false);
   return (
     <div className="dash-snapshot" data-testid="snapshot">
       <p className="dash-snapshot-summary">{snapshotSummary(snapshot)}</p>
-      <details className="dash-details">
+      <p className="dash-note">{ORIGIN_NOTE[String(body.origin)] ?? ORIGIN_NOTE["run-request"]}</p>
+      <details className="dash-details" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
         <summary>설정 전체 보기 ({n(rows.length)}항목)</summary>
-        <p className="dash-note">{ORIGIN_NOTE[String(body.origin)] ?? ORIGIN_NOTE["run-request"]}</p>
-        <dl className="detail-grid">
-          <dt>고정 시각</dt>
-          <dd>{formatTime(snapshot.captured_at)}</dd>
-          {body.evidence?.evidence_number ? (
-            <>
-              <dt>증거</dt>
-              <dd>
-                {body.evidence.evidence_number} <span className="mono break-all">{body.evidence.path}</span>
-              </dd>
-            </>
-          ) : body.request?.root ? (
-            <>
-              <dt>증거 경로</dt>
-              <dd className="mono break-all">{String(body.request.root)}</dd>
-            </>
-          ) : null}
-          {keywords.length ? (
-            <>
-              <dt>프로필 키워드</dt>
-              <dd>{[...keywords].sort(koCompare).join(", ")}</dd>
-            </>
-          ) : null}
-          {kinds.length ? (
-            <>
-              <dt>수집 계열</dt>
-              <dd>{n(kinds.length)}종</dd>
-            </>
-          ) : null}
-          {body.file ? (
-            <>
-              <dt>스냅숏 파일</dt>
-              <dd className="mono break-all">{body.file}</dd>
-            </>
-          ) : null}
-        </dl>
-        <table className="data-table dash-table" aria-label="처리 설정 스냅샷">
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.key} data-key={row.key}>
-                <th scope="row">{row.label}</th>
-                <td className={row.key === "output_dir" ? "mono break-all" : undefined}>{row.value}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {open ? (
+          <>
+            <dl className="detail-grid">
+              <dt>고정 시각</dt>
+              <dd>{formatTime(snapshot.captured_at)}</dd>
+              {body.evidence?.evidence_number ? (
+                <>
+                  <dt>증거</dt>
+                  <dd>
+                    {body.evidence.evidence_number}{" "}
+                    <span className="mono break-all">{body.evidence.path}</span>
+                  </dd>
+                </>
+              ) : body.request?.root ? (
+                <>
+                  <dt>증거 경로</dt>
+                  <dd className="mono break-all">{String(body.request.root)}</dd>
+                </>
+              ) : null}
+              {keywords.length ? (
+                <>
+                  <dt>프로필 키워드</dt>
+                  <dd>{[...keywords].sort(koCompare).join(", ")}</dd>
+                </>
+              ) : null}
+              {kinds.length ? (
+                <>
+                  <dt>수집 계열</dt>
+                  <dd>{n(kinds.length)}종</dd>
+                </>
+              ) : null}
+              {body.file ? (
+                <>
+                  <dt>스냅숏 파일</dt>
+                  <dd className="mono break-all">{body.file}</dd>
+                </>
+              ) : null}
+            </dl>
+            <table className="data-table dash-table" aria-label="처리 설정 스냅샷">
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.key} data-key={row.key}>
+                    <th scope="row">{row.label}</th>
+                    <td className={row.key === "output_dir" ? "mono break-all" : undefined}>{row.value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        ) : null}
       </details>
     </div>
   );

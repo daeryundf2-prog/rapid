@@ -221,14 +221,16 @@ describe("접수 case cards (Q-X1/Q-X3/Q-X4)", () => {
 
     const snapshot = cardOf("처리 설정 스냅샷");
     expect(within(snapshot).getByText("런 시작 시 케이스에 고정된 처리 옵션입니다.")).toBeTruthy();
-    expect(within(snapshot).getByText("500개")).toBeTruthy();
-    // One summary line; the 18-row table folds under 설정 전체 보기 (F6).
+    // One summary line; the 18-row table folds under 설정 전체 보기 (F6) and renders only when open.
     expect(within(snapshot).getByText(/^처리 모드 .+, 수집 계열 2종, 프로필 키워드 2개/)).toBeTruthy();
-    expect(
-      within(snapshot)
-        .getByText(/설정 전체 보기/)
-        .closest("details")?.open,
-    ).toBe(false);
+    const details = within(snapshot)
+      .getByText(/설정 전체 보기/)
+      .closest("details") as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    expect(within(snapshot).queryByText("500개")).toBeNull();
+    details.open = true;
+    fireEvent(details, new Event("toggle"));
+    expect(within(snapshot).getByText("500개")).toBeTruthy();
     expect(within(snapshot).getByText("송금, invoice")).toBeTruthy();
 
     const problemCard = cardOf("처리 문제");
@@ -266,9 +268,10 @@ describe("접수 case cards (Q-X1/Q-X3/Q-X4)", () => {
       ).toBe("true"),
     );
     await waitFor(() => expect(screen.getByTestId("dash-status").textContent).toContain("사건진행 중"));
+    // Case identity stays open on a first visit; the case-info card keeps its own status row.
     expect(
       within(cardOf("사건 정보")).getByRole("button", { name: "사건 정보" }).getAttribute("aria-expanded"),
-    ).toBe("false");
+    ).toBe("true");
   });
 
   it("a run without a case keeps working and offers 케이스에 연결 (Q-X2)", async () => {

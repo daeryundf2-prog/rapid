@@ -358,14 +358,13 @@ describe("CaseDashboard 사건 개요 (F6/F7/F9)", () => {
     useAppStore.getState().setTimezone("utc");
   });
 
-  it("folds every card but evidence, problems and the settings summary on a first visit", async () => {
+  it("opens only the case intake cards on a first visit", async () => {
     await renderDashboard(overviewRoutes);
     const expanded = (title: string) =>
       within(card(title)).getByRole("button", { name: title }).getAttribute("aria-expanded");
-    expect(expanded("증거 목록")).toBe("true");
-    expect(expanded("처리 문제")).toBe("true");
-    expect(expanded("처리 설정 스냅샷")).toBe("true");
-    for (const title of ["사건 정보", "증거 소스", "아티팩트 범주", "태그 및 리뷰 상태", "시작할 곳"])
+    for (const title of ["사건 정보", "증거 목록", "처리 문제", "처리 설정 스냅샷", "케이스 메모"])
+      expect(expanded(title)).toBe("true");
+    for (const title of ["증거 소스", "아티팩트 범주", "태그 및 리뷰 상태", "시작할 곳"])
       expect(expanded(title)).toBe("false");
     // Nothing is written until the examiner changes something.
     expect(window.localStorage.getItem("rt.dashboard.layout.v1")).toBeNull();
