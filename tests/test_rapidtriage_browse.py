@@ -1,10 +1,11 @@
 """Contracts for the server-side evidence path picker (core/browse.py)."""
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
-from rapidtriage.core.browse import BrowseError, browse_directory, list_roots
+from rapidtriage.core.browse import BrowseError, browse_directory, foreign_path_message, list_roots
 
 
 class BrowseDirectoryTest(unittest.TestCase):
@@ -63,6 +64,32 @@ class BrowseDirectoryTest(unittest.TestCase):
             result = browse_directory(str(root), limit=5)
             self.assertTrue(result["truncated"])
             self.assertEqual(len(result["entries"]), 5)
+
+    def test_windows_path_on_a_posix_server_says_whose_filesystem_it_is(self) -> None:
+        # A remote Windows analyst pastes a drive path into the picker; the POSIX host would
+        # otherwise join it to the server's home and report a nonsense "경로가 없습니다".
+        if os.sep != "/":
+            self.skipTest("POSIX-only message")
+        with self.assertRaises(BrowseError) as caught:
+            browse_directory("D:\\evidence\\case001")
+        message = str(caught.exception)
+        self.assertIn("윈도우 경로입니다", message)
+        self.assertIn("분석 서버", message)
+        self.assertIsNone(foreign_path_message("/Users/analyst/evidence"))
+        self.assertIsNone(foreign_path_message(""))
+
+    def test_posix_server_also_catches_quoted_and_drive_relative_pastes(self) -> None:
+        # Explorer's "경로로 복사" wraps the path in quotes; "D:data" is drive-relative.
+        if os.sep != "/":
+            self.skipTest("POSIX-only message")
+        for pasted in ('"D:\\evidence\\case001"', "D:evidence", "D:/evidence", "\\\\nas\\share\\case"):
+            self.assertIsNotNone(foreign_path_message(pasted), pasted)
+
+    def test_posix_paths_and_relative_names_are_left_alone(self) -> None:
+        if os.sep != "/":
+            self.skipTest("POSIX-only message")
+        for ok in ("/mnt/c/evidence", "~/evidence", "evidence/case001", "C-drive-copy", ""):
+            self.assertIsNone(foreign_path_message(ok), ok)
 
 
 if __name__ == "__main__":

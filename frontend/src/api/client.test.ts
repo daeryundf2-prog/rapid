@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, api, authToken, captureFragmentToken, setAuthToken } from "./client";
+import {
+  ApiError,
+  api,
+  authToken,
+  captureFragmentToken,
+  downloadNameFromDisposition,
+  setAuthToken,
+} from "./client";
 
 describe("captureFragmentToken", () => {
   afterEach(() => {
@@ -93,5 +100,55 @@ describe("422 details (D1 /flags/row, review follow-up)", () => {
     expect((error as Error).message).toBe("알 수 없는 kind입니다: zzz");
     expect((error as InstanceType<typeof ApiError>).status).toBe(422);
     vi.unstubAllGlobals();
+  });
+});
+
+describe("downloadNameFromDisposition (원격 윈도우 다운로드)", () => {
+  it("reads an RFC 5987 filename* (Starlette's only form for a Korean name)", () => {
+    expect(
+      downloadNameFromDisposition(
+        "attachment; filename*=utf-8''%ED%95%9C%EA%B8%80%ED%8C%8C%EC%9D%BC.txt",
+        "fallback.txt",
+      ),
+    ).toBe("한글파일.txt");
+  });
+
+  it("prefers filename* over the ASCII fallback the server sends beside it", () => {
+    expect(
+      downloadNameFromDisposition(
+        "attachment; filename=\"report.csv\"; filename*=utf-8''%EB%B3%B4%EA%B3%A0%EC%84%9C.csv",
+        "fallback.csv",
+      ),
+    ).toBe("보고서.csv");
+  });
+
+  it("keeps a quoted ASCII name and its spaces", () => {
+    expect(downloadNameFromDisposition('attachment; filename="case report.docx"', "fallback.docx")).toBe(
+      "case report.docx",
+    );
+  });
+
+  it("replaces characters Windows rejects in a file name but keeps a leading dot", () => {
+    expect(downloadNameFromDisposition("attachment; filename*=utf-8''a%3Ab%7Cc.txt", "fallback.txt")).toBe(
+      "a_b_c.txt",
+    );
+    expect(downloadNameFromDisposition('attachment; filename=".bash_history"', "fallback.txt")).toBe(
+      ".bash_history",
+    );
+    expect(downloadNameFromDisposition('attachment; filename="../../etc/passwd"', "fallback.txt")).toBe(
+      ".._.._etc_passwd",
+    );
+  });
+
+  it("falls back when the header has no name, and on a name of only dots", () => {
+    expect(downloadNameFromDisposition("", "fallback.json")).toBe("fallback.json");
+    expect(downloadNameFromDisposition("attachment", "fallback.json")).toBe("fallback.json");
+    expect(downloadNameFromDisposition('attachment; filename=".."', "fallback.json")).toBe("fallback.json");
+  });
+
+  it("keeps an undecodable percent sequence as typed rather than losing the name", () => {
+    expect(downloadNameFromDisposition("attachment; filename*=utf-8''%E0%A4%A.txt", "fallback.json")).toBe(
+      "%E0%A4%A.txt",
+    );
   });
 });

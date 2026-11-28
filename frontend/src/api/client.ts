@@ -116,12 +116,38 @@ export async function apiResponse(path: string, init: { signal?: AbortSignal } =
   return response;
 }
 
+/** Characters a Windows client cannot put in a file name (the console is used remotely from Windows). */
+const UNSAFE_IN_FILENAME = /[\\/:*?"<>|]/g;
+
+/**
+ * Download name from a Content-Disposition header. Starlette sends a non-ASCII name only as
+ * RFC 5987 `filename*=utf-8''…`, so a Korean or spaced name must be read from there first; the
+ * quoted `filename=` form is the ASCII fallback.
+ */
+export function downloadNameFromDisposition(disposition: string, fallbackName: string): string {
+  const extended = disposition.match(/filename\*\s*=\s*[^']*'[^']*'([^;]+)/i);
+  const plain = disposition.match(/filename\s*=\s*(?:"([^"]*)"|([^";]+))/i);
+  const raw = (extended?.[1] ?? plain?.[1] ?? plain?.[2] ?? "").trim();
+  if (!raw) return fallbackName;
+  let name = raw;
+  try {
+    name = decodeURIComponent(raw);
+  } catch {
+    name = raw;
+  }
+  const printable = [...name].filter((character) => (character.codePointAt(0) ?? 0) >= 0x20).join("");
+  // `/` and `\` are already replaced, so "../x" cannot traverse; a name of only dots is the
+  // remaining bad case. A leading dot is kept: ".bash_history" must save under its own name.
+  const safe = printable.replace(UNSAFE_IN_FILENAME, "_").trim();
+  if (/^\.+$/.test(safe)) return fallbackName;
+  return safe || fallbackName;
+}
+
 /** Fetch an authenticated file (the token header cannot ride on a plain link) and hand it to the browser as a download. */
 export async function downloadFile(path: string, fallbackName: string): Promise<string> {
   const response = await apiResponse(path);
   const disposition = response.headers.get("content-disposition") || "";
-  const match = disposition.match(/filename="?([^";]+)"?/i);
-  const filename = match?.[1] ? decodeURIComponent(match[1]) : fallbackName;
+  const filename = downloadNameFromDisposition(disposition, fallbackName);
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");

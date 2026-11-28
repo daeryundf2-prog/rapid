@@ -11,6 +11,7 @@ from pathlib import Path
 from fastapi import HTTPException
 from pydantic import BaseModel
 
+from ...core.browse import foreign_path_message
 from ...core.case import (
     CaseBookmarkError,
     build_case_summary,
@@ -116,8 +117,16 @@ def run_not_finished_message(job: RunJob) -> str:
 
 
 def validate_run_evidence_source(raw_root: str) -> None:
+    foreign = foreign_path_message(raw_root)
+    if foreign:
+        raise HTTPException(status_code=400, detail=foreign)
     source = Path(raw_root).expanduser()
     try:
+        if not source.exists():
+            # Without this the run is queued and dies later inside the engine with a misleading
+            # "[Errno 13] Permission denied" on the missing folder (remote check, 2026-11-28).
+            # exists() itself raises on EACCES/EPERM, so it stays inside the OSError guard.
+            raise HTTPException(status_code=400, detail=f"경로가 없습니다: {raw_root}")
         evidence = identify_evidence(source)
     except OSError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
