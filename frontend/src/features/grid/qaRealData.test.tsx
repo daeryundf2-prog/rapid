@@ -301,18 +301,13 @@ describe("pressed review toggles clear the mark (4)", () => {
     };
     const button = await waitFor(item);
     expect(button.getAttribute("aria-checked")).toBe("true");
-    const chip = () => screen.getByTestId("viewer-review-status");
-    expect(chip().getAttribute("aria-label")).toBe("리뷰 상태: 재검토");
-    // The viewer chip carries the verdict shape too, not only the word (review #99 P3).
-    expect(chip().querySelector('svg.verdict-shape[data-verdict="needs-review"]')).not.toBeNull();
-    expect(chip().textContent).toBe("재검토");
+    expect(screen.getByTestId("viewer-review-status").getAttribute("aria-label")).toBe("리뷰 상태: 재검토");
     fireEvent.click(button);
     await waitFor(() => expect(calls.some((c) => c.url.pathname.endsWith("review-batch"))).toBe(true));
     const post = calls.find((c) => c.url.pathname.endsWith("review-batch"));
     expect(JSON.parse(String(post?.init?.body))).toMatchObject({ status: "unreviewed" });
     await waitFor(() => expect(item().getAttribute("aria-checked")).toBe("false"));
-    expect(chip().getAttribute("aria-label")).toBe("리뷰 상태: 미검토");
-    expect(chip().querySelector(".verdict-shape")).toBeNull();
+    expect(screen.getByTestId("viewer-review-status").getAttribute("aria-label")).toBe("리뷰 상태: 미검토");
   });
 
   it("the grid overlay and optimistic patch clear the status", () => {

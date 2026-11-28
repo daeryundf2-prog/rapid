@@ -13,7 +13,6 @@ import { announce, DisabledReason } from "../../a11y";
 import { getCommand, runCommand } from "../../commands/registry";
 import { MenuButton, type MenuItem } from "../../components/MenuButton";
 import { STATUS_META } from "../../components/StatusChip";
-import { isVerdictStatus, VerdictGlyph } from "../../components/VerdictGlyph";
 import "../../components/status.css";
 import type { GridRow } from "../../contracts/collection";
 import type { Command, CommandContext } from "../../contracts/command";
@@ -374,8 +373,7 @@ export function ViewerToolbar({
             </button>
           </DisabledReason>
         ) : null}
-        {/* Status as a chip with text (review #6): the verdict glyph + full label, like <StatusChip>
-            (review #99 P3); 미검토 keeps the neutral tone dot. */}
+        {/* Status as a chip with text (review #6), not a bare dot. */}
         <span
           className="status-chip viewer-status"
           data-status={current ?? undefined}
@@ -384,11 +382,7 @@ export function ViewerToolbar({
           title={`리뷰 상태: ${currentLabel}`}
           data-testid="viewer-review-status"
         >
-          {isVerdictStatus(current) ? (
-            <VerdictGlyph status={current} withLabel label={currentLabel} />
-          ) : (
-            currentLabel
-          )}
+          {currentLabel}
         </span>
         <span ref={moreRef} className="viewer-actions-more">
           <MenuButton
