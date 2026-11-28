@@ -103,14 +103,18 @@
   --auth-token` and `--allow-remote-without-auth` included -- refuses to
   start without `RAPIDTRIAGE_ANALYSIS_ROOTS` and
   `RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS`, or when an output root is, contains or
-  lies inside an evidence root. With them set, `POST /api/runs`
+  lies inside an evidence root (compared case-insensitively by drive or UNC
+  share and folder names on Windows, so a drive or share root overlaps every
+  folder on it). With them set, `POST /api/runs`
   (`root`, `rules`, `known_good_hash_feeds`, `output_dir` -- also the default
   output folder next to the evidence), retry, `/api/evidence/identify`,
   `/api/collect/plan`, `/api/commercial-readiness` and the ti-enrichment
   `ti_feed` paths outside the roots are 422; output folders (runs,
   `/api/runs/import`, `/api/sample-case/run`) must be under an output root
   and outside every evidence root (422); runs registered earlier or imported
-  reach only their roots inside the lists (`source-file` 403), and writes
+  reach only their roots inside the lists (`source-file` 403; 404 when a
+  drive-letter path also maps into a root as a recorded evidence path and is
+  not found there, as on Windows hosts), and writes
   into a run output folder outside the output roots or inside an evidence
   root (extract, notes, reports, bookmarks, analyses, search) are 403;
   `GET /api/browse` without `scope` lists only the roots (no home folder, no

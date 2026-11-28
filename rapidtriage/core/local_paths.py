@@ -71,10 +71,19 @@ def _root_keys(entry: str) -> set[str]:
 
 
 def _contains(parent: str, child: str) -> bool:
-    try:
-        return os.path.commonpath([parent, child]) == parent
-    except ValueError:  # different drives
+    """Whether ``child`` is ``parent`` or lies under it (both case-normalized absolute keys).
+
+    Compared by drive (or UNC share) and path components: ``commonpath`` raises
+    for a bare share root (``\\\\srv\\share`` has no root separator) next to a
+    folder inside it, which would hide the overlap.
+    """
+    parent_drive, parent_rest = os.path.splitdrive(parent)
+    child_drive, child_rest = os.path.splitdrive(child)
+    if parent_drive != child_drive:
         return False
+    parent_parts = [part for part in parent_rest.split(os.path.sep) if part]
+    child_parts = [part for part in child_rest.split(os.path.sep) if part]
+    return child_parts[: len(parent_parts)] == parent_parts
 
 
 def overlapping_roots(inputs: list[str], outputs: list[str]) -> list[tuple[str, str]]:

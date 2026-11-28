@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import contextlib
 import io
+import ntpath
 import os
 import sys
 import tempfile
 import time
 import types
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest.mock import patch
 
 HAS_FASTAPI = True
@@ -33,6 +34,7 @@ if HAS_FASTAPI:
     from rapidtriage.api.app.helpers import allowed_case_db_roots
 from rapidtriage.cli import run_web_server
 from rapidtriage.core import files as files_module
+from rapidtriage.core import local_paths
 from rapidtriage.core.docs import scan_document_candidates
 from rapidtriage.core.files import iter_evidence_paths
 from rapidtriage.core.jobs import RunJobStore
@@ -69,7 +71,7 @@ class RemotePathConfinementTests(unittest.TestCase):
         self.home = base / "home"
         (self.home / "secrets").mkdir(parents=True)
         self.secret = self.home / "secrets" / "id_fake.txt"
-        self.secret.write_text(SECRET, encoding="utf-8")
+        self.secret.write_bytes(SECRET.encode("utf-8"))  # exact bytes: text mode would write CRLF on Windows
         self.store = RunJobStore()
         self.client = TestClient(
             create_app(self.store, auth_token=TOKEN), headers={"X-RapidTriage-Token": TOKEN}
@@ -148,8 +150,18 @@ class RemotePathConfinementTests(unittest.TestCase):
                 f"/api/runs/{run_id}/source-file", params={"path": str(self.case_dir / "docs" / "note.txt")}
             )
             outside = self.client.get(f"/api/runs/{run_id}/source-file", params={"path": str(self.secret)})
+            recorded_windows_path = self.client.get(
+                f"/api/runs/{run_id}/source-file", params={"path": r"C:\Users\nobody\secrets\id_fake.txt"}
+            )
         self.assertEqual(inside.status_code, 200, inside.text)
-        self.assertEqual(outside.status_code, 403, outside.text)
+        # Both codes refuse. A drive-letter path is also a recorded evidence path that
+        # candidate_source_paths maps into every allowed root (on every host), so a miss
+        # there is "not found in the allowed roots" (404); a host-absolute path with no
+        # in-root mapping is "outside the allowed roots" (403). On Windows the secret's
+        # own path is drive-letter form, so it takes the 404 branch.
+        self.assertEqual(outside.status_code, 404 if PureWindowsPath(str(self.secret)).drive else 403, outside.text)
+        self.assertNotIn(SECRET.strip(), outside.text)
+        self.assertEqual(recorded_windows_path.status_code, 404, recorded_windows_path.text)
 
     def test_run_registered_before_roots_cannot_read_outside_files(self) -> None:
         # R1 repro: root=<fake home> → source-file of the fake secret was 200.
@@ -469,14 +481,76 @@ class RemoteModeRequiresRootsTests(unittest.TestCase):
             "same folder": str(evidence),
             "output root contains evidence": str(self.base),
             "output root inside evidence": str(evidence / "out"),
-            "filesystem root": os.path.abspath(os.sep),
+            # The evidence's own filesystem root (its drive root on Windows: the
+            # current-drive root of os.sep can be another drive than the temp folder).
+            "filesystem root": self.base.anchor,
         }
         for label, output in cases.items():
             os.environ[ROOTS_ENV] = str(evidence)
             os.environ[OUTPUT_ROOTS_ENV] = output
-            with self.subTest(label), self.assertRaises(RuntimeError) as raised:
-                self._start("0.0.0.0", remote=True, auth_token="t" * 32)
-            self.assertIn("must not be, contain, or lie inside", str(raised.exception))
+            with self.subTest(label):
+                with self.assertRaises(RuntimeError) as raised:
+                    self._start("0.0.0.0", remote=True, auth_token="t" * 32)
+                self.assertIn("must not be, contain, or lie inside", str(raised.exception))
+
+
+class WindowsRootRulesTests(unittest.TestCase):
+    """Root-list path rules under Windows path semantics (``ntpath``), on every host."""
+
+    def _windows(self):
+        return patch.object(local_paths, "os", types.SimpleNamespace(name="nt", path=ntpath))
+
+    def _overlaps(self, evidence: str, output: str) -> bool:
+        with self._windows():
+            return bool(local_paths.overlapping_roots([evidence], [output]))
+
+    def test_drive_root_overlaps_every_folder_on_its_drive(self) -> None:
+        for evidence, output in [
+            (r"C:\Cases\evidence", "C:\\"),
+            (r"C:\Cases\evidence", "c:/"),
+            ("C:\\", r"C:\Cases\out"),
+        ]:
+            with self.subTest(evidence=evidence, output=output):
+                self.assertTrue(self._overlaps(evidence, output))
+
+    def test_case_and_separator_variants_overlap(self) -> None:
+        for evidence, output in [
+            (r"C:\Cases\Evidence", r"c:\cases\evidence"),
+            (r"C:\Cases\Evidence", "c:/cases/EVIDENCE/out/"),
+            (r"c:\cases\evidence\sub", r"C:\CASES\Evidence"),
+        ]:
+            with self.subTest(evidence=evidence, output=output):
+                self.assertTrue(self._overlaps(evidence, output))
+
+    def test_unc_share_root_overlaps_its_folders(self) -> None:
+        # Resolved keys of a mapped drive or a junction can be UNC even though UNC entries are refused.
+        for evidence, output in [
+            (r"\\srv\share\evidence", r"\\srv\share"),
+            (r"\\srv\share\evidence", "\\\\srv\\share\\"),
+            (r"\\SRV\Share", r"\\srv\share\evidence\out"),
+        ]:
+            with self.subTest(evidence=evidence, output=output):
+                self.assertTrue(self._overlaps(evidence, output))
+
+    def test_other_drives_shares_and_sibling_prefixes_do_not_overlap(self) -> None:
+        for evidence, output in [
+            (r"C:\Cases\evidence", "D:\\"),
+            (r"C:\Cases\evidence", r"C:\Cases\evidence2"),
+            (r"C:\Cases\evidence", r"C:\Cases\out"),
+            (r"\\srv\share\evidence", r"\\srv\other"),
+            (r"\\srv\share\evidence", "C:\\"),
+        ]:
+            with self.subTest(evidence=evidence, output=output):
+                self.assertFalse(self._overlaps(evidence, output))
+
+    def test_unc_device_and_drive_relative_entries_are_refused(self) -> None:
+        with self._windows():
+            for text in (r"\\srv\share", "//srv/share", r"\\?\C:\evidence", r"\\.\PhysicalDrive0", "C:evidence", r"\evidence"):
+                with self.subTest(text=text):
+                    self.assertIsNotNone(local_paths.local_path_problem(text))
+            for text in ("C:\\", r"C:\Cases\evidence", "c:/cases/evidence"):
+                with self.subTest(text=text):
+                    self.assertIsNone(local_paths.local_path_problem(text))
 
 
 if __name__ == "__main__":
