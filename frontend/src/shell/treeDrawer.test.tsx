@@ -1,9 +1,10 @@
 import { QueryClient } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { caseCommands, TREE_INLINE_REASON } from "../commands/builtin";
+import { caseCommands } from "../commands/builtin";
 import { registerCommands, resetCommandRegistry, runCommand } from "../commands/registry";
 import { TREE_DRAWER_KEY } from "../state/slices/overlays";
+import { treePanelHidden, treePanelKind } from "../state/slices/prefs";
 import { resetAppStore, useAppStore } from "../state/store";
 import { Layout } from "./Layout";
 
@@ -135,13 +136,148 @@ describe("Layout below 900px", () => {
   });
 });
 
-describe("Layout from 900px", () => {
-  it("keeps the panel beside the page and says why the toggle command cannot run", async () => {
+describe("Layout from 900px: the foldable panel (F24)", () => {
+  const region = () => screen.getByTestId("tree-region");
+
+  it("keeps the panel beside a browsing view; Alt+0's command folds it to the strip and back", async () => {
     stubWindowWidth(1024);
     render(<Layout />);
     expect(screen.queryByTestId("tree-drawer")).toBeNull();
     expect(screen.queryByTestId("tree-drawer-toggle")).toBeNull();
-    expect(screen.getByTestId("tree-region")).toBeTruthy();
-    expect(await runCommand("tree.panel")).toEqual({ ok: false, reason: TREE_INLINE_REASON });
+    expect(region().hidden).toBe(false);
+    expect(screen.queryByTestId("tree-strip")).toBeNull();
+
+    await act(async () => {
+      expect(await runCommand("tree.panel")).toEqual({ ok: true });
+    });
+    act(flushFrames);
+    expect(region().hidden).toBe(true);
+    const expand = screen.getByRole("button", { name: "탐색 트리 펼치기" });
+    expect(expand.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(expand);
+    expect(JSON.parse(window.localStorage.getItem("rapidtriage.v2.treePanel") ?? "{}")).toEqual({
+      browse: "hidden",
+    });
+
+    // The strip's button brings it back; focus lands on the panel heading.
+    await act(async () => {
+      fireEvent.click(expand);
+    });
+    act(flushFrames);
+    expect(region().hidden).toBe(false);
+    expect(document.activeElement).toBe(region().querySelector("h1"));
+  });
+
+  it("starts folded on timeline and search, open on the review board; each kind keeps its own pin", async () => {
+    stubWindowWidth(1280);
+    render(<Layout />);
+    act(() => s().navigate({ runId: "r1", collection: "timeline" }));
+    expect(region().hidden).toBe(true);
+    // No tree mounted in this test: the strip names the view.
+    expect(screen.getByTestId("tree-strip").textContent).toContain("타임라인");
+
+    // The heading's 접기 / the strip's 펼치기 pin the timeline kind open.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "탐색 트리 펼치기" }));
+    });
+    expect(region().hidden).toBe(false);
+    act(() => s().navigate({ runId: "r1", collection: "search", q: "x" }));
+    expect(region().hidden).toBe(true);
+    act(() => s().navigate({ runId: "r1", collection: "files" }));
+    expect(region().hidden).toBe(false);
+    act(() => s().navigate({ runId: "r1", collection: "review" }));
+    expect(region().hidden).toBe(false);
+    act(() => s().navigate({ runId: "r1", collection: "timeline" }));
+    expect(region().hidden).toBe(false);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("tree-collapse"));
+    });
+    expect(region().hidden).toBe(true);
+    expect(JSON.parse(window.localStorage.getItem("rapidtriage.v2.treePanel") ?? "{}")).toEqual({
+      timeline: "hidden",
+    });
+  });
+});
+
+describe("Layout below 600px: list ↔ detail (F23)", () => {
+  // A complete RowRef: other shell parts (the status-bar hint) read the target's locator.
+  const target = {
+    runId: "r1",
+    collection: "files",
+    rowKey: "files:/files/1",
+    ref: { collection: "files", locator: "/files/1" },
+  };
+
+  function addRow(): HTMLElement {
+    const main = document.getElementById("main") as HTMLElement;
+    const row = document.createElement("div");
+    row.setAttribute("role", "row");
+    row.dataset.index = "0";
+    row.innerHTML =
+      '<div class="grid-cell grid-cell-select"><input type="checkbox" aria-label="선택"></div><span class="text">보고서.docx</span>';
+    main.appendChild(row);
+    return row;
+  }
+
+  it("a tap on the row text opens the full-width detail; 목록으로 closes it, checkbox taps stay in the list", async () => {
+    stubWindowWidth(390);
+    render(<Layout />);
+    act(() => {
+      useAppStore.setState({ viewerTarget: target as never });
+    });
+    // The 뷰어 열기 bar sits under the list (no floating button over the rows).
+    expect(screen.getByTestId("viewer-drawer-open").closest(".drawer-handle")).toBeTruthy();
+    const row = addRow();
+
+    await act(async () => {
+      fireEvent.click(row.querySelector("input") as HTMLElement);
+    });
+    expect(s().viewerDrawerOpen).toBe(false);
+
+    await act(async () => {
+      fireEvent.click(row.querySelector(".text") as HTMLElement);
+    });
+    expect(s().viewerDrawerOpen).toBe(true);
+    const back = screen.getByTestId("viewer-drawer-back");
+    expect(back.textContent).toContain("목록으로");
+    fireEvent.click(back);
+    expect(s().viewerDrawerOpen).toBe(false);
+  });
+
+  it("from 600px a row tap keeps the side drawer closed (keyboard J/K browsing stays in the list)", async () => {
+    stubWindowWidth(1024);
+    render(<Layout />);
+    act(() => {
+      useAppStore.setState({ viewerTarget: target as never });
+    });
+    const row = addRow();
+    await act(async () => {
+      fireEvent.click(row.querySelector(".text") as HTMLElement);
+    });
+    expect(s().viewerDrawerOpen).toBe(false);
+    expect(screen.queryByTestId("viewer-drawer-back")).toBeNull();
+  });
+});
+
+describe("treePanelHidden (F24)", () => {
+  const state = (collection: string | null, treeIsDrawer = false, treePanelPins = {}) => ({
+    route: { collection },
+    treeIsDrawer,
+    treePanelPins,
+  });
+
+  it("folds the event lists by default, keeps browsing views open, honours pins, never in the drawer", () => {
+    expect(treePanelKind("timeline")).toBe("timeline");
+    expect(treePanelKind("artifacts")).toBe("browse");
+    expect(treePanelHidden(state("timeline"))).toBe(true);
+    expect(treePanelHidden(state("search"))).toBe(true);
+    expect(treePanelHidden(state("review"))).toBe(false);
+    expect(treePanelHidden(state("review", false, { review: "hidden" }))).toBe(true);
+    expect(treePanelHidden(state("files"))).toBe(false);
+    expect(treePanelHidden(state("intake"))).toBe(false);
+    expect(treePanelHidden(state("timeline", false, { timeline: "shown" }))).toBe(false);
+    expect(treePanelHidden(state("files", false, { browse: "hidden" }))).toBe(true);
+    expect(treePanelHidden(state("timeline", true))).toBe(false);
   });
 });

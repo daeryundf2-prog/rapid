@@ -11,6 +11,7 @@ import type { CollectionId } from "../../contracts/collection";
 import type { Command } from "../../contracts/command";
 import type { IconName } from "../../icons";
 import { type Route, STAGES, type Stage, stageOf } from "../../router";
+import { treePanelHidden } from "../../state/slices/prefs";
 import { useAppStore } from "../../state/store";
 
 export interface StageDef {
@@ -103,8 +104,10 @@ export function openStage(stage: Stage): void {
   store.navigate(next);
   // Focus the new stage's panel heading (tabindex=-1 h1) and say the stage name once.
   announce(`단계: ${STAGE_DEFS[stage].label}`, { hold: true });
-  // Narrow layout with the panel drawer closed: the heading is hidden, so the page takes focus.
-  if (store.treeIsDrawer && !store.treeDrawerOpen) {
+  // Narrow layout with the panel drawer closed, or the wide panel folded to its strip (F24): the
+  // heading is hidden, so the page takes focus.
+  const after = useAppStore.getState();
+  if ((after.treeIsDrawer && !after.treeDrawerOpen) || treePanelHidden(after)) {
     focusMain();
     return;
   }

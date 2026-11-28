@@ -15,11 +15,12 @@ import { COLLECTION_NODES, runDisplayName } from "../app/collections";
 import { type Command, type CommandContext, KEY_MAP } from "../contracts/command";
 import { conditionsCommand } from "../features/filters/conditionPanel";
 import { useViewPrefs } from "../features/review/viewPrefs";
+import { STAGE_HEADING_ID } from "../features/stages/stages";
 import { treeEmptyCommand } from "../features/tree/treePrefs";
 import { focusPopout } from "../features/viewer/popout/host";
 import { NO_VIEWER_REASON, stageHasViewer, stageOf } from "../router";
 import { topOverlay, viewerPaneCollapsed } from "../state/slices/overlays";
-import { DENSITIES, DENSITY_LABEL } from "../state/slices/prefs";
+import { DENSITIES, DENSITY_LABEL, treePanelHidden } from "../state/slices/prefs";
 import { anyRunActive, currentRun } from "../state/slices/runs";
 import { useAppStore } from "../state/store";
 import { CANCEL_ALL_CONFIRM, confirmAction, NO_RUN_REASON } from "./reasons";
@@ -39,6 +40,9 @@ export const VIEWER_EXPAND_ID = "viewer-expand";
 /** Narrow layout: the stage panel (tree) drawer and the stage rail button that toggles it. */
 export const TREE_DRAWER_ID = "tree-drawer";
 export const TREE_TOGGLE_ID = "tree-drawer-toggle";
+/** Wide layout: the folded stage panel's strip button, and the panel's own 접기 button. */
+export const TREE_EXPAND_ID = "tree-expand";
+export const TREE_COLLAPSE_ID = "tree-collapse";
 
 function focusById(id: string, preferSelector?: string): void {
   const run = () => {
@@ -101,7 +105,18 @@ export function collapseViewerPane(): void {
   focusById(VIEWER_EXPAND_ID);
 }
 
-export const TREE_INLINE_REASON = "창이 넓을 때는 패널이 항상 표시됩니다";
+/**
+ * Wide layout (F24): fold the stage panel to its strip or bring it back, pinned for the current
+ * collection kind; focus lands on what is left (the strip's button / the panel heading).
+ */
+export function toggleTreePanel(): void {
+  const s = useAppStore.getState();
+  if (s.treeIsDrawer) return;
+  const hidden = !treePanelHidden(s);
+  s.setTreePanelHidden(hidden);
+  announce(hidden ? "단계 패널을 접었습니다" : "단계 패널을 펼쳤습니다");
+  focusById(hidden ? TREE_EXPAND_ID : STAGE_HEADING_ID);
+}
 
 /** Narrow layout: show the stage panel (tree) drawer; focus lands on its heading, like a stage switch. */
 export function openTreeDrawer(): void {
@@ -540,15 +555,16 @@ export function caseCommands(queryClient: QueryClient): Command[] {
       },
     },
     {
-      // Narrow layout (< 900 px): the stage's left panel is a drawer; the stage rail shows the button.
+      // The stage's left panel: a drawer on a narrow window (< 900px), a foldable column on a wide one.
       id: "tree.panel",
-      label: "단계 패널(탐색 트리) 열기/닫기",
+      label: "단계 패널(탐색 트리) 열기/접기",
       group: "navigate",
       shortcut: KEY_MAP.treePanel,
       icon: "sidebar",
-      disabledReason: (ctx) => needsRun(ctx) ?? (store().treeIsDrawer ? undefined : TREE_INLINE_REASON),
+      disabledReason: (ctx) => needsRun(ctx),
       run: () => {
-        if (store().treeDrawerOpen) closeTreeDrawer();
+        if (!store().treeIsDrawer) toggleTreePanel();
+        else if (store().treeDrawerOpen) closeTreeDrawer();
         else openTreeDrawer();
       },
     },

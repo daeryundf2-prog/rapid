@@ -4,6 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { caseCommands, collapseViewerPane, expandViewerPane } from "../commands/builtin";
 import { registerCommands, resetCommandRegistry, runCommand } from "../commands/registry";
 import type { RowRef } from "../contracts/rowRef";
+import { usePopoutHost } from "../features/viewer/popout/host";
 import { VIEWER_COLLAPSED_KEY, viewerPaneCollapsed } from "../state/slices/overlays";
 import { resetAppStore, useAppStore } from "../state/store";
 import { Layout } from "./Layout";
@@ -110,5 +111,23 @@ describe("Layout viewer rail", () => {
     fireEvent.click(screen.getByRole("button", { name: "뷰어 펼치기" }));
     expect(useAppStore.getState().viewerPane).toBe("open");
     expect(screen.queryByTestId("viewer-rail")).toBeNull();
+  });
+});
+
+describe("viewer window rail (U-F2)", () => {
+  afterEach(() => usePopoutHost.setState({ status: "closed", blocked: false }));
+
+  it("puts 되돌리기 at the top of the rail, clear of the bottom-right toasts, and it brings the pane back", () => {
+    selectRow();
+    render(<Layout />);
+    act(() => usePopoutHost.setState({ status: "open" }));
+    const rail = screen.getByTestId("viewer-popout-rail");
+    const back = screen.getByTestId("viewer-popout-return");
+    const text = rail.querySelector(".viewer-rail-text") as HTMLElement;
+    // Document order: both buttons before the vertical text.
+    expect(back.compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    act(() => fireEvent.click(back));
+    expect(usePopoutHost.getState().status).toBe("closed");
+    expect(screen.queryByTestId("viewer-popout-rail")).toBeNull();
   });
 });

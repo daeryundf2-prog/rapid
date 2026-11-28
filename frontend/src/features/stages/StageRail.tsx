@@ -65,19 +65,17 @@ function PanelToggle() {
   );
 }
 
-/** Vertical stage rail (console-ia §3): always visible, one button per stage, Alt+1..5 (Ctrl+1..5 is browser tab switching). */
+/**
+ * Vertical stage rail (console-ia §3): one button per stage, Alt+1..5 (Ctrl+1..5 is browser tab
+ * switching). Without a case there is no stage to enter, so the rail is not drawn at all (F24):
+ * the landing gets the width instead of a column of five disabled buttons.
+ */
 export function StageRail() {
   const stage = useAppStore((s) => (s.route.runId ? stageOf(s.route) : null));
-  // No case: every stage is disabled (each button says why); the rail recedes (review #14).
-  const hasCase = useAppStore((s) => Boolean(s.route.runId));
   const panelIsDrawer = useAppStore((s) => s.treeIsDrawer);
+  if (!stage) return null;
   return (
-    <nav
-      className="stage-rail"
-      aria-label="작업 단계"
-      data-testid="stage-rail"
-      data-disabled={hasCase ? undefined : ""}
-    >
+    <nav className="stage-rail" aria-label="작업 단계" data-testid="stage-rail">
       {panelIsDrawer ? <PanelToggle /> : null}
       <ul>
         {STAGES.map((id) => (

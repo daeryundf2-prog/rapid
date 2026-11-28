@@ -116,6 +116,22 @@ export function EvidenceTree({ runId }: { runId: string }) {
     for (const id of selectedId ? (pathTo(fullModel, selectedId) ?? []) : []) ids.add(id);
     return ids;
   }, [fullModel, searchView, selectedId]);
+  // The folded panel strip (F24) names the selected node: "전체 타임라인", "검색 결과" …
+  const selectedLabel = useMemo(() => {
+    const find = (nodes: readonly TreeModelNode[]): string => {
+      for (const node of nodes) {
+        if (node.id === selectedId) return node.label;
+        const hit = node.children ? find(node.children) : "";
+        if (hit) return hit;
+      }
+      return "";
+    };
+    return selectedId ? find(fullModel) : "";
+  }, [fullModel, selectedId]);
+  useEffect(() => {
+    useTreePrefs.setState({ location: selectedLabel });
+  }, [selectedLabel]);
+  useEffect(() => () => useTreePrefs.setState({ location: "" }), []);
   const emptyView = useMemo(
     () => filterEmptyNodes(fullModel, showEmpty, reveal),
     [fullModel, showEmpty, reveal],

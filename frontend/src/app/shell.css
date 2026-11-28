@@ -89,18 +89,120 @@ kbd {
   min-height: 0;
 }
 
+/* A pane never clips silently (F24): its content scrolls itself (grid, .dash, .stage-page,
+   .pane-scroll); anything that still overflows scrolls the frame instead of vanishing at the
+   right or bottom edge. */
 .pane-frame {
   height: 100%;
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
   background: var(--bg);
+}
+
+.pane-frame[hidden] {
+  display: none;
 }
 
 .pane-frame:focus-visible {
   outline-offset: -2px;
+}
+
+/* The stage panel's body under its heading: the tree / stage panel scrolls here, the heading stays. */
+.pane-scroll {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.pane-scroll > * {
+  flex: none;
+}
+
+.pane-scroll > .stage-panel {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Stage heading + the panel's 접기 button (F24). */
+.stage-heading-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-inline-end: var(--space-1);
+  flex: none;
+}
+
+.stage-heading-row > .stage-heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.stage-heading-row > .tree-fold-button {
+  margin-top: var(--space-1);
+  color: var(--text-muted);
+}
+
+.stage-heading-row > .tree-fold-button:hover {
+  color: var(--text);
+}
+
+/* The folded stage panel (F24): a 36px strip, the whole strip is the 펼치기 button, the current
+   location written down it so the analyst still sees where they are. */
+.tree-strip {
+  height: 100%;
+  display: flex;
+  background: var(--bg-panel);
+}
+
+.tree-strip-button {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.tree-strip-button > .icon {
+  flex: none;
+  margin-top: var(--space-1);
+}
+
+.tree-strip-button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.tree-strip-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.tree-strip-text {
+  min-height: 0;
+  overflow: hidden;
+  writing-mode: vertical-rl;
+  color: var(--text);
+  font-size: var(--fs-aux);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+:root[data-theme="light"] .tree-strip {
+  background: var(--surface-0);
 }
 
 /* Viewer pane (탐색·검토, wide): the viewer, or the 36px rail while collapsed. */
@@ -552,11 +654,23 @@ kbd {
   }
 
   .topbar-case {
-    max-width: 40%;
+    max-width: 34%;
   }
 
   .topbar-search {
     flex: 1 1 auto;
+  }
+
+  .global-search {
+    min-width: 0;
+  }
+
+  /* Typing a search on a phone: the field takes the whole bar (the case picker, 실행 and the
+     theme/help buttons step aside until it loses focus), so the query stays readable. */
+  .topbar:has(.global-search:focus-within) .brand,
+  .topbar:has(.global-search:focus-within) .topbar-case,
+  .topbar:has(.global-search:focus-within) .topbar-actions {
+    display: none;
   }
 
   /* The case list spans the screen under the top bar (anchored at the trigger it ran 10px
@@ -858,17 +972,26 @@ kbd {
   cursor: pointer;
 }
 
-.drawer-handle {
-  position: absolute;
-  right: var(--space-3);
-  /* Above the grid footer (26px) and its horizontal scrollbar (12px): at 12px it sat on both. */
-  bottom: calc(26px + 12px + var(--space-2));
-  z-index: 500;
+/* Drawer layout (< 1200px): the list above, the 뷰어 열기 bar under it (in the flow, so it never
+   covers the rows' text — before-03-390 had it floating over the summary column). */
+.narrow-panes {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
-/* A dialog owns the screen: the floating 뷰어 열기 handle (z 500) sat over its footer at 390. */
-body:has(.case-modal-backdrop) .drawer-handle {
-  display: none;
+.narrow-panes-main {
+  flex: 1;
+  min-height: 0;
+}
+
+.drawer-handle {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-1) var(--space-3);
+  border-top: 1px solid var(--line-subtle);
+  background: var(--bg-panel);
 }
 
 .viewer-drawer {
@@ -931,6 +1054,40 @@ body:has(.case-modal-backdrop) .drawer-handle {
   padding: var(--space-1);
   border-bottom: 1px solid var(--line-subtle);
   flex: none;
+}
+
+/* Phones (F23, review X8): the detail is its own full-width screen, 목록으로 leads its head,
+   and the stage rail steps aside while it is open (Esc / 목록으로 bring both back). */
+@media (max-width: 599.98px) {
+  .viewer-drawer {
+    width: 100%;
+    min-width: 0;
+    border-left: 0;
+    box-shadow: none;
+  }
+
+  .drawer-head {
+    justify-content: flex-start;
+  }
+
+  .shell:has(.viewer-drawer.open) .stage-rail {
+    display: none;
+  }
+}
+
+.drawer-back {
+  gap: var(--space-1);
+}
+
+/* The drawers slide / fade in; without motion they simply appear. */
+@media (prefers-reduced-motion: reduce) {
+  .viewer-drawer {
+    transition: none;
+  }
+
+  .tree-drawer {
+    animation: none;
+  }
 }
 
 /* --- shared pane bits (legacy panes + feature fallbacks) ------------------ */

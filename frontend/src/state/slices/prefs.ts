@@ -12,6 +12,45 @@ export const THEME_KEY = "rapidtriage.v2.theme";
 export const DENSITY_KEY = "rapidtriage.v2.density";
 export const PANELS_KEY = "rapidtriage.v2.panels";
 export const TIMEZONE_KEY = "rapidtriage.v2.timezone";
+export const TREE_PANEL_KEY = "rapidtriage.v2.treePanel";
+
+/**
+ * Which tree-fold memory a collection uses (F24, review X2): the explore event lists (timeline,
+ * search) start with the evidence tree folded to a strip; the browsing views and the review
+ * board's panel (판정 filters, 태그 관리 — not the evidence tree) start open. Each kind remembers
+ * the analyst's own choice.
+ */
+export type TreePanelKind = "timeline" | "search" | "review" | "browse";
+export type TreePanelPins = Partial<Record<TreePanelKind, "hidden" | "shown">>;
+export const TREE_PANEL_FOLDED_BY_DEFAULT: readonly TreePanelKind[] = ["timeline", "search"];
+
+export function treePanelKind(collection: string | null | undefined): TreePanelKind {
+  return collection === "timeline" || collection === "search" || collection === "review"
+    ? collection
+    : "browse";
+}
+
+/** The wide stage panel is folded to its strip (never in the narrow drawer layout). */
+export function treePanelHidden(
+  state: Pick<PrefsSlice, "treePanelPins"> & { treeIsDrawer: boolean; route: { collection: string | null } },
+): boolean {
+  if (state.treeIsDrawer) return false;
+  const kind = treePanelKind(state.route.collection);
+  const pin = state.treePanelPins[kind];
+  return pin ? pin === "hidden" : TREE_PANEL_FOLDED_BY_DEFAULT.includes(kind);
+}
+
+function isTreePanelPins(value: unknown): value is TreePanelPins {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.entries(value).every(
+      ([key, pin]) =>
+        ["timeline", "search", "review", "browse"].includes(key) && (pin === "hidden" || pin === "shown"),
+    )
+  );
+}
 
 export const DENSITIES: readonly Density[] = ["compact", "default", "comfortable"];
 export const DENSITY_LABEL: Record<Density, string> = {
@@ -85,6 +124,10 @@ export interface PrefsSlice {
   setDensity: (density: Density) => void;
   cycleDensity: () => void;
   setPanelLayout: (layout: PanelLayout | null) => void;
+  /** Wide stage panel folded / shown per collection kind, the analyst's pins (persisted). */
+  treePanelPins: TreePanelPins;
+  /** Pin the current collection kind's stage panel folded (strip) or shown. */
+  setTreePanelHidden: (hidden: boolean) => void;
 }
 
 export const createPrefsSlice: StateCreator<AppState, [], [], PrefsSlice> = (set, get) => ({
@@ -93,6 +136,13 @@ export const createPrefsSlice: StateCreator<AppState, [], [], PrefsSlice> = (set
   density: storedDensity(),
   panelLayout: readStoredJson(PANELS_KEY, isPanelLayout),
   timezone: storedTimezone(),
+  treePanelPins: readStoredJson(TREE_PANEL_KEY, isTreePanelPins) ?? {},
+  setTreePanelHidden: (hidden) => {
+    const kind = treePanelKind(get().route.collection);
+    const pins: TreePanelPins = { ...get().treePanelPins, [kind]: hidden ? "hidden" : "shown" };
+    writeStored(TREE_PANEL_KEY, JSON.stringify(pins));
+    set({ treePanelPins: pins });
+  },
   setTimezone: (timezone) => {
     writeStored(TIMEZONE_KEY, timezone);
     set({ timezone });
