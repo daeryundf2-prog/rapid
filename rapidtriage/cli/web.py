@@ -8,6 +8,11 @@ import sys
 import textwrap
 from pathlib import Path
 
+from ..core.local_paths import (
+    ANALYSIS_OUTPUT_ROOTS_ENV,
+    ANALYSIS_ROOTS_ENV,
+    configured_root_entries,
+)
 from ..core.user_tokens import TOKENS_FILE_ENV, configured_tokens_file, load_user_tokens
 from .helpers import add_web_arguments
 
@@ -92,6 +97,16 @@ def run_web_server(
             "Refusing to bind RapidTriage to a non-localhost interface without --auth-token. "
             "Use --auth-token, --remote with a token, or --allow-remote-without-auth if you understand the risk."
         )
+    if remote:
+        missing_roots = [env for env in (ANALYSIS_ROOTS_ENV, ANALYSIS_OUTPUT_ROOTS_ENV) if not configured_root_entries(env)]
+        if missing_roots:
+            # Without them a token holder runs (and reads through source-file) any
+            # server path as evidence and writes output anywhere (R1, R10), and the
+            # picker lists the whole server file system (R2).
+            raise RuntimeError(
+                f"--remote requires server roots: set {' and '.join(missing_roots)} "
+                "(os.pathsep-separated absolute local folders: evidence inputs / run outputs)."
+            )
     if remote and host not in loopback_hosts:
         print(
             "WARNING: RapidTriage remote mode is localhost-tool-grade: API token auth and "

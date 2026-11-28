@@ -160,7 +160,11 @@ def add_web_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--remote",
         action="store_true",
-        help="Hardened remote mode: allow non-loopback binding only with a token; keeps auth and Host/Origin gates on",
+        help=(
+            "Hardened remote mode: allow non-loopback binding only with a token; keeps auth and Host/Origin gates on. "
+            "Requires RAPIDTRIAGE_ANALYSIS_ROOTS and RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS: run paths and the file picker "
+            "stay inside them"
+        ),
     )
     parser.add_argument("--allow-remote-without-auth", action="store_true", help="Allow non-localhost binding without auth token")
     parser.add_argument("--reload", action="store_true", help="Enable uvicorn reload for UI/API development")

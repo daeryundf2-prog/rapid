@@ -98,6 +98,20 @@
   zoomed time range, phones) instead of clipping 조건 지우기, the count and 열
   설정; the 조건 button ellipsises its applied summary
   (`frontend/src/features/filters/filterRowLayout.test.ts`).
+- Remote use, path confinement (remote review R1, R2, R10): `rapidtriage web
+  --remote` refuses to start without `RAPIDTRIAGE_ANALYSIS_ROOTS` and
+  `RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS`. With them set, `POST /api/runs`
+  (`root`, `rules`, `known_good_hash_feeds`, `output_dir` -- also the default
+  output folder next to the evidence), retry, `/api/runs/import`,
+  `/api/evidence/identify`, `/api/collect/plan` and
+  `/api/commercial-readiness` paths outside the roots are 422; runs
+  registered earlier or imported reach only their roots inside the lists
+  (`source-file` 403); `GET /api/browse` without `scope` lists only the roots
+  (no home folder, no drive list). These routes now also refuse `~`,
+  relative and UNC paths (422) as the case routes already did. The console
+  picker shows such a listing as a root list
+  (`tests/test_rapidtriage_remote_path_confinement.py`,
+  `frontend/src/features/case/BrowsePanel.test.tsx`).
 
 ### Fixed
 

@@ -30,6 +30,8 @@ from ...core.keyword_packs import (
     list_keyword_packs,
 )
 from ...core.visible_capabilities import build_visible_capability_response
+from .analyses import browse_server_roots
+from .case_workspace import checked_local_path
 from .models import (
     CollectPlanRequest,
     EvidenceIdentifyRequest,
@@ -38,6 +40,7 @@ from .runops import (
     build_commercial_readiness_api_payload,
 )
 from .viewer_core import (
+    INTERNAL_VALIDATION_PACKAGE_NAMES,
     build_workbench_large_result_evidence,
     build_workbench_smoke_contract,
     resolve_commercial_readiness_validation_package,
@@ -71,11 +74,19 @@ def build_meta_router(store: RunJobStore | None = None) -> APIRouter:
         include_internal_validation: bool = Query(False),
     ) -> dict[str, object]:
         try:
+            if validation_package and validation_package.strip() not in INTERNAL_VALIDATION_PACKAGE_NAMES:
+                validation_package = checked_local_path(
+                    validation_package, label="검증 패키지", confine_to_analysis_roots=True
+                )
             validation_package_path = resolve_commercial_readiness_validation_package(
                 validation_package,
                 include_internal_validation=include_internal_validation,
             )
-            mac_first_evidence_paths = [Path(mac_first_evidence).expanduser().resolve()] if mac_first_evidence else []
+            mac_first_evidence_paths = (
+                [Path(checked_local_path(mac_first_evidence, label="Mac 우선 증거", confine_to_analysis_roots=True)).resolve()]
+                if mac_first_evidence
+                else []
+            )
             report = build_commercial_readiness_report(
                 validation_package_path=validation_package_path,
                 mac_first_evidence_paths=mac_first_evidence_paths,
@@ -136,7 +147,7 @@ def build_meta_router(store: RunJobStore | None = None) -> APIRouter:
         scope: str | None = Query(
             default=None,
             max_length=32,
-            description="analysis-input | analysis-output: 분석 대화상자용 — run_id 런의 허용 입력/출력 루트 안만 나열 (없으면 예전처럼 전체 파일 시스템)",
+            description="analysis-input | analysis-output: 분석 대화상자용 — run_id 런의 허용 입력/출력 루트 안만 나열 (없으면 서버 허용 루트 안만, 루트 설정이 없으면 전체 파일 시스템)",
         ),
         run_id: str | None = Query(default=None, max_length=128),
     ) -> dict[str, object]:
@@ -146,6 +157,10 @@ def build_meta_router(store: RunJobStore | None = None) -> APIRouter:
             from .analyses import browse_analysis_scope
 
             return browse_analysis_scope(store, run_id=run_id, scope_name=scope.strip(), path=path, show_hidden=show_hidden)
+        # With server roots set (always under --remote) only inside them: no home, no drive list (R2).
+        confined = browse_server_roots(path, show_hidden=show_hidden)
+        if confined is not None:
+            return confined
         try:
             return browse_directory(path, show_hidden=show_hidden)
         except BrowseError as exc:
@@ -155,7 +170,7 @@ def build_meta_router(store: RunJobStore | None = None) -> APIRouter:
     @router.post("/api/evidence/identify")
     def identify_evidence_path(request: EvidenceIdentifyRequest) -> dict[str, object]:
         try:
-            result = identify_evidence(Path(request.path))
+            result = identify_evidence(Path(checked_local_path(request.path, label="증거", confine_to_analysis_roots=True)))
             return {
                 "command": "evidence.identify",
                 "result": result.to_dict(),
@@ -183,7 +198,7 @@ def build_meta_router(store: RunJobStore | None = None) -> APIRouter:
     def collect_plan(request: CollectPlanRequest) -> dict[str, object]:
         try:
             return build_collect_plan(
-                Path(request.root).expanduser().resolve(),
+                Path(checked_local_path(request.root, label="수집 계획 루트", confine_to_analysis_roots=True)).resolve(),
                 profile=request.profile,
                 input_kind=request.input_kind,
             )

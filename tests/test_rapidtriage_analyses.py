@@ -523,7 +523,7 @@ class AnalysisApiTests(unittest.TestCase):
     def test_env_roots_parsing(self) -> None:
         good = str(self.base / "extra")
         value = os.pathsep.join([f'"{good}"', "relative-dir", "", "'~/x'"])
-        with patch.dict(os.environ, {analyses.ANALYSIS_ROOTS_ENV: value}), self.assertLogs(analyses.LOGGER, "WARNING") as logs:
+        with patch.dict(os.environ, {analyses.ANALYSIS_ROOTS_ENV: value}), self.assertLogs("rapidtriage.core.local_paths", "WARNING") as logs:
             roots = analyses.extra_analysis_roots()
         self.assertIn(Path(os.path.abspath(good)), roots)
         self.assertEqual({str(root) for root in roots} - {os.path.abspath(good), str(Path(good).resolve())}, set())

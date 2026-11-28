@@ -28,7 +28,13 @@ from ...core.e01_hash import run_e01_streaming_hash
 from ...core.evidence import discover_raw_parts_for_guidance, identify_evidence
 from ...core.jobs import RunJob, RunJobStore, RunRequest
 from ...core.run.profiles import RUN_PROFILES
-from .analyses import confine_path, extra_analysis_roots, lexical_absolute_path
+from .analyses import (
+    ANALYSIS_OUTPUT_ROOTS_ENV,
+    ANALYSIS_ROOTS_ENV,
+    confine_path,
+    extra_analysis_roots,
+    lexical_absolute_path,
+)
 
 LOGGER = logging.getLogger(__name__)
 CASES_DB_ENV = "RAPIDTRIAGE_CASES_DB"
@@ -46,14 +52,25 @@ def as_422(exc: HTTPException) -> HTTPException:
     return HTTPException(status_code=422, detail=exc.detail)
 
 
-def checked_local_path(raw: str, *, label: str, confine_to_analysis_roots: bool = False) -> str:
-    """Absolute local path or 422 (UNC, ``\\\\?\\``, relative, ``~``; ``RAPIDTRIAGE_ANALYSIS_ROOTS``)."""
+def checked_local_path(
+    raw: str, *, label: str, confine_to_analysis_roots: bool = False, confine_to_output_roots: bool = False
+) -> str:
+    """Absolute local path or 422 (UNC, ``\\\\?\\``, relative, ``~``; outside the configured server roots).
+
+    ``confine_to_analysis_roots`` = under ``RAPIDTRIAGE_ANALYSIS_ROOTS``,
+    ``confine_to_output_roots`` = under ``RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS``;
+    both = under either list. A list the operator did not set allows any local path
+    (so with both flags, the path is confined only when both lists are set).
+    """
+    wanted = ((ANALYSIS_ROOTS_ENV, confine_to_analysis_roots), (ANALYSIS_OUTPUT_ROOTS_ENV, confine_to_output_roots))
+    configured = {env: extra_analysis_roots(env) for env, on in wanted if on}
+    if not all(configured.values()):
+        configured = {}
     try:
         lexical = lexical_absolute_path(raw, label=label)
-        if confine_to_analysis_roots:
-            roots = extra_analysis_roots()
-            if roots:
-                confine_path(lexical, roots, label=label, scope="RAPIDTRIAGE_ANALYSIS_ROOTS")
+        if configured:
+            roots = [root for env_roots in configured.values() for root in env_roots]
+            confine_path(lexical, roots, label=label, scope="·".join(configured))
     except HTTPException as exc:
         raise as_422(exc) from exc
     return lexical

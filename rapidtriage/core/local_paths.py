@@ -1,0 +1,60 @@
+"""Lexical local-path rules and the operator's server root lists.
+
+Shared by the API path gates (``api/app/analyses.py``) and ``rapidtriage web``
+(which must check the root lists before the app module is imported: importing
+it creates the app and reads the auth token from the environment).
+"""
+
+from __future__ import annotations
+
+import logging
+import ntpath
+import os
+
+LOGGER = logging.getLogger(__name__)
+
+# Roots an operator allows for analysis/run *inputs* (os.pathsep list). They are
+# evidence: never an output target.
+ANALYSIS_ROOTS_ENV = "RAPIDTRIAGE_ANALYSIS_ROOTS"
+# Roots an operator allows for analysis/run *outputs* (same parsing rules).
+ANALYSIS_OUTPUT_ROOTS_ENV = "RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS"
+_BACKSLASH = "\\"
+
+
+def local_path_problem(text: str) -> str | None:
+    """Why ``text`` is not an absolute local path (UNC/device/relative/``~``), else ``None``.
+
+    Lexical only: the filesystem is never touched.
+    """
+    if text.startswith("~"):
+        return "홈 디렉터리(~) 표기는 쓸 수 없습니다"
+    if os.name == "nt":
+        normalized = text.replace("/", _BACKSLASH)
+        if normalized.startswith(_BACKSLASH * 2):
+            return r"UNC·장치 경로(\\server, \\?\, \\.\)는 쓸 수 없습니다"
+        drive, rest = ntpath.splitdrive(normalized)
+        if not drive:
+            return "드라이브 문자를 포함한 절대 경로여야 합니다"
+        if not rest.startswith(_BACKSLASH):
+            return "드라이브 상대 경로(C:foo)는 쓸 수 없습니다"
+        return None
+    if text.startswith("//"):
+        return "네트워크 경로는 쓸 수 없습니다"
+    if not text.startswith("/"):
+        return "절대 경로여야 합니다"
+    return None
+
+
+def configured_root_entries(env: str) -> list[str]:
+    """Entries of ``env`` (an os.pathsep list): quotes stripped; relative/UNC/``~`` entries ignored with a warning."""
+    entries: list[str] = []
+    for item in os.environ.get(env, "").split(os.pathsep):
+        item = item.strip().strip("\"'").strip()
+        if not item:
+            continue
+        problem = local_path_problem(item)
+        if problem is not None:
+            LOGGER.warning("ignoring %s entry %r: %s", env, item, problem)
+            continue
+        entries.append(item)
+    return entries

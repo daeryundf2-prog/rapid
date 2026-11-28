@@ -331,24 +331,30 @@ def parse_source_preview_archive_request(raw_path: str) -> dict[str, str] | None
 
 
 def allowed_source_roots(summary: dict[str, object]) -> list[Path]:
-    roots: list[Path] = []
+    """The run's own source roots, limited to the server roots when the operator set them (``confine_run_roots``)."""
+    from .analyses import confine_run_roots
+
+    ordered: list[tuple[Path, bool]] = []  # (root, is a run output root), in lookup order
     for key in ("root", "scan_scope_root", "output_dir"):
         value = summary.get(key)
         if isinstance(value, str) and value:
-            roots.append(Path(value).expanduser().resolve())
+            ordered.append((Path(value).expanduser().resolve(), key == "output_dir"))
     source = summary.get("source")
     if isinstance(source, dict):
         for key in ("analysis_root", "stage_dir"):
             value = source.get(key)
             if isinstance(value, str) and value:
-                roots.append(Path(value).expanduser().resolve())
+                ordered.append((Path(value).expanduser().resolve(), key == "stage_dir"))
     try:
-        roots.append(run_output_dir(summary))
+        ordered.append((run_output_dir(summary), True))
     except RuntimeError:
         pass
+    kept_inputs, kept_outputs = confine_run_roots(
+        [root for root, is_output in ordered if not is_output], [root for root, is_output in ordered if is_output]
+    )
     deduped: list[Path] = []
-    for root in roots:
-        if root not in deduped:
+    for root, is_output in ordered:
+        if root in (kept_outputs if is_output else kept_inputs) and root not in deduped:
             deduped.append(root)
     return deduped
 
@@ -371,12 +377,16 @@ def allowed_case_db_roots(store: RunJobStore, extra_roots: Iterable[str | Path] 
     }
     roots.update(case_db_roots_from_env())
     roots.update(Path(root).expanduser().resolve() for root in extra_roots)
+    from .analyses import confine_run_roots
+
+    run_outputs: list[Path] = []
     for job in store.list():
         if job.summary:
             try:
-                roots.add(run_output_dir(job.summary))
+                run_outputs.append(run_output_dir(job.summary))
             except RuntimeError:
                 continue
+    roots.update(confine_run_roots((), run_outputs)[1])
     return roots
 
 

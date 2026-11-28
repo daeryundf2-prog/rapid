@@ -30,14 +30,17 @@ from ...core.indicators import (
 )
 from ...core.jobs import (
     RunControlConflict,
+    RunJob,
     RunJobStore,
     RunOutputDirBusy,
     RunRequest,
+    default_run_output_dir,
+    fresh_retry_output_dir,
     run_output_dir,
 )
 from ...core.run.plan import PlanTargetError, plan_counts_brief, validate_skip_targets
 from ...core.visible_capabilities import build_visible_capability_response
-from .analyses import run_scope
+from .analyses import ANALYSIS_OUTPUT_ROOTS_ENV, extra_analysis_roots, run_scope
 from .analysis_kinds import cross_case_eligibility
 from .artifact_filter import (
     FILES_COLLECTIONS,
@@ -51,6 +54,7 @@ from .artifact_filter import (
     parse_field_filters,
 )
 from .artifact_sort import SORT_ORDERS, paginate_sorted_artifact_output
+from .case_workspace import checked_local_path
 from .dashboard import (
     build_run_dashboard,
     notes_output_dir,
@@ -306,12 +310,57 @@ EVENT_RECORD_FIELDS = frozenset({"event_id", "record_id", "evtx_record_state", "
 EVENT_RECORD_TYPES = frozenset({"eventlog-event"})
 
 
+def checked_run_output_dir(output_dir: str | None, *, root: str, mode: str, read_only: bool) -> str | None:
+    """A run output folder inside ``RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS`` (422 otherwise; R1·R10).
+
+    ``None``/blank = the default folder next to (or inside) the evidence: with
+    the list set, that default must lie inside it too, so the examiner is told to
+    pick an output folder instead of the run writing beside the evidence.
+    """
+    if output_dir and output_dir.strip():
+        return checked_local_path(output_dir, label="출력 폴더", confine_to_output_roots=True)
+    if extra_analysis_roots(ANALYSIS_OUTPUT_ROOTS_ENV):
+        default = default_run_output_dir(Path(root).resolve(), mode, read_only=read_only)
+        try:
+            checked_local_path(str(default), label="기본 출력 폴더", confine_to_output_roots=True)
+        except HTTPException as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{exc.detail} — 출력 폴더(output_dir)를 {ANALYSIS_OUTPUT_ROOTS_ENV} 안으로 지정하세요",
+            ) from exc
+    return None
+
+
+def checked_run_inputs(root: str, rules: str | None, known_good_hash_feeds: Sequence[str]) -> tuple[str, str | None, tuple[str, ...]]:
+    """``root``, rule file and known-good feeds inside ``RAPIDTRIAGE_ANALYSIS_ROOTS`` (422 otherwise; R1)."""
+    checked_root = checked_local_path(root, label="런 증거", confine_to_analysis_roots=True)
+    checked_rules = (
+        checked_local_path(rules, label="규칙 파일", confine_to_analysis_roots=True) if rules and rules.strip() else None
+    )
+    feeds = tuple(
+        checked_local_path(path.strip(), label="known-good 해시 피드", confine_to_analysis_roots=True)
+        for path in known_good_hash_feeds
+        if path.strip()
+    )
+    return checked_root, checked_rules, feeds
+
+
 def run_request_from_body(request: RunCreateRequest, *, root: str | None = None, output_dir: str | None = None) -> RunRequest:
     """``RunRequest`` for a ``POST /api/runs`` body (also case runs: ``root``/``output_dir`` overrides).
 
-    ``skip_groups``/``skip_tasks`` are run-plan ids (400 with a Korean
-    message for unknown or unskippable ids).
+    Paths are confined to the server roots (``checked_run_inputs``,
+    ``checked_run_output_dir``; 422). ``skip_groups``/``skip_tasks`` are
+    run-plan ids (400 with a Korean message for unknown or unskippable ids).
     """
+    root, rules, known_good_hash_feeds = checked_run_inputs(
+        root if root is not None else request.root, request.rules, request.known_good_hash_feeds
+    )
+    output_dir = checked_run_output_dir(
+        output_dir if output_dir is not None else request.output_dir,
+        root=root,
+        mode=request.mode,
+        read_only=request.read_only,
+    )
     skip_groups: tuple[str, ...] = ()
     skip_tasks: tuple[str, ...] = ()
     if request.skip_groups or request.skip_tasks:
@@ -321,11 +370,11 @@ def run_request_from_body(request: RunCreateRequest, *, root: str | None = None,
             raise HTTPException(status_code=400, detail=str(exc))
         skip_groups, skip_tasks = tuple(groups), tuple(tasks)
     return RunRequest(
-        root=root if root is not None else request.root,
+        root=root,
         mode=request.mode,
-        output_dir=output_dir if output_dir is not None else request.output_dir,
+        output_dir=output_dir,
         input_kind=request.input_kind,
-        rules=request.rules,
+        rules=rules,
         dry_run=request.dry_run,
         read_only=request.read_only,
         max_extract_size_bytes=request.max_extract_size_bytes,
@@ -335,12 +384,24 @@ def run_request_from_body(request: RunCreateRequest, *, root: str | None = None,
         overwrite=request.overwrite,
         resume=request.resume,
         extract=request.extract,
-        known_good_hash_feeds=tuple(path.strip() for path in request.known_good_hash_feeds if path.strip()),
+        known_good_hash_feeds=known_good_hash_feeds,
         hide_known_good=request.hide_known_good,
         known_good_max_hash_bytes=request.known_good_max_hash_bytes,
         skip_groups=skip_groups,
         skip_tasks=skip_tasks,
     )
+
+
+def check_retry_paths(job: RunJob, *, resume: bool) -> None:
+    """A retry re-runs the stored request: its paths must still be inside the server roots.
+
+    A run registered before the roots were set (``runs.json``) or imported is
+    otherwise re-run against evidence or into a folder outside them.
+    """
+    request = job.request
+    root, _, _ = checked_run_inputs(request.root, request.rules, request.known_good_hash_feeds)
+    target = job.output_dir() if resume else fresh_retry_output_dir(job)
+    checked_run_output_dir(str(target) if target is not None else None, root=root, mode=request.mode, read_only=request.read_only)
 
 
 def build_runs_router(
@@ -351,8 +412,8 @@ def build_runs_router(
     @router.post("/api/runs", status_code=202)
     async def create_run(request: RunCreateRequest) -> dict[str, Any]:
         def queue_run() -> str:
-            validate_run_evidence_source(request.root)
             run_request = run_request_from_body(request)
+            validate_run_evidence_source(run_request.root)
             try:
                 return store.submit(run_request, owner=server_actor()).run_id
             except RunOutputDirBusy as exc:
@@ -368,8 +429,11 @@ def build_runs_router(
 
     @router.post("/api/runs/import", status_code=201)
     def import_run(request: RunImportRequest) -> dict[str, Any]:
+        output_dir = checked_local_path(
+            request.output_dir, label="가져올 런 출력 폴더", confine_to_analysis_roots=True, confine_to_output_roots=True
+        )
         try:
-            job = store.import_completed_run(request.output_dir, owner=server_actor())
+            job = store.import_completed_run(output_dir, owner=server_actor())
         except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         return job.to_dict(include_summary=True)
@@ -432,6 +496,7 @@ def build_runs_router(
         A fresh retry writes a new output folder (``<folder>-retry-<id>`` next to an explicit one);
         409 (Korean) while another queued/running run writes into the target folder."""
         resume = bool(body.resume) if body is not None else False
+        check_retry_paths(get_job(store, run_id), resume=resume)
         try:
             payload = store.retry(run_id, resume=resume, owner=server_actor()).to_dict(include_summary=True)
         except KeyError:
