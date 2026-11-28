@@ -150,14 +150,13 @@ class ApiReviewerAttributionTests(unittest.TestCase):
                 payload = self._post_review(self._client(tmp_dir), db_path, target_id)
         self.assertEqual(payload["reviewer"], "server-examiner")
 
-    def test_api_explicit_reviewer_beats_env_default(self) -> None:
+    def test_api_env_reviewer_beats_client_reviewer_in_single_token_mode(self) -> None:
+        """R5: the console always sends its own name ("web-ui" by default); the server's wins."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             db_path, target_id = _prepare_case_db(tmp_dir)
             with patch.dict(os.environ, {"RAPIDTRIAGE_REVIEWER": "server-examiner"}):
-                payload = self._post_review(
-                    self._client(tmp_dir), db_path, target_id, reviewer="explicit-reviewer"
-                )
-        self.assertEqual(payload["reviewer"], "explicit-reviewer")
+                payload = self._post_review(self._client(tmp_dir), db_path, target_id, reviewer="web-ui")
+        self.assertEqual(payload["reviewer"], "server-examiner")
 
     def test_api_mark_without_reviewer_keeps_existing_behavior(self) -> None:
         env = {key: value for key, value in os.environ.items() if key != "RAPIDTRIAGE_REVIEWER"}

@@ -67,6 +67,7 @@ __all__ = [
     "RunControlWatcher",
     "append_control_request",
     "build_run_plan",
+    "control_requester",
     "evaluate_control",
     "interrupted_plan_view",
     "orphan_reason",
@@ -861,15 +862,25 @@ def control_file_lock(output_dir: Path, *, timeout: float = CONTROL_LOCK_TIMEOUT
             lock_path.unlink()
 
 
+def control_requester(request: Mapping[str, object]) -> dict[str, str]:
+    """``requested_by`` of a control request: who (``by``, else the source) and, with ``by``, the source."""
+    source = str(request.get("actor") or "cli")
+    by = str(request.get("by") or "").strip()
+    return {"actor": by, "source": source} if by else {"actor": source}
+
+
 def append_control_request(
     output_dir: Path,
     action: str,
     targets: Sequence[Mapping[str, object]] = (),
     *,
     actor: str = "cli",
+    by: str | None = None,
 ) -> dict[str, object]:
     """Append one request to ``rapidtriage-run-control.json`` (atomic replace) and return it.
 
+    ``actor`` is where the request came from (``web``/``cli``); ``by`` names the person or
+    agent the server authenticated (per-user token / ``RAPIDTRIAGE_REVIEWER``), when known.
     The read-modify-write runs under :func:`control_file_lock` (other
     processes: CLI ``run-control``, a second server). An unreadable existing
     file raises :class:`ControlFileError` instead of being rewritten, so the
@@ -890,6 +901,7 @@ def append_control_request(
             "actor": actor if actor in CONTROL_ACTORS else "cli",
             "host": socket.gethostname(),
             "at": utc_now(),
+            **({"by": by.strip()} if by and by.strip() else {}),
         }
         requests.append(request)
         payload = {"version": CONTROL_VERSION, "requests": requests}

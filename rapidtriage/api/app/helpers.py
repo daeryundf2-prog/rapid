@@ -5,7 +5,9 @@ import hashlib
 import json
 import mimetypes
 import os
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -69,17 +71,55 @@ def allowed_api_hosts() -> set[str]:
     return LOCAL_API_HOSTS | extra
 
 
-def resolve_request_reviewer(explicit: str | None) -> str | None:
-    """Resolve reviewer attribution for API review marks.
+#: Name of the per-user token (``RAPIDTRIAGE_TOKENS_FILE``) the current API request
+#: authenticated with; set by the auth middleware for the request's lifetime.
+REQUEST_TOKEN_ACTOR: ContextVar[str | None] = ContextVar("rapidtriage_request_token_actor", default=None)
 
-    An explicit request ``reviewer`` wins; otherwise ``RAPIDTRIAGE_REVIEWER``
-    supplies a server-side default for multi-examiner deployments. When
-    neither is set the mark keeps the previous reviewer/empty behavior.
+
+def token_actor() -> str | None:
+    """The current request's per-user token name (``None`` in single-token or no-auth mode)."""
+    return REQUEST_TOKEN_ACTOR.get()
+
+
+def server_actor() -> str | None:
+    """Who the server says acts: the per-user token's name, else ``RAPIDTRIAGE_REVIEWER``."""
+    return token_actor() or os.environ.get("RAPIDTRIAGE_REVIEWER", "").strip() or None
+
+
+#: Author an internal caller already decided (the action API's ``actor_reviewer``) for the
+#: endpoint it calls in-process; never set from a request body or header.
+DECIDED_AUTHOR: ContextVar[str | None] = ContextVar("rapidtriage_decided_author", default=None)
+
+
+@contextmanager
+def decided_author(author: str) -> Iterator[None]:
+    """Within the block :func:`resolve_request_reviewer` returns ``author`` as is."""
+    reset = DECIDED_AUTHOR.set(author)
+    try:
+        yield
+    finally:
+        DECIDED_AUTHOR.reset(reset)
+
+
+def resolve_request_reviewer(explicit: str | None) -> str | None:
+    """Author recorded for a web write (review marks, tags, notes, baselines, case audit).
+
+    An author decided in-process (:func:`decided_author`, e.g. ``agent:<name>@<person>``
+    from the action API, itself derived from the server's actor) is recorded as is.
+    Otherwise the server's actor (:func:`server_actor`) wins: a client-sent ``reviewer`` /
+    ``actor`` name is only a display value then. Only when the server names nobody (single
+    token, no ``RAPIDTRIAGE_REVIEWER``) the request's name is recorded; with neither the
+    mark keeps the previous reviewer/empty behavior.
     """
+    decided = DECIDED_AUTHOR.get()
+    if decided:
+        return decided
+    actor = server_actor()
+    if actor:
+        return actor
     if explicit and explicit.strip():
         return explicit.strip()
-    env_value = os.environ.get("RAPIDTRIAGE_REVIEWER", "").strip()
-    return env_value or None
+    return None
 
 
 def get_job(store: RunJobStore, run_id: str):

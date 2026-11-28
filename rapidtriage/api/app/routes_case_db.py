@@ -43,6 +43,7 @@ from .helpers import (
     get_job,
     resolve_request_reviewer,
     run_not_finished_message,
+    server_actor,
 )
 from .models import (
     CaseCatalogAddRunRequest,
@@ -108,7 +109,7 @@ def build_case_db_router(
                 overwrite=request.overwrite,
                 read_only=request.read_only,
             )
-            job = store.import_completed_run(Path(str(sample_payload["run"]["output_dir"])))
+            job = store.import_completed_run(Path(str(sample_payload["run"]["output_dir"])), owner=server_actor())
             return {
                 "command": "sample-case.run",
                 "sample": sample_payload,
@@ -253,7 +254,7 @@ def build_case_db_router(
                     metadata_filters=request.metadata_filters,
                     review_status=request.review_status,
                     verification_status=request.verification_status,
-                    created_by="web-ui",
+                    created_by=resolve_request_reviewer(None) or "web-ui",
                 )
             return payload
         except (CaseDatabaseError, KeywordPackError) as exc:
@@ -445,7 +446,7 @@ def build_case_db_router(
                 metadata_filters=request.metadata_filters,
                 review_status=request.review_status,
                 verification_status=request.verification_status,
-                created_by=request.created_by,
+                created_by=resolve_request_reviewer(request.created_by) or "",
             )
         except CaseDatabaseError as exc:
             raise HTTPException(status_code=400, detail=str(exc))

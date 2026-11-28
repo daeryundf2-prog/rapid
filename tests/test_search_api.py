@@ -280,6 +280,18 @@ class SearchApiTests(unittest.TestCase):
         self.assertEqual(self.client.get(f"/api/hash-sets/{hash_set['id']}").status_code, 404)
         self.assertEqual(self.client.delete("/api/hash-sets/..%2Fx").status_code, 404)
 
+    def test_saved_search_records_the_server_actor(self) -> None:
+        # PR #92 review P2: the author was hard-coded web-ui and the audit actor local-user.
+        self.make_case_db()
+        with mock.patch.dict(os.environ, {"RAPIDTRIAGE_REVIEWER": "kim"}):
+            response = self.client.post(self.url("/search/saved"), json={"name": "급여", "q": "급여대장"})
+        self.assertEqual(response.status_code, 201, response.text)
+        with open_case_database(self.run_dir / "rapidtriage-case.db").connect() as connection:
+            created_by = connection.execute("SELECT created_by FROM saved_search").fetchall()
+            audit = connection.execute("SELECT actor FROM audit_event WHERE action = 'search.saved.create'").fetchall()
+        self.assertEqual([tuple(row) for row in created_by], [("kim",)])
+        self.assertEqual([tuple(row) for row in audit], [("kim",)])
+
     def test_saved_searches_history_and_tree(self) -> None:
         self.build_index()
         self.assertEqual(self.client.get(self.url("/search/saved")).json()["saved"], [])

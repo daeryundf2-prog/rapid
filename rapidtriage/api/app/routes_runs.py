@@ -81,6 +81,7 @@ from .helpers import (
     read_run_artifacts_for_capabilities,
     run_not_finished_message,
     run_progress_payload,
+    server_actor,
     validate_run_evidence_source,
 )
 from .json_rows import (
@@ -353,7 +354,7 @@ def build_runs_router(
             validate_run_evidence_source(request.root)
             run_request = run_request_from_body(request)
             try:
-                return store.submit(run_request).run_id
+                return store.submit(run_request, owner=server_actor()).run_id
             except RunOutputDirBusy as exc:
                 raise HTTPException(status_code=409, detail=str(exc))
 
@@ -368,7 +369,7 @@ def build_runs_router(
     @router.post("/api/runs/import", status_code=201)
     def import_run(request: RunImportRequest) -> dict[str, Any]:
         try:
-            job = store.import_completed_run(request.output_dir)
+            job = store.import_completed_run(request.output_dir, owner=server_actor())
         except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         return job.to_dict(include_summary=True)
@@ -404,8 +405,9 @@ def build_runs_router(
 
     @router.delete("/api/runs/{run_id}", status_code=204)
     def delete_run(run_id: str) -> None:
+        """Removes the run from the list (its folder stays); the store records who removed it."""
         try:
-            store.remove(run_id)
+            store.remove(run_id, actor=server_actor())
         except KeyError:
             raise HTTPException(status_code=404, detail="런을 찾을 수 없습니다")
 
@@ -414,7 +416,7 @@ def build_runs_router(
     def cancel_run(run_id: str) -> dict[str, Any]:
         """"모두 취소" (= ``plan/control`` ``cancel_all``); the response adds the current ``plan``."""
         try:
-            payload = store.cancel(run_id, actor="web").to_dict(include_summary=True)
+            payload = store.cancel(run_id, by=server_actor()).to_dict(include_summary=True)
         except KeyError:
             raise HTTPException(status_code=404, detail="런을 찾을 수 없습니다")
         except RunControlConflict as exc:
@@ -431,7 +433,7 @@ def build_runs_router(
         409 (Korean) while another queued/running run writes into the target folder."""
         resume = bool(body.resume) if body is not None else False
         try:
-            payload = store.retry(run_id, resume=resume).to_dict(include_summary=True)
+            payload = store.retry(run_id, resume=resume, owner=server_actor()).to_dict(include_summary=True)
         except KeyError:
             raise HTTPException(status_code=404, detail="런을 찾을 수 없습니다")
         except ValueError as exc:
@@ -544,6 +546,7 @@ def build_runs_router(
                 notes_output_dir(job),
                 examiner=request.examiner.strip(),
                 summary=request.summary.strip(),
+                updated_by=server_actor(),
             )
         except OSError as exc:
             raise HTTPException(status_code=500, detail=str(exc))

@@ -42,6 +42,7 @@ from .helpers import (
     get_job,
     job_output_dir,
     resolve_request_reviewer,
+    server_actor,
     validate_run_evidence_source,
 )
 from .models import (
@@ -357,7 +358,7 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
                         detail=f"같은 출력 폴더를 쓰는 런({busy})이 대기·실행 중입니다. 출력 폴더를 비우거나 다른 폴더를 지정하세요",
                     )
             try:
-                job = store.submit(run_request)
+                job = store.submit(run_request, owner=server_actor())
             except RunOutputDirBusy as exc:
                 raise HTTPException(status_code=409, detail=str(exc))
         snapshot = build_processing_snapshot(run_request=run_request, case=case, evidence=evidence, origin="case-run")
