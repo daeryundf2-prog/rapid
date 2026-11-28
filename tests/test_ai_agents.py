@@ -587,3 +587,135 @@ class AdversarialAgentTests(AgentFixture):
         history = next(r for r in self.rows("claude-code") if r.path.endswith("history.jsonl"))
         self.assertEqual((history.details["text"], history.details["cwd"], history.details["timestamp_utc"]),
                          ("프롬프트", "/m/w", "2023-11-14T22:13:20+00:00"))
+
+
+class PiFamilyTests(AgentFixture):
+    """Synthetic records shaped after oh-my-pi docs/session.md and pi docs/session-format.md (no real sessions)."""
+
+    def entry(self, kind, ident, parent, minute, **fields):
+        return {"type": kind, "id": ident, "parentId": parent, "timestamp": f"2026-11-01T10:{minute}:00.000Z", **fields}
+
+    def test_omp_session_tree_subagent_and_timeline(self):
+        base = "Users/u/.omp/agent/sessions/-work-app/"
+        title = {"type": "title", "v": 1, "title": "제목", "updatedAt": "2026-11-01T10:00:00.000Z", "pad": " " * 40}
+        header = {"type": "session", "version": 3, "id": "019a-main", "timestamp": "2026-11-01T10:00:00.000Z",
+                  "cwd": "/work/app"}
+        self.lines(base + "2026-11-01T10-00-00_019a-main.jsonl", title, header,
+                   self.entry("model_change", "m0", None, "00", model="anthropic/sample-model", role="default"),
+                   self.entry("message", "a1", "m0", "01", message={"role": "user", "content": "한글 요청 sk-abcdefghijklmnop",
+                                                                    "timestamp": 1}),
+                   self.entry("message", "a2", "a1", "02", message={
+                       "role": "assistant", "model": "physical-model", "provider": "anthropic", "content": [
+                           {"type": "thinking", "thinking": "hidden-reasoning"}, {"type": "text", "text": "읽겠습니다"},
+                           {"type": "toolCall", "id": "call-1", "name": "read", "arguments": {"path": "src/main.py"}}]}),
+                   self.entry("message", "a3", "a2", "03", message={
+                       "role": "toolResult", "toolCallId": "call-1", "content": [{"type": "text", "text": "print(1)"}]}),
+                   self.entry("message", "a4", "a3", "04", message={
+                       "role": "bashExecution", "command": "git status", "output": "clean", "exitCode": 0}),
+                   self.entry("message", "a5", "a4", "05", message={"role": "system", "content": "system-prompt-text"}),
+                   self.entry("compaction", "a6", "a5", "06", summary="summary-text", firstKeptEntryId="a1"),
+                   self.entry("future_entry", "a7", "a6", "07"))
+        self.lines(base + "2026-11-01T10-00-00_019a-main/0-Explore.jsonl",
+                   {**header, "id": "019a-child", "parentSession": "/home/u/.omp/agent/sessions/-work-app/main.jsonl"},
+                   self.entry("message", "c1", None, "08", message={"role": "user", "content": "서브에이전트 작업"}))
+        rows = self.rows("omp-pi")
+        main = [r for r in rows if r.path.endswith("019a-main.jsonl")]
+        self.assertEqual([(r.artifact_type, r.details["role"]) for r in main], [
+            ("agent-message", "user"), ("agent-message", "assistant"), ("agent-tool-call", "assistant"),
+            ("agent-tool-result", "tool"), ("agent-tool-call", "user"), ("agent-tool-result", "tool"),
+            ("agent-parse-note", "")])
+        user, answer, call, result, bash, output, note = (r.details for r in main)
+        self.assertEqual((user["agent"], user["session_id"], user["cwd"], user["schema_version"]),
+                         ("omp", "019a-main", "/work/app", "3"))
+        self.assertEqual((user["model"], answer["model"]), ("anthropic/sample-model", "physical-model"))
+        self.assertEqual((user["timestamp_utc"], user["source_line"], user["entry_id"]),
+                         ("2026-11-01T10:01:00+00:00", 4, "a1"))
+        self.assertNotIn("sk-abcdefghijklmnop", user["text"])
+        self.assertEqual((answer["text"], answer["parent_entry_id"]), ("읽겠습니다", "a1"))
+        self.assertEqual((call["tool_name"], call["file_paths"], call["call_id"]), ("read", ["src/main.py"], "call-1"))
+        self.assertEqual((result["tool_name"], result["text"]), ("read", "print(1)"))
+        self.assertEqual((bash["command_line"], output["text"]), ("git status", "clean"))
+        self.assertEqual(note["reason"], "unrecognized-session-record")
+        for hidden in ("hidden-reasoning", "system-prompt-text", "summary-text"):
+            self.assertNotIn(hidden, str(rows))
+        child, = (r.details for r in rows if r.path.endswith("0-Explore.jsonl"))
+        self.assertEqual((child["session_id"], child["parent_session"], child["text"]),
+                         ("019a-child", "/home/u/.omp/agent/sessions/-work-app/main.jsonl", "서브에이전트 작업"))
+        self.assertNotIn("parent_session", user)
+        payload = run_artifact_collection(self.root, kind="omp-pi", records_path=self.root.parent / "rows.jsonl",
+                                          preview_limit=1)
+        validate(payload, load_schema("artifacts.schema.json"))
+        events = extract_artifact_events(payload, self.root.parent / "artifacts-omp-pi.json")
+        self.assertEqual(len(events), 7)
+
+    def test_pi_senpi_omo_layouts_and_header_detected_sessions(self):
+        header = {"type": "session", "version": 3, "id": "s", "timestamp": "2026-11-01T10:00:00.000Z", "cwd": "/p"}
+        change = self.entry("model_change", "m", None, "00", provider="openai", modelId="sample")
+        result = self.entry("message", "r", "m", "01", message={"role": "toolResult", "toolCallId": "x", "toolName": "bash",
+                                                                "content": [{"type": "text", "text": "결과"}]})
+        layouts = {"pi": "home/u/.pi/agent/sessions/--p--/a.jsonl",
+                   "senpi": "home/u/.senpi/agent/sessions/--p--/a.jsonl",
+                   "omo": "Users/u/.omo/agent/sessions/--p--/a.jsonl",
+                   "omp": "home/u/.local/share/omp/sessions/-p/a.jsonl"}
+        for path in layouts.values():
+            self.lines(path, header, change, result)
+        # Outside the default folders (``--session-dir``): recognised by the header alone.
+        self.lines("Users/u/.local/state/cataly/lanes/l1/run.jsonl", {"type": "title", "v": 1, "title": "", "updatedAt": "",
+                                                                       "pad": ""}, header, result)
+        self.lines("Users/u/elsewhere/plain.jsonl", header, result)
+        self.lines("Users/u/elsewhere/other.jsonl", {"type": "event"}, result)
+        self.lines("Users/u/.pi/agent/sessions/--p--/notes.jsonl", {"type": "event"}, result)
+        rows = self.rows("omp-pi")
+        found = {r.path: r.details for r in rows}
+        for agent, path in layouts.items():
+            self.assertEqual((found[path]["agent"], found[path]["model"], found[path]["text"]),
+                             (agent, "openai/sample", "결과"))
+        self.assertEqual(found["Users/u/.local/state/cataly/lanes/l1/run.jsonl"]["agent"], "omp")
+        self.assertEqual(found["Users/u/elsewhere/plain.jsonl"]["agent"], "pi-family")
+        self.assertNotIn("Users/u/elsewhere/other.jsonl", found)
+        self.assertEqual(found["Users/u/.pi/agent/sessions/--p--/notes.jsonl"]["reason"], "session-header-missing")
+        self.assertEqual(len(rows), 7)
+        self.assertEqual(self.rows("codex-cli") + self.rows("claude-code"), [])
+
+    def test_prompt_history_logs_and_settings_names_only(self):
+        agent = self.root / "Users/u/.omp/agent"
+        agent.mkdir(parents=True)
+        with closing(sqlite3.connect(agent / "history.db")) as db:
+            db.execute("CREATE TABLE history (id INTEGER PRIMARY KEY, prompt TEXT NOT NULL UNIQUE, created_at INTEGER "
+                       "NOT NULL, cwd TEXT, session_id TEXT, use_count INTEGER NOT NULL DEFAULT 1)")
+            db.execute("INSERT INTO history (prompt, created_at, cwd, session_id, use_count) VALUES (?,?,?,?,?)",
+                       ("다시 보낸 프롬프트", 1_700_000_000, "/work", "s1", 3))
+            db.commit()
+        self.lines("Users/u/.omp/logs/omp.2026-11-01.123.log",
+                   {"timestamp": "2026-11-01T19:00:00.000+09:00", "level": "info", "pid": 123, "message": "session started",
+                    "sessionId": "s1", "request": "context-only-marker"},
+                   {"timestamp": "2026-11-01T19:00:01.000+09:00", "level": "warn", "pid": 123,
+                    "message": "retry Authorization: Bearer log-secret-marker"})
+        self.write("Users/u/.omp/agent/config.yml", b"modelRoles:\n  default: anthropic/sample\n  smol: openai/mini\n"
+                                                     b"auth:\n  broker:\n    token: yaml-secret-marker\n")
+        self.write("Users/u/.omp/agent/models.yml", b"providers:\n  local:\n    baseUrl: http://user:url-secret@host/v1\n"
+                                                     b"    apiKey: models-secret-marker\n    models:\n      - id: qwen-sample\n")
+        self.write("Users/u/.pi/agent/settings.json", {"defaultProvider": "openai", "defaultModel": "sample"})
+        self.write("Users/u/.omp/agent/mcp.json", {"mcpServers": {"tool": {"command": "runner", "args": ["arg-marker"],
+                                                                            "env": {"TOOL_KEY": "env-marker"}}}})
+        rows = self.rows("omp-pi")
+        history = next(r.details for r in rows if r.path.endswith("history.db"))
+        self.assertEqual((history["text"], history["timestamp_utc"], history["cwd"], history["session_id"],
+                          history["use_count"], history["source_table"]),
+                         ("다시 보낸 프롬프트", "2023-11-14T22:13:20+00:00", "/work", "s1", "3", "history"))
+        logs = [r for r in rows if r.artifact_type == "agent-log"]
+        self.assertEqual([(r.details["timestamp_utc"], r.details["level"], r.details["session_id"]) for r in logs],
+                         [("2026-11-01T10:00:00+00:00", "info", "s1"), ("2026-11-01T10:00:01+00:00", "warn", "")])
+        settings = {r.path.rsplit("/", 1)[1]: r.details for r in rows if r.artifact_type == "agent-settings"}
+        self.assertEqual((settings["config.yml"]["model"], settings["config.yml"]["model_roles"]),
+                         ("anthropic/sample", "default=anthropic/sample; smol=openai/mini"))
+        self.assertEqual((settings["models.yml"]["provider"], settings["models.yml"]["model_ids"]), ("local", ["qwen-sample"]))
+        self.assertEqual((settings["settings.json"]["model"], settings["settings.json"]["provider"]), ("sample", "openai"))
+        server, = self.rows("agent-mcp")
+        self.assertEqual((server.details["agent"], server.details["server_name"], server.details["env_names"]),
+                         ("omp", "tool", ["TOOL_KEY"]))
+        everything = str(rows) + str(server)
+        for marker in ("context-only-marker", "log-secret-marker", "yaml-secret-marker", "url-secret",
+                       "models-secret-marker", "arg-marker", "env-marker"):
+            self.assertNotIn(marker, everything)
+        self.assertEqual(len(rows), 6)

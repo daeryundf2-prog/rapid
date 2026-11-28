@@ -1,9 +1,18 @@
-"""Read message and tool records from Claude Code, Codex CLI and Gemini CLI."""
+"""Read message and tool records from Claude Code, Codex CLI, Gemini CLI and pi-family (omp, pi, senpi, OmO)."""
 from __future__ import annotations
 
 from dataclasses import replace
 
-from .ai_agent_records import content, items, mapping, tool
+from .ai_agent_records import clean, content, items, mapping, tool
+
+# pi-family entry types that carry no user, assistant or tool text (oh-my-pi docs/session.md "Entry Taxonomy",
+# pi docs/session-format.md "Entry Types"). Summaries and extension context are model-generated or injected.
+PI_QUIET_ENTRIES = frozenset({
+    "thinking_level_change", "service_tier_change", "model_usage", "usage", "compaction", "branch_summary",
+    "reset_boundary", "custom", "custom_message", "label", "title_change", "ttsr_injection", "credential_pin",
+    "session_init", "mode_change", "context_edit", "session_info"})
+# Prompt, extension and summary messages that the loader reconstructs; no user or assistant turn of their own.
+PI_QUIET_ROLES = frozenset({"system", "custom", "hookMessage", "branchSummary", "compactionSummary"})
 
 
 def claude(src, record):
@@ -123,3 +132,81 @@ def gemini(src, record):
         source = replace(src, session=message.get("sessionId", src.session),
                          location={**src.location, "message_index": index})
         yield from gemini_message(source, message)
+
+
+def pi_header(src, record):
+    """The ``session`` header names the session, its working folder, layout version and parent session
+    (a fork's or a subagent's parent transcript, recorded as an id or a path)."""
+    src.session = record["id"]
+    src.cwd = record.get("cwd", "")
+    version = record.get("version")
+    if isinstance(version, (str, int)) and not isinstance(version, bool):
+        src.version = str(version)
+    parent = record.get("parentSession")
+    src.parent_session = parent if isinstance(parent, str) else ""
+
+
+def pi_entry(src, record):
+    kind = record.get("type")
+    if kind == "model_change":
+        # omp records ``provider/model``; pi records ``provider`` and ``modelId``.
+        model = record.get("model")
+        if not isinstance(model, str):
+            model = "/".join(v for v in (record.get("provider"), record.get("modelId")) if isinstance(v, str) and v)
+        src.model = model or src.model
+        return
+    if kind != "message":
+        if kind not in PI_QUIET_ENTRIES:
+            yield src.note("unrecognized-session-record")
+        return
+    message = mapping(record.get("message"))
+    role = message.get("role")
+    tree = {key: clean(value) for key, value in (("entry_id", record.get("id")), ("parent_entry_id", record.get("parentId")))
+            if isinstance(value, str)}
+    part = replace(src, location={**src.location, **tree})
+    # Entry time is ISO 8601; the nested message keeps epoch milliseconds and stands in when the entry has none.
+    stamp, unit = record.get("timestamp"), ""
+    if stamp is None and type(message.get("timestamp")) in (int, float):
+        stamp, unit = message["timestamp"], "ms"
+    model = message.get("model", "") if role == "assistant" else ""
+    if role in ("user", "developer", "assistant"):
+        blocks = message.get("content")
+        if not isinstance(blocks, (str, list)):
+            yield part.note("invalid-message-content", damaged_count=1)
+            return
+        text = content(blocks)
+        if text or isinstance(blocks, str):
+            yield part.row("message", role=role, timestamp=stamp, unit=unit, model=model, text=text)
+        for index, block in enumerate(items(blocks) if role == "assistant" else ()):
+            block = mapping(block)
+            if block.get("type") == "toolCall":
+                yield from tool(replace(part, location={**part.location, "content_index": index}), block.get("name"),
+                                block.get("arguments"), call_id=block.get("id"), timestamp=stamp, unit=unit, model=model)
+    elif role == "toolResult":
+        yield part.row("tool-result", role="tool", timestamp=stamp, unit=unit, call_id=message.get("toolCallId"),
+                       tool_name=message.get("toolName"), text=content(message.get("content")))
+    elif role in ("bashExecution", "pythonExecution"):
+        # A command the user ran directly (``!`` or ``$``), not a model tool call.
+        name, command = ("bash", message.get("command")) if role == "bashExecution" else ("python", message.get("code"))
+        yield part.row("tool-call", role="user", timestamp=stamp, unit=unit, tool_name=name, command_line=command,
+                       record_format=role)
+        yield part.row("tool-result", role="tool", timestamp=stamp, unit=unit, tool_name=name,
+                       text=message.get("output"), record_format=role)
+    elif role == "fileMention":
+        # Inlined file contents are the file, not something the user typed; only the paths are kept.
+        paths = [mapping(item).get("path") for item in items(message.get("files"))]
+        yield part.row("message", role="user", timestamp=stamp, unit=unit, file_paths=paths, record_format=role)
+    elif role not in PI_QUIET_ROLES:
+        yield part.note("unrecognized-session-message")
+
+
+def pi_log(src, record):
+    """omp ``logs/omp.<date>.<pid>.log``: one JSON record per line with local time and offset, level, process id
+    and message. Other context fields can hold request data and are not exported."""
+    if not isinstance(record.get("message"), str):
+        yield src.note("unrecognized-log-record", damaged_count=1)
+        return
+    pid = record.get("pid")
+    yield replace(src, session=record.get("sessionId", "")).row(
+        "log", timestamp=record.get("timestamp"), text=record["message"], level=record.get("level"),
+        pid=str(pid) if type(pid) is int else "")

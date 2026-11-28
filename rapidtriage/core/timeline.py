@@ -109,6 +109,7 @@ TIMELINE_FIELD_MAP: dict[str, tuple[TimelineField, ...]] = {
     "agent-message": (F("timestamp_utc", "message"),),
     "agent-tool-call": (F("timestamp_utc", "tool-call"),),
     "agent-tool-result": (F("timestamp_utc", "tool-result"),),
+    "agent-log": (F("timestamp_utc", "agent-logged"),),
     "macos-unified-log-event": (F("timestamp", "logged"),),
     # --- execution -------------------------------------------------------
     "prefetch-file": (

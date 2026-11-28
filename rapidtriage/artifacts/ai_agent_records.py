@@ -98,6 +98,8 @@ class Source:
     model: str = ""
     version: str = ""
     app_version: str = ""
+    # Session lineage recorded by the transcript itself (pi-family ``parentSession``); exported only when set.
+    parent_session: str = ""
 
     def row(self, category, *, role="", timestamp=None, unit="", text="", model="", **fields):
         flags = ["schema-version-not-validated"]
@@ -121,8 +123,10 @@ class Source:
             "tool_name": "", "command_line": "", "file_paths": [],
             "schema_version": clean(self.version), "app_version": clean(self.app_version), "flags": flags, "validation_required": True,
         }
+        if self.parent_session:
+            details["parent_session"] = clean(self.parent_session)
         for key, value in fields.items():
-            if key in ("env_names", "file_paths") and isinstance(value, list):
+            if key in ("env_names", "file_paths", "model_ids") and isinstance(value, list):
                 details[key] = [clean(v) for v in value[:64] if isinstance(v, str)]
                 if len(value) > 64:
                     flags.append("list-length-limit")

@@ -310,6 +310,7 @@
                 "claude-code",
                 "codex-cli",
                 "gemini-cli",
+                "omp-pi",
                 "editor-chat",
                 "agent-mcp"
               ]

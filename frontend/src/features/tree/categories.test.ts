@@ -17,6 +17,7 @@ const ENGINE_KINDS = [
   "codex-cli",
   "editor-chat",
   "gemini-cli",
+  "omp-pi",
   "android-apk",
   "browser",
   "cloud-export",

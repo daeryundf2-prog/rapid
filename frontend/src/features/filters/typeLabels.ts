@@ -69,6 +69,7 @@ export const TYPE_LABEL_OVERRIDES: Readonly<Record<string, string>> = {
   "agent-tool-result": "코딩 에이전트 도구 결과",
   "agent-settings": "코딩 에이전트 설정",
   "agent-mcp-server": "MCP 서버 설정",
+  "agent-log": "코딩 에이전트 로그",
   "agent-parse-note": "코딩 에이전트 읽기 제한·오류",
   "startup-item": "시작 프로그램 항목",
   "desktop-wallpaper": "바탕 화면 배경",
