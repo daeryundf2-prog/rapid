@@ -183,7 +183,14 @@
   `rapidtriage-case-report-history/<UTC time>/` or
   `rapidtriage-reviewer-bundle-history/<UTC time>/` instead of overwriting it
   (`GET …/reviewer-bundle/file` serves the last built bundle and builds one
-  only when none exists, so a download is not a new version);
+  only when none exists, so a download is not a new version). One run's report
+  and bundle generation runs one request at a time, so two people generating
+  at once both succeed and every kept version is whole; a download that
+  re-exports a missing report format keeps the report's `generated_by`. The
+  history folders grow by one version per generation with no limit or
+  automatic cleanup (a few hundred KB per version on synthetic runs); the
+  server never reads them back, so old `<UTC time>/` folders can be deleted by
+  hand;
   the original export manifest records `requested_by`; search history records
   the searcher instead of `local-user`; editing or deleting a run saved search
   is an `audit_event` (`search.saved.update` / `.delete`, the deleted row kept

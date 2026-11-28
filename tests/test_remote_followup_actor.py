@@ -15,6 +15,7 @@ import json
 import os
 import sqlite3
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -22,10 +23,11 @@ from unittest import mock
 
 from fastapi.testclient import TestClient
 
-from rapidtriage.api.app import create_app
+from rapidtriage.api.app import create_app, routes_reports
 from rapidtriage.api.app.analyses import ANALYSIS_RUNNER, TERMINAL_STATUSES
 from rapidtriage.api.app.helpers import REQUEST_TOKEN_ACTOR
 from rapidtriage.api.app.search_index_service import AUTO_INDEX_ENV, SEARCH_HISTORY
+from rapidtriage.core import bundle as bundle_module
 from rapidtriage.core.case_db import open_case_database
 from rapidtriage.core.jobs import RunJobStore
 from rapidtriage.core.schema_validation import load_schema, validate
@@ -198,6 +200,99 @@ class ReportAttributionTests(_Sandbox):
         self.assertEqual(download.status_code, 200, download.text)
         self.assertEqual(hashlib.sha256(download.content).hexdigest(), bundle_hash)
         self.assertEqual(len(list((output_dir / "rapidtriage-reviewer-bundle-history").iterdir())), 1)
+
+    def concurrently(self, *calls):
+        """Run ``calls`` at once (a barrier releases them together); their results in order."""
+        barrier = threading.Barrier(len(calls))
+        results: list[object] = [None] * len(calls)
+
+        def run(index: int, call) -> None:
+            barrier.wait()
+            results[index] = call()
+
+        threads = [threading.Thread(target=run, args=(index, call)) for index, call in enumerate(calls)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(120)
+        return results
+
+    @staticmethod
+    def slowed(real):
+        """``real`` made slow (widening the generation window) and counting overlapping calls."""
+        state = {"active": 0, "peak": 0}
+        guard = threading.Lock()
+
+        def wrapper(*args, **kwargs):
+            with guard:
+                state["active"] += 1
+                state["peak"] = max(state["peak"], state["active"])
+            try:
+                time.sleep(0.3)
+                return real(*args, **kwargs)
+            finally:
+                with guard:
+                    state["active"] -= 1
+
+        return wrapper, state
+
+    def test_concurrent_reviewer_bundles_both_succeed_and_keep_whole_versions(self) -> None:
+        # PR #105 review P2-1: two examiners building at once got a 400 and half-written history versions.
+        run_id, output_dir = self.own_run("bunrace")
+        self.bookmark(self.kim, run_id, include_in_report=True)
+        self.assertEqual(self.kim.post(f"/api/runs/{run_id}/reviewer-bundle", json={}).status_code, 200)
+        slow, state = self.slowed(bundle_module.write_case_report_exports)
+        with mock.patch.object(bundle_module, "write_case_report_exports", slow):
+            responses = self.concurrently(
+                lambda: self.kim.post(f"/api/runs/{run_id}/reviewer-bundle", json={}),
+                lambda: self.lee.post(f"/api/runs/{run_id}/reviewer-bundle", json={}),
+                lambda: self.lee.get(f"/api/runs/{run_id}/reviewer-bundle/file"),
+            )
+        self.assertEqual([response.status_code for response in responses], [200, 200, 200], [r.text[:300] for r in responses])
+        self.assertEqual(state["peak"], 1)
+        versions = sorted((output_dir / "rapidtriage-reviewer-bundle-history").iterdir())
+        self.assertEqual(len(versions), 2)
+        authors = []
+        for folder in [*versions, output_dir]:
+            self.assertTrue((folder / "rapidtriage-reviewer-bundle.zip").is_file(), folder)
+            authors.append(json_file(folder / "rapidtriage-reviewer-bundle" / "rapidtriage-bundle-audit.json")["generated_by"])
+        self.assertEqual(sorted(authors), ["kim", "kim", "lee"])
+
+    def test_concurrent_case_reports_keep_whole_versions(self) -> None:
+        # PR #105 review P3-1: concurrent reports left torn history copies (no audit, no manifest).
+        run_id, output_dir = self.own_run("reprace")
+        self.bookmark(self.kim, run_id, include_in_report=True)
+        self.assertEqual(self.kim.post(f"/api/runs/{run_id}/case-report", json={}).status_code, 200)
+        slow, state = self.slowed(routes_reports.write_case_report_exports)
+        with mock.patch.object(routes_reports, "write_case_report_exports", slow):
+            responses = self.concurrently(
+                lambda: self.kim.post(f"/api/runs/{run_id}/case-report", json={}),
+                lambda: self.lee.post(f"/api/runs/{run_id}/case-report", json={}),
+            )
+        self.assertEqual([response.status_code for response in responses], [200, 200])
+        self.assertEqual(state["peak"], 1)
+        versions = sorted((output_dir / "rapidtriage-case-report-history").iterdir())
+        self.assertEqual(len(versions), 2)
+        authors = []
+        for folder in [*versions, output_dir]:
+            audit_author = json_file(folder / "rapidtriage-case-report.audit.md")["provenance"]["options"]["generated_by"]
+            self.assertEqual(json_file(folder / "rapidtriage-case-report.exports.json")["generated_by"], audit_author, folder)
+            for name in ("rapidtriage-case-report.md", "rapidtriage-case-report.docx", "rapidtriage-case-report.pdf"):
+                self.assertGreater((folder / name).stat().st_size, 0, folder / name)
+            authors.append(audit_author)
+        self.assertEqual(sorted(authors), ["kim", "kim", "lee"])
+
+    def test_downloading_a_missing_export_keeps_the_report_author(self) -> None:
+        # PR #105 review P3-2: re-exporting on GET recorded the downloader as generated_by.
+        run_id, output_dir = self.own_run("repget")
+        self.bookmark(self.kim, run_id, include_in_report=True)
+        self.assertEqual(self.kim.post(f"/api/runs/{run_id}/case-report", json={}).status_code, 200)
+        (output_dir / "rapidtriage-case-report.pdf").unlink()
+        download = self.lee.get(f"/api/runs/{run_id}/case-report/file/pdf")
+        self.assertEqual(download.status_code, 200, download.text)
+        self.assertTrue(download.content.startswith(b"%PDF"))
+        self.assertEqual(json_file(output_dir / "rapidtriage-case-report.exports.json")["generated_by"], "kim")
+        self.assertFalse((output_dir / "rapidtriage-case-report-history").exists())
 
 
 class ExtractAttributionTests(_Sandbox):

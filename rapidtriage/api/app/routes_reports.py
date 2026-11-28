@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import threading
+import weakref
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import (
     FileResponse,
+    Response,
 )
 
 from ...core.audit import audit_path_for, keep_previous_version, write_audit_record
@@ -60,6 +63,12 @@ from .search import (
 #: Bookmark writes load, change and save ``rapidtriage-case.json``: one at a time, so two
 #: examiners editing at once never drop each other's change (one server process).
 CASE_JSON_WRITE_LOCK = threading.Lock()
+#: One run's report and reviewer-bundle generation (which first moves or copies the current
+#: deliverable into its history folder) runs one at a time: two examiners generating at once
+#: would otherwise move the folder the other is writing (one server process). Other runs are not
+#: blocked; a lock lives while a request holds it.
+_RUN_DELIVERABLE_LOCKS: weakref.WeakValueDictionary[str, threading.Lock] = weakref.WeakValueDictionary()
+_RUN_DELIVERABLE_LOCKS_GUARD = threading.Lock()
 #: Earlier deliverables are kept here (one ``<UTC time>/`` folder per replaced version).
 CASE_REPORT_HISTORY_DIR = "rapidtriage-case-report-history"
 REVIEWER_BUNDLE_HISTORY_DIR = "rapidtriage-reviewer-bundle-history"
@@ -68,6 +77,26 @@ REVIEWER_BUNDLE_HISTORY_DIR = "rapidtriage-reviewer-bundle-history"
 def recorded_actor() -> str:
     """Who a report, bundle or bookmark write is recorded under (the server's actor, GAP-5)."""
     return resolve_request_reviewer(None) or "local-user"
+
+
+def run_deliverable_lock(run_id: str) -> threading.Lock:
+    """The lock serializing ``run_id``'s case report and reviewer bundle writes."""
+    with _RUN_DELIVERABLE_LOCKS_GUARD:
+        lock = _RUN_DELIVERABLE_LOCKS.get(run_id)
+        if lock is None:
+            lock = threading.Lock()
+            _RUN_DELIVERABLE_LOCKS[run_id] = lock
+        return lock
+
+
+def recorded_report_author(export_manifest: Path) -> str | None:
+    """``generated_by`` of an existing case report export manifest (``None`` when absent)."""
+    try:
+        manifest = json.loads(export_manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    author = manifest.get("generated_by") if isinstance(manifest, dict) else None
+    return author if isinstance(author, str) and author else None
 
 
 def build_reports_router(
@@ -134,15 +163,16 @@ def build_reports_router(
     @router.post("/api/runs/{run_id}/case-report")
     def create_case_report(run_id: str, request: CaseReportCreateRequest) -> dict[str, object]:
         report_path = default_case_report_path(store, run_id)
-        markdown = build_run_case_report(store, run_id, request)
         generated_by = recorded_actor()
-        # The report it replaces (with its audit record naming its author) stays as a version.
-        previous = keep_previous_version(
-            [*case_report_export_paths(report_path).values(), audit_path_for(report_path)],
-            report_path.with_name(CASE_REPORT_HISTORY_DIR),
-        )
-        exports = write_case_report_exports(markdown, report_path, generated_by=generated_by)
-        write_case_report_audit(store, run_id, report_path, request, generated_by=generated_by)
+        with run_deliverable_lock(run_id):
+            markdown = build_run_case_report(store, run_id, request)
+            # The report it replaces (with its audit record naming its author) stays as a version.
+            previous = keep_previous_version(
+                [*case_report_export_paths(report_path).values(), audit_path_for(report_path)],
+                report_path.with_name(CASE_REPORT_HISTORY_DIR),
+            )
+            exports = write_case_report_exports(markdown, report_path, generated_by=generated_by)
+            write_case_report_audit(store, run_id, report_path, request, generated_by=generated_by)
         return {
             "report_path": str(report_path),
             "exports": exports,
@@ -153,14 +183,21 @@ def build_reports_router(
         }
 
 
-    @router.get("/api/runs/{run_id}/case-report/file")
-    def download_case_report(run_id: str) -> FileResponse:
-        report_path = default_case_report_path(store, run_id)
+    def _ensure_case_report(run_id: str, report_path: Path) -> None:
+        """Generate the run's case report with default settings when none exists yet
+        (the caller holds :func:`run_deliverable_lock`)."""
         if not report_path.is_file():
             request = CaseReportCreateRequest()
             markdown = build_run_case_report(store, run_id, request)
             write_case_report_exports(markdown, report_path, generated_by=recorded_actor())
             write_case_report_audit(store, run_id, report_path, request, generated_by=recorded_actor())
+
+
+    @router.get("/api/runs/{run_id}/case-report/file")
+    def download_case_report(run_id: str) -> FileResponse:
+        report_path = default_case_report_path(store, run_id)
+        with run_deliverable_lock(run_id):
+            _ensure_case_report(run_id, report_path)
         return FileResponse(report_path, filename=report_path.name, media_type="text/markdown")
 
 
@@ -170,18 +207,21 @@ def build_reports_router(
         if normalized not in {"md", "html", "docx", "pdf", "manifest"}:
             raise HTTPException(status_code=404, detail="unsupported case report format")
         report_path = default_case_report_path(store, run_id)
-        if not report_path.is_file():
-            request = CaseReportCreateRequest()
-            markdown = build_run_case_report(store, run_id, request)
-            write_case_report_exports(markdown, report_path, generated_by=recorded_actor())
-            write_case_report_audit(store, run_id, report_path, request, generated_by=recorded_actor())
-        path = case_report_export_paths(report_path)[normalized]
-        if not path.is_file():
-            # Export missing for an existing report (e.g. written before the
-            # export set changed) — re-export from the stored markdown so the
-            # template the author chose is preserved instead of regenerated
-            # with default settings.
-            write_case_report_exports(report_path.read_text(encoding="utf-8"), report_path, generated_by=recorded_actor())
+        export_paths = case_report_export_paths(report_path)
+        path = export_paths[normalized]
+        with run_deliverable_lock(run_id):
+            _ensure_case_report(run_id, report_path)
+            if not path.is_file():
+                # Export missing for an existing report (e.g. written before the
+                # export set changed) — re-export from the stored markdown so the
+                # template the author chose is preserved instead of regenerated
+                # with default settings. The report's author stays its author: a
+                # download never records the downloader as ``generated_by``.
+                write_case_report_exports(
+                    report_path.read_text(encoding="utf-8"),
+                    report_path,
+                    generated_by=recorded_report_author(export_paths["manifest"]),
+                )
         media_types = {
             "md": "text/markdown",
             "html": "text/html",
@@ -195,9 +235,10 @@ def build_reports_router(
     def _build_reviewer_bundle(run_id: str, *, include_all: bool, max_items: int, title: str | None) -> dict[str, object]:
         """Reviewer bundle of the run's review payload (case JSON + case-DB review marks).
 
-        409 with the reason when nothing is marked for the report or a marked
-        item cannot be carried (the Korean list names each one). The server's actor is
-        recorded as ``generated_by``; a bundle it replaces moves to the history folder."""
+        The caller holds :func:`run_deliverable_lock`. 409 with the reason when nothing is
+        marked for the report or a marked item cannot be carried (the Korean list names each
+        one). The server's actor is recorded as ``generated_by``; a bundle it replaces moves
+        to the history folder."""
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail=run_not_finished_message(job))
@@ -231,20 +272,29 @@ def build_reports_router(
 
     @router.post("/api/runs/{run_id}/reviewer-bundle")
     def create_reviewer_bundle(run_id: str, request: ReviewerBundleCreateRequest) -> dict[str, object]:
-        return _build_reviewer_bundle(
-            run_id, include_all=request.include_all, max_items=request.max_items, title=request.title
-        )
+        get_job(store, run_id)
+        with run_deliverable_lock(run_id):
+            return _build_reviewer_bundle(
+                run_id, include_all=request.include_all, max_items=request.max_items, title=request.title
+            )
 
 
     @router.get("/api/runs/{run_id}/reviewer-bundle/file")
-    def download_reviewer_bundle(run_id: str) -> FileResponse:
+    def download_reviewer_bundle(run_id: str) -> Response:
         """The bundle the last ``POST …/reviewer-bundle`` built; built here only when none exists
-        (a download is not a new version in the history folder)."""
+        (a download is not a new version in the history folder). The archive is read under the
+        run's lock, so a bundle generated meanwhile never moves it away mid-download."""
         archive = default_reviewer_bundle_dir_path(store, run_id).with_suffix(".zip")
-        if not archive.is_file():
-            payload = _build_reviewer_bundle(run_id, include_all=False, max_items=500, title=None)
-            archive = Path(str(payload.get("archive") or payload.get("outputs", {}).get("archive", "")))
-        return FileResponse(archive, filename=archive.name, media_type="application/zip")
+        with run_deliverable_lock(run_id):
+            if not archive.is_file():
+                payload = _build_reviewer_bundle(run_id, include_all=False, max_items=500, title=None)
+                archive = Path(str(payload.get("archive") or payload.get("outputs", {}).get("archive", "")))
+            content = archive.read_bytes()
+        return Response(
+            content,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{archive.name}"'},
+        )
 
 
     @router.post("/api/runs/{run_id}/bookmarks")
