@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote_plus, urlparse
 
+from ...core.ai_service_domains import AI_CHAT_SERVICE_DOMAINS
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from ...core.sqlite_snapshot import sqlite_snapshot_reference
@@ -171,27 +172,14 @@ CLOUD_SYNC_PATH_TERMS = ("onedrive", "drivefs", "google drive", "googledrive")
 DESKTOP_CLOUD_SYNC_ROW_LIMIT = 200
 DESKTOP_CLOUD_SYNC_TABLE_LIMIT = 8
 
+# Chat services first; the hosts below them also serve non-chat pages and are
+# filtered in detect_ai_service (bing.com, notion.so) or label only the vendor.
 AI_SERVICE_DOMAINS: tuple[tuple[str, str], ...] = (
-    ("chatgpt.com", "ChatGPT"),
-    ("chat.openai.com", "ChatGPT"),
+    *AI_CHAT_SERVICE_DOMAINS,
     ("openai.com", "OpenAI"),
-    ("claude.ai", "Claude"),
-    ("gemini.google.com", "Gemini"),
-    ("bard.google.com", "Gemini"),
-    ("aistudio.google.com", "Google AI Studio"),
-    ("perplexity.ai", "Perplexity"),
-    ("copilot.microsoft.com", "Microsoft Copilot"),
     ("bing.com", "Microsoft Copilot/Bing Chat"),
-    ("poe.com", "Poe"),
     ("huggingface.co", "Hugging Face"),
-    ("grok.com", "Grok"),
     ("x.ai", "Grok"),
-    ("you.com", "You.com"),
-    ("phind.com", "Phind"),
-    ("chat.mistral.ai", "Mistral Le Chat"),
-    ("deepseek.com", "DeepSeek"),
-    ("meta.ai", "Meta AI"),
-    ("character.ai", "Character.AI"),
     ("notion.so", "Notion AI"),
 )
 QUERY_HINT_KEYS = ("q", "query", "prompt", "text", "message", "ask", "p")

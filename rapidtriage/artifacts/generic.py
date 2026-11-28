@@ -30,11 +30,24 @@ DESKTOP_AI_MESSAGE_ROW_LIMIT = 200
 DESKTOP_AI_MESSAGE_TABLE_LIMIT = 5
 EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 URL_RE = re.compile(r"(?i)https?://[^\s\x00\"'<>]{4,300}")
+# Matched against the lowercased path with "/" separators and "_" read as a
+# space. Data folders per vendor docs: docs/ai-usage-coverage-matrix.md.
 LOCAL_LLM_PATH_TERMS = {
     "ollama": "Ollama",
     "lm studio": "LM Studio",
     "lmstudio": "LM Studio",
     "gpt4all": "GPT4All",
+    "/jan/data/": "Jan",
+    "/.jan/": "Jan",
+    "anythingllm": "AnythingLLM",
+    "/msty/": "Msty",
+    "ai.backend.go": "AI:GO",
+    "/.backend-ai-go/": "AI:GO",
+    "/localai/": "LocalAI",
+    "open webui": "Open WebUI",
+    "open-webui": "Open WebUI",
+    "text-generation-webui": "text-generation-webui",
+    "koboldcpp": "KoboldCpp",
 }
 DESKTOP_AI_APP_PATH_TERMS = {
     "chatgpt": "ChatGPT Desktop",
@@ -49,7 +62,7 @@ LOCAL_LLM_MODEL_SUFFIXES = {".gguf", ".ggml", ".bin", ".safetensors"}
 # ``.bin`` is far too generic (firmware, caches, VBA projects): it is only a
 # model file when the content carries a GGUF / safetensors header.
 LOCAL_LLM_MAGIC_REQUIRED_SUFFIXES = {".bin"}
-LOCAL_LLM_CONFIG_SUFFIXES = {".json", ".yaml", ".yml", ".toml", ".log", ".txt", ".sqlite", ".db"}
+LOCAL_LLM_CONFIG_SUFFIXES = {".json", ".jsonl", ".yaml", ".yml", ".toml", ".log", ".txt", ".sqlite", ".db"}
 LOCAL_LLM_PROMPT_SCAN_BYTES = 2 * 1024 * 1024
 LOCAL_LLM_PROMPT_ROW_LIMIT = 200
 LOCAL_LLM_TEXT_PROMPT_TERMS = (
@@ -2276,7 +2289,7 @@ def collect_local_llm_prompt_candidates(
     if suffix in {".sqlite", ".db"}:
         yield from collect_local_llm_sqlite_prompt_candidates(path=path, product=product, source_hashes=source_hashes)
         return
-    if suffix not in {".json", ".yaml", ".yml", ".toml", ".log", ".txt"}:
+    if suffix not in {".json", ".jsonl", ".yaml", ".yml", ".toml", ".log", ".txt"}:
         return
     data = read_prefix(path, LOCAL_LLM_PROMPT_SCAN_BYTES)
     if not data:
@@ -2765,7 +2778,7 @@ def local_llm_model_magic(path: Path) -> str:
 
 
 def infer_local_llm_product(path: Path) -> str:
-    lowered = str(path).lower().replace("_", " ")
+    lowered = str(path).lower().replace("\\", "/").replace("_", " ")
     for term, product in LOCAL_LLM_PATH_TERMS.items():
         if term in lowered:
             return product

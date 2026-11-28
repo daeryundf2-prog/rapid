@@ -11,6 +11,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from urllib.parse import parse_qsl, unquote_plus, urlparse
 
+from ..core.ai_service_domains import AI_CHAT_SERVICE_DOMAINS
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 from ._walk import iter_evidence_paths
@@ -84,16 +85,6 @@ PRIVATE_BROWSING_TERMS = (
     "off the record",
     "guest profile",
 )
-AI_SERVICE_DOMAINS = {
-    "chatgpt.com": "ChatGPT",
-    "chat.openai.com": "ChatGPT",
-    "claude.ai": "Claude",
-    "gemini.google.com": "Gemini",
-    "bard.google.com": "Gemini",
-    "perplexity.ai": "Perplexity",
-    "copilot.microsoft.com": "Microsoft Copilot",
-    "poe.com": "Poe",
-}
 SEARCH_QUERY_PARAM_NAMES = {"q", "query", "search", "search_query", "text", "prompt", "p"}
 SEARCH_ENGINE_DOMAINS = (
     "google.",
@@ -1044,7 +1035,7 @@ def classify_memory_url(url: str, context_preview: str = "") -> dict[str, object
     categories = ["web-url"]
     service = ""
     service_family = ""
-    for domain, label in AI_SERVICE_DOMAINS.items():
+    for domain, label in AI_CHAT_SERVICE_DOMAINS:
         if host == domain or host.endswith("." + domain):
             service = label
             service_family = "ai-service"
