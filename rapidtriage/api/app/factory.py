@@ -102,6 +102,12 @@ CASE_INTAKE_PATH = re.compile(r"/api/cases(/.*)?|/api/runs/[^/]+/(problems|proce
 # retry checks its own paths (``check_retry_paths``).
 RUN_WRITE_PATH = re.compile(r"/api/runs/(?P<run_id>[^/]+)/(?P<rest>.+)")
 RUN_WRITE_EXEMPT = re.compile(r"cancel|retry|analyses/[^/]+/cancel")
+# GET run sub-routes that also write into the run's output folder: deliverables
+# (and their audit records) regenerated on download, the extract zip. The
+# thumbnail cache is skipped instead (``routes_media``).
+RUN_GET_WRITE = re.compile(
+    r"submission-manifest(/file)?|validation-package(/file)?|case-report/file(/[^/]+)?|reviewer-bundle/file|extract/[^/]+/file"
+)
 
 
 def _without_surrogates(value: object) -> object:
@@ -200,11 +206,16 @@ def create_app(
         """403 for a write into a run output folder outside the output roots or inside an evidence root.
 
         Runs registered before the server roots were set, or imported from an
-        evidence folder, otherwise keep writing into the evidence (review F2).
+        evidence folder, otherwise keep writing into the evidence (review F2), also
+        through the GET routes that regenerate a file (#91 re-review B4).
         Registered before the auth middleware, so it runs after it.
         """
-        match = RUN_WRITE_PATH.fullmatch(request.url.path) if request.method.upper() in MUTATING_METHODS else None
-        if match is not None and not RUN_WRITE_EXEMPT.fullmatch(match["rest"]):
+        match = RUN_WRITE_PATH.fullmatch(request.url.path)
+        method = request.method.upper()
+        if match is not None and (
+            (method in MUTATING_METHODS and not RUN_WRITE_EXEMPT.fullmatch(match["rest"]))
+            or (method in {"GET", "HEAD"} and RUN_GET_WRITE.fullmatch(match["rest"]))
+        ):
             try:
                 output_dir = store.get(match["run_id"]).output_dir()
             except KeyError:

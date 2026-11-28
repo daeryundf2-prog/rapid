@@ -125,12 +125,47 @@
   `frontend/src/features/case/BrowsePanel.test.tsx`).
 - Sample case overwrite (`POST /api/sample-case/run`, `rapidtriage sample
   --overwrite`) deletes only an earlier sample folder (marker
-  `.rapidtriage-sample-case` or `rapidtriage-sample-expected.json`); any
-  other non-empty folder is refused instead of deleted recursively. With the
-  output roots set the API default is `<first output root>/rapidtriage-sample`.
+  `.rapidtriage-sample-case`; `rapidtriage-sample-expected.json` alone no
+  longer counts, so a sample made before the marker existed is refused and
+  must be deleted by hand); any other non-empty folder is refused instead of
+  deleted recursively. With the output roots set the API default is
+  `<first output root>/rapidtriage-sample`.
 - Run evidence walks skip a symlink or junction that resolves outside the
   run root, so the analysis server's own files are no longer indexed (docs
   index, case DB) through a link inside collected evidence.
+- Case DB and case catalog paths (`/api/case-db/*`, `/api/case-catalog*`,
+  `/api/runs/{run}/case-db/ensure`, review tools; security audit GAP-1): the
+  allowed roots no longer include the server's working directory or all of
+  `~/.rapidtriage` -- only `~/.rapidtriage/cases`, `RAPIDTRIAGE_CASE_DB_ROOTS`
+  entries (now parsed like the server root lists: absolute local folders
+  only), `create_app(case_db_roots=)` and run output folders (inside the
+  output roots when set). The default catalog
+  `~/.rapidtriage/case-catalog.json` stays usable, also when named
+  explicitly. A case DB name must end in `.db`, `.sqlite` or `.sqlite3`, a
+  catalog name in `.json`, and neither may start with `.`; a path inside an
+  evidence root is refused (403) even under `RAPIDTRIAGE_CASE_DB_ROOTS` or
+  `RAPIDTRIAGE_CASE_DB_UNRESTRICTED`, and `rapidtriage web --remote` refuses
+  to start when a `RAPIDTRIAGE_CASE_DB_ROOTS` entry overlaps an evidence root.
+- `case-db/import-run` and `case-catalog/add-run` `run_output` (GAP-2): an
+  output path (under the output roots, outside every evidence root), so a run
+  made before the roots were set cannot be re-imported; every refusal --
+  outside, missing, not a summary, invalid -- is one 422 with the same text
+  (no file-existence answer). With server roots set, an import opens, hashes
+  and text-extracts only the outputs, documents and evidence source under the
+  run's allowed roots. `load_run_summary` reads only a regular file of at most
+  64 MiB.
+- GET routes no longer write into a run output folder outside the output
+  roots or inside an evidence root (#91 re-review B4, GAP-3):
+  `submission-manifest`, `validation-package` (and `/file`),
+  `case-report/file[/{format}]`, `reviewer-bundle/file` and
+  `extract/{name}/file` are 403 for such a run, and `source-thumbnail`
+  renders it in memory without caching. `extract/{name}/file` refuses `.` and
+  `..` (400) and zips only a folder directly under `extract/` (GAP-9).
+- Root overlap checks (start-up and per request) also catch case-insensitive
+  and Unicode NFC/NFD spellings of an evidence folder (existing folders are
+  compared by file identity) and Windows `\\?\`, `\\?\UNC\` and `\\.\`
+  resolved forms (#91 re-review B2)
+  (`tests/test_remote_followup_paths.py`).
 
 ### Fixed
 

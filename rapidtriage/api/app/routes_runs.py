@@ -1377,11 +1377,12 @@ def build_runs_router(
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail=run_not_finished_message(job))
-        if not EXTRACT_NAME_PATTERN.fullmatch(name):
+        if name in {".", ".."} or not EXTRACT_NAME_PATTERN.fullmatch(name):
             raise HTTPException(status_code=400, detail="invalid extract name")
         base = run_output_dir(job.summary) / "extract"
         folder = base / name
-        if not folder.is_dir():
+        # Only an extract folder directly under ``<output>/extract`` (never the run output itself).
+        if not folder.is_dir() or folder.is_symlink() or folder.resolve().parent != base.resolve():
             raise HTTPException(status_code=404, detail="extract not found")
         files = [p for p in sorted(folder.rglob("*")) if p.is_file() and not p.is_symlink()]
         if sum(p.stat().st_size for p in files) > EXTRACT_ZIP_MAX_BYTES:

@@ -5,7 +5,7 @@ import hashlib
 import json
 import mimetypes
 import os
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -18,6 +18,7 @@ from ...core.case import (
     build_case_summary,
     load_case_payload,
 )
+from ...core.case_catalog import default_case_catalog_path
 from ...core.evidence import identify_evidence
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.jobs import (
@@ -27,6 +28,7 @@ from ...core.jobs import (
     job_progress_view,
     run_output_dir,
 )
+from ...core.local_paths import CASE_DB_ROOTS_ENV, configured_root_entries
 from ...core.run.plan import plan_counts_brief
 from ...core.run.summary import derive_counts
 from ...core.source_paths import (
@@ -359,22 +361,61 @@ def allowed_source_roots(summary: dict[str, object]) -> list[Path]:
     return deduped
 
 
+def run_source_filter(summary: Mapping[str, object]) -> Callable[[str], bool] | None:
+    """With server roots set: whether a path a run summary names lies under the run's allowed roots.
+
+    Guards what a case-DB import opens on the summary's word (output files, docs
+    candidates it extracts, files and the evidence source it hashes): a summary
+    planted in an output folder must not pull server files outside the roots into
+    the index. ``None`` (no filter) when neither server root list is set.
+    """
+    from .analyses import ANALYSIS_OUTPUT_ROOTS_ENV, extra_analysis_roots
+
+    if not (extra_analysis_roots() or extra_analysis_roots(ANALYSIS_OUTPUT_ROOTS_ENV)):
+        return None
+    roots = allowed_source_roots(dict(summary))
+
+    def allowed(raw: str) -> bool:
+        try:
+            resolved = Path(str(raw)).expanduser().resolve()
+        except (OSError, RuntimeError, ValueError):
+            return False
+        return any(resolved == root or is_relative_to(resolved, root) for root in roots)
+
+    return allowed
+
+
+def summary_with_allowed_outputs(summary: Mapping[str, object], allowed: Callable[[str], bool] | None) -> dict[str, object]:
+    """``summary`` whose ``outputs`` keep only the files ``allowed`` (:func:`run_source_filter`) accepts."""
+    outputs = summary.get("outputs")
+    if allowed is None or not isinstance(outputs, Mapping):
+        return dict(summary)
+    return {**summary, "outputs": {key: value for key, value in outputs.items() if value and allowed(str(value))}}
+
+
+CASE_DB_SUFFIXES = (".db", ".sqlite", ".sqlite3")
+CASE_CATALOG_SUFFIXES = (".json",)
+
+
+def case_paths_home() -> Path:
+    """``~/.rapidtriage/cases``: the server account's own case-DB/catalog folder.
+
+    Only this folder: the rest of ``~/.rapidtriage`` (plugins, state) and the
+    server's working directory (often the account's home) are never targets.
+    """
+    return (Path.home() / ".rapidtriage" / "cases").resolve()
+
+
 def case_db_roots_from_env() -> set[Path]:
-    """Extra case-DB roots from RAPIDTRIAGE_CASE_DB_ROOTS (os.pathsep-separated:
-    colon on POSIX, semicolon on Windows)."""
-    roots: set[Path] = set()
-    for item in os.environ.get("RAPIDTRIAGE_CASE_DB_ROOTS", "").split(os.pathsep):
-        item = item.strip()
-        if item:
-            roots.add(Path(item).expanduser().resolve())
-    return roots
+    """Extra case-DB roots from RAPIDTRIAGE_CASE_DB_ROOTS (os.pathsep list: colon on POSIX,
+    semicolon on Windows), parsed like the server root lists: absolute local folders only."""
+    return {Path(entry).resolve() for entry in configured_root_entries(CASE_DB_ROOTS_ENV)}
 
 
 def allowed_case_db_roots(store: RunJobStore, extra_roots: Iterable[str | Path] = ()) -> set[Path]:
-    roots: set[Path] = {
-        (Path.home() / ".rapidtriage").resolve(),
-        Path.cwd().resolve(),
-    }
+    """``~/.rapidtriage/cases``, RAPIDTRIAGE_CASE_DB_ROOTS, ``create_app(case_db_roots=)`` and run
+    output folders (only those inside RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS when it is set)."""
+    roots: set[Path] = {case_paths_home()}
     roots.update(case_db_roots_from_env())
     roots.update(Path(root).expanduser().resolve() for root in extra_roots)
     from .analyses import confine_run_roots
@@ -394,6 +435,13 @@ def case_db_path_restricted() -> bool:
     return not truthy_env("RAPIDTRIAGE_CASE_DB_UNRESTRICTED")
 
 
+def _case_path_name_problem(name: str, kind: str) -> str | None:
+    suffixes = CASE_CATALOG_SUFFIXES if kind == "case catalog" else CASE_DB_SUFFIXES
+    if name.startswith(".") or not name.lower().endswith(suffixes):
+        return f"{kind} file name must end in {'/'.join(suffixes)} and must not start with '.': {name!r}"
+    return None
+
+
 def _resolve_confined_case_path(
     store: RunJobStore,
     raw_path: str | Path,
@@ -401,9 +449,26 @@ def _resolve_confined_case_path(
     *,
     kind: str,
 ) -> Path:
-    candidate = Path(raw_path).expanduser().resolve()
+    """403 unless the case DB/catalog path has an allowed file name, is outside every
+    evidence root and (restricted mode) lies under :func:`allowed_case_db_roots`."""
+    from .case_workspace import inside_evidence_roots
+
+    lexical = Path(os.path.abspath(Path(raw_path).expanduser()))
+    candidate = lexical.resolve()
+    for name in dict.fromkeys((lexical.name, candidate.name)):
+        problem = _case_path_name_problem(name, kind)
+        if problem is not None:
+            raise HTTPException(status_code=403, detail=problem)
+    if inside_evidence_roots(lexical) or inside_evidence_roots(candidate):
+        raise HTTPException(
+            status_code=403,
+            detail=f"{kind} path is inside an evidence root (RAPIDTRIAGE_ANALYSIS_ROOTS): {candidate}; "
+            "case databases and catalogs are never written into evidence",
+        )
     if not case_db_path_restricted():
         return candidate
+    if kind == "case catalog" and candidate == default_case_catalog_path().expanduser().resolve():
+        return candidate  # the catalog the route uses when none is named
     roots = allowed_case_db_roots(store, extra_roots)
     if any(is_relative_to(candidate, root) for root in roots):
         return candidate
@@ -411,8 +476,8 @@ def _resolve_confined_case_path(
         status_code=403,
         detail=(
             f"{kind} path is outside allowed case-db roots: {candidate}; "
-            "allowed roots are run output directories, the server working directory, "
-            "~/.rapidtriage, and RAPIDTRIAGE_CASE_DB_ROOTS entries "
+            "allowed roots are run output directories (inside RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS when set), "
+            "~/.rapidtriage/cases, and RAPIDTRIAGE_CASE_DB_ROOTS entries "
             "(set RAPIDTRIAGE_CASE_DB_UNRESTRICTED=1 to disable this restriction)"
         ),
     )

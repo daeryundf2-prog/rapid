@@ -1043,17 +1043,29 @@ def search_reportability_decision(
     }
 
 
+RUN_SUMMARY_MAX_BYTES = 64 * 1024 * 1024
+
+
 def load_run_summary(run_summary: Mapping[str, object] | Path) -> Mapping[str, object]:
+    """The run summary mapping, or the ``rapidtriage-run-summary.json`` at/in ``run_summary``.
+
+    Only a regular file up to ``RUN_SUMMARY_MAX_BYTES`` is read: a device or FIFO
+    (``/dev/zero``) would otherwise exhaust memory or block the worker.
+    """
     if isinstance(run_summary, Mapping):
         return run_summary
     path = Path(run_summary).expanduser().resolve()
     if path.is_dir():
         path = path / "rapidtriage-run-summary.json"
+    if not path.is_file():
+        raise SearchError(f"run summary not found: {path}")
     try:
+        if path.stat().st_size > RUN_SUMMARY_MAX_BYTES:
+            raise SearchError(f"run summary is larger than {RUN_SUMMARY_MAX_BYTES} bytes: {path}")
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise SearchError(f"run summary not found: {path}") from exc
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise SearchError(f"invalid run summary JSON: {path}") from exc
 
 

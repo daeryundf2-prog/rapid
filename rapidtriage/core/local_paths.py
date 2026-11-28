@@ -3,7 +3,8 @@
 Shared by the API path gates (``api/app/analyses.py``) and ``rapidtriage web``
 (which must check the root lists before the app module is imported: importing
 it creates the app and reads the auth token from the environment). Everything
-here is lexical except ``overlapping_roots``, which also compares resolved forms.
+here is lexical except ``path_within``/``overlapping_roots``, which also compare
+resolved forms and the file identity of the existing folders.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 import logging
 import ntpath
 import os
+import unicodedata
 
 LOGGER = logging.getLogger(__name__)
 
@@ -19,7 +21,18 @@ LOGGER = logging.getLogger(__name__)
 ANALYSIS_ROOTS_ENV = "RAPIDTRIAGE_ANALYSIS_ROOTS"
 # Roots an operator allows for analysis/run *outputs* (same parsing rules).
 ANALYSIS_OUTPUT_ROOTS_ENV = "RAPIDTRIAGE_ANALYSIS_OUTPUT_ROOTS"
+# Extra roots for case databases and case catalogs (same parsing rules); never evidence.
+CASE_DB_ROOTS_ENV = "RAPIDTRIAGE_CASE_DB_ROOTS"
 _BACKSLASH = "\\"
+# Windows extended-length / device prefixes of a case-normalized key (``realpath`` may keep one):
+# ``\\?\UNC\srv\share`` is ``\\srv\share``; ``\\?\c:\x``, ``\??\c:\x`` and ``\\.\c:\x`` are ``c:\x``.
+_EXTENDED_KEY_PREFIXES = (
+    ("\\\\?\\unc\\", "\\\\"),
+    ("\\??\\unc\\", "\\\\"),
+    ("\\\\?\\", ""),
+    ("\\??\\", ""),
+    ("\\\\.\\", ""),
+)
 
 
 def local_path_problem(text: str) -> str | None:
@@ -61,10 +74,19 @@ def configured_root_entries(env: str) -> list[str]:
     return entries
 
 
+def _without_extended_prefix(key: str) -> str:
+    if os.name != "nt":
+        return key
+    for prefix, replacement in _EXTENDED_KEY_PREFIXES:
+        if key.startswith(prefix):
+            return replacement + key[len(prefix):]
+    return key
+
+
 def _root_keys(entry: str) -> set[str]:
-    keys = {os.path.normcase(os.path.abspath(entry))}
+    keys = {_without_extended_prefix(os.path.normcase(os.path.abspath(entry)))}
     try:
-        keys.add(os.path.normcase(os.path.realpath(entry)))
+        keys.add(_without_extended_prefix(os.path.normcase(os.path.realpath(entry))))
     except (OSError, ValueError):
         pass
     return keys
@@ -86,18 +108,70 @@ def _contains(parent: str, child: str) -> bool:
     return child_parts[: len(parent_parts)] == parent_parts
 
 
+def _folded(names: list[str]) -> list[str]:
+    return [unicodedata.normalize("NFC", name).casefold() for name in names]
+
+
+def _existing_anchor(path: str) -> tuple[str | None, list[str]]:
+    """The nearest existing folder of ``path`` (or ``None``) and the names below it."""
+    current = os.path.abspath(path)
+    tail: list[str] = []
+    while not os.path.exists(current):
+        head, name = os.path.split(current)
+        if head == current or not name:
+            return None, tail
+        tail.insert(0, name)
+        current = head
+    return current, tail
+
+
+def _same_file_within(path: str, root: str) -> bool:
+    """Whether an existing ancestor of ``path`` is the same folder as ``root``'s existing part.
+
+    Catches what string keys miss: a case-insensitive or Unicode-normalizing file
+    system (APFS, NTFS) treats ``EVIDENCE``/``evidence`` and NFC/NFD Hangul names as
+    one folder. The names below the existing parts are compared NFC-casefolded.
+    """
+    root_anchor, root_tail = _existing_anchor(root)
+    if root_anchor is None:
+        return False
+    wanted = _folded(root_tail)
+    current = os.path.abspath(path)
+    tail: list[str] = []
+    while True:
+        try:
+            if os.path.samefile(current, root_anchor) and _folded(tail[: len(wanted)]) == wanted:
+                return True
+        except (OSError, ValueError):
+            pass
+        head, name = os.path.split(current)
+        if head == current or not name:
+            return False
+        tail.insert(0, name)
+        current = head
+
+
+def path_within(path: str, root: str) -> bool:
+    """Whether ``path`` is ``root`` or lies under it.
+
+    Case-normalized lexical and resolved keys (Windows ``\\\\?\\`` prefixes dropped),
+    then the file identity (``samefile``) of their existing folders.
+    """
+    if any(_contains(parent, child) for parent in _root_keys(root) for child in _root_keys(path)):
+        return True
+    return _same_file_within(path, root)
+
+
 def overlapping_roots(inputs: list[str], outputs: list[str]) -> list[tuple[str, str]]:
     """``(input root, output root)`` pairs where one folder is, or contains, the other.
 
-    Compared case-normalized in lexical and resolved form, so an output root that
-    is a parent of (or a link into) an evidence root counts: run output would land
-    inside the evidence.
+    Compared by :func:`path_within`, so an output root that is a parent of (or a
+    link into, or a case/Unicode alias of) an evidence root counts: run output
+    would land inside the evidence.
     """
     pairs: list[tuple[str, str]] = []
     for evidence in inputs:
-        evidence_keys = _root_keys(evidence)
         for output in outputs:
-            output_keys = _root_keys(output)
-            if any(_contains(a, b) or _contains(b, a) for a in evidence_keys for b in output_keys):
+            if path_within(output, evidence) or path_within(evidence, output):
                 pairs.append((evidence, output))
     return pairs
