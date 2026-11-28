@@ -756,7 +756,7 @@ kbd {
 
 .status-hint kbd {
   min-width: 1.4em;
-  padding: 0 3px;
+  padding: 0 var(--space-1);
   line-height: 1.3;
   font-size: var(--fs-aux);
 }
@@ -801,6 +801,30 @@ kbd {
     gap: var(--space-2);
     padding: 0 var(--space-2);
   }
+}
+
+/* Key caps on buttons (F15): the key that runs the same command, always visible (commands/CommandButton KeyCap). */
+.keycap {
+  display: inline-block;
+  min-width: 1.5em;
+  margin-left: var(--space-1);
+  padding: 0 var(--space-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-aux);
+  font-weight: 400;
+  line-height: 1.35;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* A filled (pressed / primary) button keeps the cap readable on its own surface. */
+[aria-pressed="true"] > .keycap,
+.button.primary > .keycap {
+  color: var(--text);
 }
 
 /* ? help: 판정 후 이동 setting (F17), one row of radios above the key table. */

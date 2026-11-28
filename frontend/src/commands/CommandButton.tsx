@@ -2,7 +2,6 @@ import { DisabledReason } from "../a11y";
 import { Icon, isIconName } from "../icons";
 import { keyLabel } from "../shortcuts";
 import { useCommandState } from "./registry";
-import "./keycap.css";
 
 /**
  * The visible key cap of a button whose command has a key (F15): the one place the batch bar,
