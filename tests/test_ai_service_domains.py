@@ -207,7 +207,9 @@ class LocalLlmDesktopAppPathTests(unittest.TestCase):
                 jan_thread_message("msg_1", "user", "summarize the incident timeline for the board"),
                 jan_thread_message("msg_2", "assistant", "The intrusion began on 3 November with a phishing email."),
             ]
-            (thread / "messages.jsonl").write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+            # Write bytes, not text: write_text turns "\n" into "\r\n" on Windows and shifts offsets.
+            encoded = [json.dumps(line).encode("utf-8") + b"\n" for line in lines]
+            (thread / "messages.jsonl").write_bytes(b"".join(encoded))
 
             artifacts = run_generic_documents(root)
 
@@ -218,7 +220,7 @@ class LocalLlmDesktopAppPathTests(unittest.TestCase):
                 [(item["details"]["direction"], item["details"]["source_offset"]) for item in prompts],
                 [
                     ("user-prompt-candidate", 0),
-                    ("assistant-response-candidate", len(json.dumps(lines[0]).encode("utf-8")) + 1),
+                    ("assistant-response-candidate", len(encoded[0])),
                 ],
             )
             self.assertTrue(all(item["details"]["product_hint"] == "Jan" for item in prompts))
