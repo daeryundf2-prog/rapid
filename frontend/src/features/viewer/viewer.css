@@ -338,6 +338,51 @@
   white-space: nowrap;
 }
 
+/* 레코드 요약 (F18): 대상 · 시각 의미 · 증거 · 원본 · 위치, then 인용 복사 · 원본 위치 열기 side by side. */
+.record-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.record-head-lines {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0 var(--space-3);
+  margin: 0;
+  font-size: var(--fs-table-aux);
+}
+
+.record-head-lines dt {
+  color: var(--text-muted);
+}
+
+.record-head-lines dd {
+  min-width: 0;
+  margin: 0;
+}
+
+.record-head-target {
+  font-weight: 600;
+}
+
+.record-head-path {
+  display: flex;
+}
+
+/* One record locator part per line (레코드= · 원본 레코드= · SQLite … · 바이트=). */
+.record-head-loc {
+  display: block;
+}
+
+.record-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
 /* 함께 볼 것 (F19): three pivot buttons with counts and key caps, one wrapping line. */
 .viewer-pivots {
   display: flex;

@@ -12,6 +12,8 @@
  */
 
 import { api } from "../../api/client";
+import { fetchSearchRows } from "../../api/collections";
+import { searchSpec } from "../../app/gridBridge";
 import type { GridRow } from "../../contracts/collection";
 import type { Route } from "../../router";
 import { isRecord } from "../grid/columns/common";
@@ -46,24 +48,19 @@ async function timelineWindowCount(runId: string, route: Route, signal: AbortSig
   return { count, capped: false };
 }
 
-/** The search route's keywords as the search API takes them (quoted phrases stay one keyword). */
-export function routeKeywords(q: string | undefined): string[] {
-  const text = (q ?? "").trim();
-  if (!text) return [];
-  const quoted = /^"(.*)"$/.exec(text);
-  return [quoted?.[1] ?? text];
-}
+/** Rows the search grid lists at most (`fetchSearchRows(…, 1000)`): a count that reaches it is "n+". */
+export const SEARCH_LIST_LIMIT = 1000;
 
+/**
+ * 같은 대상: exactly the request the search grid makes when the pivot opens it (`searchSpec(q)`:
+ * the routed keywords with the analyst's search options, up to 1,000 rows), so the count is the
+ * number of rows the list will show. (`summary.match_count` is capped by the request's `limit`.)
+ */
 async function searchCount(runId: string, route: Route, signal: AbortSignal): Promise<PivotCount | null> {
-  const keywords = routeKeywords(route.q);
-  if (keywords.length === 0) return null;
-  const params = new URLSearchParams({ limit: "1", search_mode: "exact" });
-  for (const keyword of keywords) params.append("keyword", keyword);
-  const payload = await api<Record<string, unknown>>(`/api/runs/${enc(runId)}/search?${params}`, { signal });
-  const summary = isRecord(payload.summary) ? payload.summary : {};
-  const count = asNumber(summary.match_count);
-  if (count === null) return null;
-  return { count, capped: payload.truncated === true };
+  const search = searchSpec(route.q);
+  if (!search) return null;
+  const page = await fetchSearchRows(runId, { search }, SEARCH_LIST_LIMIT, signal);
+  return { count: page.rows.length, capped: page.truncated || page.rows.length >= SEARCH_LIST_LIMIT };
 }
 
 async function artifactPathCount(

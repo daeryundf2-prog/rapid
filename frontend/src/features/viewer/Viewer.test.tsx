@@ -115,7 +115,9 @@ describe("Viewer — empty state and toolbar", () => {
       expect(tool(id).getAttribute("data-disabled-reason")).toBe("뷰어에 표시된 행이 없습니다.");
     }
     expect(tool("viewer.mark.relevant").getAttribute("aria-disabled")).toBe("true");
-    expect(screen.getAllByRole("tab").every((t) => t.getAttribute("aria-disabled") === "true")).toBe(true);
+    // No row: no mode is usable, so there is no tab — one folded list says why (F25).
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
+    expect(screen.getByTestId("viewer-unusable-modes").textContent).toContain("쓸 수 없는 보기 8");
   });
 
   it("registers the toolbar actions as commands that report disabledReason", async () => {
@@ -239,31 +241,20 @@ describe("Viewer — loading, modes, focus", () => {
     expect(screen.getAllByRole("tabpanel")).toHaveLength(1);
   });
 
-  it("renders disabled tabs with a Korean reason in the tooltip only — never in the panel body", async () => {
+  it("folds the modes this row cannot show into one 쓸 수 없는 보기 n list with text reasons (F25)", async () => {
     await show({ preview_type: "text", extension: ".txt", text: "hi" });
-    const sqlite = tab("SQLite");
-    expect(sqlite.getAttribute("aria-disabled")).toBe("true");
-    const described = document.getElementById(sqlite.getAttribute("aria-describedby") || "");
-    expect(described?.hasAttribute("hidden")).toBe(true);
-    expect(described?.textContent).toBe("SQLite 데이터베이스가 아닙니다.");
-    fireEvent.click(sqlite);
-    expect(sqlite.getAttribute("aria-selected")).toBe("false");
+    // Unusable modes are not tabs (no dimmed 2.65:1 tab, no tooltip-only reason).
+    expect(screen.queryByRole("tab", { name: "SQLite" })).toBeNull();
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["원본", "헥스", "메타"]);
+    const folded = screen.getByTestId("viewer-unusable-modes");
+    expect(folded.querySelector("summary")?.textContent).toBe("쓸 수 없는 보기 5");
+    const sqlite = folded.querySelector('[data-mode="sqlite"]');
+    expect(sqlite?.textContent).toContain("SQLite 데이터베이스가 아닙니다.");
+    // The reasons never land in the tab panel.
     const panel = screen.getByRole("tabpanel");
-    for (const reason of [
-      "SQLite 데이터베이스가 아닙니다.",
-      "이미지 파일이 아닙니다.",
-      "오디오·비디오 파일이 아닙니다.",
-    ]) {
+    for (const reason of ["SQLite 데이터베이스가 아닙니다.", "이미지 파일이 아닙니다."]) {
       expect(panel.textContent).not.toContain(reason);
     }
-    // Only the hidden description / on-hover tooltip carry reasons; no visible text node has them.
-    const holders = Array.from(document.querySelectorAll("*")).filter(
-      (el) => el.children.length === 0 && el.textContent === "이미지 파일이 아닙니다.",
-    );
-    expect(holders.length).toBeGreaterThan(0);
-    expect(holders.every((el) => el.hasAttribute("hidden") || el.getAttribute("role") === "tooltip")).toBe(
-      true,
-    );
   });
 
   it("uses no banner landmark and no local live region (S5 announcer only)", async () => {
@@ -273,18 +264,17 @@ describe("Viewer — loading, modes, focus", () => {
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("file.bin");
   });
 
-  it("moves between tabs with arrow keys (disabled tabs focus but do not activate)", async () => {
+  it("moves between the usable tabs with arrow keys, activating each", async () => {
     await show({ preview_type: "text", extension: ".txt", text: "hi" });
     tab("원본").focus();
     fireEvent.keyDown(tab("원본"), { key: "ArrowRight" });
     expect(document.activeElement).toBe(tab("헥스"));
     expect(tab("헥스").getAttribute("aria-selected")).toBe("true");
-    fireEvent.keyDown(tab("헥스"), { key: "ArrowRight" });
-    expect(document.activeElement).toBe(tab("SQLite"));
-    expect(tab("헥스").getAttribute("aria-selected")).toBe("true");
-    fireEvent.keyDown(tab("SQLite"), { key: "End" });
+    fireEvent.keyDown(tab("헥스"), { key: "End" });
     expect(document.activeElement).toBe(tab("메타"));
     expect(tab("메타").getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(tab("메타"), { key: "ArrowRight" });
+    expect(document.activeElement).toBe(tab("원본"));
   });
 
   it("moves focus to the selected mode tab when opened with Enter (requestViewerFocus)", async () => {
