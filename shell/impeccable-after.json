@@ -1,0 +1,81 @@
+[
+{"screen":"01-cases","viewport":"1440x900","count":0,"findings":[]}
+,
+{"screen":"01-cases","viewport":"390x844","count":0,"findings":[]}
+,
+{"screen":"02-dashboard","viewport":"1440x900","count":0,"findings":[]}
+,
+{"screen":"02-dashboard","viewport":"390x844","count":1,"findings":[
+  {
+    "antipattern": "straggler",
+    "name": "Straggler",
+    "description": "The last line of this paragraph holds one word, which leaves a hole under the block. Set text-wrap: pretty on body copy (Chrome, Safari) to pull a word down beside it. Where a browser ignores it, edit the last sentence or bind the last two words with a no-break space. Keep it if the break is intended.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "http://127.0.0.1:8842/v2/#/case/ce781cdd7fc7/intake?token=review-token",
+    "line": 0,
+    "snippet": "\"transfer\" alone on the last of 3 lines (27% of the measure)",
+    "advisory": true,
+    "selector": "div.dash-snapshot > dl.detail-grid > dd:nth-of-type(3)"
+  }
+]}
+,
+{"screen":"03-timeline","viewport":"1440x900","count":0,"findings":[]}
+,
+{"screen":"03-timeline","viewport":"390x844","count":0,"findings":[]}
+,
+{"screen":"05-files","viewport":"1440x900","count":1,"findings":[
+  {
+    "antipattern": "em-dash-overuse",
+    "name": "Em-dash overuse",
+    "description": "Em-dash saturation in body copy is an AI cadence tell. Advisory only: humans use em-dashes legitimately, so this fires only on saturation — at least 8 em-dashes (— or --) at a density near one per 500 characters of body text — never on a long article that uses a few. Prefer commas, colons, periods, or parentheses.",
+    "severity": "advisory",
+    "category": "slop",
+    "file": "http://127.0.0.1:8842/v2/#/case/ce781cdd7fc7/explore/files?token=review-token",
+    "line": 0,
+    "snippet": "9 em-dashes in body text",
+    "advisory": true,
+    "selector": "body"
+  }
+]}
+,
+{"screen":"05-files","viewport":"390x844","count":0,"findings":[]}
+,
+{"screen":"06-search","viewport":"1440x900","count":0,"findings":[]}
+,
+{"screen":"06-search","viewport":"390x844","count":0,"findings":[]}
+,
+{"screen":"07-review","viewport":"1440x900","count":0,"findings":[]}
+,
+{"screen":"07-review","viewport":"390x844","count":0,"findings":[]}
+,
+{"screen":"08-report","viewport":"1440x900","count":1,"findings":[
+  {
+    "antipattern": "flat-type-hierarchy",
+    "name": "Flat type hierarchy",
+    "description": "Dominant heading and body roles are separated by less than 1.25× at every step, leaving the size hierarchy flat. Add at least one stronger size step.",
+    "severity": "advisory",
+    "category": "slop",
+    "file": "http://127.0.0.1:8842/v2/#/case/ce781cdd7fc7/report/outputs?token=review-token",
+    "line": 0,
+    "snippet": "Role sizes: body 13px, h1 13px, h3 14px (largest adjacent step 1.08:1; target 1.25:1; weight separates headings from body text)",
+    "advisory": true,
+    "selector": "body"
+  }
+]}
+,
+{"screen":"08-report","viewport":"390x844","count":1,"findings":[
+  {
+    "antipattern": "flat-type-hierarchy",
+    "name": "Flat type hierarchy",
+    "description": "Dominant heading and body roles are separated by less than 1.25× at every step, leaving the size hierarchy flat. Add at least one stronger size step.",
+    "severity": "advisory",
+    "category": "slop",
+    "file": "http://127.0.0.1:8842/v2/#/case/ce781cdd7fc7/report/outputs?token=review-token",
+    "line": 0,
+    "snippet": "Role sizes: body 13px, h3 14px, h2 16px (largest adjacent step 1.14:1; target 1.25:1; weight separates headings from body text)",
+    "advisory": true,
+    "selector": "body"
+  }
+]}
+]
