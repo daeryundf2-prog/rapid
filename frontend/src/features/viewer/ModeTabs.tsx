@@ -87,34 +87,37 @@ export function ModeTabs({ modes, active, onSelect, recordFirst = false }: ModeT
 
   return (
     <div className="viewer-tabs-row">
-      <div className="viewer-tabs" role="tablist" aria-label="보기 모드" onKeyDown={onKeyDown}>
-        {tabs.map((state) => {
-          const selected = state.mode === active;
-          return (
-            <button
-              key={state.mode}
-              ref={(element) => {
-                if (element) refs.current.set(state.mode, element);
-                else refs.current.delete(state.mode);
-              }}
-              type="button"
-              role="tab"
-              id={tabId(state.mode)}
-              data-mode={state.mode}
-              className="viewer-tab"
-              aria-selected={selected}
-              data-viewer-focus={selected ? "" : undefined}
-              // Every tab controls its own panel (inactive panels are rendered `hidden`
-              // and empty), and each panel is labelled by its tab.
-              aria-controls={panelId(state.mode)}
-              tabIndex={selected ? 0 : -1}
-              onClick={() => onSelect(state.mode)}
-            >
-              {MODE_LABELS[state.mode]}
-            </button>
-          );
-        })}
-      </div>
+      {/* No usable mode (no row yet): no empty tablist — the folded list below says why. */}
+      {tabs.length ? (
+        <div className="viewer-tabs" role="tablist" aria-label="보기 모드" onKeyDown={onKeyDown}>
+          {tabs.map((state) => {
+            const selected = state.mode === active;
+            return (
+              <button
+                key={state.mode}
+                ref={(element) => {
+                  if (element) refs.current.set(state.mode, element);
+                  else refs.current.delete(state.mode);
+                }}
+                type="button"
+                role="tab"
+                id={tabId(state.mode)}
+                data-mode={state.mode}
+                className="viewer-tab"
+                aria-selected={selected}
+                data-viewer-focus={selected ? "" : undefined}
+                // Every tab controls its own panel (inactive panels are rendered `hidden`
+                // and empty), and each panel is labelled by its tab.
+                aria-controls={panelId(state.mode)}
+                tabIndex={selected ? 0 : -1}
+                onClick={() => onSelect(state.mode)}
+              >
+                {MODE_LABELS[state.mode]}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
       {unusable.length ? (
         <details className="viewer-tabs-unavailable" data-testid="viewer-unusable-modes">
           <summary>쓸 수 없는 보기 {unusable.length}</summary>

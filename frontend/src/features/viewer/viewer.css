@@ -50,6 +50,12 @@
   gap: var(--space-1);
 }
 
+/* The history buttons' disabled-reason tooltip opens over the verdict row below them (F20):
+   it is read, never in the way of a click on 관련 있음 / 재검토 underneath. */
+.viewer-header [role="tooltip"] {
+  pointer-events: none;
+}
+
 .viewer-heading {
   flex: 1;
   min-width: 0;

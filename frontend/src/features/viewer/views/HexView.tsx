@@ -263,6 +263,20 @@ export function HexView({ runId, path, size: declaredSize, highlight, staticRows
 
   const cursorRow = Math.floor(cursor / BYTES_PER_ROW);
   const cursorValue = byteAt(cursor);
+  // Polite cursor read-out (F26) through the one app announcer: offset, value, character and
+  // signature / record edges, once the analyst moves the cursor.
+  const cursorSentence = moved
+    ? hexCursorSentence(
+        cursor,
+        size,
+        typeof cursorValue === "number" ? cursorValue : null,
+        hitByOffset.get(cursor),
+        highlight,
+      )
+    : "";
+  useEffect(() => {
+    if (cursorSentence) announce(cursorSentence);
+  }, [cursorSentence]);
   const windowTop = scaled ? scrollTop : renderStart * HEX_ROW_HEIGHT;
   const rows: number[] = [];
   const renderFrom = scaled ? firstRow : renderStart;
@@ -335,18 +349,6 @@ export function HexView({ runId, path, size: declaredSize, highlight, staticRows
         >
           문자 열
         </button>
-        {/* Polite cursor read-out (F26): offset, value, character, signature / record edges. */}
-        <span className="viewer-sr-only" aria-live="polite" data-testid="hex-live">
-          {moved
-            ? hexCursorSentence(
-                cursor,
-                size,
-                typeof cursorValue === "number" ? cursorValue : null,
-                hitByOffset.get(cursor),
-                highlight,
-              )
-            : ""}
-        </span>
       </form>
       {gotoError ? (
         <p className="viewer-error" id="hex-goto-error">
