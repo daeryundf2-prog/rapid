@@ -21,6 +21,8 @@ export interface SlotProps {
   viewer: { drawer: boolean };
   "run-dialog": { open: boolean; onClose: () => void };
   "case-picker": Record<never, never>;
+  /** Evidence integrity seal after the case picker (F8, features/case/IntegritySeal). */
+  "integrity-seal": Record<never, never>;
   /** Extra status-bar chips (analysis job progress). */
   "status-extra": Record<never, never>;
 }

@@ -569,6 +569,22 @@ kbd {
     width: auto;
     max-width: none;
   }
+
+  /* The integrity seal shares the case row: the case name keeps a few letters ("fold…") instead
+     of vanishing behind the seal and 실행, and the search gives way down to its placeholder width.
+     (Own block with .topbar scope so other phone rules for .topbar-case stay untouched.) */
+  .topbar .topbar-case {
+    max-width: 50%;
+  }
+
+  .topbar .case-picker-name {
+    min-width: 3em;
+  }
+
+  .topbar .topbar-search,
+  .topbar .global-search {
+    min-width: 72px;
+  }
 }
 
 /* --- buttons: controls.css (.button .primary/.secondary/.ghost/.danger, .icon-btn) --- */

@@ -4,6 +4,17 @@
 
 ### Added
 
+- Console 접수 = 사건 개요 (design overhaul F6–F9): an evidence integrity seal
+  in the top bar after the case picker (깨짐 / 미검증 / 검증 중 / 대조 일치 with
+  the SHA-256 prefix / 계산만 됨, shape + word, compact on phones; nothing for
+  caseless runs or folder evidence) with per-evidence hashes and 검증 실행; a
+  먼저 할 일 list (hash, processing problems, unreviewed indicator candidates,
+  관련 있음 not in the report); key numbers that name what they count; activity
+  by date from the timeline histogram with the busiest day opening the
+  timeline; statuses with their subject (처리 / 처리 오류 / 사건); the settings
+  snapshot folded to one line; detail cards in balanced columns, folded by
+  default on a first visit.
+
 - `omp-pi` collector for oh-my-pi (omp), pi, senpi and OmO: session JSONL
   under `<home>/agent/sessions` (subagent transcripts included, linked by
   `parent_session`), sessions in other folders recognized by their `session`

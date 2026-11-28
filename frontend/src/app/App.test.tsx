@@ -178,10 +178,11 @@ describe("App shell", () => {
     // 취소 / 재시도 only show when they apply (review #8): a running run offers 취소 only.
     expect(screen.queryByTestId("run-retry")).toBeNull();
     expect(screen.getByTestId("run-cancel").getAttribute("aria-disabled")).toBeNull();
-    // 접수 dashboard (S7) replaces the grid on the intake node.
-    await waitFor(() => expect(screen.getByTestId("intake-pane").textContent).toContain("registry"));
+    // 접수 dashboard (S7) replaces the grid on the intake node: statuses with their subject (F9) on
+    // top; the processing-details card is folded on a first visit.
+    await waitFor(() => expect(screen.getByTestId("dash-status").textContent).toContain("처리 오류1"));
     const intake = screen.getByTestId("intake-pane");
-    expect(intake.textContent).toContain("inventory");
+    expect(intake.textContent).toContain("처리실행 중");
     expect(intake.textContent).toContain("케이스 처리 세부");
     expect(intake.textContent).toContain("런이 완료되면 표시됩니다.");
   });

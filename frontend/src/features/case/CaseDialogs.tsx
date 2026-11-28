@@ -11,7 +11,6 @@ import {
   type CaseDetail,
   type CasePatchBody,
   createCaseRun,
-  getCase,
   getProcessingSnapshot,
   getRunProblems,
   koCompare,
@@ -25,6 +24,7 @@ import { caseRunBody, caseRunFormReason } from "./CaseWizard";
 import { snapshotQueryKey } from "./caseLink";
 import { ErrorText } from "./ErrorText";
 import { EvidenceFields } from "./EvidenceFields";
+import { caseQueryKey, useCaseDetail } from "./integrity";
 import { Modal } from "./Modal";
 import { ReasonButton } from "./ReasonButton";
 import { RunOptionsFields } from "./RunOptionsFields";
@@ -47,18 +47,8 @@ function messageOf(error: unknown): string {
   return error instanceof ApiError || error instanceof Error ? error.message : "알 수 없는 오류";
 }
 
-const caseQueryKey = (caseId: string) => ["case", caseId] as const;
 /** Reason shown while a request is in flight (no double submit). */
 const PENDING = "처리 중입니다";
-
-function useCaseQuery(caseId: string | undefined) {
-  return useQuery({
-    queryKey: caseQueryKey(caseId ?? ""),
-    queryFn: () => getCase(caseId as string),
-    enabled: Boolean(caseId),
-    retry: false,
-  });
-}
 
 function invalidateCase(queryClient: ReturnType<typeof useQueryClient>, caseId: string, runId?: string) {
   void queryClient.invalidateQueries({ queryKey: ["cases"] });
@@ -276,7 +266,7 @@ export function CaseEditDialog({
 }) {
   const queryClient = useQueryClient();
   const id = useId();
-  const detail = useCaseQuery(caseId);
+  const detail = useCaseDetail(caseId);
   const [form, setForm] = useState<CaseInfoForm | null>(null);
   const current = form ?? (detail.data ? infoFromCase(detail.data) : null);
   const errors = current ? validateCaseInfo({ ...current, caseRoot: "" }) : {};
@@ -375,7 +365,7 @@ export function AddEvidenceDialog({
 }) {
   const queryClient = useQueryClient();
   const id = useId();
-  const detail = useCaseQuery(caseId);
+  const detail = useCaseDetail(caseId);
   const existing = (detail.data?.evidence ?? []).map((item) => ({
     ...newEvidenceDraft([]),
     key: item.citation_id,
@@ -449,7 +439,7 @@ export function AddRunDialog({
 }) {
   const queryClient = useQueryClient();
   const id = useId();
-  const detail = useCaseQuery(caseId);
+  const detail = useCaseDetail(caseId);
   const [picked, setEvidenceId] = useState(evidenceCitationId ?? "");
   const [form, setForm] = useState<RunForm>(DEFAULT_RUN_FORM);
   const [advanced, setAdvanced] = useState(false);

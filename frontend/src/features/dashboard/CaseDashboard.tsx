@@ -1,20 +1,24 @@
 /**
- * 접수 dashboard (plan §9 X1/X9/X10/X18, AXIOM 케이스 대시보드 §2a): a card grid
- * — 3 columns from 1200 px, 1 column below — replacing the single-column
- * intake summary. Mounted in the grid slot when the route's collection is
- * "intake" (app/IntakePane.tsx).
+ * 접수 dashboard = 사건 개요 (design overhaul F6/F7/F9; plan §9 X1/X9/X10/X18): statuses with
+ * their subject, 먼저 할 일, the case's key numbers and activity by date on top, then the detail
+ * cards in balanced columns (on a first visit only the case intake cards are open: case info,
+ * evidence, settings summary, problems, case memo). Mounted in the grid slot when the route's
+ * collection is "intake" (app/IntakePane.tsx).
  */
 
+import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
+import { getReviewMap } from "../../api/caseDb";
 import { runDisplayName } from "../../app/collections";
-import { StatusBadge } from "../../components/Badge";
 import { WaitPanel } from "../../components/WaitPanel";
 import type { CollectionId, ReviewStatus } from "../../contracts/collection";
 import type { IconName } from "../../icons";
 import { useRoute } from "../../state/hooks";
 import { isRunActive } from "../../state/slices/runs";
 import { useRunCaseLink } from "../case/caseLink";
+import { runEvidence, sealState } from "../case/integrity";
 import { useSearchState } from "../case/searchState";
+import { reviewMapKey } from "../grid/reviewMap";
 import { Card, CardEmpty, CardError, CardLoading, useCardLayout } from "./Card";
 import {
   CaseNotesCard,
@@ -38,11 +42,14 @@ import {
 } from "./caseCards";
 import { disclosureItems, runWarnings } from "./disclosures";
 import { categoryBars, keywordRows, reviewSummary, stageRows } from "./model";
+import { ActivityByDate, DashStatus, OverviewFigures, TodoList } from "./Overview";
+import { type FigureId, isEmptyRun, overviewFigures, type TodoItem, todoItems } from "./overviewModel";
 import { useDashboardData } from "./useDashboardData";
 import "./dashboard.css";
 
 export const CARD_IDS = [
-  // Case intake (AXIOM adoption E1).
+  // Case intake (AXIOM adoption E1); the first five stay open on a first visit (case identity
+  // first: reviewers and report recipients check whose case this is before anything else).
   "case-info",
   "case-evidence",
   "snapshot",
@@ -59,6 +66,9 @@ export const CARD_IDS = [
   "start",
 ] as const;
 export type CardId = (typeof CARD_IDS)[number];
+
+/** Collapsed until the examiner opens them (the overview above already carries their headline). */
+export const DEFAULT_COLLAPSED_CARDS: readonly CardId[] = CARD_IDS.slice(5);
 
 const CARD_META: Record<CardId, { title: string; icon: IconName }> = {
   "case-info": { title: "사건 정보", icon: "inbox" },
@@ -79,16 +89,35 @@ const CARD_META: Record<CardId, { title: string; icon: IconName }> = {
 
 const WAIT_FOR_RUN = "런이 완료되면 표시됩니다.";
 
+const FIGURE_COLLECTION: Record<Exclude<FigureId, "marks">, CollectionId> = {
+  timeline: "timeline",
+  files: "files",
+  artifacts: "artifacts",
+  indicators: "indicators",
+};
+
 export function CaseDashboard({ runId }: { runId: string }) {
-  const { openCollection } = useRoute();
+  const { openCollection, navigate } = useRoute();
   const applySaved = useSearchState((s) => s.applySaved);
   const data = useDashboardData(runId);
-  const { layout, setCollapsed, setHidden, showAll } = useCardLayout();
+  const { layout, setCollapsed, setHidden, showAll } = useCardLayout(DEFAULT_COLLAPSED_CARDS);
   const { detail, completed, summary, tree, review, saved, dashboard, notes, issues } = data;
   const snapshot = useRunCaseLink(runId);
   const runFinished = Boolean(detail.data) && !isRunActive(detail.data);
   const intake = useCaseIntakeData(runId, snapshot.data, runFinished);
   const caseDetail = intake.detail.data;
+  // The raw marks (not the locator map): marks without a run-output locator still count. A
+  // truncated map makes the mark-based to-dos bounds (todoItems says so).
+  const marks = useQuery({
+    queryKey: [...reviewMapKey(runId), "marks"],
+    queryFn: ({ signal }) =>
+      getReviewMap(runId, signal).then((payload) => ({
+        marks: payload.marks ?? [],
+        truncated: payload.truncated === true,
+      })),
+    enabled: completed,
+    retry: false,
+  });
 
   const counts = summary.data?.summary?.counts;
   const categories = useMemo(() => categoryBars(tree.data), [tree.data]);
@@ -96,6 +125,27 @@ export function CaseDashboard({ runId }: { runId: string }) {
   const keywords = useMemo(
     () => keywordRows(dashboard.data?.profile.keywords ?? [], saved.data ?? []),
     [dashboard.data, saved.data],
+  );
+  const seal = useMemo(
+    () =>
+      caseDetail ? sealState(runEvidence(caseDetail.evidence, snapshot.data?.evidence_citation_id)) : null,
+    [caseDetail, snapshot.data?.evidence_citation_id],
+  );
+  const todo = useMemo(
+    () =>
+      todoItems({
+        seal,
+        problems: intake.problems.data,
+        indicators: counts?.indicators,
+        marks: marks.data?.marks,
+        marksTruncated: marks.data?.truncated,
+      }),
+    [seal, intake.problems.data, counts?.indicators, marks.data],
+  );
+  const scanned = summary.data?.summary?.scanned_file_count;
+  const figures = useMemo(
+    () => overviewFigures(counts, review.data, typeof scanned === "number" ? scanned : undefined),
+    [counts, review.data, scanned],
   );
 
   if (detail.isPending) {
@@ -150,12 +200,42 @@ export function CaseDashboard({ runId }: { runId: string }) {
   });
   const visible = (id: CardId) => !layout.hidden.includes(id);
   const hiddenCount = CARD_IDS.filter((id) => layout.hidden.includes(id)).length;
+  /** Opens (and un-hides) a card, scrolls to it and puts focus on its toggle. */
+  const reveal = (id: CardId) => {
+    setHidden(id, false);
+    setCollapsed(id, false);
+    requestAnimationFrame(() => {
+      const section = document.querySelector<HTMLElement>(`[data-card="${id}"]`);
+      section?.scrollIntoView?.({ block: "start" });
+      section?.querySelector<HTMLElement>(".dash-card-toggle")?.focus({ preventScroll: true });
+    });
+  };
+  const onTodo = (item: TodoItem) => {
+    if (item.id === "hash") reveal("case-evidence");
+    else if (item.id === "problems") reveal("problems");
+    else if (item.id === "indicators") go("indicators");
+    // 관련 있음 AND 보고서 미포함: the board's 보고서 column reads "포함" / "미포함" (columns/review.ts).
+    else
+      navigate({
+        runId,
+        collection: "review",
+        status: "relevant",
+        cf: [{ col: "report", op: ":", value: "미포함" }],
+      });
+  };
+  const known = (query: { data?: unknown; isError: boolean }) => query.data !== undefined || query.isError;
+  const todoReady =
+    runFinished &&
+    known(intake.problems) &&
+    (!completed || (known(marks) && known(summary))) &&
+    known(snapshot) &&
+    (!intake.caseId || known(intake.detail));
 
   return (
     <div className="dash" data-testid="intake-pane">
       <div className="dash-head">
         <h1>{runDisplayName(run)}</h1>
-        <StatusBadge status={String(run.status)} />
+        <DashStatus run={run} caseDetail={caseDetail} />
         {caseDetail ? (
           <p className="dash-crumb" data-testid="case-crumb">
             <span className="visually-hidden">케이스 › 증거 › 런: </span>
@@ -167,6 +247,31 @@ export function CaseDashboard({ runId }: { runId: string }) {
             숨긴 카드 {hiddenCount}개 다시 표시
           </button>
         ) : null}
+      </div>
+
+      <TodoList
+        items={todo}
+        ready={todoReady}
+        waiting={!runFinished}
+        completed={completed}
+        seal={seal}
+        caseId={intake.caseId}
+        onAction={onTodo}
+      />
+
+      <div className="dash-top">
+        <OverviewFigures
+          run={run}
+          figures={completed ? figures : []}
+          empty={completed && isEmptyRun(counts)}
+          review={review.data}
+          error={summary.isError ? String(summary.error?.message ?? "") : null}
+          onOpen={(figure, status) =>
+            figure === "marks" ? go("review", status ? { status } : {}) : go(FIGURE_COLLECTION[figure])
+          }
+          onShowProblems={() => reveal("problems")}
+        />
+        <ActivityByDate runId={runId} completed={completed} events={counts?.timeline_events} />
       </div>
 
       <div className="dash-grid">
@@ -195,7 +300,9 @@ export function CaseDashboard({ runId }: { runId: string }) {
         {visible("case-evidence") ? (
           <Card
             {...cardProps("case-evidence", () => void intake.detail.refetch())}
-            meta={caseDetail ? `증거 ${caseDetail.evidence_count} · 런 ${caseDetail.run_count}` : undefined}
+            meta={
+              caseDetail ? `증거 ${caseDetail.evidence_count}건, 런 ${caseDetail.run_count}개` : undefined
+            }
           >
             {snapshot.isPending || (intake.caseId && intake.detail.isPending) ? (
               <CardLoading />

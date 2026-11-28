@@ -140,6 +140,8 @@ export function TopBar() {
       <Brand />
       <div className="topbar-case">
         <Slot name="case-picker" fallback={<CasePickerFallback />} />
+        {/* Evidence integrity seal (F8): stays visible at every width, compact on phones. */}
+        <Slot name="integrity-seal" />
         <CommandButton command="case.run-dialog" variant="ghost" label="실행" testId="run-dialog-button" />
       </div>
       <div className="topbar-search">

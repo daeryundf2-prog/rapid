@@ -9,6 +9,7 @@ import { CommandButton } from "../commands/CommandButton";
 import { AnalysisPane } from "../features/analysis/AnalysisPane";
 import { AnalysisProgressChip } from "../features/analysis/AnalysisProgressChip";
 import { useCaseDialogs } from "../features/case/dialogs";
+import { IntegritySeal } from "../features/case/IntegritySeal";
 import { DerivedPane } from "../features/derived/DerivedPane";
 import { FsExplorerLayout, fsExplorerOpen } from "../features/explorers/FsExplorer";
 import { RegistryExplorer } from "../features/explorers/RegistryExplorer";
@@ -94,4 +95,5 @@ export function registerAppSlots(): void {
   connectViewerToShell();
   registerSlot("run-dialog", RunDialogBridge);
   registerSlot("status-extra", AnalysisProgressChip);
+  registerSlot("integrity-seal", IntegritySeal);
 }

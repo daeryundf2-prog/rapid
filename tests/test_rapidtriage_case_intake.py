@@ -710,6 +710,78 @@ class CaseIntakeApiTests(unittest.TestCase):
         self.assertEqual(added.status_code, 201, added.text)
         self.assertEqual(added.json()["evidence"]["hash_status"], "computed")
 
+    def test_evidence_carries_the_time_of_its_last_finished_hash(self) -> None:
+        """review #101 P2-1: a match is a result of its time; the payload names that time."""
+        case = self.create_case()
+        export = self.temp / "export.bin"
+        export.write_bytes(b"bytes to hash")
+        added = self.client.post(f"/api/cases/{case['case_id']}/evidence", json={
+            "evidence_number": "E-01", "source_type": "export", "path": str(export), "verify_hash": False})
+        self.assertEqual(added.status_code, 201, added.text)
+        self.assertIsNone(added.json()["evidence"]["hash_checked_at"])
+        with self.finish_hash_before_response():
+            hashed = self.client.post(
+                f"/api/cases/{case['case_id']}/evidence/{added.json()['evidence']['citation_id']}/hash")
+        self.assertEqual(hashed.status_code, 202, hashed.text)
+        workspace = self.client.app.state.case_workspace
+        with closing(sqlite3.connect(workspace.path())) as connection:
+            audited = connection.execute(
+                "SELECT MAX(timestamp) FROM audit_event WHERE action = 'evidence.hash'").fetchone()[0]
+        listed = self.client.get(f"/api/cases/{case['case_id']}/evidence").json()["evidence"][0]
+        self.assertEqual(listed["hash_status"], "computed")
+        self.assertEqual(listed["hash_checked_at"], audited)
+        self.assertEqual(hashed.json()["evidence"]["hash_checked_at"], audited)
+
+    def test_rehash_rechecks_the_stored_path_against_the_server_roots_of_now(self) -> None:
+        """review #101 re-review P2: 다시 검증 never hashes outside the roots a restarted server allows."""
+        case = self.create_case()
+        old_root = self.temp / "old-root"
+        new_root = self.temp / "new-root"
+        old_root.mkdir()
+        new_root.mkdir()
+        outside = old_root / "outside.bin"
+        inside = new_root / "inside.bin"
+        outside.write_bytes(b"outside bytes")
+        inside.write_bytes(b"inside bytes")
+        url = f"/api/cases/{case['case_id']}/evidence"
+        with patch.dict(os.environ, {"RAPIDTRIAGE_ANALYSIS_ROOTS": os.pathsep.join([str(old_root), str(new_root)])}):
+            added = [
+                self.client.post(url, json={"evidence_number": number, "source_type": "export", "path": str(path),
+                                            "verify_hash": False}).json()["evidence"]
+                for number, path in (("E-01", outside), ("E-02", inside))
+            ]
+            with self.finish_hash_before_response():
+                first = self.client.post(f"{url}/{added[0]['citation_id']}/hash")
+        self.assertEqual(first.status_code, 202, first.text)
+        before = self.client.get(url).json()["evidence"][0]
+        self.assertEqual(before["hash_status"], "computed")
+        self.client.close()
+        workspace_path = self.client.app.state.case_workspace.path()
+        with patch.dict(os.environ, {"RAPIDTRIAGE_ANALYSIS_ROOTS": str(new_root)}):
+            # A new server over the same workspace DB, now allowing only new-root.
+            self.client, self.store = client_for(self.temp)
+            with closing(sqlite3.connect(workspace_path)) as connection:
+                audits = connection.execute("SELECT COALESCE(MAX(id), 0) FROM audit_event").fetchone()[0]
+            with self.finish_hash_before_response():
+                refused = self.client.post(f"{url}/{added[0]['citation_id']}/hash")
+                allowed = self.client.post(f"{url}/{added[1]['citation_id']}/hash")
+            self.assertEqual(refused.status_code, 422, refused.text)
+            self.assertIn("허용 범위", refused.json()["detail"])
+            self.assertEqual(allowed.status_code, 202, allowed.text)
+            listed = {row["citation_id"]: row for row in self.client.get(url).json()["evidence"]}
+        after = listed[added[0]["citation_id"]]
+        # Nothing hashed, nothing recorded for the refused item: status, digests and check time unchanged.
+        self.assertEqual(after["hash_status"], "computed")
+        self.assertEqual(after["hashes"], before["hashes"])
+        self.assertEqual(after["hash_checked_at"], before["hash_checked_at"])
+        self.assertEqual(listed[added[1]["citation_id"]]["hash_status"], "computed")
+        with closing(sqlite3.connect(workspace_path)) as connection:
+            refused_audits = connection.execute(
+                "SELECT COUNT(*) FROM audit_event WHERE target_id = ? AND id > ?",
+                (added[0]["citation_id"], audits),
+            ).fetchone()[0]
+        self.assertEqual(refused_audits, 0)
+
     def test_worker_of_this_server_that_recorded_nothing_reads_interrupted(self) -> None:
         case = self.create_case()
         export = self.temp / "export.bin"

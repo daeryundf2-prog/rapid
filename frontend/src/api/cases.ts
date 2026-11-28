@@ -36,6 +36,8 @@ export interface CaseEvidence {
   hash_status_label: string;
   hash_message: string;
   hashes: Partial<Record<"md5" | "sha1" | "sha256", string>>;
+  /** When the last hash finished (matched / computed / mismatched / failed), from the audit log. */
+  hash_checked_at?: string | null;
   added_at: string | null;
   runs: CaseRunBrief[];
   /** The run gate: folders always run; a file only when an adapter reads it directly (else 등록만). */
