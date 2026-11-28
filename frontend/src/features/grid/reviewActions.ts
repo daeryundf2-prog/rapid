@@ -466,7 +466,8 @@ async function applyBody(
   rows: GridRow[],
   body: MarkPayload,
   mark: ReviewMarkBody,
-  label: string,
+  // What the conflict prompt calls this write; callers that restore or replay marks keep the default.
+  label = "판정",
 ): Promise<ApplyResult> {
   const targets = rows.map(reviewTargetOf);
   const unresolved = targets.filter((t) => t === null).length;
