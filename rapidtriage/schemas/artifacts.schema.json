@@ -311,7 +311,8 @@
                 "codex-cli",
                 "gemini-cli",
                 "editor-chat",
-                "agent-mcp"
+                "agent-mcp",
+                "herdr-sessions"
               ]
             }
           },

@@ -58,6 +58,7 @@ export const KIND_CATEGORY: Readonly<Record<string, KindMeta>> = {
   "gemini-cli": { category: "application-usage", icon: "app" },
   "editor-chat": { category: "application-usage", icon: "app" },
   "agent-mcp": { category: "application-usage", icon: "app" },
+  "herdr-sessions": { category: "application-usage", icon: "app" },
   browser: { category: "web", icon: "globe" },
   // R5 L3: BitTorrent clients / .torrent / eMule.
   p2p: { category: "web", icon: "globe" },

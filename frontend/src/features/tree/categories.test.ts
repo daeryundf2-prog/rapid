@@ -17,6 +17,7 @@ const ENGINE_KINDS = [
   "codex-cli",
   "editor-chat",
   "gemini-cli",
+  "herdr-sessions",
   "android-apk",
   "browser",
   "cloud-export",
