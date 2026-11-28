@@ -123,8 +123,9 @@ export const reviewCollection: CollectionDef = {
     col.title("요약", 340),
     col.field("tags", "태그", 160, ["analysis", "compact"], (r) => r.tags.join(", ")),
     col.field("note", "메모", 260, ["analysis"], (r) => fieldStr(r, "note")),
+    // "미포함" spelled out (not blank) so 접수's 관련 있음·보고서 미포함 link can filter on it.
     col.field("report", "보고서", 80, ["analysis", "compact"], (r) =>
-      r.fields.includeInReport ? "포함" : "",
+      r.fields.includeInReport ? "포함" : "미포함",
     ),
     // 시각 never narrower than "2026-10-18 08:02:48" at 13px (review #9: no clipped seconds; the
     // header names the zone).
