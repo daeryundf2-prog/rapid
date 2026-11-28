@@ -7,6 +7,10 @@ input_json: string
 root: (string | null)
 generated_at: string
 output_dir: string
+/**
+ * Server actor who asked for the export (web API; absent for CLI extracts)
+ */
+requested_by?: string
 filters: {
 name_contains: string[]
 path_contains: string[]

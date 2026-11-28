@@ -432,8 +432,10 @@ def build_hash_only_report(
     return "\n".join(lines)
 
 
-def write_case_report_exports(markdown: str, markdown_path: Path) -> dict[str, str]:
-    """Write markdown plus portable HTML, DOCX, PDF, and hash manifest variants."""
+def write_case_report_exports(markdown: str, markdown_path: Path, *, generated_by: str | None = None) -> dict[str, str]:
+    """Write markdown plus portable HTML, DOCX, PDF, and hash manifest variants.
+
+    ``generated_by`` (the web server's actor) is recorded in the hash manifest."""
     markdown_path.parent.mkdir(parents=True, exist_ok=True)
     paths = case_report_export_paths(markdown_path)
     paths["md"].write_text(markdown, encoding="utf-8")
@@ -441,6 +443,8 @@ def write_case_report_exports(markdown: str, markdown_path: Path) -> dict[str, s
     write_case_report_docx(markdown, paths["docx"])
     write_case_report_pdf(markdown, paths["pdf"])
     manifest = build_case_report_export_manifest(paths)
+    if generated_by:
+        manifest["generated_by"] = generated_by
     paths["manifest"].write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {key: str(path) for key, path in paths.items()}
 

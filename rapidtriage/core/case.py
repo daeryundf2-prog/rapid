@@ -125,6 +125,7 @@ def create_or_update_case_payload(
     note: str | None = None,
     review_status: str | None = None,
     include_in_report: bool | None = None,
+    actor: str | None = None,
 ) -> dict[str, object]:
     resolved_case_path = case_path.expanduser().resolve()
     payload = (
@@ -153,6 +154,7 @@ def create_or_update_case_payload(
             note=note,
             review_status=review_status,
             include_in_report=include_in_report,
+            actor=actor,
         )
     elif source_pointer or bookmark_id or tags or remove_tags or note or review_status or include_in_report is not None:
         raise CaseBookmarkError("--source is required when using bookmark-specific options")
@@ -237,7 +239,13 @@ def upsert_bookmark(
     note: str | None,
     review_status: str | None,
     include_in_report: bool | None,
+    actor: str | None = None,
 ) -> None:
+    """Add the row's bookmark or update it, appending to its ``review_history``.
+
+    ``actor`` (the server's actor for web writes) is recorded as the bookmark's ``created_by``
+    / ``updated_by`` and on each history entry; ``None`` (CLI) records no name.
+    """
     source_command = str(source_payload.get("command") or "").strip()
     item = resolve_case_source_row(source_payload, source_command=source_command, source_pointer=source_pointer)
 
@@ -297,6 +305,7 @@ def upsert_bookmark(
             "bookmark_id": bookmark_id.strip() if bookmark_id else stable_key,
             "created_at": now,
             "updated_at": now,
+            **({"created_by": actor, "updated_by": actor} if actor else {}),
             "summary": summary,
             "tags": merged_tags,
             "note": note or "",
@@ -314,6 +323,7 @@ def upsert_bookmark(
                     tags=merged_tags,
                     note=note or "",
                     changed_fields=["bookmark", "review", "tags", "note"],
+                    actor=actor,
                 )
             ],
             "reference": reference,
@@ -326,6 +336,8 @@ def upsert_bookmark(
     prior_tags = normalize_tags(existing.get("tags", []))
     created_at_value = existing.get("created_at")
     created_at = str(created_at_value) if isinstance(created_at_value, str) and created_at_value else now
+    created_by = existing.get("created_by")
+    updated_by = existing.get("updated_by")
     prior_note = str(existing.get("note") or "")
     prior_history = existing.get("review_history")
     review_history = [item for item in prior_history if isinstance(item, dict)] if isinstance(prior_history, list) else []
@@ -356,6 +368,7 @@ def upsert_bookmark(
         next_review=review,
     )
     if changed_fields:
+        updated_by = actor
         review_history.append(
             build_review_history_entry(
                 action="updated",
@@ -365,12 +378,17 @@ def upsert_bookmark(
                 tags=next_tags,
                 note=next_note,
                 changed_fields=changed_fields,
+                actor=actor,
             )
         )
     existing.clear()
     existing["bookmark_id"] = existing_bookmark_id
     existing["created_at"] = created_at
     existing["updated_at"] = now
+    if isinstance(created_by, str) and created_by:
+        existing["created_by"] = created_by
+    if isinstance(updated_by, str) and updated_by:
+        existing["updated_by"] = updated_by
     existing["summary"] = summary
     existing["reference"] = reference
     existing["snapshot"] = snapshot
@@ -579,8 +597,9 @@ def build_review_history_entry(
     tags: list[str],
     note: str,
     changed_fields: list[str],
+    actor: str | None = None,
 ) -> dict[str, object]:
-    return {
+    entry: dict[str, object] = {
         "action": action,
         "at": at,
         "status": status,
@@ -589,6 +608,9 @@ def build_review_history_entry(
         "note": note,
         "changed_fields": changed_fields,
     }
+    if actor:
+        entry["actor"] = actor
+    return entry
 
 
 def changed_review_fields(

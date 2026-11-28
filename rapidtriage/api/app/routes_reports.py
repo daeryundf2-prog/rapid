@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
@@ -9,7 +10,7 @@ from fastapi.responses import (
     FileResponse,
 )
 
-from ...core.audit import audit_path_for, write_audit_record
+from ...core.audit import audit_path_for, keep_previous_version, write_audit_record
 from ...core.bundle import BundleError, build_submission_bundle
 from ...core.case import (
     CaseBookmarkError,
@@ -31,6 +32,7 @@ from .helpers import (
     default_submission_manifest_path,
     get_job,
     get_output_path,
+    resolve_request_reviewer,
     run_not_finished_message,
 )
 from .models import (
@@ -54,6 +56,18 @@ from .search import (
     normalize_bookmark_source,
     normalize_bookmark_tags,
 )
+
+#: Bookmark writes load, change and save ``rapidtriage-case.json``: one at a time, so two
+#: examiners editing at once never drop each other's change (one server process).
+CASE_JSON_WRITE_LOCK = threading.Lock()
+#: Earlier deliverables are kept here (one ``<UTC time>/`` folder per replaced version).
+CASE_REPORT_HISTORY_DIR = "rapidtriage-case-report-history"
+REVIEWER_BUNDLE_HISTORY_DIR = "rapidtriage-reviewer-bundle-history"
+
+
+def recorded_actor() -> str:
+    """Who a report, bundle or bookmark write is recorded under (the server's actor, GAP-5)."""
+    return resolve_request_reviewer(None) or "local-user"
 
 
 def build_reports_router(
@@ -121,12 +135,20 @@ def build_reports_router(
     def create_case_report(run_id: str, request: CaseReportCreateRequest) -> dict[str, object]:
         report_path = default_case_report_path(store, run_id)
         markdown = build_run_case_report(store, run_id, request)
-        exports = write_case_report_exports(markdown, report_path)
-        write_case_report_audit(store, run_id, report_path, request)
+        generated_by = recorded_actor()
+        # The report it replaces (with its audit record naming its author) stays as a version.
+        previous = keep_previous_version(
+            [*case_report_export_paths(report_path).values(), audit_path_for(report_path)],
+            report_path.with_name(CASE_REPORT_HISTORY_DIR),
+        )
+        exports = write_case_report_exports(markdown, report_path, generated_by=generated_by)
+        write_case_report_audit(store, run_id, report_path, request, generated_by=generated_by)
         return {
             "report_path": str(report_path),
             "exports": exports,
             "audit": str(audit_path_for(report_path)),
+            "generated_by": generated_by,
+            "previous_version": str(previous) if previous else None,
             "markdown": markdown,
         }
 
@@ -137,8 +159,8 @@ def build_reports_router(
         if not report_path.is_file():
             request = CaseReportCreateRequest()
             markdown = build_run_case_report(store, run_id, request)
-            write_case_report_exports(markdown, report_path)
-            write_case_report_audit(store, run_id, report_path, request)
+            write_case_report_exports(markdown, report_path, generated_by=recorded_actor())
+            write_case_report_audit(store, run_id, report_path, request, generated_by=recorded_actor())
         return FileResponse(report_path, filename=report_path.name, media_type="text/markdown")
 
 
@@ -151,15 +173,15 @@ def build_reports_router(
         if not report_path.is_file():
             request = CaseReportCreateRequest()
             markdown = build_run_case_report(store, run_id, request)
-            write_case_report_exports(markdown, report_path)
-            write_case_report_audit(store, run_id, report_path, request)
+            write_case_report_exports(markdown, report_path, generated_by=recorded_actor())
+            write_case_report_audit(store, run_id, report_path, request, generated_by=recorded_actor())
         path = case_report_export_paths(report_path)[normalized]
         if not path.is_file():
             # Export missing for an existing report (e.g. written before the
             # export set changed) — re-export from the stored markdown so the
             # template the author chose is preserved instead of regenerated
             # with default settings.
-            write_case_report_exports(report_path.read_text(encoding="utf-8"), report_path)
+            write_case_report_exports(report_path.read_text(encoding="utf-8"), report_path, generated_by=recorded_actor())
         media_types = {
             "md": "text/markdown",
             "html": "text/html",
@@ -174,7 +196,8 @@ def build_reports_router(
         """Reviewer bundle of the run's review payload (case JSON + case-DB review marks).
 
         409 with the reason when nothing is marked for the report or a marked
-        item cannot be carried (the Korean list names each one)."""
+        item cannot be carried (the Korean list names each one). The server's actor is
+        recorded as ``generated_by``; a bundle it replaces moves to the history folder."""
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail=run_not_finished_message(job))
@@ -187,15 +210,18 @@ def build_reports_router(
                 status_code=409,
                 detail="보고서 포함으로 지정된 검토 항목이 없어 리뷰어 번들을 만들지 않았습니다. 항목을 북마크하거나 검토 표시에서 보고서 포함을 지정하세요.",
             )
+        bundle_dir = default_reviewer_bundle_dir_path(store, run_id)
         try:
             return build_submission_bundle(
                 case_json=default_case_path(store, run_id),
                 case_payload=case_payload,
-                output_dir=default_reviewer_bundle_dir_path(store, run_id),
+                output_dir=bundle_dir,
                 allowed_roots=allowed_source_roots(job.summary),
                 include_all=include_all,
                 max_items=max_items,
                 title=title,
+                generated_by=recorded_actor(),
+                history_dir=bundle_dir.with_name(REVIEWER_BUNDLE_HISTORY_DIR),
             )
         except BundleError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
@@ -212,8 +238,12 @@ def build_reports_router(
 
     @router.get("/api/runs/{run_id}/reviewer-bundle/file")
     def download_reviewer_bundle(run_id: str) -> FileResponse:
-        payload = _build_reviewer_bundle(run_id, include_all=False, max_items=500, title=None)
-        archive = Path(str(payload.get("archive") or payload.get("outputs", {}).get("archive", "")))
+        """The bundle the last ``POST …/reviewer-bundle`` built; built here only when none exists
+        (a download is not a new version in the history folder)."""
+        archive = default_reviewer_bundle_dir_path(store, run_id).with_suffix(".zip")
+        if not archive.is_file():
+            payload = _build_reviewer_bundle(run_id, include_all=False, max_items=500, title=None)
+            archive = Path(str(payload.get("archive") or payload.get("outputs", {}).get("archive", "")))
         return FileResponse(archive, filename=archive.name, media_type="application/zip")
 
 
@@ -222,40 +252,44 @@ def build_reports_router(
         source_name = normalize_bookmark_source(request.source)
         source_path = get_output_path(store, run_id, source_name)
         case_path = default_case_path(store, run_id)
-        try:
-            payload = create_or_update_case_payload(
-                case_path,
-                case_id=request.case_id or f"run-{run_id}",
-                title=request.title or f"rapidtriage run {run_id}",
-                source_path=source_path,
-                source_pointer=request.pointer,
-                bookmark_id=request.bookmark_id,
-                tags=normalize_bookmark_tags(request),
-                remove_tags=[str(item).strip() for item in (request.remove_tags or []) if str(item).strip()] or None,
-                note=request.note,
-                review_status=request.review_status,
-                include_in_report=request.include_in_report,
+        actor = recorded_actor()
+        with CASE_JSON_WRITE_LOCK:
+            try:
+                payload = create_or_update_case_payload(
+                    case_path,
+                    case_id=request.case_id or f"run-{run_id}",
+                    title=request.title or f"rapidtriage run {run_id}",
+                    source_path=source_path,
+                    source_pointer=request.pointer,
+                    bookmark_id=request.bookmark_id,
+                    tags=normalize_bookmark_tags(request),
+                    remove_tags=[str(item).strip() for item in (request.remove_tags or []) if str(item).strip()] or None,
+                    note=request.note,
+                    review_status=request.review_status,
+                    include_in_report=request.include_in_report,
+                    actor=actor,
+                )
+            except (FileNotFoundError, CaseBookmarkError) as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            save_case_payload(case_path, payload)
+            audit_output = audit_path_for(case_path)
+            write_audit_record(
+                audit_output,
+                command="case",
+                options={
+                    "case_id": request.case_id,
+                    "title": request.title,
+                    "source": str(source_path),
+                    "pointer": request.pointer,
+                    "bookmark_id": request.bookmark_id,
+                    "tags": normalize_bookmark_tags(request),
+                    "review_status": request.review_status,
+                    "include_in_report": request.include_in_report,
+                    "actor": actor,
+                },
+                input_files=[("source-json", source_path)],
+                output_files=[("case-json", case_path)],
             )
-        except (FileNotFoundError, CaseBookmarkError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        save_case_payload(case_path, payload)
-        audit_output = audit_path_for(case_path)
-        write_audit_record(
-            audit_output,
-            command="case",
-            options={
-                "case_id": request.case_id,
-                "title": request.title,
-                "source": str(source_path),
-                "pointer": request.pointer,
-                "bookmark_id": request.bookmark_id,
-                "tags": normalize_bookmark_tags(request),
-                "review_status": request.review_status,
-                "include_in_report": request.include_in_report,
-            },
-            input_files=[("source-json", source_path)],
-            output_files=[("case-json", case_path)],
-        )
         return {"case_path": str(case_path), "audit": str(audit_output), "case": payload}
 
     return router

@@ -102,6 +102,14 @@
             "type": "string",
             "format": "date-time"
           },
+          "created_by": {
+            "type": "string",
+            "description": "Server actor who created the bookmark (web writes; absent for CLI bookmarks)"
+          },
+          "updated_by": {
+            "type": "string",
+            "description": "Server actor of the last change (web writes)"
+          },
           "summary": {
             "type": "string"
           },
@@ -195,6 +203,10 @@
                   "items": {
                     "type": "string"
                   }
+                },
+                "actor": {
+                  "type": "string",
+                  "description": "Server actor who made this change (web writes)"
                 }
               }
             }

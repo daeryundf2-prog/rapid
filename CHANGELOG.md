@@ -171,6 +171,41 @@
   contain `@` (nor can an action API agent name), and `rapidtriage web` warns
   when other accounts can read the file or a token is shorter than 24
   characters (`tests/test_user_tokens_actor.py`).
+- Writes that still recorded nobody on a shared server (remote-use audit
+  GAP-5) now record the server's actor (the per-user token's name, else
+  `RAPIDTRIAGE_REVIEWER`, else `local-user`): report bookmarks carry
+  `created_by` / `updated_by` and every `review_history` entry its `actor`
+  (the bookmark's audit record too), and bookmark writes are serialized so two
+  people editing at once no longer drop a change; the case report's audit and
+  export manifest and the reviewer bundle's audit and manifests record
+  `generated_by` (the client's `investigator` stays a display field), and a
+  regenerated report or bundle keeps the one it replaces under
+  `rapidtriage-case-report-history/<UTC time>/` or
+  `rapidtriage-reviewer-bundle-history/<UTC time>/` instead of overwriting it
+  (`GET …/reviewer-bundle/file` serves the last built bundle and builds one
+  only when none exists, so a download is not a new version);
+  the original export manifest records `requested_by`; search history records
+  the searcher instead of `local-user`; editing or deleting a run saved search
+  is an `audit_event` (`search.saved.update` / `.delete`, the deleted row kept
+  in its parameters), and a case-DB saved search saved again under the same
+  name keeps its original `created_by` (the change is an audit event);
+  hash sets record `uploaded_by` and a deletion appends to
+  `hash-sets-deleted.jsonl`; analyses and index builds record `requested_by`
+  and cancels `cancel_requested_by`; case-DB `import-run` / `ensure` audit the
+  actor. The run pipeline's own case-DB import still audits `local-user`
+  (`tests/test_remote_followup_actor.py`).
+- Per-user tokens follow-ups (PR #92 review P3): the server re-reads
+  `RAPIDTRIAGE_TOKENS_FILE` when it changes, so adding a person or removing
+  their line (revoking the token) needs no restart; an edit that fails
+  validation (or a deleted file) keeps the last good set and logs a warning
+  naming the line, never a token. A token holding `" #"` (a trailing comment
+  that became part of the token) is warned about. `GET /api/whoami` returns
+  the name the server records for the caller (`actor`, `source`: `token`,
+  `env` or `null`, `per_user_tokens`; never the token), and the console's
+  status bar shows it ("기록 이름 kim"). Run removal records moved from
+  `runs.json` to the append-only `runs-removed.jsonl` beside it, so
+  `runs.json` no longer grows with every removal; an existing `removed_runs`
+  list moves there on the next start (`tests/test_remote_followup_actor.py`).
 - Browser storage (Local Storage, IndexedDB) matches AI service hosts only at
   a host boundary, so GitHub Copilot storage (`api.githubcopilot.com`) is no
   longer labelled Microsoft Copilot and `box.ai` / `bayou.com` no longer read

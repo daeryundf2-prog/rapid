@@ -9,6 +9,7 @@ RapidTriage is local-first by default. Deploy it as a workstation tool unless a 
 - On Windows, run `scripts\windows\smoke-test-rapidtriage.ps1`; on macOS/Linux, run `sh scripts/smoke-test-rapidtriage.sh` before handing the build to analysts.
 - Keep case output, logs, crash exports, and report bundles outside evidence roots.
 - Use `rapidtriage web --auth-token ...` for any non-localhost bind and record who received the token.
+- For several examiners, prefer per-user tokens (`RAPIDTRIAGE_TOKENS_FILE`, one `name=token` line per person, `chmod 600`): every write then records that person. The server re-reads the file when it changes, so add a person or delete their line (revoke) without a restart; a malformed edit is refused with a warning in the server log and the previous tokens stay in force. Each examiner can check the recorded name in the console's status bar ("기록 이름") or with `GET /api/whoami`.
 - Use `rapidtriage web --crash-log-dir ...` for local-only crash report storage.
 - Back up Case DB files with `rapidtriage case-backup CASE.db --output-dir BACKUP`.
 - Restore with `rapidtriage case-restore BACKUP/rapidtriage-case-backup-manifest.json --output CASE-restored.db`.

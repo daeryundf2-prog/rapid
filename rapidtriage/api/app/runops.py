@@ -963,13 +963,17 @@ def write_case_report_audit(
     run_id: str,
     report_path: Path,
     request: CaseReportCreateRequest,
+    *,
+    generated_by: str,
 ) -> None:
+    """Audit record of the case report; ``generated_by`` is the server's actor (the request's
+    ``investigator`` stays a display value beside it)."""
     manifest_path = default_submission_manifest_path(store, run_id)
     exports = case_report_export_paths(report_path)
     write_audit_record(
         audit_path_for(report_path),
         command="case-report",
-        options=model_to_dict(request),
+        options={**model_to_dict(request), "generated_by": generated_by},
         input_files=[*run_review_input_files(store, run_id), ("submission-manifest", manifest_path)],
         output_files=[
             ("case-report", exports["md"]),

@@ -31,6 +31,7 @@ from .artifact_sort import (
     paginate_sorted_artifact_output,
     sort_descriptor,
 )
+from .helpers import server_actor
 from .jsonl_records import iter_artifact_records, iter_record_range
 from .pagination import paginate_artifact_output
 from .query_filters import strict_query_filters
@@ -226,7 +227,9 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
     def create_analysis(run_id: str, request: AnalysisCreateRequest) -> dict[str, object]:
         """Queue one analysis over a completed/failed run (409 while the same kind runs)."""
         scope = run_scope(store, run_id)
-        state = ANALYSIS_RUNNER.submit(scope, request.kind.strip(), request.options, owner=owner)
+        state = ANALYSIS_RUNNER.submit(
+            scope, request.kind.strip(), request.options, owner=owner, requested_by=server_actor() or "local-user"
+        )
         return {
             "analysis_id": state["analysis_id"],
             "kind": state["kind"],
@@ -250,7 +253,7 @@ def build_analyses_router(store: RunJobStore, *, owner: object | None = None) ->
         """Request cancellation; the runner stops at its next unit boundary."""
         scope = run_scope(store, run_id, require_ready=False)
         directory = analysis_directory(scope.output_dir, analysis_id)
-        state = ANALYSIS_RUNNER.cancel(scope.output_dir, directory.name)
+        state = ANALYSIS_RUNNER.cancel(scope.output_dir, directory.name, by=server_actor() or "local-user")
         if state is None:
             raise HTTPException(status_code=404, detail="분석을 찾을 수 없습니다")
         return public_state(state)

@@ -11,6 +11,7 @@ import { useRuns, useTimezone } from "../state/hooks";
 import { isRunActive } from "../state/slices/runs";
 import { useAppStore } from "../state/store";
 import { tzOffsetLabel } from "../utils/time";
+import { ServerActor } from "./ServerActor";
 import { Slot } from "./slots";
 
 const NOTICE_MS = 6000;
@@ -277,6 +278,7 @@ export function StatusBar() {
       ) : null}
       <Slot name="status-extra" />
       <span className="statusbar-spacer" />
+      <ServerActor />
       <TimezoneControl />
       <StatusSep />
       <span className="status-connection-wrap">

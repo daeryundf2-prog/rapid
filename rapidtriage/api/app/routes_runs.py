@@ -1364,6 +1364,8 @@ def build_runs_router(
             raise HTTPException(status_code=400, detail=str(exc))
         except OSError as exc:
             raise HTTPException(status_code=500, detail=str(exc))
+        # Who exported originals (the server's actor; GAP-5); the manifest is the export's record.
+        manifest["requested_by"] = server_actor() or "local-user"
         (target / DEFAULT_EXTRACT_MANIFEST_NAME).write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
         )

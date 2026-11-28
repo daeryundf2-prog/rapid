@@ -5,9 +5,11 @@
 * auto builds: full on run completion (``RunJobStore`` completion hook) and
   incremental after other analyses complete (``analyses`` completion hook);
 * saved searches (case DB ``saved_search``, ``filters_json.search_v = 2``; their
-  creation is also an ``audit_event`` ``search.saved.create``);
+  creation, edits and deletion are also ``audit_event`` rows ``search.saved.create`` /
+  ``.update`` / ``.delete`` naming the server's actor);
 * history: ``<run>/search/history.sqlite`` table ``search_history`` (last
-  ``HISTORY_KEEP`` searches), written off the event loop by one writer thread;
+  ``HISTORY_KEEP`` searches, each with the server's actor), written off the event loop
+  by one writer thread;
 * review marks of the run (``review_map_entries``) for ``review:``/``tag:``
   filters and the rows' ``review`` overlay (``truncated`` past ``REVIEW_MARK_LIMIT``);
 * the per-run concurrency limit (429); a slot is held until the worker
@@ -47,6 +49,10 @@ LOGGER = logging.getLogger(__name__)
 AUTO_INDEX_ENV = "RAPIDTRIAGE_SEARCH_AUTO_INDEX"
 MAX_CONCURRENT_QUERIES = 4
 SAVED_SEARCH_ACTION = "search.saved.create"
+SAVED_SEARCH_UPDATE_ACTION = "search.saved.update"
+SAVED_SEARCH_DELETE_ACTION = "search.saved.delete"
+#: Actor recorded when the server names nobody (single token, no ``RAPIDTRIAGE_REVIEWER``).
+UNNAMED_ACTOR = "local-user"
 SAVED_SEARCH_VERSION = 2
 REVIEW_MARK_LIMIT = 50_000
 HISTORY_KEEP = 500
@@ -184,13 +190,15 @@ def _failed_swap(latest: Mapping[str, object] | None, meta: Mapping[str, object]
 # ---------------------------------------------------------------------------
 
 
-def submit_build(store: RunJobStore, run_id: str, options: Mapping[str, object], *, owner: object | None) -> dict[str, object]:
+def submit_build(
+    store: RunJobStore, run_id: str, options: Mapping[str, object], *, owner: object | None, requested_by: str | None = None
+) -> dict[str, object]:
     scope = run_scope(store, run_id)  # 409 unless completed/failed
     latest = latest_build(scope.output_dir)
     if latest is not None and latest.get("status") in ACTIVE_STATUSES:
         raise HTTPException(status_code=409, detail=INDEX_BUSY)
     try:
-        return ANALYSIS_RUNNER.submit(scope, SEARCH_INDEX_KIND, options, owner=owner)
+        return ANALYSIS_RUNNER.submit(scope, SEARCH_INDEX_KIND, options, owner=owner, requested_by=requested_by)
     except HTTPException as exc:
         if exc.status_code == 409:
             raise HTTPException(status_code=409, detail=INDEX_BUSY) from exc
@@ -410,7 +418,7 @@ class SearchHistory:
     def __init__(self) -> None:
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="search-history")
         self._lock = threading.Lock()
-        self._pending: dict[Path, list[tuple[str, str, str, str]]] = {}
+        self._pending: dict[Path, list[tuple[str, str, str, str, str]]] = {}
         self._scheduled = False
 
     @staticmethod
@@ -427,8 +435,10 @@ class SearchHistory:
         return self._executor.submit(guarded)
 
     def record(self, output_dir: Path, params: Mapping[str, object], *, truncated: bool) -> None:
+        """Queue one search; the actor is the requesting server actor (read here, on the request's context)."""
         entry = (
             now_iso(),
+            resolve_request_reviewer(None) or UNNAMED_ACTOR,
             str(params.get("q") or ""),
             json.dumps(dict(params), ensure_ascii=False, sort_keys=True, default=str),
             "truncated" if truncated else "ok",
@@ -454,7 +464,7 @@ class SearchHistory:
         for output_dir, entries in pending.items():
             self._write(output_dir, entries)
 
-    def _write(self, output_dir: Path, entries: list[tuple[str, str, str, str]]) -> None:
+    def _write(self, output_dir: Path, entries: list[tuple[str, str, str, str, str]]) -> None:
         path = self.path_for(output_dir)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -469,7 +479,7 @@ class SearchHistory:
                     "q TEXT NOT NULL, params_json TEXT NOT NULL, result TEXT NOT NULL)"
                 )
                 connection.executemany(
-                    "INSERT INTO search_history (at, actor, q, params_json, result) VALUES (?, 'local-user', ?, ?, ?)", entries
+                    "INSERT INTO search_history (at, actor, q, params_json, result) VALUES (?, ?, ?, ?, ?)", entries
                 )
                 connection.execute(
                     "DELETE FROM search_history WHERE id <= (SELECT id FROM search_history ORDER BY id DESC LIMIT 1 OFFSET ?)",
@@ -646,20 +656,27 @@ def create_saved(job: RunJob, run_id: str, body: Mapping[str, object]) -> dict[s
             ),
         )
         saved_id = int(cursor.lastrowid or 0)
+    _audit_saved(job, run_id, case_id, SAVED_SEARCH_ACTION, citation_id, author, _filters(body))
+    return get_saved(job, run_id, saved_id)
+
+
+def _audit_saved(
+    job: RunJob, run_id: str, case_id: str, action: str, citation_id: str, author: str | None, params: Mapping[str, object]
+) -> None:
+    """``audit_event`` of a saved-search change (best effort: a failed audit never fails the change)."""
     try:
         CaseDatabase(database_path(job, run_id)).add_audit_event(
             case_id=case_id,
-            action=SAVED_SEARCH_ACTION,
+            action=action,
             target_type="saved_search",
             target_id=citation_id,
-            actor=author or "local-user",
+            actor=author or UNNAMED_ACTOR,
             tool_name="rapidtriage-search",
-            params_json=json.dumps(_filters(body), ensure_ascii=False, sort_keys=True, default=str),
+            params_json=json.dumps(dict(params), ensure_ascii=False, sort_keys=True, default=str),
             result="ok",
         )
     except (sqlite3.Error, OSError) as exc:
-        LOGGER.warning("search.saved.create audit not recorded for %s: %s", run_id, exc)
-    return get_saved(job, run_id, saved_id)
+        LOGGER.warning("%s audit not recorded for %s: %s", action, run_id, exc)
 
 
 def database_path(job: RunJob, run_id: str) -> Path:
@@ -689,15 +706,24 @@ def update_saved(job: RunJob, run_id: str, saved_id: int, body: Mapping[str, obj
                 saved_id,
             ),
         )
-    return get_saved(job, run_id, saved_id)
+    updated = get_saved(job, run_id, saved_id)
+    _audit_saved(job, run_id, case_id, SAVED_SEARCH_UPDATE_ACTION, str(current["citation_id"]), resolve_request_reviewer(None),
+                 {"before": current, "after": updated})
+    return updated
 
 
 def delete_saved(job: RunJob, run_id: str, saved_id: int) -> None:
+    """Delete the saved search; the audit event keeps the removed row (name, query, author)."""
     get_saved(job, run_id, saved_id)
     with _case_connection(job, run_id, write=True) as handle:
         assert handle is not None
         connection, case_id = handle
+        row = connection.execute("SELECT * FROM saved_search WHERE case_id = ? AND id = ?", (case_id, saved_id)).fetchone()
         connection.execute("DELETE FROM saved_search WHERE case_id = ? AND id = ?", (case_id, saved_id))
+    if row is not None:
+        removed = {key: row[key] for key in row.keys()}
+        _audit_saved(job, run_id, case_id, SAVED_SEARCH_DELETE_ACTION, str(removed.get("citation_id") or ""),
+                     resolve_request_reviewer(None), removed)
 
 
 def record_saved_count(job: RunJob, run_id: str, saved_id: int, total: int, exact: bool) -> None:

@@ -3,6 +3,8 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import os
+import shutil
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
@@ -165,3 +167,35 @@ def dedupe_records(records: Sequence[tuple[str, Path]]) -> list[tuple[str, Path]
         seen.add(key)
         normalized.append((label, resolved))
     return normalized
+
+
+def keep_previous_version(paths: Sequence[Path], history_dir: Path, *, move: bool = False) -> Path | None:
+    """Keep the current ``paths`` (files or folders) in a new ``history_dir/<UTC time>/`` folder.
+
+    Called before a deliverable is regenerated so the earlier version (and its audit record,
+    which names who generated it) is not silently overwritten. ``move`` renames instead of
+    copying (same folder tree, so cheap). Returns the version folder, ``None`` when none of
+    ``paths`` exists yet. Symlinks are kept as links, never followed.
+    """
+    existing = [path for path in paths if path.is_symlink() or path.exists()]
+    if not existing:
+        return None
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    target = history_dir / stamp
+    suffix = 1
+    while True:
+        try:
+            target.mkdir(parents=True)
+            break
+        except FileExistsError:
+            target = history_dir / f"{stamp}-{suffix}"
+            suffix += 1
+    for path in existing:
+        destination = target / path.name
+        if move:
+            os.replace(path, destination)
+        elif path.is_dir() and not path.is_symlink():
+            shutil.copytree(path, destination, symlinks=True)
+        else:
+            shutil.copy2(path, destination, follow_symlinks=False)
+    return target

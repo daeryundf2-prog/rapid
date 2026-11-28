@@ -973,8 +973,11 @@ class AnalysisRunner:
         raw_options: Mapping[str, object] | None,
         *,
         owner: object | None = None,
+        requested_by: str | None = None,
     ) -> dict[str, object]:
-        """Queue one analysis; ``owner`` scopes it to that app's ``shutdown(owner=...)``."""
+        """Queue one analysis; ``owner`` scopes it to that app's ``shutdown(owner=...)``.
+
+        ``requested_by``: the server's actor of a web request (``None``: automatic build)."""
         spec = get_spec(kind)
         try:
             options = spec.options_model.model_validate(dict(raw_options or {}))
@@ -1000,6 +1003,7 @@ class AnalysisRunner:
                 "status": "queued",
                 "options": stored_options,
                 "created_at": utc_now(),
+                "requested_by": requested_by,
                 "started_at": None,
                 "finished_at": None,
                 "elapsed_s": None,
@@ -1040,8 +1044,10 @@ class AnalysisRunner:
             return context.snapshot()
         return snapshot
 
-    def cancel(self, output_dir: Path, analysis_id: str) -> dict[str, object] | None:
-        """Request cancellation; the status turns ``cancelled`` once the runner has stopped."""
+    def cancel(self, output_dir: Path, analysis_id: str, *, by: str | None = None) -> dict[str, object] | None:
+        """Request cancellation; the status turns ``cancelled`` once the runner has stopped.
+
+        ``by`` (the server's actor) is recorded as ``cancel_requested_by``."""
         context = self._context(output_dir, analysis_id)
         if context is None:
             return self.load_state(output_dir, analysis_id)
@@ -1049,6 +1055,7 @@ class AnalysisRunner:
         with context.lock:
             if context.state.get("status") in ACTIVE_STATUSES and not context.state.get("cancel_requested_at"):
                 context.state["cancel_requested_at"] = utc_now()
+                context.state["cancel_requested_by"] = by
                 context._progress()["message"] = "취소 요청됨 · 현재 단위가 끝나면 멈춥니다"
             queued = context.state.get("status") == "queued"
         if queued:

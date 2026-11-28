@@ -414,6 +414,9 @@
     "/api/sample-case/run": {
       "post": "run_sample_case_api_sample_case_run_post"
     },
+    "/api/whoami": {
+      "get": "whoami_api_whoami_get"
+    },
     "/api/workbench/large-result-evidence": {
       "get": "workbench_large_result_evidence_api_workbench_large_result_evidence_get"
     },
