@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
+from starlette.concurrency import run_in_threadpool
 
 from ...core.case_db.base import CaseDatabaseError
 from ...core.case_db.intake import CaseConflictError, CaseNotFoundError
@@ -54,6 +55,7 @@ from .models import (
 )
 from .routes_runs import run_request_from_body
 from .run_problems import PROBLEM_MAX_LIMIT, PROBLEM_PREVIEW_LIMIT, build_run_problems
+from .run_wait import wait_for_run
 
 #: Korean field names for 422 bodies on these routes (factory exception handler).
 CASE_FIELD_LABELS = {
@@ -315,8 +317,8 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
 
     # --- runs --------------------------------------------------------------------
 
-    @router.post("/api/cases/{case_id}/runs", status_code=202)
-    def create_case_run(case_id: str, request: CaseRunCreateRequest) -> dict[str, Any]:
+    def queue_case_run(case_id: str, request: CaseRunCreateRequest) -> tuple[str, dict[str, Any]]:
+        """Queue the case run and record its processing snapshot: ``(run_id, snapshot fields)``."""
         case = case_or_404(case_id)
         try:
             evidence = intake().get_evidence(case_id, request.evidence_citation_id.strip())
@@ -355,18 +357,13 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
                         detail=f"같은 출력 폴더를 쓰는 런({busy})이 대기·실행 중입니다. 출력 폴더를 비우거나 다른 폴더를 지정하세요",
                     )
             try:
-                job = store.submit(run_request) if not request.wait else None
-            except RunOutputDirBusy as exc:
-                raise HTTPException(status_code=409, detail=str(exc))
-        if job is None:
-            try:
-                job = store.run_sync(run_request)
+                job = store.submit(run_request)
             except RunOutputDirBusy as exc:
                 raise HTTPException(status_code=409, detail=str(exc))
         snapshot = build_processing_snapshot(run_request=run_request, case=case, evidence=evidence, origin="case-run")
-        # Written into the run's own output folder: with wait=false (the default) this happens right
-        # after the run is queued, before its first step, so the file is part of the run output from
-        # the start; the path is also recorded in the case audit (run.created params).
+        # Written into the run's own output folder right after the run is queued, before its first
+        # step, so the file is part of the run output from the start; the path is also recorded in
+        # the case audit (run.created params).
         file_path, file_error = _write_snapshot_file(job_output_dir(job), snapshot)
         snapshot["file"] = file_path
         try:
@@ -377,14 +374,16 @@ def build_cases_router(store: RunJobStore, workspace: CaseWorkspace) -> APIRoute
             )
         except CaseDatabaseError as exc:
             _raise(exc)
-        return {
-            "command": "case.run.create",
-            "case_id": case_id,
-            "run": store.get(job.run_id).to_dict(include_summary=request.wait),
-            "snapshot": saved,
-            "snapshot_file": file_path,
-            "snapshot_file_error": file_error,
-        }
+        return job.run_id, {"snapshot": saved, "snapshot_file": file_path, "snapshot_file_error": file_error}
+
+    @router.post("/api/cases/{case_id}/runs", status_code=202)
+    async def create_case_run(case_id: str, request: CaseRunCreateRequest) -> dict[str, Any]:
+        run_id, snapshot_fields = await run_in_threadpool(queue_case_run, case_id, request)
+        ended = await wait_for_run(store, run_id) if request.wait else False
+        run = await run_in_threadpool(lambda: store.get(run_id).to_dict(include_summary=ended))
+        if request.wait:
+            run["wait_timed_out"] = not ended
+        return {"command": "case.run.create", "case_id": case_id, "run": run, **snapshot_fields}
 
     @router.post("/api/cases/{case_id}/runs/link", status_code=201)
     def link_case_run(case_id: str, request: CaseRunLinkRequest) -> dict[str, Any]:
