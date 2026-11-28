@@ -43,6 +43,7 @@ __all__ = [
     "apply_review_schema",
     "ensure_system_tags",
     "live_tag_rows",
+    "mark_tag_names",
     "migrate_string_tags",
     "next_color_token",
     "normalize_tag_name",
@@ -297,7 +298,8 @@ def tag_names_for_ids(connection: sqlite3.Connection, ids: Sequence[int]) -> lis
     return [names[tag_id] for tag_id in ids if tag_id in names]
 
 
-def _mark_tag_names(raw: object) -> list[str]:
+def mark_tag_names(raw: object) -> list[str]:
+    """Tag names of a mark's ``tags_json`` (malformed JSON: none)."""
     try:
         value = json.loads(str(raw or "[]"))
     except json.JSONDecodeError:
@@ -314,7 +316,7 @@ def migrate_string_tags(connection: sqlite3.Connection) -> int:
         "SELECT id, case_id, tags_json, reviewer FROM review_mark WHERE tag_ids_json IS NULL"
     ).fetchall()
     for row in rows:
-        names = _mark_tag_names(row[2])
+        names = mark_tag_names(row[2])
         ids = resolve_tag_names(connection, str(row[1]), names, actor=str(row[3] or "") or "migration")
         connection.execute(
             "UPDATE review_mark SET tag_ids_json = ?, tags_json = ? WHERE id = ?",

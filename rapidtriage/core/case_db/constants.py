@@ -854,7 +854,7 @@ CREATE INDEX IF NOT EXISTS idx_artifact_case_type ON artifact(case_id, artifact_
 CREATE INDEX IF NOT EXISTS idx_event_case_time ON event(case_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_indexed_document_case_source ON indexed_document(case_id, source_type);
 CREATE INDEX IF NOT EXISTS idx_review_mark_case_status ON review_mark(case_id, status, verification_status);
-CREATE INDEX IF NOT EXISTS idx_review_mark_case_target ON review_mark(case_id, target_type, target_id);
+-- idx_review_mark_case_target is UNIQUE: created by database.ensure_unique_review_mark_targets (merges legacy duplicates first).
 CREATE INDEX IF NOT EXISTS idx_review_mark_history_target ON review_mark_history(case_id, target_type, target_id, version);
 CREATE INDEX IF NOT EXISTS idx_saved_search_case_name ON saved_search(case_id, name);
 CREATE INDEX IF NOT EXISTS idx_audit_event_case_time ON audit_event(case_id, timestamp);

@@ -115,6 +115,10 @@ class _CountingConnection:
         self.executescript_calls += 1
         return self._connection.executescript(script)
 
+    def __getattr__(self, name: str):
+        # Transaction state/control (in_transaction, commit, rollback) of the wrapped connection.
+        return getattr(self._connection, name)
+
 
 class SchemaInitFastPathTests(unittest.TestCase):
     def test_current_schema_skips_ddl_replay_but_migrates_columns(self) -> None:
