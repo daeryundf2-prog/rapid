@@ -404,6 +404,10 @@ test("Q-A3: every visible control does something (request, URL/aria change, or d
       const changed = JSON.stringify(before) !== JSON.stringify(after);
       if (!requested && !changed) unresponsive.push(`${collection} ${label}`);
       await page.keyboard.press("Escape"); // close any overlay the click opened
+      // A click that opened ANOTHER run (the 처리 run list) shows that run's page, whose controls
+      // differ (e.g. its case's integrity seal in the top bar): the next index would point at a
+      // different control than this sweep counted. Go back to this run before the next one.
+      if (!after.url.includes(`/case/${runId}/`)) await openRoute(page, collection);
     }
   }
   expect(unresponsive, `unresponsive controls:\n${unresponsive.join("\n")}`).toEqual([]);
