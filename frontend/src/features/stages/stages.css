@@ -198,6 +198,25 @@
   display: none;
 }
 
+/* 보고 left panel: in-page section links (buttons styled as the panel's links). */
+.stage-panel button.stage-link {
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-table-aux);
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 특이사항 grade links: one line saying what the grade means. */
+.stage-link-help {
+  margin: 0 0 var(--space-1);
+  padding: 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+}
+
 .stage-more {
   align-self: flex-start;
   font-size: var(--fs-table-aux);
@@ -643,25 +662,6 @@
 .stage-report-grid > .grid-root {
   flex: 1;
   min-height: 0;
-}
-
-/* 보고 left panel: in-page section links (buttons styled as the panel's links). */
-.stage-panel button.stage-link {
-  width: 100%;
-  border: 0;
-  background: none;
-  font: inherit;
-  font-size: var(--fs-table-aux);
-  text-align: left;
-  cursor: pointer;
-}
-
-/* 특이사항 grade links: one line saying what the grade means. */
-.stage-link-help {
-  margin: 0 0 var(--space-1);
-  padding: 0 var(--space-2);
-  color: var(--text-muted);
-  font-size: var(--fs-aux);
 }
 
 .stage-heading {
