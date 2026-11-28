@@ -19,6 +19,7 @@ from ..core.ai_agent_kinds import AI_AGENT_LABELS
 from ..core.models import ArtifactRecord
 from ._walk import iter_evidence_paths
 from .ai_agent_editor import editor, editor_value
+from .ai_agent_herdr import herdr, identify_herdr
 from .ai_agent_records import Source, content, items, mapping
 from .ai_agent_sessions import claude, claude_history, codex, gemini
 
@@ -72,7 +73,7 @@ def identify(parts: tuple[str, ...]) -> tuple[str, str] | None:
     if name.endswith(".json") and len(parts) >= 5 and parts[-5] in EDITORS and parts[-4:-1] == (
             "user", "globalstorage", "emptywindowchatsessions"):
         return "editor-chat", "document"
-    return None
+    return identify_herdr(parts)
 
 
 def configuration(src, doc):
@@ -246,7 +247,9 @@ def json_lines(src, path, mode):
 
 
 def read_source(src, path, mode):
-    if mode == "database":
+    if src.agent == "herdr-sessions":
+        yield from herdr(src, path, mode)
+    elif mode == "database":
         yield from editor(src, path)
     elif path.suffix.lower() == ".jsonl":
         yield from json_lines(src, path, mode)
