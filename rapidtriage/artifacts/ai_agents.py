@@ -81,19 +81,22 @@ def identify_pi(parts: tuple[str, ...]) -> tuple[str, str] | None:
 
 def pi_header_agent(path: Path) -> str | None:
     """A session saved outside the default folders is recognised by its first logical record: the ``session``
-    header with a string ``id``, after omp's fixed-width ``title`` slot when present (the loaders' own check)."""
+    header with a string ``id``, after omp's fixed-width ``title`` slot when present (the loaders' own check). As
+    this runs on every unclaimed ``.jsonl``, the header must also carry the string ``cwd`` and ``timestamp`` that
+    omp and pi always write, and it is decoded as strict UTF-8 like the reader (no BOM, no UTF-16)."""
     with path.open("rb") as stream:
         head = stream.read(HEADER_BYTES).split(b"\n", 2)
     agent = "pi-family"
     for index, raw in enumerate(head[:2]):
         try:
-            doc = mapping(json.loads(raw))
+            doc = mapping(json.loads(raw.decode("utf-8")))
         except (ValueError, RecursionError):
             return None
         if index == 0 and doc.get("type") == "title" and doc.get("v") == 1:
             agent = "omp"
             continue
-        return agent if doc.get("type") == "session" and isinstance(doc.get("id"), str) else None
+        header = doc.get("type") == "session" and all(isinstance(doc.get(key), str) for key in ("id", "cwd", "timestamp"))
+        return agent if header else None
     return None
 
 
@@ -310,10 +313,35 @@ def line_note(src, reason):
     return src.note(reason, **({"damaged_count": 1} if reason != "stream-byte-limit" else {}))
 
 
+def pi_active_entries(path):
+    """The active branch as the pi-family loaders rebuild it on load: the last entry in the file is the leaf, and its
+    ``parentId`` chain leads back to the root. ``None`` when the leaf is unknown (no tree ids, or the file is longer
+    than the read prefix, so the last entry was never read)."""
+    parents, leaf = {}, None
+    for _, doc, reason in line_records(path):
+        if reason == "stream-byte-limit":
+            return None
+        record = mapping(doc)
+        ident = record.get("id")
+        if record.get("type") == "session" or not isinstance(ident, str):
+            continue
+        parent = record.get("parentId")
+        parents[ident] = parent if isinstance(parent, str) else None
+        leaf = ident
+    active = set()
+    while leaf is not None and leaf not in active:
+        active.add(leaf)
+        leaf = parents.get(leaf)
+    return active or None
+
+
 def pi_session_lines(src, path):
     """omp's title slot, then the ``session`` header, then tree entries. As in the pi-family loaders, a file whose
-    first logical record is not a header is not a session, and nothing more is read from it."""
+    first logical record is not a header is not a session, and nothing more is read from it. Entries on abandoned
+    branches really happened and are exported, flagged ``off-active-branch``."""
     header = False
+    active = None
+    models = {}
     for location, doc, reason in line_records(path):
         src.location = location
         if reason:
@@ -328,10 +356,16 @@ def pi_session_lines(src, path):
                 return
             pi_header(src, record)
             header = True
+            active = pi_active_entries(path)
         elif not isinstance(doc, dict):
             yield src.note("invalid-record-shape", damaged_count=1)
         else:
-            yield from pi_entry(src, record)
+            ident = record.get("id")
+            off_branch = active is not None and isinstance(ident, str) and ident not in active
+            for row in pi_entry(src, record, models):
+                if off_branch:
+                    row.details["flags"].append("off-active-branch")
+                yield row
 
 
 def json_lines(src, path, mode):
@@ -395,6 +429,10 @@ def read_source(src, path, mode):
             return
         try:
             doc = parse_document(path.suffix.lower(), raw.decode("utf-8-sig"))
+        except ModuleNotFoundError:
+            # PyYAML is imported lazily (pyproject.toml); a trimmed install skips this document, not the whole run.
+            yield src.note("parser-unavailable")
+            return
         except (ValueError, RecursionError):
             yield src.note("invalid-document")
             return
@@ -432,7 +470,11 @@ class AiAgentProvider:
                 if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(root.resolve()):
                     continue
                 if mode == "header":
-                    src.agent = pi_header_agent(path)
+                    # An unreadable unclaimed ``.jsonl`` is not known to be a session; it is not an omp-pi source.
+                    try:
+                        src.agent = pi_header_agent(path)
+                    except OSError:
+                        continue
                     if src.agent is None:
                         continue
                     mode = "session"

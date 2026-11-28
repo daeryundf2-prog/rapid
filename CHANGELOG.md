@@ -7,10 +7,15 @@
 - `omp-pi` collector for oh-my-pi (omp), pi, senpi and OmO: session JSONL
   under `<home>/agent/sessions` (subagent transcripts included, linked by
   `parent_session`), sessions in other folders recognized by their `session`
-  header, omp `history.db` prompt history, `logs/omp.*.log` (`agent-log`
-  rows in the timeline), model names from `config.yml`, `settings.json` and
-  `models.yml`/`models.json`, and pi-family `mcp.json` in `agent-mcp`. See
-  `docs/ai-agent-artifacts.md` (`tests/test_ai_agents.py`).
+  header (string `id`, `cwd` and `timestamp`, strict UTF-8), omp
+  `history.db` prompt history, `logs/omp.*.log` (`agent-log` rows in the
+  timeline), model names from `config.yml`, `settings.json` and
+  `models.yml`/`models.json`, and pi-family `mcp.json` in `agent-mcp`.
+  omp's `attribution` (`user` or `agent`) is exported on user and developer
+  rows, so an agent-written prompt is not read as typed by a person; rows on
+  abandoned branches carry the flag `off-active-branch`, and `model_change`
+  applies along the entry tree. See `docs/ai-agent-artifacts.md`
+  (`tests/test_ai_agents.py`).
 - Action API v1 (`docs/ai-action-api.md`): `GET /api/actions` (catalog),
   `POST /api/runs/{run}/actions/select` (analyse a selection: count, time span,
   sources, event types, top paths, samples; read-only) and

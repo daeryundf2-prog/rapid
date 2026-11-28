@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import sqlite3
+import sys
 import tempfile
 import unittest
 import weakref
@@ -719,3 +720,80 @@ class PiFamilyTests(AgentFixture):
                        "models-secret-marker", "arg-marker", "env-marker"):
             self.assertNotIn(marker, everything)
         self.assertEqual(len(rows), 6)
+
+
+PI_HEADER = {"type": "session", "version": 3, "id": "s", "timestamp": "2026-11-01T10:00:00.000Z", "cwd": "/p"}
+
+
+class PiFamilyReviewTests(AgentFixture):
+    """PR #84 review cases, each rebuilt from synthetic records (no real sessions)."""
+
+    def entry(self, kind, ident, parent, minute, **fields):
+        return {"type": kind, "id": ident, "parentId": parent, "timestamp": f"2026-11-01T10:{minute}:00.000Z", **fields}
+
+    def test_agent_attributed_turns_are_not_exported_as_typed(self):
+        path = "Users/u/.omp/agent/sessions/-p/s.jsonl"
+        self.lines(path, PI_HEADER,
+                   self.entry("message", "u1", None, "01", message={"role": "user", "content": "typed", "attribution": "user"}),
+                   self.entry("message", "u2", "u1", "02", message={"role": "user", "content": "AGENT_RELAYED_AS_USER",
+                                                                    "attribution": "agent"}),
+                   self.entry("message", "d1", "u2", "03", message={"role": "developer", "content": "steer",
+                                                                    "attribution": "agent"}),
+                   self.entry("message", "u3", "d1", "04", message={"role": "user", "content": "unattributed"}))
+        rows = self.rows("omp-pi")
+        self.assertEqual([(r.details["role"], r.details.get("attribution")) for r in rows],
+                         [("user", "user"), ("user", "agent"), ("developer", "agent"), ("user", None)])
+        payload = run_artifact_collection(self.root, kind="omp-pi", records_path=self.root.parent / "rows.jsonl")
+        events = {e["details"]["entry_id"]: e for e in extract_artifact_events(payload, self.root.parent / "a.json")}
+        self.assertEqual(events["u2"]["details"]["attribution"], "agent")
+        self.assertIn("(role user, attribution agent)", events["u2"]["summary"])
+        self.assertNotIn("attribution", events["u3"]["summary"])
+
+    def test_generic_session_jsonl_is_not_taken_as_a_pi_session(self):
+        message = {"type": "message", "message": {"role": "user", "content": "web text"}}
+        self.lines("Users/u/backup/generic_session_event.jsonl", {"type": "session", "id": "web-123", "user": "bob"}, message)
+        self.lines("Users/u/logs/clicks.jsonl", {"type": "session", "id": "w1"}, *[{"type": "click"}] * 25)
+        self.lines("Users/u/logs/no_time.jsonl", {"type": "session", "id": "w2", "cwd": "/p"}, message)
+        self.lines("Users/u/logs/titled.jsonl", {"type": "title", "v": 1}, {"type": "session", "id": "w3"}, message)
+        self.assertEqual(self.rows("omp-pi"), [])
+
+    @unittest.skipIf(os.name != "posix" or os.geteuid() == 0, "needs POSIX permissions and a non-root user")
+    def test_unreadable_unrelated_jsonl_is_not_an_omp_pi_source(self):
+        target = self.lines("proj/logs/app-events.jsonl", {"type": "event"})
+        target.chmod(0)
+        self.addCleanup(target.chmod, 0o600)
+        self.assertEqual(self.rows("omp-pi"), [])
+
+    def test_detector_rejects_what_the_reader_cannot_decode(self):
+        text = "\n".join(json.dumps(row) for row in (PI_HEADER, self.entry("message", "u", None, "01", message={
+            "role": "user", "content": "x"}))) + "\n"
+        self.write("x/bom.jsonl", b"\xef\xbb\xbf" + text.encode())
+        self.write("x/utf16.jsonl", text.encode("utf-16"))
+        self.write("x/plain.jsonl", text.encode())
+        self.assertEqual([(r.path, r.artifact_type) for r in self.rows("omp-pi")], [("x/plain.jsonl", "agent-message")])
+
+    def test_missing_yaml_skips_only_the_yaml_document(self):
+        self.write("Users/u/.omp/agent/config.yml", b"modelRoles:\n  default: anthropic/sample\n")
+        self.write("Users/u/.omp/agent/settings.json", {"defaultProvider": "openai", "defaultModel": "sample"})
+        with patch.dict(sys.modules, {"yaml": None}):
+            rows = {r.path.rsplit("/", 1)[1]: r.details for r in self.rows("omp-pi")}
+        self.assertEqual(rows["config.yml"]["reason"], "parser-unavailable")
+        self.assertEqual(rows["settings.json"]["model"], "sample")
+
+    def test_abandoned_branch_is_flagged_and_model_follows_the_tree(self):
+        def user(text):
+            return {"role": "user", "content": text}
+
+        path = "Users/u/.omp/agent/sessions/-p/s.jsonl"
+        self.lines(path, PI_HEADER,
+                   self.entry("model_change", "m0", None, "00", model="anthropic/active-model"),
+                   self.entry("message", "u1", "m0", "01", message=user("root")),
+                   self.entry("model_change", "mx", "u1", "02", model="openai/abandoned-model"),
+                   self.entry("message", "ux", "mx", "03", message=user("ABANDONED_BRANCH_TEXT")),
+                   self.entry("message", "u2", "u1", "04", message=user("active")),
+                   self.entry("message", "a2", "u2", "05", message={"role": "assistant", "model": "m-a", "content": "done"}))
+        rows = {r.details["entry_id"]: r.details for r in self.rows("omp-pi")}
+        self.assertEqual({key: "off-active-branch" in row["flags"] for key, row in rows.items()},
+                         {"u1": False, "ux": True, "u2": False, "a2": False})
+        self.assertEqual((rows["ux"]["model"], rows["u2"]["model"], rows["a2"]["model"]),
+                         ("openai/abandoned-model", "anthropic/active-model", "m-a"))

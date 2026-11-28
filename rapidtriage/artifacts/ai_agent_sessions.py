@@ -146,24 +146,34 @@ def pi_header(src, record):
     src.parent_session = parent if isinstance(parent, str) else ""
 
 
-def pi_entry(src, record):
+def pi_entry(src, record, models):
+    """``models`` maps each entry id to the model in effect there. A ``model_change`` applies to its descendants
+    in the tree, so a switch made on an abandoned branch does not carry over to the active one. Entries without a
+    tree id (pi's version 1 layout) fall back to file order."""
     kind = record.get("type")
+    ident, parent = record.get("id"), record.get("parentId")
+    tree_model = isinstance(ident, str)
+    inherited = (models.get(parent, "") if isinstance(parent, str) else "") if tree_model else src.model
     if kind == "model_change":
         # omp records ``provider/model``; pi records ``provider`` and ``modelId``.
         model = record.get("model")
         if not isinstance(model, str):
             model = "/".join(v for v in (record.get("provider"), record.get("modelId")) if isinstance(v, str) and v)
-        src.model = model or src.model
+        if tree_model:
+            models[ident] = model or inherited
+        else:
+            src.model = model or src.model
         return
+    if tree_model:
+        models[ident] = inherited
     if kind != "message":
         if kind not in PI_QUIET_ENTRIES:
             yield src.note("unrecognized-session-record")
         return
     message = mapping(record.get("message"))
     role = message.get("role")
-    tree = {key: clean(value) for key, value in (("entry_id", record.get("id")), ("parent_entry_id", record.get("parentId")))
-            if isinstance(value, str)}
-    part = replace(src, location={**src.location, **tree})
+    tree = {key: clean(value) for key, value in (("entry_id", ident), ("parent_entry_id", parent)) if isinstance(value, str)}
+    part = replace(src, location={**src.location, **tree}, model=inherited)
     # Entry time is ISO 8601; the nested message keeps epoch milliseconds and stands in when the entry has none.
     stamp, unit = record.get("timestamp"), ""
     if stamp is None and type(message.get("timestamp")) in (int, float):
@@ -175,8 +185,13 @@ def pi_entry(src, record):
             yield part.note("invalid-message-content", damaged_count=1)
             return
         text = content(blocks)
+        # omp records who initiated a user or developer turn: ``user`` for typed input, ``agent`` for text an
+        # extension generated or relayed from another agent (subagent task prompts, parent steering). ``role`` stays
+        # the message role; ``attribution`` is exported as recorded so agent-written turns are not read as typed.
+        attribution = message.get("attribution")
+        extra = {"attribution": attribution} if isinstance(attribution, str) else {}
         if text or isinstance(blocks, str):
-            yield part.row("message", role=role, timestamp=stamp, unit=unit, model=model, text=text)
+            yield part.row("message", role=role, timestamp=stamp, unit=unit, model=model, text=text, **extra)
         for index, block in enumerate(items(blocks) if role == "assistant" else ()):
             block = mapping(block)
             if block.get("type") == "toolCall":
